@@ -15,11 +15,13 @@ updates:
           - 'minor'
           - 'patch'
     ignore:
-      # Node types follow the minimum supported runtime (engines: node >=24.15),
-      # so newer Node APIs cannot slip in. Raise this together with `engines`.
+      # Node types follow the minimum supported runtime (engines: node >=24.15;
+      # @types/node 24.13 is the newest release not ahead of it), so newer Node
+      # APIs cannot slip in. Raise them together with `engines`/.node-version.
       - dependency-name: '@types/node'
         update-types:
           - 'version-update:semver-major'
+          - 'version-update:semver-minor'
 
   # The pinned `uses:` SHAs in the workflows are supply-chain dependencies too.
   - package-ecosystem: 'github-actions'
