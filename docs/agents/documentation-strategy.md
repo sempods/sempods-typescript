@@ -45,7 +45,12 @@ stand alone without private work logs, credentials or personal test data.
 agent and skill files. It uses [remark-validate-links](https://github.com/remarkjs/remark-validate-links)
 through remark's CLI: the plugin's standalone API does not validate headings in
 other files. A small runner supplies the repository inventory and checks reachability
-using the same Markdown syntax tree. It does not implement a Markdown parser.
+using the same Markdown syntax tree. It inventories the current working tree,
+including unstaged additions, deletions and renames. Remaining links to deleted
+files still fail, as do missing README/AGENTS entry points. Package README links
+to this repository's files/directories must name the package manifest's version.
+This local assertion does not verify that the release tag exists remotely.
+The runner does not implement a Markdown parser.
 
 [Lychee](https://lychee.cli.rs/recipes/anchors/) is another reusable option, with
 Markdown/HTML and external URL support. The Node-based remark integration fits

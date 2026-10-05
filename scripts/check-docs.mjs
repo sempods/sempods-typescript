@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { remark } from 'remark';
@@ -10,7 +10,7 @@ import { visit } from 'unist-util-visit';
 const here = dirname(fileURLToPath(import.meta.url));
 const parser = remark().use(frontmatter).use(gfm);
 
-// Inventory only this checkout, including new files before they are staged.
+// Inventory the working tree: include untracked additions and skip unstaged deletions.
 // Passing every Markdown file to one CLI invocation enables cross-file anchors.
 export function checkDocs(root) {
   const files = [
@@ -22,7 +22,7 @@ export function checkDocs(root) {
       ).split('\0'),
     ),
   ]
-    .filter((file) => /\.md$/i.test(file))
+    .filter((file) => /\.md$/i.test(file) && existsSync(resolve(root, file)))
     .sort();
   if (!files.length) return ['No Markdown files found'];
   const result = spawnSync(
@@ -56,6 +56,11 @@ export function checkDocs(root) {
   for (const file of files) {
     const absolute = resolve(root, file);
     const tree = parser.parse(readFileSync(absolute, 'utf8'));
+    const packageVersion = /^packages\/[^/]+\/README\.md$/.test(file)
+      ? JSON.parse(
+          readFileSync(resolve(dirname(absolute), 'package.json'), 'utf8'),
+        ).version
+      : undefined;
     const definitions = new Map();
     visit(tree, 'definition', (node) => {
       if (!definitions.has(node.identifier))
@@ -69,7 +74,22 @@ export function checkDocs(root) {
           : node.type === 'linkReference'
             ? definitions.get(node.identifier)
             : undefined;
-      if (!url || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(url)) return;
+      if (!url) return;
+      // npm readers need repository docs pinned to the package they are installing.
+      // Compare revisions locally; a release tag may not exist during preparation.
+      const repositoryLink = url.match(
+        /^https:\/\/github\.com\/sempods\/sempods-typescript\/(?:blob|tree)\/([^/]+)\//,
+      );
+      if (
+        packageVersion &&
+        repositoryLink &&
+        repositoryLink[1] !== `v${packageVersion}`
+      ) {
+        errors.push(
+          `${file}: repository link must use v${packageVersion}: ${url}`,
+        );
+      }
+      if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(url)) return;
       let target;
       try {
         const path = decodeURIComponent(url.split(/[?#]/, 1)[0]);

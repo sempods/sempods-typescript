@@ -29,7 +29,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 
 - `check:docs`: offline local Markdown file/heading validation, including agent and
   skill files, plus reachability from README and AGENTS. Regression fixtures prove
-  failures for missing targets/anchors and isolated documents. See
+  failures for missing targets/anchors and isolated documents, valid unstaged moves,
+  and package README links matching their manifest version. See
   [documentation strategy](agents/documentation-strategy.md#automated-checks-and-their-limits)
   for deliberately separate checks and limits.
 - `build`: strict library compilation, explicit `.js` ESM imports and a one-way

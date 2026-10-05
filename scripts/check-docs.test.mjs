@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -71,3 +77,62 @@ test('an unused reference definition is not a navigation edge', (t) => {
   });
   assert.match(checkDocs(root).join('\n'), /island.md: unreachable/);
 });
+
+test('an unstaged tracked deletion passes after its incoming link is removed', (t) => {
+  const root = fixture(t);
+  execFileSync('git', ['add', '.'], { cwd: root });
+  rmSync(join(root, 'guide.md'));
+  writeFileSync(join(root, 'README.md'), '# Start\n[Agents](AGENTS.md)\n');
+  assert.deepEqual(checkDocs(root), []);
+});
+
+test('an unstaged tracked rename uses the new file and updated incoming link', (t) => {
+  const root = fixture(t);
+  execFileSync('git', ['add', '.'], { cwd: root });
+  renameSync(join(root, 'guide.md'), join(root, 'renamed.md'));
+  writeFileSync(
+    join(root, 'README.md'),
+    '# Start\n[Agents](AGENTS.md)\n[Guide](renamed.md#repeat-1)\n',
+  );
+  assert.deepEqual(checkDocs(root), []);
+});
+
+test('a deleted tracked target still fails when its incoming link remains', (t) => {
+  const root = fixture(t);
+  execFileSync('git', ['add', '.'], { cwd: root });
+  rmSync(join(root, 'guide.md'));
+  assert.match(checkDocs(root).join('\n'), /Cannot find file `guide.md/);
+});
+
+test('deleting a required entry still reports missing navigation', (t) => {
+  const root = fixture(t);
+  execFileSync('git', ['add', '.'], { cwd: root });
+  rmSync(join(root, 'AGENTS.md'));
+  assert.match(
+    checkDocs(root).join('\n'),
+    /Missing navigation entry AGENTS.md/,
+  );
+});
+
+for (const revision of ['v0.2.0', 'v0.1.0', 'main']) {
+  test(`package README links must match the package version: ${revision}`, (t) => {
+    const root = fixture(t, {
+      'guide.md': '# Repeat\n# Repeat\n[Package](packages/app-sdk/README.md)\n',
+      'packages/app-sdk/package.json': JSON.stringify({
+        name: '@sempods/app-sdk',
+        version: '0.2.0',
+      }),
+      'packages/app-sdk/README.md': `# Package\n[Direct](https://github.com/sempods/sempods-typescript/blob/${revision}/docs/browser-runtime.md)\n[Reference][docs]\n\n[docs]: https://github.com/sempods/sempods-typescript/tree/${revision}/examples/todo\n\n[External](https://github.com/example/other/blob/main/README.md)\n`,
+    });
+    const errors = checkDocs(root);
+    if (revision === 'v0.2.0') assert.deepEqual(errors, []);
+    else {
+      assert.equal(errors.length, 2);
+      assert.ok(
+        errors.every((error) =>
+          error.includes('repository link must use v0.2.0'),
+        ),
+      );
+    }
+  });
+}
