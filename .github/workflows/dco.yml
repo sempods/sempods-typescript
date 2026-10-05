@@ -1,8 +1,10 @@
 name: DCO
 # Every commit in a pull request needs a Signed-off-by line matching its author
-# (the organisation's CONTRIBUTING.md carries the certificate). Bot commits such
-# as Dependabot's are exempt: they have nothing to certify, and the maintainer
-# who merges them takes responsibility. Merge commits introduce no authorship.
+# (the organisation's CONTRIBUTING.md carries the certificate). Commits of a bot
+# such as Dependabot are exempt only in a pull request that this bot account
+# opened: GitHub authenticates the pull request's author, while commit author
+# fields are free text anyone can set. The maintainer who merges a bot pull
+# request takes responsibility. Merge commits introduce no authorship.
 on:
   pull_request:
 permissions:
@@ -21,27 +23,31 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
         run: |
           set -euo pipefail
-          # A GitHub bot has both a `[bot]` name and a noreply address; either
-          # alone is not enough.
-          is_bot_commit() {
-            case "$1" in
-              *"[bot]") case "$2" in *"@users.noreply.github.com") return 0 ;; esac ;;
-            esac
+          # Exempt only commits of the authenticated bot that opened this pull
+          # request: its account type, its exact name and a GitHub noreply
+          # address. Look-alike author fields in anyone else's pull request are
+          # checked like every other commit.
+          is_bot_commit() { # name email pr-author pr-author-type
+            [[ "$4" == "Bot" && "$1" == "$3" ]] || return 1
+            case "$2" in *"[bot]@users.noreply.github.com") return 0 ;; esac
             return 1
           }
           failed=""
           expect() {
             local want="$1" got="check"
-            is_bot_commit "$2" "$3" && got="skip"
-            [[ "$got" == "$want" ]] || { echo "self-test: '$2' <$3> = $got, want $want" >&2; failed=1; }
+            is_bot_commit "$2" "$3" "$4" "$5" && got="skip"
+            [[ "$got" == "$want" ]] || { echo "self-test: '$2' <$3> in a PR by $4 ($5) = $got, want $want" >&2; failed=1; }
           }
-          expect skip "dependabot[bot]" "49699333+dependabot[bot]@users.noreply.github.com"
-          expect skip "github-actions[bot]" "41898282+github-actions[bot]@users.noreply.github.com"
-          expect check "Ada Lovelace" "ada@example.org"
-          expect check "Ada Lovelace" "1234+ada@users.noreply.github.com"
-          expect check "notabot[bot]" "someone@example.org"
+          dependabot="49699333+dependabot[bot]@users.noreply.github.com"
+          expect skip "dependabot[bot]" "$dependabot" "dependabot[bot]" "Bot"
+          expect check "dependabot[bot]" "$dependabot" "mallory" "User"
+          expect check "dependabot[bot]" "$dependabot" "renovate[bot]" "Bot"
+          expect check "Ada Lovelace" "1234+ada@users.noreply.github.com" "dependabot[bot]" "Bot"
+          expect check "dependabot[bot]" "someone@example.org" "dependabot[bot]" "Bot"
           [[ -z "$failed" ]] || exit 3
 
           missing=""
@@ -49,7 +55,7 @@ jobs:
             [[ -z "$sha" ]] && continue
             name="$(git show -s --format='%an' "$sha")"
             email="$(git show -s --format='%ae' "$sha")"
-            is_bot_commit "$name" "$email" && continue
+            is_bot_commit "$name" "$email" "$PR_AUTHOR" "$PR_AUTHOR_TYPE" && continue
             # Compare the trailer address as a fixed string: `+` and `.` in
             # noreply addresses must not act as regex syntax. Only the author's
             # own sign-off counts; another person cannot certify on their behalf.
