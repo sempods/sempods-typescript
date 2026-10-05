@@ -4,7 +4,9 @@ name: DCO
 # such as Dependabot are exempt only in a pull request that this bot account
 # opened: GitHub authenticates the pull request's author, while commit author
 # fields are free text anyone can set. The maintainer who merges a bot pull
-# request takes responsibility. Merge commits introduce no authorship.
+# request takes responsibility. Merge commits are checked too: a merge can carry
+# conflict resolutions or other changes of its own. Sign them off
+# (`git merge --signoff`) or rebase instead.
 #
 # pull_request_target runs this file as it is on the base branch, so a pull
 # request cannot weaken its own gate by editing it. That trigger runs with base
@@ -66,8 +68,6 @@ jobs:
           missing=""
           for i in $(seq 0 $((count - 1))); do
             commit="$(jq -c ".[$i]" <<<"$commits")"
-            # Merge commits introduce no authorship.
-            (( $(jq '.parents | length' <<<"$commit") > 1 )) && continue
             sha="$(jq -r '.sha' <<<"$commit")"
             name="$(jq -r '.commit.author.name' <<<"$commit")"
             email="$(jq -r '.commit.author.email' <<<"$commit")"
@@ -90,7 +90,7 @@ jobs:
             echo "These commits carry no Signed-off-by line matching their author:"
             echo "$missing"
             echo "Add it with: git rebase --signoff <base> && git push --force-with-lease"
-            echo "New commits: git commit -s"
+            echo "New commits: git commit -s (merges: git merge --signoff, or rebase)"
             exit 1
           fi
           echo "All $count commits signed off."
