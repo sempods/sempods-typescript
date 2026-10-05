@@ -49,6 +49,9 @@ through `@sempods/app-sdk/react`. Both packages emit ESM and TypeScript declarat
 The portable client also provides the field definitions used by browser apps.
 [Architecture decisions](docs/decisions.md) explain these boundaries.
 
+For all guides and contributor workflows, use the [documentation map](docs/README.md).
+Agents changing this SDK start with [AGENTS.md](AGENTS.md).
+
 ## Supported environments
 
 | Environment                  | Status in 0.1                                                                                                                                                                      |

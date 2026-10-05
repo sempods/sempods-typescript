@@ -281,6 +281,6 @@ here remain browser/Node portable. Licensed under Apache-2.0 (see LICENSE and
 NOTICE).
 
 Supported: Node 22.19 or newer (ESM only) and current browsers. See
-[supported environments](../../README.md#supported-environments).
+[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.1.0/README.md#supported-environments).
 
 [Provenance](PROVENANCE.md) records the source revision and adaptations.

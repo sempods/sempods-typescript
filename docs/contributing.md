@@ -2,8 +2,8 @@
 
 App authors can start with the [quickstart](quickstart.md) without changing this
 repository. This page is for changes to the reusable SDK, its examples or guides.
-Read repository-local contributor instructions when they are present, then agree
-on a bounded issue and check for overlapping work before editing.
+Read [AGENTS.md](../AGENTS.md), then use [issue work](agents/issue-work.md)
+to agree on a bounded issue and check for overlapping work before editing.
 
 ## Keep the boundaries useful
 
@@ -37,7 +37,8 @@ regressions for changed behavior. Preserve package-boundary checks and packed
 consumer tests: a successful workspace build does not prove that an installed
 package works in a browser, Node or a React-free consumer.
 
-For documentation, verify relative links, public exports and commands. Compile
+Use the [documentation strategy](agents/documentation-strategy.md) and
+[doc review](agents/doc-review.md). For documentation, verify links, public exports and commands. Compile
 copyable examples against the packaged SDK. For deployment instructions, separate
 configuration review, a successful static build, and actual live-domain/login
 validation. Do not present a simulated server or a human-readable checklist as
@@ -70,3 +71,7 @@ Questions and ideas are welcome in
 Publication, versioning and supported-environment promises are maintainer
 decisions; do not infer them from a passing build. Before a release, check the
 package artifacts, required notices, docs navigation and migration notes.
+
+The [release procedure](agents/release.md) separates readiness, preparation and
+explicitly authorized publication. Security reports follow the organisation’s
+[private reporting policy](https://github.com/sempods/.github/blob/main/SECURITY.md).
