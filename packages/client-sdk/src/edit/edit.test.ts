@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createPod, type JsonLd, type WriteResult } from '../index.js';
 import {
   createResourceEditor,
@@ -12,8 +12,10 @@ import {
   snapshots,
   text,
   updateFields,
+  type DateTimeField,
   type ResourceEditor,
   type ResourceSource,
+  type TextField,
 } from './index.js';
 
 const NAME = 'https://schema.org/name';
@@ -428,6 +430,35 @@ describe('dateTime fields', () => {
     // @ts-expect-error A required field never reads as null.
     const strict: { readonly end: string } = optional.read({ '@id': TASK });
     expect(strict.end).toBeNull();
+  });
+
+  it('keeps optionality in the draft type when a field is annotated', () => {
+    // Reusable fields annotated with the plain type: optionality is unknown.
+    const end: DateTimeField = dateTime(END, { optional: true });
+    const note: TextField = text(NAME, { language: 'en', optional: true });
+    const draft = fields({ end, note }).read({ '@id': TASK });
+    expect(draft).toEqual({ end: null, note: null });
+    expectTypeOf(draft).toEqualTypeOf<{
+      readonly end: string | null;
+      readonly note: string | null;
+    }>();
+    // @ts-expect-error An annotated field of unknown optionality may read null.
+    const unsound: string = draft.end;
+    expect(unsound).toBeNull();
+    // Known optionality stays precise, also in the earlier intersection form.
+    const due: DateTimeField<false> = dateTime(END);
+    const title: TextField & { readonly optional: true } = text(NAME, {
+      language: 'en',
+      optional: true,
+    });
+    expectTypeOf(fields({ due, title }).read).returns.toEqualTypeOf<{
+      readonly due: string;
+      readonly title: string | null;
+    }>();
+    expectTypeOf(dateTime(END)).toEqualTypeOf<DateTimeField<false>>();
+    expectTypeOf(text(NAME, { language: null, optional: true })).toEqualTypeOf<
+      TextField<true>
+    >();
   });
 
   it('rejects fields that write the same terms, but not a text on the same predicate', () => {

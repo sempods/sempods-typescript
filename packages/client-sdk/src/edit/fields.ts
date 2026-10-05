@@ -25,8 +25,13 @@ export interface EditDefinition<D> {
   valid?(draft: D): boolean;
 }
 
-/** At most one string value: untagged (`language: null`) or with this tag. */
-export interface TextField {
+/**
+ * At most one string value: untagged (`language: null`) or with this tag.
+ * `Optional` keeps the draft type sound when a field is annotated: plain
+ * `TextField` (optionality unknown) drafts `string | null`; `text()` returns
+ * `TextField<true>` or `TextField<false>`.
+ */
+export interface TextField<Optional extends boolean = boolean> {
   readonly kind: 'text';
   readonly predicate: string;
   readonly language: string | null;
@@ -43,7 +48,7 @@ export interface TextField {
    * this field's value (an explicit intent); writing `""` stores an empty
    * literal when `empty: 'allow'`.
    */
-  readonly optional: boolean;
+  readonly optional: Optional;
 }
 /** An IRI-valued predicate mapped to a boolean; any other value is a mapping error. */
 export interface FlagField {
@@ -70,8 +75,9 @@ export interface IriField {
  * invalid. It is stored unchanged, never normalized, so the offset survives a
  * round trip. A stored value without a time zone is read as it is, not
  * guessed: the draft stays invalid until a time zone is given.
+ * `Optional` works as in {@link TextField}.
  */
-export interface DateTimeField {
+export interface DateTimeField<Optional extends boolean = boolean> {
   readonly kind: 'dateTime';
   readonly predicate: string;
   /**
@@ -79,15 +85,19 @@ export interface DateTimeField {
    * removes this field's value. A required field reads an absent value as
    * `""`, which is invalid, as in a required `text`.
    */
-  readonly optional: boolean;
+  readonly optional: Optional;
 }
 export type Field = TextField | FlagField | IriField | DateTimeField;
 
+// Only a field known to be required drafts `string`; unknown optionality
+// (`optional: boolean`) may read `null` and is typed so.
 type ValueOf<F> = F extends FlagField
   ? boolean
-  : F extends { readonly optional: true }
-    ? string | null
-    : string;
+  : F extends { readonly optional: false }
+    ? string
+    : F extends { readonly optional: boolean }
+      ? string | null
+      : string;
 export type DraftOf<S extends { readonly [name: string]: Field }> = {
   readonly [K in keyof S]: ValueOf<S[K]>;
 };
@@ -126,11 +136,11 @@ type TextOptions = {
 export function text(
   predicate: string,
   options: TextOptions & { readonly optional: true },
-): TextField & { readonly optional: true };
+): TextField<true>;
 export function text(
   predicate: string,
   options: TextOptions & { readonly optional?: false },
-): TextField & { readonly optional: false };
+): TextField<false>;
 export function text(
   predicate: string,
   options: TextOptions & { readonly optional?: boolean },
@@ -177,11 +187,11 @@ export function iri(predicate: string): IriField {
 export function dateTime(
   predicate: string,
   options: { readonly optional: true },
-): DateTimeField & { readonly optional: true };
+): DateTimeField<true>;
 export function dateTime(
   predicate: string,
   options?: { readonly optional?: false },
-): DateTimeField & { readonly optional: false };
+): DateTimeField<false>;
 export function dateTime(
   predicate: string,
   options: { readonly optional?: boolean } = {},
