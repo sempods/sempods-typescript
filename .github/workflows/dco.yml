@@ -1,0 +1,71 @@
+name: DCO
+# Every commit in a pull request needs a Signed-off-by line matching its author
+# (the organisation's CONTRIBUTING.md carries the certificate). Bot commits such
+# as Dependabot's are exempt: they have nothing to certify, and the maintainer
+# who merges them takes responsibility. Merge commits introduce no authorship.
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    name: Sign-off
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Every commit carries the author's sign-off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # A GitHub bot has both a `[bot]` name and a noreply address; either
+          # alone is not enough.
+          is_bot_commit() {
+            case "$1" in
+              *"[bot]") case "$2" in *"@users.noreply.github.com") return 0 ;; esac ;;
+            esac
+            return 1
+          }
+          failed=""
+          expect() {
+            local want="$1" got="check"
+            is_bot_commit "$2" "$3" && got="skip"
+            [[ "$got" == "$want" ]] || { echo "self-test: '$2' <$3> = $got, want $want" >&2; failed=1; }
+          }
+          expect skip "dependabot[bot]" "49699333+dependabot[bot]@users.noreply.github.com"
+          expect skip "github-actions[bot]" "41898282+github-actions[bot]@users.noreply.github.com"
+          expect check "Ada Lovelace" "ada@example.org"
+          expect check "Ada Lovelace" "1234+ada@users.noreply.github.com"
+          expect check "notabot[bot]" "someone@example.org"
+          [[ -z "$failed" ]] || exit 3
+
+          missing=""
+          while IFS= read -r sha; do
+            [[ -z "$sha" ]] && continue
+            name="$(git show -s --format='%an' "$sha")"
+            email="$(git show -s --format='%ae' "$sha")"
+            is_bot_commit "$name" "$email" && continue
+            # Compare the trailer address as a fixed string: `+` and `.` in
+            # noreply addresses must not act as regex syntax. Only the author's
+            # own sign-off counts; another person cannot certify on their behalf.
+            if git show -s --format='%B' "$sha" |
+              sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\(.*\)>[[:space:]]*$/\1/p' |
+              grep -qixF "$email"; then
+              continue
+            fi
+            missing+="  ${sha:0:12}  $(git show -s --format='%s' "$sha") (author: $email)"$'\n'
+          done < <(git rev-list --no-merges "$BASE".."$HEAD")
+
+          if [[ -n "$missing" ]]; then
+            echo "These commits carry no Signed-off-by line matching their author:"
+            echo "$missing"
+            echo "Add it with: git rebase --signoff $BASE && git push --force-with-lease"
+            echo "New commits: git commit -s"
+            exit 1
+          fi
+          echo "All commits signed off."

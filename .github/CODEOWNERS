@@ -1,0 +1,18 @@
+# Whom GitHub requests for review when a matching path changes. This assigns
+# reviewers; it does not require them. Last matching pattern wins.
+
+*                                      @haed
+
+# Licensing and governance stay with the maintainer.
+/LICENSE                               @haed
+/NOTICE                                @haed
+
+# CI, the release workflow and this file: a change here can weaken every other guard.
+/.github/                              @haed
+/scripts/publish-packages.mjs          @haed
+
+# Security-critical code: delegated login, tokens and durable sessions.
+/packages/client-sdk/src/oauth/        @haed
+/packages/client-sdk/src/auth.ts       @haed
+/packages/app-sdk/src/sessions/        @haed
+/packages/app-sdk/src/runtime/         @haed

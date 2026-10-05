@@ -53,6 +53,20 @@ The maintainer decides merging and release.
 
 Code is licensed under Apache-2.0 and documentation under CC BY 4.0 (see
 [NOTICE](../NOTICE)); contributions are accepted under the same terms.
+
+## Sign off every commit
+
+The [sempods contributing terms](https://github.com/sempods/.github/blob/main/CONTRIBUTING.md)
+apply here as everywhere in the organisation: licensing, the Developer
+Certificate of Origin and AI-assisted work. Every commit carries a
+`Signed-off-by` line matching its author (`git commit -s`); the DCO check on
+pull requests enforces it. You are the author of what you submit, including
+AI-assisted changes, and the sign-off is yours to give. There is no CLA.
+Questions and ideas are welcome in
+[Discussions](https://github.com/sempods/sempods-typescript/discussions).
+
+## Release decisions
+
 Publication, versioning and supported-environment promises are maintainer
 decisions; do not infer them from a passing build. Before a release, check the
 package artifacts, required notices, docs navigation and migration notes.
