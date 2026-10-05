@@ -81,7 +81,10 @@ jobs:
             # SIGPIPE upstream would reject a valid commit with many sign-offs.
             signoffs="$(jq -r '.commit.message' <<<"$commit" |
               sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\(.*\)>[[:space:]]*$/\1/p')"
-            if grep -qixF -e "$email" <<<"$signoffs"; then
+            # An empty pattern would match any line, so an empty author address
+            # or an empty sign-off set never counts as signed.
+            if [[ -n "$email" && -n "$signoffs" ]] &&
+              grep -qixF -e "$email" <<<"$signoffs"; then
               continue
             fi
             subject="$(jq -r '.commit.message | split("\n")[0]' <<<"$commit")"
