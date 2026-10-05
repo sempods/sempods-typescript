@@ -1,0 +1,12 @@
+{
+  "name": "@sempods/example-todo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sempods/client-sdk": "workspace:*",
+    "@sempods/app-sdk": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}

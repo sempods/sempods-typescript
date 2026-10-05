@@ -1,0 +1,20 @@
+{
+  "name": "@sempods/example-widgets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@sempods/app-sdk": "0.1.0",
+    "@sempods/client-sdk": "0.1.0",
+    "react": "^19.0.0"
+  }
+}

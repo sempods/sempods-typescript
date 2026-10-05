@@ -1,0 +1,64 @@
+{
+  "name": "@sempods/app-sdk",
+  "version": "0.1.0",
+  "description": "Browser runtime for sempods apps: Pod login, durable sessions, guarded context selection, safe editing feedback and optional React bindings.",
+  "keywords": [
+    "sempods",
+    "rdf",
+    "json-ld",
+    "pod",
+    "oauth",
+    "react",
+    "browser",
+    "linked-data"
+  ],
+  "license": "Apache-2.0",
+  "author": "Danilo Stein",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sempods/sempods-typescript.git",
+    "directory": "packages/app-sdk"
+  },
+  "homepage": "https://github.com/sempods/sempods-typescript/tree/main/packages/app-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/sempods/sempods-typescript/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md",
+    "PROVENANCE.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    }
+  },
+  "dependencies": {
+    "@sempods/client-sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

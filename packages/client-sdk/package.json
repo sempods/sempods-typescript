@@ -1,0 +1,63 @@
+{
+  "name": "@sempods/client-sdk",
+  "version": "0.1.0",
+  "description": "Portable sempods Pod client: discovery, delegated OAuth, context views, conditional reads/writes and safe editing for browsers and Node.",
+  "keywords": [
+    "sempods",
+    "rdf",
+    "json-ld",
+    "sparql",
+    "pod",
+    "oauth",
+    "linked-data"
+  ],
+  "license": "Apache-2.0",
+  "author": "Danilo Stein",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sempods/sempods-typescript.git",
+    "directory": "packages/client-sdk"
+  },
+  "homepage": "https://github.com/sempods/sempods-typescript/tree/main/packages/client-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/sempods/sempods-typescript/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md",
+    "PROVENANCE.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./oauth": {
+      "types": "./dist/oauth/index.d.ts",
+      "import": "./dist/oauth/index.js"
+    },
+    "./oauth/host": {
+      "types": "./dist/oauth/host.d.ts",
+      "import": "./dist/oauth/host.js"
+    },
+    "./edit": {
+      "types": "./dist/edit/index.d.ts",
+      "import": "./dist/edit/index.js"
+    }
+  },
+  "dependencies": {
+    "oauth4webapi": "3.8.6"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

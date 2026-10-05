@@ -1,0 +1,47 @@
+name: Publish
+# Publishes both packages for a version tag, only in the public repository.
+# The maintainer creates the tag; an `npm` environment can require approval.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+  id-token: write # npm provenance
+jobs:
+  publish:
+    name: Publish to npm
+    if: github.repository == 'sempods/sempods-typescript'
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm check
+      # The tag must name exactly the version both packages carry.
+      - run: |
+          node -e '
+            const tag = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            for (const name of ["client-sdk", "app-sdk"]) {
+              const { version } = require(`./packages/${name}/package.json`);
+              if (version !== tag) throw new Error(`${name} is ${version}, tag is ${tag}`);
+            }'
+      # pnpm pack resolves workspace:* to the exact version. The script publishes
+      # client-sdk first and, on a rerun, skips a version that is already on the
+      # registry only if its contents equal the packed artifact.
+      - run: |
+          mkdir -p ../release
+          pnpm --filter @sempods/client-sdk pack --pack-destination ../release
+          pnpm --filter @sempods/app-sdk pack --pack-destination ../release
+          node scripts/publish-packages.mjs ../release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

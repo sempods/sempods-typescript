@@ -1,0 +1,9 @@
+{
+  "name": "@sempods/example-node-script",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sempods/client-sdk": "workspace:*"
+  }
+}
