@@ -1,11 +1,13 @@
 import type { JsonLd } from '../results.js';
 import {
   hasLanguage,
+  isDateTime,
   isText,
   MappingError,
   sameData,
   sameTerms,
   termsOf,
+  XSD_DATE_TIME,
   type Term,
 } from './terms.js';
 import { EMBEDDABLE_IRI } from '../iri.js';
@@ -57,7 +59,29 @@ export interface IriField {
   readonly kind: 'iri';
   readonly predicate: string;
 }
-export type Field = TextField | FlagField | IriField;
+/**
+ * At most one `xsd:dateTime` literal, as its lexical form (for example
+ * `2026-10-05T09:30:00+02:00`). Other values of the predicate (untyped
+ * strings, other datatypes such as `xsd:date`, IRIs) are preserved and not
+ * read; two `xsd:dateTime` values are a mapping error.
+ *
+ * A written value must be a valid `xsd:dateTime` lexical form with an
+ * explicit time zone (`Z` or `±hh:mm`); anything else makes the draft
+ * invalid. It is stored unchanged, never normalized, so the offset survives a
+ * round trip. A stored value without a time zone is read as it is, not
+ * guessed: the draft stays invalid until a time zone is given.
+ */
+export interface DateTimeField {
+  readonly kind: 'dateTime';
+  readonly predicate: string;
+  /**
+   * Optional fields read an absent value as `null`, and writing `null`
+   * removes this field's value. A required field reads an absent value as
+   * `""`, which is invalid, as in a required `text`.
+   */
+  readonly optional: boolean;
+}
+export type Field = TextField | FlagField | IriField | DateTimeField;
 
 type ValueOf<F> = F extends FlagField
   ? boolean
@@ -149,11 +173,63 @@ export function iri(predicate: string): IriField {
   return Object.freeze({ kind: 'iri', predicate: predicateOf(predicate) });
 }
 
+/** A point in time as an `xsd:dateTime` literal; other values are preserved. */
+export function dateTime(
+  predicate: string,
+  options: { readonly optional: true },
+): DateTimeField & { readonly optional: true };
+export function dateTime(
+  predicate: string,
+  options?: { readonly optional?: false },
+): DateTimeField & { readonly optional: false };
+export function dateTime(
+  predicate: string,
+  options: { readonly optional?: boolean } = {},
+): DateTimeField {
+  return Object.freeze({
+    kind: 'dateTime',
+    predicate: predicateOf(predicate),
+    optional: options.optional ?? false,
+  });
+}
+
+/**
+ * XSD 1.1 `dateTime` lexical form with a mandatory time zone. The pattern
+ * checks the ranges of each part; the day of the month is checked below.
+ */
+const DATE_TIME =
+  /^-?(\d*(\d{4}))-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?|24:00:00(?:\.0+)?)(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
+const DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+function isZonedDateTime(value: string): boolean {
+  const match = DATE_TIME.exec(value);
+  // A year of more than four digits has no leading zero.
+  if (!match || (match[1]!.length > 4 && match[1]![0] === '0')) return false;
+  const month = Number(match[3]);
+  const day = Number(match[4]);
+  if (day > DAYS[month - 1]!) return false;
+  if (month !== 2 || day !== 29) return true;
+  // 10000 is a multiple of 400: the last four digits decide a leap year.
+  const year = Number(match[2]);
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+/** Whether this field reads and replaces the term. */
+function owns(field: Field, term: Term): boolean {
+  switch (field.kind) {
+    case 'text':
+      return isText(term) && hasLanguage(term, field.language);
+    case 'dateTime':
+      return isDateTime(term);
+    case 'flag':
+    case 'iri':
+      return true;
+  }
+}
+
 /** The terms of the predicate that this field reads and replaces. */
 export function owned(field: Field, terms: readonly Term[]): readonly Term[] {
-  return field.kind === 'text'
-    ? terms.filter((t) => isText(t) && hasLanguage(t, field.language))
-    : terms;
+  return terms.filter((t) => owns(field, t));
 }
 
 type Value = string | boolean | null;
@@ -161,9 +237,13 @@ type Value = string | boolean | null;
 function readField(field: Field, terms: readonly Term[]): Value {
   const mine = owned(field, terms);
   switch (field.kind) {
-    case 'text': {
+    case 'text':
+    case 'dateTime': {
       if (mine.length > 1)
-        throw new MappingError(field.predicate, 'ambiguous text value');
+        throw new MappingError(
+          field.predicate,
+          `ambiguous ${field.kind} value`,
+        );
       const value = mine[0]?.['@value'] as string | undefined;
       return value ?? (field.optional ? null : '');
     }
@@ -190,25 +270,16 @@ function writeField(
 ): readonly Term[] {
   if (readField(field, terms) === value) return terms;
   switch (field.kind) {
-    case 'text': {
+    case 'text':
+    case 'dateTime': {
       // Only an optional field reaches here with null: explicit removal.
-      if (value === null)
-        return terms.filter(
-          (t) => !(isText(t) && hasLanguage(t, field.language)),
-        );
-      const index = terms.findIndex(
-        (t) => isText(t) && hasLanguage(t, field.language),
-      );
+      if (value === null) return terms.filter((t) => !owns(field, t));
+      const index = terms.findIndex((t) => owns(field, t));
       if (index >= 0)
         return terms.map((t, i) =>
           i === index ? { ...t, '@value': value } : t,
         );
-      return [
-        ...terms,
-        field.language === null
-          ? { '@value': value }
-          : { '@value': value, '@language': field.language },
-      ];
+      return [...terms, ...freshTerms(field, value)];
     }
     case 'flag':
       return [{ '@id': value ? field.on : field.off }];
@@ -229,11 +300,23 @@ function validField(field: Field, value: unknown): boolean {
       return typeof value === 'boolean';
     case 'iri':
       return typeof value === 'string' && EMBEDDABLE_IRI.test(value);
+    case 'dateTime':
+      return (
+        (value === null && field.optional) ||
+        (typeof value === 'string' && isZonedDateTime(value))
+      );
   }
 }
 
+/**
+ * Whether two fields can own the same term. `flag` and `iri` own every value
+ * of their predicate; `text` and `dateTime` own disjoint kinds of literals.
+ */
 function overlaps(a: Field, b: Field): boolean {
   if (a.predicate !== b.predicate) return false;
+  if (a.kind === 'flag' || a.kind === 'iri') return true;
+  if (b.kind === 'flag' || b.kind === 'iri') return true;
+  if (a.kind !== b.kind) return false;
   if (a.kind !== 'text' || b.kind !== 'text') return true;
   return a.language === null || b.language === null
     ? a.language === b.language
@@ -367,7 +450,7 @@ export function withFields<D>(names: readonly string[], mine: D, base: D): D {
 
 /**
  * The description of a new subject: the declared type plus every field's
- * value written as fresh terms. Optional text left `null` is omitted.
+ * value written as fresh terms. An optional field left `null` is omitted.
  */
 export function describeNew<D>(
   definition: FieldDefinition<D>,
@@ -410,5 +493,8 @@ function freshTerms(field: Field, value: Value): readonly Term[] {
       return [{ '@id': value ? field.on : field.off }];
     case 'iri':
       return [{ '@id': value }];
+    case 'dateTime':
+      if (value === null) return [];
+      return [{ '@value': value, '@type': XSD_DATE_TIME }];
   }
 }

@@ -4,6 +4,7 @@ import type { JsonLd } from '../results.js';
 export type Term = { readonly [key: string]: unknown };
 
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
+export const XSD_DATE_TIME = 'http://www.w3.org/2001/XMLSchema#dateTime';
 
 /** The resource or snapshot cannot be mapped to the definition; nothing is guessed. */
 export class MappingError extends Error {
@@ -37,6 +38,15 @@ export function isText(term: Term): boolean {
     typeof term['@value'] === 'string' &&
     (term['@type'] === undefined || term['@type'] === XSD_STRING) &&
     (term['@language'] === undefined || typeof term['@language'] === 'string')
+  );
+}
+
+/** An `xsd:dateTime` literal with a string lexical form (valid or not). */
+export function isDateTime(term: Term): boolean {
+  return (
+    typeof term['@value'] === 'string' &&
+    term['@type'] === XSD_DATE_TIME &&
+    term['@language'] === undefined
   );
 }
 

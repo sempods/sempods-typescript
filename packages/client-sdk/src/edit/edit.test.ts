@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPod, type JsonLd, type WriteResult } from '../index.js';
 import {
   createResourceEditor,
+  dateTime,
   fields,
   flag,
   iri,
@@ -282,6 +283,204 @@ describe('field definitions', () => {
       }),
     ).not.toThrow();
     expect(() => text(NAME, { language: 'preferred-language' })).toThrow();
+  });
+});
+
+describe('dateTime fields', () => {
+  const END = 'https://schema.org/endTime';
+  const XSD = 'http://www.w3.org/2001/XMLSchema#';
+  const at = (value: string) => ({
+    '@value': value,
+    '@type': `${XSD}dateTime`,
+  });
+  const required = fields({ end: dateTime(END) });
+  const optional = fields({ end: dateTime(END, { optional: true }) });
+
+  it('round-trips the lexical form unchanged, with Z or an offset', () => {
+    for (const value of [
+      '2026-10-05T09:30:00Z',
+      '2026-10-05T09:30:00.250+02:00',
+      '2026-10-05T09:30:00-05:30',
+    ]) {
+      const body = { '@id': TASK, [END]: [at(value)] };
+      const draft: { readonly end: string } = required.read(body);
+      expect(draft).toEqual({ end: value });
+      expect(required.valid!(draft)).toBe(true);
+      expect(required.patch(body, draft)).toEqual({});
+    }
+    const body = { '@id': TASK, [END]: [at('2026-10-05T09:30:00Z')] };
+    // The same instant in another offset is a change and stored as given.
+    expect(required.patch(body, { end: '2026-10-05T11:30:00+02:00' })).toEqual({
+      [END]: [at('2026-10-05T11:30:00+02:00')],
+    });
+    expect(
+      required.patch({ '@id': TASK }, { end: '2026-10-05T09:30:00Z' }),
+    ).toEqual({ [END]: [at('2026-10-05T09:30:00Z')] });
+  });
+
+  it('makes the draft invalid unless the value is an xsd:dateTime with a time zone', () => {
+    for (const value of [
+      '2026-10-05T09:30:00Z',
+      '2026-10-05T09:30:00.123456+14:00',
+      '2026-10-05T24:00:00-14:00',
+      '2024-02-29T00:00:00+05:45',
+      '2000-02-29T12:00:00Z',
+      '0000-01-01T00:00:00Z',
+      '-0044-03-15T12:00:00+01:00',
+      '12026-01-01T00:00:00Z',
+    ])
+      expect(required.valid!({ end: value }), value).toBe(true);
+    for (const value of [
+      '',
+      '2026-10-05',
+      '2026-10-05T09:30:00',
+      '2026-10-05T09:30Z',
+      '2026-10-05 09:30:00Z',
+      '2026-10-05T09:30:00z',
+      '2026-10-05T09:30:00+0200',
+      '2026-10-05T09:30:00+15:00',
+      '2026-10-05T09:30:00+14:30',
+      '2026-10-05T25:00:00Z',
+      '2026-10-05T24:00:01Z',
+      '2026-13-05T09:30:00Z',
+      '2026-04-31T09:30:00Z',
+      '2026-02-29T09:30:00Z',
+      '1900-02-29T09:30:00Z',
+      '26-10-05T09:30:00Z',
+      '02026-10-05T09:30:00Z',
+      ' 2026-10-05T09:30:00Z',
+      '2026-10-05T09:30:00Z ',
+      '２０２６-10-05T09:30:00Z',
+    ])
+      expect(required.valid!({ end: value }), value).toBe(false);
+    expect(required.valid!({ end: null as unknown as string })).toBe(false);
+    expect(required.valid!({ end: 1 as unknown as string })).toBe(false);
+  });
+
+  it('reads a stored value without a time zone as it is and keeps the draft invalid', () => {
+    const body = { '@id': TASK, [END]: [at('2026-10-05T09:30:00')] };
+    expect(required.read(body)).toEqual({ end: '2026-10-05T09:30:00' });
+    expect(required.valid!(required.read(body))).toBe(false);
+    expect(required.patch(body, { end: '2026-10-05T09:30:00+02:00' })).toEqual({
+      [END]: [at('2026-10-05T09:30:00+02:00')],
+    });
+  });
+
+  it('reads only xsd:dateTime literals and preserves every other value', () => {
+    const others = [
+      { '@value': '2026-10-05T09:30:00Z' },
+      { '@value': '2026-10-05T09:30:00Z', '@type': `${XSD}string` },
+      { '@value': '2026-10-05T09:30:00Z', '@language': 'en' },
+      { '@value': '2026-10-05', '@type': `${XSD}date` },
+      { '@id': 'https://example.org/later' },
+    ];
+    const without = { '@id': TASK, [END]: others };
+    expect(optional.read(without)).toEqual({ end: null });
+    expect(required.read(without)).toEqual({ end: '' });
+    expect(required.valid!(required.read(without))).toBe(false);
+    // An absent required value stays absent until a valid value is written.
+    expect(required.patch(without, { end: '' })).toEqual({});
+    expect(optional.patch(without, { end: null })).toEqual({});
+    expect(
+      optional.patch(without, { end: '2026-10-06T08:00:00+02:00' }),
+    ).toEqual({ [END]: [...others, at('2026-10-06T08:00:00+02:00')] });
+
+    const present = {
+      '@id': TASK,
+      [END]: [others[0]!, at('2026-10-05T09:30:00Z'), others[3]!],
+    };
+    expect(required.read(present)).toEqual({ end: '2026-10-05T09:30:00Z' });
+    expect(required.patch(present, { end: '2026-10-07T00:00:00Z' })).toEqual({
+      [END]: [others[0], at('2026-10-07T00:00:00Z'), others[3]],
+    });
+  });
+
+  it('reports more than one xsd:dateTime value as a mapping error', () => {
+    const two = {
+      '@id': TASK,
+      [END]: [at('2026-10-05T09:30:00Z'), at('2026-10-05T11:30:00+02:00')],
+    };
+    expect(() => required.read(two)).toThrow(MappingError);
+    expect(() => optional.read(two)).toThrow(MappingError);
+  });
+
+  it('optional: absence reads as null and null removes only this value', () => {
+    const draft: { readonly end: string | null } = optional.read({
+      '@id': TASK,
+    });
+    expect(draft).toEqual({ end: null });
+    expect(optional.valid!({ end: null })).toBe(true);
+    expect(optional.valid!({ end: '2026-10-05' })).toBe(false);
+    const mixed = {
+      '@id': TASK,
+      [END]: [at('2026-10-05T09:30:00Z'), { '@value': 'soon' }],
+    };
+    expect(optional.patch(mixed, { end: null })).toEqual({
+      [END]: [{ '@value': 'soon' }],
+    });
+    // The last value removed: the predicate is removed, not set to [].
+    expect(
+      optional.patch(
+        { '@id': TASK, [END]: [at('2026-10-05T09:30:00Z')] },
+        { end: null },
+      ),
+    ).toEqual({ [END]: null });
+    // @ts-expect-error A required field never reads as null.
+    const strict: { readonly end: string } = optional.read({ '@id': TASK });
+    expect(strict.end).toBeNull();
+  });
+
+  it('rejects fields that write the same terms, but not a text on the same predicate', () => {
+    expect(() =>
+      fields({ a: dateTime(END), b: dateTime(END, { optional: true }) }),
+    ).toThrow(TypeError);
+    expect(() => fields({ a: dateTime(END), b: iri(END) })).toThrow(TypeError);
+    expect(() =>
+      fields({ a: flag(END, { on: DONE, off: OPEN }), b: dateTime(END) }),
+    ).toThrow(TypeError);
+    expect(() => dateTime('endTime')).toThrow(TypeError);
+    // Text and dateTime own disjoint literals of one predicate.
+    const both = fields({
+      label: text(END, { language: null, optional: true }),
+      end: dateTime(END, { optional: true }),
+    });
+    const body = {
+      '@id': TASK,
+      [END]: [{ '@value': 'tomorrow' }, at('2026-10-06T00:00:00Z')],
+    };
+    expect(both.read(body)).toEqual({
+      label: 'tomorrow',
+      end: '2026-10-06T00:00:00Z',
+    });
+    expect(
+      both.patch(body, { label: null, end: '2026-10-06T08:00:00+02:00' }),
+    ).toEqual({ [END]: [at('2026-10-06T08:00:00+02:00')] });
+  });
+
+  it('creates and saves typed literals through the editor', async () => {
+    const NEW = 'https://pod.example/alice/tasks/2';
+    const pod = memoryPod({});
+    expect(
+      await prepareCreation(pod.source, NEW, optional, {
+        end: '2026-10-05T09:30:00+02:00',
+      }).run(),
+    ).toEqual({ kind: 'created' });
+    expect(pod.body(NEW)).toEqual({
+      '@id': NEW,
+      [END]: [at('2026-10-05T09:30:00+02:00')],
+    });
+    const editor = await opened(
+      createResourceEditor(pod.source, NEW, optional),
+    );
+    editor.change({ end: '2026-10-05' });
+    expect(editor.state.canSave).toBe(false);
+    editor.change({ end: '2026-10-05T10:00:00+02:00' });
+    expect(await editor.save()).toEqual({ kind: 'saved' });
+    expect(pod.body(NEW)?.[END]).toEqual([at('2026-10-05T10:00:00+02:00')]);
+    editor.change({ end: null });
+    expect(await editor.save()).toEqual({ kind: 'saved' });
+    expect(pod.body(NEW)).toEqual({ '@id': NEW });
+    editor.dispose();
   });
 });
 
