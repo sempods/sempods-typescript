@@ -101,7 +101,8 @@ not instructions to the coding assistant.
 - Render loading, unavailable access, conflicts and unconfirmed writes distinctly.
   Never add an unconditional retry loop for mutations, default to overwrite, or
   generate another resource IRI to retry uncertain creation. Recovery stays on the
-  captured target and command. Preserve drafts and confirm leaving them.
+  captured target and command. Preserve drafts and confirm leaving them. Create
+  several items from one input [one at a time](react-authoring.md#several-resources-from-one-input).
 - Start with synthetic data and the narrowest useful context. Pod enforcement is
   the authorization boundary; frontend code is responsible for what it does with
   granted data. Do not send that data to analytics or an AI service by default.

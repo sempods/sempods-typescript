@@ -26,6 +26,7 @@ export type CreateOutcome =
    * holds this body) is not proof that this creation wrote it.
    */
   | { readonly kind: 'unconfirmed'; readonly desiredObserved?: boolean }
+  /** The Pod refused it before acting, or it was not sent; nothing was written. */
   | { readonly kind: 'not-created'; readonly reason: EditProblem['kind'] };
 
 /** One captured creation: a fixed IRI and body; running it again is always safe. */
@@ -40,6 +41,11 @@ export interface Creation {
  * confirms `created`. Once an answer was lost, the creation stays `unconfirmed`
  * until actual evidence settles it: a failed or refused retry cannot disprove
  * it, and a found resource holding the body (`desiredObserved`) is no proof.
+ *
+ * For several resources, prepare one creation per item and run them one at a
+ * time. Stop at the first result that is not `created` and leave the remaining
+ * items unsent. Retry an `unconfirmed` item only by running its creation again,
+ * never under a new IRI.
  */
 export function prepareCreation<D>(
   source: ResourceSource,

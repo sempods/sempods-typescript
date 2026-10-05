@@ -486,7 +486,15 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   };
 }
 
-/** Owns the draft, leave guard and captured command for one intended creation. */
+/**
+ * Owns the draft, leave guard and captured command for one intended creation.
+ *
+ * Several resources from one input are created one at a time: while `canEdit`
+ * is true, call `change(draft)` and then `await create()` for each item, and
+ * stop at the first result that is not `created`. Both actions use the hook's
+ * latest state, so one handler may keep calling them across awaits. Each
+ * confirmed creation resets the draft; the next item captures a fresh IRI.
+ */
 export function useCreation<D extends object>(
   definition: FieldDefinition<D>,
   options: { readonly initial: D; readonly collection: string },
@@ -548,6 +556,11 @@ export function useCreation<D extends object>(
     canCreate: mutation.canMutate && valid(draft),
     busy: mutation.busy,
     outcome: mutation.outcome,
+    /**
+     * Applies at once, so a following `create()` submits this draft. Ignored
+     * while a command is pending, unconfirmed or held for an explicit retry
+     * (`canEdit` is false).
+     */
     change: (patch: Partial<D>) => {
       if (
         !mutation.editable() ||
@@ -566,6 +579,11 @@ export function useCreation<D extends object>(
       command.current = null;
       setState(next);
     },
+    /**
+     * Sends the current draft under its captured IRI. `undefined`: nothing was
+     * sent (no write access, an invalid draft, a pending or unconfirmed command
+     * or a guarded transition), or the target lifetime ended before the answer.
+     */
     create: async () => {
       if (
         !view ||

@@ -128,6 +128,67 @@ Advanced clients may also retain a portable `prepareCreation` command and
 explicitly retry the same IRI. Reading the desired state does not prove which
 request wrote it.
 
+### Several resources from one input
+
+One input can name several resources, for example “Milk, 2 Bananas, Bread”.
+Create them one at a time with the same `useCreation` hook:
+
+```tsx
+const creation = useCreation(item, {
+  initial: { title: '' },
+  collection: 'items',
+});
+const [input, setInput] = useState('');
+
+async function addAll() {
+  if (!creation.canEdit) return; // a held creation is settled first
+  const names = input
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+  for (const [index, name] of names.entries()) {
+    creation.change({ title: name });
+    const outcome = await creation.create();
+    if (outcome?.kind === 'created') continue;
+    // Stop: an unconfirmed item stays in the locked draft, the rest is unsent.
+    const kept = outcome?.kind === 'unconfirmed' ? index + 1 : index;
+    setInput(names.slice(kept).join(', '));
+    return;
+  }
+  setInput('');
+}
+```
+
+`change` applies at once, so the `create()` right after it submits exactly that
+draft. Both actions use the hook's latest state, so the handler may keep using
+the `creation` of the render that started it. Start only while `canEdit` is true:
+while a command is pending, unconfirmed or held for a retry, `change` is ignored
+and `create()` would not submit the new name. Keep the input and button disabled
+until `addAll` returns; never run creations in parallel. What each result leaves
+behind:
+
+- `created`: confirmed. The draft resets, lists refresh and the next item
+  captures a fresh subject IRI. `outcome` stays `created` until the next `change`.
+- `unconfirmed`: the item may exist. Its draft and captured command stay locked
+  (`canEdit` and `canCreate` are false), so it must not return to the input.
+  Show its name from `creation.draft` next to `<UpdateNotice {...creation.notice} />`
+  and settle it as described above: present evidence resets the draft; observed
+  absence enables `create()` for the explicit retry of the same IRI and body.
+  Run the rest once `canEdit` is true again.
+- `exists` or `not-created`: nothing was written. The item stays in the editable
+  draft and, with the rest, in the input. Running the batch again captures a
+  new IRI for it.
+- `undefined`: nothing was sent, for example after write access was lost; keep
+  the item with the rest. `outcome` is then empty. (`create` also returns
+  `undefined` when the target lifetime ended before the answer; a forced
+  lifetime change retires that result.)
+
+Items confirmed earlier stay created; a later stop does not affect them.
+Nothing is retried automatically, an uncertain item never gets a new IRI, and
+items after the stop were never sent. [React tests](../packages/app-sdk/src/react/safe-authoring.test.tsx)
+run this handler against fixtures. Without React, prepare one `prepareCreation`
+per item with `newSubjectIri` and `await` each `run()` the same way.
+
 ## Standard UI for one known Pod
 
 For an app with one known Pod, put the preset in the host-owned runtime and keep
