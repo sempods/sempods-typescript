@@ -5,8 +5,14 @@ name: DCO
 # opened: GitHub authenticates the pull request's author, while commit author
 # fields are free text anyone can set. The maintainer who merges a bot pull
 # request takes responsibility. Merge commits introduce no authorship.
+#
+# pull_request_target runs this file as it is on the base branch, so a pull
+# request cannot weaken its own gate by editing it. That trigger runs with base
+# privileges, therefore the job never executes or checks out pull-request
+# content: it fetches the commits as objects and reads their metadata only.
+# Read-only token, no stored credentials, no secrets.
 on:
-  pull_request:
+  pull_request_target:
 permissions:
   contents: read
 jobs:
@@ -15,10 +21,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The base branch only; pull-request commits are fetched as data below.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Fetch the pull-request commits without checking them out
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
       - name: Every commit carries the author's sign-off
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
