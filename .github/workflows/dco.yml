@@ -76,10 +76,12 @@ jobs:
             # and `.` in noreply addresses must not act as regex syntax, and an
             # author address such as `--help` must not act as a grep option.
             # Only the author's own sign-off counts; another person cannot
-            # certify on their behalf.
-            if jq -r '.commit.message' <<<"$commit" |
-              sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\(.*\)>[[:space:]]*$/\1/p' |
-              grep -qixF -e "$email"; then
+            # certify on their behalf. Collect all addresses first: grep -q in
+            # a pipeline stops reading early, and with pipefail the resulting
+            # SIGPIPE upstream would reject a valid commit with many sign-offs.
+            signoffs="$(jq -r '.commit.message' <<<"$commit" |
+              sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\(.*\)>[[:space:]]*$/\1/p')"
+            if grep -qixF -e "$email" <<<"$signoffs"; then
               continue
             fi
             subject="$(jq -r '.commit.message | split("\n")[0]' <<<"$commit")"
