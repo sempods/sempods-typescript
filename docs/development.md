@@ -11,6 +11,7 @@ pnpm install --frozen-lockfile
 pnpm exec playwright install chromium
 pnpm build
 pnpm typecheck
+pnpm check:docs
 pnpm test
 pnpm test:consumers
 pnpm test:runtime
@@ -26,8 +27,14 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 
 ## What the checks establish
 
+- `check:docs`: offline local Markdown file/heading validation, including agent and
+  skill files, plus reachability from README and AGENTS. Regression fixtures prove
+  failures for missing targets/anchors and isolated documents, valid unstaged moves,
+  and package README links staying within the package or matching its release revision. See
+  [documentation strategy](agents/documentation-strategy.md#automated-checks-and-their-limits)
+  for deliberately separate checks and limits.
 - `build`: strict library compilation, explicit `.js` ESM imports and a one-way
-  client → app dependency. Test sources are not part of library output.
+  app-sdk → client-sdk dependency. Test sources are not part of library output.
 - `typecheck`: portable client source in Node-only and DOM-only environments,
   plus unit test sources and example sources. Browser policy options remain in the transport type
   even when Node's RequestInit declaration lacks them.
@@ -68,8 +75,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 The consumer harness uses npm to install exact SDK tarballs and exact direct test
 versions; normal workspace development uses pinned pnpm. Consumer directories are
 removed after the run. Installing tools may use the registry; runtime fixtures
-and page traffic stay on loopback. Chromium is the first tested browser, not yet
-a release browser matrix. Live Kotlin validation and independent human authoring remain follow-up work.
+and page traffic stay on loopback. Chromium is the automated browser target; see the
+[support matrix](../README.md#supported-environments) for the public support scope. Live Kotlin validation and independent human authoring remain follow-up work.
 The runnable TODO/Node examples and React authoring layer are described in
 [React/headless authoring](react-authoring.md).
 

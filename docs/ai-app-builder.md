@@ -4,7 +4,7 @@ Give this document to your coding assistant before it starts implementing your
 app. It is intended for **an app consuming the SDK**, including a new app created
 with AI. In your app repository, reference a pinned copy from your `AGENTS.md`
 (or your assistant's equivalent instruction file). Keep app-specific decisions
-there too. The SDK repository's contributor instructions serve a different task.
+there too. The SDK repository's [contributor instructions](../AGENTS.md) serve a different task.
 Keep the linked documentation/examples with the entry document, or retain links
 to their pinned source; copying this page alone must not strand its relative links.
 
