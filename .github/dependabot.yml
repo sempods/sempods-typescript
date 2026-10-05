@@ -1,0 +1,29 @@
+# Version updates. Security updates are enabled in the repository settings.
+# Minor and patch bumps arrive as one weekly group per ecosystem; majors stay
+# separate, because each deserves its own review.
+version: 2
+
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - 'minor'
+          - 'patch'
+
+  # The pinned `uses:` SHAs in the workflows are supply-chain dependencies too.
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
