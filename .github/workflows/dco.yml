@@ -8,32 +8,25 @@ name: DCO
 #
 # pull_request_target runs this file as it is on the base branch, so a pull
 # request cannot weaken its own gate by editing it. That trigger runs with base
-# privileges, therefore the job never executes or checks out pull-request
-# content: it fetches the commits as objects and reads their metadata only.
-# Read-only token, no stored credentials, no secrets.
+# privileges, therefore the job brings no pull-request content onto the runner:
+# no checkout, no fetch. It reads commit authors and messages from the GitHub
+# API as data. Read-only token, no secrets.
 on:
   pull_request_target:
 permissions:
   contents: read
+  pull-requests: read
 jobs:
   check:
     name: Sign-off
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # The base branch only; pull-request commits are fetched as data below.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Fetch the pull-request commits without checking them out
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
       - name: Every commit carries the author's sign-off
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
         run: |
@@ -61,29 +54,43 @@ jobs:
           expect check "dependabot[bot]" "someone@example.org" "dependabot[bot]" "Bot"
           [[ -z "$failed" ]] || exit 3
 
+          # The API lists at most 250 commits of a pull request; refuse rather
+          # than check a partial range.
+          commits="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits?per_page=100" --jq '.[]' | jq -s '.')"
+          count="$(jq 'length' <<<"$commits")"
+          if (( count >= 250 )); then
+            echo "This pull request has $count or more commits; split it to check every sign-off." >&2
+            exit 1
+          fi
+
           missing=""
-          while IFS= read -r sha; do
-            [[ -z "$sha" ]] && continue
-            name="$(git show -s --format='%an' "$sha")"
-            email="$(git show -s --format='%ae' "$sha")"
+          for i in $(seq 0 $((count - 1))); do
+            commit="$(jq -c ".[$i]" <<<"$commits")"
+            # Merge commits introduce no authorship.
+            (( $(jq '.parents | length' <<<"$commit") > 1 )) && continue
+            sha="$(jq -r '.sha' <<<"$commit")"
+            name="$(jq -r '.commit.author.name' <<<"$commit")"
+            email="$(jq -r '.commit.author.email' <<<"$commit")"
             is_bot_commit "$name" "$email" "$PR_AUTHOR" "$PR_AUTHOR_TYPE" && continue
             # Compare the trailer address as a fixed string passed with -e: `+`
             # and `.` in noreply addresses must not act as regex syntax, and an
-            # author address such as `--help` must not act as a grep option. Only the author's
-            # own sign-off counts; another person cannot certify on their behalf.
-            if git show -s --format='%B' "$sha" |
+            # author address such as `--help` must not act as a grep option.
+            # Only the author's own sign-off counts; another person cannot
+            # certify on their behalf.
+            if jq -r '.commit.message' <<<"$commit" |
               sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\(.*\)>[[:space:]]*$/\1/p' |
               grep -qixF -e "$email"; then
               continue
             fi
-            missing+="  ${sha:0:12}  $(git show -s --format='%s' "$sha") (author: $email)"$'\n'
-          done < <(git rev-list --no-merges "$BASE".."$HEAD")
+            subject="$(jq -r '.commit.message | split("\n")[0]' <<<"$commit")"
+            missing+="  ${sha:0:12}  $subject (author: $email)"$'\n'
+          done
 
           if [[ -n "$missing" ]]; then
             echo "These commits carry no Signed-off-by line matching their author:"
             echo "$missing"
-            echo "Add it with: git rebase --signoff $BASE && git push --force-with-lease"
+            echo "Add it with: git rebase --signoff <base> && git push --force-with-lease"
             echo "New commits: git commit -s"
             exit 1
           fi
-          echo "All commits signed off."
+          echo "All $count commits signed off."
