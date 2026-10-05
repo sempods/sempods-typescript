@@ -56,12 +56,13 @@ jobs:
             name="$(git show -s --format='%an' "$sha")"
             email="$(git show -s --format='%ae' "$sha")"
             is_bot_commit "$name" "$email" "$PR_AUTHOR" "$PR_AUTHOR_TYPE" && continue
-            # Compare the trailer address as a fixed string: `+` and `.` in
-            # noreply addresses must not act as regex syntax. Only the author's
+            # Compare the trailer address as a fixed string passed with -e: `+`
+            # and `.` in noreply addresses must not act as regex syntax, and an
+            # author address such as `--help` must not act as a grep option. Only the author's
             # own sign-off counts; another person cannot certify on their behalf.
             if git show -s --format='%B' "$sha" |
               sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\(.*\)>[[:space:]]*$/\1/p' |
-              grep -qixF "$email"; then
+              grep -qixF -e "$email"; then
               continue
             fi
             missing+="  ${sha:0:12}  $(git show -s --format='%s' "$sha") (author: $email)"$'\n'
