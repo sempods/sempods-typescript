@@ -22,7 +22,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
-          cache: pnpm
+          # No dependency cache in the release job: a cache restored from
+          # another workflow run could feed what is packed and published.
+          # setup-node v5+ caches automatically unless disabled.
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
