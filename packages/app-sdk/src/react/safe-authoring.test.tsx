@@ -60,7 +60,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-async function setup(language: 'en' | 'de' = 'en') {
+async function setup(
+  language: 'en' | 'de' = 'en',
+  // Holds the batch input above TargetScreen, so it survives target changes.
+  { hostInput = false } = {},
+) {
   const f = fixture();
   const session = await f.login();
   cleanups.push(() => session.runtime.dispose());
@@ -109,7 +113,8 @@ async function setup(language: 'en' | 'de' = 'en') {
     setInput: (input: string) => void;
     addAll: () => Promise<void>;
   };
-  function Screen() {
+  type Input = readonly [string, (input: string) => void];
+  function Screen({ host }: { readonly host?: Input | undefined }) {
     const creation = useCreation(definition, {
       initial: { ...initial },
       collection: 'tasks',
@@ -120,11 +125,13 @@ async function setup(language: 'en' | 'de' = 'en') {
     // Leave-dialog internals (confirm/cancel, snapshot) are not public API.
     const app = useController();
     const editor = useResourceEditor(selection.selected, definition);
-    const [input, setInput] = useState('');
+    const local = useState('');
+    const [input, setInput] = host ?? local;
     // The guide's pattern for several resources from one input
     // (docs/react-authoring.md); keep both in step.
     async function addAll() {
-      if (!creation.canEdit) return; // a held creation is settled first
+      // Settle a pending, uncertain or stopped item in the draft first.
+      if (!creation.canEdit || creation.draft.title !== '') return;
       const names = input
         .split(',')
         .map((name) => name.trim())
@@ -133,9 +140,9 @@ async function setup(language: 'en' | 'de' = 'en') {
         creation.change({ title: name });
         const outcome = await creation.create();
         if (outcome?.kind === 'created') continue;
-        // Stop: an unconfirmed item stays in the locked draft, the rest is unsent.
-        const kept = outcome?.kind === 'unconfirmed' ? index + 1 : index;
-        setInput(names.slice(kept).join(', '));
+        // Stop. This item is held in the draft or may already exist: it never
+        // returns to the input. Only the unsent rest does.
+        setInput(names.slice(index + 1).join(', '));
         return;
       }
       setInput('');
@@ -158,11 +165,17 @@ async function setup(language: 'en' | 'de' = 'en') {
       </>
     );
   }
+  function Host() {
+    const input = useState('');
+    return (
+      <TargetScreen>
+        <Screen host={hostInput ? input : undefined} />
+      </TargetScreen>
+    );
+  }
   render(
     <SempodsProvider runtime={session.runtime} language={language}>
-      <TargetScreen>
-        <Screen />
-      </TargetScreen>
+      <Host />
     </SempodsProvider>,
   );
   await waitFor(() => expect(api.list.state.kind).toBe('ready'));
@@ -666,7 +679,6 @@ it.each([
       return new Response(null, { status: 202 });
     },
     outcome: { kind: 'unconfirmed' },
-    kept: 'Eggs',
     held: true,
     canCreate: false,
   },
@@ -674,7 +686,6 @@ it.each([
     stop: 'refused',
     answer: async () => new Response(null, { status: 403 }),
     outcome: { kind: 'not-created', reason: 'refused' },
-    kept: 'Bread, Eggs',
     held: false,
     canCreate: true,
   },
@@ -682,7 +693,6 @@ it.each([
     stop: 'exists',
     answer: async () => new Response(null, { status: 412 }),
     outcome: { kind: 'exists' },
-    kept: 'Bread, Eggs',
     held: false,
     canCreate: true,
   },
@@ -690,13 +700,12 @@ it.each([
     stop: 'not sent (write access lost)',
     answer: undefined,
     outcome: null,
-    kept: 'Bread, Eggs',
     held: false,
     canCreate: false,
   },
 ])(
   'S2: stops at the first $stop item; confirmed items stay created and the rest is not sent',
-  async ({ answer, outcome, kept, held, canCreate }) => {
+  async ({ answer, outcome, held, canCreate }) => {
     const f = await setup();
     const track = trackPuts(f, async (attempt, url, init) => {
       if (attempt === 3 && answer) return answer(f, url, init);
@@ -714,7 +723,8 @@ it.each([
     expect(track.puts.map((put) => put.title)).toEqual(
       ['Milk', 'Bananas', 'Bread'].slice(0, sent),
     );
-    await waitFor(() => expect(f.api.input).toBe(kept));
+    // The stopped item stays in the draft; only the unsent rest returns.
+    await waitFor(() => expect(f.api.input).toBe('Eggs'));
     expect(f.api.creation.outcome).toEqual(outcome);
     expect(f.api.creation.draft).toEqual({ ...initial, title: 'Bread' });
     expect(f.api.creation.canEdit).toBe(!held);
@@ -725,16 +735,18 @@ it.each([
       ),
     );
     expect(f.rows.size).toBe(held ? 4 : 3); // the lost answer's item landed
-    // Nothing is retried on its own, and a held item cannot be replaced.
+    // Nothing is retried on its own, and the next batch cannot replace the
+    // stopped item in the draft.
     await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
+    await addAll(f);
+    expect(f.api.creation.draft.title).toBe('Bread');
+    expect(f.api.input).toBe('Eggs');
     if (held) {
       act(() => f.api.creation.change({ title: 'Eggs' }));
       await act(async () => {
         expect(await f.api.creation.create()).toBeUndefined();
       });
-      await addAll(f);
       expect(f.api.creation.draft.title).toBe('Bread');
-      expect(f.api.input).toBe('Eggs');
     }
     expect(track.puts).toHaveLength(sent);
   },
@@ -789,3 +801,48 @@ it('S3: an unconfirmed item keeps its IRI through recovery; the rest continues a
     expect(listed(f)).toEqual(['Bananas', 'Bread', 'Eggs', 'Milk', 'One']),
   );
 });
+
+it.each([false, true])(
+  'S4: a target change during a creation stops the batch without returning its possibly written item (input above TargetScreen: %s)',
+  async (hostInput) => {
+    const f = await setup('en', { hostInput });
+    const gate = deferred<void>();
+    const track = trackPuts(f, async (attempt, url, init) => {
+      const result = await f.resource(url, init); // the write lands
+      if (attempt === 2) await gate.promise;
+      return result;
+    });
+    act(() => f.api.setInput('Milk, Bananas, Bread'));
+    let finished = false;
+    act(() => {
+      void f.api.addAll().then(() => {
+        finished = true;
+      });
+    });
+    await waitFor(() => expect(f.rows.size).toBe(3)); // One, Milk, Bananas
+    // An unguarded switch through the runtime while the answer is pending.
+    await act(async () => {
+      f.runtime.selectContext(f.id, personal);
+    });
+    await act(async () => {
+      gate.resolve();
+    });
+    await waitFor(() => expect(finished).toBe(true));
+    // The answer was applied, but it belongs to the ended lifetime: the hook
+    // reports `undefined` and the new lifetime starts with a blank draft.
+    expect(f.api.creation.draft).toEqual(initial);
+    expect(f.api.creation.outcome).toBeNull();
+    expect(f.api.input).toBe(hostInput ? 'Bread' : '');
+    await act(async () => {
+      f.runtime.selectContext(f.id, work);
+    });
+    await waitFor(() => expect(listed(f)).toEqual(['Bananas', 'Milk', 'One']));
+    if (hostInput) {
+      await addAll(f); // the rest continues; Bananas is not sent again
+      await waitFor(() => expect(f.api.input).toBe(''));
+    }
+    expect(track.puts.map((put) => put.title)).toEqual(
+      hostInput ? ['Milk', 'Bananas', 'Bread'] : ['Milk', 'Bananas'],
+    );
+  },
+);

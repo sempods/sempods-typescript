@@ -131,7 +131,7 @@ request wrote it.
 ### Several resources from one input
 
 One input can name several resources, for example “Milk, 2 Bananas, Bread”.
-Create them one at a time with the same `useCreation` hook:
+Create them one at a time with the same `useCreation` hook, inside `TargetScreen`:
 
 ```tsx
 const creation = useCreation(item, {
@@ -141,7 +141,8 @@ const creation = useCreation(item, {
 const [input, setInput] = useState('');
 
 async function addAll() {
-  if (!creation.canEdit) return; // a held creation is settled first
+  // Settle a pending, uncertain or stopped item in the draft first.
+  if (!creation.canEdit || creation.draft.title !== '') return;
   const names = input
     .split(',')
     .map((name) => name.trim())
@@ -150,9 +151,9 @@ async function addAll() {
     creation.change({ title: name });
     const outcome = await creation.create();
     if (outcome?.kind === 'created') continue;
-    // Stop: an unconfirmed item stays in the locked draft, the rest is unsent.
-    const kept = outcome?.kind === 'unconfirmed' ? index + 1 : index;
-    setInput(names.slice(kept).join(', '));
+    // Stop. This item is held in the draft or may already exist: it never
+    // returns to the input. Only the unsent rest does.
+    setInput(names.slice(index + 1).join(', '));
     return;
   }
   setInput('');
@@ -161,33 +162,42 @@ async function addAll() {
 
 `change` applies at once, so the `create()` right after it submits exactly that
 draft. Both actions use the hook's latest state, so the handler may keep using
-the `creation` of the render that started it. Start only while `canEdit` is true:
-while a command is pending, unconfirmed or held for a retry, `change` is ignored
-and `create()` would not submit the new name. Keep the input and button disabled
-until `addAll` returns; never run creations in parallel. What each result leaves
-behind:
+the `creation` of the render that started it. Start only while `canEdit` is true
+and the draft is blank: while a command is pending, unconfirmed or held for a
+retry, `change` is ignored, and an editable stopped item would be overwritten.
+Keep the input and button disabled until `addAll` returns; never run creations
+in parallel.
+
+The item that stops the loop never returns to the input. Render the draft like
+the single-item form next to `<UpdateNotice {...creation.notice} />`: an input
+bound to `change` and disabled by `!creation.canEdit`, and Create disabled by
+`!creation.canCreate`. What each result leaves behind:
 
 - `created`: confirmed. The draft resets, lists refresh and the next item
   captures a fresh subject IRI. `outcome` stays `created` until the next `change`.
 - `unconfirmed`: the item may exist. Its draft and captured command stay locked
-  (`canEdit` and `canCreate` are false), so it must not return to the input.
-  Show its name from `creation.draft` next to `<UpdateNotice {...creation.notice} />`
-  and settle it as described above: present evidence resets the draft; observed
-  absence enables `create()` for the explicit retry of the same IRI and body.
-  Run the rest once `canEdit` is true again.
+  (`canEdit` and `canCreate` are false). Settle it as described above: present
+  evidence resets the draft; observed absence enables Create for the explicit
+  retry of the same IRI and body.
 - `exists` or `not-created`: nothing was written. The item stays in the editable
-  draft and, with the rest, in the input. Running the batch again captures a
-  new IRI for it.
-- `undefined`: nothing was sent, for example after write access was lost; keep
-  the item with the rest. `outcome` is then empty. (`create` also returns
-  `undefined` when the target lifetime ended before the answer; a forced
-  lifetime change retires that result.)
+  draft. Create sends it again (`exists` under a new IRI, `not-created` under
+  the captured one); editing or clearing it is the person's choice.
+- `undefined`: usually nothing was sent, for example after write access was
+  lost; the item stays in the editable draft and `outcome` is empty. But
+  `create` also returns `undefined` when the target lifetime ended while the
+  request was in flight, for example through a direct runtime call. That write
+  may have landed, and the handler cannot tell the two cases apart. The new
+  lifetime starts with a blank draft and, inside `TargetScreen`, a blank input;
+  the person checks the list before typing the item again.
 
 Items confirmed earlier stay created; a later stop does not affect them.
 Nothing is retried automatically, an uncertain item never gets a new IRI, and
-items after the stop were never sent. [React tests](../packages/app-sdk/src/react/safe-authoring.test.tsx)
-run this handler against fixtures. Without React, prepare one `prepareCreation`
-per item with `newSubjectIri` and `await` each `run()` the same way.
+items after the stop were never sent. Keep the input in the same `TargetScreen`
+as the hook: a target change then drops it, instead of carrying unsent items to
+another target. [React tests](../packages/app-sdk/src/react/safe-authoring.test.tsx)
+run this handler against fixtures, including a target change during a creation.
+Without React, prepare one `prepareCreation` per item with `newSubjectIri` and
+`await` each `run()` the same way.
 
 ## Standard UI for one known Pod
 

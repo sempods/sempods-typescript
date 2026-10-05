@@ -490,10 +490,13 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
  * Owns the draft, leave guard and captured command for one intended creation.
  *
  * Several resources from one input are created one at a time: while `canEdit`
- * is true, call `change(draft)` and then `await create()` for each item, and
- * stop at the first result that is not `created`. Both actions use the hook's
- * latest state, so one handler may keep calling them across awaits. Each
- * confirmed creation resets the draft; the next item captures a fresh IRI.
+ * is true and the draft is blank, call `change(draft)` and then
+ * `await create()` for each item, and stop at the first result that is not
+ * `created`. Both actions use the hook's latest state, so one handler may keep
+ * calling them across awaits. Each confirmed creation resets the draft; the
+ * next item captures a fresh IRI. The item that stopped stays in the draft, or
+ * may exist if the target lifetime ended (see `create`); never resubmit it
+ * from the input.
  */
 export function useCreation<D extends object>(
   definition: FieldDefinition<D>,
@@ -580,9 +583,12 @@ export function useCreation<D extends object>(
       setState(next);
     },
     /**
-     * Sends the current draft under its captured IRI. `undefined`: nothing was
-     * sent (no write access, an invalid draft, a pending or unconfirmed command
-     * or a guarded transition), or the target lifetime ended before the answer.
+     * Sends the current draft under its captured IRI. `undefined` either means
+     * nothing was sent (no write access, an invalid draft, a pending or
+     * unconfirmed command or a guarded transition; the draft is kept) or that
+     * the target lifetime ended before the answer. In the second case the
+     * write may have landed and its result is retired; the two cannot be told
+     * apart here, so treat the item as possibly created.
      */
     create: async () => {
       if (
