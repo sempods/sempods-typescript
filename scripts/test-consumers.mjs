@@ -335,6 +335,66 @@ try {
     'Quickstart bundle used workspace source',
   );
   assets.set('/quickstart.js', quickstartBundle.outputFiles[0].text);
+  // Apply the PWA guide's App adaptation to the quickstart, compiling against
+  // packed packages. Importing this component must not register a worker.
+  const pwaGuide = await readFile(join(root, 'docs/pwa.md'), 'utf8');
+  const pwaBlocks = [...pwaGuide.matchAll(/```tsx\n([\s\S]*?)```/g)].map(
+    (match) => match[1],
+  );
+  const pwaApp = pwaBlocks.find((source) =>
+    source.includes('export default function App('),
+  );
+  const pwaMain = pwaBlocks.find((source) => source.includes('createRoot('));
+  assert.ok(pwaApp, 'PWA App adaptation missing');
+  assert.ok(pwaMain, 'PWA entry missing');
+  const quickstartApp = block('tsx');
+  const appStart = quickstartApp.indexOf('export default function App(');
+  const tasksStart = quickstartApp.indexOf('\nfunction Tasks()');
+  assert.ok(appStart >= 0 && tasksStart > appStart);
+  const pwaDocs = join(withReact, 'pwa-docs');
+  await cp(quickstart, pwaDocs, { recursive: true });
+  await writeFile(
+    join(pwaDocs, 'App.tsx'),
+    quickstartApp.slice(0, appStart) + pwaApp + quickstartApp.slice(tasksStart),
+  );
+  await writeFile(join(pwaDocs, 'main.tsx'), pwaMain);
+  await cp(
+    join(root, 'examples/todo/pwa/register.tsx'),
+    join(pwaDocs, 'pwa.tsx'),
+  );
+  await writeFile(
+    join(pwaDocs, 'vite-env.d.ts'),
+    (await readFile(join(quickstart, 'vite-env.d.ts'), 'utf8')) +
+      'interface ImportMeta { readonly env: { readonly PROD: boolean }; }\n',
+  );
+  run(
+    process.execPath,
+    ['../node_modules/typescript/bin/tsc', '-p', 'tsconfig.json'],
+    pwaDocs,
+  );
+  for (const [entry, asset] of [
+    ['App.tsx', '/pwa-app.js'],
+    ['main.tsx', '/pwa-main.js'],
+  ]) {
+    const result = await build({
+      absWorkingDir: pwaDocs,
+      entryPoints: [entry],
+      bundle: true,
+      platform: 'browser',
+      format: 'esm',
+      jsx: 'automatic',
+      define: { 'import.meta.env.PROD': 'true' },
+      write: false,
+      metafile: true,
+    });
+    assert.ok(
+      Object.keys(result.metafile.inputs).every(
+        (input) => !input.includes(root),
+      ),
+      'PWA documentation bundle used workspace source',
+    );
+    assets.set(asset, result.outputFiles[0].text);
+  }
   const requests = [];
   server = createServer((req, res) => {
     const path = req.url ?? '';
@@ -374,6 +434,9 @@ try {
       res.end(
         '<div id="app"></div><script type="module" src="/quickstart.js"></script>',
       );
+    } else if (path === '/pwa-docs') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<div id="root"></div>');
     } else {
       res.writeHead(404);
       res.end();
@@ -438,9 +501,33 @@ try {
     await page.getByRole('button', { name: 'Connect', exact: true }).count(),
     1,
   );
+  await page.goto(`${origin}/pwa-docs`);
+  const registrations = await page.evaluate(async () => {
+    const calls = [];
+    Object.defineProperty(globalThis.navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        register(url) {
+          calls.push(url);
+          return Promise.resolve(undefined);
+        },
+      },
+    });
+    await import('/pwa-app.js');
+    const afterAppImport = [...calls];
+    await import('/pwa-main.js');
+    return { afterAppImport, afterEntry: [...calls] };
+  });
+  assert.deepEqual(
+    registrations.afterAppImport,
+    [],
+    'Importing App registered a worker',
+  );
+  assert.deepEqual(registrations.afterEntry, ['/sw.js']);
+  await page.getByText('My tasks', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    'Packed DOM-only browser discovery, the edit entry, React provider/draft preservation and the verbatim quickstart app passed in Chromium.',
+    'Packed DOM-only browser discovery, the edit entry, React provider/draft preservation, the verbatim quickstart and PWA entry-only registration passed in Chromium.',
   );
 } finally {
   await browser?.close();

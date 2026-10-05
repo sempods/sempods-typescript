@@ -64,6 +64,10 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 - Packed React: separately installs React/ReactDOM and their types, compiles and
   renders a provider/hook consumer in Chromium; language change retains the draft.
   Both bundles resolve installed artifacts, not workspace aliases.
+- Documented apps: compiles the quickstart and its PWA adaptation against packed
+  SDKs. Chromium checks startup and, with a registration spy, verifies that
+  importing the PWA `App` component registers no worker while the production
+  entry registers exactly once. Native worker behavior is covered by `test:todo`.
 
 - `test:runtime`: a separate packed DOM-only consumer in Chromium, using native
   IndexedDB/Web Locks and real loopback Code + PKCE redirects/exchanges. Checks

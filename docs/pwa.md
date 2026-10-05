@@ -108,11 +108,12 @@ site root (for apps under a path, see
 of your app to `navigateFallbackAllowlist` (for example `/^\/(settings)?$/` for
 `/` and `/settings`), but never the callback route. Copy
 [`register.tsx`](../examples/todo/pwa/register.tsx) to `src/pwa.tsx` and register
-from `src/App.tsx`. Keep the quickstart's existing imports, runtime and `Tasks`
-component; add this import and module-level registration, and replace its `App`
-function with:
+from the app entry, `src/main.tsx`:
 
 ```tsx
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App.tsx';
 import { NewVersionNotice, registerAppWorker } from './pwa.tsx';
 
 // Production builds only: the development server has no service worker.
@@ -120,10 +121,26 @@ const registration = import.meta.env.PROD
   ? registerAppWorker('/sw.js')
   : Promise.resolve(undefined);
 
-export default function App() {
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App>
+      <NewVersionNotice registration={registration} />
+    </App>
+  </StrictMode>,
+);
+```
+
+Keep any existing CSS imports in `main.tsx` and use your HTML root element's ID.
+In `src/App.tsx`, keep the quickstart's existing imports, runtime and `Tasks`
+component; add the type import and replace its `App` function with:
+
+```tsx
+import type { ReactNode } from 'react';
+
+export default function App({ children }: { readonly children?: ReactNode }) {
   return (
     <SempodsProvider runtime={runtime}>
-      <NewVersionNotice registration={registration} />
+      {children}
       <AppShell title="My tasks">
         <TargetScreen>
           <Tasks />
@@ -139,7 +156,8 @@ Keep your existing language, locale and message props on `SempodsProvider`.
 any nested `SdkLocaleProvider` that owns the selected language. Placing it beside
 `<App />` in `main.tsx` cannot read a provider inside App and falls back to English.
 Keep the notice outside target/access gates so it also appears while signed out;
-registration stays outside render. Language changes update the notice without
+registration stays in the entry module, outside render. Importing `App.tsx`
+alone must not register a worker. Language changes update the notice without
 replacing the runtime, re-registering the worker or losing drafts.
 
 `NewVersionNotice` tells the person that a downloaded version is used once all
