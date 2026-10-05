@@ -1,6 +1,6 @@
 {
   "name": "@sempods/client-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Portable sempods Pod client: discovery, delegated OAuth, context views, conditional reads/writes and safe editing for browsers and Node.",
   "keywords": [
     "sempods",
