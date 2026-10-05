@@ -1,6 +1,6 @@
 # Development and package evidence
 
-Node is pinned in `.node-version` (22.19.0) and pnpm in `package.json` (11.1.2).
+Node is pinned in `.node-version` (24.15.0, the supported minimum) and pnpm in `package.json` (11.1.2).
 Tool dependencies have exact versions; `pnpm-lock.yaml` is committed. Node's
 current minimum is tested, not a claim to support every future environment.
 

@@ -7,13 +7,13 @@ connections and safe editing. People keep their data in their Pod.
 ## Start here
 
 Follow the [quickstart](quickstart.md) to create a Vite React/TypeScript app
-(Node 22.19 or newer). Once SDK 0.1.0 is published, install the matching pair:
+(Node 24.15 or newer). Install the matching pair:
 
 ```sh
-npm install --save-exact @sempods/app-sdk@0.1.0 @sempods/client-sdk@0.1.0
+npm install --save-exact @sempods/app-sdk@0.2.0 @sempods/client-sdk@0.2.0
 ```
 
-Commit the lockfile. Before publication, use the quickstart's
+Commit the lockfile. To try unreleased SDK changes, use the quickstart's
 [packed SDK archives](quickstart.md#trying-unreleased-sdk-changes). To ship it
 as an installable app, add the [PWA setup](pwa.md).
 Use a dedicated test context and synthetic data; follow

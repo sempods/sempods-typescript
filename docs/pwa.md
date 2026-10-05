@@ -14,7 +14,7 @@ What “PWA-ready” means here:
   no queue of changes: a write that may have reached the Pod is never sent again
   automatically, so the SDK's “not confirmed” recovery stays the only path.
 
-Installed apps are experimental in 0.1 (see
+Installed apps are experimental in 0.2 (see
 [supported environments](../README.md#supported-environments)): sign-in returns
 to the app in the same window, and that return must land in the storage that
 holds the sign-in attempt. Check your target devices with the list at the end.

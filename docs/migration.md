@@ -4,6 +4,20 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.1 to 0.2
+
+0.2 requires **Node 24.15 or newer** (Node 24 LTS) for development, builds and
+Node scripts; Node 22 is in maintenance and reaches end of life in April 2027.
+Switch your local and CI Node version, then upgrade both packages together:
+
+```sh
+npm install --save-exact @sempods/app-sdk@0.2.0 @sempods/client-sdk@0.2.0
+```
+
+The public API is unchanged. client-sdk now uses `oauth4webapi` 3.8.8, which
+fixes the parsing of `WWW-Authenticate` challenges and validates ID-token
+subjects as strings; no app code needs to change. Browser support is unchanged.
+
 ## Move one app flow at a time
 
 1. Record the old app's origin, client identity, SDK revision and data vocabulary.

@@ -54,9 +54,9 @@ Agents changing this SDK start with [AGENTS.md](AGENTS.md).
 
 ## Supported environments
 
-| Environment                  | Status in 0.1                                                                                                                                                                      |
+| Environment                  | Status in 0.2                                                                                                                                                                      |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node                         | 22.19 or newer, ESM only (`engines` in both packages).                                                                                                                             |
+| Node                         | 24.15 or newer (Node 24 LTS), ESM only (`engines` in both packages).                                                                                                               |
 | Browser tab                  | Current browsers with IndexedDB and Web Locks. Automated browser checks run in Chromium.                                                                                           |
 | React                        | 19, for `@sempods/app-sdk/react` (optional peer).                                                                                                                                  |
 | Installed PWA (experimental) | Desktop Chromium and Android are expected to work; iOS/iPadOS home-screen apps are unverified. Login returns to the app in the same window and must land in the app's own storage. |
