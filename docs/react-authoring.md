@@ -153,7 +153,10 @@ const runtime = createBrowserRuntime({
 ```
 
 `Tasks` is your existing app screen. The first visit offers **Sign in** without a
-Pod URL input; after consent, the person chooses a context. Add the optional
+Pod URL input; after consent, the person chooses a context. The preset also hides
+the standard new-Pod URL form in `mode="multiple"`; connecting a different Pod
+requires custom controls or headless calls with an explicit URL. Existing foreign
+connections remain available for selection. Add the optional
 `contextIri` inside `preset` to declare an exact context instead. The SDK waits for
 fresh readable catalogue evidence, displays that fixed context instead of a
 picker, and never falls back to another. Missing feature scopes, failed catalogue

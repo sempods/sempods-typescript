@@ -67,7 +67,11 @@ export type DisconnectResult = {
 };
 /** Optional advanced composition seam; ordinary applications use the production client. */
 export type PodFactory = (url: string, options: PodOptions) => Pod;
-/** A UI default for one known Pod, not an allowed-Pod policy. */
+/**
+ * A UI default for one known Pod, not an allowed-Pod policy.
+ * Construction rejects an invalid podUrl with SdkError (invalid-pod-url),
+ * or an invalid contextIri with RuntimeError (configuration), before I/O.
+ */
 export interface PodPreset {
   readonly podUrl: string;
   /** Exact canonical context of this Pod; no fallback to another context. */
@@ -109,7 +113,12 @@ export interface BrowserRuntime {
   getSnapshot(): readonly Connection[];
   /** Listener exceptions are reported asynchronously and never interrupt session transitions. */
   subscribe(listener: () => void): () => void;
-  /** Omit the URL to use the preset. Matching preset connections are reused. */
+  /**
+   * Omit the URL to use the preset. Matching preset connections are reused after
+   * any pending disconnect settles. Waiting rejects with RuntimeError (storage)
+   * if retirement fails, or (disconnected) if this runtime was disposed.
+   * Concurrent preset connects share discovery; connecting never starts login.
+   */
   connect(url?: string): Promise<Connection>;
   beginAuthorization(id: string): Promise<void>;
   disconnect(id: string): Promise<DisconnectResult>;
