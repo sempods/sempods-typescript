@@ -1,11 +1,11 @@
 {
   "name": "sempods-typescript-workspace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.1.2",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "build": "tsc -b",
@@ -15,19 +15,20 @@
     "lint": "eslint packages scripts tests examples eslint.config.mjs vitest.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:publish && pnpm test:consumers && pnpm test:runtime && pnpm test:todo",
+    "check": "pnpm format:check && pnpm lint && pnpm check:docs && pnpm typecheck && pnpm test && pnpm test:publish && pnpm test:consumers && pnpm test:runtime && pnpm test:todo",
     "test:runtime": "pnpm build && node scripts/test-runtime-consumer.mjs",
     "dev:todo": "pnpm build && node scripts/dev-todo.mjs",
     "build:examples": "tsc -p examples/tsconfig.json && esbuild examples/node-script/src/main.ts --bundle --platform=node --format=esm --outfile=examples/node-script/dist/main.js",
     "test:todo": "pnpm build && node scripts/test-todo-consumer.mjs",
-    "test:publish": "node scripts/test-publish-packages.mjs"
+    "test:publish": "node scripts/test-publish-packages.mjs",
+    "check:docs": "node --test scripts/check-docs.test.mjs && node scripts/check-docs.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@testing-library/react": "16.3.2",
-    "@types/node": "22.19.0",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "24.13.6",
     "@types/react": "19.3.0",
-    "@types/react-dom": "19.2.0",
+    "@types/react-dom": "19.3.0",
     "esbuild": "0.28.2",
     "eslint": "10.12.0",
     "fake-indexeddb": "6.2.5",
@@ -36,8 +37,14 @@
     "prettier": "3.9.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "remark": "15.0.1",
+    "remark-cli": "12.0.1",
+    "remark-frontmatter": "5.0.0",
+    "remark-gfm": "4.0.1",
+    "remark-validate-links": "13.1.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",
+    "unist-util-visit": "5.1.0",
     "vitest": "5.0.3"
   }
 }

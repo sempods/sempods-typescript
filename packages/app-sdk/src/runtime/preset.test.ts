@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { SdkError } from '@sempods/client-sdk';
 import { createBrowserRuntime } from './runtime.js';
+import { RuntimeError } from './errors.js';
 import { createAppController } from '../authoring/app.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
@@ -65,7 +67,12 @@ it('validates and freezes the preset without discovery, storage or navigation', 
   ]) {
     expect(() =>
       createBrowserRuntime({ ...f.options, preset: { podUrl: invalid } }),
-    ).toThrow();
+    ).toThrow(
+      expect.objectContaining({
+        constructor: SdkError,
+        reason: { code: 'invalid-pod-url' },
+      }),
+    );
   }
   for (const contextIri of [
     '',
@@ -80,7 +87,12 @@ it('validates and freezes the preset without discovery, storage or navigation', 
         ...f.options,
         preset: { podUrl: pod, contextIri },
       }),
-    ).toThrow();
+    ).toThrow(
+      expect.objectContaining({
+        constructor: RuntimeError,
+        problem: 'configuration',
+      }),
+    );
   }
   expect(f.fetch).not.toHaveBeenCalled();
 });

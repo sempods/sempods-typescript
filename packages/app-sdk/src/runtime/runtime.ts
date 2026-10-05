@@ -623,10 +623,21 @@ export function createBrowserRuntime(
         throw new RuntimeError('configuration');
       const matchesPreset = url === preset?.podUrl;
       if (matchesPreset) {
-        const existing = [...entries.values()].find(
-          (e) => e.view.podUrl === url,
-        );
-        if (existing) return existing.view;
+        for (;;) {
+          const existing = [...entries.values()].find(
+            (e) => e.view.podUrl === url,
+          );
+          const pending = existing && disconnects.get(existing.view.id);
+          if (!pending) {
+            if (existing) return existing.view;
+            break;
+          }
+          const result = await pending;
+          if (disposed) throw new RuntimeError('disconnected');
+          if (result.kind === 'blocked-locally')
+            throw new RuntimeError('storage');
+          // Re-read after retirement: another connect may already have replaced it.
+        }
         if (connectingPreset) return connectingPreset;
       }
       const operation = (async () => {
@@ -721,6 +732,19 @@ export function createBrowserRuntime(
       const pending = disconnects.get(id);
       if (pending) return pending;
       const e = get(id);
+      // Register before abort/notifications so reentrant callers see the retirement.
+      const operation = retire(e)
+        .then(
+          () => {
+            if (entries.get(id) === e) entries.delete(id);
+            contexts.forget(id);
+            publish();
+            return { kind: 'disconnected' as const };
+          },
+          () => ({ kind: 'blocked-locally' as const }),
+        )
+        .finally(() => disconnects.delete(id));
+      disconnects.set(id, operation);
       delete e.credentials;
       delete e.credential;
       e.lifetime.abort();
@@ -734,18 +758,6 @@ export function createBrowserRuntime(
         missingRequiredScopes: required,
       };
       publish();
-      const operation = retire(e)
-        .then(
-          () => {
-            if (entries.get(id) === e) entries.delete(id);
-            contexts.forget(id);
-            publish();
-            return { kind: 'disconnected' as const };
-          },
-          () => ({ kind: 'blocked-locally' as const }),
-        )
-        .finally(() => disconnects.delete(id));
-      disconnects.set(id, operation);
       return operation;
     },
     async loadContexts(id, { signal } = {}) {

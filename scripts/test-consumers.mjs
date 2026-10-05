@@ -66,7 +66,15 @@ try {
       assert.ok(contents.includes(required), `Missing ${required}`);
     assert.equal(manifest.license, 'Apache-2.0');
     if (manifest.name === '@sempods/app-sdk') {
-      assert.equal(manifest.dependencies['@sempods/client-sdk'], '0.1.0');
+      assert.equal(
+        manifest.dependencies['@sempods/client-sdk'],
+        JSON.parse(
+          await readFile(
+            join(root, 'packages/client-sdk/package.json'),
+            'utf8',
+          ),
+        ).version,
+      );
       assert.equal(manifest.peerDependenciesMeta.react.optional, true);
     }
   }
