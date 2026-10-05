@@ -95,7 +95,7 @@ For an app at the site root, put this in the **app repository's** `netlify.toml`
 ```
 
 Use a Node version compatible with the app's pinned dependencies (this SDK is
-checked with Node 22.19.0). Commit the app manifest and lockfile. Connect that app
+checked with Node 24.15.0). Commit the app manifest and lockfile. Connect that app
 repository as the Netlify project, review its build settings, and deploy when
 authorized. For a manual deploy, build locally and upload `dist/`; include a
 `public/_redirects` file containing `/* /index.html 200` before building so the

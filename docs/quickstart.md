@@ -6,7 +6,7 @@ published SDK packages, Vite and React.
 For the idea behind the example, start with [build your own app](build-your-app.md);
 for AI assistance, supply [the app-builder instructions](ai-app-builder.md).
 
-You need Node 22.19 or newer, and a sempods Pod with a context you may grant
+You need Node 24.15 or newer (Node 24 LTS), and a sempods Pod with a context you may grant
 to an app. No feature scopes are needed for data: the person grants context
 access when consenting (SPS-AUTH-024).
 

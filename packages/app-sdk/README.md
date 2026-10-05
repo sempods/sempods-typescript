@@ -48,7 +48,7 @@ child state. Runtime failures expose structured facts; AppShell and editing comp
 localized workflow feedback. Neither entry starts login,
 discovery or storage on import.
 
-Supported: Node 22.19 or newer (ESM only); current browsers with IndexedDB and
+Supported: Node 24.15 or newer (ESM only); current browsers with IndexedDB and
 Web Locks in a normal browser tab; React 19 for `./react`. Installed PWAs are
 experimental: desktop Chromium and Android are expected to work, iOS/iPadOS
 home-screen apps are unverified. See [supported environments](https://github.com/sempods/sempods-typescript/blob/v0.1.0/README.md#supported-environments).

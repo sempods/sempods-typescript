@@ -15,7 +15,7 @@ updates:
           - 'minor'
           - 'patch'
     ignore:
-      # Node types follow the minimum supported runtime (engines: node >=22.19),
+      # Node types follow the minimum supported runtime (engines: node >=24.15),
       # so newer Node APIs cannot slip in. Raise this together with `engines`.
       - dependency-name: '@types/node'
         update-types:
