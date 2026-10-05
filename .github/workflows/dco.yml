@@ -1,101 +1,16 @@
 name: DCO
-# Every commit in a pull request needs a Signed-off-by line matching its author
-# (the organisation's CONTRIBUTING.md carries the certificate). Commits of a bot
-# such as Dependabot are exempt only in a pull request that this bot account
-# opened: GitHub authenticates the pull request's author, while commit author
-# fields are free text anyone can set. The maintainer who merges a bot pull
-# request takes responsibility. Merge commits are checked too: a merge can carry
-# conflict resolutions or other changes of its own. Sign them off
-# (`git merge --signoff`) or rebase instead.
-#
-# pull_request_target runs this file as it is on the base branch, so a pull
-# request cannot weaken its own gate by editing it. That trigger runs with base
-# privileges, therefore the job brings no pull-request content onto the runner:
-# no checkout, no fetch. It reads commit authors and messages from the GitHub
-# API as data. Read-only token, no secrets.
+# Every pull-request commit needs a Signed-off-by matching its author. The
+# check is shared by all sempods repositories and tested there:
+# https://github.com/sempods/.github/tree/main/actions/dco
+# Keep the job id `check`; the ruleset requires that status check.
 on:
-  pull_request_target:
+  pull_request:
 permissions:
   contents: read
   pull-requests: read
 jobs:
   check:
-    name: Sign-off
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every commit carries the author's sign-off
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
-        run: |
-          set -euo pipefail
-          # Exempt only commits of the authenticated bot that opened this pull
-          # request: its account type, its exact name and a GitHub noreply
-          # address. Look-alike author fields in anyone else's pull request are
-          # checked like every other commit.
-          is_bot_commit() { # name email pr-author pr-author-type
-            [[ "$4" == "Bot" && "$1" == "$3" ]] || return 1
-            case "$2" in *"[bot]@users.noreply.github.com") return 0 ;; esac
-            return 1
-          }
-          failed=""
-          expect() {
-            local want="$1" got="check"
-            is_bot_commit "$2" "$3" "$4" "$5" && got="skip"
-            [[ "$got" == "$want" ]] || { echo "self-test: '$2' <$3> in a PR by $4 ($5) = $got, want $want" >&2; failed=1; }
-          }
-          dependabot="49699333+dependabot[bot]@users.noreply.github.com"
-          expect skip "dependabot[bot]" "$dependabot" "dependabot[bot]" "Bot"
-          expect check "dependabot[bot]" "$dependabot" "mallory" "User"
-          expect check "dependabot[bot]" "$dependabot" "renovate[bot]" "Bot"
-          expect check "Ada Lovelace" "1234+ada@users.noreply.github.com" "dependabot[bot]" "Bot"
-          expect check "dependabot[bot]" "someone@example.org" "dependabot[bot]" "Bot"
-          [[ -z "$failed" ]] || exit 3
-
-          # The API lists at most 250 commits of a pull request; refuse rather
-          # than check a partial range.
-          commits="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits?per_page=100" --jq '.[]' | jq -s '.')"
-          count="$(jq 'length' <<<"$commits")"
-          if (( count >= 250 )); then
-            echo "This pull request has $count or more commits; split it to check every sign-off." >&2
-            exit 1
-          fi
-
-          missing=""
-          for i in $(seq 0 $((count - 1))); do
-            commit="$(jq -c ".[$i]" <<<"$commits")"
-            sha="$(jq -r '.sha' <<<"$commit")"
-            name="$(jq -r '.commit.author.name' <<<"$commit")"
-            email="$(jq -r '.commit.author.email' <<<"$commit")"
-            is_bot_commit "$name" "$email" "$PR_AUTHOR" "$PR_AUTHOR_TYPE" && continue
-            # Compare the trailer address as a fixed string passed with -e: `+`
-            # and `.` in noreply addresses must not act as regex syntax, and an
-            # author address such as `--help` must not act as a grep option.
-            # Only the author's own sign-off counts; another person cannot
-            # certify on their behalf. Collect all addresses first: grep -q in
-            # a pipeline stops reading early, and with pipefail the resulting
-            # SIGPIPE upstream would reject a valid commit with many sign-offs.
-            signoffs="$(jq -r '.commit.message' <<<"$commit" |
-              sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\(.*\)>[[:space:]]*$/\1/p')"
-            # An empty pattern would match any line, so an empty author address
-            # or an empty sign-off set never counts as signed.
-            if [[ -n "$email" && -n "$signoffs" ]] &&
-              grep -qixF -e "$email" <<<"$signoffs"; then
-              continue
-            fi
-            subject="$(jq -r '.commit.message | split("\n")[0]' <<<"$commit")"
-            missing+="  ${sha:0:12}  $subject (author: $email)"$'\n'
-          done
-
-          if [[ -n "$missing" ]]; then
-            echo "These commits carry no Signed-off-by line matching their author:"
-            echo "$missing"
-            echo "Add it with: git rebase --signoff <base> && git push --force-with-lease"
-            echo "New commits: git commit -s (merges: git merge --signoff, or rebase)"
-            exit 1
-          fi
-          echo "All $count commits signed off."
+      - uses: sempods/.github/actions/dco@09cf2f9a527677281c9bb65e1fc3535f135fc241 # main
