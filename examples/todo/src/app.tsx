@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   AppShell,
   ConnectionControls,
@@ -169,9 +169,12 @@ function CustomScreen() {
 export function TodoApp({
   runtime,
   custom,
+  children,
 }: {
   readonly runtime: BrowserRuntime;
   readonly custom?: boolean;
+  /** App-level notices share the selected language and remain outside target gates. */
+  readonly children?: ReactNode;
 }) {
   const [language, setLanguage] = useState<'en' | 'de'>('en');
   return (
@@ -180,6 +183,7 @@ export function TodoApp({
         <button onClick={() => setLanguage('en')}>English</button>
         <button onClick={() => setLanguage('de')}>Deutsch</button>
       </nav>
+      {children}
       <TodoLayout custom={custom} />
     </SempodsProvider>
   );

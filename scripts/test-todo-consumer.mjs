@@ -1072,13 +1072,37 @@ try {
       .getByLabel('Task', { exact: true })
       .first()
       .fill('Unsaved draft');
+    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
     workerVersion = 'v2';
     await page.evaluate(() =>
       navigator.serviceWorker.getRegistration().then((r) => r.update()),
     );
-    await page.getByText('A new version is ready.', { exact: false }).waitFor();
+    const germanUpdate = page.getByRole('status').filter({
+      hasText: 'Eine neue Version ist bereit.',
+    });
+    const englishUpdate = page.getByRole('status').filter({
+      hasText: 'A new version is ready.',
+    });
+    await germanUpdate.waitFor();
+    assert.equal(await englishUpdate.count(), 0);
+    assert.equal(
+      await page.getByLabel('Aufgabe', { exact: true }).first().inputValue(),
+      'Unsaved draft',
+    );
+    // The already-visible notice follows the app's language without a remount
+    // or worker takeover; the creation draft survives both changes.
+    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await englishUpdate.waitFor();
+    assert.equal(await germanUpdate.count(), 0);
     assert.equal(
       await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      'Unsaved draft',
+    );
+    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await germanUpdate.waitFor();
+    assert.equal(await englishUpdate.count(), 0);
+    assert.equal(
+      await page.getByLabel('Aufgabe', { exact: true }).first().inputValue(),
       'Unsaved draft',
     );
     assert.deepEqual(
@@ -1121,7 +1145,7 @@ try {
     await context.close();
     pwaMode = false;
     console.log(
-      'Packed PWA recipe: manifest, controlled shell, same-origin Pod/OAuth/callback untouched by the worker, install-time-only cache, offline start without logout, waiting update without reload, two apps on one origin keep separate shells.',
+      'Packed PWA recipe: manifest, controlled shell, same-origin Pod/OAuth/callback untouched by the worker, install-time-only cache, offline start without logout, waiting update follows EN/DE without reload or draft loss, two apps on one origin keep separate shells.',
     );
   }
   // The same domain mapper and edit helpers also work without app-sdk, React or browser storage.

@@ -20,9 +20,8 @@ const runtime = createBrowserRuntime({
 });
 const registration = registerAppWorker('/sw.js');
 createRoot(document.getElementById('root')!).render(
-  <>
+  <TodoApp runtime={runtime}>
     <NewVersionNotice registration={registration} />
-    <TodoApp runtime={runtime} />
-  </>,
+  </TodoApp>,
 );
 window.addEventListener('pagehide', () => runtime.dispose());

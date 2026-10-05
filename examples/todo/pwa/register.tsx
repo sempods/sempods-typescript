@@ -17,6 +17,8 @@ export function registerAppWorker(
 }
 
 /**
+ * Render beneath the app's actual locale provider so notices follow its language.
+ * Keep it outside target/access gates: updates also matter while signed out.
  * Announces a downloaded version. It applies once every window of the app is
  * closed, so an update never reloads a page over unsaved drafts or unconfirmed
  * writes. App-owned recipe, not an SDK export.
