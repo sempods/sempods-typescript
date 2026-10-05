@@ -94,16 +94,24 @@ const runtime = createBrowserRuntime({
 });
 ```
 
-The runtime validates and copies the preset at construction. Noncanonical Pod
-URLs (including a trailing slash) and wrong-Pod/noncanonical context IRIs are
+The runtime validates and copies the preset at construction. An invalid Pod URL
+throws the client's `SdkError` with `reason.code: 'invalid-pod-url'`; an invalid
+exact context throws `RuntimeError` with `problem: 'configuration'`. Noncanonical
+Pod URLs (including a trailing slash) and wrong-Pod/noncanonical context IRIs are
 rejected before any request. Configure it once for that runtime lifetime; changing
 props does not change an existing runtime. A host that replaces a runtime must
 first settle its drafts and unresolved operations, dispose it, and initialize its
 replacement.
 
 `runtime.connect()` uses the preset URL and reuses its first matching connection;
-concurrent preset connects share discovery. An explicit `connect(preset.podUrl)`
-has the same reuse behavior. This action alone does not sign in. After startup is
+concurrent preset connects share discovery. If that connection is being
+disconnected, connect waits for retirement and checks the current entries again.
+A failed durable retirement keeps the connection locally blocked: disconnect
+returns `blocked-locally` and waiting connects reject with `RuntimeError('storage')`.
+Offer an explicit disconnect retry; do not claim the saved session was removed.
+Disposing the runtime while a connect waits makes it reject with
+`RuntimeError('disconnected')`, without starting new discovery. An explicit
+`connect(preset.podUrl)` has the same reuse behavior. This action alone does not sign in. After startup is
 durable and restoration of the connection has finished, use
 `beginAuthorization(connection.id)` to sign in or update access. React and
 headless authoring consumers use the guarded `app.connect()` action, which does
