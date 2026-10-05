@@ -108,13 +108,11 @@ site root (for apps under a path, see
 of your app to `navigateFallbackAllowlist` (for example `/^\/(settings)?$/` for
 `/` and `/settings`), but never the callback route. Copy
 [`register.tsx`](../examples/todo/pwa/register.tsx) to `src/pwa.tsx` and register
-in `src/main.tsx`:
+from `src/App.tsx`. Keep the quickstart's existing imports, runtime and `Tasks`
+component; add this import and module-level registration, and replace its `App`
+function with:
 
 ```tsx
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import './index.css';
-import App from './App.tsx';
 import { NewVersionNotice, registerAppWorker } from './pwa.tsx';
 
 // Production builds only: the development server has no service worker.
@@ -122,13 +120,27 @@ const registration = import.meta.env.PROD
   ? registerAppWorker('/sw.js')
   : Promise.resolve(undefined);
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <NewVersionNotice registration={registration} />
-    <App />
-  </StrictMode>,
-);
+export default function App() {
+  return (
+    <SempodsProvider runtime={runtime}>
+      <NewVersionNotice registration={registration} />
+      <AppShell title="My tasks">
+        <TargetScreen>
+          <Tasks />
+        </TargetScreen>
+      </AppShell>
+    </SempodsProvider>
+  );
+}
 ```
+
+Keep your existing language, locale and message props on `SempodsProvider`.
+`NewVersionNotice` must be beneath the same locale provider as the app, including
+any nested `SdkLocaleProvider` that owns the selected language. Placing it beside
+`<App />` in `main.tsx` cannot read a provider inside App and falls back to English.
+Keep the notice outside target/access gates so it also appears while signed out;
+registration stays outside render. Language changes update the notice without
+replacing the runtime, re-registering the worker or losing drafts.
 
 `NewVersionNotice` tells the person that a downloaded version is used once all
 windows of the app are closed. Do not call the plugin's `updateServiceWorker()`
