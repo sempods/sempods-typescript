@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { remark } from 'remark';
 import frontmatter from 'remark-frontmatter';
@@ -69,9 +69,9 @@ export function checkDocs(root) {
     const edges = new Set();
     visit(tree, (node) => {
       const url =
-        node.type === 'link'
+        node.type === 'link' || node.type === 'image'
           ? node.url
-          : node.type === 'linkReference'
+          : node.type === 'linkReference' || node.type === 'imageReference'
             ? definitions.get(node.identifier)
             : undefined;
       if (!url) return;
@@ -102,7 +102,20 @@ export function checkDocs(root) {
       } catch {
         return; // The link validator owns malformed-link diagnostics.
       }
-      if (inventory.has(target)) edges.add(target);
+      const packagePath = relative(dirname(absolute), target);
+      if (
+        packageVersion &&
+        (packagePath === '..' || packagePath.startsWith(`..${sep}`))
+      ) {
+        errors.push(
+          `${file}: local target escapes the package; use a v${packageVersion} repository URL: ${url}`,
+        );
+      }
+      if (
+        (node.type === 'link' || node.type === 'linkReference') &&
+        inventory.has(target)
+      )
+        edges.add(target);
     });
     graph.set(absolute, edges);
   }

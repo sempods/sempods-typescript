@@ -136,3 +136,52 @@ for (const revision of ['v0.2.0', 'v0.1.0', 'main']) {
     }
   });
 }
+
+for (const target of [
+  '../../guide.md#repeat',
+  '..%2F..%2Fguide.md',
+  '/guide.md',
+]) {
+  test(`package README links cannot escape the package: ${target}`, (t) => {
+    const root = fixture(t, {
+      'guide.md': '# Repeat\n# Repeat\n[Package](packages/app-sdk/README.md)\n',
+      'packages/app-sdk/package.json': JSON.stringify({ version: '0.1.0' }),
+      'packages/app-sdk/README.md': `# Package\n[Direct](${target})\n[Reference][guide]\n\n[guide]: ${target}\n`,
+    });
+    const errors = checkDocs(root);
+    assert.equal(errors.length, 2);
+    assert.ok(
+      errors.every((error) =>
+        error.includes('local target escapes the package'),
+      ),
+    );
+  });
+}
+
+test('package-local links and anchors remain valid', (t) => {
+  const root = fixture(t, {
+    'guide.md': '# Repeat\n# Repeat\n[Package](packages/app-sdk/README.md)\n',
+    'packages/app-sdk/package.json': JSON.stringify({ version: '0.1.0' }),
+    'packages/app-sdk/README.md':
+      '# Package\n[Here](#package)\n[Provenance](PROVENANCE.md#source)\n[Normalized](./nested/../PROVENANCE.md)\n[Dots](..notes.md)\n![Image](image.svg)\n',
+    'packages/app-sdk/PROVENANCE.md': '# Source\n',
+    'packages/app-sdk/..notes.md': '# Notes\n',
+    'packages/app-sdk/image.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+  });
+  assert.deepEqual(checkDocs(root), []);
+});
+
+test('package README images cannot escape the package either', (t) => {
+  const root = fixture(t, {
+    'guide.md': '# Repeat\n# Repeat\n[Package](packages/app-sdk/README.md)\n',
+    'packages/app-sdk/package.json': JSON.stringify({ version: '0.1.0' }),
+    'packages/app-sdk/README.md':
+      '# Package\n![Direct](../../image.svg)\n![Reference][image]\n\n[image]: ../../image.svg\n',
+    'image.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+  });
+  const errors = checkDocs(root);
+  assert.equal(errors.length, 2);
+  assert.ok(
+    errors.every((error) => error.includes('local target escapes the package')),
+  );
+});

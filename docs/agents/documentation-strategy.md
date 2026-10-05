@@ -47,8 +47,9 @@ through remark's CLI: the plugin's standalone API does not validate headings in
 other files. A small runner supplies the repository inventory and checks reachability
 using the same Markdown syntax tree. It inventories the current working tree,
 including unstaged additions, deletions and renames. Remaining links to deleted
-files still fail, as do missing README/AGENTS entry points. Package README links
-to this repository's files/directories must name the package manifest's version.
+files still fail, as do missing README/AGENTS entry points. Local links and images
+in package READMEs must stay within their package directory. Repository URLs
+for files/directories must name the package manifest's version.
 This local assertion does not verify that the release tag exists remotely.
 The runner does not implement a Markdown parser.
 
