@@ -13,8 +13,14 @@ const { bearer, createPod, decodeCatalogue } =
   await import('@sempods/client-sdk');
 const { discoverPod, prepareAuthorization } =
   await import('@sempods/client-sdk/oauth');
-const { createResourceEditor, fields, listSubjects, newSubjectIri, text } =
-  await import('@sempods/client-sdk/edit');
+const {
+  createResourceEditor,
+  dateTime,
+  fields,
+  listSubjects,
+  newSubjectIri,
+  text,
+} = await import('@sempods/client-sdk/edit');
 const { createLocale } = await import('@sempods/app-sdk');
 assert.equal(requests, 0);
 assert.equal(
@@ -156,6 +162,21 @@ try {
   );
   assert.deepEqual(editor.state.draft, { title: '' });
   editor.dispose();
+  // Typed literals through the packed declarations: optional reads as null.
+  const timed = fields({
+    end: dateTime('https://schema.org/endTime', { optional: true }),
+  });
+  const end: string | null = timed.read({}).end;
+  assert.equal(end, null);
+  assert.equal(timed.valid?.({ end: '2026-10-05T09:30' }), false);
+  assert.deepEqual(timed.patch({}, { end: '2026-10-05T09:30:00+02:00' }), {
+    'https://schema.org/endTime': [
+      {
+        '@value': '2026-10-05T09:30:00+02:00',
+        '@type': 'http://www.w3.org/2001/XMLSchema#dateTime',
+      },
+    ],
+  });
   assert.equal(routes.length, 6);
   assert.deepEqual(routes.slice(0, 2), [
     'GET /alice/.well-known/oauth-protected-resource',

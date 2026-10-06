@@ -7,8 +7,16 @@ export type {
   Review,
   SaveOutcome,
 } from './editor.js';
-export { fields, flag, iri, text, isFieldDefinition } from './fields.js';
+export {
+  dateTime,
+  fields,
+  flag,
+  iri,
+  text,
+  isFieldDefinition,
+} from './fields.js';
 export type {
+  DateTimeField,
   DraftOf,
   EditDefinition,
   Field,
