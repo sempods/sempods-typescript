@@ -17,6 +17,8 @@ export interface LeaveGuard {
 }
 export interface AppSnapshot {
   readonly preset: PodPreset | undefined;
+  /** Immutable runtime policy; undefined means unrestricted. */
+  readonly allowedPods?: readonly string[];
   readonly startup: StartupReport | undefined;
   readonly startupError: unknown;
   readonly connections: readonly Connection[];
@@ -29,6 +31,9 @@ export interface AppSnapshot {
 }
 /** Selection/leave policy only. Authentication and request authority remain in the runtime. */
 export function createAppController(runtime: BrowserRuntime) {
+  const defaultPodUrl =
+    runtime.preset?.podUrl ??
+    (runtime.allowedPods?.length === 1 ? runtime.allowedPods[0] : undefined);
   const listeners = new Set<() => void>();
   const guards = new Set<LeaveGuard>();
   let unsubscribe: (() => void) | undefined;
@@ -47,6 +52,7 @@ export function createAppController(runtime: BrowserRuntime) {
     | undefined;
   let snapshot: AppSnapshot = {
     preset: runtime.preset,
+    ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
     startup,
     startupError,
     connections: runtime.getSnapshot(),
@@ -80,6 +86,7 @@ export function createAppController(runtime: BrowserRuntime) {
     }
     snapshot = Object.freeze({
       preset: runtime.preset,
+      ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
       startup,
       startupError,
       connections,
@@ -239,10 +246,10 @@ export function createAppController(runtime: BrowserRuntime) {
         runtime.selectContext(id, iri);
       });
     },
-    connect(url = runtime.preset?.podUrl) {
+    connect(url = defaultPodUrl) {
       return guard(async () => {
         const connection =
-          (url === runtime.preset?.podUrl
+          (url === defaultPodUrl
             ? runtime
                 .getSnapshot()
                 .find((c) => c.id === activeId && c.podUrl === url)

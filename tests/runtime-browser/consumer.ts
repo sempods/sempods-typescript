@@ -24,6 +24,8 @@ declare global {
 }
 const mode = new URL(location.href).searchParams.get('identity') ?? 'dynamic';
 const redirectUri = location.origin + '/callback?identity=' + mode;
+// The harness changes deployment policy across reloads without changing identity.
+const policy = sessionStorage.getItem('fixture-policy');
 const runtime = createBrowserRuntime({
   identity:
     mode === 'did'
@@ -36,6 +38,11 @@ const runtime = createBrowserRuntime({
   scopes: { required: ['tasks'], optional: ['ai'] },
   returnTo: '/app?identity=' + mode,
   development: 'loopback-http',
+  ...(policy === 'one'
+    ? { allowedPods: [location.origin + '/alice'] }
+    : policy === 'set'
+      ? { allowedPods: [location.origin + '/alice', location.origin + '/bob'] }
+      : {}),
 });
 window.fixture = {
   runtime,

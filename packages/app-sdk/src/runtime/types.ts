@@ -80,6 +80,18 @@ export interface PodPreset {
 export interface BrowserRuntimeOptions {
   /** Stable for this runtime lifetime; scopes remain runtime-wide. */
   readonly preset?: PodPreset;
+  /**
+   * Opt-in restriction to exact canonical Pod URLs. Omit for unrestricted use;
+   * an empty list, duplicates or a preset outside the list are configuration
+   * errors. Invalid URLs use the client's invalid-pod-url error. Copied/frozen
+   * at construction, before I/O; never changes the identity/storage namespace.
+   * A single allowed Pod is also the default for connect() without a preset.
+   * Foreign stored records remain untouched and absent from snapshots. A
+   * foreign callback fails with configuration, without discovery/token exchange;
+   * its URL is scrubbed but its stored attempt is not consumed or deleted.
+   * This app policy does not replace server-side authorization.
+   */
+  readonly allowedPods?: readonly string[];
   readonly identity: ClientIdentity;
   readonly returnTo?: string;
   readonly scopes?: FeatureScopes;
@@ -109,15 +121,19 @@ export interface PreferenceStorage {
 export interface BrowserRuntime {
   /** Validated, frozen copy of the configured default; never a grant. */
   readonly preset?: PodPreset;
+  /** Frozen exact Pod restriction, or undefined for unrestricted use. */
+  readonly allowedPods?: readonly string[];
   initialize(): Promise<StartupReport>;
   getSnapshot(): readonly Connection[];
   /** Listener exceptions are reported asynchronously and never interrupt session transitions. */
   subscribe(listener: () => void): () => void;
   /**
-   * Omit the URL to use the preset. Matching preset connections are reused after
+   * Omit the URL to use the preset or sole allowed Pod. Matching default
+   * connections are reused after
    * any pending disconnect settles. Waiting rejects with RuntimeError (storage)
    * if retirement fails, or (disconnected) if this runtime was disposed.
-   * Concurrent preset connects share discovery; connecting never starts login.
+   * Concurrent default connects share discovery; connecting never starts login.
+   * Outside-list URLs reject with RuntimeError (configuration) before discovery.
    */
   connect(url?: string): Promise<Connection>;
   beginAuthorization(id: string): Promise<void>;

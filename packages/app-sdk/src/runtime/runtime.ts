@@ -71,6 +71,22 @@ export function createBrowserRuntime(
   const preset = options.preset
     ? Object.freeze({ ...options.preset })
     : undefined;
+  const allowedPods =
+    options.allowedPods === undefined
+      ? undefined
+      : Object.freeze([...options.allowedPods]);
+  if (allowedPods) {
+    if (!allowedPods.length || new Set(allowedPods).size !== allowedPods.length)
+      throw new RuntimeError('configuration');
+    for (const url of allowedPods)
+      createPod(url, {
+        auth: anonymous(),
+        ...(options.development ? { development: options.development } : {}),
+      });
+  }
+  function allows(url: string) {
+    return allowedPods === undefined || allowedPods.includes(url);
+  }
   if (preset) {
     // Reuse the portable client's canonical URL validation; construction sends nothing.
     createPod(preset.podUrl, {
@@ -82,8 +98,11 @@ export function createBrowserRuntime(
       !isContextIri(preset.contextIri, preset.podUrl)
     )
       throw new RuntimeError('configuration');
+    if (!allows(preset.podUrl)) throw new RuntimeError('configuration');
   }
-  let connectingPreset: Promise<Connection> | undefined;
+  const defaultPodUrl =
+    preset?.podUrl ?? (allowedPods?.length === 1 ? allowedPods[0] : undefined);
+  let connectingDefault: Promise<Connection> | undefined;
   const contexts = createContextMemory(
     namespace,
     options.preferences === undefined
@@ -519,6 +538,18 @@ export function createBrowserRuntime(
       for (const saved of listing.records) {
         if (saved.value.kind === 'disconnected') continue;
         const b = sessionBinding(saved.value);
+        // Find the callback even when its Pod is excluded. Reject it below without
+        // discovery, code claim or mutation of the foreign durable record.
+        if (
+          callback &&
+          saved.value.kind === 'authorizing' &&
+          location.searchParams.getAll('state').length === 1 &&
+          location.searchParams.get('state') === saved.value.attempt.state
+        ) {
+          if (pending) throw new RuntimeError('attempt');
+          pending = saved;
+        }
+        if (!allows(b.pod.podUrl)) continue;
         const e = createEntry(b.pod, b.client, saved.id, b.generation);
         e.revision = saved.revision;
         e.view = {
@@ -540,15 +571,6 @@ export function createBrowserRuntime(
           ),
         };
         entries.set(saved.id, e);
-        if (
-          callback &&
-          saved.value.kind === 'authorizing' &&
-          location.searchParams.getAll('state').length === 1 &&
-          location.searchParams.get('state') === saved.value.attempt.state
-        ) {
-          if (pending) throw new RuntimeError('attempt');
-          pending = saved;
-        }
       }
       publish();
       const restoring = Promise.all(
@@ -569,6 +591,8 @@ export function createBrowserRuntime(
       if (!pending || pending.value.kind !== 'authorizing')
         throw new RuntimeError('attempt');
       destination = pending.value.attempt.returnTo;
+      if (!allows(sessionBinding(pending.value).pod.podUrl))
+        throw new RuntimeError('configuration');
       const connectionId = await redeem(
         pending.id,
         pending.revision,
@@ -600,6 +624,7 @@ export function createBrowserRuntime(
   }
   return {
     ...(preset ? { preset } : {}),
+    ...(allowedPods ? { allowedPods } : {}),
     initialize() {
       if (disposed)
         return Promise.resolve({
@@ -618,11 +643,11 @@ export function createBrowserRuntime(
         listeners.delete(listener);
       };
     },
-    async connect(url = preset?.podUrl) {
-      if (!initialized || disposed || url === undefined)
+    async connect(url = defaultPodUrl) {
+      if (!initialized || disposed || url === undefined || !allows(url))
         throw new RuntimeError('configuration');
-      const matchesPreset = url === preset?.podUrl;
-      if (matchesPreset) {
+      const matchesDefault = url === defaultPodUrl;
+      if (matchesDefault) {
         for (;;) {
           const existing = [...entries.values()].find(
             (e) => e.view.podUrl === url,
@@ -638,7 +663,7 @@ export function createBrowserRuntime(
             throw new RuntimeError('storage');
           // Re-read after retirement: another connect may already have replaced it.
         }
-        if (connectingPreset) return connectingPreset;
+        if (connectingDefault) return connectingDefault;
       }
       const operation = (async () => {
         const pod = await discoverPod(url, protocol);
@@ -649,11 +674,11 @@ export function createBrowserRuntime(
         publish();
         return e.view;
       })();
-      if (matchesPreset) connectingPreset = operation;
+      if (matchesDefault) connectingDefault = operation;
       try {
         return await operation;
       } finally {
-        if (connectingPreset === operation) connectingPreset = undefined;
+        if (connectingDefault === operation) connectingDefault = undefined;
       }
     },
     async beginAuthorization(id) {

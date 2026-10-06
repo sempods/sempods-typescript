@@ -243,6 +243,14 @@ The same action is available on the headless app controller. For a different Pod
 pass an explicit URL; the preset does not enforce an allowlist. Hosts reconcile
 all feature requirements through the existing runtime-wide `scopes` option.
 
+To enforce a restriction, add `allowedPods: ['https://pods.example/alice']` to
+that configuration. Custom controls can read `useAppState().allowedPods`; one
+allowed Pod also supports argument-free `useApp().connect()` without a preset.
+With several allowed Pods and no preset, pass the chosen URL. The runtime enforces
+the policy for restore and callbacks too; see
+[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). Existing default
+controls continue to use `preset` for their presentation.
+
 The [runtime guide](browser-runtime.md#one-known-pod) explains validation, exact
 context precedence, reload and foreign-session behavior. The recipe below
 remains useful when your app owns the selection/presentation policy instead of

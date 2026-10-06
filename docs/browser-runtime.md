@@ -115,8 +115,8 @@ Disposing the runtime while a connect waits makes it reject with
 durable and restoration of the connection has finished, use
 `beginAuthorization(connection.id)` to sign in or update access. React and
 headless authoring consumers use the guarded `app.connect()` action, which does
-both and prefers an already active matching connection. No URL and no preset is
-a configuration error. Failed preparation leaves a reusable connection, so a
+both and prefers an already active matching connection. With neither a preset nor
+a sole allowed Pod, omitting the URL is a configuration error. Failed preparation leaves a reusable connection, so a
 retry does not create duplicates.
 
 An exact configured context takes precedence over a remembered choice for that
@@ -137,8 +137,58 @@ empty instead of silently using a foreign one. People can explicitly select
 another restored Pod. Identity alone continues to determine the storage/lease
 namespace; changing the preset never deletes or migrates sessions. Required and
 optional scopes remain runtime-wide, including for explicitly connected other
-Pods. Declared Pod sets, enforced restrictions and per-Pod scope policies need
-separate contracts; they must not silently reinterpret this preset.
+Pods. To restrict which Pods can be used, add the separate policy below. Per-Pod
+scope policies remain outside this contract.
+
+## Restrict the permitted Pods
+
+Add `allowedPods` alongside identity and scopes when an app should use only
+specific Pods:
+
+```ts
+const runtime = createBrowserRuntime({
+  identity: {
+    kind: 'did-web',
+    clientId: 'did:web:tasks.example.org',
+    redirectUri: 'https://tasks.example.org/callback',
+  },
+  allowedPods: ['https://pods.example/alice', 'https://team.example/shared'],
+  // Optional default; it must be in allowedPods.
+  preset: { podUrl: 'https://pods.example/alice' },
+});
+```
+
+One entry also supplies the default for `runtime.connect()` and guarded
+`useApp().connect()` without a preset. It uses the same reuse/disconnect-waiting
+behavior as a preset. With several entries and no preset, pass the chosen URL
+explicitly. Omitting `allowedPods` keeps unrestricted behavior; an empty list,
+duplicates or an outside-list preset throw `RuntimeError('configuration')` at
+construction. URLs use the client's canonical validation, including the explicit
+`development: 'loopback-http'` exception; matching is exact, not by origin or
+prefix. The list is copied and frozen, and exposed through `runtime.allowedPods`
+and `useAppState().allowedPods`. No new public export is needed.
+
+An outside-list connection is rejected before discovery. Stored records from
+other Pods stay untouched but are excluded from snapshots, restoration and all
+connection-ID actions, so they cannot be selected or bound. Widening the policy
+in a replacement runtime makes those records eligible again. Required scopes
+and fresh context evidence still gate every permitted target; a Pod restriction
+is app configuration, not server authorization.
+
+A callback for an excluded Pod reports `interaction: 'failed'` with
+`problem: 'configuration'`. It makes no discovery or token request for that Pod,
+does not claim the code, and scrubs the URL to the stored safe return location.
+Its attempt remains untouched and expires normally; do not retry the callback
+automatically. Other permitted sessions restore independently. The identity-based
+storage namespace and single-tab lease remain unchanged when the policy changes.
+
+Existing default controls still use `preset` for presentation. For a single-Pod
+default UI, configure both `preset` and `allowedPods`; custom controls can use
+`useAppState().allowedPods` for a finite picker. A new minimal login surface is
+planned in [#25](https://github.com/sempods/sempods-typescript/issues/25).
+Configure the policy once outside rendering and use the existing guarded actions
+for Pod/context switches; replacing the runtime first requires settling drafts
+and unresolved operations, as with presets.
 
 ## Subscribe and bind
 
