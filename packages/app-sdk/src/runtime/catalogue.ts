@@ -3,7 +3,7 @@ import type { Entry } from './connection.js';
 import { RuntimeError } from './errors.js';
 
 /** Uses the runtime's connection authority; never starts login or renews on a 403. */
-interface CatalogueOwner {
+export interface CatalogueOwner {
   eligible(entry: Entry, generation?: string): boolean;
   invalidate(entry: Entry): void;
   publish(): void;
@@ -19,15 +19,15 @@ export function loadCatalogue(
   const generation = e.generation;
   const previous =
     'contexts' in e.view.catalogue ? e.view.catalogue.contexts : undefined;
-  const labels =
-    'labels' in e.view.catalogue ? e.view.catalogue.labels : undefined;
-  const known = {
+  const known = () => ({
     ...(previous ? { contexts: previous } : {}),
-    ...(labels ? { labels } : {}),
-  };
+    ...('labels' in e.view.catalogue && e.view.catalogue.labels
+      ? { labels: e.view.catalogue.labels }
+      : {}),
+  });
   e.view = {
     ...e.view,
-    catalogue: Object.freeze({ kind: 'loading', ...known }),
+    catalogue: Object.freeze({ kind: 'loading', ...known() }),
   };
   publish();
   const operation = (async () => {
@@ -47,11 +47,17 @@ export function loadCatalogue(
           before?.writable !== after?.writable
         )
           invalidate(e);
-        // Keep known labels only for contexts this catalogue still lists.
+        pruneLabels(e, previous, contexts);
+        // Keep labels only for contexts with unchanged readable authority.
+        const labels =
+          'labels' in e.view.catalogue ? e.view.catalogue.labels : undefined;
         const kept = labels
           ? Object.fromEntries(
-              Object.entries(labels).filter(([iri]) =>
-                contexts.some((c) => c.iri === iri),
+              Object.entries(labels).filter(
+                ([iri]) =>
+                  contexts.some((c) => c.iri === iri && c.readable) &&
+                  previous?.find((c) => c.iri === iri)?.writable ===
+                    contexts.find((c) => c.iri === iri)?.writable,
               ),
             )
           : {};
@@ -65,7 +71,6 @@ export function loadCatalogue(
               : {}),
           }),
         };
-        void loadLabels(e, owner, contexts, generation);
         // Apply an explicit configured/remembered choice only while readable;
         // never a fallback to any other context.
         const choice = e.view.selectedContext ? undefined : remembered(e);
@@ -77,16 +82,17 @@ export function loadCatalogue(
       } else {
         e.view = {
           ...e.view,
-          catalogue: Object.freeze({ kind: 'failed', ...known }),
+          catalogue: Object.freeze({ kind: 'failed', ...known() }),
         };
       }
       publish();
+      if (result.kind === 'ok') loadSelectedLabel(e, owner);
       return result;
     } catch (error) {
       if (eligible(e, generation)) {
         e.view = {
           ...e.view,
-          catalogue: Object.freeze({ kind: 'failed', ...known }),
+          catalogue: Object.freeze({ kind: 'failed', ...known() }),
         };
         publish();
       }
@@ -99,104 +105,119 @@ export function loadCatalogue(
   return operation;
 }
 
-/** Context descriptions read at once, and at most per catalogue. */
-const LABEL_READS = 3;
-const LABEL_LIMIT = 50;
-
-/**
- * Reads the registry labels of the readable contexts after a ready catalogue
- * (SPS-CTX-032), in the background and bound to the connection lifetime. It
- * never blocks selection or startup; a failed read leaves that label out. The
- * result is published only while this exact catalogue is still current.
- */
-async function loadLabels(
-  e: Entry,
-  owner: CatalogueOwner,
-  contexts: readonly CatalogueContext[],
-  generation: string,
-): Promise<void> {
-  const targets = contexts
-    .filter((c) => c.readable)
-    .slice(0, LABEL_LIMIT)
-    .map((c) => c.iri);
-  if (!targets.length) return;
-  const found: Record<string, string> = {};
-  // A newer catalogue load supersedes this one: stop issuing its reads.
-  const current = () => {
-    const fact = e.view.catalogue;
-    return (
-      owner.eligible(e, generation) &&
-      fact.kind === 'ready' &&
-      fact.contexts === contexts
-    );
-  };
-  let next = 0;
-  const read = async () => {
-    while (next < targets.length && current()) {
-      // One cap per connection, shared with superseded loaders still in flight.
-      await acquire(e);
-      if (!current() || next >= targets.length) {
-        release(e);
-        break;
-      }
-      const iri = targets[next++]!;
-      try {
-        const result = await e.clientPod.contextDescription(iri, {
-          signal: e.lifetime.signal,
-        });
-        const label = result.kind === 'ok' ? result.body.label?.trim() : '';
-        if (label) found[iri] = label;
-      } catch {
-        // Display text only: an unreadable description keeps today's name.
-      } finally {
-        release(e);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: LABEL_READS }, read));
-  const fact = e.view.catalogue;
-  if (
-    !current() ||
-    fact.kind !== 'ready' ||
-    sameLabels(fact.labels ?? {}, found)
-  )
-    return;
-  e.view = {
-    ...e.view,
-    catalogue: Object.freeze({ ...fact, labels: Object.freeze(found) }),
-  };
-  owner.publish();
-}
-
-function sameLabels(a: Record<string, string>, b: Record<string, string>) {
-  const keys = Object.keys(a);
-  return (
-    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
-  );
-}
-
-/** Description reads in flight per connection, and the reads waiting for a slot. */
-const slots = new WeakMap<
+/** Completed attempts are cached, including absent/failed labels, for this access lifetime. */
+const labelStates = new WeakMap<
   Entry,
-  { active: number; readonly waiting: (() => void)[] }
+  {
+    cache: Map<string, string | undefined>;
+    pending?: { iri: string; selection: number; controller: AbortController };
+  }
 >();
 
-function acquire(e: Entry): Promise<void> {
-  let slot = slots.get(e);
-  if (!slot) slots.set(e, (slot = { active: 0, waiting: [] }));
-  if (slot.active < LABEL_READS) {
-    slot.active++;
-    return Promise.resolve();
+/** Session/generation/grant changes must not reuse old descriptive authority. */
+export function resetLabels(e: Entry) {
+  labelStates.get(e)?.pending?.controller.abort();
+  labelStates.delete(e);
+  if ('labels' in e.view.catalogue) {
+    const fact = { ...e.view.catalogue };
+    delete fact.labels;
+    e.view = { ...e.view, catalogue: Object.freeze(fact) };
   }
-  const waiting = slot.waiting;
-  return new Promise((resolve) => waiting.push(resolve));
 }
 
-function release(e: Entry) {
-  const slot = slots.get(e);
-  if (!slot) return;
-  const next = slot.waiting.shift();
-  // Hand the slot straight to the next waiting read, or free it.
-  if (next) next();
-  else slot.active--;
+function pruneLabels(
+  e: Entry,
+  before: readonly CatalogueContext[] | undefined,
+  after: readonly CatalogueContext[],
+) {
+  const state = labelStates.get(e);
+  if (!state) return;
+  const changed = (iri: string) => {
+    const old = before?.find((c) => c.iri === iri);
+    const next = after.find((c) => c.iri === iri);
+    return (
+      !next?.readable ||
+      old?.readable !== next.readable ||
+      old?.writable !== next.writable
+    );
+  };
+  for (const iri of state.cache.keys())
+    if (changed(iri)) state.cache.delete(iri);
+  if (state.pending && changed(state.pending.iri)) {
+    state.pending.controller.abort();
+    delete state.pending;
+  }
+}
+
+/** One nonblocking description, only for the currently selected validated Context. */
+export function loadSelectedLabel(
+  e: Entry,
+  owner: Pick<CatalogueOwner, 'eligible' | 'publish'>,
+): void {
+  let state = labelStates.get(e);
+  if (!state) labelStates.set(e, (state = { cache: new Map() }));
+  const iri = e.view.selectedContext;
+  if (
+    state.pending &&
+    (state.pending.iri !== iri || state.pending.selection !== e.selectedVersion)
+  ) {
+    state.pending.controller.abort();
+    delete state.pending;
+  }
+  const fact = e.view.catalogue;
+  if (
+    !iri ||
+    fact.kind !== 'ready' ||
+    !fact.contexts.some((c) => c.iri === iri && c.readable) ||
+    !owner.eligible(e)
+  )
+    return;
+  const publishLabel = (label: string | undefined) => {
+    const current = e.view.catalogue;
+    if (!label || !('contexts' in current) || current.labels?.[iri] === label)
+      return;
+    e.view = {
+      ...e.view,
+      catalogue: Object.freeze({
+        ...current,
+        labels: Object.freeze({ ...current.labels, [iri]: label }),
+      }),
+    };
+    owner.publish();
+  };
+  if (state.cache.has(iri)) {
+    publishLabel(state.cache.get(iri));
+    return;
+  }
+  if (state.pending) return;
+  const pending = {
+    iri,
+    selection: e.selectedVersion,
+    controller: new AbortController(),
+  };
+  state.pending = pending;
+  const generation = e.generation;
+  const current = () =>
+    owner.eligible(e, generation) &&
+    labelStates.get(e) === state &&
+    state.pending === pending &&
+    e.selectedVersion === pending.selection &&
+    e.view.selectedContext === iri &&
+    'contexts' in e.view.catalogue &&
+    e.view.catalogue.contexts?.some((c) => c.iri === iri && c.readable);
+  void (async () => {
+    let label: string | undefined;
+    try {
+      const result = await e.clientPod.contextDescription(iri, {
+        signal: AbortSignal.any([e.lifetime.signal, pending.controller.signal]),
+      });
+      if (result.kind === 'ok') label = result.body.label?.trim() || undefined;
+    } catch {
+      // Display text only: failure keeps the immediate IRI/name fallback.
+    }
+    if (!current()) return;
+    state.cache.set(iri, label);
+    delete state.pending;
+    publishLabel(label);
+  })();
 }

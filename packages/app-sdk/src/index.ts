@@ -17,6 +17,7 @@ export type {
 } from './locale.js';
 export type {
   BoundRead,
+  BoundPod,
   BoundView,
   Invalidated,
   ViewAccess,

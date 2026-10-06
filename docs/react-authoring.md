@@ -54,7 +54,9 @@ custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
 No icon is required. `podNames` maps exact canonical Pod URLs to display names;
 the destination remains visible, and duplicate names are disambiguated. Both controls prefer `connection.catalogue.labels?.[iri]` from the runtime's
-background description reads, falling back to a safe readable last path segment.
+selected-Context description reads, falling back to a safe readable last path segment.
+Only the selected, validated Context is fetched automatically; other entries use
+the fallback immediately, including on small Pods.
 Duplicate context names include the full IRI; **Full addresses** exposes all readable
 context identities. Names never replace Pod/context identity, and displaying them
 starts no additional requests. Late or refreshed labels do not change selection
@@ -535,7 +537,11 @@ at subscription time and unsubscribe during cleanup. A permanently invalid view
 never becomes valid again; obtain the next view from the runtime.
 
 `createAppController(runtime)` supplies the same guarded selection policy to a
-non-React UI; call `start()` and `stop()` around its lifetime. Register draft guards
+non-React UI; call `start()` and `stop()` around its lifetime. Its snapshot also
+exposes the active `BoundPod` as `pod`, independently of the Context `view`.
+Use its `sparql.select`/`construct` methods and subscribe to its access snapshot
+for direct headless Pod reads; see [the runtime reader](browser-runtime.md#read-the-authorized-pod-dataset).
+React Pod loaders and on-demand access/discovery remain the next increment. Register draft guards
 with `register`. Guards default to local scope; use `scope: 'target'` for drafts
 or mutation outcomes that survive row navigation and `unconfirmed()` for pending
 write-outcome evidence. Headless hosts must prevent input while the controller's

@@ -46,7 +46,8 @@ import {
 } from './errors.js';
 import { waitFor } from './wait.js';
 import { bindView } from './binding.js';
-import { loadCatalogue } from './catalogue.js';
+import { bindPod } from './pod-binding.js';
+import { loadCatalogue, loadSelectedLabel, resetLabels } from './catalogue.js';
 import { browserPreferences, createContextMemory } from './context-memory.js';
 
 import { assertCredentialRecipient, type Entry } from './connection.js';
@@ -132,6 +133,12 @@ export function createBrowserRuntime(
     e.reads.abort();
     e.reads = new AbortController();
   }
+  function invalidatePod(e: Entry) {
+    e.podEpoch++;
+    e.podReads.abort();
+    e.podReads = new AbortController();
+    resetLabels(e);
+  }
   function publish() {
     snapshot = Object.freeze(
       [...entries.values()].map((e) => Object.freeze({ ...e.view })),
@@ -182,6 +189,7 @@ export function createBrowserRuntime(
   }
   function install(e: Entry, result: ExchangeResult) {
     const previous = e.view.grantedScopes;
+    const previousSubject = e.credentials?.subject;
     e.credentials = result;
     e.credential = Object.freeze({
       authorization: `Bearer ${result.accessToken}`,
@@ -195,16 +203,26 @@ export function createBrowserRuntime(
       ),
     };
     if (
+      previousSubject !== result.subject ||
       previous.length !== result.scopes.length ||
       previous.some((s) => !result.scopes.includes(s))
-    )
+    ) {
       invalidate(e);
+      invalidatePod(e);
+      if (previousSubject !== result.subject) {
+        delete e.boundPod;
+        delete e.bound;
+      }
+    }
     publish();
+    loadSelectedLabel(e, { eligible, publish });
   }
   function end(e: Entry, error: unknown, retireRecord = true) {
     delete e.credentials;
     delete e.credential;
     invalidate(e);
+    invalidatePod(e);
+    delete e.boundPod;
     e.lifetime.abort(new RuntimeError('disconnected'));
     e.view = {
       ...e.view,
@@ -333,12 +351,14 @@ export function createBrowserRuntime(
     id: string = crypto.randomUUID(),
     generation: string = crypto.randomUUID(),
   ): Entry {
-    const data: Omit<Entry, 'clientPod'> = {
+    const data: Omit<Entry, 'clientPod' | 'auth'> = {
       pod,
       client,
       generation,
       lifetime: new AbortController(),
       reads: new AbortController(),
+      podReads: new AbortController(),
+      podEpoch: 0,
       revision: null,
       persistence: Promise.resolve(),
       epoch: 0,
@@ -357,22 +377,24 @@ export function createBrowserRuntime(
         selectedContext: null,
       },
     };
+    const auth: Entry['auth'] = {
+      async credential(request) {
+        assertCredentialRecipient(e.pod.podUrl, request.url);
+        if (e.refresh)
+          await waitFor(e.refresh, e.lifetime.signal, request.signal);
+        if (!eligible(e) || !e.credential)
+          throw new RuntimeError('disconnected');
+        return e.credential;
+      },
+      renew: (refused, challenge) => renew(e, refused, challenge.signal),
+    };
     const e: Entry = {
       ...data,
+      auth,
       clientPod: (options.podFactory ?? createPod)(pod.podUrl, {
         ...protocol,
         beforeDispatch: () => eligible(e) && e.credential !== undefined,
-        auth: {
-          async credential(request) {
-            assertCredentialRecipient(e.pod.podUrl, request.url);
-            if (e.refresh)
-              await waitFor(e.refresh, e.lifetime.signal, request.signal);
-            if (!eligible(e) || !e.credential)
-              throw new RuntimeError('disconnected');
-            return e.credential;
-          },
-          renew: (refused, challenge) => renew(e, refused, challenge.signal),
-        },
+        auth,
       }),
     };
     return e;
@@ -730,10 +752,12 @@ export function createBrowserRuntime(
         delete e.credentials;
         delete e.credential;
         delete e.bound;
+        delete e.boundPod;
         delete e.refresh;
         delete e.catalogue;
         delete e.revalidation;
         invalidate(e);
+        invalidatePod(e);
         e.selectedVersion++;
         e.view = {
           ...e.view,
@@ -774,6 +798,8 @@ export function createBrowserRuntime(
       delete e.credential;
       e.lifetime.abort();
       invalidate(e);
+      invalidatePod(e);
+      delete e.boundPod;
       e.view = {
         ...e.view,
         session: Object.freeze({ kind: 'ended', problem: 'disconnected' }),
@@ -815,12 +841,37 @@ export function createBrowserRuntime(
       )
         throw new RuntimeError('configuration');
       contexts.remember(id, iri);
-      if (e.view.selectedContext === iri) return;
+      if (e.view.selectedContext === iri) {
+        loadSelectedLabel(e, { eligible, publish });
+        return;
+      }
       e.view = { ...e.view, selectedContext: iri };
       e.selectedVersion++;
       invalidate(e);
       delete e.bound;
       publish();
+      loadSelectedLabel(e, { eligible, publish });
+    },
+    bindPod(id) {
+      const e = get(id);
+      ready(e);
+      e.boundPod ??= bindPod(
+        e,
+        () => eligible(e),
+        (guard) =>
+          (options.podFactory ?? createPod)(e.pod.podUrl, {
+            ...protocol,
+            auth: e.auth,
+            beforeDispatch: guard,
+          }),
+        (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      );
+      return e.boundPod;
     },
     bind(id) {
       const e = get(id);
@@ -847,6 +898,8 @@ export function createBrowserRuntime(
         delete e.credential;
         e.lifetime.abort();
         invalidate(e);
+        invalidatePod(e);
+        delete e.boundPod;
       }
       entries.clear();
       lease?.close();

@@ -5,7 +5,7 @@ import type {
   PodPreset,
 } from '../runtime/types.js';
 import { RuntimeError } from '../runtime/errors.js';
-import type { BoundView } from '../runtime/view.js';
+import type { BoundPod, BoundView } from '../runtime/view.js';
 
 export interface LeaveGuard {
   /** Target guards survive local row navigation; local guards are left by both. */
@@ -24,6 +24,8 @@ export interface AppSnapshot {
   readonly connections: readonly Connection[];
   readonly activeId: string | null;
   readonly view: BoundView | null;
+  /** Reader for the active signed-in Pod; independent of selected Context and catalogue. */
+  readonly pod: BoundPod | null;
   readonly confirmingLeave: boolean;
   readonly unconfirmedLeave: boolean;
   /** Hosts must prevent new user input while a guarded action is preparing. */
@@ -43,6 +45,7 @@ export function createAppController(runtime: BrowserRuntime) {
   let startupError: unknown;
   let activeId: string | null = null;
   let view: BoundView | null = null;
+  let pod: BoundPod | null = null;
   let pending:
     | {
         action: () => void | Promise<void>;
@@ -58,6 +61,7 @@ export function createAppController(runtime: BrowserRuntime) {
     connections: runtime.getSnapshot(),
     activeId,
     view,
+    pod,
     confirmingLeave: false,
     unconfirmedLeave: false,
     changing,
@@ -71,6 +75,14 @@ export function createAppController(runtime: BrowserRuntime) {
           : connections[0]
         )?.id ?? null;
     const connection = connections.find((c) => c.id === activeId);
+    pod = null;
+    if (connection) {
+      try {
+        pod = runtime.bindPod(connection.id);
+      } catch {
+        /* No signed-in eligible session yet. */
+      }
+    }
     if (!connection || !connection.selectedContext) view = null;
     else {
       try {
@@ -92,6 +104,7 @@ export function createAppController(runtime: BrowserRuntime) {
       connections,
       activeId,
       view,
+      pod,
       confirmingLeave: Boolean(pending),
       unconfirmedLeave: Boolean(
         pending && leavingGuards(pending.scope).some((g) => g.unconfirmed?.()),
