@@ -549,6 +549,7 @@ try {
     });
     await page.goto(origin + '/baseline');
     assert.equal(await page.locator('link[rel=stylesheet]').count(), 0);
+    await page.getByLabel('Your Pod').waitFor();
     // A dark OS preference alone must not create dark SDK islands on a light page.
     for (const surface of await page.locator('[data-sempods-ui]').all()) {
       assert.equal(
@@ -558,8 +559,14 @@ try {
         'normal',
       );
       assert.equal(
-        await surface.evaluate((element) => getComputedStyle(element).color),
-        'rgb(32, 41, 35)',
+        await surface.evaluate(
+          (element) => getComputedStyle(element).backgroundColor,
+        ),
+        ['shell', 'access'].includes(
+          await surface.getAttribute('data-sempods-ui'),
+        )
+          ? 'rgb(255, 255, 255)'
+          : 'rgba(0, 0, 0, 0)',
       );
     }
     await page.getByLabel('Your Pod').fill(pod);
