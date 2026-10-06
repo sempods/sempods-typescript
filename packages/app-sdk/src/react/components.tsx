@@ -190,6 +190,7 @@ export function ConnectionControls({
     state.preset?.podUrl === connection?.podUrl
       ? state.preset?.contextIri
       : undefined;
+  const displayedContext = connection?.selectedContext ?? fixedContext;
   const unavailable =
     busy ||
     !state.startup ||
@@ -368,9 +369,10 @@ export function ConnectionControls({
               </div>
             ))}
           </dl>
-          {(connection?.selectedContext || fixedContext) && (
-            <p>{connection?.selectedContext ?? fixedContext}</p>
-          )}
+          {displayedContext &&
+            !readable.some((entry) => entry.iri === displayedContext) && (
+              <p>{displayedContext}</p>
+            )}
           <dl>
             {readable.map((entry) => (
               <div key={entry.iri}>

@@ -1,6 +1,10 @@
 /** Internal shared baseline. Public tokens inherit from the host; no style registry. */
 export function SdkStyles() {
-  return <style>{styles}</style>;
+  return (
+    <style href="sempods-sdk" precedence="sempods">
+      {styles}
+    </style>
+  );
 }
 const surfaces =
   ':where([data-sempods-ui="access"], [data-sempods-ui="connections"], [data-sempods-ui="editor"], [data-sempods-ui="notice"])';

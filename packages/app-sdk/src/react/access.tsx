@@ -121,7 +121,9 @@ export function AppAccess({
       style={hidden ? { ...style, display: 'none' } : style}
     >
       <SdkStyles />
-      <style>{styles}</style>
+      <style href="sempods-access" precedence="sempods">
+        {styles}
+      </style>
       <div className="sp-access-content">
         {(needsAttention || open) && (
           <header>
@@ -297,7 +299,7 @@ function AccessConnections({
           </label>
           {choice && <p className="sp-access-address">{choice}</p>}
           <button
-            className="sp-access-primary"
+            className={c ? undefined : 'sp-access-primary'}
             disabled={
               unavailable ||
               !choice ||
@@ -317,7 +319,7 @@ function AccessConnections({
             <p className="sp-access-address">{defaultUrl}</p>
           )}
           <button
-            className="sp-access-primary"
+            className={c ? undefined : 'sp-access-primary'}
             disabled={
               unavailable ||
               state.connections.some(
@@ -356,7 +358,10 @@ function AccessConnections({
           <p id={id} className="sp-access-hint">
             {m.controls.podHint}
           </p>
-          <button className="sp-access-primary" disabled={unavailable}>
+          <button
+            className={c ? undefined : 'sp-access-primary'}
+            disabled={unavailable}
+          >
             {m.controls.signIn}
           </button>
         </form>

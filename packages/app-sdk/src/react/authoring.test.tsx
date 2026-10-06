@@ -890,6 +890,15 @@ it('standalone ConnectionControls shows readable names while preserving exact va
   expect(details.textContent).toContain(work);
   expect(details.textContent).toContain(personal);
   expect(details.textContent).toContain(pod);
+  const exactAddresses = () =>
+    [...details.querySelectorAll('p, dd')].filter(
+      (entry) => entry.textContent === work,
+    );
+  expect(exactAddresses()).toHaveLength(1);
+  // An unavailable selected context still needs its full address outside the readable list.
+  f.setCatalogue(async () => catalogue([personal], []));
+  await act(() => f.runtime.loadContexts(f.id));
+  expect(exactAddresses()).toHaveLength(1);
 });
 
 it('distinguishes an unconnected preset from a same-named active Pod and exposes both addresses', async () => {

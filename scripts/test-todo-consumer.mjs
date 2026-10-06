@@ -550,6 +550,16 @@ try {
     await page.goto(origin + '/baseline');
     assert.equal(await page.locator('link[rel=stylesheet]').count(), 0);
     await page.getByLabel('Your Pod').waitFor();
+    const initialSignIn = page.getByRole('button', {
+      name: 'Sign in',
+      exact: true,
+    });
+    assert.equal(
+      await initialSignIn.evaluate(
+        (button) => getComputedStyle(button).backgroundColor,
+      ),
+      'rgb(34, 96, 68)',
+    );
     // A dark OS preference alone must not create dark SDK islands on a light page.
     for (const surface of await page.locator('[data-sempods-ui]').all()) {
       assert.equal(
@@ -588,6 +598,16 @@ try {
       .click();
     const editor = page.locator('[data-sempods-ui="editor"]');
     await editor.waitFor();
+    // Multiple notices, the shell, access UI and editor share one copy of each sheet.
+    assert.equal(
+      await page.locator('head style[data-href="sempods-sdk"]').count(),
+      1,
+    );
+    assert.equal(
+      await page.locator('head style[data-href="sempods-access"]').count(),
+      1,
+    );
+    assert.equal(await page.locator('body style').count(), 0);
     const save = editor.getByRole('button', { name: 'Save', exact: true });
     const field = editor.getByLabel('Task', { exact: true });
     await field.fill('Unfinished baseline');
@@ -694,6 +714,13 @@ try {
     await page
       .getByRole('button', { name: 'Data access', exact: true })
       .click();
+    const addPod = page.getByRole('button', { name: 'Sign in', exact: true });
+    assert.equal(
+      await addPod.evaluate(
+        (button) => getComputedStyle(button).backgroundColor,
+      ),
+      'rgba(0, 0, 0, 0)',
+    );
     await page
       .getByRole('button', { name: 'Update access', exact: true })
       .click();

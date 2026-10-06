@@ -61,7 +61,9 @@ starts no additional requests. Late or refreshed labels do not change selection
 or discard drafts.
 
 One `allowedPods` entry or a preset needs no URL input. Several permitted Pods
-get a finite picker; selecting an option does not start sign-in. Unrestricted
+get a finite picker; selecting an option does not start sign-in. When a connection
+already exists, adding another Pod is a secondary action; signing into the current
+connection remains prominent when needed. Unrestricted
 apps show **Your Pod** with a short hint. The input may omit `https://`; presentation
 adds it, trims surrounding whitespace and removes one trailing slash before
 calling the runtime. Other noncanonical input remains rejected; configured Pod
@@ -145,7 +147,9 @@ Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
 `style`/`className` where supported. They inherit across SDK components. Existing
 `--sempods-access-*` names remain fallback aliases; the shared names take priority.
-Inline scoped styles require a compatible CSP. Hosts that prohibit them can
+React 19 hoists and deduplicates the static scoped sheets using its
+[`style` resource support](https://react.dev/reference/react-dom/components/style).
+Inline scoped styles still require a compatible CSP. Hosts that prohibit them can
 compose their own presentation using the public hooks.
 
 `components={{ Connections: YourControls }}` replaces access controls while
