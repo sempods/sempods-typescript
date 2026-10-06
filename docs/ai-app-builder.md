@@ -92,8 +92,10 @@ not instructions to the coding assistant.
   documented scope. Empty context selection never means all contexts.
 - Define fields once using the portable `client-sdk/edit` helpers. Choose exact
   type/predicate IRIs, fixed text language or `language: null`, and enum/flag
-  values. Preserve unedited RDF, unknown properties and other languages. Treat
-  incompatible mappings as unsupported, not as empty editable records.
+  values. Store points in time with `dateTime` (an `xsd:dateTime` with an
+  explicit time zone), not as text. Preserve unedited RDF, unknown properties
+  and other languages. Treat incompatible mappings as unsupported, not as empty
+  editable records.
 - Prefer `useList`, `useCreation`, `useFieldUpdate`, `useSelection` and
   `useResourceEditor` with `ResourceEditor`/`UpdateNotice`. Pass original snapshots
   to list actions. Use `useApp()`'s guarded actions for custom connection/context

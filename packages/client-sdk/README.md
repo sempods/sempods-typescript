@@ -228,9 +228,14 @@ if (opened.phase === 'ready') {
   typed literals and IRIs are preserved; `optional: true` distinguishes absent
   `null` from an empty literal; by default an empty or whitespace-only value
   makes the draft invalid, and values are stored as typed), `flag` (two IRIs,
-  anything else is a mapping error) and `iri`. Fields writing the same terms are
-  rejected. `EditDefinition` (`read`/`patch`/`valid`) is the escape hatch for
-  other mappings. `isFieldDefinition(definition)` tells whether a definition was
+  anything else is a mapping error), `iri` and `dateTime` (one `xsd:dateTime`
+  literal as its lexical string, such as `2026-10-05T09:30:00+02:00`; a value
+  without an explicit time zone, `Z` or `±hh:mm`, makes the draft invalid; it is
+  stored unchanged, so the offset survives; untyped strings, other datatypes and
+  IRIs are preserved; `optional: true` as for `text`). Fields writing the same
+  terms are rejected; a `text` and a `dateTime` may share a predicate.
+  `EditDefinition` (`read`/`patch`/`valid`) is the escape hatch for other
+  mappings. `isFieldDefinition(definition)` tells whether a definition was
   created by `fields()` (copies and look-alikes are not).
 - **Different fields both survive.** Saving is conditional on the version that
   was read. If someone else changed only _other_ fields meanwhile (a 412 whose

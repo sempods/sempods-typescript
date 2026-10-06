@@ -51,6 +51,7 @@ it.each([
     [
       'MappingError',
       'createResourceEditor',
+      'dateTime',
       'fields',
       'flag',
       'iri',
