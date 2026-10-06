@@ -16,6 +16,11 @@ version and commit. Use the [contributor rules](../contributing.md).
   APIs between minor versions; patches preserve compatibility. Check release-pinned
   URLs in package READMEs when preparing the next version; `pnpm check:docs`
   requires repository file/directory links there to name that package’s `v<version>`.
+- `pnpm build` writes app-sdk's app-author reference (`docs/` and `examples/` in
+  the package) from the maintained sources with `scripts/package-docs.mjs`;
+  `test:consumers` checks it in the packed artifact. Consumers point their
+  assistants to `node_modules/@sempods/app-sdk/docs/ai-app-builder.md`, so that
+  path is a contract: moving or renaming it needs a migration note.
 - Run `pnpm check` on the exact release candidate. Pack both packages with pnpm into
   a fresh directory and inspect contents and `npm publish --dry-run` output.
   Record artifact contents/integrity separately from archive byte identity.

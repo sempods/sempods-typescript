@@ -2,29 +2,34 @@
 
 Give this document to your coding assistant before it starts implementing your
 app. It is intended for **an app consuming the SDK**, including a new app created
-with AI. In your app repository, reference a pinned copy from your `AGENTS.md`
-(or your assistant's equivalent instruction file). Keep app-specific decisions
-there too. The SDK repository's [contributor instructions](../AGENTS.md) serve a different task.
-Keep the linked documentation/examples with the entry document, or retain links
-to their pinned source; copying this page alone must not strand its relative links.
+with AI. The SDK repository's [contributor instructions](../AGENTS.md) serve a
+different task.
 
-For example, after placing the matching SDK documentation and examples in
-`reference/sempods-sdk/`, your app's `AGENTS.md` can begin:
+`@sempods/app-sdk` ships this entry with the guides and examples it links, at
+the same version as the code: after installation it is
+`node_modules/@sempods/app-sdk/docs/ai-app-builder.md`. Assistants do not
+discover files inside `node_modules` by themselves, so point to it from your
+app's `AGENTS.md` (or your assistant's equivalent instruction file) and keep
+app-specific decisions there too. Your `AGENTS.md` can begin:
 
 ```text
 Build this app using @sempods/app-sdk.
-Read reference/sempods-sdk/docs/ai-app-builder.md and its required references first.
-Record our app's vocabulary, SDK revision, test setup and deployment identity in
+Read node_modules/@sempods/app-sdk/docs/ai-app-builder.md and its linked guides
+first; they match the installed SDK version.
+Record our app's vocabulary, SDK version, test setup and deployment identity in
 our development notes. Follow the user's instructions and preserve existing work.
 ```
+
+Links inside the shipped reference stay local; links to repository-only material
+point to the matching release tag.
 
 ## Start the conversation
 
 Copy this prompt and fill in the brackets:
 
 > Build a sempods frontend app for [idea and the first useful interaction]. Read
-> docs/ai-app-builder.md from the supplied SDK checkout or documentation snapshot
-> first, then its linked quickstart and authoring guide. Use app-sdk for the
+> node_modules/@sempods/app-sdk/docs/ai-app-builder.md (or docs/ai-app-builder.md
+> from an SDK checkout) first, then its linked quickstart and authoring guide. Use app-sdk for the
 > browser integration. My test Pod is [URL, or not set up yet]; use a dedicated
 > context and synthetic data. Start with a brief screen/data plan, then build one
 > working slice. Validate the installed SDK API and show what you actually tested.
@@ -35,7 +40,7 @@ A GitHub MCP connection is helpful: it lets the assistant read source, examples
 and the specification in their repositories. Use your assistant's connector setup
 with [GitHub's MCP server](https://github.com/github/github-mcp-server). Read access
 is enough for research; access to private SDK source must be explicitly granted.
-A local checkout or supplied documentation snapshot works as well. MCP access to
+The installed package or a local checkout works as well. MCP access to
 GitHub is separate from access to a person's Pod. Never paste connector tokens
 into a prompt or app configuration.
 

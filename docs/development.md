@@ -35,6 +35,12 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   for deliberately separate checks and limits.
 - `build`: strict library compilation, explicit `.js` ESM imports and a one-way
   app-sdk → client-sdk dependency. Test sources are not part of library output.
+  It also writes app-sdk's app-author reference (`scripts/package-docs.mjs`): the
+  AI entry and the guides and examples it links, without SDK contributor
+  instructions, with links to anything not shipped pinned to the release tag.
+  `check:docs` runs its fixtures, including a missing entry, a missing linked
+  document, a broken anchor, a link leaving the package and shipped contributor
+  instructions.
 - `typecheck`: portable client source in Node-only and DOM-only environments,
   plus unit test sources and example sources. Browser policy options remain in the transport type
   even when Node's RequestInit declaration lacks them.
@@ -45,7 +51,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 - `test:consumers`: packs both packages and installs their tarballs together in
   fresh directories outside the workspace. Checks packed file allowlists and
   rewritten workspace dependency, rejects linked workspace packages, and verifies
-  that the plain installation contains neither React nor its types.
+  that the plain installation contains neither React nor its types. The installed
+  app-sdk reference is checked on its own: entry present, no contributor
+  instructions, every local link and anchor inside the package.
 - Packed client root: a separate root-only browser bundle retains every export
   with tree-shaking disabled. Its import graph excludes oauth4webapi, React,
   app-sdk and client OAuth/session entry paths. Importing that bundle in Node
@@ -64,8 +72,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 - Packed React: separately installs React/ReactDOM and their types, compiles and
   renders a provider/hook consumer in Chromium; language change retains the draft.
   Both bundles resolve installed artifacts, not workspace aliases.
-- Documented apps: compiles the quickstart and its PWA adaptation against packed
-  SDKs. Chromium checks startup and, with a registration spy, verifies that
+- Documented apps: compiles the quickstart and its PWA adaptation, read from the
+  installed app-sdk reference, against packed SDKs. Chromium checks startup and, with a registration spy, verifies that
   importing the PWA `App` component registers no worker while the production
   entry registers exactly once. Native worker behavior is covered by `test:todo`.
 

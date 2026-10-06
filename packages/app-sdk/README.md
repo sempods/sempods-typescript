@@ -57,3 +57,13 @@ The package installs client-sdk. Plain consumers need neither React nor its type
 packed-consumer checks prove this with actual installations. Licensed under
 Apache-2.0 (see LICENSE and NOTICE). See [provenance](PROVENANCE.md) and
 [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.2.0/docs/development.md).
+
+## Documentation for app authors and AI assistants
+
+This package ships its app-author reference at the same version as the code:
+the AI entry `docs/ai-app-builder.md`, the guides it links and the TODO example.
+After installation, point your coding assistant to
+`node_modules/@sempods/app-sdk/docs/ai-app-builder.md`; assistants do not look
+inside `node_modules` by themselves. The same entry is
+[online](https://github.com/sempods/sempods-typescript/blob/v0.2.0/docs/ai-app-builder.md).
+Documentation is CC BY 4.0 and code examples Apache-2.0, as stated in `NOTICE`.

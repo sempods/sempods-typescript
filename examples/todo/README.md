@@ -1,11 +1,20 @@
 # TODO
 
-From the workspace root:
+In an SDK checkout, from the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm dev:todo
 ```
+
+`@sempods/app-sdk` also ships these sources, under
+`node_modules/@sempods/app-sdk/examples/todo/`, for reading and copying. There
+they are not a runnable project: the development server and build setup are
+part of the SDK repository. To use the screens in your own app, start it with
+the [quickstart](../../docs/quickstart.md), copy `src/domain.ts`, `src/app.tsx`
+and `src/style.css` into its `src/`, and render `<TodoApp runtime={runtime} />`
+from your entry with the runtime configuration shown in `src/main.tsx`. The
+shipped `package.json` names the exact SDK version the sources belong to.
 
 Open `http://127.0.0.1:5173/` for AppShell or `/custom` for the freely arranged
 layout. Enter your Pod URL, sign in on the Pod, then explicitly select a context.
