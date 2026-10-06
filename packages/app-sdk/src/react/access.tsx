@@ -242,8 +242,10 @@ function AccessConnections({
       ) ?? state.connections.find((entry) => entry.podUrl === target);
     if (existing) {
       if (existing.session.kind === 'restoring') return;
-      if (await app.selectConnection(existing.id))
-        await app.authorize(existing.id);
+      // Keep the current target/drafts until preparation succeeds. The completed
+      // callback activates this connection; selecting first would discard drafts
+      // even if discovery or durable authorization preparation subsequently fails.
+      await app.authorize(existing.id);
     } else await app.connect(target);
   }
   const showNew = manage || !c;

@@ -215,6 +215,38 @@ it('hides usable/read-only access, keeps drafts through read loss, and guards ex
   expect((draft as HTMLInputElement).value).toBe('Keep this');
 });
 
+it('keeps the current target and draft when sign-in preparation for a known other Pod fails', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ allowedPods: [pod, other] });
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  await logged.runtime.connect(other);
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <Host />
+    </SempodsProvider>,
+  );
+  const draft = await screen.findByLabelText('Draft');
+  fireEvent.change(draft, { target: { value: 'Keep this on Alice' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+  fireEvent.change(screen.getByLabelText('Your Pod'), {
+    target: { value: other },
+  });
+  const navigations = f.navigate.mock.calls.length;
+  f.fetch.mockRejectedValueOnce(new Error('offline'));
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await screen.findByRole('alertdialog');
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  await screen.findByRole('alert');
+  expect(screen.getByLabelText('Draft')).toBe(draft);
+  expect((draft as HTMLInputElement).value).toBe('Keep this on Alice');
+  expect((screen.getByLabelText('Active pod') as HTMLSelectElement).value).toBe(
+    logged.id,
+  );
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  expect(logged.runtime.getSnapshot()).toHaveLength(2);
+});
+
 it('distinguishes failed catalogue, empty catalogue and exact unavailable target', async () => {
   const missing = pod + '/_system/contexts/missing';
   const f = fixture({ preset: { podUrl: pod, contextIri: missing } });
