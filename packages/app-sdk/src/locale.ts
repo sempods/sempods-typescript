@@ -121,6 +121,13 @@ export interface UiMessages {
   readonly no: string;
   readonly mine: string;
   readonly alongside: string;
+  readonly dataAccess: string;
+  readonly yourPod: string;
+  readonly podHint: string;
+  readonly loginHint: string;
+  readonly checkAccess: string;
+  readonly addresses: string;
+  readonly signInCancelled: string;
 }
 
 export interface SdkMessages {
@@ -186,6 +193,13 @@ export const englishMessages: SdkMessages = {
     no: 'No',
     mine: 'Your draft',
     alongside: 'Saved alongside changes to other fields.',
+    dataAccess: 'Data access',
+    yourPod: 'Your Pod',
+    podHint: 'Paste the link to your Pod.',
+    loginHint: 'Continue to sign in on your Pod.',
+    checkAccess: 'Check access',
+    addresses: 'Full addresses',
+    signInCancelled: 'Sign-in was cancelled.',
   },
   activePod: 'Active pod',
   dataContext: 'Data context',
@@ -278,6 +292,13 @@ export const germanMessages: SdkMessages = {
     no: 'Nein',
     mine: 'Dein Entwurf',
     alongside: 'Zusammen mit Änderungen an anderen Feldern gespeichert.',
+    dataAccess: 'Datenzugriff',
+    yourPod: 'Dein Pod',
+    podHint: 'Füge den Link zu deinem Pod ein.',
+    loginHint: 'Weiter zur Anmeldung auf deinem Pod.',
+    checkAccess: 'Zugriff prüfen',
+    addresses: 'Vollständige Adressen',
+    signInCancelled: 'Die Anmeldung wurde abgebrochen.',
   },
   activePod: 'Aktiver Pod',
   dataContext: 'Datenkontext',

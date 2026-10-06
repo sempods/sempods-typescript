@@ -79,8 +79,12 @@ not instructions to the coding assistant.
 
 ## Implementation contract
 
-- Build a TypeScript frontend. Prefer React and the standard AppShell for the first
-  slice; use headless app-sdk composition when the project needs another UI.
+- Build a TypeScript frontend. Prefer React with `AppAccess` beside `TargetScreen`
+  for the first slice: a centered login/recovery surface without an SDK app frame.
+  An optional app icon and Pod display names belong to presentation. The app owns
+  its layout and a way to open data-access management. Keep content/controllers
+  mounted during same-target access loss; hide/inert only presentation, with write
+  recovery outside it. Existing AppShell consumers remain supported.
 - Create one stable `createBrowserRuntime` outside rendering. Give it to
   `SempodsProvider`, which initializes it, including on the callback route. Keep
   `TargetScreen` around target-specific screens. Dispose a runtime when its actual

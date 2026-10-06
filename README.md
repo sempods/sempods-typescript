@@ -29,7 +29,7 @@ At a hackathon? Keep the [one-page quick reference](docs/hackathon.md) nearby.
 
 Already have this checkout? Run `pnpm install --frozen-lockfile` and
 `pnpm dev:todo`, then open `http://127.0.0.1:5173/`. The
-[TODO example](examples/todo/README.md) has a standard AppShell and the same screen
+[TODO example](examples/todo/README.md) has centered login without an SDK frame, a legacy AppShell, and the same screen
 in a custom layout at `/custom`; both need a Pod for real data.
 
 ## Find the right API

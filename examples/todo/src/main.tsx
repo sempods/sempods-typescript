@@ -9,7 +9,7 @@ const runtime = createBrowserRuntime({
     name: 'sempods TODO',
     redirectUri: location.origin + '/callback',
   },
-  returnTo: url.pathname === '/custom' ? '/custom' : '/',
+  returnTo: ['/custom', '/legacy'].includes(url.pathname) ? url.pathname : '/',
   development: 'loopback-http',
 });
 createRoot(document.getElementById('root')!).render(

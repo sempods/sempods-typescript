@@ -16,6 +16,8 @@ npm install --save-exact @sempods/app-sdk@0.2.0 @sempods/client-sdk@0.2.0
 Commit the lockfile. To try unreleased SDK changes, use the quickstart's
 [packed SDK archives](quickstart.md#trying-unreleased-sdk-changes). To ship it
 as an installable app, add the [PWA setup](pwa.md).
+`AppAccess` below is new in this checkout; use packed archives until a release
+contains it, or the reference bundled with your installed version.
 Use a dedicated test context and synthetic data; follow
 [local or hosted Pod testing](local-testing.md) for setup.
 
@@ -30,7 +32,7 @@ Full signatures and examples:
 | ------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Start the browser session       | `createBrowserRuntime` (app)                       | One stable runtime outside render; dispose at app shutdown.                  |
 | Bind the UI to it               | `SempodsProvider`, `TargetScreen` (React)          | Provider initializes; TargetScreen resets app-local state per target.        |
-| Get connection/context controls | `AppShell` (React)                                 | Start with the standard shell; custom layouts can follow.                    |
+| Get connection/context controls | `AppAccess` (React)                                | Place login/recovery beside your screen; the app owns its frame.             |
 | Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit) | Choose exact predicate/type IRIs and an explicit text language.              |
 | Read a typed list               | `useList` (React)                                  | Render rows only for `state.kind === 'ready'`; inspect `data.skipped`.       |
 | Add an item                     | `useCreation` (React)                              | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`. |

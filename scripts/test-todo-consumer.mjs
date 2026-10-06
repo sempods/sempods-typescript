@@ -1,4 +1,4 @@
-/* global document, URLSearchParams, navigator, caches */
+/* global window, document, URLSearchParams, navigator, caches */
 import assert from 'node:assert/strict';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -213,6 +213,7 @@ try {
         [
           '/',
           '/custom',
+          '/legacy',
           '/callback',
           '/customized',
           '/recipe',
@@ -444,6 +445,59 @@ try {
   const work = pod + '/_system/contexts/work';
   const personal = pod + '/_system/contexts/personal';
   browser = await chromium.launch({ headless: true });
+  // The documented default is the actual shell-free TODO, installed from tarballs.
+  for (const language of ['en', 'de']) {
+    tasks.clear();
+    const context = await browser.newContext({
+      viewport: { width: 320, height: 740 },
+      colorScheme: language === 'de' ? 'dark' : 'light',
+    });
+    const page = await context.newPage();
+    await page.goto(origin + '/');
+    if (language === 'de')
+      await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await page
+      .getByLabel(language === 'de' ? 'Dein Pod' : 'Your Pod', { exact: true })
+      .fill(pod);
+    await page
+      .getByRole('button', {
+        name: language === 'de' ? 'Anmelden' : 'Sign in',
+        exact: true,
+      })
+      .click();
+    // Redirect initializes the example's default language again.
+    await page.getByLabel('Data context', { exact: true }).selectOption(work);
+    const input = page.getByLabel('Task', { exact: true }).first();
+    await input.fill('Shell-free task');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Shell-free task', exact: true })
+      .waitFor();
+    await page
+      .getByRole('region', { name: 'Data access', exact: true })
+      .waitFor({ state: 'hidden' });
+    await input.fill('Keep this draft');
+    await page
+      .getByRole('button', { name: 'Data access', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Update access', exact: true })
+      .click();
+    await page.getByRole('alertdialog').waitFor();
+    await page
+      .getByRole('button', { name: 'Keep editing', exact: true })
+      .click();
+    assert.equal(await input.inputValue(), 'Keep this draft');
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    );
+    await context.close();
+  }
+  console.log(
+    'Packed default TODO: EN/DE login, 320px light/dark, explicit context, creation and guarded management with retained draft passed.',
+  );
   for (const custom of [false, true]) {
     tasks.clear();
     const context = await browser.newContext({
@@ -460,7 +514,7 @@ try {
         ? route.continue()
         : route.abort(),
     );
-    await page.goto(origin + (custom ? '/custom' : '/'));
+    await page.goto(origin + (custom ? '/custom' : '/legacy'));
     await page.getByLabel('Pod URL').fill(pod);
     await page.getByRole('button', { name: 'Connect', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
@@ -771,7 +825,7 @@ try {
       fullPage: true,
     });
     const busy = await context.newPage();
-    await busy.goto(origin + (custom ? '/custom' : '/'));
+    await busy.goto(origin + (custom ? '/custom' : '/legacy'));
     await busy.getByRole('alert').filter({ hasText: 'another tab' }).waitFor();
     await busy.getByRole('button', { name: 'Deutsch', exact: true }).click();
     await busy.getByRole('alert').filter({ hasText: 'anderen Tab' }).waitFor();
@@ -808,7 +862,7 @@ try {
       }),
     );
     const failed = await unavailable.newPage();
-    await failed.goto(origin + (custom ? '/custom' : '/'));
+    await failed.goto(origin + (custom ? '/custom' : '/legacy'));
     await failed
       .getByRole('alert')
       .filter({ hasText: 'storage could not be opened' })

@@ -64,7 +64,7 @@ These are the moving parts you will reuse:
 
 | App need                                  | API                                                                | What you supply                                                            |
 | ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Start the app                             | `createBrowserRuntime` → `SempodsProvider` → `AppShell`            | One stable runtime, identity and title                                     |
+| Start the app                             | `createBrowserRuntime` → `SempodsProvider` + `AppAccess`           | One stable runtime, identity and app name                                  |
 | Keep state attached to the chosen context | `TargetScreen`                                                     | Your screen inside it                                                      |
 | Describe a task                           | `fields`, `text`, `flag`, `iri`, `dateTime` from `client-sdk/edit` | Type and predicate IRIs; explicit text language                            |
 | Display tasks                             | `useList(task)`                                                    | The same field definition; render ready, loading and failure states        |

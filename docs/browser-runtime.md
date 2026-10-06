@@ -182,10 +182,11 @@ Its attempt remains untouched and expires normally; do not retry the callback
 automatically. Other permitted sessions restore independently. The identity-based
 storage namespace and single-tab lease remain unchanged when the policy changes.
 
-Existing default controls still use `preset` for presentation. For a single-Pod
-default UI, configure both `preset` and `allowedPods`; custom controls can use
-`useAppState().allowedPods` for a finite picker. A new minimal login surface is
-planned in [#25](https://github.com/sempods/sempods-typescript/issues/25).
+`AppAccess` presents one/set/free Pod configuration directly, including the
+finite picker. See [login composition](react-authoring.md#login-without-an-app-frame).
+Legacy `ConnectionControls` still uses `preset` for presentation; combine it with
+`allowedPods` for that UI's single-Pod preset path. Custom controls can read
+`useAppState().allowedPods` too.
 Configure the policy once outside rendering and use the existing guarded actions
 for Pod/context switches; replacing the runtime first requires settling drafts
 and unresolved operations, as with presets.

@@ -10,7 +10,7 @@ keep it stable. The caller owns `runtime.dispose()` at application shutdown.
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
   SempodsProvider,
-  AppShell,
+  AppAccess,
   TargetScreen,
 } from '@sempods/app-sdk/react';
 
@@ -25,11 +25,10 @@ const runtime = createBrowserRuntime({
 });
 
 <SempodsProvider runtime={runtime} language="de" locale="de-CH">
-  <AppShell title="My tasks" mode="multiple">
-    <TargetScreen>
-      <TaskScreen />
-    </TargetScreen>
-  </AppShell>
+  <AppAccess appName="My tasks" />
+  <TargetScreen>
+    <TaskScreen />
+  </TargetScreen>
 </SempodsProvider>;
 ```
 
@@ -39,13 +38,86 @@ connection becomes active; context selection stays explicit. The startup report
 exposes `connectionId` for headless hosts. Screens never handle callbacks,
 credentials, ETags or authentication recovery. See [browser runtime](browser-runtime.md)
 for deployment identity, persisted sessions and the one-active-tab contract.
-AppShell displays startup loading, callback failure or cancellation (with its
-cause), unavailable storage and a localized second-tab notice. A custom layout
-without AppShell places `<CallbackNotice />` itself next to its connection
-controls. The context picker lists readable contexts only and says so when the
+`AppAccess` is the default composition for new apps: a centered login/recovery
+surface beside your content, with no mandatory outer frame or persistent header.
+It displays startup loading, callback failure/cancellation, unavailable storage
+and a localized second-tab notice. It hides once the selected target is readable,
+including read-only access; catalogue failures remain visible even if the runtime
+retains previous access facts. The context picker lists readable contexts only and says so when the
 Pod grants none. Unavailable session storage prevents startup; controls
-remain blocked with a reload notice (there is no in-memory session fallback). `mode="single"` hides adding further Pods once one
-is connected; it uses the same runtime and guarded selectors as multiple mode.
+remain blocked with a reload notice (there is no in-memory session fallback).
+`AppShell`, `ConnectionControls` and fully custom layouts remain supported;
+custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
+
+## Login without an app frame
+
+An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
+No icon is required. `podNames` maps exact canonical Pod URLs to display names;
+the destination remains visible, and duplicate names are disambiguated. Contexts
+currently expose no label in the public catalogue, so controls use a safe readable
+last path segment and offer full IRIs under **Full addresses**. Names never replace
+Pod/context identity, and displaying them starts no additional requests.
+
+One `allowedPods` entry or a preset needs no URL input. Several permitted Pods
+get a finite picker; selecting an option does not start sign-in. Unrestricted
+apps show **Your Pod** with a short hint. The input may omit `https://`; presentation
+adds it before calling the runtime, which still rejects noncanonical URLs.
+For local HTTP development enter `http://127.0.0.1:…` explicitly. There is no silent
+auth or automatic redirect. Login/consent on the Pod retains the Pod's own UI.
+
+The app may put a **Data access** button in its own menu or header. `open` shows
+management; toggling it changes presentation only. Pod/context changes still run
+through the same leave guards. Supply `focusTarget` for focus recovery when a
+focused access control disappears. For example, inside the provider:
+
+```tsx
+function AppContent() {
+  const [open, setOpen] = useState(false);
+  const target = useRef<HTMLButtonElement>(null);
+  const { connections } = useAppState();
+  const { messages } = useSdkLocale();
+  return (
+    <>
+      {connections.length > 0 && (
+        <button
+          ref={target}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {messages.controls.dataAccess}
+        </button>
+      )}
+      <AppAccess
+        appName="My tasks"
+        open={open}
+        focusTarget={target}
+        icon={<img src="/icon.png" alt="" />}
+        podNames={{ 'https://pods.example/alice': 'Personal' }}
+      />
+      <TargetScreen>
+        <TaskScreen />
+      </TargetScreen>
+    </>
+  );
+}
+```
+
+Import `useState`/`useRef` from React and the other names from
+`@sempods/app-sdk/react`. The [TODO source](../examples/todo/src/app.tsx) is a complete
+example. `AppAccess` takes no content children and does not gate/unmount your
+screen: keep `TargetScreen` and mutation controllers mounted through same-target
+access loss. Keep uncertain-write recovery outside hidden/inert widget regions.
+Read-only content remains useful; use `AccessNotice` where a write limitation
+needs explanation and operation eligibility to disable edits.
+
+The defaults follow light/dark appearance and provide keyboard focus and mobile
+targets without a stylesheet import. Use `className`/`style` or override
+`--sempods-access-bg`, `--sempods-access-text`, `--sempods-access-muted`,
+`--sempods-access-line`, `--sempods-access-accent` and `--sempods-access-on-accent`
+on the component. The inline styles require a compatible CSP; hosts that disallow
+them can compose their own UI from the public hooks.
+`components={{ Connections: YourControls }}` replaces controls while retaining
+startup/callback presentation. All actions must still use `useApp()`.
 
 ## A screen
 
@@ -248,8 +320,8 @@ that configuration. Custom controls can read `useAppState().allowedPods`; one
 allowed Pod also supports argument-free `useApp().connect()` without a preset.
 With several allowed Pods and no preset, pass the chosen URL. The runtime enforces
 the policy for restore and callbacks too; see
-[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). Existing default
-controls continue to use `preset` for their presentation.
+[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). `AppAccess` presents allowed Pod sets directly; legacy controls continue to use
+`preset` for their presentation.
 
 The [runtime guide](browser-runtime.md#one-known-pod) explains validation, exact
 context precedence, reload and foreign-session behavior. The recipe below

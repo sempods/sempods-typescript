@@ -1,4 +1,6 @@
 export { SdkLocaleProvider, useSdkLocale } from './locale.js';
+export { AppAccess } from './access.js';
+export type { AppAccessProps } from './access.js';
 export {
   SempodsProvider,
   TargetScreen,
