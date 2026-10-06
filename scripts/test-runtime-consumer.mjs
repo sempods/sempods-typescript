@@ -800,13 +800,9 @@ try {
     const picker = page.getByLabel('Data context', { exact: true });
     await picker.waitFor();
     assert.equal(await picker.inputValue(), '');
-    assert.equal(
-      await picker
-        .locator('option')
-        .filter({ hasText: /^work$/ })
-        .count(),
-      1,
-    );
+    await picker
+      .getByRole('option', { name: 'work', exact: true })
+      .waitFor({ state: 'attached' });
     await picker.focus();
     await picker.selectOption(origin + '/alice/_system/contexts/work');
     await page.getByLabel('Preset draft').waitFor();
