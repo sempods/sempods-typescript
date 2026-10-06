@@ -2,7 +2,9 @@
 // across catalogue sizes, not backend or live scalability.
 import { afterEach, expect, it, vi } from 'vitest';
 import { createBrowserRuntime } from './runtime.js';
-import type { BrowserRuntime } from './types.js';
+import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
+import { createAppController } from '../authoring/app.js';
+import { createViewLoader } from '../authoring/load.js';
 import {
   catalogue,
   deferred,
@@ -67,8 +69,11 @@ const description = (iri: string) =>
   });
 
 /** Signed in through the callback; the catalogue answers with [scale]'s Contexts. */
-async function signedIn(scale: Scale) {
-  const f = fixture({ preferences: null });
+async function signedIn(
+  scale: Scale,
+  overrides: Partial<BrowserRuntimeOptions> = {},
+) {
+  const f = fixture({ preferences: null, ...overrides });
   runtimes.push(f.runtime);
   const iris = contexts(scale);
   f.setCatalogue(async () => catalogue(iris, []));
@@ -267,3 +272,105 @@ it.runIf(process.env['SEMPODS_SCALE_TIMING'])(
     );
   },
 );
+
+/**
+ * Restores the signed-in connection in a fresh runtime driven by an app controller, as an
+ * app would after a reload, then runs one Pod read through the shared loader.
+ */
+async function restoredOverview(
+  f: Awaited<ReturnType<typeof signedIn>>,
+  contextSelection: 'required' | 'on-demand',
+) {
+  f.runtime.dispose();
+  await settleLease();
+  const requests = counter(f);
+  requests.mark();
+  const next = createBrowserRuntime(f.options);
+  runtimes.push(next);
+  const app = createAppController(next, { contextSelection });
+  app.start();
+  await restored(next);
+  await vi.waitFor(() => expect(app.getSnapshot().pod).not.toBeNull());
+  const loader = createViewLoader(app.getSnapshot().pod!, (pod, signal) =>
+    pod.sparql.select(SELECT, { signal }),
+  );
+  await loader.reload();
+  expect(loader.getSnapshot()).toMatchObject({ kind: 'ready' });
+  return { app, next, requests, loader };
+}
+
+it.each(SCALES)(
+  'on-demand: restore and a Pod overview read issue no catalogue or description request, even with a preset Context ($name)',
+  async (scale) => {
+    const f = await signedIn(scale, {
+      preset: { podUrl: pod, contextIri: people },
+    });
+    const { app, next, requests, loader } = await restoredOverview(
+      f,
+      'on-demand',
+    );
+    // Let any background discovery that should not exist get the chance to start.
+    await settleLease();
+    expect(requests.since()).toMatchObject({
+      query: 1,
+      catalogue: 0,
+      descriptions: 0,
+      resources: 0,
+      token: 0,
+    });
+    expect(next.getSnapshot()[0]).toMatchObject({
+      selectedContext: null,
+      catalogue: { kind: 'unknown' },
+    });
+    loader.dispose();
+    app.stop();
+  },
+);
+
+it('required mode keeps automatic discovery: one catalogue and one selected description, at any size (broad access)', async () => {
+  const f = await signedIn(broad, {
+    preset: { podUrl: pod, contextIri: people },
+  });
+  const { app, next, requests, loader } = await restoredOverview(f, 'required');
+  await vi.waitFor(() =>
+    expect(next.getSnapshot()[0]!.selectedContext).toBe(people),
+  );
+  await vi.waitFor(() =>
+    expect(requests.since().descriptions).toBeGreaterThan(0),
+  );
+  expect(requests.since()).toMatchObject({
+    query: 1,
+    catalogue: 1,
+    descriptions: 1,
+    resources: 0,
+    token: 0,
+  });
+  loader.dispose();
+  app.stop();
+});
+
+it('on-demand: explicit discovery after a Pod overview loads the catalogue once, validates the preset and keeps the overview (broad access)', async () => {
+  const f = await signedIn(broad, {
+    preset: { podUrl: pod, contextIri: people },
+  });
+  const { app, next, requests, loader } = await restoredOverview(
+    f,
+    'on-demand',
+  );
+  const id = next.getSnapshot()[0]!.id;
+  await Promise.all([next.loadContexts(id), next.loadContexts(id)]);
+  await vi.waitFor(() =>
+    expect(next.getSnapshot()[0]!.selectedContext).toBe(people),
+  );
+  await vi.waitFor(() =>
+    expect(requests.since().descriptions).toBeGreaterThan(0),
+  );
+  expect(requests.since()).toMatchObject({
+    query: 1,
+    catalogue: 1,
+    descriptions: 1,
+  });
+  expect(loader.getSnapshot()).toMatchObject({ kind: 'ready' });
+  loader.dispose();
+  app.stop();
+});
