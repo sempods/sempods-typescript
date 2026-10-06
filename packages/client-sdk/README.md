@@ -120,11 +120,18 @@ are local to one result document. Unsupported term types retain their opaque
 JSON in `term` with `type: 'unsupported'`. This also applies to extensions
 on known term types, such as a literal's `its:dir`: known fields are validated
 first, then the entire term is retained opaquely. Only the outer `term` object is
-frozen; nested extension values remain opaque JSON. Language tags are checked
-against the [Turtle LANGTAG lexical form](https://www.w3.org/TR/turtle/#grammar-production-LANGTAG),
-without the leading `@`; this is not full BCP47 validation. Header variable names
-must be nonempty and unique; an empty variable list is still accepted. Invalid structure or malformed known
-terms reject with `response/body`. SELECT requires `application/sparql-results+json`.
+frozen; nested extension values remain opaque JSON. Known terms receive lexical checks, not full BCP47/RFC 3987 validation.
+Language tags follow the [xsd:language lexical form](https://www.w3.org/TR/xmlschema11-2/#language):
+an ASCII-letter primary subtag and alphanumeric following subtags, each 1–8
+characters. Singleton/extension grammar, registry membership and normalization
+are outside the decoder; a bare `x` therefore passes this lexical check.
+IRI terms and literal datatypes require a scheme, a nonempty remainder and no
+whitespace or forbidden IRIREF delimiters (angle brackets, quotes, braces, pipe,
+backslash, caret or backtick). Component grammar and percent escapes are not
+validated, so `https://[invalid]/` and `urn:x%GG` pass the lexical boundary.
+Unicode, URNs and received lexical values are preserved. Header variable names
+must be nonempty and unique; an empty variable list is still accepted. Invalid structure or known
+terms that fail these checks reject with `response/body`. SELECT requires `application/sparql-results+json`.
 
 Headers are preserved even when no rows match. The SDK does not parse queries
 to validate projected names: an empty header with empty bindings is accepted

@@ -1,8 +1,8 @@
 import { SdkError } from './errors.js';
-import { ABSOLUTE_IRI } from './iri.js';
+import { EMBEDDABLE_IRI } from './iri.js';
 
-/** Turtle LANGTAG lexical form, without the leading @; not full BCP47 validation. */
-const LANGUAGE_TAG = /^[a-zA-Z]+(-[a-zA-Z0-9]+)*$/;
+/** xsd:language lexical form; deliberately not full BCP47 validation. */
+const LANGUAGE_TAG = /^[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*$/;
 
 /** One SELECT result document; no inferred variables or client-side deduplication. */
 export interface SelectResult {
@@ -12,7 +12,7 @@ export interface SelectResult {
   readonly rows: readonly Readonly<Partial<Record<string, SparqlTerm>>>[];
 }
 
-/** Known RDF terms are decoded strictly; unsupported extensions retain their JSON. */
+/** Known terms receive structural/lexical checks; unsupported extensions retain JSON. */
 export type SparqlTerm =
   | { readonly type: 'iri'; readonly value: string }
   | { readonly type: 'blank'; readonly value: string }
@@ -31,6 +31,7 @@ export type SparqlTerm =
 /**
  * SPARQL Results JSON §3. Validates the response, not the originating query:
  * empty vars/bindings are accepted as received, without proving query conformance.
+ * Known terms use lexical language/IRI checks, not full BCP47/RFC 3987 validation.
  */
 export function decodeSelect(value: unknown): SelectResult {
   if (
@@ -73,7 +74,7 @@ function decodeTerm(term: unknown): SparqlTerm {
   if (typeof value !== 'string') throw malformed();
   if (type === 'uri' || type === 'bnode') {
     if (
-      (type === 'uri' ? !ABSOLUTE_IRI.test(value) : !value) ||
+      (type === 'uri' ? !EMBEDDABLE_IRI.test(value) : !value) ||
       'xml:lang' in term ||
       'datatype' in term
     )
@@ -88,7 +89,7 @@ function decodeTerm(term: unknown): SparqlTerm {
     ('xml:lang' in term &&
       (typeof language !== 'string' || !LANGUAGE_TAG.test(language))) ||
     ('datatype' in term &&
-      (typeof datatype !== 'string' || !ABSOLUTE_IRI.test(datatype))) ||
+      (typeof datatype !== 'string' || !EMBEDDABLE_IRI.test(datatype))) ||
     ('xml:lang' in term && 'datatype' in term)
   )
     throw malformed();

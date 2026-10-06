@@ -77,7 +77,15 @@ describe('SELECT decoding', () => {
     }
   });
 
-  it.each(['en', 'de-DE', 'zh-Hant-TW', 'es-419', 'x-private', 'i-klingon'])(
+  it.each([
+    'en',
+    'de-DE',
+    'zh-Hant-TW',
+    'es-419',
+    'x-private',
+    'i-klingon',
+    'abcdefgh-12345678',
+  ])(
     'preserves a lexically valid language tag %s unchanged',
     async (language) => {
       const decoded = await select(
@@ -93,17 +101,85 @@ describe('SELECT decoding', () => {
     },
   );
 
-  it.each(['not a tag', 'en_US', '-en', 'en-', 'en--US', '419', 'en\n'])(
-    'rejects malformed language tag %j',
-    async (language) => {
-      await expect(
-        select(
-          result([
-            { x: { type: 'literal', value: 'text', 'xml:lang': language } },
-          ]),
-        ),
-      ).rejects.toMatchObject({
-        reason: { code: 'response', problem: 'body' },
+  it.each([
+    'not a tag',
+    'en_US',
+    '-en',
+    'en-',
+    'en--US',
+    '419',
+    'en\n',
+    'en-123456789',
+    'abcdefghi',
+    'x-123456789',
+  ])('rejects malformed language tag %j', async (language) => {
+    await expect(
+      select(
+        result([
+          { x: { type: 'literal', value: 'text', 'xml:lang': language } },
+        ]),
+      ),
+    ).rejects.toMatchObject({
+      reason: { code: 'response', problem: 'body' },
+    });
+  });
+
+  it('keeps the documented lexical boundary for language tags', async () => {
+    // Singleton/extension grammar and registry validation are outside this decoder.
+    for (const language of ['x', 'en-x', 'en-a-abc-a-def']) {
+      const decoded = await select(
+        result([{ x: { type: 'literal', value: 'x', 'xml:lang': language } }]),
+      );
+      expect(decoded.rows[0]?.['x']).toEqual({
+        type: 'literal',
+        value: 'x',
+        language,
+      });
+    }
+  });
+
+  describe.each(['uri', 'datatype'] as const)(
+    '%s lexical IRI checks',
+    (position) => {
+      const term = (iri: string) =>
+        position === 'uri'
+          ? { type: 'uri', value: iri }
+          : { type: 'literal', value: 'x', datatype: iri };
+      it.each([
+        'urn:example:ä',
+        'https://例え.テスト/路径?q=ü#片段',
+        'mailto:user@example.org',
+        'https://[::1]/path',
+      ])('preserves %s unchanged', async (iri) => {
+        const decoded = await select(result([{ x: term(iri) }]));
+        expect(decoded.rows[0]?.['x']).toEqual(
+          position === 'uri' ? { type: 'iri', value: iri } : term(iri),
+        );
+      });
+      it.each([
+        'urn:x>',
+        'urn:x<',
+        'urn:x"',
+        'urn:x{y}',
+        'urn:x|y',
+        'urn:x^y',
+        'urn:x`y',
+        'urn:x\\y',
+        'urn:x y',
+        'urn:x\n',
+      ])('rejects forbidden IRI characters in %j', async (iri) => {
+        await expect(select(result([{ x: term(iri) }]))).rejects.toMatchObject({
+          reason: { code: 'response', problem: 'body' },
+        });
+      });
+      it('does not claim full RFC 3987 validation', async () => {
+        // Component grammar and percent-escape validation are outside this decoder.
+        for (const iri of ['urn:x%GG', 'https://[invalid]/']) {
+          const decoded = await select(result([{ x: term(iri) }]));
+          expect(decoded.rows[0]?.['x']).toEqual(
+            position === 'uri' ? { type: 'iri', value: iri } : term(iri),
+          );
+        }
       });
     },
   );
