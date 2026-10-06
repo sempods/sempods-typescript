@@ -1,5 +1,5 @@
 export { CatalogueError, decodeCatalogue, isContextIri } from './catalogue.js';
-export type { CatalogueContext } from './catalogue.js';
+export type { CatalogueContext, ContextDescription } from './catalogue.js';
 export { SdkError, sdkFailure } from './errors.js';
 export type { SdkFailure } from './errors.js';
 export type { PodFetch, PodRequestInit } from './transport.js';
@@ -23,6 +23,7 @@ export type {
 export type {
   Cancelled,
   CatalogueResult,
+  ContextDescriptionResult,
   CreateCondition,
   GetResult,
   JsonLd,

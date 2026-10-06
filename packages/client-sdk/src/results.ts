@@ -1,4 +1,4 @@
-import type { CatalogueContext } from './catalogue.js';
+import type { CatalogueContext, ContextDescription } from './catalogue.js';
 import type { SdkFailure } from './errors.js';
 
 /**
@@ -32,6 +32,8 @@ export type QueryResult<T> =
   { readonly kind: 'ok'; readonly body: T } | Refused | Cancelled | Stopped;
 
 export type CatalogueResult = QueryResult<readonly CatalogueContext[]>;
+
+export type ContextDescriptionResult = QueryResult<ContextDescription>;
 
 /**
  * Outcome of one write. `not-sent` is decided before any dispatch and is safe
