@@ -18,8 +18,6 @@ Commit the lockfile. Point your coding assistant to
 guides and examples at the installed version. To try unreleased SDK changes, use the quickstart's
 [packed SDK archives](quickstart.md#trying-unreleased-sdk-changes). To ship it
 as an installable app, add the [PWA setup](pwa.md).
-`AppAccess` below is new in this checkout; use packed archives until a release
-contains it, or the reference bundled with your installed version.
 Use a dedicated test context and synthetic data; follow
 [local or hosted Pod testing](local-testing.md) for setup.
 

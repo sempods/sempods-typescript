@@ -60,9 +60,8 @@ export const task = fields(
 
 ## 3. The app: `src/App.tsx`
 
-The `AppAccess` composition below is new in this checkout. Until a release
-containing it is published, install the two local tarballs described above.
-For a released package, use the reference shipped with that exact version.
+The `AppAccess` composition below needs 0.3.0 or newer. For an older installed
+version, use the reference shipped with that exact version.
 
 ```tsx
 import { useRef, useState } from 'react';
