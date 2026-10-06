@@ -4,7 +4,9 @@ Create one browser runtime outside render and pass it to one `SempodsProvider`.
 The provider consumes `runtime.initialize()`; it does not create a second session
 coordinator. Equivalent inline locale/message props do not replace the runtime or
 editor. Changing the runtime object is an explicit application lifetime change;
-keep it stable. The caller owns `runtime.dispose()` at application shutdown.
+keep it stable. Keep `contextSelection` fixed for the provider's lifetime too:
+changing it replaces the controller and cancels a pending leave confirmation;
+it is not a guarded mode switch. The caller owns `runtime.dispose()` at application shutdown.
 
 ```tsx
 import { createBrowserRuntime } from '@sempods/app-sdk';
@@ -225,7 +227,7 @@ infers the callback's Pod handle and data type, with the same states, `reload`,
 signal into every read. Ordinary renders, Context switches, catalogue/label
 updates do not restart it. Pod/session changes retire the old loader; scope loss
 clears displayed data and changed grants renew it within the existing recovery
-bound. An absent reader reports unavailable once startup completes. Inline reads
+bound. An absent reader reports unavailable once startup completes or fails. Inline reads
 do not loop; call `reload()` when your query/domain inputs change.
 
 Pod-only startup, restored sessions, first reads and recovery initiate **zero**
@@ -233,6 +235,10 @@ catalogue/description requests in this mode, including with remembered/preset
 Contexts and several saved connections. `AppAccess` hides for usable Pod access,
 reacts to session/required-scope loss, and leaves the overview mounted. Pod `403`
 is an operation refusal; the hook reports failed without catalogue recovery.
+Failed operations remain failed after a grant change until explicit `reload()`;
+reauthorization creates a new handle and loader. A grant change refreshes an
+already ready Pod result, without treating a refusal as evidence that repeating
+that operation will succeed.
 
 Mount `TargetScreen` as soon as the Context flow is wanted, **before** a view
 exists. It demands the active eligible connection's catalogue even if it mounted

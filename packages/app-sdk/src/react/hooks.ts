@@ -114,12 +114,16 @@ export function useLoad<T>(read: ViewRead<T>) {
  * Loads the active BoundPod using the same cancellable/bounded loader as useLoad.
  * Context/catalogue/label changes do not reload it. Changed Pod/session/grants
  * retire obsolete results; no catalogue or Context fallback is requested.
- * No reader means unavailable after startup. Inline callbacks do not loop:
+ * No reader means unavailable after startup completes or fails. Inline callbacks do not loop:
  * call reload after changing the query or other read inputs.
  */
 export function usePodLoad<T>(read: PodRead<T>) {
-  const { pod, startup } = useAppState();
-  return useBoundLoad(pod, read, startup ? unavailable : loading);
+  const { pod, startup, startupError } = useAppState();
+  return useBoundLoad(
+    pod,
+    read,
+    startup || startupError !== undefined ? unavailable : loading,
+  );
 }
 function useBoundLoad<T, H extends BoundView | BoundPod>(
   view: H | null,

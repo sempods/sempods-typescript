@@ -70,6 +70,8 @@ export function SempodsProvider({
    * On-demand leaves Pod startup/reads catalogue-free; mounted TargetScreens
    * and explicitly opened AppAccess management demand active Context discovery.
    * Preset/remembered Contexts still require fresh readable catalogue evidence.
+   * Keep fixed for the provider's lifetime: changing it replaces the controller
+   * and cancels a pending leave confirmation; it is not a guarded mode switch.
    */
   readonly contextSelection?: 'required' | 'on-demand';
 }) {

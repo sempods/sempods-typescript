@@ -130,6 +130,30 @@ function Harness({
   );
 }
 
+it('settles unavailable after startup fails instead of leaving the Pod overview loading', async () => {
+  const f = fixture({ preferences: null });
+  runtimes.push(f.runtime);
+  const startup = deferred<Awaited<ReturnType<BrowserRuntime['initialize']>>>();
+  vi.spyOn(f.runtime, 'initialize').mockReturnValue(startup.promise);
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <Harness />
+    </SempodsProvider>,
+  );
+  expect(screen.getByTestId('overview').textContent).toBe('loading');
+  expect(screen.queryByRole('alert')).toBeNull();
+  await act(async () => startup.reject(new Error('Storage startup failed')));
+  await waitFor(() =>
+    expect(screen.getByTestId('overview').textContent).toBe('unavailable'),
+  );
+  expect(screen.getByRole('alert').textContent).toBeTruthy();
+  fireEvent.click(screen.getByText('Read again'));
+  expect(screen.getByTestId('overview').textContent).toBe('unavailable');
+  expect(f.count('/_system/contexts')).toBe(0);
+  expect(descriptions(f)).toHaveLength(0);
+  expect(f.count('/_system/sparql/query')).toBe(0);
+});
+
 it('starts a Pod overview with no catalogue, labels or Context access, and opens discovery explicitly', async () => {
   const f = await returned();
   render(
@@ -588,6 +612,61 @@ it('refreshes a completed Pod result after optional grants change without touchi
     f.runtime.bindPod(f.id).sparql.construct('CONSTRUCT {} WHERE {}'),
   );
   await screen.findByText('[{"@id":"urn:changed-grants"}]');
+  expect(f.count('/_system/contexts')).toBe(0);
+  expect(descriptions(f)).toHaveLength(0);
+});
+
+it('keeps a refused Pod operation failed after changed grants until explicit reload', async () => {
+  const f = await returned(
+    fixture({ preferences: null, scopes: { optional: ['ai'] } }),
+  );
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt({ scope: 'ai' }),
+      token_type: 'Bearer',
+      refresh_token: 'initial',
+    }),
+  );
+  f.setQuery(async () => new Response(null, { status: 403 }));
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <Overview />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId('overview').textContent).toBe('failed'),
+  );
+  let calls = 0;
+  f.setQuery(async () =>
+    ++calls === 1
+      ? new Response(null, {
+          status: 401,
+          headers: { 'www-authenticate': 'Bearer' },
+        })
+      : Response.json([{ '@id': 'urn:changed-grants' }]),
+  );
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt(),
+      token_type: 'Bearer',
+      refresh_token: 'rotated',
+    }),
+  );
+  // Renewal by another reader loses optional grants on the same handle.
+  const reader = f.runtime.bindPod(f.id);
+  const revision = reader.getSnapshot().revision;
+  await act(async () => {
+    expect(await reader.sparql.construct('CONSTRUCT {} WHERE {}')).toEqual({
+      kind: 'invalidated',
+    });
+  });
+  expect(reader.getSnapshot().revision).toBeGreaterThan(revision);
+  expect(f.runtime.bindPod(f.id)).toBe(reader);
+  expect(screen.getByTestId('overview').textContent).toBe('failed');
+  expect(calls).toBe(1); // The other read's 401 is invalidated by changed grants.
+  fireEvent.click(screen.getByText('Read again'));
+  await screen.findByText('[{"@id":"urn:changed-grants"}]');
+  expect(calls).toBe(2);
   expect(f.count('/_system/contexts')).toBe(0);
   expect(descriptions(f)).toHaveLength(0);
 });

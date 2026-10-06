@@ -28,6 +28,8 @@ interface ViewLoader<T> {
  * the first read (`useLoad` and `usePodLoad` do this after creating it).
  * The callback receives exactly the supplied handle type. Recovery reuses that
  * handle and callback; a Context read never falls back to a Pod read.
+ * Changed grants refresh ready Pod data; failed operations wait for explicit
+ * reload or a new handle rather than automatically repeating a refusal.
  */
 export function createViewLoader<T>(
   view: BoundView,
