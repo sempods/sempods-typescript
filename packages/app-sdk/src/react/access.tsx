@@ -259,11 +259,13 @@ function AccessConnections({
       state.allowedPods ?? state.connections.map((entry) => entry.podUrl),
       (value) => podName(value, podNames),
     );
+  const labels =
+    c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
   const contextLabel = (iri: string) =>
     distinctName(
       iri,
       readable.map((entry) => entry.iri),
-      contextName,
+      (value) => contextName(value, labels),
     );
   return (
     <>

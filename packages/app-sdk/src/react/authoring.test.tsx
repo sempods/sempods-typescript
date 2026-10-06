@@ -26,6 +26,7 @@ import type { BrowserRuntime, StartupReport } from '../index.js';
 import {
   SempodsProvider,
   AppShell,
+  AppAccess,
   ConnectionControls,
   ResourceEditor,
   useApp,
@@ -909,3 +910,70 @@ it('distinguishes an unconnected preset from a same-named active Pod and exposes
     [...details.querySelectorAll('dd')].map((entry) => entry.textContent),
   ).toEqual(expect.arrayContaining([pod, other]));
 });
+
+it.each(['access', 'connections'] as const)(
+  '%s prefers late context labels, disambiguates duplicates and retains the exact target and draft',
+  async (kind) => {
+    const f = await connected();
+    const pending = deferred<void>();
+    let labels: Record<string, string> = {
+      [work]: '  Team\u202e  ',
+      [personal]: 'Team',
+    };
+    f.setDescriptions(async (url) => {
+      await pending.promise;
+      return Response.json({
+        '@id': url,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': url },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': false }],
+        ...(labels[url]
+          ? {
+              'http://www.w3.org/2000/01/rdf-schema#label': [
+                { '@value': labels[url] },
+              ],
+            }
+          : {}),
+      });
+    });
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        {kind === 'access' ? (
+          <AppAccess appName="Notes" open />
+        ) : (
+          <ConnectionControls />
+        )}
+        <Form />
+      </SempodsProvider>,
+    );
+    await screen.findByDisplayValue('Original');
+    const field = screen.getByLabelText('Title');
+    fireEvent.change(field, { target: { value: 'Unsaved' } });
+    await act(() => f.runtime.loadContexts(f.id));
+    await screen.findByRole('option', { name: 'work' });
+    await act(async () => pending.resolve());
+    const option = await screen.findByRole('option', {
+      name: `Team · ${work}`,
+    });
+    expect((option as HTMLOptionElement).value).toBe(work);
+    expect(
+      screen.getByRole('option', { name: `Team · ${personal}` }),
+    ).toBeTruthy();
+    expect(
+      (screen.getByLabelText('Data context') as HTMLSelectElement).value,
+    ).toBe(work);
+    expect(screen.getByLabelText('Title')).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('Unsaved');
+    const details = screen.getByText('Full addresses').closest('details')!;
+    expect(details.textContent).toContain(work);
+    expect(details.textContent).toContain(personal);
+    labels = { [work]: 'Arbeit' };
+    await act(() => f.runtime.loadContexts(f.id));
+    await screen.findByRole('option', { name: 'Arbeit' });
+    expect(screen.getByRole('option', { name: 'personal' })).toBeTruthy();
+    expect(screen.getByLabelText('Title')).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('Unsaved');
+  },
+);

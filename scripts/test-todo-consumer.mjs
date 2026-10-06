@@ -531,10 +531,32 @@ try {
       colorScheme: appearance,
     });
     const page = await context.newPage();
+    await page.route('**/alice/_system/contexts/*', (route) => {
+      const iri = route.request().url();
+      return route.fulfill({
+        json: {
+          '@id': iri,
+          '@type': [
+            'http://www.w3.org/ns/sparql-service-description#NamedGraph',
+          ],
+          'http://www.w3.org/ns/sparql-service-description#name': [
+            { '@id': iri },
+          ],
+          'https://schema.sempods.org/public': [{ '@value': false }],
+          'http://www.w3.org/2000/01/rdf-schema#label': [{ '@value': 'Tasks' }],
+        },
+      });
+    });
     await page.goto(origin + '/baseline');
     assert.equal(await page.locator('link[rel=stylesheet]').count(), 0);
     await page.getByLabel('Your Pod').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page
+      .getByRole('option', { name: 'Tasks · ' + work, exact: true })
+      .waitFor();
+    await page
+      .getByRole('option', { name: 'Tasks · ' + personal, exact: true })
+      .waitFor();
     await page.getByLabel('Data context', { exact: true }).selectOption(work);
     await page
       .getByRole('region', { name: 'Data access', exact: true })

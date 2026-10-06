@@ -210,11 +210,15 @@ export function ConnectionControls({
   ];
   const podLabel = (url: string) =>
     distinctName(url, podUrls, (value) => podName(value, podNames));
+  const labels =
+    connection?.catalogue.kind !== 'unknown'
+      ? connection?.catalogue.labels
+      : undefined;
   const contextLabel = (iri: string) =>
     distinctName(
       iri,
       readable.map((entry) => entry.iri),
-      contextName,
+      (value) => contextName(value, labels),
     );
   return (
     <section data-sempods-ui="connections" aria-label={controls.choosePod}>
@@ -316,7 +320,7 @@ export function ConnectionControls({
           )}
           {active && fixedContext && (
             <p style={{ overflowWrap: 'anywhere' }}>
-              {m.dataContext}: {contextName(fixedContext)}
+              {m.dataContext}: {contextLabel(fixedContext)}
             </p>
           )}
           {active &&

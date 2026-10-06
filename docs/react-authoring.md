@@ -53,10 +53,12 @@ custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 
 An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
 No icon is required. `podNames` maps exact canonical Pod URLs to display names;
-the destination remains visible, and duplicate names are disambiguated. Contexts
-currently expose no label in the public catalogue, so controls use a safe readable
-last path segment and offer full IRIs under **Full addresses**. Names never replace
-Pod/context identity, and displaying them starts no additional requests.
+the destination remains visible, and duplicate names are disambiguated. Both controls prefer `connection.catalogue.labels?.[iri]` from the runtime's
+background description reads, falling back to a safe readable last path segment.
+Duplicate context names include the full IRI; **Full addresses** exposes all readable
+context identities. Names never replace Pod/context identity, and displaying them
+starts no additional requests. Late or refreshed labels do not change selection
+or discard drafts.
 
 One `allowedPods` entry or a preset needs no URL input. Several permitted Pods
 get a finite picker; selecting an option does not start sign-in. Unrestricted

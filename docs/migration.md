@@ -18,7 +18,9 @@ mounted during same-target access loss and management changes.
 
 `ConnectionControls` remains available for custom layouts. Selectors now show
 readable Pod/context names and disambiguate duplicates; **Full addresses** exposes
-the identities. Select option values stay exact. Tests or code that matched raw
+the identities. Context names prefer the runtime's description labels and fall
+back to the final path segment. Late labels preserve selection and drafts.
+Select option values stay exact. Tests or code that matched raw
 IRI text should use the option value or accessible control name instead. The
 AppShell free input is **Your Pod** / **Dein Pod** with **Sign in** / **Anmelden**;
 access refresh is **Check access** / **Zugriff prüfen**. Existing direct
