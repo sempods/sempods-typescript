@@ -168,6 +168,8 @@ console.log(`\nEvidence: ${file}`);
 /**
  * PodAuth for one service client: one immutable credential object per token, renewed
  * shortly before expiry or after a refused request; concurrent renewals share one call.
+ * The token request is bounded by --timeout, and each caller stops waiting when its own
+ * request or challenge signal aborts (a shared renewal continues for the others).
  */
 function clientCredentials(client, counters) {
   const basic = Buffer.from(
@@ -180,6 +182,7 @@ function clientCredentials(client, counters) {
     (pending ??= (async () => {
       counters.token++;
       const response = await fetch(tokenEndpoint, {
+        signal: globalThis.AbortSignal.timeout(options.timeout),
         method: 'POST',
         headers: {
           authorization: `Basic ${basic}`,
@@ -197,16 +200,37 @@ function clientCredentials(client, counters) {
       pending = undefined;
     }));
   return {
-    async credential() {
-      if (!current || performance.now() > expires) await issue();
+    async credential(request) {
+      if (!current || performance.now() > expires)
+        await untilAborted(issue(), request?.signal);
       return current;
     },
-    async renew(refused) {
+    async renew(refused, challenge) {
       if (refused !== current) return current !== undefined;
-      await issue().catch(() => {});
+      await untilAborted(issue(), challenge?.signal).catch(() => {});
       return current !== refused;
     },
   };
+}
+
+/** Resolves like [promise], or rejects when [signal] aborts first; [promise] keeps running. */
+function untilAborted(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', abort);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function sparql(pod, query, signal) {
@@ -264,27 +288,44 @@ async function measure(client, query, call, counters) {
     if (i >= options.warmup) samples.push(sample);
   }
   const times = samples.map((s) => s.ms).sort((a, b) => a - b);
-  const pick = (q) =>
-    times[Math.min(times.length - 1, Math.floor(q * times.length))];
   const outcomes = {};
   for (const s of samples) outcomes[s.outcome] = (outcomes[s.outcome] ?? 0) + 1;
-  const last = samples.at(-1);
+  const SEMANTIC = ['rows', 'readable', 'value', 'vars', 'headConforms'];
+  const semantics = new Set(
+    samples.map((s) => JSON.stringify(pickDefined(s, SEMANTIC))),
+  );
+  const checked = samples.filter((s) => s.headConforms !== undefined);
   return {
     client,
     query: query.id,
     note: query.note,
     outcomes,
     minMs: round(times[0]),
-    medianMs: round(pick(0.5)),
-    p95Ms: round(pick(0.95)),
+    medianMs: round(median(times)),
+    p95Ms: round(times[Math.ceil(0.95 * times.length) - 1]),
     requestsPerCall: [...new Set(samples.map((s) => s.requests))],
-    ...pickDefined(last, ['rows', 'readable', 'value', 'vars', 'headConforms']),
-    samples: samples.map(({ outcome, ms, requests }) => ({
-      outcome,
-      ms: round(ms),
-      requests,
+    // Reported results come from the last sample; `consistent` says whether every sample
+    // returned the same ones, and head conformance must hold for every sample.
+    ...pickDefined(samples.at(-1), ['rows', 'readable', 'value', 'vars']),
+    consistent: semantics.size === 1,
+    ...(checked.length
+      ? { headConforms: checked.every((s) => s.headConforms) }
+      : {}),
+    samples: samples.map((s) => ({
+      outcome: s.outcome,
+      ms: round(s.ms),
+      requests: s.requests,
+      ...pickDefined(s, SEMANTIC),
     })),
   };
+}
+
+/** Median of sorted values; the mean of the two middle values for an even count. */
+function median(sorted) {
+  const middle = sorted.length >> 1;
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function outcomeOf(result) {
@@ -319,8 +360,9 @@ function printTable(rows) {
         : ` — head.vars ${r.headConforms ? 'ok' : `wrong: ${JSON.stringify(r.vars)}`}`;
     const readable =
       r.readable === undefined ? '' : ` (${r.readable} readable)`;
+    const varies = r.consistent ? '' : ' (results vary between samples)';
     console.log(
-      `| ${r.client} | ${r.query} | ${outcome} | ${r.medianMs} | ${r.p95Ms} | ${r.requestsPerCall.join('/')} | ${r.rows ?? ''}${readable} | ${r.value ?? ''} | ${r.note}${head} |`,
+      `| ${r.client} | ${r.query} | ${outcome} | ${r.medianMs} | ${r.p95Ms} | ${r.requestsPerCall.join('/')} | ${r.rows ?? ''}${readable} | ${r.value ?? ''} | ${r.note}${head}${varies} |`,
     );
   }
 }
@@ -359,8 +401,17 @@ function parseArgs(args) {
     else if (arg === '--timeout') parsed.timeout = Number(args[++i]);
     else fail(`Unknown argument ${arg}.`);
   }
-  if (!(parsed.runs >= 1) || !(parsed.warmup >= 0) || !(parsed.timeout > 0))
-    fail('--runs must be >= 1, --warmup >= 0, --timeout > 0.');
+  if (
+    !Number.isInteger(parsed.runs) ||
+    parsed.runs < 1 ||
+    !Number.isInteger(parsed.warmup) ||
+    parsed.warmup < 0 ||
+    !Number.isFinite(parsed.timeout) ||
+    parsed.timeout <= 0
+  )
+    fail(
+      '--runs must be an integer >= 1, --warmup an integer >= 0, --timeout a finite number > 0.',
+    );
   return parsed;
 }
 
