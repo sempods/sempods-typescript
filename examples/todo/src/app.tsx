@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   AppShell,
+  AppAccess,
   ConnectionControls,
   AccessNotice,
   ResourceEditor,
@@ -15,6 +16,7 @@ import {
   TargetScreen,
   useResourceEditor,
   useSdkLocale,
+  useWorkflowAccess,
 } from '@sempods/app-sdk/react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
 import { emptyTask, supportedTasks, taskFields } from './domain.js';
@@ -170,11 +172,14 @@ export function TodoApp({
   runtime,
   custom,
   children,
+  legacy = false,
 }: {
   readonly runtime: BrowserRuntime;
   readonly custom?: boolean;
   /** App-level notices share the selected language and remain outside target gates. */
   readonly children?: ReactNode;
+  /** Legacy AppShell remains available for existing applications. */
+  readonly legacy?: boolean;
 }) {
   const [language, setLanguage] = useState<'en' | 'de'>('en');
   return (
@@ -184,20 +189,57 @@ export function TodoApp({
         <button onClick={() => setLanguage('de')}>Deutsch</button>
       </nav>
       {children}
-      <TodoLayout custom={custom} />
+      <TodoLayout custom={custom} legacy={legacy} />
     </SempodsProvider>
   );
 }
 
-function TodoLayout({ custom }: { readonly custom: boolean | undefined }) {
+function TodoLayout({
+  custom,
+  legacy,
+}: {
+  readonly custom: boolean | undefined;
+  readonly legacy: boolean;
+}) {
   useAppState(); // Also redraw after the initializer restores the callback's return route.
   return (custom ?? location.pathname === '/custom') ? (
     <CustomScreen />
-  ) : (
-    <AppShell title="TODO">
+  ) : legacy || location.pathname === '/legacy' ? (
+    <AppShell title="TODO" style={{ color: 'light-dark(#173740, #e8eee9)' }}>
       <TargetScreen>
         <TaskScreen />
       </TargetScreen>
     </AppShell>
+  ) : (
+    <StandardScreen />
+  );
+}
+
+function StandardScreen() {
+  const [open, setOpen] = useState(false);
+  const focusTarget = useRef<HTMLButtonElement>(null);
+  const { messages } = useSdkLocale();
+  const { view, connections } = useAppState();
+  const access = useWorkflowAccess();
+  return (
+    <main className="standard">
+      {connections.length > 0 && (
+        <header className="app-heading">
+          {view && <h1>TODO</h1>}
+          <button
+            ref={focusTarget}
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            {messages.controls.dataAccess}
+          </button>
+        </header>
+      )}
+      <AppAccess appName="TODO" open={open} focusTarget={focusTarget} />
+      {view && access.read && !access.write && <AccessNotice />}
+      <TargetScreen>
+        <TaskScreen />
+      </TargetScreen>
+    </main>
   );
 }

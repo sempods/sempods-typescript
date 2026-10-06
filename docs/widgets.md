@@ -22,7 +22,7 @@ context grants, not an invented `tasks:write` feature scope.
 ```tsx
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
-  ConnectionControls,
+  AppAccess,
   SempodsProvider,
   TargetScreen,
 } from '@sempods/app-sdk/react';
@@ -40,7 +40,7 @@ const runtime = createBrowserRuntime({
 export function Dashboard() {
   return (
     <SempodsProvider runtime={runtime}>
-      <ConnectionControls mode="single" />
+      <AppAccess appName="My dashboard" />
       <TargetScreen>
         <TaskListWidget />
         <QuickAddWidget fallback="disabled" />
@@ -50,15 +50,15 @@ export function Dashboard() {
 }
 ```
 
-This is the composition core. Add startup/storage feedback and `CallbackNotice`
-outside the widgets as in the [complete browser host](../tests/runtime-browser/widgets.tsx).
-It includes the single initializer, busy/unavailable feedback and error reporting
-without AppShell. Its loopback identity, synthetic Pod URL and exposed lifecycle
+This is the composition core. `AppAccess` keeps startup, storage and callback
+feedback outside widget content gates. Add an app-owned management toggle with
+its `open` prop as in the [complete browser host](../tests/runtime-browser/widgets.tsx).
+Its loopback identity, synthetic Pod URL and exposed lifecycle
 controls are test configuration; use the [quickstart](quickstart.md) for local
 identity and [deployment](deployment.md) for production callback routing.
 The host must render on the callback route too.
 
-`ConnectionControls` uses the preset and the existing guarded `useApp().connect()`
+`AppAccess` uses the preset/allowed Pods and the existing guarded `useApp().connect()`
 path. It reuses a matching connection, and sign-in occurs only after a click.
 You can replace those controls through the [authoring API](react-authoring.md#standard-ui-for-one-known-pod).
 Widgets neither create a runtime/provider nor repeat connection matching,
@@ -186,9 +186,10 @@ cross-widget list refresh, draft/access/unconfirmed-write recovery, clean remoun
 host disposal, and the deliberately broken duplicate-SDK bundle. Existing SDK
 tests cover the individual helpers; this consumer tests their composition.
 
-No new SDK export is needed for this shared-target slice. Remaining host code
-is startup/callback presentation, a stable runtime/provider, target lifetime and
-layout. The access panel remains app-owned. A general removal/reload guard,
+The host uses `AppAccess` for startup/callback/login presentation plus a stable
+runtime/provider, target lifetime and layout. The widget content gate (`AccessPanel`
+in the recipe) remains app-owned and distinct from the SDK's `AppAccess` surface.
+A general removal/reload guard,
 independent targets, per-widget scope composition and isolated iframe login need
 explicit contracts before more public names. This automated evidence does not
 replace a new author's exercise, a real Pod run, an installed-device test or an

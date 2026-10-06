@@ -4,7 +4,7 @@ Browser coordination and presentation primitives, with optional React.
 
 - `.`: `createBrowserRuntime`, connection/startup/access facts, `BoundView`,
   runtime errors, headless authoring/selection helpers, locale/formatting and EN/DE messages.
-- `./react`: `SempodsProvider`, optional `AppShell`, view/load/workflow/edit hooks,
+- `./react`: `SempodsProvider`, composable `AppAccess`, optional `AppShell`, view/load/workflow/edit hooks,
   `useList`, guarded `useCreation`/`useSelection`, `TargetScreen`, standard
   editor/feedback and locale providers. React is an
   optional peer; consumers of this entry install it themselves.
@@ -20,7 +20,10 @@ Add `allowedPods: [url]` (or several canonical URLs) to enforce an immutable Pod
 restriction; omission stays unrestricted. Foreign stored sessions remain saved
 but cannot restore or yield views under that policy. `runtime.allowedPods` and
 `useAppState().allowedPods` expose it; a sole allowed Pod is also the default for
-argument-free connect. Existing default controls use `preset` for presentation.
+argument-free connect. `AppAccess` supplies a centered login/recovery surface,
+optional app icon and friendly Pod selection, hiding when usable. It sits beside
+app content; the app owns its layout and may open management explicitly. Legacy
+AppShell and its replaceable controls remain supported.
 Screens receive views without credentials. It creates no request,
 navigation or storage on import or construction.
 

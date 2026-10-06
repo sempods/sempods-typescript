@@ -60,10 +60,15 @@ export const task = fields(
 
 ## 3. The app: `src/App.tsx`
 
+The `AppAccess` composition below is new in this checkout. Until a release
+containing it is published, install the two local tarballs described above.
+For a released package, use the reference shipped with that exact version.
+
 ```tsx
+import { useRef, useState } from 'react';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
-  AppShell,
+  AppAccess,
   ResourceEditor,
   SempodsProvider,
   TargetScreen,
@@ -73,6 +78,8 @@ import {
   useList,
   useResourceEditor,
   useSelection,
+  useAppState,
+  useSdkLocale,
 } from '@sempods/app-sdk/react';
 import { task } from './tasks';
 
@@ -91,12 +98,32 @@ if (import.meta.hot) import.meta.hot.dispose(() => runtime.dispose());
 export default function App() {
   return (
     <SempodsProvider runtime={runtime}>
-      <AppShell title="My tasks">
-        <TargetScreen>
-          <Tasks />
-        </TargetScreen>
-      </AppShell>
+      <AppContent />
     </SempodsProvider>
+  );
+}
+
+function AppContent() {
+  const [open, setOpen] = useState(false);
+  const target = useRef<HTMLButtonElement>(null);
+  const { connections } = useAppState();
+  const { messages } = useSdkLocale();
+  return (
+    <main>
+      {connections.length > 0 && (
+        <button
+          ref={target}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {messages.controls.dataAccess}
+        </button>
+      )}
+      <AppAccess appName="My tasks" open={open} focusTarget={target} />
+      <TargetScreen>
+        <Tasks />
+      </TargetScreen>
+    </main>
   );
 }
 
@@ -172,17 +199,23 @@ before acknowledgement. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
 [TODO example](../examples/todo/src/app.tsx) adds EN/DE and a custom layout.
 
-Replace Vite's demo styles in `src/index.css` with a simple light baseline so
-AppShell and your inputs share readable defaults:
+Replace Vite's demo styles in `src/index.css` with a simple baseline for your
+app content. AppAccess supplies its own scoped login/recovery styles:
 
 ```css
 :root {
+  color-scheme: light dark;
   font-family: system-ui, sans-serif;
-  color: #173740;
-  background: #f6faf9;
+  color: light-dark(#173740, #e8eee9);
+  background: light-dark(#f6faf9, #191b1a);
 }
 body {
   margin: 0;
+}
+main {
+  max-width: 760px;
+  margin: auto;
+  padding: 16px;
 }
 button,
 input,

@@ -16,9 +16,11 @@ and `src/style.css` into its `src/`, and render `<TodoApp runtime={runtime} />`
 from your entry with the runtime configuration shown in `src/main.tsx`. The
 shipped `package.json` names the exact SDK version the sources belong to.
 
-Open `http://127.0.0.1:5173/` for AppShell or `/custom` for the freely arranged
-layout. Enter your Pod URL, sign in on the Pod, then explicitly select a context.
-Both screens share `src/domain.ts` and `TaskScreen`; no protocol or session logic
+Open `http://127.0.0.1:5173/` for the centered `AppAccess` login and app-owned
+layout. Use **Data access** to open management after connecting. `/legacy` retains
+AppShell and `/custom` shows a fully custom layout. Enter your Pod link, sign in
+on the Pod, then explicitly select a context.
+The screens share `src/domain.ts` and `TaskScreen`; no protocol or session logic
 is duplicated. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).

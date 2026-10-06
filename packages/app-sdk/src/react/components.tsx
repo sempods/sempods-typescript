@@ -129,10 +129,13 @@ export function AccessNotice() {
 }
 export interface ConnectionControlsProps {
   readonly mode?: 'single' | 'multiple';
+  /** Optional app-supplied display names keyed by exact Pod URL. Never identities. */
+  readonly podNames?: Readonly<Record<string, string>>;
 }
 /** All selectors and connection actions use the same leave policy as custom composition. */
 export function ConnectionControls({
   mode = 'multiple',
+  podNames,
 }: ConnectionControlsProps) {
   const app = useApp();
   const state = useAppState();
@@ -184,7 +187,9 @@ export function ConnectionControls({
       {state.preset && connection?.podUrl !== state.preset.podUrl && (
         <div>
           <span style={{ overflowWrap: 'anywhere' }}>
-            {state.preset.podUrl}
+            {podNames?.[state.preset.podUrl]?.trim()
+              ? `${podNames[state.preset.podUrl]} · ${state.preset.podUrl}`
+              : state.preset.podUrl}
           </span>{' '}
           <button
             disabled={unavailable}
@@ -239,7 +244,9 @@ export function ConnectionControls({
               </option>
               {state.connections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.podUrl}
+                  {podNames?.[c.podUrl]?.trim()
+                    ? `${podNames[c.podUrl]} · ${c.podUrl}`
+                    : c.podUrl}
                 </option>
               ))}
             </select>
@@ -324,9 +331,11 @@ export function CallbackNotice() {
   if (interaction !== 'failed' && interaction !== 'cancelled') return null;
   return (
     <p role="alert">
-      {state.startup?.failure
-        ? describeFailure(messages.errors, state.startup.failure)
-        : messages.controls.failure}
+      {interaction === 'cancelled'
+        ? messages.controls.signInCancelled
+        : state.startup?.failure
+          ? describeFailure(messages.errors, state.startup.failure)
+          : messages.controls.failure}
     </p>
   );
 }
