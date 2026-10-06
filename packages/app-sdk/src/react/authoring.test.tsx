@@ -14,6 +14,7 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   fixture,
   catalogue,
+  pod,
   personal,
   work,
   deferred,
@@ -132,6 +133,7 @@ it('replacement picker uses guarded actions and confirmation restores focus on c
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Unfinished' },
   });
+  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
   const picker = screen.getByText('Custom picker');
   picker.focus();
   fireEvent.click(picker);
@@ -684,10 +686,10 @@ it('names why connecting failed instead of a generic failure', async () => {
   );
   await screen.findByText('Tasks mounted');
   f.fetch.mockRejectedValue(new TypeError('offline'));
-  fireEvent.change(screen.getByLabelText('Pod URL'), {
+  fireEvent.change(screen.getByLabelText('Your Pod'), {
     target: { value: 'https://pod.example/carol' },
   });
-  fireEvent.submit(screen.getByLabelText('Pod URL').closest('form')!);
+  fireEvent.submit(screen.getByLabelText('Your Pod').closest('form')!);
   expect((await screen.findByRole('alert')).textContent).toBe(
     'The pod’s connection information could not be loaded. Try again.',
   );
@@ -842,3 +844,49 @@ it.each([
     await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
   },
 );
+
+it('AppShell preserves title/style/content and hides management until explicitly opened', async () => {
+  const f = await connected();
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppShell title="My notebook" style={{ maxWidth: 480 }}>
+        <Form />
+      </AppShell>
+    </SempodsProvider>,
+  );
+  await screen.findByDisplayValue('Original');
+  expect(
+    screen.getByRole('heading', { level: 1, name: 'My notebook' }),
+  ).toBeTruthy();
+  expect(screen.getByRole('main').style.maxWidth).toBe('480px');
+  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  const field = screen.getByLabelText('Title');
+  fireEvent.change(field, { target: { value: 'Mounted draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  expect(
+    screen.getByRole('heading', { level: 2, name: 'Data access' }),
+  ).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Check access' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  expect(screen.getByLabelText('Title')).toBe(field);
+  expect((field as HTMLInputElement).value).toBe('Mounted draft');
+});
+
+it('standalone ConnectionControls shows readable names while preserving exact values and full addresses', async () => {
+  const f = await connected();
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <ConnectionControls podNames={{ [pod]: 'Personal Pod' }} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('option', { name: 'work' });
+  expect(
+    (screen.getByRole('option', { name: 'work' }) as HTMLOptionElement).value,
+  ).toBe(work);
+  expect(screen.getByRole('option', { name: 'Personal Pod' })).toBeTruthy();
+  const details = screen.getByText('Full addresses').closest('details')!;
+  expect(details.textContent).toContain(work);
+  expect(details.textContent).toContain(personal);
+  expect(details.textContent).toContain(pod);
+});

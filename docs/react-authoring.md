@@ -115,14 +115,28 @@ access loss. Keep uncertain-write recovery outside hidden/inert widget regions.
 Read-only content remains useful; use `AccessNotice` where a write limitation
 needs explanation and operation eligibility to disable edits.
 
-The defaults follow light/dark appearance and provide keyboard focus and mobile
-targets without a stylesheet import. Use `className`/`style` or override
-`--sempods-access-bg`, `--sempods-access-text`, `--sempods-access-muted`,
-`--sempods-access-line`, `--sempods-access-accent` and `--sempods-access-on-accent`
-on the component. The inline styles require a compatible CSP; hosts that disallow
-them can compose their own UI from the public hooks.
-`components={{ Connections: YourControls }}` replaces controls while retaining
-startup/callback presentation. All actions must still use `useApp()`.
+### Shared SDK appearance
+
+`AppAccess`, `AppShell`, `ConnectionControls`, `ResourceEditor`, `UpdateNotice`,
+`AccessNotice` and `CallbackNotice` share a scoped baseline: light/dark appearance,
+44px touch targets, visible keyboard focus and wrapping comparisons. No stylesheet
+import or UI framework is required. AppShell styles its own header; it does not
+style app list rows or controls elsewhere in its children. ResourceEditor styles
+the fields rendered inside that editor as well as its review/actions.
+
+Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
+`--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
+`style`/`className` where supported. They inherit across SDK components. Existing
+`--sempods-access-*` names remain fallback aliases; the shared names take priority.
+Inline scoped styles require a compatible CSP. Hosts that prohibit them can
+compose their own presentation using the public hooks.
+
+`components={{ Connections: YourControls }}` replaces access controls while
+retaining startup/callback presentation. All actions must still use `useApp()`.
+`mode="single"` hides adding another Pod once selected; it is a presentation choice,
+not a restriction. Use runtime `allowedPods` to enforce the permitted Pods.
+When a host already provides its title, use `headingLevel={2}` for subordinate
+access headings; AppShell does this automatically.
 
 ## A screen
 
@@ -301,9 +315,8 @@ const runtime = createBrowserRuntime({
 ```
 
 `Tasks` is your existing app screen. The first visit offers **Sign in** without a
-Pod URL input; after consent, the person chooses a context. The preset also hides
-the standard new-Pod URL form in `mode="multiple"`; connecting a different Pod
-requires custom controls or headless calls with an explicit URL. Existing foreign
+Pod URL input; after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
+**Data access** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
 connections remain available for selection. Add the optional
 `contextIri` inside `preset` to declare an exact context instead. The SDK waits for
 fresh readable catalogue evidence, displays that fixed context instead of a
@@ -325,8 +338,8 @@ that configuration. Custom controls can read `useAppState().allowedPods`; one
 allowed Pod also supports argument-free `useApp().connect()` without a preset.
 With several allowed Pods and no preset, pass the chosen URL. The runtime enforces
 the policy for restore and callbacks too; see
-[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). `AppAccess` presents allowed Pod sets directly; legacy controls continue to use
-`preset` for their presentation.
+[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). `AppAccess` and AppShell present allowed Pod sets directly; standalone
+ConnectionControls continues to use `preset` for its form presentation.
 
 The [runtime guide](browser-runtime.md#one-known-pod) explains validation, exact
 context precedence, reload and foreign-session behavior. The recipe below
@@ -372,6 +385,11 @@ is inferred from an absent grant. Each server operation remains authoritative.
 ## Customize without replacing safety
 
 `AppShell` accepts `title`, `style` and `components={{ Connections: MyPicker }}`.
+It composes a title/management header, `AppAccess`, and the content. Usable access
+hides administration; **Data access** opens it, including replacement controls.
+Startup still gates content until durable storage is ready; later access loss or
+management toggles retain mounted content and its drafts. Read-only feedback stays
+visible. See [0.3 migration](migration.md#from-02-to-03) for the changed presentation.
 A replacement uses `useConnections`, `useAppState` and guarded `useApp()` actions;
 it must not call raw runtime selection directly. For a different layout, omit
 AppShell, keep the provider, and place `ConnectionControls`/`AccessNotice` and

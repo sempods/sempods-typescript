@@ -4,6 +4,35 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.2 to 0.3
+
+Existing `AppShell` calls use the new access UI without changing app code. The
+shell now has a title and **Data access** button; connection administration hides
+when the target is usable, including read-only access, and opens explicitly.
+`title`, `style` and `components={{ Connections: MyPicker }}` remain supported.
+Replacement controls follow the same open/recovery visibility; they are no longer
+always mounted. Keep app drafts/controllers in the shell content, not inside a
+replacement picker. `mode="single"` remains presentation only; `allowedPods`
+enforces a Pod restriction. Content still waits for durable startup, then remains
+mounted during same-target access loss and management changes.
+
+`ConnectionControls` remains available for custom layouts. Selectors now show
+readable Pod/context names and disambiguate duplicates; **Full addresses** exposes
+the identities. Select option values stay exact. Tests or code that matched raw
+IRI text should use the option value or accessible control name instead. The
+AppShell free input is **Your Pod** / **Dein Pod** with **Sign in** / **Anmelden**;
+access refresh is **Check access** / **Zugriff prüfen**. Existing direct
+ConnectionControls keeps its form/action labels.
+
+All SDK access, notice and editor components share the
+[scoped styling baseline](react-authoring.md#shared-sdk-appearance). Set inherited
+`--sempods-*` tokens to theme them together; previous `--sempods-access-*` variables
+remain fallback aliases. Root `style` still styles the AppShell container;
+component controls use the shared tokens. There is no stylesheet import. The CSP
+must permit the inline styles, or the host supplies hook-based custom UI.
+App-owned list rows and other content outside SDK controls/editors remain unstyled.
+Target guards, conflict review and unconfirmed-write recovery are unchanged.
+
 ## From 0.1 to 0.2
 
 0.2 requires **Node 24.15 or newer** (Node 24 LTS) for development, builds and

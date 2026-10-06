@@ -728,6 +728,7 @@ try {
     await page.getByLabel('Data context', { exact: true }).count(),
     0,
   );
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
   await presetDraft.fill('Keep this draft');
   await page
     .getByRole('button', { name: 'Update access', exact: true })

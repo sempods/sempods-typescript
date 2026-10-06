@@ -15,10 +15,16 @@ import {
   CallbackNotice,
   type ConnectionControlsProps,
 } from './components.js';
+import { SdkStyles } from './styles.js';
+import { contextName, podName, distinctName } from './names.js';
 import { describeFailure } from '../locale.js';
 
 export interface AppAccessProps {
   readonly appName: string;
+  /** Heading under a host title; omitted means h1 initially, h2 for management/recovery. */
+  readonly headingLevel?: 1 | 2;
+  /** Presentation only: single hides adding Pods once connected; allowedPods enforces policy. */
+  readonly mode?: 'single' | 'multiple';
   /** App-owned decorative icon, for example <img src="/icon.png" alt="" />. */
   readonly icon?: ReactNode;
   /** Exact Pod URL → friendly name. A name never changes the destination. */
@@ -40,11 +46,13 @@ export interface AppAccessProps {
  * Read-only targets remain usable. Callback failures remain visible separately.
  * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
  * children mounted during same-target access loss; this is not a content gate.
- * Inline, scoped defaults use --sempods-access-* CSS variables; no stylesheet
+ * Inline, scoped defaults use shared --sempods-* CSS variables; no stylesheet
  * import or UI framework is required. A CSP must permit this component's styles.
  */
 export function AppAccess({
   appName,
+  headingLevel,
+  mode = 'multiple',
   icon,
   podNames,
   open = false,
@@ -83,7 +91,8 @@ export function AppAccess({
     state.changing,
     state.confirmingLeave,
   ]);
-  const Heading = open || state.view ? 'h2' : 'h1';
+  const Heading =
+    (headingLevel ?? (open || state.view ? 2 : 1)) === 2 ? 'h2' : 'h1';
   const Connections = components?.Connections;
   const available = state.startup?.storage === 'durable' && !state.startupError;
   const active =
@@ -104,12 +113,14 @@ export function AppAccess({
       }}
       hidden={hidden}
       data-sempods-access=""
+      data-sempods-ui="access"
       data-initial={!state.view && !open ? '' : undefined}
       aria-label={m.controls.dataAccess}
       dir={direction}
       className={className}
       style={hidden ? { ...style, display: 'none' } : style}
     >
+      <SdkStyles />
       <style>{styles}</style>
       <div className="sp-access-content">
         {(needsAttention || open) && (
@@ -120,7 +131,9 @@ export function AppAccess({
               </div>
             )}
             <Heading>
-              {open || state.view ? m.controls.dataAccess : appName}
+              {open || state.view || headingLevel === 2
+                ? m.controls.dataAccess
+                : appName}
             </Heading>
           </header>
         )}
@@ -139,12 +152,13 @@ export function AppAccess({
               <>
                 {Connections ? (
                   <Connections
-                    mode="multiple"
+                    mode={mode}
                     {...(podNames ? { podNames } : {})}
                   />
                 ) : (
                   <AccessConnections
                     manage={open}
+                    mode={mode}
                     {...(podNames ? { podNames } : {})}
                   />
                 )}
@@ -163,26 +177,6 @@ export function AppAccess({
   );
 }
 
-// CatalogueContext currently exposes no label. Use the safe final path segment;
-// keep full identities available, and disambiguate duplicate names in selectors.
-function contextName(iri: string) {
-  const segment = iri.slice(iri.lastIndexOf('/') + 1);
-  try {
-    return (
-      decodeURIComponent(segment).replace(
-        // Strip control/bidi characters from display only; IRI identity stays exact.
-        // eslint-disable-next-line no-control-regex
-        /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,
-        '',
-      ) || iri
-    );
-  } catch {
-    return segment || iri;
-  }
-}
-function podName(url: string, names?: Readonly<Record<string, string>>) {
-  return names?.[url]?.trim() || url.replace(/^https?:\/\//, '');
-}
 /** Presentation-only convenience. Canonical URL/security validation stays in the runtime. */
 function enteredPod(value: string) {
   // Only clean up the common pasted-address form. Do not parse/re-serialize the
@@ -193,9 +187,11 @@ function enteredPod(value: string) {
 
 function AccessConnections({
   manage,
+  mode,
   podNames,
 }: {
   readonly manage: boolean;
+  readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
 }) {
   const app = useApp();
@@ -253,17 +249,22 @@ function AccessConnections({
       await app.authorize(existing.id);
     } else await app.connect(target);
   }
-  const showNew = manage || !c;
+  const showNew = (manage && mode === 'multiple') || !c;
   const showDefault =
     defaultUrl && c?.podUrl !== defaultUrl && !(manage && !state.allowedPods);
   const choice = url || defaultUrl || '';
-  const name = (target: string) => {
-    const label = podName(target, podNames);
-    const duplicates = (
-      state.allowedPods ?? state.connections.map((entry) => entry.podUrl)
-    ).some((other) => other !== target && podName(other, podNames) === label);
-    return duplicates ? `${label} · ${target}` : label;
-  };
+  const name = (target: string) =>
+    distinctName(
+      target,
+      state.allowedPods ?? state.connections.map((entry) => entry.podUrl),
+      (value) => podName(value, podNames),
+    );
+  const contextLabel = (iri: string) =>
+    distinctName(
+      iri,
+      readable.map((entry) => entry.iri),
+      contextName,
+    );
   return (
     <>
       {showNew && state.allowedPods && state.allowedPods.length > 1 ? (
@@ -428,26 +429,17 @@ function AccessConnections({
             <option value="" disabled>
               {m.chooseContext}
             </option>
-            {readable.map((entry) => {
-              const label = contextName(entry.iri);
-              return (
-                <option key={entry.iri} value={entry.iri}>
-                  {readable.some(
-                    (other) =>
-                      other.iri !== entry.iri &&
-                      contextName(other.iri) === label,
-                  )
-                    ? `${label} · ${entry.iri}`
-                    : label}
-                </option>
-              );
-            })}
+            {readable.map((entry) => (
+              <option key={entry.iri} value={entry.iri}>
+                {contextLabel(entry.iri)}
+              </option>
+            ))}
           </select>
         </label>
       )}
       {active && fixedContext && (
         <p>
-          {m.dataContext}: {contextName(fixedContext)}
+          {m.dataContext}: {contextLabel(fixedContext)}
         </p>
       )}
       {active &&
@@ -458,7 +450,18 @@ function AccessConnections({
         <details>
           <summary>{m.controls.addresses}</summary>
           <p>{c.podUrl}</p>
-          {c.selectedContext && <p>{c.selectedContext}</p>}
+          {c.selectedContext &&
+            !readable.some((entry) => entry.iri === c.selectedContext) && (
+              <p>{c.selectedContext}</p>
+            )}
+          <dl>
+            {readable.map((entry) => (
+              <div key={entry.iri}>
+                <dt>{contextLabel(entry.iri)}</dt>
+                <dd>{entry.iri}</dd>
+              </div>
+            ))}
+          </dl>
         </details>
       )}
       {c && (
@@ -495,7 +498,7 @@ function AccessConnections({
 }
 
 const styles = `
-[data-sempods-access] { --sempods-access-bg:light-dark(#fff,#191b1a); --sempods-access-text:light-dark(#202923,#e8eee9); --sempods-access-muted:light-dark(#606c64,#acb9b0); --sempods-access-line:light-dark(#dce3dd,#39453d); --sempods-access-accent:light-dark(#226044,#8acda6); --sempods-access-on-accent:light-dark(#fff,#14251b); color-scheme:light dark; color:var(--sempods-access-text); background:var(--sempods-access-bg); font:400 1rem/1.5 system-ui,sans-serif; padding:clamp(16px,4vw,32px); text-align:center; }
+[data-sempods-access] { padding:clamp(16px,4vw,32px); text-align:center; }
 [data-sempods-access][hidden] { display:none; }
 [data-sempods-access][data-initial]:not([hidden]) { min-block-size:32rem; display:grid; align-items:center; }
 [data-sempods-access] * { box-sizing:border-box; }
@@ -506,14 +509,14 @@ const styles = `
 [data-sempods-access] .sp-access-icon > * { width:100%; height:100%; object-fit:contain; }
 [data-sempods-access] p { overflow-wrap:anywhere; margin:12px 0; }
 [data-sempods-access] label { display:block; text-align:start; margin:18px 0; }
-[data-sempods-access] input, [data-sempods-access] select { display:block; width:100%; min-width:0; margin:8px 0; font:inherit; color:inherit; background:var(--sempods-access-bg); border:1px solid var(--sempods-access-line); border-radius:4px; padding:12px; min-height:46px; }
+[data-sempods-access] input, [data-sempods-access] select { display:block; width:100%; min-width:0; margin:8px 0; font:inherit; color:inherit; background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:4px; padding:12px; min-height:46px; }
 [data-sempods-access] input { border-width:0 0 1px; border-radius:0; padding-inline:0; }
-[data-sempods-access] input::placeholder { color:var(--sempods-access-muted); opacity:1; }
-[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:5px; color:var(--sempods-access-accent); background:transparent; padding:10px 14px; cursor:pointer; }
-[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sempods-access-on-accent); background:var(--sempods-access-accent); }
+[data-sempods-access] input::placeholder { color:var(--sp-muted); opacity:1; }
+[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:5px; color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }
+[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-on-accent); background:var(--sp-accent); }
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
-[data-sempods-access] :focus-visible { outline:2px solid var(--sempods-access-accent); outline-offset:3px; }
-[data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sempods-access-muted); }
+[data-sempods-access] :focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
+[data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-actions { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:16px; }
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
 [data-sempods-access] summary { min-height:44px; padding:10px; cursor:pointer; }
