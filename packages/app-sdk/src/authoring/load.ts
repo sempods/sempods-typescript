@@ -1,5 +1,5 @@
 import type { QueryResult } from '@sempods/client-sdk';
-import type { BoundRead, BoundView } from '../runtime/view.js';
+import type { BoundPod, BoundRead, BoundView } from '../runtime/view.js';
 
 export type LoadState<T> =
   | { readonly kind: 'loading' | 'cancelled' | 'unavailable' }
@@ -9,13 +9,42 @@ export type ViewRead<T> = (
   view: BoundView,
   signal: AbortSignal,
 ) => Promise<BoundRead<QueryResult<T>>>;
+/** A read of the authorized Pod dataset; never selects a Context or discovers a catalogue. */
+export type PodRead<T> = (
+  pod: BoundPod,
+  signal: AbortSignal,
+) => Promise<BoundRead<QueryResult<T>>>;
+interface ViewLoader<T> {
+  getSnapshot(): LoadState<T>;
+  subscribe(listener: () => void): () => void;
+  reload(): Promise<void>;
+  cancel(): void;
+  dispose(): void;
+}
 
 /**
  * One cancellable read, plus at most one same-target recovery retry per cycle.
  * The loader starts in `loading` without a request: call `reload()` to start
- * the first read (`useLoad` does this right after creating it).
+ * the first read (`useLoad` and `usePodLoad` do this after creating it).
+ * The callback receives exactly the supplied handle type. Recovery reuses that
+ * handle and callback; a Context read never falls back to a Pod read.
  */
-export function createViewLoader<T>(view: BoundView, read: ViewRead<T>) {
+export function createViewLoader<T>(
+  view: BoundView,
+  read: ViewRead<T>,
+): ViewLoader<T>;
+export function createViewLoader<T>(
+  pod: BoundPod,
+  read: PodRead<T>,
+): ViewLoader<T>;
+export function createViewLoader<T, H extends BoundView | BoundPod = BoundView>(
+  view: H,
+  read: (handle: H, signal: AbortSignal) => Promise<BoundRead<QueryResult<T>>>,
+): ViewLoader<T>;
+export function createViewLoader<T, H extends BoundView | BoundPod>(
+  view: H,
+  read: (handle: H, signal: AbortSignal) => Promise<BoundRead<QueryResult<T>>>,
+) {
   let state: LoadState<T> = { kind: 'loading' };
   const listeners = new Set<() => void>();
   let abort = new AbortController();
@@ -98,8 +127,13 @@ export function createViewLoader<T>(view: BoundView, read: ViewRead<T>) {
       emit({ kind: cancelled ? 'cancelled' : 'unavailable' });
     } else if (
       !cancelled &&
-      (waiting || (running && next.revision !== previous.revision))
+      (waiting ||
+        (next.revision !== previous.revision &&
+          (running || (!('contextIri' in view) && state.kind === 'ready'))))
     ) {
+      // A completed Pod result belongs to its grants; a new access change starts
+      // a fresh bounded cycle. Context write-only changes retain displayed data.
+      if (state.kind === 'ready') retries = 0;
       void run(true);
     }
     previous = next;

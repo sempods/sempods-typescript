@@ -5,7 +5,12 @@ import type {
   RemoveOutcome,
 } from '@sempods/client-sdk/edit';
 import type { MutationOutcome } from './hooks.js';
-import { useApp, useAppState, useWorkflowAccess } from './app.js';
+import {
+  useApp,
+  useAppState,
+  useContextDemand,
+  useWorkflowAccess,
+} from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure } from '../locale.js';
 import { AppAccess } from './access.js';
@@ -432,6 +437,7 @@ export function AppShell({
   const target = useRef<HTMLButtonElement>(null);
   const { messages, direction } = useSdkLocale();
   const access = useWorkflowAccess();
+  const contextRequired = useContextDemand(false);
   return (
     <main dir={direction} data-sempods-ui="shell" style={style}>
       <SdkStyles />
@@ -455,6 +461,7 @@ export function AppShell({
         components={components}
       />
       {!open &&
+        contextRequired &&
         access.read &&
         !access.write &&
         access.connection?.catalogue.kind === 'ready' && <AccessNotice />}

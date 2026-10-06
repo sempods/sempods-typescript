@@ -98,10 +98,26 @@ headless controller exposes the active reader in `AppSnapshot.pod`.
 Automatic labels load only for the selected, validated Context for every catalogue
 size, with fallback names and cache lifetime tied to access authority.
 
-On-demand controller/React discovery and Pod loaders remain tracked in
-[#39](https://github.com/sempods/sempods-typescript/issues/39). Controller startup
-and the existing React access flow still load/require Contexts under the
-compatibility policy.
+Controller/provider `contextSelection: 'required' | 'on-demand'` defaults to
+`required`, preserving automatic catalogues and Context-based access UI.
+With `on-demand`, startup, restore and Pod read/recovery need no catalogue or
+description request, even with preset/remembered Contexts and several saved Pods.
+`usePodLoad` and `useLoad` share the cancellable, bounded loader while keeping
+their handle/callback types correlated. Context failures never fall back to Pod reads.
+
+Mounting `TargetScreen` or explicitly opening `AppAccess` management demands the
+active connection's catalogue before a view exists, including when login becomes
+eligible later. Concurrent demand shares the runtime operation; ready/empty/failed
+catalogues are reused until explicit refresh, with chooser/retry reachable beside
+the content. A headless/custom UI calls the existing `runtime.loadContexts` or
+React `refreshContexts` action. The catalogue contract remains one complete
+response; no paging, description sweep or per-Context query fallback is introduced.
+`useWorkflowAccess` stays Context-only. Labels never gate selection or read access.
+
+_Why:_ a Pod overview should not pay for Context discovery, while editing still
+requires explicit, validated Context authority. One loader and the existing
+coordinator keep these paths small and consistent. Live scale evidence remains
+tracked in [#40](https://github.com/sempods/sempods-typescript/issues/40).
 
 A reload may reselect the context the person chose last for that connection.
 That is their own explicit choice, remembered as a browser preference rather

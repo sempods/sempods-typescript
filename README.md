@@ -54,8 +54,11 @@ in a custom layout at `/custom`; both need a Pod for real data.
 through `@sempods/app-sdk/react`. Both packages emit ESM and TypeScript declarations.
 The portable client also provides Pod-wide SELECT/CONSTRUCT queries without
 Context enumeration, and the field definitions used by browser apps. See
-[Pod reads](packages/client-sdk/README.md#reading-across-the-pod); runtime/React
-integration remains separate follow-up work.
+[Pod reads](packages/client-sdk/README.md#reading-across-the-pod) and
+[React Pod overviews](docs/react-authoring.md#pod-overviews-with-contexts-on-demand).
+The runtime supplies independent readers; React/controller on-demand mode keeps
+overview startup and recovery free of Context discovery. Live scale evidence is
+tracked in [#40](https://github.com/sempods/sempods-typescript/issues/40).
 [Architecture decisions](docs/decisions.md) explain these boundaries.
 
 For all guides and contributor workflows, use the [documentation map](docs/README.md).

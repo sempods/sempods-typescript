@@ -3,12 +3,18 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentType,
   type CSSProperties,
   type ReactNode,
   type RefObject,
 } from 'react';
-import { useApp, useAppState, useWorkflowAccess } from './app.js';
+import {
+  useApp,
+  useAppState,
+  useContextDemand,
+  useWorkflowAccess,
+} from './app.js';
 import { useSdkLocale } from './locale.js';
 import {
   AccessNotice,
@@ -29,7 +35,7 @@ export interface AppAccessProps {
   readonly icon?: ReactNode;
   /** Exact Pod URL → friendly name. A name never changes the destination. */
   readonly podNames?: Readonly<Record<string, string>>;
-  /** Explicit host-owned management toggle; never opens a dialog or starts login. */
+  /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
   /** Focus here if a focused access control disappears after successful recovery. */
   readonly focusTarget?: RefObject<HTMLElement | null>;
@@ -39,6 +45,12 @@ export interface AppAccessProps {
   readonly className?: string;
   readonly style?: CSSProperties;
 }
+const unavailablePod = Object.freeze({
+  current: false,
+  read: false,
+  revision: 0,
+});
+const noSubscription = () => () => {};
 
 /**
  * Centered login/recovery UI beside, never around, app content. Uses the host's
@@ -63,13 +75,23 @@ export function AppAccess({
 }: AppAccessProps) {
   const state = useAppState();
   const access = useWorkflowAccess();
+  const contextRequired = useContextDemand(open);
+  const podAccess = useSyncExternalStore(
+    state.pod?.subscribe ?? noSubscription,
+    state.pod?.getSnapshot ?? (() => unavailablePod),
+    state.pod?.getSnapshot ?? (() => unavailablePod),
+  );
+  const readable =
+    state.contextSelection === 'on-demand' ? podAccess.read : access.read;
   const { messages: m, direction, error } = useSdkLocale();
   const heldFocus = useRef(false);
   const callbackFailed =
     state.startup?.interaction === 'failed' ||
     state.startup?.interaction === 'cancelled';
   const needsAttention =
-    !access.read || access.connection?.catalogue.kind === 'failed';
+    !readable ||
+    (contextRequired &&
+      (!access.read || access.connection?.catalogue.kind === 'failed'));
   const hidden = !needsAttention && !open && !callbackFailed;
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
@@ -98,6 +120,19 @@ export function AppAccess({
   const active =
     access.connection?.session.kind === 'active' ||
     access.connection?.session.kind === 'renewing';
+  const missingScopes = Boolean(
+    access.connection?.missingRequiredScopes.length,
+  );
+  const showNotice =
+    active &&
+    available &&
+    (missingScopes ||
+      (contextRequired &&
+        Boolean(
+          access.connection?.selectedContext ||
+          access.connection?.catalogue.kind !== 'ready' ||
+          state.preset?.contextIri,
+        )));
   return (
     <section
       onFocusCapture={() => {
@@ -159,17 +194,13 @@ export function AppAccess({
                   />
                 ) : (
                   <AccessConnections
+                    contextRequired={contextRequired}
                     manage={open}
                     mode={mode}
                     {...(podNames ? { podNames } : {})}
                   />
                 )}
-                {active &&
-                  available &&
-                  (access.connection?.selectedContext ||
-                    access.connection?.missingRequiredScopes.length ||
-                    access.connection?.catalogue.kind !== 'ready' ||
-                    state.preset?.contextIri) && <AccessNotice />}
+                {showNotice && <AccessNotice />}
               </>
             )}
           </>
@@ -191,10 +222,12 @@ function AccessConnections({
   manage,
   mode,
   podNames,
+  contextRequired,
 }: {
   readonly manage: boolean;
   readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
+  readonly contextRequired: boolean;
 }) {
   const app = useApp();
   const state = useAppState();
@@ -421,7 +454,7 @@ function AccessConnections({
           </button>
         </>
       )}
-      {active && !fixedContext && (
+      {active && contextRequired && !fixedContext && (
         <label>
           {m.dataContext}
           <select
@@ -447,12 +480,13 @@ function AccessConnections({
           </select>
         </label>
       )}
-      {active && fixedContext && (
+      {active && contextRequired && fixedContext && (
         <p>
           {m.dataContext}: {contextLabel(fixedContext)}
         </p>
       )}
       {active &&
+        contextRequired &&
         !fixedContext &&
         c?.catalogue.kind === 'ready' &&
         readable.length === 0 && <p role="status">{m.noContexts}</p>}
@@ -484,12 +518,14 @@ function AccessConnections({
               >
                 {m.controls.updateAccess}
               </button>
-              <button
-                disabled={unavailable}
-                onClick={() => void act(() => app.refreshContexts(c.id))}
-              >
-                {m.controls.checkAccess}
-              </button>
+              {contextRequired && (
+                <button
+                  disabled={unavailable}
+                  onClick={() => void act(() => app.refreshContexts(c.id))}
+                >
+                  {m.controls.checkAccess}
+                </button>
+              )}
             </>
           )}
           {(manage || c.session.kind === 'ended') && (

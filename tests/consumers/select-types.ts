@@ -3,12 +3,18 @@ import type {
   BoundRead,
   AppSnapshot,
   BrowserRuntime,
+  BoundView,
+  LoadState,
+  PodRead,
+  ViewRead,
 } from '@sempods/app-sdk';
+import { createViewLoader } from '@sempods/app-sdk';
 import type {
   Pod,
   QueryResult,
   SelectResult,
   SparqlTerm,
+  JsonLd,
 } from '@sempods/client-sdk';
 
 // Compiled against installed declarations with noUncheckedIndexedAccess: false.
@@ -35,6 +41,37 @@ export async function read(pod: Pod) {
   }
   // @ts-expect-error Pod reads expose no write operations.
   void pod.subjects;
+}
+
+// Both inference and explicit result generics retain the supplied handle type.
+export function loaders(view: BoundView, pod: BoundPod) {
+  const scoped = createViewLoader(view, (target, signal) => {
+    const context: BoundView = target;
+    void context;
+    // @ts-expect-error A Context callback does not acquire Pod SELECT operations.
+    void target.sparql.select;
+    return target.sparql.construct('CONSTRUCT {} WHERE {}', { signal });
+  });
+  const overview = createViewLoader(pod, (target, signal) => {
+    const reader: BoundPod = target;
+    void reader;
+    // @ts-expect-error A Pod callback cannot edit Context subjects.
+    void target.subjects;
+    return target.sparql.select('SELECT ?x WHERE {}', { signal });
+  });
+  const state: LoadState<SelectResult> = overview.getSnapshot();
+  void state;
+  const podRead: PodRead<SelectResult> = (target, signal) =>
+    target.sparql.select('SELECT ?x WHERE {}', { signal });
+  const viewRead: ViewRead<readonly JsonLd[]> = (target, signal) =>
+    target.sparql.construct('CONSTRUCT {} WHERE {}', { signal });
+  createViewLoader<SelectResult>(pod, podRead);
+  createViewLoader<readonly JsonLd[]>(view, viewRead);
+  // @ts-expect-error A supplied Pod must not infer a Context callback.
+  createViewLoader(pod, viewRead);
+  // @ts-expect-error A supplied Context must not infer a Pod callback.
+  createViewLoader(view, podRead);
+  return { scoped, overview };
 }
 
 // The installed React-free app entry exposes the reader without a write surface.
