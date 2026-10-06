@@ -31,6 +31,8 @@
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
+    "docs/**/*",
+    "examples/**/*",
     "README.md",
     "PROVENANCE.md",
     "LICENSE",

@@ -1,3 +1,6 @@
 node_modules/
 dist/
 pnpm-lock.yaml
+# Generated app-author reference (scripts/package-docs.mjs)
+packages/app-sdk/docs/
+packages/app-sdk/examples/

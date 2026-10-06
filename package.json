@@ -8,7 +8,7 @@
     "node": ">=24.15.0"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node scripts/package-docs.mjs",
     "typecheck": "pnpm build && tsc -p packages/client-sdk/tsconfig.node.json && tsc -p packages/client-sdk/tsconfig.browser.json && tsc -p tsconfig.tests.json && tsc -p examples/tsconfig.json",
     "test": "vitest run",
     "test:consumers": "pnpm build && node scripts/test-consumers.mjs",
@@ -21,7 +21,7 @@
     "build:examples": "tsc -p examples/tsconfig.json && esbuild examples/node-script/src/main.ts --bundle --platform=node --format=esm --outfile=examples/node-script/dist/main.js",
     "test:todo": "pnpm build && node scripts/test-todo-consumer.mjs",
     "test:publish": "node scripts/test-publish-packages.mjs",
-    "check:docs": "node --test scripts/check-docs.test.mjs && node scripts/check-docs.mjs"
+    "check:docs": "node --test scripts/check-docs.test.mjs scripts/package-docs.test.mjs && node scripts/check-docs.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

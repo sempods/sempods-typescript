@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
 import { discoveryDocument, resourceAnswer } from './consumer-fixture.mjs';
+import { checkReference, ENTRY } from './package-docs.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const temp = await mkdtemp(join(tmpdir(), 'sempods-consumers-'));
@@ -55,10 +56,13 @@ try {
       .trim()
       .split('\n');
     assert.ok(
-      contents.every((file) =>
-        /^package\/(dist\/.+\.(js|d\.ts)|README\.md|PROVENANCE\.md|LICENSE|NOTICE|package\.json)$/.test(
-          file,
-        ),
+      contents.every(
+        (file) =>
+          /^package\/(dist\/.+\.(js|d\.ts)|README\.md|PROVENANCE\.md|LICENSE|NOTICE|package\.json)$/.test(
+            file,
+          ) ||
+          (manifest.name === '@sempods/app-sdk' &&
+            /^package\/(docs|examples)\/.+/.test(file)),
       ),
       'Unexpected packed file',
     );
@@ -76,6 +80,11 @@ try {
         ).version,
       );
       assert.equal(manifest.peerDependenciesMeta.react.optional, true);
+      // The app-author reference ships with the code (see package-docs.mjs).
+      assert.ok(
+        contents.includes(`package/${ENTRY}`),
+        `Missing package/${ENTRY}`,
+      );
     }
   }
   async function consumer(name, react) {
@@ -120,6 +129,12 @@ try {
   }
   const plain = await consumer('plain', false);
   const withReact = await consumer('react', true);
+  // The installed reference is complete on its own: entry present, no SDK
+  // contributor instructions, every local link and anchor inside the package.
+  assert.deepEqual(
+    checkReference(join(withReact, 'node_modules/@sempods/app-sdk')),
+    [],
+  );
   const strict = {
     target: 'ES2022',
     strict: true,
@@ -262,7 +277,9 @@ try {
   }
   // The quickstart's code blocks, verbatim, as a Vite react-ts app would compile
   // them: a renamed export or changed option breaks this check, not a reader.
-  const guide = await readFile(join(root, 'docs/quickstart.md'), 'utf8');
+  // Read from the installed package: the shipped reference must compile.
+  const shippedDocs = join(withReact, 'node_modules/@sempods/app-sdk/docs');
+  const guide = await readFile(join(shippedDocs, 'quickstart.md'), 'utf8');
   const block = (lang) =>
     guide.match(new RegExp('```' + lang + '\\n([\\s\\S]*?)```'))?.[1];
   const quickstart = join(withReact, 'quickstart');
@@ -337,7 +354,7 @@ try {
   assets.set('/quickstart.js', quickstartBundle.outputFiles[0].text);
   // Apply the PWA guide's App adaptation to the quickstart, compiling against
   // packed packages. Importing this component must not register a worker.
-  const pwaGuide = await readFile(join(root, 'docs/pwa.md'), 'utf8');
+  const pwaGuide = await readFile(join(shippedDocs, 'pwa.md'), 'utf8');
   const pwaBlocks = [...pwaGuide.matchAll(/```tsx\n([\s\S]*?)```/g)].map(
     (match) => match[1],
   );
