@@ -17,6 +17,12 @@ separate from the automated checks.
 
 ## Your first app
 
+Want your own small apps quickly, set up and kept up to date by your coding
+assistant? Start from the
+[sempods apps template](https://github.com/sempods/sempods-apps-template): one
+repository for your personal apps, built on this SDK. The steps below build an
+app from an empty folder instead.
+
 At a hackathon? Keep the [one-page quick reference](docs/hackathon.md) nearby.
 
 1. [Understand the idea and choose a small app](docs/build-your-app.md).
