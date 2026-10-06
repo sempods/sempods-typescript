@@ -16,6 +16,8 @@ export interface LeaveGuard {
   discard(): void;
 }
 export interface AppSnapshot {
+  /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
+  readonly contextSelection: 'required' | 'on-demand';
   readonly preset: PodPreset | undefined;
   /** Immutable runtime policy; undefined means unrestricted. */
   readonly allowedPods?: readonly string[];
@@ -31,8 +33,16 @@ export interface AppSnapshot {
   /** Hosts must prevent new user input while a guarded action is preparing. */
   readonly changing: boolean;
 }
+export interface AppControllerOptions {
+  /** Required preserves automatic catalogues; on-demand uses explicit discovery/Context flows. */
+  readonly contextSelection?: 'required' | 'on-demand';
+}
 /** Selection/leave policy only. Authentication and request authority remain in the runtime. */
-export function createAppController(runtime: BrowserRuntime) {
+export function createAppController(
+  runtime: BrowserRuntime,
+  options: AppControllerOptions = {},
+) {
+  const contextSelection = options.contextSelection ?? 'required';
   const defaultPodUrl =
     runtime.preset?.podUrl ??
     (runtime.allowedPods?.length === 1 ? runtime.allowedPods[0] : undefined);
@@ -54,6 +64,7 @@ export function createAppController(runtime: BrowserRuntime) {
       }
     | undefined;
   let snapshot: AppSnapshot = {
+    contextSelection,
     preset: runtime.preset,
     ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
     startup,
@@ -96,6 +107,7 @@ export function createAppController(runtime: BrowserRuntime) {
       }
     }
     snapshot = Object.freeze({
+      contextSelection,
       preset: runtime.preset,
       ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
       startup,
@@ -120,7 +132,9 @@ export function createAppController(runtime: BrowserRuntime) {
       }
     }
     // Load each accepted connection independently; failed checks await an explicit retry.
-    for (const connection of connections) {
+    for (const connection of contextSelection === 'required'
+      ? connections
+      : []) {
       if (
         connection.session.kind === 'active' &&
         connection.catalogue.kind === 'unknown'

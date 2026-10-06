@@ -9,7 +9,9 @@ import {
   bindResourceEditor,
   createViewLoader,
   type BoundView,
+  type BoundPod,
   type ViewRead,
+  type PodRead,
   type LoadState,
 } from '../index.js';
 import {
@@ -30,11 +32,17 @@ import {
   type RemoveSnapshotOutcome,
 } from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
-import { useController, useView, useWorkflowAccess } from './app.js';
+import {
+  useAppState,
+  useController,
+  useView,
+  useWorkflowAccess,
+} from './app.js';
 import { changed, observeWrites } from '../authoring/changes.js';
 
 const noopSubscribe = () => () => {};
 const loading = Object.freeze({ kind: 'loading' as const });
+const unavailable = Object.freeze({ kind: 'unavailable' as const });
 /** Reported in the console: a lost draft or write guard is an app bug. */
 function warn(message: string) {
   console.warn(`[@sempods/app-sdk] ${message}`);
@@ -100,19 +108,40 @@ function useDefinition<T>(input: T, hook: string) {
  * Call `reload()` after changing what `read` returns.
  */
 export function useLoad<T>(read: ViewRead<T>) {
-  const view = useView();
+  return useBoundLoad(useView(), read);
+}
+/**
+ * Loads the active BoundPod using the same cancellable/bounded loader as useLoad.
+ * Context/catalogue/label changes do not reload it. Changed Pod/session/grants
+ * retire obsolete results; no catalogue or Context fallback is requested.
+ * No reader means unavailable after startup completes or fails. Inline callbacks do not loop:
+ * call reload after changing the query or other read inputs.
+ */
+export function usePodLoad<T>(read: PodRead<T>) {
+  const { pod, startup, startupError } = useAppState();
+  return useBoundLoad(
+    pod,
+    read,
+    startup || startupError !== undefined ? unavailable : loading,
+  );
+}
+function useBoundLoad<T, H extends BoundView | BoundPod>(
+  view: H | null,
+  read: (handle: H, signal: AbortSignal) => ReturnType<ViewRead<T>>,
+  empty: LoadState<T> = loading,
+) {
   const latest = useRef(read);
   latest.current = read;
   const [active, setActive] = useState<{
-    view: BoundView;
-    loader: ReturnType<typeof createViewLoader<T>>;
+    view: H;
+    loader: ReturnType<typeof createViewLoader<T, H>>;
   } | null>(null);
   useEffect(() => {
     if (!view) {
       setActive(null);
       return;
     }
-    const loader = createViewLoader(view, (target, signal) =>
+    const loader = createViewLoader<T, H>(view, (target, signal) =>
       latest.current(target, signal),
     );
     setActive({ view, loader });
@@ -122,8 +151,8 @@ export function useLoad<T>(read: ViewRead<T>) {
   const loader = active?.view === view ? active.loader : null;
   const state: LoadState<T> = useSyncExternalStore(
     loader?.subscribe ?? noopSubscribe,
-    loader?.getSnapshot ?? (() => loading),
-    loader?.getSnapshot ?? (() => loading),
+    loader?.getSnapshot ?? (() => empty),
+    loader?.getSnapshot ?? (() => empty),
   );
   const reload = useCallback(async () => {
     await loader?.reload();

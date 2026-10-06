@@ -49,4 +49,12 @@ Independent `BoundPod` readers, their separate read revisions and selected-Conte
 label caching are new SDK code for #38, composed over the existing credential owner
 and production client executor. The stored session shape is unchanged. Runtime and
 packed-consumer checks use deterministic/loopback transports; no live scale claim
-is added. React Pod loaders and on-demand discovery remain tracked in #39.
+is added.
+
+The #39 controller/provider Context-selection policy, shared Pod/Context loader
+and React demand composition are new SDK code over those runtime facts and
+existing catalogue/selection actions. The copyable Pod-overview recipe is new
+app-owned example code using public exports. Its packed Chromium and React tests
+use synthetic transports/loopback responses, including native browser storage and
+real PKCE redirects. This establishes package composition and request behavior;
+live scale evidence remains separate in #40, with no new device-support claim.

@@ -66,6 +66,7 @@ These are the moving parts you will reuse:
 | ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | Start the app                             | `createBrowserRuntime` → `SempodsProvider` + `AppAccess`           | One stable runtime, identity and app name                                  |
 | Keep state attached to the chosen context | `TargetScreen`                                                     | Your screen inside it                                                      |
+| Read across the authorized Pod            | `usePodLoad` with provider `contextSelection="on-demand"`          | One SELECT/CONSTRUCT query; mount `TargetScreen` later for scoped editing  |
 | Describe a task                           | `fields`, `text`, `flag`, `iri`, `dateTime` from `client-sdk/edit` | Type and predicate IRIs; explicit text language                            |
 | Display tasks                             | `useList(task)`                                                    | The same field definition; render ready, loading and failure states        |
 | Add a task                                | `useCreation(task, options)`                                       | Initial draft, collection path, inputs calling `change`                    |

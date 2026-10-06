@@ -4,7 +4,9 @@ Create one browser runtime outside render and pass it to one `SempodsProvider`.
 The provider consumes `runtime.initialize()`; it does not create a second session
 coordinator. Equivalent inline locale/message props do not replace the runtime or
 editor. Changing the runtime object is an explicit application lifetime change;
-keep it stable. The caller owns `runtime.dispose()` at application shutdown.
+keep it stable. Keep `contextSelection` fixed for the provider's lifetime too:
+changing it replaces the controller and cancels a pending leave confirmation;
+it is not a guarded mode switch. The caller owns `runtime.dispose()` at application shutdown.
 
 ```tsx
 import { createBrowserRuntime } from '@sempods/app-sdk';
@@ -77,7 +79,7 @@ The initial login uses an `h1`; recovery with an existing target and explicitly
 opened management use an `h2`, below the app’s own main heading.
 
 The app may put a **Data access** button in its own menu or header. `open` shows
-management; toggling it changes presentation only. Pod/context changes still run
+management. In on-demand mode, opening it also demands Context discovery. Pod/context changes still run
 through the same leave guards. Supply `focusTarget` for focus recovery when a
 focused access control disappears. For example, inside the provider:
 
@@ -187,8 +189,8 @@ example with a `key`) to apply a different custom mapping. When a real definitio
 change discards an unsaved draft or a pending or unconfirmed write, the console
 says so.
 
-`useLoad(read)` accepts a read-only domain function `(view, signal) =>
-Promise<QueryResult<T> | Invalidated>`. It can combine a query and cancellable
+`useLoad(read)` accepts `ViewRead<T>`, a read-only domain function `(view, signal) =>
+Promise<BoundRead<QueryResult<T>>>`. It can combine a query and cancellable
 read-only domain checks; it is not an OAuth hook. Pass the signal to each read.
 States are `loading`, `ready`, `unavailable`, `cancelled` or `failed`; failed data
 is not an empty result. `reload()` starts an explicit new cycle; `cancel()` stops
@@ -199,6 +201,69 @@ Recovery can retry an invalidated read once within the same target lifetime.
 Repeated invalidation settles unavailable; target switch/disconnect/cancellation
 never restarts an old loader. Write-only access loss keeps displayed read data;
 read loss removes it.
+
+## Pod overviews with Contexts on-demand
+
+Keep `contextSelection` omitted (or `'required'`) for the existing Context-based
+app: the controller automatically loads catalogues for accepted connections and
+`AppAccess` waits for a readable Context. For an overview, opt in on the provider:
+
+```tsx
+<SempodsProvider runtime={runtime} contextSelection="on-demand">
+  <AppAccess appName="My overview" />
+  <Overview />
+  {editing && (
+    <TargetScreen>
+      <Editor />
+    </TargetScreen>
+  )}
+</SempodsProvider>
+```
+
+`Overview` calls `usePodLoad((pod, signal) => pod.sparql.select(query, { signal }))`
+or `construct`; `useAppState().pod` exposes the same active `BoundPod`. The hook
+infers the callback's Pod handle and data type, with the same states, `reload`,
+`cancel`, obsolete-result handling and bounded recovery as `useLoad`. Pass the
+signal into every read. Ordinary renders, Context switches, catalogue/label
+updates do not restart it. Pod/session changes retire the old loader; scope loss
+clears displayed data and changed grants renew it within the existing recovery
+bound. An absent reader reports unavailable once startup completes or fails. Inline reads
+do not loop; call `reload()` when your query/domain inputs change.
+
+Pod-only startup, restored sessions, first reads and recovery initiate **zero**
+catalogue/description requests in this mode, including with remembered/preset
+Contexts and several saved connections. `AppAccess` hides for usable Pod access,
+reacts to session/required-scope loss, and leaves the overview mounted. Pod `403`
+is an operation refusal; the hook reports failed without catalogue recovery.
+Failed operations remain failed after a grant change until explicit `reload()`;
+reauthorization creates a new handle and loader. A grant change refreshes an
+already ready Pod result, without treating a refusal as evidence that repeating
+that operation will succeed.
+
+Mount `TargetScreen` as soon as the Context flow is wanted, **before** a view
+exists. It demands the active eligible connection's catalogue even if it mounted
+before login completed. Concurrent/StrictMode demand shares the runtime operation.
+`AppAccess` then exposes the chooser, empty/error feedback and explicit **Check
+access** retry. Opening its `open` management also demands discovery. Ready,
+empty and failed catalogues are reused, with no effect-driven retry loop.
+Custom UI uses existing `useApp().refreshContexts(id)` and guarded `selectContext`;
+it supplies its own chooser/retry presentation. No separate activation API is needed.
+
+`useWorkflowAccess` stays Context-only: `read`/`write` remain false before a
+validated view, even when the Pod overview is ready. Fresh catalogue evidence
+validates preset/remembered targets only on demand; an unreadable exact preset
+never falls back to another Context. Selection immediately uses fallback names;
+only the selected Context's label loads, and a pending/failed label never gates
+reads, selection or drafts. The policy does not change the complete-catalogue API.
+
+The [copyable overview recipe](../examples/todo/recipes/pod-overview.tsx) combines
+a Pod SELECT with provenance and a later Context-bound creation form. It keeps
+the demand boundary mounted while the form owns drafts/outcomes. An overview row
+is not an editable snapshot: editing existing data requires a known target and
+a fresh Context-bound resource read with its ETag. The packed browser test runs
+this recipe with installed archives; live scalability remains #40.
+
+## Lists and creation
 
 `useList(definition, { type? })` is the ordinary typed-list path. It uses
 `listSubjects` through the same loader, exposing the same states/cancel/reload.
@@ -400,7 +465,8 @@ Failed catalogue checks remain unresolved, with explicit failure feedback;
 last accepted access facts are retained rather than inferred to be denied. The editor stays mounted next to recovery feedback.
 
 `useWorkflowAccess()` exposes current read/write/catalogue facts and requested
-feature scopes with required/optional and granted/missing/unknown status. Grants
+feature scopes with required/optional and granted/missing/unknown status. It remains
+Context-only; use `usePodLoad` for independent Pod reads. Grants
 come from the accepted session; context access comes from the catalogue. Missing
 optional features do not invalidate the session. No support or consent decision
 is inferred from an absent grant. Each server operation remains authoritative.
@@ -541,7 +607,11 @@ non-React UI; call `start()` and `stop()` around its lifetime. Its snapshot also
 exposes the active `BoundPod` as `pod`, independently of the Context `view`.
 Use its `sparql.select`/`construct` methods and subscribe to its access snapshot
 for direct headless Pod reads; see [the runtime reader](browser-runtime.md#read-the-authorized-pod-dataset).
-React Pod loaders and on-demand access/discovery remain the next increment. Register draft guards
+Pass `{ contextSelection: 'on-demand' }` as the second controller argument to
+defer catalogues; explicitly call `runtime.loadContexts(id)` for a Context flow.
+`createViewLoader(pod, read)` accepts `PodRead<T>` through the same bounded loader
+as Context reads, with correlated callback types and no scoped-to-Pod fallback.
+Register draft guards
 with `register`. Guards default to local scope; use `scope: 'target'` for drafts
 or mutation outcomes that survive row navigation and `unconfirmed()` for pending
 write-outcome evidence. Headless hosts must prevent input while the controller's

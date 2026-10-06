@@ -143,11 +143,11 @@ use the Pod's default graph. CONSTRUCT returns expanded JSON-LD nodes without
 automatic provenance. Editing a query result requires an explicit Context and
 a fresh Context-bound resource read with its applicable ETag.
 
-This surface is portable client-sdk functionality. Browser-runtime Pod handles
-and on-demand Context selection are tracked in
-[#38](https://github.com/sempods/sempods-typescript/issues/38) and
-[#39](https://github.com/sempods/sempods-typescript/issues/39); existing app-sdk
-flows still require a Context.
+This surface is portable client-sdk functionality. app-sdk supplies independent
+`BoundPod` readers and `usePodLoad`; provider/controller `contextSelection: 'on-demand'`
+defers catalogue discovery until a Context flow is requested. The compatibility
+default is `'required'`. See
+[React Pod overviews](https://github.com/sempods/sempods-typescript/blob/v0.3.0/docs/react-authoring.md#pod-overviews-with-contexts-on-demand).
 
 ## Reading and writing one context
 

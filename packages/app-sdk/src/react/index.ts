@@ -14,6 +14,7 @@ export {
 export type { AppActions } from './app.js';
 export {
   useLoad,
+  usePodLoad,
   useList,
   useCreation,
   useResourceEditor,
