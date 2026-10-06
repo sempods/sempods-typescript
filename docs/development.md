@@ -81,7 +81,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   IndexedDB/Web Locks and real loopback Code + PKCE redirects/exchanges. Checks
   dynamic/did:web identity, durable reload, sequential multi-Pod, reactive refresh,
   second-tab exclusion and cookie omission. Uses the production client by default,
-  including editor composition, conditional saves, conflicts and an applied write
+  including one/set/free Pod restrictions, excluded saved sessions and callbacks,
+  and restoring preserved sessions after widening the policy. Also covers
+  editor composition, conditional saves, conflicts and an applied write
   whose answer is withheld at the test network boundary (no SDK resend).
 
 The consumer harness uses npm to install exact SDK tarballs and exact direct test

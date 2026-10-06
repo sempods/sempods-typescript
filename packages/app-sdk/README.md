@@ -16,6 +16,11 @@ controls offer sign-in without a URL input, and guarded `useApp().connect()` can
 omit the URL. `runtime.preset` / `useAppState().preset` expose the frozen
 configuration (`PodPreset`). The optional exact context requires fresh catalogue
 evidence; other stored Pods are preserved. This is a preset, not an allowlist.
+Add `allowedPods: [url]` (or several canonical URLs) to enforce an immutable Pod
+restriction; omission stays unrestricted. Foreign stored sessions remain saved
+but cannot restore or yield views under that policy. `runtime.allowedPods` and
+`useAppState().allowedPods` expose it; a sole allowed Pod is also the default for
+argument-free connect. Existing default controls use `preset` for presentation.
 Screens receive views without credentials. It creates no request,
 navigation or storage on import or construction.
 

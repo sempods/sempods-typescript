@@ -141,8 +141,11 @@ Neither a configured target nor readable catalogue evidence overrides required
 feature scopes or the server's authorization.
 
 _Why:_ a convenient default and an enforced allowed-Pod policy are different
-contracts. Future Pod sets/restrictions can add explicit policy without turning
-existing presets into authorization or changing stored identity. Runtime and
+contracts. The separate `allowedPods` option restricts exact canonical Pod URLs
+without turning existing presets into authorization or changing stored identity.
+Foreign records stay durable but cannot restore, become targets or exchange a
+callback code under the restriction. The list is immutable for the runtime's
+lifetime; omission preserves unrestricted behavior. Runtime and
 React export-name budgets remain unchanged; the client exposes the existing
 canonical context predicate as `isContextIri` so configuration and catalogue
 validation do not drift.

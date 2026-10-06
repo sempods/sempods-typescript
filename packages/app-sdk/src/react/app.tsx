@@ -26,7 +26,7 @@ export interface AppActions {
   selectConnection(id: string): Promise<boolean>;
   /** Select one readable context of the active connection; guarded the same way. */
   selectContext(iri: string): Promise<boolean>;
-  /** Sign in to a Pod; omit the URL to reuse/connect the runtime preset. */
+  /** Sign in to a Pod; omit the URL to reuse/connect the preset or sole allowed Pod. */
   connect(url?: string): Promise<boolean>;
   /** Sign in again for an existing connection. */
   authorize(id: string): Promise<boolean>;

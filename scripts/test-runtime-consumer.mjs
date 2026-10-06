@@ -1,4 +1,4 @@
-/* global document, window, URLSearchParams */
+/* global document, window, URLSearchParams, sessionStorage */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
@@ -566,6 +566,107 @@ try {
         .every((c) => c.session.kind === 'active'),
   );
   await busy.close();
+  // A deployment can narrow its allowed Pods without changing the durable namespace.
+  await page.goto(origin + '/app?identity=dynamic');
+  await ready();
+  await restored();
+  const bobId = await page.evaluate(
+    () =>
+      window.fixture.runtime
+        .getSnapshot()
+        .find((c) => c.podUrl.endsWith('/bob')).id,
+  );
+  await page.evaluate(() => sessionStorage.setItem('fixture-policy', 'one'));
+  const beforeRestricted = traffic.length;
+  await page.reload();
+  await ready();
+  await restored();
+  assert.deepEqual(
+    await page.evaluate(async (bobId) => {
+      const r = window.fixture.runtime;
+      const existing = r.getSnapshot()[0];
+      let rejected = false;
+      let bound = false;
+      try {
+        await r.connect(window.location.origin + '/bob');
+      } catch {
+        rejected = true;
+      }
+      try {
+        r.bind(bobId);
+        bound = true;
+      } catch {
+        /* Excluded IDs cannot bind. */
+      }
+      return {
+        count: r.getSnapshot().length,
+        pod: new URL(existing.podUrl).pathname,
+        reused: (await r.connect()).id === existing.id,
+        rejected,
+        bound,
+      };
+    }, bobId),
+    { count: 1, pod: '/alice', reused: true, rejected: true, bound: false },
+  );
+  assert.ok(
+    traffic.slice(beforeRestricted).every((t) => !t.path.startsWith('/bob/')),
+  );
+  await page.evaluate(() => sessionStorage.setItem('fixture-policy', 'set'));
+  await page.reload();
+  await ready();
+  await restored();
+  assert.equal(
+    await page.evaluate(() => window.fixture.runtime.getSnapshot().length),
+    2,
+  );
+  assert.equal(
+    await page.evaluate(async () => {
+      try {
+        await window.fixture.runtime.connect();
+        return false;
+      } catch {
+        return true;
+      }
+    }),
+    true,
+  );
+  await page.evaluate(() => sessionStorage.removeItem('fixture-policy'));
+  await page.reload();
+  await ready();
+  await restored();
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.fixture.runtime
+          .getSnapshot()
+          .filter((c) => c.session.kind === 'active').length,
+    ),
+    2,
+  );
+  // Narrow the next page while this runtime still owns a legitimate Bob attempt.
+  const beforeForeignCallback = exchanges;
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.evaluate(async (bobId) => {
+      sessionStorage.setItem('fixture-policy', 'one');
+      await window.fixture.runtime.beginAuthorization(bobId);
+    }, bobId),
+  ]);
+  await page.waitForURL('**/app?identity=dynamic');
+  await ready();
+  assert.equal(
+    await page.evaluate(() => window.fixture.report.problem),
+    'configuration',
+  );
+  assert.equal(exchanges, beforeForeignCallback);
+  assert.equal(
+    await page.evaluate(() => window.fixture.runtime.getSnapshot().length),
+    1,
+  );
+  await page.evaluate(() => sessionStorage.removeItem('fixture-policy'));
+  console.log(
+    'Packed Pod policy: one/set/free configuration, exact default reuse, excluded restore/bind/connect, widening and rejected callback passed.',
+  );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');
   await ready();
