@@ -114,3 +114,19 @@ separate maintainer action: a version tag runs the publish workflow
 Apache-2.0 and documentation under CC BY 4.0 (see LICENSE and NOTICE); preserve
 per-package PROVENANCE.md. See [contributing](contributing.md) for the change
 workflow and [migration](migration.md) for app upgrade guidance.
+
+Runtime Pod-reader regressions cover catalogue-free direct binding/SELECT/CONSTRUCT,
+independent read revisions through Context changes, session/grant invalidation,
+required scopes, policy, refusal and cancellation. Selected-label fixtures cover
+catalogues of 1, 50, 51 and 10,000 entries, restoration, cache/coalescing and stale
+responses, including manage-only grants/revocations for cached, failed and pending
+label attempts while Pod reads remain valid. Packed React-free declarations include `BoundPod` and `AppSnapshot.pod`;
+the Chromium runtime consumer verifies bound SELECT/CONSTRUCT with no dataset
+parameters and no accompanying catalogue requests. These are client/runtime
+fixture checks; #40 owns live scale evidence.
+
+Pod/label regressions and the packed Chromium runtime also run with
+`AbortSignal.any` unavailable. Signal tests verify cancellation propagation and
+listener cleanup, and controller regressions keep unexpected binding defects
+visible. Removing an API in Chromium is compatibility regression evidence, not
+a test on an older Safari/iOS device.

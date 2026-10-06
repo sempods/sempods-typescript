@@ -8,7 +8,7 @@ import type {
 import type { ClientIdentity } from '@sempods/client-sdk/oauth';
 import type { SessionLocks, SessionStore } from '../sessions/types.js';
 import type { RuntimeProblem } from './errors.js';
-import type { BoundRead, BoundView } from './view.js';
+import type { BoundPod, BoundRead, BoundView } from './view.js';
 
 export type FeatureScopes = {
   readonly required?: readonly string[];
@@ -24,7 +24,7 @@ export type SessionFact =
     };
 /**
  * Registry labels (`rdfs:label`, SPS-CTX-032) keyed by exact context IRI, read
- * in the background after a ready catalogue. Display text only: absent while
+ * only for the selected, validated Context in the background. Display text only: absent while
  * unread, for contexts without a label and after a failed read; never an
  * identity or a grant.
  */
@@ -157,5 +157,10 @@ export interface BrowserRuntime {
   ): Promise<BoundRead<CatalogueResult>>;
   selectContext(id: string, iri: string): void;
   bind(id: string): BoundView;
+  /** Requires a signed-in eligible connection, but neither selection nor catalogue.
+   * Missing required scopes leave the handle current with read=false and stop dispatch.
+   * Pod 403 returns refused without catalogue recovery or inferred session changes.
+   */
+  bindPod(id: string): BoundPod;
   dispose(): void;
 }

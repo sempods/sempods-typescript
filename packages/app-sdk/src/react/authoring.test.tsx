@@ -73,8 +73,7 @@ function Picker() {
     </button>
   );
 }
-async function connected() {
-  const f = fixture();
+async function connected(f = fixture()) {
   const session = await f.login();
   f.setResource(async () =>
     Response.json(
@@ -921,15 +920,15 @@ it('distinguishes an unconnected preset from a same-named active Pod and exposes
 });
 
 it.each(['access', 'connections'] as const)(
-  '%s prefers late context labels, disambiguates duplicates and retains the exact target and draft',
+  '%s shows the selected late label, disambiguates fallback duplicates and retains target/draft through cached reload',
   async (kind) => {
-    const f = await connected();
+    const source = fixture();
     const pending = deferred<void>();
     let labels: Record<string, string> = {
-      [work]: '  Team\u202e  ',
+      [work]: '  personal\u202e  ',
       [personal]: 'Team',
     };
-    f.setDescriptions(async (url) => {
+    source.setDescriptions(async (url) => {
       await pending.promise;
       return Response.json({
         '@id': url,
@@ -947,6 +946,7 @@ it.each(['access', 'connections'] as const)(
           : {}),
       });
     });
+    const f = await connected(source);
     render(
       <SempodsProvider runtime={f.runtime}>
         {kind === 'access' ? (
@@ -964,11 +964,11 @@ it.each(['access', 'connections'] as const)(
     await screen.findByRole('option', { name: 'work' });
     await act(async () => pending.resolve());
     const option = await screen.findByRole('option', {
-      name: `Team · ${work}`,
+      name: `personal · ${work}`,
     });
     expect((option as HTMLOptionElement).value).toBe(work);
     expect(
-      screen.getByRole('option', { name: `Team · ${personal}` }),
+      screen.getByRole('option', { name: `personal · ${personal}` }),
     ).toBeTruthy();
     expect(
       (screen.getByLabelText('Data context') as HTMLSelectElement).value,
@@ -980,8 +980,16 @@ it.each(['access', 'connections'] as const)(
     expect(details.textContent).toContain(personal);
     labels = { [work]: 'Arbeit' };
     await act(() => f.runtime.loadContexts(f.id));
-    await screen.findByRole('option', { name: 'Arbeit' });
-    expect(screen.getByRole('option', { name: 'personal' })).toBeTruthy();
+    // Unchanged catalogue authority reuses the selected label; no sweep or refresh.
+    expect(
+      (
+        screen.getByRole('option', {
+          name: `personal · ${work}`,
+        }) as HTMLOptionElement
+      ).value,
+    ).toBe(work);
+    expect(f.count('/_system/contexts/personal')).toBe(0);
+    expect(f.count('/_system/contexts/work')).toBe(1);
     expect(screen.getByLabelText('Title')).toBe(field);
     expect((field as HTMLInputElement).value).toBe('Unsaved');
   },

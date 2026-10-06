@@ -1,7 +1,7 @@
 # Browser runtime
 
 The non-React entry `@sempods/app-sdk` exports `createBrowserRuntime`.
-It coordinates browser login, durable connections and bound context views.
+It coordinates browser login, durable connections, bound Context views and independent Pod readers.
 Portable OAuth steps belong to `@sempods/client-sdk/oauth`; only the client
 executor sends and resends data operations. Importing either package starts
 neither requests nor storage.
@@ -221,18 +221,24 @@ Snapshots contain session, feature-scope and catalogue facts, never credentials.
 `requestedScopes`, `grantedScopes` and `missingRequiredScopes` remain distinct.
 Missing required features block bound operations; a missing optional feature
 does not. The catalogue supplies context rights separately from token scopes.
-After a ready catalogue, the runtime reads the registry description of each
-readable context in the background (at most 3 at once and 50 per catalogue) and
-publishes `catalogue.labels`: exact context IRI → `rdfs:label` (SPS-CTX-032).
-Labels are display text only, never identities or grants; they never block
-selection, a failed read leaves that label out, and the known labels stay while
-a later catalogue reloads.
+The runtime reads a registry description only for the currently selected,
+validated Context, including an explicitly selected, preset or remembered target.
+It publishes `catalogue.labels`: exact IRI → `rdfs:label` (SPS-CTX-032).
+Other picker entries use immediate IRI/derived-name fallbacks, even with a small
+catalogue. No catalogue size triggers a description sweep. Labels are display
+text only, never identities or grants, and never block selection or data reads.
+Pending attempts coalesce; completed successes, absence and failures are cached
+within the connection/access lifetime. Unchanged catalogue reloads and
+reselection reuse that cache; failures retain the fallback without automatic
+retry. Selection changes abort pending label reads and ignore stale responses.
+Revoked/changed Context rights discard that label's authority; changed grants,
+session end or a new authorization generation clear the cache. An unchanged
+credential renewal does not itself refresh labels.
 There is no automatic consent redirect after a refusal.
 
 Select one readable context explicitly. Empty selection does not mean all or
 a default context. A writable target is an application requirement derived
-from catalogue facts, not a second login implementation. A future context-free
-Pod profile is outside this increment.
+from catalogue facts, not a second login implementation. Read-only Pod queries use the separate reader below.
 
 A `BoundView` exposes client subject/query operations without tokens. Its
 `key` stays stable through refresh and same-target access changes. Switching
@@ -252,6 +258,56 @@ reads only when the selected context's access facts change; unchanged rights,
 unrelated-context changes and failed reloads retain eligible reads. A caller can
 cancel its wait for a write-triggered revalidation; the already confirmed write
 result still returns, and the shared catalogue operation may finish separately.
+
+## Read the authorized Pod dataset
+
+```ts
+const reader = runtime.bindPod(connectionId);
+if (reader.getSnapshot().read) {
+  const result = await reader.sparql.select(
+    'SELECT ?subject WHERE { ?subject ?predicate ?object }',
+  );
+  if (result.kind === 'ok') {
+    for (const row of result.body.rows) {
+      if (row.subject?.type === 'iri') console.log(row.subject.value);
+    }
+  }
+}
+```
+
+Binding and dispatch require no selected Context or catalogue and initiate no
+discovery. `bindPod` requires an eligible signed-in connection; it rejects during
+restoration or after session end. A handle may be current with `read: false`
+when required scopes are missing; dispatch rechecks eligibility and returns
+`invalidated` without sending. Readability means permission to attempt the read,
+not that readable data exists. The server authorizes its dataset.
+
+The cached `BoundPod.key` identifies connection, subject, Pod and authorization
+generation. It exposes only `select`/`construct` and a stable immutable snapshot
+with `current`, `read` and `revision`. Subscriptions have no initial callback and
+notify only changes to those reader facts. Context selection (including A → B → A),
+catalogue loading/failure/permission updates and labels neither cancel pending
+Pod reads nor change their snapshot. Session end, disconnect, disposal, changed
+subject/generation and changed granted scopes invalidate pending results. A new
+generation gets a new handle; an old handle never revives. Changed scopes within
+a renewal advance the read revision, while unchanged grants preserve it.
+Caller cancellation returns `cancelled`; invalidation returns `invalidated`,
+including when a late transport answer would otherwise succeed.
+Cancellation does not require the newer `AbortSignal.any` browser API.
+
+Pod reads share the runtime credential owner and the production client's executor
+implementation. A bound client guard and the captured lifetime signal apply on
+initial dispatch and authentication resend. The existing bounded `401` renewal
+remains shared across readers. A Pod `403` returns `refused` without catalogue
+revalidation, automatic renewal or inferred global session/access changes.
+Context-view `403` recovery retains its existing behavior.
+
+`createAppController(runtime).getSnapshot().pod` exposes the active eligible Pod
+reader, or `null` during unresolved/signed-out startup. Changing the active Pod
+exposes its handle; another connection's reader retains its own lifetime.
+Controller startup still automatically loads catalogues as before. React Pod
+loaders and on-demand discovery are tracked in
+[#39](https://github.com/sempods/sempods-typescript/issues/39).
 
 ## Durable sessions and refresh
 
@@ -385,7 +441,7 @@ integration tests exercise it with the runtime-bound editor.
 deterministic transports and the production client. `pnpm test:runtime` installs packed SDKs outside
 the workspace and runs Chromium with real redirects, PKCE exchanges, IndexedDB and
 Web Locks against a loopback server. It checks sequential multi-Pod, reload,
-did:web without DCR, reactive refresh, cookie omission, context-scoped queries,
+did:web without DCR, reactive refresh, cookie omission, Context-scoped and bound Pod queries,
 and editor saves with strong `If-Match`, conflicts and unknown write outcomes.
 The unknown-outcome scenario applies the request on the server and deliberately
 withholds its answer at the test network boundary. The SDK does not resend it;
@@ -402,4 +458,4 @@ transfers attempts or tokens between storage containers. See
 Owner live validation remains follow-up work. React/AppShell and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
 checks. Multi-tab concurrent operation, proactive refresh, revocation, anonymous
-reading and a context-free profile are not implemented here.
+reading and on-demand controller/React discovery are not implemented here.

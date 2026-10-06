@@ -2,7 +2,7 @@
 
 Browser coordination and presentation primitives, with optional React.
 
-- `.`: `createBrowserRuntime`, connection/startup/access facts, `BoundView`,
+- `.`: `createBrowserRuntime`, connection/startup/access facts, `BoundView`, `BoundPod`,
   runtime errors, headless authoring/selection helpers, locale/formatting and EN/DE messages.
 - `./react`: `SempodsProvider`, composable `AppAccess`, optional `AppShell`, view/load/workflow/edit hooks,
   `useList`, guarded `useCreation`/`useSelection`, `TargetScreen`, standard
@@ -11,7 +11,7 @@ Browser coordination and presentation primitives, with optional React.
 
 The runtime handles dynamic/did:web Code + PKCE login, durable sessions,
 sequential multi-Pod connections, shared reactive refresh and lifetime-bound
-views. Configure `preset: { podUrl, contextIri? }` for a known Pod: the default
+views and independent Pod readers. Configure `preset: { podUrl, contextIri? }` for a known Pod: the default
 controls offer sign-in without a URL input, and guarded `useApp().connect()` can
 omit the URL. `runtime.preset` / `useAppState().preset` expose the frozen
 configuration (`PodPreset`). The optional exact context requires fresh catalogue
@@ -24,7 +24,7 @@ argument-free connect. `AppAccess` supplies a centered login/recovery surface,
 optional app icon and friendly Pod selection, hiding when usable. It sits beside
 app content; the app owns its layout and may open management explicitly. Legacy
 AppShell composes a title, management control and AppAccess; its existing props and replaceable controls remain supported. Access, editor and notice components share inherited `--sempods-*` styling tokens.
-Screens receive views without credentials. It creates no request,
+Screens receive views and read-only Pod handles without credentials. It creates no request,
 navigation or storage on import or construction.
 
 The runtime uses the production `createPod` client by default; `podFactory` is
@@ -65,6 +65,27 @@ The package installs client-sdk. Plain consumers need neither React nor its type
 packed-consumer checks prove this with actual installations. Licensed under
 Apache-2.0 (see LICENSE and NOTICE). See [provenance](PROVENANCE.md) and
 [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.3.0/docs/development.md).
+
+## Pod reads without a Context
+
+Use `runtime.bindPod(connectionId)` after the connection is signed in. Its
+`select`/`construct` methods query the authorized Pod dataset without a catalogue
+or selected Context. The cached `BoundPod` exposes a stable access snapshot and
+subscription; missing required scopes set `read: false` and block dispatch.
+Context changes, catalogue outcomes and labels do not invalidate its reads.
+Session replacement/end and changed grants do. A Pod `403` is an operation refusal,
+without a catalogue reload or inferred session change. Writes remain on `BoundView`.
+The headless controller exposes the active reader as `AppSnapshot.pod`.
+
+Automatic Context descriptions now load only for the selected, validated Context,
+including preset/remembered restoration. Other picker entries immediately use
+IRI/derived names, for small and large Pods alike. Completed label attempts are
+cached within the access lifetime; failed attempts keep the fallback without an
+automatic retry loop. Selection changes cancel pending labels and ignore stale
+answers. Session/grant changes clear label authority.
+
+Controller startup still requests catalogues under its existing policy. React Pod
+loaders and on-demand discovery are the next increment (#39).
 
 ## Documentation for app authors and AI assistants
 

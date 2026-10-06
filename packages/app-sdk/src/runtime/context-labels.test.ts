@@ -1,5 +1,7 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import type { PodFetch } from '@sempods/client-sdk';
+import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
+import { createBrowserRuntime } from './runtime.js';
 import {
   catalogue,
   deferred,
@@ -7,8 +9,13 @@ import {
   personal,
   pod,
   work,
+  settleLease,
+  restored,
+  jwt,
 } from './fixture.test.js';
 
+const runtimes: BrowserRuntime[] = [];
+afterEach(() => runtimes.splice(0).forEach((r) => r.dispose()));
 const sd = 'http://www.w3.org/ns/sparql-service-description#';
 function description(iri: string, label?: string) {
   return Response.json({
@@ -21,187 +28,393 @@ function description(iri: string, label?: string) {
       : {}),
   });
 }
-const labelled =
-  (labels: Record<string, string>): PodFetch =>
-  async (url) =>
-    url in labels || url === work || url === personal
-      ? description(url, labels[url])
-      : new Response(null, { status: 404 });
-
-it('publishes registry labels after a ready catalogue, without touching contexts or selection', async () => {
-  const f = fixture();
-  f.setDescriptions(labelled({ [work]: 'Arbeit' }));
-  const { runtime, id } = await f.login();
-  await vi.waitFor(() => {
-    const fact = runtime.getSnapshot()[0]!.catalogue;
-    expect(fact.kind === 'ready' && fact.labels).toEqual({ [work]: 'Arbeit' });
-  });
-  const connection = runtime.getSnapshot()[0]!;
-  expect(connection.id).toBe(id);
-  expect(connection.selectedContext).toBe(work);
-  expect(
-    connection.catalogue.kind === 'ready' && connection.catalogue.contexts,
-  ).toEqual([
-    { iri: work, readable: true, writable: true, manageable: false },
-    { iri: personal, readable: true, writable: false, manageable: false },
-  ]);
-  runtime.dispose();
-});
-
-it('tolerates failed reads, keeps labels while reloading and renews them on refresh', async () => {
-  const f = fixture();
-  f.setDescriptions(labelled({ [work]: 'Arbeit', [personal]: 'Privat' }));
-  const { runtime, id } = await f.login();
-  await vi.waitFor(() => {
-    const fact = runtime.getSnapshot()[0]!.catalogue;
-    expect(fact.kind === 'ready' && fact.labels).toEqual({
-      [work]: 'Arbeit',
-      [personal]: 'Privat',
-    });
-  });
-  // Reloading keeps the known labels until the new ones are read.
-  const reload = deferred<Response>();
-  f.setCatalogue(() => reload.promise);
-  const refresh = runtime.loadContexts(id);
-  await vi.waitFor(() =>
-    expect(runtime.getSnapshot()[0]!.catalogue).toMatchObject({
-      kind: 'loading',
-      labels: { [work]: 'Arbeit', [personal]: 'Privat' },
-    }),
-  );
-  // One description fails, one changed: the failed one is simply left out.
-  f.setDescriptions(async (url) => {
-    if (url === personal) throw new Error('network');
-    return description(url, 'Büro');
-  });
-  reload.resolve(catalogue());
-  await refresh;
-  await vi.waitFor(() => {
-    const fact = runtime.getSnapshot()[0]!.catalogue;
-    expect(fact.kind === 'ready' && fact.labels).toEqual({ [work]: 'Büro' });
-  });
-  runtime.dispose();
-});
-
-it('reads at most three descriptions at once and publishes nothing after disconnect', async () => {
-  const f = fixture();
-  const many = Array.from(
-    { length: 60 },
-    (_, i) => `${pod}/_system/contexts/c${i}`,
-  );
-  f.setCatalogue(async () => catalogue([work, ...many], [work]));
-  const gate = deferred<void>();
-  let open = 0;
-  let peak = 0;
-  f.setDescriptions(async (url) => {
-    open++;
-    peak = Math.max(peak, open);
-    await gate.promise;
-    open--;
-    return description(url, 'x');
-  });
-  const { runtime, id } = await f.login();
-  await vi.waitFor(() => expect(open).toBe(3));
-  const snapshots: unknown[] = [];
-  runtime.subscribe(() => snapshots.push(runtime.getSnapshot()));
-  await runtime.disconnect(id);
-  const afterDisconnect = snapshots.length;
-  gate.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(peak).toBe(3);
-  // The reads stop with the connection; nothing is published for it afterwards.
-  expect(f.count('/_system/contexts/c59')).toBe(0);
-  expect(snapshots.length).toBe(afterDisconnect);
-  expect(runtime.getSnapshot()).toEqual([]);
-  runtime.dispose();
-});
-
-it('caps the reads at 50 contexts per catalogue', async () => {
-  const f = fixture();
-  const many = Array.from(
-    { length: 60 },
-    (_, i) => `${pod}/_system/contexts/c${i}`,
-  );
-  f.setCatalogue(async () => catalogue([work, ...many], [work]));
-  f.setDescriptions(async (url) => description(url, url.split('/').at(-1)));
-  const { runtime } = await f.login();
-  await vi.waitFor(() => {
-    const fact = runtime.getSnapshot()[0]!.catalogue;
-    expect(fact.kind === 'ready' && Object.keys(fact.labels ?? {}).length).toBe(
-      50,
-    );
-  });
-  const reads = f.fetch.mock.calls.filter(([url]) =>
-    /\/_system\/contexts\/[^/]+$/.test(new URL(url).pathname),
-  ).length;
-  expect(reads).toBe(50);
-  runtime.dispose();
-});
-
-it('drops labels of contexts the refreshed catalogue no longer lists', async () => {
-  const f = fixture();
-  f.setDescriptions(labelled({ [work]: 'Arbeit', [personal]: 'Privat' }));
-  const { runtime, id } = await f.login();
-  await vi.waitFor(() => {
-    const fact = runtime.getSnapshot()[0]!.catalogue;
-    expect(
-      fact.kind === 'ready' && Object.keys(fact.labels ?? {}),
-    ).toHaveLength(2);
-  });
-  // A valid empty catalogue carries no labels; a smaller one only its own.
-  f.setCatalogue(async () => catalogue([], []));
-  await runtime.loadContexts(id);
-  expect(runtime.getSnapshot()[0]!.catalogue).toEqual({
-    kind: 'ready',
-    contexts: [],
-  });
-  f.setCatalogue(async () => catalogue([work], [work]));
-  f.setDescriptions(async () => new Response(null, { status: 404 }));
-  await runtime.loadContexts(id);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+const labels = (runtime: BrowserRuntime) => {
   const fact = runtime.getSnapshot()[0]!.catalogue;
-  expect(fact.kind === 'ready' && fact.labels).toBeFalsy();
-  runtime.dispose();
+  return 'labels' in fact ? fact.labels : undefined;
+};
+const descriptions = (f: ReturnType<typeof fixture>) =>
+  f.fetch.mock.calls.filter(([url]) =>
+    /\/_system\/contexts\/[^/]+$/.test(new URL(url).pathname),
+  );
+async function signedIn(f: ReturnType<typeof fixture>) {
+  runtimes.push(f.runtime);
+  const { connection } = await f.begin();
+  f.runtime.dispose();
+  await settleLease();
+  const runtime = f.returned();
+  runtimes.push(runtime);
+  await runtime.initialize();
+  return { runtime, id: connection.id };
+}
+async function selected(f = fixture({ preferences: null })) {
+  const result = await signedIn(f);
+  await result.runtime.loadContexts(result.id);
+  result.runtime.selectContext(result.id, work);
+  return { ...f, ...result };
+}
+
+it('loads labels and cancels stale selection requests without AbortSignal.any', async () => {
+  const native = Object.getOwnPropertyDescriptor(AbortSignal, 'any')!;
+  Object.defineProperty(AbortSignal, 'any', { value: undefined });
+  try {
+    const f = fixture({ preferences: null });
+    const stale = deferred<Response>();
+    let signal: AbortSignal | undefined;
+    f.setDescriptions(async (url, init) => {
+      if (url === work) {
+        signal = init?.signal ?? undefined;
+        return stale.promise;
+      }
+      return description(url, 'Current');
+    });
+    const { runtime, id } = await selected(f);
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    runtime.selectContext(id, personal);
+    expect(signal?.aborted).toBe(true);
+    await vi.waitFor(() => expect(labels(runtime)?.[personal]).toBe('Current'));
+    stale.resolve(description(work, 'Stale'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(labels(runtime)).toEqual({ [personal]: 'Current' });
+  } finally {
+    Object.defineProperty(AbortSignal, 'any', native);
+  }
 });
 
-it('stops a superseded loader instead of reading on in parallel', async () => {
-  const f = fixture();
-  const many = Array.from(
-    { length: 20 },
-    (_, i) => `${pod}/_system/contexts/c${i}`,
+it.each([1, 50, 51, 10_000])(
+  'loads only the selected Context in a catalogue of %i entries',
+  async (size) => {
+    const f = fixture({ preferences: null });
+    const iris = [
+      work,
+      ...Array.from(
+        { length: size - 1 },
+        (_, i) => `${pod}/_system/contexts/c${i}`,
+      ),
+    ];
+    f.setCatalogue(async () => catalogue(iris, [work]));
+    f.setDescriptions(async (url) => description(url, 'Selected'));
+    const { runtime, id } = await signedIn(f);
+    await runtime.loadContexts(id);
+    expect(descriptions(f)).toHaveLength(0);
+    runtime.selectContext(id, work);
+    await vi.waitFor(() =>
+      expect(labels(runtime)).toEqual({ [work]: 'Selected' }),
+    );
+    expect(descriptions(f).map(([url]) => url)).toEqual([work]);
+    expect(runtime.getSnapshot()[0]!.selectedContext).toBe(work);
+  },
+);
+
+it('coalesces a pending selected-label read and caches it through catalogue reloads and reselection', async () => {
+  const f = fixture({ preferences: null });
+  const gate = deferred<Response>();
+  f.setDescriptions((url) =>
+    url === work ? gate.promise : Promise.resolve(description(url, 'Private')),
   );
-  f.setCatalogue(async () => catalogue([work, ...many], [work]));
-  const gates: Array<() => void> = [];
-  let released = false;
-  let open = 0;
-  let peak = 0;
-  f.setDescriptions(async (url) => {
-    open++;
-    peak = Math.max(peak, open);
-    if (!released) await new Promise<void>((resolve) => gates.push(resolve));
-    open--;
-    return description(url, 'x');
-  });
-  const { runtime, id } = await f.login();
-  await vi.waitFor(() => expect(open).toBe(3));
-  // A refresh while the first loader's reads are pending supersedes it.
+  const { runtime, id } = await selected(f);
+  await vi.waitFor(() => expect(descriptions(f)).toHaveLength(1));
+  runtime.selectContext(id, work);
+  await Promise.all([runtime.loadContexts(id), runtime.loadContexts(id)]);
+  expect(descriptions(f)).toHaveLength(1);
+  gate.resolve(description(work, 'Work'));
+  await vi.waitFor(() => expect(labels(runtime)).toEqual({ [work]: 'Work' }));
+  runtime.selectContext(id, personal);
+  await vi.waitFor(() => expect(labels(runtime)?.[personal]).toBe('Private'));
+  runtime.selectContext(id, work);
   await runtime.loadContexts(id);
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(gates.length).toBe(3);
-  released = true;
-  while (gates.length) gates.shift()!();
-  await vi.waitFor(() => {
-    const fact = runtime.getSnapshot()[0]!.catalogue;
-    expect(
-      fact.kind === 'ready' && Object.keys(fact.labels ?? {}),
-    ).toHaveLength(21);
-  });
-  // The old loader finished only its in-flight reads, then stopped.
-  const reads = f.fetch.mock.calls.filter(([url]) =>
-    /\/_system\/contexts\/[^/]+$/.test(new URL(url).pathname),
-  ).length;
-  expect(reads).toBe(3 + 21);
-  // The cap holds across loaders: the new one waits for the old in-flight reads.
-  expect(peak).toBe(3);
-  runtime.dispose();
+  expect(descriptions(f).map(([url]) => url)).toEqual([work, personal]);
 });
+
+it('ignores stale results after rapid A-B-A selection even if the transport ignores abort', async () => {
+  const f = fixture({ preferences: null });
+  const calls: {
+    url: string;
+    signal: AbortSignal | undefined;
+    gate: ReturnType<typeof deferred<Response>>;
+  }[] = [];
+  f.setDescriptions((url, init) => {
+    const gate = deferred<Response>();
+    calls.push({ url, signal: init?.signal ?? undefined, gate });
+    return gate.promise;
+  });
+  const { runtime, id } = await selected(f);
+  await vi.waitFor(() => expect(calls).toHaveLength(1));
+  runtime.selectContext(id, personal);
+  await vi.waitFor(() => expect(calls).toHaveLength(2));
+  runtime.selectContext(id, work);
+  await vi.waitFor(() => expect(calls).toHaveLength(3));
+  expect(calls[0]!.signal?.aborted).toBe(true);
+  expect(calls[1]!.signal?.aborted).toBe(true);
+  calls[2]!.gate.resolve(description(work, 'Current'));
+  await vi.waitFor(() =>
+    expect(labels(runtime)).toEqual({ [work]: 'Current' }),
+  );
+  calls[0]!.gate.resolve(description(work, 'Old'));
+  calls[1]!.gate.resolve(description(personal, 'Stale'));
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(labels(runtime)).toEqual({ [work]: 'Current' });
+});
+
+it.each(['network', 'refused', 'absent'] as const)(
+  'keeps fallback after %s without blocking Pod reads or retrying',
+  async (mode) => {
+    const f = fixture({ preferences: null });
+    const handler: PodFetch = async (url) => {
+      if (mode === 'network') throw new TypeError('offline');
+      if (mode === 'refused') return new Response(null, { status: 403 });
+      return description(url);
+    };
+    f.setDescriptions(handler);
+    const { runtime, id } = await selected(f);
+    await vi.waitFor(() => expect(descriptions(f)).toHaveLength(1));
+    // Let the settled attempt enter the failure/absence cache before repeating demand.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await runtime.loadContexts(id);
+    runtime.selectContext(id, work);
+    const reader = runtime.bindPod(id);
+    expect(
+      await reader.sparql.construct(
+        'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }',
+      ),
+    ).toMatchObject({ kind: 'ok' });
+    expect(labels(runtime)).toBeUndefined();
+    expect(descriptions(f)).toHaveLength(1);
+    expect(runtime.getSnapshot()[0]!.selectedContext).toBe(work);
+  },
+);
+
+it.each(['preset', 'remembered'] as const)(
+  'loads the validated %s Context without explicit reselection',
+  async (mode) => {
+    const map = new Map<string, string>();
+    const preferences = {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        map.set(key, value);
+      },
+      removeItem: (key: string) => {
+        map.delete(key);
+      },
+    };
+    const options: Partial<BrowserRuntimeOptions> =
+      mode === 'preset'
+        ? { preset: { podUrl: pod, contextIri: work }, preferences: null }
+        : { preferences };
+    const f = fixture(options);
+    f.setDescriptions(async (url) => description(url, 'Restored'));
+    const result = await selected(f);
+    await vi.waitFor(() =>
+      expect(labels(result.runtime)?.[work]).toBe('Restored'),
+    );
+    result.runtime.dispose();
+    await settleLease();
+    const next = createBrowserRuntime({
+      ...f.options,
+      location: () => 'https://app.example/',
+    });
+    runtimes.push(next);
+    await next.initialize();
+    await restored(next);
+    expect(descriptions(f)).toHaveLength(1);
+    expect(next.getSnapshot()[0]!.selectedContext).toBeNull();
+    await next.loadContexts(result.id);
+    await vi.waitFor(() => expect(labels(next)?.[work]).toBe('Restored'));
+    expect(next.getSnapshot()[0]!.selectedContext).toBe(work);
+    expect(descriptions(f).map(([url]) => url)).toEqual([work, work]);
+  },
+);
+
+it('drops revoked label authority and rereads it on restored permission', async () => {
+  const f = fixture({ preferences: null });
+  f.setDescriptions(async (url) => description(url, 'Original'));
+  const { runtime, id } = await selected(f);
+  await vi.waitFor(() => expect(labels(runtime)?.[work]).toBe('Original'));
+  f.setCatalogue(async () => catalogue([personal], []));
+  await runtime.loadContexts(id);
+  expect(labels(runtime)).toBeUndefined();
+  f.setDescriptions(async (url) => description(url, 'Fresh'));
+  f.setCatalogue(async () => catalogue());
+  await runtime.loadContexts(id);
+  await vi.waitFor(() => expect(labels(runtime)?.[work]).toBe('Fresh'));
+  expect(descriptions(f).map(([url]) => url)).toEqual([work, work]);
+});
+
+it.each([
+  [false, 'cached'],
+  [true, 'cached'],
+  [false, 'pending'],
+  [true, 'pending'],
+  [false, 'failed'],
+  [true, 'failed'],
+] as const)(
+  'replaces %s manageable label authority with a %s initial attempt',
+  async (manageable, mode) => {
+    const f = fixture({ preferences: null });
+    let manage = manageable;
+    f.setCatalogue(async () => {
+      const data = (await catalogue().json()) as Record<string, unknown>;
+      return Response.json({
+        ...data,
+        'https://schema.sempods.org/manageableContext': manage
+          ? [{ '@id': work }]
+          : [],
+      });
+    });
+    const old = deferred<Response>();
+    const fresh = deferred<Response>();
+    let calls = 0;
+    let signal: AbortSignal | undefined;
+    f.setDescriptions(async (url, init) => {
+      if (++calls !== 1) return fresh.promise;
+      signal = init?.signal ?? undefined;
+      if (mode === 'pending') return old.promise;
+      if (mode === 'failed') return new Response(null, { status: 403 });
+      return description(url, 'Old authority');
+    });
+    const { runtime, id } = await selected(f);
+    await vi.waitFor(() => expect(calls).toBe(1));
+    if (mode === 'cached')
+      await vi.waitFor(() =>
+        expect(labels(runtime)?.[work]).toBe('Old authority'),
+      );
+    else if (mode === 'failed')
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const reader = runtime.bindPod(id);
+    const snapshot = reader.getSnapshot();
+    const podResponse = deferred<Response>();
+    f.setQuery(() => podResponse.promise);
+    const read = reader.sparql.construct('CONSTRUCT {} WHERE {}');
+    await vi.waitFor(() => expect(f.count('/_system/sparql/query')).toBe(1));
+    manage = !manage;
+    await runtime.loadContexts(id);
+    expect(labels(runtime)).toBeUndefined();
+    await vi.waitFor(() => expect(calls).toBe(2));
+    if (mode === 'pending') expect(signal?.aborted).toBe(true);
+    expect(reader.getSnapshot()).toBe(snapshot);
+    old.resolve(description(work, 'Stale'));
+    fresh.resolve(description(work, 'New authority'));
+    await vi.waitFor(() =>
+      expect(labels(runtime)?.[work]).toBe('New authority'),
+    );
+    await runtime.loadContexts(id);
+    expect(calls).toBe(2);
+    podResponse.resolve(Response.json([]));
+    expect(await read).toMatchObject({ kind: 'ok' });
+    expect(descriptions(f).map(([url]) => url)).toEqual([work, work]);
+  },
+);
+
+it.each(['disconnect', 'dispose', 'reauthorize', 'scope-loss'] as const)(
+  'retires pending and cached label authority on %s',
+  async (mode) => {
+    const f = fixture({ preferences: null, scopes: { optional: ['ai'] } });
+    f.setToken(async () =>
+      Response.json({
+        access_token: jwt({ scope: 'ai' }),
+        token_type: 'Bearer',
+        refresh_token: 'initial',
+      }),
+    );
+    const gates: ReturnType<typeof deferred<Response>>[] = [];
+    let signal: AbortSignal | undefined;
+    f.setDescriptions((_url, init) => {
+      signal ??= init?.signal ?? undefined;
+      const gate = deferred<Response>();
+      gates.push(gate);
+      return gate.promise;
+    });
+    const { runtime, id } = await selected(f);
+    await vi.waitFor(() => expect(descriptions(f)).toHaveLength(1));
+    if (mode === 'disconnect') await runtime.disconnect(id);
+    else if (mode === 'dispose') runtime.dispose();
+    else if (mode === 'reauthorize') await runtime.beginAuthorization(id);
+    else {
+      let calls = 0;
+      f.setQuery(async () =>
+        ++calls === 1
+          ? new Response(null, {
+              status: 401,
+              headers: { 'www-authenticate': 'Bearer' },
+            })
+          : Response.json([]),
+      );
+      f.setToken(async () =>
+        Response.json({
+          access_token: jwt(),
+          token_type: 'Bearer',
+          refresh_token: 'rotated',
+        }),
+      );
+      await runtime
+        .bindPod(id)
+        .sparql.construct('CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }');
+    }
+    expect(signal?.aborted).toBe(true);
+    gates[0]!.resolve(description(work, 'Stale'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (runtime.getSnapshot().length) expect(labels(runtime)).toBeUndefined();
+    if (mode === 'scope-loss') {
+      await vi.waitFor(() => expect(gates).toHaveLength(2));
+      gates[1]!.resolve(description(work, 'Fresh'));
+      await vi.waitFor(() => expect(labels(runtime)?.[work]).toBe('Fresh'));
+      expect(descriptions(f).map(([url]) => url)).toEqual([work, work]);
+    }
+  },
+);
+
+it.each(['ready', 'refused', 'offline'] as const)(
+  'does not restore cached labels across a scope change during a %s catalogue reload',
+  async (mode) => {
+    const f = fixture({ preferences: null, scopes: { optional: ['ai'] } });
+    f.setToken(async () =>
+      Response.json({
+        access_token: jwt({ scope: 'ai' }),
+        token_type: 'Bearer',
+        refresh_token: 'initial',
+      }),
+    );
+    f.setDescriptions(async (url) => description(url, 'Old authority'));
+    const { runtime, id } = await selected(f);
+    await vi.waitFor(() =>
+      expect(labels(runtime)?.[work]).toBe('Old authority'),
+    );
+    const gate = deferred<Response>();
+    f.setCatalogue(() => gate.promise);
+    const reload = runtime.loadContexts(id);
+    // Attach before rejecting the gate to avoid an unhandled rejection.
+    const settled = reload.catch(() => {});
+    await vi.waitFor(() =>
+      expect(runtime.getSnapshot()[0]!.catalogue.kind).toBe('loading'),
+    );
+    let calls = 0;
+    f.setQuery(async () =>
+      ++calls === 1
+        ? new Response(null, {
+            status: 401,
+            headers: { 'www-authenticate': 'Bearer' },
+          })
+        : Response.json([]),
+    );
+    f.setToken(async () =>
+      Response.json({
+        access_token: jwt(),
+        token_type: 'Bearer',
+        refresh_token: 'rotated',
+      }),
+    );
+    await runtime.bindPod(id).sparql.construct('CONSTRUCT {} WHERE {}');
+    expect(labels(runtime)).toBeUndefined();
+    f.setDescriptions(async (url) => description(url, 'New authority'));
+    if (mode === 'offline') gate.reject(new TypeError('offline'));
+    else
+      gate.resolve(
+        mode === 'ready' ? catalogue() : new Response(null, { status: 403 }),
+      );
+    await settled;
+    if (mode === 'ready')
+      await vi.waitFor(() =>
+        expect(labels(runtime)?.[work]).toBe('New authority'),
+      );
+    else expect(labels(runtime)).toBeUndefined();
+  },
+);
