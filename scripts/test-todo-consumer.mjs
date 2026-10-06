@@ -531,8 +531,10 @@ try {
       colorScheme: appearance,
     });
     const page = await context.newPage();
+    const labelRequests = [];
     await page.route('**/alice/_system/contexts/*', (route) => {
       const iri = route.request().url();
+      labelRequests.push(iri);
       return route.fulfill({
         json: {
           '@id': iri,
@@ -582,16 +584,17 @@ try {
     await page.getByLabel('Your Pod').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page
-      .getByRole('option', { name: 'Tasks · ' + work, exact: true })
+      .getByRole('option', { name: 'work', exact: true })
       .waitFor({ state: 'attached' });
     await page
-      .getByRole('option', { name: 'Tasks · ' + personal, exact: true })
+      .getByRole('option', { name: 'personal', exact: true })
       .waitFor({ state: 'attached' });
     await page.getByLabel('Data context', { exact: true }).selectOption(work);
     await page
       .getByRole('region', { name: 'Data access', exact: true })
       .waitFor({ state: 'hidden' });
     await page.getByLabel('Task', { exact: true }).first().fill('SDK baseline');
+    assert.deepEqual(labelRequests, [work]);
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
       .getByRole('button', { name: 'SDK baseline', exact: true })

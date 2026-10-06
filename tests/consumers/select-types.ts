@@ -1,4 +1,10 @@
 import type {
+  BoundPod,
+  BoundRead,
+  AppSnapshot,
+  BrowserRuntime,
+} from '@sempods/app-sdk';
+import type {
   Pod,
   QueryResult,
   SelectResult,
@@ -29,4 +35,33 @@ export async function read(pod: Pod) {
   }
   // @ts-expect-error Pod reads expose no write operations.
   void pod.subjects;
+}
+
+// The installed React-free app entry exposes the reader without a write surface.
+export async function runtimeRead(
+  runtime: BrowserRuntime,
+  snapshot: AppSnapshot,
+  id: string,
+) {
+  const pod: BoundPod = runtime.bindPod(id);
+  const selected: BoundPod | null = snapshot.pod;
+  void selected;
+  const access: {
+    readonly current: boolean;
+    readonly read: boolean;
+    readonly revision: number;
+  } = pod.getSnapshot();
+  void access;
+  const result: BoundRead<QueryResult<SelectResult>> = await pod.sparql.select(
+    'SELECT ?title WHERE { ?s ?p ?title }',
+  );
+  if (result.kind === 'ok') {
+    // @ts-expect-error Runtime SELECT bindings are sparse as well.
+    const bound: SparqlTerm = result.body.rows[0]!['title'];
+    void bound;
+  }
+  // @ts-expect-error Runtime Pod handles cannot edit subjects.
+  void pod.subjects;
+  // @ts-expect-error Runtime Pod access has no context-write permission.
+  void pod.getSnapshot().write;
 }

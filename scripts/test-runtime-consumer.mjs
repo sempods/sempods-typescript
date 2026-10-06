@@ -376,14 +376,35 @@ try {
       }
       if (url.pathname.endsWith('/sparql/query')) {
         assert.equal(req.method, 'POST');
-        assert.equal(
-          url.searchParams.get('default-graph-uri'),
-          base + '/_system/contexts/work',
-        );
-        assert.equal(
-          url.searchParams.get('named-graph-uri'),
-          base + '/_system/contexts/work',
-        );
+        assert.equal(req.headers.cookie, undefined);
+        assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        if (url.search) {
+          assert.equal(
+            url.searchParams.get('default-graph-uri'),
+            base + '/_system/contexts/work',
+          );
+          assert.equal(
+            url.searchParams.get('named-graph-uri'),
+            base + '/_system/contexts/work',
+          );
+        } else {
+          assert.equal(url.searchParams.size, 0);
+          if (req.headers.accept === 'application/sparql-results+json') {
+            json(
+              {
+                head: { vars: ['task', 'unbound'] },
+                results: {
+                  bindings: [
+                    { task: { type: 'uri', value: 'urn:fixture-task' } },
+                  ],
+                },
+              },
+              200,
+              { 'content-type': 'application/sparql-results+json' },
+            );
+            return;
+          }
+        }
         if (refreshes === 0)
           json({}, 401, { 'www-authenticate': 'Bearer error="invalid_token"' });
         else json([{ '@id': 'urn:fixture-task' }]);
@@ -402,6 +423,10 @@ try {
   const origin = 'http://127.0.0.1:' + server.address().port;
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
+  // Exercise the installed SDK without the newer browser signal combinator.
+  await context.addInitScript(() => {
+    delete globalThis.AbortSignal.any;
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error));
@@ -445,6 +470,37 @@ try {
   });
   assert.equal(read.kind, 'ok');
   assert.equal(refreshes, 1);
+  const beforePodReads = traffic.length;
+  const podReads = await page.evaluate(async () => {
+    const runtime = window.fixture.runtime;
+    const id = runtime.getSnapshot()[0].id;
+    const reader = runtime.bindPod(id);
+    return {
+      access: reader.getSnapshot(),
+      select: await reader.sparql.select(
+        'SELECT ?task ?unbound WHERE { ?task ?p ?o }',
+      ),
+      construct: await reader.sparql.construct('CONSTRUCT {} WHERE {}'),
+      cached: runtime.bindPod(id) === reader,
+    };
+  });
+  assert.equal(podReads.cached, true);
+  assert.equal(podReads.access.read, true);
+  assert.deepEqual(podReads.select, {
+    kind: 'ok',
+    body: {
+      variables: ['task', 'unbound'],
+      rows: [{ task: { type: 'iri', value: 'urn:fixture-task' } }],
+    },
+  });
+  assert.equal(podReads.construct.kind, 'ok');
+  assert.equal(traffic.slice(beforePodReads).length, 2);
+  assert.ok(
+    traffic
+      .slice(beforePodReads)
+      .every((request) => request.path.endsWith('/_system/sparql/query')),
+  );
+
   assert.deepEqual(
     await page.evaluate(() => window.fixture.editTask('Saved')),
     {

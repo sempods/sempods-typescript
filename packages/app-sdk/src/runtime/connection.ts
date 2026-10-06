@@ -1,12 +1,17 @@
 import { RuntimeError } from './errors.js';
-import type { AuthCredential, CatalogueResult, Pod } from '@sempods/client-sdk';
+import type {
+  AuthCredential,
+  CatalogueResult,
+  Pod,
+  PodAuth,
+} from '@sempods/client-sdk';
 import type {
   PodDiscovery,
   OAuthClient,
   ExchangeResult,
 } from '@sempods/client-sdk/oauth';
 import type { Connection } from './types.js';
-import type { BoundView } from './view.js';
+import type { BoundPod, BoundView } from './view.js';
 
 export interface Entry {
   pod: PodDiscovery;
@@ -15,6 +20,9 @@ export interface Entry {
   generation: string;
   lifetime: AbortController;
   reads: AbortController;
+  podReads: AbortController;
+  podEpoch: number;
+  auth: PodAuth;
   credentials?: ExchangeResult;
   credential?: AuthCredential;
   revision: string | null;
@@ -22,6 +30,7 @@ export interface Entry {
   epoch: number;
   selectedVersion: number;
   bound?: BoundView;
+  boundPod?: BoundPod;
   catalogue?: Promise<CatalogueResult>;
   revalidation?: Promise<void>;
   refresh?: Promise<boolean>;

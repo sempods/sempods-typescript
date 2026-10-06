@@ -44,3 +44,9 @@ composing the existing reviewed runtime and portable editor. Their behavior uses
 the documented package boundaries and authoring contracts; no additional
 legacy implementation was copied. TODO and Node consumers are new code sharing
 a provisional Focus-compatible Action mapping. No live Pod claim is added.
+
+Independent `BoundPod` readers, their separate read revisions and selected-Context-only
+label caching are new SDK code for #38, composed over the existing credential owner
+and production client executor. The stored session shape is unchanged. Runtime and
+packed-consumer checks use deterministic/loopback transports; no live scale claim
+is added. React Pod loaders and on-demand discovery remain tracked in #39.

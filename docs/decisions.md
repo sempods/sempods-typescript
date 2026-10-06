@@ -91,11 +91,17 @@ later request.
 _Why:_ overviews and cross-Context joins need one authorized query, while scoped
 reads and writes need explicit targets. Readers do not need to enumerate Contexts.
 
-This is implemented in client-sdk. Browser-runtime Pod handles and on-demand
-Context discovery remain tracked in
-[#38](https://github.com/sempods/sempods-typescript/issues/38) and
-[#39](https://github.com/sempods/sempods-typescript/issues/39); current app-sdk
-views and startup behavior still depend on Context selection.
+Client-sdk and the browser runtime implement independent Pod readers.
+`BoundPod` invalidation depends on connection/session/grants, while Context
+switches and catalogue/label changes affect only Context-bound flows. The
+headless controller exposes the active reader in `AppSnapshot.pod`.
+Automatic labels load only for the selected, validated Context for every catalogue
+size, with fallback names and cache lifetime tied to access authority.
+
+On-demand controller/React discovery and Pod loaders remain tracked in
+[#39](https://github.com/sempods/sempods-typescript/issues/39). Controller startup
+and the existing React access flow still load/require Contexts under the
+compatibility policy.
 
 A reload may reselect the context the person chose last for that connection.
 That is their own explicit choice, remembered as a browser preference rather
