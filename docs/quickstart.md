@@ -5,6 +5,10 @@ context choice, a task list, one-click completion and safe editing. It uses the
 published SDK packages, Vite and React.
 For the idea behind the example, start with [build your own app](build-your-app.md);
 for AI assistance, supply [the app-builder instructions](ai-app-builder.md).
+For several personal apps in one repository, with setup and updates handled by
+your assistant, start from the
+[sempods apps template](https://github.com/sempods/sempods-apps-template)
+instead.
 
 You need Node 24.15 or newer (Node 24 LTS), and a sempods Pod with a context you may grant
 to an app. No feature scopes are needed for data: the person grants context
