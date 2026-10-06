@@ -27,10 +27,10 @@ navigation or storage on import or construction.
 The runtime uses the production `createPod` client by default; `podFactory` is
 an optional advanced composition seam. Both the runtime's transport fixtures and
 the packed Chromium consumer exercise that client, including direct composition
-with the edit controller. See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.2.0/docs/browser-runtime.md)
+with the edit controller. See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.3.0/docs/browser-runtime.md)
 for configuration, startup reports, subscriptions, scope/access behavior and
-remaining limits. Live Kotlin validation remains separate work. See [React/headless authoring](https://github.com/sempods/sempods-typescript/blob/v0.2.0/docs/react-authoring.md)
-and the runnable [TODO](https://github.com/sempods/sempods-typescript/blob/v0.2.0/examples/todo/README.md).
+remaining limits. Live Kotlin validation remains separate work. See [React/headless authoring](https://github.com/sempods/sempods-typescript/blob/v0.3.0/docs/react-authoring.md)
+and the runnable [TODO](https://github.com/sempods/sempods-typescript/blob/v0.3.0/examples/todo/README.md).
 
 ```tsx
 import { SdkLocaleProvider, useSdkLocale } from '@sempods/app-sdk/react';
@@ -56,12 +56,12 @@ discovery or storage on import.
 Supported: Node 24.15 or newer (ESM only); current browsers with IndexedDB and
 Web Locks in a normal browser tab; React 19 for `./react`. Installed PWAs are
 experimental: desktop Chromium and Android are expected to work, iOS/iPadOS
-home-screen apps are unverified. See [supported environments](https://github.com/sempods/sempods-typescript/blob/v0.2.0/README.md#supported-environments).
+home-screen apps are unverified. See [supported environments](https://github.com/sempods/sempods-typescript/blob/v0.3.0/README.md#supported-environments).
 
 The package installs client-sdk. Plain consumers need neither React nor its types;
 packed-consumer checks prove this with actual installations. Licensed under
 Apache-2.0 (see LICENSE and NOTICE). See [provenance](PROVENANCE.md) and
-[development evidence](https://github.com/sempods/sempods-typescript/blob/v0.2.0/docs/development.md).
+[development evidence](https://github.com/sempods/sempods-typescript/blob/v0.3.0/docs/development.md).
 
 ## Documentation for app authors and AI assistants
 
@@ -70,5 +70,5 @@ the AI entry `docs/ai-app-builder.md`, the guides it links and the TODO example.
 After installation, point your coding assistant to
 `node_modules/@sempods/app-sdk/docs/ai-app-builder.md`; assistants do not look
 inside `node_modules` by themselves. The same entry is
-[online](https://github.com/sempods/sempods-typescript/blob/v0.2.0/docs/ai-app-builder.md).
+[online](https://github.com/sempods/sempods-typescript/blob/v0.3.0/docs/ai-app-builder.md).
 Documentation is CC BY 4.0 and code examples Apache-2.0, as stated in `NOTICE`.

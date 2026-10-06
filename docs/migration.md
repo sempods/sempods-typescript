@@ -4,6 +4,34 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.2 to 0.3
+
+Upgrade both packages together; Node 24.15 or newer stays the requirement:
+
+```sh
+npm install --save-exact @sempods/app-sdk@0.3.0 @sempods/client-sdk@0.3.0
+```
+
+Runtime behavior of existing apps is unchanged. One type change can need an
+edit: `TextField` (and the new `DateTimeField`) carry their optionality as a
+type parameter. A field annotated as plain `TextField` now reads `string | null`
+in drafts, because its optionality is unknown; annotate a required field as
+`TextField<false>` to keep `string`. Fields used without an annotation are
+unaffected.
+
+New in 0.3:
+
+- `dateTime(predicate, { optional })` in `@sempods/client-sdk/edit` reads and
+  writes one `xsd:dateTime` literal. Store points in time with it rather than
+  as text; values need an explicit time zone.
+- `allowedPods` restricts a browser runtime to exact Pod URLs, separately from
+  `preset`; see [restrict the permitted Pods](browser-runtime.md#restrict-the-permitted-pods).
+- `@sempods/app-sdk` ships its app-author reference. Point your coding assistant
+  to `node_modules/@sempods/app-sdk/docs/ai-app-builder.md`; it matches the
+  installed version.
+- Creating several resources from one input is a documented pattern; see
+  [several resources from one input](react-authoring.md#several-resources-from-one-input).
+
 ## From 0.1 to 0.2
 
 0.2 requires **Node 24.15 or newer** (Node 24 LTS) for development, builds and
