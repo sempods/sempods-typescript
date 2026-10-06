@@ -126,7 +126,7 @@ an ASCII-letter primary subtag and alphanumeric following subtags, each 1–8
 characters. Singleton/extension grammar, registry membership and normalization
 are outside the decoder; a bare `x` therefore passes this lexical check.
 IRI terms and literal datatypes require a scheme, a nonempty remainder and no
-whitespace or forbidden IRIREF delimiters (angle brackets, quotes, braces, pipe,
+U+0000–U+0020 characters, other whitespace or forbidden IRIREF delimiters (angle brackets, quotes, braces, pipe,
 backslash, caret or backtick). Component grammar and percent escapes are not
 validated, so `https://[invalid]/` and `urn:x%GG` pass the lexical boundary.
 Unicode, URNs and received lexical values are preserved. Header variable names

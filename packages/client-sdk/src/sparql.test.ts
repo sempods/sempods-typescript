@@ -77,6 +77,14 @@ describe('SELECT decoding', () => {
     }
   });
 
+  it('preserves controls in literal text rather than applying IRI checks to it', async () => {
+    const value = Array.from({ length: 0x21 }, (_, code) =>
+      String.fromCharCode(code),
+    ).join('');
+    const decoded = await select(result([{ x: { type: 'literal', value } }]));
+    expect(decoded.rows[0]?.['x']).toEqual({ type: 'literal', value });
+  });
+
   it.each([
     'en',
     'de-DE',
@@ -181,6 +189,17 @@ describe('SELECT decoding', () => {
           );
         }
       });
+      it.each(Array.from({ length: 0x21 }, (_, code) => code))(
+        'rejects IRIREF control/space code point %i',
+        async (code) => {
+          const iri = `urn:x${String.fromCharCode(code)}y`;
+          await expect(
+            select(result([{ x: term(iri) }])),
+          ).rejects.toMatchObject({
+            reason: { code: 'response', problem: 'body' },
+          });
+        },
+      );
     },
   );
 
