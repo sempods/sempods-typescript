@@ -58,7 +58,9 @@ export function loadCatalogue(
                 ([iri]) =>
                   contexts.some((c) => c.iri === iri && c.readable) &&
                   previous?.find((c) => c.iri === iri)?.writable ===
-                    contexts.find((c) => c.iri === iri)?.writable,
+                    contexts.find((c) => c.iri === iri)?.writable &&
+                  previous?.find((c) => c.iri === iri)?.manageable ===
+                    contexts.find((c) => c.iri === iri)?.manageable,
               ),
             )
           : {};
@@ -139,7 +141,8 @@ function pruneLabels(
     return (
       !next?.readable ||
       old?.readable !== next.readable ||
-      old?.writable !== next.writable
+      old?.writable !== next.writable ||
+      old?.manageable !== next.manageable
     );
   };
   for (const iri of state.cache.keys())

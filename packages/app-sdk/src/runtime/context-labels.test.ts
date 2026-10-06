@@ -239,6 +239,71 @@ it('drops revoked label authority and rereads it on restored permission', async 
   expect(descriptions(f).map(([url]) => url)).toEqual([work, work]);
 });
 
+it.each([
+  [false, 'cached'],
+  [true, 'cached'],
+  [false, 'pending'],
+  [true, 'pending'],
+  [false, 'failed'],
+  [true, 'failed'],
+] as const)(
+  'replaces %s manageable label authority with a %s initial attempt',
+  async (manageable, mode) => {
+    const f = fixture({ preferences: null });
+    let manage = manageable;
+    f.setCatalogue(async () => {
+      const data = (await catalogue().json()) as Record<string, unknown>;
+      return Response.json({
+        ...data,
+        'https://schema.sempods.org/manageableContext': manage
+          ? [{ '@id': work }]
+          : [],
+      });
+    });
+    const old = deferred<Response>();
+    const fresh = deferred<Response>();
+    let calls = 0;
+    let signal: AbortSignal | undefined;
+    f.setDescriptions(async (url, init) => {
+      if (++calls !== 1) return fresh.promise;
+      signal = init?.signal ?? undefined;
+      if (mode === 'pending') return old.promise;
+      if (mode === 'failed') return new Response(null, { status: 403 });
+      return description(url, 'Old authority');
+    });
+    const { runtime, id } = await selected(f);
+    await vi.waitFor(() => expect(calls).toBe(1));
+    if (mode === 'cached')
+      await vi.waitFor(() =>
+        expect(labels(runtime)?.[work]).toBe('Old authority'),
+      );
+    else if (mode === 'failed')
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const reader = runtime.bindPod(id);
+    const snapshot = reader.getSnapshot();
+    const podResponse = deferred<Response>();
+    f.setQuery(() => podResponse.promise);
+    const read = reader.sparql.construct('CONSTRUCT {} WHERE {}');
+    await vi.waitFor(() => expect(f.count('/_system/sparql/query')).toBe(1));
+    manage = !manage;
+    await runtime.loadContexts(id);
+    expect(labels(runtime)).toBeUndefined();
+    await vi.waitFor(() => expect(calls).toBe(2));
+    if (mode === 'pending') expect(signal?.aborted).toBe(true);
+    expect(reader.getSnapshot()).toBe(snapshot);
+    old.resolve(description(work, 'Stale'));
+    fresh.resolve(description(work, 'New authority'));
+    await vi.waitFor(() =>
+      expect(labels(runtime)?.[work]).toBe('New authority'),
+    );
+    await runtime.loadContexts(id);
+    expect(calls).toBe(2);
+    podResponse.resolve(Response.json([]));
+    expect(await read).toMatchObject({ kind: 'ok' });
+    expect(descriptions(f).map(([url]) => url)).toEqual([work, work]);
+  },
+);
+
 it.each(['disconnect', 'dispose', 'reauthorize', 'scope-loss'] as const)(
   'retires pending and cached label authority on %s',
   async (mode) => {

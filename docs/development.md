@@ -119,7 +119,8 @@ Runtime Pod-reader regressions cover catalogue-free direct binding/SELECT/CONSTR
 independent read revisions through Context changes, session/grant invalidation,
 required scopes, policy, refusal and cancellation. Selected-label fixtures cover
 catalogues of 1, 50, 51 and 10,000 entries, restoration, cache/coalescing and stale
-responses. Packed React-free declarations include `BoundPod` and `AppSnapshot.pod`;
+responses, including manage-only grants/revocations for cached, failed and pending
+label attempts while Pod reads remain valid. Packed React-free declarations include `BoundPod` and `AppSnapshot.pod`;
 the Chromium runtime consumer verifies bound SELECT/CONSTRUCT with no dataset
 parameters and no accompanying catalogue requests. These are client/runtime
 fixture checks; #40 owns live scale evidence.
