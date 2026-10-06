@@ -71,6 +71,31 @@ const server = createServer((req, res) => {
     }
     return;
   }
+  if (req.url === '/alice/_system/sparql/query') {
+    assert.equal(req.method, 'POST');
+    assert.equal(req.headers.authorization, 'Bearer node-token');
+    assert.equal(req.headers['content-type'], 'application/sparql-query');
+    const select = req.headers.accept === 'application/sparql-results+json';
+    assert.ok(select || req.headers.accept === 'application/ld+json');
+    res.writeHead(200, {
+      'content-type': select
+        ? 'application/sparql-results+json'
+        : 'application/ld+json',
+    });
+    res.end(
+      JSON.stringify(
+        select
+          ? {
+              head: { vars: ['title', 'unbound'] },
+              results: {
+                bindings: [{ title: { type: 'literal', value: 'Overview' } }],
+              },
+            }
+          : [{ '@id': task }],
+      ),
+    );
+    return;
+  }
   if (req.url === '/alice/_system/contexts/tasks') {
     // A Context description (SPS-CTX-032) is read with the caller's bearer.
     assert.equal(req.headers.authorization, 'Bearer node-token');
@@ -152,6 +177,20 @@ try {
     auth: bearer('node-token'),
     development: 'loopback-http',
   });
+  const overview = await tasksPod.sparql.select(
+    'SELECT ?title ?unbound WHERE { ?s ?p ?title }',
+  );
+  assert.ok(overview.kind === 'ok');
+  assert.deepEqual(overview.body.variables, ['title', 'unbound']);
+  assert.deepEqual(overview.body.rows[0]?.['title'], {
+    type: 'literal',
+    value: 'Overview',
+  });
+  assert.equal(overview.body.rows[0]?.['unbound'], undefined);
+  const graph = await tasksPod.sparql.construct('CONSTRUCT WHERE { ?s ?p ?o }');
+  assert.ok(graph.kind === 'ok');
+  assert.deepEqual(graph.body, [{ '@id': `${pod}/tasks/1` }]);
+  assert.equal(routes.length, 4); // Discovery + two queries; no Context enumeration.
   const described = await tasksPod.contextDescription(
     `${pod}/_system/contexts/tasks`,
   );
@@ -204,7 +243,7 @@ try {
       },
     ],
   });
-  assert.equal(routes.length, 7);
+  assert.equal(routes.length, 9);
   assert.deepEqual(routes.slice(0, 2), [
     'GET /alice/.well-known/oauth-protected-resource',
     'GET /alice/.well-known/oauth-authorization-server',

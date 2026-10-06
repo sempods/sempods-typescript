@@ -46,3 +46,35 @@ export function resourceAnswer(origin, method, path, headers) {
     return { status: headers['if-match'] === '"v1"' ? 204 : 412 };
   return { status: 405 };
 }
+
+/** Pod query fixture: rejects any dataset parameters or missing bearer. */
+export function queryAnswer(origin, method, path, headers) {
+  const url = new URL(path, origin);
+  if (url.pathname !== '/alice/_system/sparql/query') return null;
+  if (
+    url.search ||
+    method !== 'POST' ||
+    headers['content-type'] !== 'application/sparql-query'
+  )
+    return { status: 400 };
+  if (headers.authorization !== 'Bearer consumer-token') return { status: 401 };
+  const select = headers.accept === 'application/sparql-results+json';
+  return {
+    status: 200,
+    headers: {
+      'content-type': select
+        ? 'application/sparql-results+json'
+        : 'application/ld+json',
+    },
+    body: JSON.stringify(
+      select
+        ? {
+            head: { vars: ['title', 'unbound'] },
+            results: {
+              bindings: [{ title: { type: 'literal', value: 'Overview' } }],
+            },
+          }
+        : [{ '@id': `${origin}/alice/tasks/1` }],
+    ),
+  };
+}

@@ -5,6 +5,7 @@ export type { SdkFailure } from './errors.js';
 export type { PodFetch, PodRequestInit } from './transport.js';
 export { anonymous, bearer } from './auth.js';
 export { createPod } from './client.js';
+export type { SelectResult, SparqlTerm } from './sparql.js';
 export type {
   AuthChallenge,
   AuthCredential,

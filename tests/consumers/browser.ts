@@ -29,10 +29,24 @@ async function main() {
   );
   const locale = createLocale({ locale: 'de-DE' });
   // One real read and one conditional write through the packed client.
-  const tasks = createPod(pod, {
+  const reader = createPod(pod, {
     auth: bearer('consumer-token'),
     development: 'loopback-http',
-  }).context(`${pod}/_system/contexts/tasks`);
+  });
+  const overview = await reader.sparql.select(
+    'SELECT ?title ?unbound WHERE { ?s ?p ?title }',
+  );
+  const graph = await reader.sparql.construct('CONSTRUCT WHERE { ?s ?p ?o }');
+  if (
+    overview.kind !== 'ok' ||
+    overview.body.rows[0]?.['title']?.type !== 'literal' ||
+    overview.body.rows[0]?.['title']?.value !== 'Overview' ||
+    overview.body.rows[0]?.['unbound'] !== undefined ||
+    graph.kind !== 'ok' ||
+    graph.body.length !== 1
+  )
+    throw new Error('Packed Pod queries failed');
+  const tasks = reader.context(`${pod}/_system/contexts/tasks`);
   const read = await tasks.subjects.get(`${pod}/tasks/1`);
   const write =
     read.kind === 'ok'

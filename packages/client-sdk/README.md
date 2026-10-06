@@ -2,7 +2,7 @@
 
 Portable browser/Node protocol primitives. Current supported exports:
 
-- `.`: `createPod`, context reads/writes, `bearer`/`anonymous`, `PodAuth`,
+- `.`: `createPod`, Pod SELECT/CONSTRUCT, context reads/writes, `bearer`/`anonymous`, `PodAuth`,
   `decodeCatalogue`, `isContextIri`, result/failure and transport types. Membership never implies
   context access.
 - `./oauth`: `discoverPod`, `createClientRegistry`, `prepareAuthorization`,
@@ -81,6 +81,61 @@ fields are removed. `SessionBinding`, session/attempt parsers, `assertAttemptFre
 and `safeReturnTo` are no longer client exports. Browser hosts use the app runtime;
 standalone hosts enforce their own attempt lifetime before exchanging a code.
 
+## Reading across the Pod
+
+`pod.sparql.select()` and `pod.sparql.construct()` query the caller's readable
+Pod dataset without fetching a catalogue or selecting a Context. The server
+enforces access. The SDK sends the query unchanged, without adding dataset
+parameters or making per-Context requests. Query-level dataset clauses remain
+subject to server authorization.
+
+```ts
+import type { Pod } from '@sempods/client-sdk';
+
+export async function overview(pod: Pod, signal: AbortSignal) {
+  const result = await pod.sparql.select(
+    `
+    PREFIX schema: <https://schema.org/>
+    SELECT ?task ?title ?context WHERE {
+      GRAPH ?context { ?task a schema:Action ; schema:name ?title }
+    }
+  `,
+    { signal },
+  );
+  if (result.kind !== 'ok') return result;
+  for (const row of result.body.rows) {
+    if (row['title']?.type === 'literal' && row['context']?.type === 'iri') {
+      console.log(row['title'].value, row['context'].value);
+    }
+  }
+  return result;
+}
+```
+
+The exported `SelectResult` and `SparqlTerm` types preserve projected names,
+solution order, repeated rows and RDF lexical values. Unbound variables are
+absent, so every binding needs a guard. Known terms decode to `iri`, `blank` or
+`literal`; literals retain optional `language` or `datatype`. Blank-node labels
+are local to one result document. Unsupported term types retain their opaque
+JSON in `term` with `type: 'unsupported'`. Invalid structure or malformed known
+terms reject with `response/body`. SELECT requires `application/sparql-results+json`.
+
+Headers are preserved even when no rows match. The SDK does not parse queries
+to validate projected names: an empty header with empty bindings is accepted
+structurally, without proving it is correct for that query. See the
+[SPARQL Results JSON format](https://www.w3.org/TR/sparql11-results-json/#select-results).
+
+`GRAPH ?context` requests named-graph provenance explicitly; ordinary patterns
+use the Pod's default graph. CONSTRUCT returns expanded JSON-LD nodes without
+automatic provenance. Editing a query result requires an explicit Context and
+a fresh Context-bound resource read with its applicable ETag.
+
+This surface is portable client-sdk functionality. Browser-runtime Pod handles
+and on-demand Context selection are tracked in
+[#38](https://github.com/sempods/sempods-typescript/issues/38) and
+[#39](https://github.com/sempods/sempods-typescript/issues/39); existing app-sdk
+flows still require a Context.
+
 ## Reading and writing one context
 
 ```ts
@@ -100,7 +155,7 @@ if (read.kind === 'ok') {
 }
 ```
 
-Supported operations (as of 0.3):
+Supported operations in this source revision (Pod queries are new since 0.3.0):
 
 | Operation                                     | Request                                                                                             | Results                                                                                                                          |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -110,6 +165,8 @@ Supported operations (as of 0.3):
 | `view.subjects.put(iri, body, condition)`     | `PUT` with `If-None-Match: *`, `If-Match` or explicit `{ overwrite: true }`                         | `applied` (`status` 200/201/204, `location` on 201) · `precondition-failed` · `not-found` · `refused` · `not-sent` · `uncertain` |
 | `view.subjects.patch(iri, change, condition)` | `PATCH` JSON Merge Patch                                                                            | `applied` (200/204) · same as above                                                                                              |
 | `view.subjects.delete(iri, condition)`        | `DELETE`                                                                                            | `applied` (204/200) · same as above                                                                                              |
+| `pod.sparql.select(query)`                    | `POST {pod}/_system/sparql/query`, accepts SPARQL Results JSON; no SDK-added dataset parameters     | `ok` (`SelectResult`) · `refused` · `cancelled` · `stopped`                                                                      |
+| `pod.sparql.construct(query)`                 | Same route, accepts JSON-LD; no SDK-added dataset parameters                                        | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `view.sparql.construct(query)`                | `POST {pod}/_system/sparql/query` with `default-graph-uri` and `named-graph-uri` = the view context | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 
 ### Deliberately not covered yet
@@ -123,15 +180,16 @@ not silently emulated:
 | Capability                                                         | Spec                           | Use instead / status                                                                  |
 | ------------------------------------------------------------------ | ------------------------------ | ------------------------------------------------------------------------------------- |
 | LOD addresses (`{pod}/{path}`)                                     | SPS-CRUD-001–004, §4           | The system route serves the same resource (SPS-CRUD-002)                              |
-| Union or multi-context reads (no or repeated `?context=`)          | SPS-CRUD-014–017               | One explicitly selected context per view                                              |
+| Union or multi-context CRUD reads (no or repeated `?context=`)     | SPS-CRUD-014–017               | Use Pod SPARQL for cross-Context queries; CRUD stays Context-bound                    |
 | `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -058 | JSON-LD only; no provenance per value                                                 |
 | Slots, single edges and the `outcome` representation               | SPS-CRUD-041–057               | Merge-patch replaces a predicate wholesale (SPS-CRUD-038)                             |
-| SPARQL SELECT/ASK and the find primitive                           | `sparql.md`, `find.md`         | CONSTRUCT in the view context                                                         |
+| SPARQL ASK and the find primitive                                  | `sparql.md`, `find.md`         | Pod SELECT/CONSTRUCT or Context CONSTRUCT                                             |
 | Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`       | Out of scope for the client                                                           |
 | Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                    | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |
 
-Protocol facts the client preserves: read bodies are returned exactly as
-answered (terms, language tags, datatypes, IRIs); writes return the answered
+Protocol facts the client preserves: JSON-LD read bodies are returned as
+answered; SELECT decodes wire terms without changing their lexical values, language
+tags or datatype IRIs; writes return the answered
 status and a pod-local `Location` for a creation, but no entity tag
 (SPS-CRUD-030); conflicts are explicit results. A 404 or a missing catalogue
 entry never redirects a request to another context. Creation locations must match

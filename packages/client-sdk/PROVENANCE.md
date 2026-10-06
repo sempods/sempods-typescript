@@ -50,7 +50,16 @@ in `sempods/sempods-kotlin` at `c6a5eab459249bcd04863a45ef87fbe5121034d4`
 (`PodContextRegistryRdf`, `PodContextPermissionResolver`, `SempodsPodContexts`).
 This is source reading and deterministic fixtures, not live wire evidence;
 pinned live validation remains pending. Re-check these revisions when the
-specification changes before 0.1.
+specification changes.
+
+Pod SELECT/CONSTRUCT (#37) was checked against that same spec revision on
+2026-10-06: SPS-SPARQL-001–018, including server dataset authorization and result
+media types. SELECT decoding follows the
+[SPARQL 1.1 Results JSON format](https://www.w3.org/TR/sparql11-results-json/).
+Evidence is source review and deterministic/packed-consumer fixtures, not live
+Pod or 10,000-Context backend scalability. Dataset downscope clarification remains
+owned by [sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129);
+Context failure has no unscoped fallback.
 
 No source licence file was found at the source revisions above; they and this
 port are by the same author. Since 0.1.0 this package, including the ported code,
