@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   useState,
   useRef,
+  useCallback,
   type ReactNode,
 } from 'react';
 import {
@@ -19,6 +20,8 @@ import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 const Context = createContext<{
   readonly controller: AppController;
   readonly actions: AppActions;
+  readonly contextDemand: boolean;
+  readonly retainContext: () => () => void;
 } | null>(null);
 /** Guarded user actions for custom screens and replacement controls. */
 export interface AppActions {
@@ -57,13 +60,23 @@ export function useAppState() {
 export function SempodsProvider({
   runtime,
   children,
+  contextSelection = 'required',
   ...locale
 }: LocaleOptions & {
   readonly runtime: BrowserRuntime;
   readonly children: ReactNode;
+  /**
+   * Required preserves automatic catalogues and Context-based access UI.
+   * On-demand leaves Pod startup/reads catalogue-free; mounted TargetScreens
+   * and explicitly opened AppAccess management demand active Context discovery.
+   * Preset/remembered Contexts still require fresh readable catalogue evidence.
+   * Keep fixed for the provider's lifetime: changing it replaces the controller
+   * and cancels a pending leave confirmation; it is not a guarded mode switch.
+   */
+  readonly contextSelection?: 'required' | 'on-demand';
 }) {
-  const value = useMemo(() => {
-    const controller = createAppController(runtime);
+  const owner = useMemo(() => {
+    const controller = createAppController(runtime, { contextSelection });
     const actions: AppActions = Object.freeze({
       selectConnection: (id: string) => controller.selectConnection(id),
       selectContext: (iri: string) => controller.selectContext(iri),
@@ -75,8 +88,22 @@ export function SempodsProvider({
         controller.navigate(action),
     });
     return { controller, actions };
-  }, [runtime]);
-  const app = value.controller;
+  }, [runtime, contextSelection]);
+  const [demands, setDemands] = useState(0);
+  const retainContext = useCallback(() => {
+    setDemands((count) => count + 1);
+    let current = true;
+    return () => {
+      if (!current) return;
+      current = false;
+      setDemands((count) => count - 1);
+    };
+  }, []);
+  const value = useMemo(
+    () => ({ ...owner, contextDemand: demands > 0, retainContext }),
+    [owner, demands, retainContext],
+  );
+  const app = owner.controller;
   useEffect(() => {
     app.start();
     return () => app.stop();
@@ -112,6 +139,31 @@ const none = Object.freeze({
   revision: 0,
 });
 const noSubscription = () => () => {};
+/** Internal Context demand, independent of whether a BoundView already exists. */
+export function useContextDemand(active: boolean) {
+  const value = useContext(Context);
+  if (!value) throw new Error('SempodsProvider is required.');
+  const state = useAppState();
+  const connection = state.connections.find((c) => c.id === state.activeId);
+  useEffect(
+    () => (active ? value.retainContext() : undefined),
+    [active, value.retainContext],
+  );
+  const id = connection?.id;
+  const session = connection?.session.kind;
+  const catalogue = connection?.catalogue.kind;
+  useEffect(() => {
+    if (
+      active &&
+      state.contextSelection === 'on-demand' &&
+      id &&
+      (session === 'active' || session === 'renewing') &&
+      catalogue === 'unknown'
+    )
+      void value.actions.refreshContexts(id).catch(() => {});
+  }, [active, state.contextSelection, id, session, catalogue, value.actions]);
+  return state.contextSelection === 'required' || active || value.contextDemand;
+}
 export function useWorkflowAccess() {
   const { view, connections, activeId } = useAppState();
   const access = useSyncExternalStore(
@@ -203,8 +255,9 @@ function LeaveConfirmation() {
   );
 }
 
-/** Mount a fresh screen per target, retaining it through same-target access recovery. */
+/** Demand discovery before a view exists, then retain the screen through same-target recovery. */
 export function TargetScreen({ children }: { readonly children: ReactNode }) {
+  useContextDemand(true);
   const view = useView();
   return view ? <Fragment key={view.key}>{children}</Fragment> : null;
 }

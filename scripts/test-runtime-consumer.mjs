@@ -73,6 +73,14 @@ try {
     join(root, 'tests/runtime-browser/preset.tsx'),
     join(temp, 'preset.tsx'),
   );
+  await cp(
+    join(root, 'tests/runtime-browser/overview.tsx'),
+    join(temp, 'overview.tsx'),
+  );
+  await cp(
+    join(root, 'examples/todo/recipes/pod-overview.tsx'),
+    join(temp, 'pod-overview.tsx'),
+  );
   await writeFile(
     join(temp, 'tsconfig.json'),
     JSON.stringify({
@@ -87,7 +95,7 @@ try {
         noEmit: true,
         jsx: 'react-jsx',
       },
-      files: ['consumer.ts', 'preset.tsx'],
+      files: ['consumer.ts', 'preset.tsx', 'overview.tsx'],
     }),
   );
   execFileSync(
@@ -122,6 +130,20 @@ try {
     ),
   );
   const widgets = await prepareWidgets(root, temp);
+  const overviewBundle = await build({
+    absWorkingDir: temp,
+    entryPoints: ['overview.tsx'],
+    bundle: true,
+    platform: 'browser',
+    format: 'esm',
+    write: false,
+    metafile: true,
+  });
+  assert.ok(
+    Object.keys(overviewBundle.metafile.inputs).every(
+      (path) => !path.includes(root),
+    ),
+  );
   const widgetFixture = widgetData();
   const clients = new Map();
   const codes = new Map();
@@ -131,6 +153,7 @@ try {
   let registrations = 0;
   let exchanges = 0;
   let refreshes = 0;
+  let overviewRefuse = false;
   let writeMode = 'normal';
   let writes = 0;
   let version = 1;
@@ -182,6 +205,12 @@ try {
           'content-type': 'text/html',
           'set-cookie': 'ambient=owner; Path=/',
         });
+        if (url.searchParams.get('identity') === 'overview') {
+          res.end(
+            '<html><div id="app"></div><script type="module" src="/overview.js"></script></html>',
+          );
+          return;
+        }
         if (url.searchParams.get('identity') === 'widgets') {
           res.end(
             '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="' +
@@ -219,6 +248,11 @@ try {
       if (url.pathname === '/preset.js') {
         res.writeHead(200, { 'content-type': 'text/javascript' });
         res.end(presetBundle.outputFiles[0].text);
+        return;
+      }
+      if (url.pathname === '/overview.js') {
+        res.writeHead(200, { 'content-type': 'text/javascript' });
+        res.end(overviewBundle.outputFiles[0].text);
         return;
       }
       if (url.pathname === '/consumer.js') {
@@ -304,7 +338,7 @@ try {
           access_token: token(
             base,
             client,
-            name === 'widgets-pod' ? '' : 'tasks',
+            name === 'widgets-pod' || name === 'overview-pod' ? '' : 'tasks',
           ),
           token_type: 'Bearer',
           refresh_token: rotated,
@@ -378,6 +412,35 @@ try {
         assert.equal(req.method, 'POST');
         assert.equal(req.headers.cookie, undefined);
         assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        if (name === 'overview-pod') {
+          assert.equal(url.search, '');
+          assert.equal(req.headers.accept, 'application/sparql-results+json');
+          if (overviewRefuse) {
+            overviewRefuse = false;
+            json({}, 401, {
+              'www-authenticate': 'Bearer error="invalid_token"',
+            });
+          } else
+            json(
+              {
+                head: { vars: ['item', 'graph'] },
+                results: {
+                  bindings: [
+                    {
+                      item: { type: 'uri', value: 'urn:overview-note' },
+                      graph: {
+                        type: 'uri',
+                        value: base + '/_system/contexts/work',
+                      },
+                    },
+                  ],
+                },
+              },
+              200,
+              { 'content-type': 'application/sparql-results+json' },
+            );
+          return;
+        }
         if (url.search) {
           assert.equal(
             url.searchParams.get('default-graph-uri'),
@@ -893,6 +956,74 @@ try {
   }
   console.log(
     'Packed AppAccess: one/set/free Pod UI, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+  );
+  // The copyable recipe, installed archives and native browser storage: a Pod
+  // overview loads/restores/renews without touching Context discovery.
+  const beforeOverview = traffic.length;
+  const contextTraffic = () =>
+    traffic
+      .slice(beforeOverview)
+      .filter((r) => r.path.startsWith('/overview-pod/_system/contexts'));
+  const podQueries = () =>
+    traffic
+      .slice(beforeOverview)
+      .filter((r) => r.path === '/overview-pod/_system/sparql/query').length;
+  await page.goto(origin + '/app?identity=overview');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=overview');
+  await page.getByText('urn:overview-note', { exact: false }).waitFor();
+  assert.deepEqual(contextTraffic(), []);
+  await page.reload();
+  await page.getByText('urn:overview-note', { exact: false }).waitFor();
+  assert.deepEqual(contextTraffic(), []);
+  const beforeRenewal = podQueries();
+  overviewRefuse = true;
+  const renewed = page.waitForResponse(
+    (r) => r.url().endsWith('/_system/sparql/query') && r.status() === 200,
+  );
+  await page.getByRole('button', { name: 'Reload overview' }).click();
+  await renewed;
+  await page.getByText('urn:overview-note', { exact: false }).waitFor();
+  assert.equal(podQueries(), beforeRenewal + 2);
+  assert.deepEqual(contextTraffic(), []);
+  const beforeScoped = podQueries();
+  await page.getByRole('button', { name: 'Create a note' }).click();
+  await page
+    .getByLabel('Data context')
+    .selectOption(origin + '/overview-pod/_system/contexts/work');
+  await page.getByLabel('New note').fill('Unfinished');
+  assert.equal(
+    contextTraffic().filter((r) => r.path.endsWith('/contexts')).length,
+    1,
+  );
+  assert.equal(podQueries(), beforeScoped);
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  const revalidated = page.waitForResponse((r) =>
+    r.url().endsWith('/_system/contexts'),
+  );
+  await page.getByRole('button', { name: 'Check access', exact: true }).click();
+  await revalidated;
+  assert.equal(await page.getByLabel('New note').inputValue(), 'Unfinished');
+  assert.equal(podQueries(), beforeScoped);
+  await page.reload();
+  await page.getByText('urn:overview-note', { exact: false }).waitFor();
+  const afterRestore = contextTraffic().length;
+  assert.equal(
+    contextTraffic().filter((r) => r.path.endsWith('/contexts')).length,
+    2,
+  );
+  await page.getByRole('button', { name: 'Create a note' }).click();
+  await page.getByLabel('New note').waitFor();
+  assert.equal(
+    contextTraffic().filter((r) => r.path.endsWith('/contexts')).length,
+    3,
+  );
+  assert.ok(contextTraffic().length >= afterRestore + 1);
+  console.log(
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection and draft-preserving revalidation passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);

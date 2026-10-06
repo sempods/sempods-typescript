@@ -305,9 +305,17 @@ Context-view `403` recovery retains its existing behavior.
 `createAppController(runtime).getSnapshot().pod` exposes the active eligible Pod
 reader, or `null` during unresolved/signed-out startup. Changing the active Pod
 exposes its handle; another connection's reader retains its own lifetime.
-Controller startup still automatically loads catalogues as before. React Pod
-loaders and on-demand discovery are tracked in
-[#39](https://github.com/sempods/sempods-typescript/issues/39).
+Controller startup defaults to automatic catalogues (`contextSelection: 'required'`).
+Use `createAppController(runtime, { contextSelection: 'on-demand' })` for a
+catalogue-free Pod overview. Neither startup/restore, preset/remembered Contexts
+nor Pod read/recovery initiates catalogue or description requests in this mode.
+The controller still restores all eligible sessions independently. A headless UI
+explicitly calls `runtime.loadContexts(id)` before selecting/binding a Context;
+fresh readable catalogue evidence validates the configured/remembered selection.
+The full catalogue remains one response, without per-Context reads or fetches.
+`createViewLoader(reader, read)` works with `BoundPod` and `PodRead<T>` as well as
+Context handles, retaining cancellation, obsolete-result retirement and at most
+one recovery retry per cycle. See [React Pod overviews](react-authoring.md#pod-overviews-with-contexts-on-demand).
 
 ## Durable sessions and refresh
 

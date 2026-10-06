@@ -28,18 +28,19 @@ Import the named APIs from the table's entry: **app** = `@sempods/app-sdk`,
 Full signatures and examples:
 [authoring guide](react-authoring.md), [working task screen](../examples/todo/src/app.tsx).
 
-| Job                             | API (entry)                                        | Remember                                                                     |
-| ------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Start the browser session       | `createBrowserRuntime` (app)                       | One stable runtime outside render; dispose at app shutdown.                  |
-| Bind the UI to it               | `SempodsProvider`, `TargetScreen` (React)          | Provider initializes; TargetScreen resets app-local state per target.        |
-| Get connection/context controls | `AppAccess` (React)                                | Place login/recovery beside your screen; the app owns its frame.             |
-| Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit) | Choose exact predicate/type IRIs and an explicit text language.              |
-| Read a typed list               | `useList` (React)                                  | Render rows only for `state.kind === 'ready'`; inspect `data.skipped`.       |
-| Add an item                     | `useCreation` (React)                              | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`. |
-| Update or remove a row          | `useFieldUpdate` (React)                           | Pass the original list snapshot; respect `canMutate`.                        |
-| Edit a form safely              | `useResourceEditor`, `ResourceEditor` (React)      | Hook owns the editor; component supplies save/delete/recovery UI.            |
-| Change selection                | `useSelection`, `useApp` (React)                   | Use guarded row selection and connection/context/navigation actions.         |
-| Show mutation recovery          | `UpdateNotice` (React)                             | Render it with `{...creation.notice}` and `{...update.notice}`.              |
+| Job                             | API (entry)                                        | Remember                                                                        |
+| ------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Start the browser session       | `createBrowserRuntime` (app)                       | One stable runtime outside render; dispose at app shutdown.                     |
+| Bind the UI to it               | `SempodsProvider`, `TargetScreen` (React)          | Provider initializes; TargetScreen resets app-local state per target.           |
+| Get connection/context controls | `AppAccess` (React)                                | Place login/recovery beside your screen; the app owns its frame.                |
+| Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit) | Choose exact predicate/type IRIs and an explicit text language.                 |
+| Read a typed list               | `useList` (React)                                  | Render rows only for `state.kind === 'ready'`; inspect `data.skipped`.          |
+| Read across the Pod             | `usePodLoad` (React), `pod.sparql` (client)        | On-demand provider defers catalogues; writes still require a validated Context. |
+| Add an item                     | `useCreation` (React)                              | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`.    |
+| Update or remove a row          | `useFieldUpdate` (React)                           | Pass the original list snapshot; respect `canMutate`.                           |
+| Edit a form safely              | `useResourceEditor`, `ResourceEditor` (React)      | Hook owns the editor; component supplies save/delete/recovery UI.               |
+| Change selection                | `useSelection`, `useApp` (React)                   | Use guarded row selection and connection/context/navigation actions.            |
+| Show mutation recovery          | `UpdateNotice` (React)                             | Render it with `{...creation.notice}` and `{...update.notice}`.                 |
 
 ## Avoid the common traps
 

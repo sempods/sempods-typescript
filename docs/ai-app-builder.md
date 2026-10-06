@@ -99,6 +99,16 @@ not instructions to the coding assistant.
 - Keep Pod URL, app origin/callback and selected context distinct. Ordinary CRUD
   uses context grants; omit feature scopes unless the feature and Pod require a
   documented scope. Empty context selection never means all contexts.
+- For an overview across authorized Contexts, use `pod.sparql.select`/`construct`
+  through `usePodLoad` and provider `contextSelection="on-demand"`. Keep the
+  overview outside `TargetScreen`; do not enumerate Contexts or query/fetch each
+  one to build it. Mount `TargetScreen` before a view exists when a scoped flow
+  is requested, with `AppAccess` alongside for discovery, chooser and explicit
+  retry. The default `'required'` policy preserves ordinary CRUD startup.
+  `useWorkflowAccess` stays Context-only. Query rows are read-only: to edit an
+  existing item, select/validate its explicit target and reread through that
+  Context with its ETag. See the [overview recipe](../examples/todo/recipes/pod-overview.tsx)
+  and [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
 - Define fields once using the portable `client-sdk/edit` helpers. Choose exact
   type/predicate IRIs, fixed text language or `language: null`, and enum/flag
   values. Store points in time with `dateTime` (an `xsd:dateTime` with an

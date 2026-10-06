@@ -6,6 +6,8 @@
   [quickstart](quickstart.md) and [hackathon reference](hackathon.md).
 - [React/headless authoring](react-authoring.md), [widgets](widgets.md) and
   [browser runtime](browser-runtime.md).
+- [Pod overviews with Contexts on-demand](react-authoring.md#pod-overviews-with-contexts-on-demand)
+  and the [copyable overview recipe](../examples/todo/recipes/pod-overview.tsx).
 - [Local testing](local-testing.md), [deployment](deployment.md),
   [PWA](pwa.md) and [migration/recovery](migration.md).
 - [TODO example](../examples/todo/README.md) and

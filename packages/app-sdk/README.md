@@ -84,8 +84,22 @@ cached within the access lifetime; failed attempts keep the fallback without an
 automatic retry loop. Selection changes cancel pending labels and ignore stale
 answers. Session/grant changes clear label authority.
 
-Controller startup still requests catalogues under its existing policy. React Pod
-loaders and on-demand discovery are the next increment (#39).
+Controller/provider `contextSelection` defaults to `'required'`, preserving
+automatic catalogue loading and Context-based access UI. Choose `'on-demand'`
+on `SempodsProvider` or `createAppController(runtime, options)` for a Pod overview:
+`useAppState().pod` and `usePodLoad((pod, signal) => pod.sparql.select(query, { signal }))`
+need no catalogue, including on restore or recovery. `useLoad` and `usePodLoad`
+share one cancellable loader; `createViewLoader` accepts `ViewRead<T>` or `PodRead<T>`
+with the corresponding handle, without losing callback inference.
+
+Mount `TargetScreen` before a view exists to activate a Context flow, or open
+`AppAccess` management explicitly. The active eligible connection then discovers
+its catalogue; concurrent demand coalesces, ready/empty/failed catalogues are reused,
+and **Check access** retries explicitly. Preset/remembered Contexts still require
+fresh readable evidence. `useWorkflowAccess` remains Context-only and labels do
+not gate access. Custom/headless controls use existing refresh/load operations;
+no new activation API is needed. See the
+[copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.3.0/examples/todo/recipes/pod-overview.tsx).
 
 ## Documentation for app authors and AI assistants
 

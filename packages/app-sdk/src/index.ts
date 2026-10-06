@@ -45,8 +45,9 @@ export { bindResourceEditor } from './authoring/editor.js';
 export { createAppController } from './authoring/app.js';
 export type {
   AppController,
+  AppControllerOptions,
   AppSnapshot,
   LeaveGuard,
 } from './authoring/app.js';
 export { createViewLoader } from './authoring/load.js';
-export type { LoadState, ViewRead } from './authoring/load.js';
+export type { LoadState, ViewRead, PodRead } from './authoring/load.js';

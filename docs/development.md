@@ -125,6 +125,17 @@ the Chromium runtime consumer verifies bound SELECT/CONSTRUCT with no dataset
 parameters and no accompanying catalogue requests. These are client/runtime
 fixture checks; #40 owns live scale evidence.
 
+React/headless on-demand regressions cover catalogue/description-free startup,
+restore, reads and recovery (including preset/remembered targets and saved Pods),
+StrictMode/concurrent Context demand before/after login, explicit retry after
+empty/failed discovery, label fallback and obsolete Pod results. Packed consumer
+types preserve Context/Pod callback inference, including explicit result generics
+and rejection of mismatched handles. `test:runtime` executes the copyable
+Pod-overview recipe against installed archives in Chromium: native storage/PKCE,
+catalogue-free overview restore and 401 recovery, later validated Context demand
+and draft-preserving revalidation. These fixtures do not establish server dataset
+semantics or deployed scale; #40 remains separate.
+
 Pod/label regressions and the packed Chromium runtime also run with
 `AbortSignal.any` unavailable. Signal tests verify cancellation propagation and
 listener cleanup, and controller regressions keep unexpected binding defects
