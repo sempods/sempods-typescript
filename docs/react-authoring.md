@@ -126,6 +126,21 @@ import or UI framework is required. AppShell styles its own header; it does not
 style app list rows or controls elsewhere in its children. ResourceEditor styles
 the fields rendered inside that editor as well as its review/actions.
 
+The host owns the color scheme; SDK surfaces inherit it. A page without a scheme
+stays light even when the system prefers dark. Enable page-wide automatic dark
+appearance in the app's CSS:
+
+```css
+:root {
+  color-scheme: light dark;
+}
+```
+
+Keep any explicit page backgrounds/text colors compatible with that choice
+(for example with `light-dark()`). Embedded notices, editors and connection controls
+have transparent surfaces; their fields/buttons use the shared tokens. AppShell
+and AppAccess retain their themed background.
+
 Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
 `style`/`className` where supported. They inherit across SDK components. Existing

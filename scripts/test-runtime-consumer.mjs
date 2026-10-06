@@ -184,7 +184,7 @@ try {
         });
         if (url.searchParams.get('identity') === 'widgets') {
           res.end(
-            '<html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="' +
+            '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="' +
               (url.searchParams.has('duplicate')
                 ? '/widgets-duplicate.js'
                 : '/widgets.js') +
@@ -197,7 +197,7 @@ try {
           url.searchParams.get('identity')?.startsWith('access-')
         ) {
           res.end(
-            '<html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/preset.js"></script></html>',
+            '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/preset.js"></script></html>',
           );
           return;
         }

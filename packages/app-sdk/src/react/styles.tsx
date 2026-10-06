@@ -12,8 +12,9 @@ const styles = `
   --sp-line:var(--sempods-line,var(--sempods-access-line,light-dark(#dce3dd,#39453d)));
   --sp-accent:var(--sempods-accent,var(--sempods-access-accent,light-dark(#226044,#8acda6)));
   --sp-on-accent:var(--sempods-on-accent,var(--sempods-access-on-accent,light-dark(#fff,#14251b)));
-  color-scheme:light dark; color:var(--sp-text); background:var(--sp-bg); font:400 1rem/1.5 system-ui,sans-serif; overflow-wrap:anywhere;
+  color:var(--sp-text); font:400 1rem/1.5 system-ui,sans-serif; overflow-wrap:anywhere;
 }
+:where([data-sempods-ui="shell"], [data-sempods-ui="access"]) { background:var(--sp-bg); }
 ${surfaces} :where(.sp-sdk-actions) { display:flex; flex-wrap:wrap; gap:8px; }
 ${surfaces}, ${surfaces} * { box-sizing:border-box; }
 ${surfaces} :where(button,input,select,textarea), :where([data-sempods-button]) { font:inherit; max-width:100%; min-width:0; min-height:44px; }

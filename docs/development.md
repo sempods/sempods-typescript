@@ -100,7 +100,7 @@ creation and guarded management with a retained draft. The unchanged AppShell en
 custom layouts retain the full CRUD, conflict/unknown-outcome, guard,
 keyboard/mobile and second-tab checks, plus the shared Node domain/edit path.
 `test:todo` also checks AppShell, editor and recovery controls without an app
-stylesheet at 320/375px in EN/DE and light/dark, including inherited token overrides,
+stylesheet at 320/375px in EN/DE and light/dark, including host-controlled color schemes, transparent embedded surfaces, inherited token overrides,
 44px targets, keyboard focus, and isolation from app-owned list styling.
 `test:runtime` also covers packed `AppAccess` one/set/free Pod choices, keyboard
 sign-in and focus recovery, and the widget host with retained drafts/uncertain

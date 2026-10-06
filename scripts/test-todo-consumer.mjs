@@ -549,6 +549,19 @@ try {
     });
     await page.goto(origin + '/baseline');
     assert.equal(await page.locator('link[rel=stylesheet]').count(), 0);
+    // A dark OS preference alone must not create dark SDK islands on a light page.
+    for (const surface of await page.locator('[data-sempods-ui]').all()) {
+      assert.equal(
+        await surface.evaluate(
+          (element) => getComputedStyle(element).colorScheme,
+        ),
+        'normal',
+      );
+      assert.equal(
+        await surface.evaluate((element) => getComputedStyle(element).color),
+        'rgb(32, 41, 35)',
+      );
+    }
     await page.getByLabel('Your Pod').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page
@@ -591,12 +604,59 @@ try {
       const box = await control.boundingBox();
       assert.ok(box.height >= 44);
     }
+    assert.equal(
+      await editor.evaluate((element) => getComputedStyle(element).color),
+      'rgb(32, 41, 35)',
+    );
+    // This is the entire host opt-in; no SDK stylesheet import is needed.
+    await page.addStyleTag({ content: ':root { color-scheme: light dark; }' });
+    for (const surface of await page.locator('[data-sempods-ui]').all())
+      assert.equal(
+        await surface.evaluate(
+          (element) => getComputedStyle(element).colorScheme,
+        ),
+        'light dark',
+      );
+    for (const surface of await page
+      .locator('[data-sempods-ui="editor"], [data-sempods-ui="notice"]')
+      .all())
+      assert.equal(
+        await surface.evaluate(
+          (element) => getComputedStyle(element).backgroundColor,
+        ),
+        'rgba(0, 0, 0, 0)',
+      );
+    // The root declaration also changes the browser's page canvas, not just SDK boxes.
+    const canvas = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.background = 'Canvas';
+      document.body.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
+    assert.equal(
+      canvas,
+      appearance === 'light' ? 'rgb(255, 255, 255)' : 'rgb(18, 18, 18)',
+    );
     const expectedText =
       appearance === 'light' ? 'rgb(32, 41, 35)' : 'rgb(232, 238, 233)';
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
       expectedText,
     );
+    // A host can force light even with a dark OS preference, without remounting.
+    await page.evaluate(() => {
+      document.documentElement.style.colorScheme = 'light';
+    });
+    assert.equal(
+      await editor.evaluate((element) => getComputedStyle(element).color),
+      'rgb(32, 41, 35)',
+    );
+    await page.evaluate(() => {
+      document.documentElement.style.removeProperty('color-scheme');
+    });
+    assert.equal(await field.inputValue(), 'Unfinished baseline');
     // One inherited token styles both shell management and standalone editor controls.
     await page.evaluate(() =>
       document.documentElement.style.setProperty('--sempods-accent', '#654321'),

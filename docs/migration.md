@@ -30,7 +30,10 @@ All SDK access, notice and editor components share the
 [scoped styling baseline](react-authoring.md#shared-sdk-appearance). Set inherited
 `--sempods-*` tokens to theme them together; previous `--sempods-access-*` variables
 remain fallback aliases. Root `style` still styles the AppShell container;
-component controls use the shared tokens. There is no stylesheet import. The CSP
+component controls use the shared tokens. SDK surfaces now inherit the host color
+scheme: use `:root { color-scheme: light dark; }` in the app CSS to enable automatic
+dark appearance, and adapt any hard-coded page colors accordingly. Embedded notices,
+editors and connection controls have transparent backgrounds. There is no stylesheet import. The CSP
 must permit the inline styles, or the host supplies hook-based custom UI.
 App-owned list rows and other content outside SDK controls/editors remain unstyled.
 Target guards, conflict review and unconfirmed-write recovery are unchanged.
