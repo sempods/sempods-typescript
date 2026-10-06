@@ -53,6 +53,33 @@ async function selected(f = fixture({ preferences: null })) {
   return { ...f, ...result };
 }
 
+it('loads labels and cancels stale selection requests without AbortSignal.any', async () => {
+  const native = Object.getOwnPropertyDescriptor(AbortSignal, 'any')!;
+  Object.defineProperty(AbortSignal, 'any', { value: undefined });
+  try {
+    const f = fixture({ preferences: null });
+    const stale = deferred<Response>();
+    let signal: AbortSignal | undefined;
+    f.setDescriptions(async (url, init) => {
+      if (url === work) {
+        signal = init?.signal ?? undefined;
+        return stale.promise;
+      }
+      return description(url, 'Current');
+    });
+    const { runtime, id } = await selected(f);
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    runtime.selectContext(id, personal);
+    expect(signal?.aborted).toBe(true);
+    await vi.waitFor(() => expect(labels(runtime)?.[personal]).toBe('Current'));
+    stale.resolve(description(work, 'Stale'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(labels(runtime)).toEqual({ [personal]: 'Current' });
+  } finally {
+    Object.defineProperty(AbortSignal, 'any', native);
+  }
+});
+
 it.each([1, 50, 51, 10_000])(
   'loads only the selected Context in a catalogue of %i entries',
   async (size) => {

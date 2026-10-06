@@ -423,6 +423,10 @@ try {
   const origin = 'http://127.0.0.1:' + server.address().port;
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
+  // Exercise the installed SDK without the newer browser signal combinator.
+  await context.addInitScript(() => {
+    delete globalThis.AbortSignal.any;
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error));

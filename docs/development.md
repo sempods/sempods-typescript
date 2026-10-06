@@ -123,3 +123,9 @@ responses. Packed React-free declarations include `BoundPod` and `AppSnapshot.po
 the Chromium runtime consumer verifies bound SELECT/CONSTRUCT with no dataset
 parameters and no accompanying catalogue requests. These are client/runtime
 fixture checks; #40 owns live scale evidence.
+
+Pod/label regressions and the packed Chromium runtime also run with
+`AbortSignal.any` unavailable. Signal tests verify cancellation propagation and
+listener cleanup, and controller regressions keep unexpected binding defects
+visible. Removing an API in Chromium is compatibility regression evidence, not
+a test on an older Safari/iOS device.

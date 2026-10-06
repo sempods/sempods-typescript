@@ -137,7 +137,6 @@ export function createBrowserRuntime(
     e.podEpoch++;
     e.podReads.abort();
     e.podReads = new AbortController();
-    resetLabels(e);
   }
   function publish() {
     snapshot = Object.freeze(
@@ -209,6 +208,7 @@ export function createBrowserRuntime(
     ) {
       invalidate(e);
       invalidatePod(e);
+      resetLabels(e);
       if (previousSubject !== result.subject) {
         delete e.boundPod;
         delete e.bound;
@@ -222,6 +222,7 @@ export function createBrowserRuntime(
     delete e.credential;
     invalidate(e);
     invalidatePod(e);
+    resetLabels(e);
     delete e.boundPod;
     e.lifetime.abort(new RuntimeError('disconnected'));
     e.view = {
@@ -758,6 +759,7 @@ export function createBrowserRuntime(
         delete e.revalidation;
         invalidate(e);
         invalidatePod(e);
+        resetLabels(e);
         e.selectedVersion++;
         e.view = {
           ...e.view,
@@ -799,6 +801,7 @@ export function createBrowserRuntime(
       e.lifetime.abort();
       invalidate(e);
       invalidatePod(e);
+      resetLabels(e);
       delete e.boundPod;
       e.view = {
         ...e.view,
@@ -899,6 +902,7 @@ export function createBrowserRuntime(
         e.lifetime.abort();
         invalidate(e);
         invalidatePod(e);
+        resetLabels(e);
         delete e.boundPod;
       }
       entries.clear();

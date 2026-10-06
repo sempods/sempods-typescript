@@ -1,6 +1,7 @@
 import type { CatalogueContext, CatalogueResult } from '@sempods/client-sdk';
 import type { Entry } from './connection.js';
 import { RuntimeError } from './errors.js';
+import { combineSignals } from './signals.js';
 
 /** Uses the runtime's connection authority; never starts login or renews on a 403. */
 export interface CatalogueOwner {
@@ -207,13 +208,19 @@ export function loadSelectedLabel(
     e.view.catalogue.contexts?.some((c) => c.iri === iri && c.readable);
   void (async () => {
     let label: string | undefined;
+    const combined = combineSignals(
+      e.lifetime.signal,
+      pending.controller.signal,
+    );
     try {
       const result = await e.clientPod.contextDescription(iri, {
-        signal: AbortSignal.any([e.lifetime.signal, pending.controller.signal]),
+        signal: combined.signal,
       });
       if (result.kind === 'ok') label = result.body.label?.trim() || undefined;
     } catch {
       // Display text only: failure keeps the immediate IRI/name fallback.
+    } finally {
+      combined.dispose();
     }
     if (!current()) return;
     state.cache.set(iri, label);

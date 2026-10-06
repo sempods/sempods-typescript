@@ -7,6 +7,7 @@ import type {
 import type { Entry } from './connection.js';
 import type { BoundPod, BoundRead, ViewAccess } from './view.js';
 import { waitFor } from './wait.js';
+import { combineSignals } from './signals.js';
 
 /** The production client remains the only protocol/renewal executor. */
 export function bindPod(
@@ -42,11 +43,12 @@ export function bindPod(
     if (options?.signal?.aborted) return { kind: 'cancelled' };
     if (!readable()) return { kind: 'invalidated' };
     const revision = e.podEpoch;
-    const signal = AbortSignal.any([
+    const combined = combineSignals(
       e.podReads.signal,
       e.lifetime.signal,
-      ...(options?.signal ? [options.signal] : []),
-    ]);
+      options?.signal,
+    );
+    const { signal } = combined;
     try {
       const result = await waitFor(action({ ...options, signal }), signal);
       if (options?.signal?.aborted) return { kind: 'cancelled' };
@@ -59,6 +61,8 @@ export function bindPod(
       if (!readable() || revision !== e.podEpoch)
         return { kind: 'invalidated' };
       throw error;
+    } finally {
+      combined.dispose();
     }
   }
   return Object.freeze({

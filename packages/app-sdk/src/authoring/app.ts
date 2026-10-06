@@ -76,13 +76,12 @@ export function createAppController(runtime: BrowserRuntime) {
         )?.id ?? null;
     const connection = connections.find((c) => c.id === activeId);
     pod = null;
-    if (connection) {
-      try {
-        pod = runtime.bindPod(connection.id);
-      } catch {
-        /* No signed-in eligible session yet. */
-      }
-    }
+    if (
+      connection &&
+      (connection.session.kind === 'active' ||
+        connection.session.kind === 'renewing')
+    )
+      pod = runtime.bindPod(connection.id);
     if (!connection || !connection.selectedContext) view = null;
     else {
       try {

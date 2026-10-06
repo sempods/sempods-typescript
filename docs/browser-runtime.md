@@ -293,6 +293,7 @@ generation gets a new handle; an old handle never revives. Changed scopes within
 a renewal advance the read revision, while unchanged grants preserve it.
 Caller cancellation returns `cancelled`; invalidation returns `invalidated`,
 including when a late transport answer would otherwise succeed.
+Cancellation does not require the newer `AbortSignal.any` browser API.
 
 Pod reads share the runtime credential owner and the production client's executor
 implementation. A bound client guard and the captured lifetime signal apply on

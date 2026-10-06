@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createBrowserRuntime } from './runtime.js';
 import { createAppController } from '../authoring/app.js';
+import { RuntimeError } from './errors.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
   fixture,
@@ -23,6 +24,49 @@ const unauthorized = () =>
     status: 401,
     headers: { 'www-authenticate': 'Bearer' },
   });
+
+it('reads and aborts the actual request without AbortSignal.any', async () => {
+  const native = Object.getOwnPropertyDescriptor(AbortSignal, 'any')!;
+  Object.defineProperty(AbortSignal, 'any', { value: undefined });
+  try {
+    const f = await signedIn();
+    expect(await f.reader.sparql.construct(query)).toMatchObject({
+      kind: 'ok',
+    });
+    const gate = deferred<Response>();
+    let signal: AbortSignal | undefined;
+    f.setQuery(async (_url, init) => {
+      signal = init?.signal ?? undefined;
+      return gate.promise;
+    });
+    const caller = new AbortController();
+    const read = f.reader.sparql.construct(query, { signal: caller.signal });
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    caller.abort();
+    expect(await read).toEqual({ kind: 'cancelled' });
+    expect(signal?.aborted).toBe(true);
+    gate.resolve(answer());
+  } finally {
+    Object.defineProperty(AbortSignal, 'any', native);
+  }
+});
+
+it.each([new TypeError('factory defect'), new RuntimeError('configuration')])(
+  'keeps unexpected binding errors visible to the controller: %s',
+  async (error) => {
+    const f = await signedIn();
+    const binding = vi.spyOn(f.runtime, 'bindPod').mockImplementation(() => {
+      throw error;
+    });
+    const app = createAppController(f.runtime);
+    try {
+      expect(() => app.start()).toThrow(error);
+    } finally {
+      app.stop();
+      binding.mockRestore();
+    }
+  },
+);
 async function signedIn(
   options: Partial<BrowserRuntimeOptions> = {},
   scopes = '',
