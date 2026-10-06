@@ -7,8 +7,10 @@
 //
 // The credentials file is local and never committed:
 //   { "podUrl": "http://localhost:8090/perf10k",
-//     "tokenEndpoint": "http://localhost:8090/perf10k/_system/auth/token",
+//     "tokenEndpoint": "http://localhost:8090/perf10k/_system/auth/token",  (optional)
 //     "clients": { "<name>": { "clientId": "...", "secret": "..." } } }
+// podUrl must use https, or http on a loopback host. Secrets are sent only to the Pod's own
+// token endpoint ({podUrl}/_system/auth/token); a different tokenEndpoint is rejected.
 // Each client is a sempods service client using client_credentials, wired into the SDK
 // through its PodAuth seam; the pod decides what it may read. Queries run through
 // pod.sparql.select()/construct(), which send no dataset parameters. --catalogue also
@@ -36,7 +38,15 @@ const credentialsPath = env.POD_READ_CREDENTIALS;
 if (!credentialsPath)
   fail('Set POD_READ_CREDENTIALS to the credentials JSON file.');
 const credentials = JSON.parse(await readFile(credentialsPath, 'utf8'));
-const podUrl = String(credentials.podUrl).replace(/\/$/, '');
+const podUrl = podBase(credentials.podUrl);
+// Client secrets go only to the measured Pod's own token endpoint, never to a recipient the
+// file names separately (the SDK applies the same rule to bearer credentials).
+const tokenEndpoint = `${podUrl}/_system/auth/token`;
+if (
+  credentials.tokenEndpoint !== undefined &&
+  credentials.tokenEndpoint !== tokenEndpoint
+)
+  fail(`tokenEndpoint must be the Pod's own token endpoint: ${tokenEndpoint}`);
 const people =
   env.POD_READ_PEOPLE_CONTEXT ??
   `${podUrl}/_system/contexts/apps/seeder/people`;
@@ -169,7 +179,7 @@ function clientCredentials(client, counters) {
   const issue = () =>
     (pending ??= (async () => {
       counters.token++;
-      const response = await fetch(credentials.tokenEndpoint, {
+      const response = await fetch(tokenEndpoint, {
         method: 'POST',
         headers: {
           authorization: `Basic ${basic}`,
@@ -313,6 +323,22 @@ function printTable(rows) {
       `| ${r.client} | ${r.query} | ${outcome} | ${r.medianMs} | ${r.p95Ms} | ${r.requestsPerCall.join('/')} | ${r.rows ?? ''}${readable} | ${r.value ?? ''} | ${r.note}${head} |`,
     );
   }
+}
+
+/** The Pod base URL: https, or http on a loopback host; no query, fragment or userinfo. */
+function podBase(value) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch {
+    fail('podUrl must be an absolute URL.');
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
+    fail('podUrl must use https, or http on a loopback host.');
+  if (url.search || url.hash || url.username || url.password)
+    fail('podUrl must not contain a query, fragment or credentials.');
+  return url.href.replace(/\/$/, '');
 }
 
 function parseArgs(args) {
