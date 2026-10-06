@@ -1,6 +1,9 @@
 import { SdkError } from './errors.js';
 import { ABSOLUTE_IRI } from './iri.js';
 
+/** Turtle LANGTAG lexical form, without the leading @; not full BCP47 validation. */
+const LANGUAGE_TAG = /^[a-zA-Z]+(-[a-zA-Z0-9]+)*$/;
+
 /** One SELECT result document; no inferred variables or client-side deduplication. */
 export interface SelectResult {
   /** Projected names from head.vars, in received order, even for an empty result. */
@@ -21,6 +24,7 @@ export type SparqlTerm =
     }
   | {
       readonly type: 'unsupported';
+      /** Opaque JSON; only the outer object is frozen, not nested extension values. */
       readonly term: Readonly<Record<string, unknown>>;
     };
 
@@ -33,7 +37,9 @@ export function decodeSelect(value: unknown): SelectResult {
     !object(value) ||
     !object(value['head']) ||
     !Array.isArray(value['head']['vars']) ||
-    !value['head']['vars'].every((v: unknown) => typeof v === 'string') ||
+    !value['head']['vars'].every(
+      (v: unknown) => typeof v === 'string' && v.length > 0,
+    ) ||
     !object(value['results']) ||
     !Array.isArray(value['results']['bindings']) ||
     'boolean' in value
@@ -43,6 +49,7 @@ export function decodeSelect(value: unknown): SelectResult {
     ...value['head']['vars'],
   ]);
   const declared = new Set(variables);
+  if (declared.size !== variables.length) throw malformed();
   const rows = value['results']['bindings'].map((binding: unknown) => {
     if (!object(binding)) throw malformed();
     // Variable names such as __proto__ or constructor are data, not prototypes.
@@ -61,7 +68,7 @@ function decodeTerm(term: unknown): SparqlTerm {
     throw malformed();
   const type = term['type'];
   if (type !== 'uri' && type !== 'bnode' && type !== 'literal')
-    return Object.freeze({ type: 'unsupported', term: Object.freeze(term) });
+    return unsupported(term);
   const value = term['value'];
   if (typeof value !== 'string') throw malformed();
   if (type === 'uri' || type === 'bnode') {
@@ -71,23 +78,38 @@ function decodeTerm(term: unknown): SparqlTerm {
       'datatype' in term
     )
       throw malformed();
+    if (Object.keys(term).some((key) => !['type', 'value'].includes(key)))
+      return unsupported(term);
     return Object.freeze({ type: type === 'uri' ? 'iri' : 'blank', value });
   }
   const language = term['xml:lang'];
   const datatype = term['datatype'];
   if (
-    ('xml:lang' in term && (typeof language !== 'string' || !language)) ||
+    ('xml:lang' in term &&
+      (typeof language !== 'string' || !LANGUAGE_TAG.test(language))) ||
     ('datatype' in term &&
       (typeof datatype !== 'string' || !ABSOLUTE_IRI.test(datatype))) ||
     ('xml:lang' in term && 'datatype' in term)
   )
     throw malformed();
+  // Extensions such as RDF 1.2 its:dir can change the RDF term's identity.
+  // Preserve them after validating known fields, rather than silently dropping them.
+  if (
+    Object.keys(term).some(
+      (key) => !['type', 'value', 'xml:lang', 'datatype'].includes(key),
+    )
+  )
+    return unsupported(term);
   return Object.freeze({
     type: 'literal',
     value,
     ...(typeof language === 'string' ? { language } : {}),
     ...(typeof datatype === 'string' ? { datatype } : {}),
   });
+}
+
+function unsupported(term: Record<string, unknown>): SparqlTerm {
+  return Object.freeze({ type: 'unsupported', term: Object.freeze(term) });
 }
 
 function object(value: unknown): value is Record<string, unknown> {

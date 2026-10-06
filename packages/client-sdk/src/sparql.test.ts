@@ -77,6 +77,62 @@ describe('SELECT decoding', () => {
     }
   });
 
+  it.each(['en', 'de-DE', 'zh-Hant-TW', 'es-419', 'x-private', 'i-klingon'])(
+    'preserves a lexically valid language tag %s unchanged',
+    async (language) => {
+      const decoded = await select(
+        result([
+          { x: { type: 'literal', value: 'text', 'xml:lang': language } },
+        ]),
+      );
+      expect(decoded.rows[0]?.['x']).toEqual({
+        type: 'literal',
+        value: 'text',
+        language,
+      });
+    },
+  );
+
+  it.each(['not a tag', 'en_US', '-en', 'en-', 'en--US', '419', 'en\n'])(
+    'rejects malformed language tag %j',
+    async (language) => {
+      await expect(
+        select(
+          result([
+            { x: { type: 'literal', value: 'text', 'xml:lang': language } },
+          ]),
+        ),
+      ).rejects.toMatchObject({
+        reason: { code: 'response', problem: 'body' },
+      });
+    },
+  );
+
+  it.each([
+    { type: 'literal', value: 'مرحبا', 'xml:lang': 'ar', 'its:dir': 'rtl' },
+    { type: 'literal', value: 'hello', 'xml:lang': 'en', 'its:dir': 'ltr' },
+    { type: 'literal', value: 'x', extension: { future: [1, 2] } },
+    { type: 'uri', value: 'urn:x', extension: true },
+    { type: 'bnode', value: 'b1', extension: true },
+  ])('preserves extensions of known terms opaquely %#', async (term) => {
+    const decoded = await select(result([{ x: term }]));
+    expect(decoded.rows[0]?.['x']).toEqual({ type: 'unsupported', term });
+  });
+
+  it.each([
+    { type: 'literal', value: 1, 'its:dir': 'rtl' },
+    { type: 'literal', value: 'x', 'xml:lang': 'not a tag', 'its:dir': 'rtl' },
+    { type: 'literal', value: 'x', datatype: 'relative', extension: true },
+    { type: 'uri', value: 'relative', extension: true },
+  ])(
+    'still rejects malformed known fields when extensions are present %#',
+    async (term) => {
+      await expect(select(result([{ x: term }]))).rejects.toMatchObject({
+        reason: { code: 'response', problem: 'body' },
+      });
+    },
+  );
+
   it('preserves empty headers and projected headers without interpreting the query', async () => {
     expect(await select(result([], ['x', 'title']))).toEqual({
       variables: ['x', 'title'],
@@ -111,6 +167,8 @@ describe('SELECT decoding', () => {
     { head: { vars: ['x'] } },
     result({}, ['x']),
     result([], [1]),
+    result([], ['']),
+    result([], ['x', 'x']),
     result([null]),
     result([[]]),
     result([{ extra: { type: 'literal', value: 'x' } }]),

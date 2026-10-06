@@ -117,7 +117,13 @@ solution order, repeated rows and RDF lexical values. Unbound variables are
 absent, so every binding needs a guard. Known terms decode to `iri`, `blank` or
 `literal`; literals retain optional `language` or `datatype`. Blank-node labels
 are local to one result document. Unsupported term types retain their opaque
-JSON in `term` with `type: 'unsupported'`. Invalid structure or malformed known
+JSON in `term` with `type: 'unsupported'`. This also applies to extensions
+on known term types, such as a literal's `its:dir`: known fields are validated
+first, then the entire term is retained opaquely. Only the outer `term` object is
+frozen; nested extension values remain opaque JSON. Language tags are checked
+against the [Turtle LANGTAG lexical form](https://www.w3.org/TR/turtle/#grammar-production-LANGTAG),
+without the leading `@`; this is not full BCP47 validation. Header variable names
+must be nonempty and unique; an empty variable list is still accepted. Invalid structure or malformed known
 terms reject with `response/body`. SELECT requires `application/sparql-results+json`.
 
 Headers are preserved even when no rows match. The SDK does not parse queries
