@@ -775,7 +775,7 @@ try {
     await page.setViewportSize({ width: 320, height: 720 });
     await page.emulateMedia({ colorScheme: mode === 'set' ? 'dark' : 'light' });
     await page.goto(origin + '/app?identity=access-' + mode);
-    await page.getByRole('heading', { name: 'Shopping' }).waitFor();
+    await page.getByRole('heading', { name: 'Shopping', level: 1 }).waitFor();
     if (process.env.SEMPODS_UI_PREVIEW_DIR)
       await page.screenshot({
         path: join(
@@ -789,7 +789,7 @@ try {
     } else if (mode === 'set') {
       await page.getByLabel('Your Pod').selectOption(origin + '/alice');
       assert.equal(await page.getByRole('textbox').count(), 0);
-    } else await page.getByLabel('Your Pod').fill(origin + '/alice');
+    } else await page.getByLabel('Your Pod').fill('  ' + origin + '/alice/  ');
     await page.getByRole('button', { name: 'Sign in', exact: true }).focus();
     await Promise.all([
       page.waitForURL('**/callback?**'),
@@ -819,6 +819,9 @@ try {
     await page
       .getByRole('button', { name: 'Data access', exact: true })
       .click();
+    await page
+      .getByRole('heading', { name: 'Data access', level: 2 })
+      .waitFor();
     await page
       .getByRole('button', { name: 'Check access', exact: true })
       .waitFor();

@@ -59,7 +59,9 @@ it.each(['en', 'de'] as const)(
     const button = await screen.findByRole('button', {
       name: language === 'en' ? 'Sign in' : 'Anmelden',
     });
-    expect(screen.getByRole('heading', { name: 'Shopping' })).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { name: 'Shopping', level: 1 }),
+    ).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.getByText('Personal')).toBeTruthy();
@@ -119,7 +121,11 @@ it('keeps an unrestricted preset a default and offers another Pod in explicit ma
   expect(f.runtime.getSnapshot()[0]!.podUrl).toBe('https://pod.example/bob');
 });
 
-it('accepts scheme-free input only in presentation and keeps runtime rejection of ambiguous URLs', async () => {
+it.each([
+  'pod.example/alice',
+  'pod.example/alice/',
+  '  https://pod.example/alice/ \n',
+])('cleans up pasted Pod input in presentation: %s', async (value) => {
   const f = fixture();
   cleanups.push(() => f.runtime.dispose());
   render(
@@ -128,14 +134,33 @@ it('accepts scheme-free input only in presentation and keeps runtime rejection o
     </SempodsProvider>,
   );
   const input = await screen.findByLabelText('Your Pod');
-  fireEvent.change(input, { target: { value: 'pod.example/alice/' } });
-  await act(async () => fireEvent.submit(input.closest('form')!));
-  expect(await screen.findByRole('alert')).toBeTruthy();
-  expect(f.fetch).not.toHaveBeenCalled();
-  fireEvent.change(input, { target: { value: 'pod.example/alice' } });
+  fireEvent.change(input, { target: { value } });
   await act(async () => fireEvent.submit(input.closest('form')!));
   await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(1));
   expect(f.runtime.getSnapshot()[0]!.podUrl).toBe(pod);
+});
+
+it.each([
+  'pod.example/alice?/',
+  'pod.example/alice#/',
+  'pod.example/alice//',
+  'pod.example/al ice/',
+  'https://user@pod.example/alice/',
+  'pod.example/notes/../alice/',
+])('keeps ambiguous Pod input rejected before requests: %s', async (value) => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Shopping" />
+    </SempodsProvider>,
+  );
+  const input = await screen.findByLabelText('Your Pod');
+  fireEvent.change(input, { target: { value } });
+  await act(async () => fireEvent.submit(input.closest('form')!));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(f.fetch).not.toHaveBeenCalled();
+  expect(f.navigate).not.toHaveBeenCalled();
 });
 
 const fieldsForDraft = fields({ title: text('urn:title', { language: null }) });
@@ -155,10 +180,12 @@ function Draft() {
   );
 }
 function Host() {
+  const { view } = useAppState();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   return (
     <>
+      {view && <h1>My tasks</h1>}
       <button ref={button} onClick={() => setOpen(!open)}>
         Manage
       </button>
@@ -194,6 +221,10 @@ it('hides usable/read-only access, keeps drafts through read loss, and guards ex
   });
   expect(screen.getByRole('region', { name: 'Data access' })).toBeTruthy();
   expect(getComputedStyle(surface).display).toBe('grid');
+  expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  expect(
+    screen.getByRole('heading', { level: 2, name: 'Data access' }),
+  ).toBeTruthy();
   expect(
     screen.getByText('Context catalogue unavailable. Access is unknown.'),
   ).toBeTruthy();
@@ -217,6 +248,9 @@ it('hides usable/read-only access, keeps drafts through read loss, and guards ex
   );
   expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+  expect(
+    screen.getByRole('heading', { level: 2, name: 'Data access' }),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Update access' }));
   expect(await screen.findByRole('alertdialog')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));

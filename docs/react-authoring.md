@@ -61,9 +61,14 @@ Pod/context identity, and displaying them starts no additional requests.
 One `allowedPods` entry or a preset needs no URL input. Several permitted Pods
 get a finite picker; selecting an option does not start sign-in. Unrestricted
 apps show **Your Pod** with a short hint. The input may omit `https://`; presentation
-adds it before calling the runtime, which still rejects noncanonical URLs.
+adds it, trims surrounding whitespace and removes one trailing slash before
+calling the runtime. Other noncanonical input remains rejected; configured Pod
+URLs still require the strict canonical form.
 For local HTTP development enter `http://127.0.0.1:…` explicitly. There is no silent
 auth or automatic redirect. Login/consent on the Pod retains the Pod's own UI.
+
+The initial login uses an `h1`; recovery with an existing target and explicitly
+opened management use an `h2`, below the app’s own main heading.
 
 The app may put a **Data access** button in its own menu or header. `open` shows
 management; toggling it changes presentation only. Pod/context changes still run

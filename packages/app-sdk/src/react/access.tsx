@@ -83,6 +83,7 @@ export function AppAccess({
     state.changing,
     state.confirmingLeave,
   ]);
+  const Heading = open || state.view ? 'h2' : 'h1';
   const Connections = components?.Connections;
   const available = state.startup?.storage === 'durable' && !state.startupError;
   const active =
@@ -118,7 +119,9 @@ export function AppAccess({
                 {icon}
               </div>
             )}
-            <h1>{open || state.view ? m.controls.dataAccess : appName}</h1>
+            <Heading>
+              {open || state.view ? m.controls.dataAccess : appName}
+            </Heading>
           </header>
         )}
         {state.startupError ? (
@@ -182,7 +185,9 @@ function podName(url: string, names?: Readonly<Record<string, string>>) {
 }
 /** Presentation-only convenience. Canonical URL/security validation stays in the runtime. */
 function enteredPod(value: string) {
-  const text = value.trim();
+  // Only clean up the common pasted-address form. Do not parse/re-serialize the
+  // URL: that could silently normalize ambiguous paths, credentials or escapes.
+  const text = value.trim().replace(/\/$/, '');
   return /^[a-z][a-z\d+.-]*:/i.test(text) ? text : `https://${text}`;
 }
 
@@ -496,7 +501,7 @@ const styles = `
 [data-sempods-access] * { box-sizing:border-box; }
 [data-sempods-access] .sp-access-content { width:100%; max-width:22rem; margin-inline:auto; }
 [data-sempods-access] header { margin:0 0 28px; }
-[data-sempods-access] h1 { font-size:1.75rem; font-weight:500; line-height:1.25; margin:0; }
+[data-sempods-access] h1, [data-sempods-access] h2 { font-size:1.75rem; font-weight:500; line-height:1.25; margin:0; }
 [data-sempods-access] .sp-access-icon { margin:0 auto 20px; width:56px; height:56px; }
 [data-sempods-access] .sp-access-icon > * { width:100%; height:100%; object-fit:contain; }
 [data-sempods-access] p { overflow-wrap:anywhere; margin:12px 0; }
