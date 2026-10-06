@@ -8,6 +8,26 @@ import type { MutationOutcome } from './hooks.js';
 import { useApp, useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure } from '../locale.js';
+import { AppAccess } from './access.js';
+import { SdkStyles } from './styles.js';
+import { contextName, podName, distinctName } from './names.js';
+
+function Notice({
+  children,
+  role = 'status',
+}: {
+  readonly children: ReactNode;
+  readonly role?: 'status' | 'alert';
+}) {
+  return (
+    <>
+      <SdkStyles />
+      <p data-sempods-ui="notice" role={role}>
+        {children}
+      </p>
+    </>
+  );
+}
 
 export function UpdateNotice({
   outcome,
@@ -55,7 +75,8 @@ export function UpdateNotice({
   const uncertain =
     outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
   return (
-    <>
+    <section data-sempods-ui="notice">
+      <SdkStyles />
       <p role="status">{text}</p>
       {uncertain && current !== undefined && (
         <section aria-label={m.current}>
@@ -67,36 +88,38 @@ export function UpdateNotice({
           )}
         </section>
       )}
-      {uncertain && onCheck && (
-        <button
-          disabled={checking}
-          onClick={async () => {
-            const pending = { outcome, checked: false, checking: true };
-            setComparison(pending);
-            let checked = false;
-            try {
-              checked = await onCheck();
-            } catch {
-              // A failed comparison never authorizes acknowledgement.
-            }
-            // Only this check may settle its state; replaced outcomes/checks
-            // keep their own progress and acknowledgement requirement.
-            setComparison((current) =>
-              current === pending
-                ? { ...pending, checked, checking: false }
-                : current,
-            );
-          }}
-        >
-          {m.compare}
-        </button>
-      )}
-      {uncertain && onAcknowledge && (
-        <button disabled={!checked || checking} onClick={onAcknowledge}>
-          {m.acknowledge}
-        </button>
-      )}
-    </>
+      <div className="sp-sdk-actions">
+        {uncertain && onCheck && (
+          <button
+            disabled={checking}
+            onClick={async () => {
+              const pending = { outcome, checked: false, checking: true };
+              setComparison(pending);
+              let checked = false;
+              try {
+                checked = await onCheck();
+              } catch {
+                // A failed comparison never authorizes acknowledgement.
+              }
+              // Only this check may settle its state; replaced outcomes/checks
+              // keep their own progress and acknowledgement requirement.
+              setComparison((current) =>
+                current === pending
+                  ? { ...pending, checked, checking: false }
+                  : current,
+              );
+            }}
+          >
+            {m.compare}
+          </button>
+        )}
+        {uncertain && onAcknowledge && (
+          <button disabled={!checked || checking} onClick={onAcknowledge}>
+            {m.acknowledge}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 export function AccessNotice() {
@@ -104,27 +127,24 @@ export function AccessNotice() {
   const { preset } = useAppState();
   const { messages: m, format } = useSdkLocale();
   const c = access.connection;
-  if (!c) return <p role="status">{m.controls.noTarget}</p>;
+  if (!c) return <Notice>{m.controls.noTarget}</Notice>;
   if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
-    return <p role="status">{m.controls.readLost}</p>;
+    return <Notice>{m.controls.readLost}</Notice>;
   if (c.missingRequiredScopes.length)
-    return (
-      <p role="status">{m.missingScopes(c.missingRequiredScopes, format)}</p>
-    );
-  if (c.catalogue.kind === 'failed')
-    return <p role="status">{m.catalogueError}</p>;
+    return <Notice>{m.missingScopes(c.missingRequiredScopes, format)}</Notice>;
+  if (c.catalogue.kind === 'failed') return <Notice>{m.catalogueError}</Notice>;
   if (c.catalogue.kind !== 'ready')
-    return <p role="status">{m.cataloguePending}</p>;
+    return <Notice>{m.cataloguePending}</Notice>;
   if (!c.selectedContext)
     return (
-      <p role="status">
+      <Notice>
         {preset?.podUrl === c.podUrl && preset.contextIri
           ? m.controls.presetContextUnavailable
           : m.controls.noTarget}
-      </p>
+      </Notice>
     );
-  if (!access.read) return <p role="status">{m.controls.readLost}</p>;
-  if (!access.write) return <p role="status">{m.controls.readOnly}</p>;
+  if (!access.read) return <Notice>{m.controls.readLost}</Notice>;
+  if (!access.write) return <Notice>{m.controls.readOnly}</Notice>;
   return null;
 }
 export interface ConnectionControlsProps {
@@ -170,6 +190,7 @@ export function ConnectionControls({
     state.preset?.podUrl === connection?.podUrl
       ? state.preset?.contextIri
       : undefined;
+  const displayedContext = connection?.selectedContext ?? fixedContext;
   const unavailable =
     busy ||
     !state.startup ||
@@ -182,14 +203,31 @@ export function ConnectionControls({
     connection?.catalogue.kind === 'ready'
       ? connection.catalogue.contexts.filter((c) => c.readable)
       : [];
+  const podUrls = [
+    ...new Set([
+      ...state.connections.map((entry) => entry.podUrl),
+      ...(state.preset ? [state.preset.podUrl] : []),
+    ]),
+  ];
+  const podLabel = (url: string) =>
+    distinctName(url, podUrls, (value) => podName(value, podNames));
+  const labels =
+    connection?.catalogue.kind !== 'unknown'
+      ? connection?.catalogue.labels
+      : undefined;
+  const contextLabel = (iri: string) =>
+    distinctName(
+      iri,
+      readable.map((entry) => entry.iri),
+      (value) => contextName(value, labels),
+    );
   return (
-    <section aria-label={controls.choosePod}>
+    <section data-sempods-ui="connections" aria-label={controls.choosePod}>
+      <SdkStyles />
       {state.preset && connection?.podUrl !== state.preset.podUrl && (
         <div>
           <span style={{ overflowWrap: 'anywhere' }}>
-            {podNames?.[state.preset.podUrl]?.trim()
-              ? `${podNames[state.preset.podUrl]} · ${state.preset.podUrl}`
-              : state.preset.podUrl}
+            {podLabel(state.preset.podUrl)}
           </span>{' '}
           <button
             disabled={unavailable}
@@ -233,6 +271,7 @@ export function ConnectionControls({
           <label>
             {m.activePod}
             <select
+              aria-label={m.activePod}
               value={state.activeId ?? ''}
               disabled={busy}
               onChange={(e) =>
@@ -244,9 +283,12 @@ export function ConnectionControls({
               </option>
               {state.connections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {podNames?.[c.podUrl]?.trim()
-                    ? `${podNames[c.podUrl]} · ${c.podUrl}`
-                    : c.podUrl}
+                  {podLabel(c.podUrl)}
+                  {state.connections.filter(
+                    (other) => other.podUrl === c.podUrl,
+                  ).length > 1
+                    ? ` · ${state.connections.indexOf(c) + 1}`
+                    : ''}
                 </option>
               ))}
             </select>
@@ -255,6 +297,7 @@ export function ConnectionControls({
             <label>
               {m.dataContext}
               <select
+                aria-label={m.dataContext}
                 value={connection?.selectedContext ?? ''}
                 disabled={
                   busy ||
@@ -270,7 +313,7 @@ export function ConnectionControls({
                 </option>
                 {readable.map((c) => (
                   <option key={c.iri} value={c.iri}>
-                    {c.iri}
+                    {contextLabel(c.iri)}
                   </option>
                 ))}
               </select>
@@ -278,7 +321,7 @@ export function ConnectionControls({
           )}
           {active && fixedContext && (
             <p style={{ overflowWrap: 'anywhere' }}>
-              {m.dataContext}: {fixedContext}
+              {m.dataContext}: {contextLabel(fixedContext)}
             </p>
           )}
           {active &&
@@ -315,6 +358,31 @@ export function ConnectionControls({
           )}
         </div>
       )}
+      {(connection || state.preset) && (
+        <details>
+          <summary>{controls.addresses}</summary>
+          <dl>
+            {podUrls.map((url) => (
+              <div key={url}>
+                <dt>{podLabel(url)}</dt>
+                <dd>{url}</dd>
+              </div>
+            ))}
+          </dl>
+          {displayedContext &&
+            !readable.some((entry) => entry.iri === displayedContext) && (
+              <p>{displayedContext}</p>
+            )}
+          <dl>
+            {readable.map((entry) => (
+              <div key={entry.iri}>
+                <dt>{contextLabel(entry.iri)}</dt>
+                <dd>{entry.iri}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
       {failure && <p role="alert">{error(failure.cause)}</p>}
     </section>
   );
@@ -330,15 +398,20 @@ export function CallbackNotice() {
   const interaction = state.startup?.interaction;
   if (interaction !== 'failed' && interaction !== 'cancelled') return null;
   return (
-    <p role="alert">
+    <Notice role="alert">
       {interaction === 'cancelled'
         ? messages.controls.signInCancelled
         : state.startup?.failure
           ? describeFailure(messages.errors, state.startup.failure)
           : messages.controls.failure}
-    </p>
+    </Notice>
   );
 }
+/** Optional app frame: title/management, AppAccess, then startup-gated content.
+ * Existing title/style/replacement controls remain supported. Controls now hide
+ * with usable access; mode is passed through and is presentation, not Pod policy.
+ * Uses inline scoped --sempods-* styling; see the CSP note in the authoring guide.
+ */
 export function AppShell({
   children,
   title = 'sempods',
@@ -354,41 +427,38 @@ export function AppShell({
   };
   readonly style?: React.CSSProperties;
 }) {
+  const [open, setOpen] = useState(false);
   const state = useAppState();
-  const { messages, direction, error } = useSdkLocale();
-  const Connections = components.Connections ?? ConnectionControls;
+  const target = useRef<HTMLButtonElement>(null);
+  const { messages, direction } = useSdkLocale();
+  const access = useWorkflowAccess();
   return (
-    <main
-      dir={direction}
-      style={{
-        maxWidth: 900,
-        margin: 'auto',
-        padding: 'clamp(12px,4vw,32px)',
-        fontFamily: 'system-ui,sans-serif',
-        lineHeight: 1.5,
-        color: '#173740',
-        ...style,
-      }}
-    >
+    <main dir={direction} data-sempods-ui="shell" style={style}>
+      <SdkStyles />
       <header>
         <h1>{title}</h1>
+        <button
+          ref={target}
+          data-sempods-button=""
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {messages.controls.dataAccess}
+        </button>
       </header>
-      {!state.startup && !state.startupError ? (
-        <p role="status">{messages.controls.loading}</p>
-      ) : state.startup?.storage === 'busy' ? (
-        <p role="alert">{messages.controls.busy}</p>
-      ) : state.startup?.storage === 'unavailable' ? (
-        <p role="alert">{messages.controls.storage}</p>
-      ) : state.startupError ? (
-        <p role="alert">{error(state.startupError)}</p>
-      ) : (
-        <>
-          <CallbackNotice />
-          <Connections mode={mode} />
-          <AccessNotice />
-          {children}
-        </>
-      )}
+      <AppAccess
+        appName={title}
+        headingLevel={2}
+        open={open}
+        focusTarget={target}
+        mode={mode}
+        components={components}
+      />
+      {!open &&
+        access.read &&
+        !access.write &&
+        access.connection?.catalogue.kind === 'ready' && <AccessNotice />}
+      {state.startup?.storage === 'durable' && !state.startupError && children}
     </main>
   );
 }
@@ -440,7 +510,10 @@ function Comparison({
     </dl>
   );
 }
-/** Default save/delete/review UI; children supply only domain fields. */
+/** Default save/delete/review UI; children supply only domain fields.
+ * Inline scoped --sempods-* styles cover controls and comparisons without changing
+ * draft/review lifetime. Host app content outside this editor is not styled.
+ */
 export function ResourceEditor<D, U = D>({
   editor,
   children,
@@ -460,7 +533,7 @@ export function ResourceEditor<D, U = D>({
     outcome: SaveOutcome | RemoveOutcome;
   } | null>(null);
   if (!editor || editor.state.phase === 'loading')
-    return <p role="status">{m.loading}</p>;
+    return <Notice>{m.loading}</Notice>;
   const state = editor.state;
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
     const result = await action();
@@ -475,7 +548,8 @@ export function ResourceEditor<D, U = D>({
     if (result.kind === 'saved' || result.kind === 'removed') onChanged?.();
   };
   return (
-    <section>
+    <section data-sempods-ui="editor">
+      <SdkStyles />
       {state.draft !== null && state.phase !== 'deleted' && (
         <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
           {children(state.draft, editor.change)}
@@ -514,7 +588,7 @@ export function ResourceEditor<D, U = D>({
           </button>
         </section>
       )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div className="sp-sdk-actions">
         <button
           disabled={!state.canSave}
           onClick={() => void act(() => editor.save())}

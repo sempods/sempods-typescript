@@ -23,7 +23,7 @@ but cannot restore or yield views under that policy. `runtime.allowedPods` and
 argument-free connect. `AppAccess` supplies a centered login/recovery surface,
 optional app icon and friendly Pod selection, hiding when usable. It sits beside
 app content; the app owns its layout and may open management explicitly. Legacy
-AppShell and its replaceable controls remain supported.
+AppShell composes a title, management control and AppAccess; its existing props and replaceable controls remain supported. Access, editor and notice components share inherited `--sempods-*` styling tokens.
 Screens receive views without credentials. It creates no request,
 navigation or storage on import or construction.
 

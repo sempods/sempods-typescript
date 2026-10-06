@@ -18,7 +18,7 @@ shipped `package.json` names the exact SDK version the sources belong to.
 
 Open `http://127.0.0.1:5173/` for the centered `AppAccess` login and app-owned
 layout. Use **Data access** to open management after connecting. `/legacy` retains
-AppShell and `/custom` shows a fully custom layout. Enter your Pod link, sign in
+AppShell composition with the same access UI, and `/custom` shows a fully custom layout. Enter your Pod link, sign in
 on the Pod, then explicitly select a context.
 The screens share `src/domain.ts` and `TaskScreen`; no protocol or session logic
 is duplicated. The callback route is served by the development server. Configure

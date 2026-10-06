@@ -1,4 +1,4 @@
-/* global window, document, URLSearchParams, navigator, caches */
+/* global getComputedStyle, window, document, URLSearchParams, navigator, caches */
 import assert from 'node:assert/strict';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -76,6 +76,10 @@ try {
     join(temp, 'sign-in.tsx'),
   );
   await cp(join(root, 'tests/todo-browser/pwa.tsx'), join(temp, 'pwa.tsx'));
+  await cp(
+    join(root, 'tests/todo-browser/baseline.tsx'),
+    join(temp, 'baseline.tsx'),
+  );
   await writeFile(
     join(temp, 'tsconfig.json'),
     JSON.stringify({
@@ -96,6 +100,7 @@ try {
         'customized.tsx',
         'sign-in.tsx',
         'pwa.tsx',
+        'baseline.tsx',
       ],
     }),
   );
@@ -164,6 +169,15 @@ try {
   assert.ok(
     Object.keys(pwa.metafile.inputs).every((path) => !path.includes(root)),
   );
+  const baseline = await build({
+    absWorkingDir: temp,
+    entryPoints: ['baseline.tsx'],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    jsx: 'automatic',
+    write: false,
+  });
   const pwaFile = (name) => readFile(join(temp, 'examples/todo/pwa', name));
   const worker = (await pwaFile('sw.js')).toString();
   // The installable variant replaces the plain TODO bundle at the same paths.
@@ -214,6 +228,8 @@ try {
           '/',
           '/custom',
           '/legacy',
+          '/baseline',
+          '/baseline/callback',
           '/callback',
           '/customized',
           '/recipe',
@@ -226,14 +242,24 @@ try {
             (pwaMode
               ? '<link rel="manifest" href="/manifest.webmanifest">'
               : '') +
-            '<link rel="stylesheet" href="/app.css"><div id="root"></div><script type="module" src="' +
+            (url.pathname.startsWith('/baseline')
+              ? ''
+              : '<link rel="stylesheet" href="/app.css">') +
+            '<div id="root"></div><script type="module" src="' +
             (url.pathname.startsWith('/recipe')
               ? '/sign-in.js'
-              : url.pathname === '/customized'
-                ? '/customized.js'
-                : '/app.js') +
+              : url.pathname.startsWith('/baseline')
+                ? '/baseline.js'
+                : url.pathname === '/customized'
+                  ? '/customized.js'
+                  : '/app.js') +
             '"></script></html>',
         );
+        return;
+      }
+      if (url.pathname === '/baseline.js') {
+        res.writeHead(200, { 'content-type': 'text/javascript' });
+        res.end(baseline.outputFiles[0].text);
         return;
       }
       if (url.pathname === '/sign-in.js') {
@@ -498,6 +524,234 @@ try {
   console.log(
     'Packed default TODO: EN/DE login, 320px light/dark, explicit context, creation and guarded management with retained draft passed.',
   );
+  for (const appearance of ['light', 'dark']) {
+    tasks.clear();
+    const context = await browser.newContext({
+      viewport: { width: appearance === 'light' ? 320 : 375, height: 800 },
+      colorScheme: appearance,
+    });
+    const page = await context.newPage();
+    await page.route('**/alice/_system/contexts/*', (route) => {
+      const iri = route.request().url();
+      return route.fulfill({
+        json: {
+          '@id': iri,
+          '@type': [
+            'http://www.w3.org/ns/sparql-service-description#NamedGraph',
+          ],
+          'http://www.w3.org/ns/sparql-service-description#name': [
+            { '@id': iri },
+          ],
+          'https://schema.sempods.org/public': [{ '@value': false }],
+          'http://www.w3.org/2000/01/rdf-schema#label': [{ '@value': 'Tasks' }],
+        },
+      });
+    });
+    await page.goto(origin + '/baseline');
+    assert.equal(await page.locator('link[rel=stylesheet]').count(), 0);
+    await page.getByLabel('Your Pod').waitFor();
+    const initialSignIn = page.getByRole('button', {
+      name: 'Sign in',
+      exact: true,
+    });
+    assert.equal(
+      await initialSignIn.evaluate(
+        (button) => getComputedStyle(button).backgroundColor,
+      ),
+      'rgb(34, 96, 68)',
+    );
+    // A dark OS preference alone must not create dark SDK islands on a light page.
+    for (const surface of await page.locator('[data-sempods-ui]').all()) {
+      assert.equal(
+        await surface.evaluate(
+          (element) => getComputedStyle(element).colorScheme,
+        ),
+        'normal',
+      );
+      assert.equal(
+        await surface.evaluate(
+          (element) => getComputedStyle(element).backgroundColor,
+        ),
+        ['shell', 'access'].includes(
+          await surface.getAttribute('data-sempods-ui'),
+        )
+          ? 'rgb(255, 255, 255)'
+          : 'rgba(0, 0, 0, 0)',
+      );
+    }
+    await page.getByLabel('Your Pod').fill(pod);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page
+      .getByRole('option', { name: 'Tasks · ' + work, exact: true })
+      .waitFor({ state: 'attached' });
+    await page
+      .getByRole('option', { name: 'Tasks · ' + personal, exact: true })
+      .waitFor({ state: 'attached' });
+    await page.getByLabel('Data context', { exact: true }).selectOption(work);
+    await page
+      .getByRole('region', { name: 'Data access', exact: true })
+      .waitFor({ state: 'hidden' });
+    await page.getByLabel('Task', { exact: true }).first().fill('SDK baseline');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'SDK baseline', exact: true })
+      .click();
+    const editor = page.locator('[data-sempods-ui="editor"]');
+    await editor.waitFor();
+    // Multiple notices, the shell, access UI and editor share one copy of each sheet.
+    assert.equal(
+      await page.locator('head style[data-href="sempods-sdk"]').count(),
+      1,
+    );
+    assert.equal(
+      await page.locator('head style[data-href="sempods-access"]').count(),
+      1,
+    );
+    assert.equal(await page.locator('body style').count(), 0);
+    const save = editor.getByRole('button', { name: 'Save', exact: true });
+    const field = editor.getByLabel('Task', { exact: true });
+    await field.fill('Unfinished baseline');
+    await page.keyboard.press('Tab'); // Checkbox.
+    await page.keyboard.press('Tab'); // Save.
+    assert.equal(
+      await save.evaluate((button) => button === document.activeElement),
+      true,
+    );
+    assert.ok(
+      await save.evaluate(
+        (button) => getComputedStyle(button).outlineStyle !== 'none',
+      ),
+    );
+    for (const control of [
+      save,
+      field,
+      page.getByRole('button', { name: 'Check current version', exact: true }),
+      page.getByRole('button', { name: 'Data access', exact: true }),
+    ]) {
+      const box = await control.boundingBox();
+      assert.ok(box.height >= 44);
+    }
+    assert.equal(
+      await editor.evaluate((element) => getComputedStyle(element).color),
+      'rgb(32, 41, 35)',
+    );
+    // This is the entire host opt-in; no SDK stylesheet import is needed.
+    await page.addStyleTag({ content: ':root { color-scheme: light dark; }' });
+    for (const surface of await page.locator('[data-sempods-ui]').all())
+      assert.equal(
+        await surface.evaluate(
+          (element) => getComputedStyle(element).colorScheme,
+        ),
+        'light dark',
+      );
+    for (const surface of await page
+      .locator('[data-sempods-ui="editor"], [data-sempods-ui="notice"]')
+      .all())
+      assert.equal(
+        await surface.evaluate(
+          (element) => getComputedStyle(element).backgroundColor,
+        ),
+        'rgba(0, 0, 0, 0)',
+      );
+    // The root declaration also changes the browser's page canvas, not just SDK boxes.
+    const canvas = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.background = 'Canvas';
+      document.body.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
+    assert.equal(
+      canvas,
+      appearance === 'light' ? 'rgb(255, 255, 255)' : 'rgb(18, 18, 18)',
+    );
+    const expectedText =
+      appearance === 'light' ? 'rgb(32, 41, 35)' : 'rgb(232, 238, 233)';
+    assert.equal(
+      await editor.evaluate((element) => getComputedStyle(element).color),
+      expectedText,
+    );
+    // A host can force light even with a dark OS preference, without remounting.
+    await page.evaluate(() => {
+      document.documentElement.style.colorScheme = 'light';
+    });
+    assert.equal(
+      await editor.evaluate((element) => getComputedStyle(element).color),
+      'rgb(32, 41, 35)',
+    );
+    await page.evaluate(() => {
+      document.documentElement.style.removeProperty('color-scheme');
+    });
+    assert.equal(await field.inputValue(), 'Unfinished baseline');
+    // One inherited token styles both shell management and standalone editor controls.
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty('--sempods-accent', '#654321'),
+    );
+    assert.equal(
+      await save.evaluate((button) => getComputedStyle(button).color),
+      'rgb(101, 67, 33)',
+    );
+    assert.equal(
+      await page
+        .getByRole('button', { name: 'Data access', exact: true })
+        .evaluate((button) => getComputedStyle(button).color),
+      'rgb(101, 67, 33)',
+    );
+    assert.equal(
+      await page
+        .getByRole('button', { name: 'Check current version', exact: true })
+        .evaluate((button) => getComputedStyle(button).color),
+      'rgb(101, 67, 33)',
+    );
+    // App-owned list controls retain browser appearance; the shell does not style descendants globally.
+    assert.notEqual(
+      await page
+        .getByRole('button', { name: 'SDK baseline', exact: true })
+        .evaluate((button) => getComputedStyle(button).color),
+      'rgb(101, 67, 33)',
+    );
+    await page
+      .getByRole('button', { name: 'Data access', exact: true })
+      .click();
+    const addPod = page.getByRole('button', { name: 'Sign in', exact: true });
+    assert.equal(
+      await addPod.evaluate(
+        (button) => getComputedStyle(button).backgroundColor,
+      ),
+      'rgba(0, 0, 0, 0)',
+    );
+    await page
+      .getByRole('button', { name: 'Update access', exact: true })
+      .click();
+    await page.getByRole('alertdialog').waitFor();
+    await page.keyboard.press('Escape');
+    assert.equal(await field.inputValue(), 'Unfinished baseline');
+    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await editor
+      .getByRole('button', { name: 'Speichern', exact: true })
+      .waitFor();
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    );
+    await page.evaluate(() =>
+      document.documentElement.style.removeProperty('--sempods-accent'),
+    );
+    if (process.env.SEMPODS_UI_PREVIEW_DIR)
+      await page.screenshot({
+        path: join(
+          process.env.SEMPODS_UI_PREVIEW_DIR,
+          'sdk-baseline-' + appearance + '.png',
+        ),
+        fullPage: true,
+      });
+    await context.close();
+  }
+  console.log(
+    'Packed SDK baseline without a stylesheet: AppShell, editor, inherited tokens, app-content isolation, EN/DE, 320/375px light/dark, touch targets, focus and guarded drafts passed.',
+  );
   for (const custom of [false, true]) {
     tasks.clear();
     const context = await browser.newContext({
@@ -515,10 +769,19 @@ try {
         : route.abort(),
     );
     await page.goto(origin + (custom ? '/custom' : '/legacy'));
-    await page.getByLabel('Pod URL').fill(pod);
-    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await page.getByLabel(custom ? 'Pod URL' : 'Your Pod').fill(pod);
+    await page
+      .getByRole('button', {
+        name: custom ? 'Connect' : 'Sign in',
+        exact: true,
+      })
+      .click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
+    if (!custom)
+      await page
+        .getByRole('button', { name: 'Data access', exact: true })
+        .click();
     // New drafts cannot start while connect awaits discovery/registration.
     let releaseDiscovery;
     const discoveryStarted = new Promise((resolve) => {
@@ -530,8 +793,13 @@ try {
       releaseDiscovery();
     };
     await page.route('**/.well-known/oauth-protected-resource', holdDiscovery);
-    await page.getByLabel('Pod URL').fill(pod);
-    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await page.getByLabel(custom ? 'Pod URL' : 'Your Pod').fill(pod);
+    await page
+      .getByRole('button', {
+        name: custom ? 'Connect' : 'Sign in',
+        exact: true,
+      })
+      .click();
     await discoveryStarted;
     const newDraft = page.getByLabel('Task', { exact: true }).first();
     assert.equal(
@@ -837,6 +1105,9 @@ try {
       .getByRole('button', { name: 'After unknown deletion', exact: true })
       .waitFor();
     await page.goto(origin + '/customized');
+    await page
+      .getByRole('button', { name: 'Data access', exact: true })
+      .click();
     await page.getByRole('button', { name: 'Use work', exact: true }).click();
     await page.getByLabel('Custom draft').fill('Untouched');
     await page.getByText('Store my task', { exact: true }).waitFor();
@@ -1045,8 +1316,8 @@ try {
       '/,standalone,./,./,2',
     );
     seen.length = 0;
-    await page.getByLabel('Pod URL').fill(pod);
-    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await page.getByLabel('Your Pod').fill(pod);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await page.getByLabel('Task', { exact: true }).first().fill('Installed');
@@ -1102,22 +1373,23 @@ try {
       await cached(),
       [...shell('/', 'v1'), ...shell('/second/', 'v1')].sort(),
     );
-    // Offline: the shell opens from the cache and the stored session stays;
-    // a missing network is neither a logout nor a revoked permission.
+    // Offline restoration reports its network failure but retains the stored session.
+    // Coming back online below restores it without another authorization.
     await context.setOffline(true);
     await page.reload();
-    await page.getByRole('heading', { name: 'TODO' }).waitFor();
+    await page.getByRole('heading', { name: 'TODO', level: 1 }).waitFor();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+    assert.equal(await page.getByLabel('Your Pod', { exact: true }).count(), 0);
     assert.equal(
-      (await page.getByLabel('Active pod').inputValue()) !== '',
+      await page
+        .getByText('Full addresses')
+        .locator('..')
+        .textContent()
+        .then((text) => text.includes(pod)),
       true,
-    );
-    assert.equal(
-      await page.getByRole('button', { name: 'Connect', exact: true }).count(),
-      1,
     );
     await context.setOffline(false);
     await page.reload();
-    await page.getByLabel('Data context').selectOption(work);
     await page
       .getByRole('button', { name: 'Installed', exact: true })
       .waitFor();
@@ -1191,7 +1463,9 @@ try {
       }),
       [...shell('/', 'v2'), ...shell('/second/', 'v1')].sort(),
     );
-    await next.getByLabel('Data context').selectOption(work);
+    await next
+      .getByRole('region', { name: 'Data access', exact: true })
+      .waitFor({ state: 'hidden' });
     await next
       .getByRole('button', { name: 'Installed', exact: true })
       .waitFor();

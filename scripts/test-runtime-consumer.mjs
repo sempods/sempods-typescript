@@ -184,7 +184,7 @@ try {
         });
         if (url.searchParams.get('identity') === 'widgets') {
           res.end(
-            '<html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="' +
+            '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="' +
               (url.searchParams.has('duplicate')
                 ? '/widgets-duplicate.js'
                 : '/widgets.js') +
@@ -197,7 +197,7 @@ try {
           url.searchParams.get('identity')?.startsWith('access-')
         ) {
           res.end(
-            '<html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/preset.js"></script></html>',
+            '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/preset.js"></script></html>',
           );
           return;
         }
@@ -728,6 +728,7 @@ try {
     await page.getByLabel('Data context', { exact: true }).count(),
     0,
   );
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
   await presetDraft.fill('Keep this draft');
   await page
     .getByRole('button', { name: 'Update access', exact: true })
@@ -799,13 +800,9 @@ try {
     const picker = page.getByLabel('Data context', { exact: true });
     await picker.waitFor();
     assert.equal(await picker.inputValue(), '');
-    assert.equal(
-      await picker
-        .locator('option')
-        .filter({ hasText: /^work$/ })
-        .count(),
-      1,
-    );
+    await picker
+      .getByRole('option', { name: 'work', exact: true })
+      .waitFor({ state: 'attached' });
     await picker.focus();
     await picker.selectOption(origin + '/alice/_system/contexts/work');
     await page.getByLabel('Preset draft').waitFor();
