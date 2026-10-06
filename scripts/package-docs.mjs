@@ -157,6 +157,30 @@ export function selfContainedTsconfig(root, file) {
   return merged;
 }
 
+/**
+ * A shipped manifest with `workspace:` dependencies replaced by the exact
+ * version of that workspace package, so it names installable versions.
+ */
+export function releasedManifest(root, file) {
+  const manifest = JSON.parse(readFileSync(join(root, file), 'utf8'));
+  const versions = new Map(
+    readdirSync(join(root, 'packages')).flatMap((dir) => {
+      const path = join(root, 'packages', dir, 'package.json');
+      if (!existsSync(path)) return [];
+      const { name, version } = JSON.parse(readFileSync(path, 'utf8'));
+      return [[name, version]];
+    }),
+  );
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies'])
+    for (const [name, spec] of Object.entries(manifest[field] ?? {})) {
+      if (!String(spec).startsWith('workspace:')) continue;
+      if (!versions.has(name))
+        throw new Error(`${file}: no workspace package ${name}`);
+      manifest[field][name] = versions.get(name);
+    }
+  return manifest;
+}
+
 /** Writes the reference into the app-sdk package directory. */
 export function writeReference(root) {
   const pkg = join(root, 'packages', 'app-sdk');
@@ -179,6 +203,11 @@ export function writeReference(root) {
           shipped,
           version,
         ),
+      );
+    else if (/(^|\/)package\.json$/.test(file))
+      writeFileSync(
+        to,
+        `${JSON.stringify(releasedManifest(root, file), null, 2)}\n`,
       );
     else if (/(^|\/)tsconfig[^/]*\.json$/.test(file))
       writeFileSync(
@@ -212,9 +241,15 @@ export function checkReference(dir) {
       ? walk(join(dir, root)).map((f) => `${root}/${f}`)
       : [],
   );
-  for (const file of files)
+  for (const file of files) {
     if (isExcluded(file))
       errors.push(`${file}: contributor instructions are not shipped`);
+    if (
+      /(^|\/)package\.json$/.test(file) &&
+      readFileSync(join(dir, file), 'utf8').includes('"workspace:')
+    )
+      errors.push(`${file}: names a workspace dependency, not a version`);
+  }
   const markdown = files.filter(isMarkdown);
   for (const file of markdown)
     for (const { url } of relativeLinks(readFileSync(join(dir, file), 'utf8')))

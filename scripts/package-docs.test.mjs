@@ -28,7 +28,14 @@ function file(path, content) {
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sempods-package-docs-'));
-  file('packages/app-sdk/package.json', '{ "version": "9.9.9" }\n');
+  file(
+    'packages/app-sdk/package.json',
+    '{ "name": "@sempods/app-sdk", "version": "9.9.9" }\n',
+  );
+  file(
+    'examples/demo/package.json',
+    '{ "dependencies": { "@sempods/app-sdk": "workspace:*", "react": "19.3.0" } }\n',
+  );
   file('README.md', '# SDK\n\n## Status\n');
   file('AGENTS.md', '# Contributors\n');
   file('docs/agents/release.md', '# Release\n');
@@ -71,6 +78,7 @@ describe('the shipped reference', () => {
       'docs/ai-app-builder.md',
       'docs/quickstart.md',
       'examples/demo/README.md',
+      'examples/demo/package.json',
       'examples/demo/src/app.tsx',
       'examples/demo/src/domain.ts',
     ]);
@@ -98,6 +106,11 @@ describe('the shipped reference', () => {
     );
     // Code blocks are text, not links.
     assert.ok(entry.includes('[not a link](../AGENTS.md)'));
+    // A shipped manifest names installable versions, not the workspace.
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(pkg, 'examples/demo/package.json'), 'utf8')),
+      { dependencies: { '@sempods/app-sdk': '9.9.9', react: '19.3.0' } },
+    );
     assert.deepEqual(checkReference(pkg), []);
   });
 });
@@ -155,6 +168,16 @@ describe('checking an extracted reference', () => {
     );
     assert.ok(
       checkReference(pkg).some((e) => e.includes('leaves the package')),
+    );
+  });
+
+  it('reports a workspace dependency left in a shipped manifest', () => {
+    writeFileSync(
+      join(pkg, 'examples/demo/package.json'),
+      '{ "dependencies": { "@sempods/app-sdk": "workspace:*" } }\n',
+    );
+    assert.ok(
+      checkReference(pkg).some((e) => e.includes('workspace dependency')),
     );
   });
 
