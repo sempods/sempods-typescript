@@ -890,3 +890,22 @@ it('standalone ConnectionControls shows readable names while preserving exact va
   expect(details.textContent).toContain(personal);
   expect(details.textContent).toContain(pod);
 });
+
+it('distinguishes an unconnected preset from a same-named active Pod and exposes both addresses', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ preset: { podUrl: other } });
+  const session = await f.login();
+  cleanups.push(() => session.runtime.dispose());
+  render(
+    <SempodsProvider runtime={session.runtime}>
+      <ConnectionControls podNames={{ [pod]: 'Shared', [other]: 'Shared' }} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('option', { name: `Shared · ${pod}` });
+  const signIn = screen.getByRole('button', { name: 'Sign in' });
+  expect(signIn.parentElement!.textContent).toContain(`Shared · ${other}`);
+  const details = screen.getByText('Full addresses').closest('details')!;
+  expect(
+    [...details.querySelectorAll('dd')].map((entry) => entry.textContent),
+  ).toEqual(expect.arrayContaining([pod, other]));
+});

@@ -202,12 +202,14 @@ export function ConnectionControls({
     connection?.catalogue.kind === 'ready'
       ? connection.catalogue.contexts.filter((c) => c.readable)
       : [];
+  const podUrls = [
+    ...new Set([
+      ...state.connections.map((entry) => entry.podUrl),
+      ...(state.preset ? [state.preset.podUrl] : []),
+    ]),
+  ];
   const podLabel = (url: string) =>
-    distinctName(
-      url,
-      state.connections.map((entry) => entry.podUrl),
-      (value) => podName(value, podNames),
-    );
+    distinctName(url, podUrls, (value) => podName(value, podNames));
   const contextLabel = (iri: string) =>
     distinctName(
       iri,
@@ -354,7 +356,14 @@ export function ConnectionControls({
       {(connection || state.preset) && (
         <details>
           <summary>{controls.addresses}</summary>
-          <p>{connection?.podUrl ?? state.preset?.podUrl}</p>
+          <dl>
+            {podUrls.map((url) => (
+              <div key={url}>
+                <dt>{podLabel(url)}</dt>
+                <dd>{url}</dd>
+              </div>
+            ))}
+          </dl>
           {(connection?.selectedContext || fixedContext) && (
             <p>{connection?.selectedContext ?? fixedContext}</p>
           )}
