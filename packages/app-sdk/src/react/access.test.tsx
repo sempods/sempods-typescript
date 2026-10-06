@@ -162,7 +162,12 @@ function Host() {
       <button ref={button} onClick={() => setOpen(!open)}>
         Manage
       </button>
-      <AppAccess appName="Shopping" open={open} focusTarget={button} />
+      <AppAccess
+        appName="Shopping"
+        open={open}
+        focusTarget={button}
+        style={{ display: 'grid' }}
+      />
       <TargetScreen>
         <Draft />
       </TargetScreen>
@@ -181,11 +186,14 @@ it('hides usable/read-only access, keeps drafts through read loss, and guards ex
   const draft = await screen.findByLabelText('Draft');
   fireEvent.change(draft, { target: { value: 'Keep this' } });
   expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  const surface = document.querySelector('[data-sempods-access]')!;
+  expect(getComputedStyle(surface).display).toBe('none');
   f.setCatalogue(async () => new Response(null, { status: 503 }));
   await act(async () => {
     await expect(logged.runtime.loadContexts(logged.id)).rejects.toThrow();
   });
   expect(screen.getByRole('region', { name: 'Data access' })).toBeTruthy();
+  expect(getComputedStyle(surface).display).toBe('grid');
   expect(
     screen.getByText('Context catalogue unavailable. Access is unknown.'),
   ).toBeTruthy();

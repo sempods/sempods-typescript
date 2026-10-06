@@ -107,7 +107,7 @@ export function AppAccess({
       aria-label={m.controls.dataAccess}
       dir={direction}
       className={className}
-      style={style}
+      style={hidden ? { ...style, display: 'none' } : style}
     >
       <style>{styles}</style>
       <div className="sp-access-content">
