@@ -8,6 +8,7 @@ import {
   screen,
   fireEvent,
 } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   fields,
@@ -59,7 +60,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-async function setup(language: 'en' | 'de' = 'en') {
+async function setup(
+  language: 'en' | 'de' = 'en',
+  // Holds the batch input above TargetScreen, so it survives target changes.
+  { hostInput = false } = {},
+) {
   const f = fixture();
   const session = await f.login();
   cleanups.push(() => session.runtime.dispose());
@@ -104,8 +109,12 @@ async function setup(language: 'en' | 'de' = 'en') {
     list: ReturnType<typeof useList<Task>>;
     app: ReturnType<typeof useController>;
     editor: Editor<Task, Partial<Task>> | null;
+    input: string;
+    setInput: (input: string) => void;
+    addAll: () => Promise<void>;
   };
-  function Screen() {
+  type Input = readonly [string, (input: string) => void];
+  function Screen({ host }: { readonly host?: Input | undefined }) {
     const creation = useCreation(definition, {
       initial: { ...initial },
       collection: 'tasks',
@@ -116,7 +125,39 @@ async function setup(language: 'en' | 'de' = 'en') {
     // Leave-dialog internals (confirm/cancel, snapshot) are not public API.
     const app = useController();
     const editor = useResourceEditor(selection.selected, definition);
-    api = { creation, mutation, selection, list, app, editor };
+    const local = useState('');
+    const [input, setInput] = host ?? local;
+    // The guide's pattern for several resources from one input
+    // (docs/react-authoring.md); keep both in step.
+    async function addAll() {
+      // Settle a pending, uncertain or stopped item in the draft first.
+      if (!creation.canEdit || creation.draft.title !== '') return;
+      const names = input
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean);
+      for (const [index, name] of names.entries()) {
+        creation.change({ title: name });
+        const outcome = await creation.create();
+        if (outcome?.kind === 'created') continue;
+        // Stop. This item is held in the draft or may already exist: it never
+        // returns to the input. Only the unsent rest does.
+        setInput(names.slice(index + 1).join(', '));
+        return;
+      }
+      setInput('');
+    }
+    api = {
+      creation,
+      mutation,
+      selection,
+      list,
+      app,
+      editor,
+      input,
+      setInput,
+      addAll,
+    };
     return (
       <>
         <UpdateNotice {...creation.notice} />
@@ -124,11 +165,17 @@ async function setup(language: 'en' | 'de' = 'en') {
       </>
     );
   }
+  function Host() {
+    const input = useState('');
+    return (
+      <TargetScreen>
+        <Screen host={hostInput ? input : undefined} />
+      </TargetScreen>
+    );
+  }
   render(
     <SempodsProvider runtime={session.runtime} language={language}>
-      <TargetScreen>
-        <Screen />
-      </TargetScreen>
+      <Host />
     </SempodsProvider>,
   );
   await waitFor(() => expect(api.list.state.kind).toBe('ready'));
@@ -544,3 +591,258 @@ it('R3: after a definitive exists, the next explicit create uses a fresh IRI', a
   expect(attempts[1]).not.toBe(attempts[0]);
   expect(f.api.creation.draft).toEqual(initial);
 });
+
+type Setup = Awaited<ReturnType<typeof setup>>;
+type Init = NonNullable<Parameters<PodFetch>[1]>;
+const iriOf = (url: string) =>
+  Buffer.from(new URL(url).pathname.split('/').at(-1)!, 'base64url').toString();
+/** Records each creation attempt; each answer is slow enough for React to render. */
+function trackPuts(
+  f: Setup,
+  answer: (attempt: number, url: string, init: Init) => Promise<Response>,
+) {
+  const puts: {
+    iri: string;
+    title: unknown;
+    body: string;
+    ifNoneMatch: string | null;
+  }[] = [];
+  let inFlight = 0;
+  let most = 0;
+  f.setResource(async (url, init) => {
+    if (init?.method !== 'PUT') return f.resource(url, init);
+    const body = init.body as string;
+    puts.push({
+      iri: iriOf(url),
+      title: (JSON.parse(body) as { 'urn:title': [{ '@value': string }] })[
+        'urn:title'
+      ][0]['@value'],
+      body,
+      ifNoneMatch: new Headers(init.headers).get('if-none-match'),
+    });
+    most = Math.max(most, ++inFlight);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return await answer(puts.length, url, init);
+    } finally {
+      inFlight--;
+    }
+  });
+  return { puts, most: () => most };
+}
+/** Starts the screen's batch as a click would, then waits until it has returned. */
+async function addAll(f: Setup) {
+  let finished = false;
+  act(() => {
+    void f.api.addAll().then(() => {
+      finished = true;
+    });
+  });
+  await waitFor(() => expect(finished).toBe(true));
+}
+const listed = (f: Setup) =>
+  f.api.list.state.kind === 'ready'
+    ? f.api.list.state.data.items.map((item) => item.data.title).sort()
+    : [];
+
+it('S1: creates several items from one input one at a time, in order, each under a fresh IRI', async () => {
+  const f = await setup();
+  const track = trackPuts(f, (_, url, init) => f.resource(url, init));
+  act(() => f.api.setInput('Milk, 2 Bananas, Bread'));
+  await addAll(f);
+  expect(track.puts.map((put) => put.title)).toEqual([
+    'Milk',
+    '2 Bananas',
+    'Bread',
+  ]);
+  expect(track.most()).toBe(1); // never two creations in flight
+  expect(new Set(track.puts.map((put) => put.iri)).size).toBe(3);
+  for (const put of track.puts) {
+    expect(put.iri).toMatch(/\/tasks\/[\w-]+$/);
+    expect(put.ifNoneMatch).toBe('*');
+  }
+  await waitFor(() => expect(f.api.input).toBe(''));
+  expect(f.api.creation.draft).toEqual(initial);
+  expect(f.api.creation.outcome).toEqual({ kind: 'created' });
+  expect(f.api.creation.canEdit).toBe(true);
+  expect(screen.getByRole('status').textContent).toBe('Created.');
+  await waitFor(() =>
+    expect(listed(f)).toEqual(['2 Bananas', 'Bread', 'Milk', 'One']),
+  );
+});
+
+it.each([
+  {
+    stop: 'unconfirmed',
+    answer: async (f: Setup, url: string, init: Init) => {
+      await f.resource(url, init); // applied, but the answer is lost
+      return new Response(null, { status: 202 });
+    },
+    outcome: { kind: 'unconfirmed' },
+    held: true,
+    canCreate: false,
+  },
+  {
+    stop: 'refused',
+    answer: async () => new Response(null, { status: 403 }),
+    outcome: { kind: 'not-created', reason: 'refused' },
+    held: false,
+    canCreate: true,
+  },
+  {
+    stop: 'exists',
+    answer: async () => new Response(null, { status: 412 }),
+    outcome: { kind: 'exists' },
+    held: false,
+    canCreate: true,
+  },
+  {
+    stop: 'not sent (write access lost)',
+    answer: undefined,
+    outcome: null,
+    held: false,
+    canCreate: false,
+  },
+])(
+  'S2: stops at the first $stop item; confirmed items stay created and the rest is not sent',
+  async ({ answer, outcome, held, canCreate }) => {
+    const f = await setup();
+    const track = trackPuts(f, async (attempt, url, init) => {
+      if (attempt === 3 && answer) return answer(f, url, init);
+      const result = await f.resource(url, init);
+      if (attempt === 2 && !answer) {
+        // Before the third item: the target stays, its write access goes.
+        f.setCatalogue(async () => catalogue([work, personal], []));
+        await f.runtime.loadContexts(f.id);
+      }
+      return result;
+    });
+    act(() => f.api.setInput('Milk, Bananas, Bread, Eggs'));
+    await addAll(f);
+    const sent = answer ? 3 : 2;
+    expect(track.puts.map((put) => put.title)).toEqual(
+      ['Milk', 'Bananas', 'Bread'].slice(0, sent),
+    );
+    // The stopped item stays in the draft; only the unsent rest returns.
+    await waitFor(() => expect(f.api.input).toBe('Eggs'));
+    expect(f.api.creation.outcome).toEqual(outcome);
+    expect(f.api.creation.draft).toEqual({ ...initial, title: 'Bread' });
+    expect(f.api.creation.canEdit).toBe(!held);
+    expect(f.api.creation.canCreate).toBe(canCreate);
+    await waitFor(() =>
+      expect(listed(f)).toEqual(
+        expect.arrayContaining(['Bananas', 'Milk', 'One']),
+      ),
+    );
+    expect(f.rows.size).toBe(held ? 4 : 3); // the lost answer's item landed
+    // Nothing is retried on its own, and the next batch cannot replace the
+    // stopped item in the draft.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
+    await addAll(f);
+    expect(f.api.creation.draft.title).toBe('Bread');
+    expect(f.api.input).toBe('Eggs');
+    if (held) {
+      act(() => f.api.creation.change({ title: 'Eggs' }));
+      await act(async () => {
+        expect(await f.api.creation.create()).toBeUndefined();
+      });
+      expect(f.api.creation.draft.title).toBe('Bread');
+    }
+    expect(track.puts).toHaveLength(sent);
+  },
+);
+
+it('S3: an unconfirmed item keeps its IRI through recovery; the rest continues afterwards', async () => {
+  const f = await setup();
+  const track = trackPuts(f, async (attempt, url, init) => {
+    // The third item's first answer is lost before anything was stored.
+    if (attempt === 3) return new Response(null, { status: 202 });
+    return f.resource(url, init);
+  });
+  act(() => f.api.setInput('Milk, Bananas, Bread, Eggs'));
+  await addAll(f);
+  await waitFor(() => expect(f.api.input).toBe('Eggs'));
+  expect(f.api.creation.outcome).toEqual({ kind: 'unconfirmed' });
+  expect(
+    screen.getByText(
+      'The result is unconfirmed. Check the pod before deciding; nothing is retried automatically.',
+    ),
+  ).toBeTruthy();
+  await act(async () => {
+    expect(await f.api.creation.notice.onCheck()).toBe(true);
+  });
+  expect(f.api.creation.notice.current).toBeNull(); // observed absence
+  act(() => f.api.creation.notice.onAcknowledge());
+  // Absence is no proof: the same command stays held for an explicit retry.
+  expect(f.api.creation.draft.title).toBe('Bread');
+  expect(f.api.creation.canEdit).toBe(false);
+  expect(f.api.creation.canCreate).toBe(true);
+  await addAll(f); // the batch waits until the held item is settled
+  expect(track.puts).toHaveLength(3);
+  await act(async () => {
+    expect(await f.api.creation.create()).toEqual({ kind: 'created' });
+  });
+  expect(track.puts).toHaveLength(4);
+  expect(track.puts[3]!.iri).toBe(track.puts[2]!.iri);
+  expect(track.puts[3]!.body).toBe(track.puts[2]!.body);
+  expect(f.api.creation.draft).toEqual(initial);
+  expect(f.api.creation.canEdit).toBe(true);
+  await addAll(f);
+  await waitFor(() => expect(f.api.input).toBe(''));
+  expect(track.puts.map((put) => put.title)).toEqual([
+    'Milk',
+    'Bananas',
+    'Bread',
+    'Bread',
+    'Eggs',
+  ]);
+  expect(new Set(track.puts.map((put) => put.iri)).size).toBe(4);
+  await waitFor(() =>
+    expect(listed(f)).toEqual(['Bananas', 'Bread', 'Eggs', 'Milk', 'One']),
+  );
+});
+
+it.each([false, true])(
+  'S4: a target change during a creation stops the batch without returning its possibly written item (input above TargetScreen: %s)',
+  async (hostInput) => {
+    const f = await setup('en', { hostInput });
+    const gate = deferred<void>();
+    const track = trackPuts(f, async (attempt, url, init) => {
+      const result = await f.resource(url, init); // the write lands
+      if (attempt === 2) await gate.promise;
+      return result;
+    });
+    act(() => f.api.setInput('Milk, Bananas, Bread'));
+    let finished = false;
+    act(() => {
+      void f.api.addAll().then(() => {
+        finished = true;
+      });
+    });
+    await waitFor(() => expect(f.rows.size).toBe(3)); // One, Milk, Bananas
+    // An unguarded switch through the runtime while the answer is pending.
+    await act(async () => {
+      f.runtime.selectContext(f.id, personal);
+    });
+    await act(async () => {
+      gate.resolve();
+    });
+    await waitFor(() => expect(finished).toBe(true));
+    // The answer was applied, but it belongs to the ended lifetime: the hook
+    // reports `undefined` and the new lifetime starts with a blank draft.
+    expect(f.api.creation.draft).toEqual(initial);
+    expect(f.api.creation.outcome).toBeNull();
+    expect(f.api.input).toBe(hostInput ? 'Bread' : '');
+    await act(async () => {
+      f.runtime.selectContext(f.id, work);
+    });
+    await waitFor(() => expect(listed(f)).toEqual(['Bananas', 'Milk', 'One']));
+    if (hostInput) {
+      await addAll(f); // the rest continues; Bananas is not sent again
+      await waitFor(() => expect(f.api.input).toBe(''));
+    }
+    expect(track.puts.map((put) => put.title)).toEqual(
+      hostInput ? ['Milk', 'Bananas', 'Bread'] : ['Milk', 'Bananas'],
+    );
+  },
+);

@@ -269,7 +269,10 @@ if (opened.phase === 'ready') {
   takes a raw body. Either captures one IRI and body. Only the
   Pod's answer confirms `created`; after a lost answer, running it again is
   safe, and a found resource stays `unconfirmed` (`desiredObserved` is not
-  proof).
+  proof). For several resources from one input, prepare one creation per item
+  and `await` each `run()` before the next. Stop at the first result that is
+  not `created` and leave the rest unsent; an `unconfirmed` item is retried
+  only through its own creation, never under a new IRI.
 - Not in 0.1: preferred-language editing, `texts`, and merging two changes to
   the same field.
 
