@@ -253,7 +253,10 @@ function AccessConnections({
   }
   const showNew = (manage && mode === 'multiple') || !c;
   const showDefault =
-    defaultUrl && c?.podUrl !== defaultUrl && !(manage && !state.allowedPods);
+    (mode === 'multiple' || !c) &&
+    defaultUrl &&
+    c?.podUrl !== defaultUrl &&
+    !(manage && !state.allowedPods);
   const choice = url || defaultUrl || '';
   const name = (target: string) =>
     distinctName(

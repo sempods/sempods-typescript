@@ -389,3 +389,47 @@ it('preserves cancelled callback feedback and supports custom connection replace
   expect(await screen.findByText('Sign-in was cancelled.')).toBeTruthy();
   expect(screen.getByText('Custom 1')).toBeTruthy();
 });
+
+it.each([
+  { restricted: false, manage: false },
+  { restricted: false, manage: true },
+  { restricted: true, manage: false },
+  { restricted: true, manage: true },
+])(
+  'single mode hides another preset Pod (restricted=$restricted, management=$manage)',
+  async ({ restricted, manage }) => {
+    const other = 'https://pod.example/bob';
+    const f = fixture({
+      preset: { podUrl: other },
+      ...(restricted ? { allowedPods: [pod, other] } : {}),
+    });
+    const session = await f.login();
+    cleanups.push(() => session.runtime.dispose());
+    if (!manage) {
+      f.setCatalogue(async () => new Response(null, { status: 503 }));
+      await expect(session.runtime.loadContexts(session.id)).rejects.toThrow();
+    }
+    const ui = (mode: 'single' | 'multiple') => (
+      <SempodsProvider runtime={session.runtime}>
+        <AppAccess appName="Shopping" mode={mode} open={manage} />
+      </SempodsProvider>
+    );
+    const mounted = render(ui('single'));
+    await screen.findByRole('button', { name: 'Check access' });
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+    expect(screen.queryByLabelText('Your Pod')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Update access' })).toBeTruthy();
+    mounted.rerender(ui('multiple'));
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy();
+    if (manage) {
+      mounted.rerender(ui('single'));
+      await act(async () =>
+        screen.getByRole('button', { name: 'Disconnect' }).click(),
+      );
+      // Without a connection, single mode still permits the configured first sign-in.
+      expect(
+        await screen.findByRole('button', { name: 'Sign in' }),
+      ).toBeTruthy();
+    }
+  },
+);
