@@ -6,6 +6,49 @@ automatic conversion of legacy app data or stored credentials.
 
 ## From 0.2 to 0.3
 
+Upgrade both packages together; Node 24.15 or newer stays the requirement:
+
+```sh
+npm install --save-exact @sempods/app-sdk@0.3.0 @sempods/client-sdk@0.3.0
+```
+
+Session storage, guards and write recovery are unchanged. Three changes can
+need attention:
+
+- **Field types.** `TextField` (and the new `DateTimeField`) carry their optionality as a
+  type parameter. A field annotated as plain `TextField` now reads
+  `string | null` in drafts, because its optionality is unknown; annotate a
+  required field as `TextField<false>` to keep `string`. Fields used without an
+  annotation are unaffected.
+- **AppShell presentation.** `AppShell` now shows the new access UI; see
+  [access UI and AppShell](#access-ui-and-appshell). Tests that matched raw
+  context IRIs or the previous labels need updating.
+- **Dark appearance.** SDK components follow the page's color scheme instead of
+  the operating system's. Add `:root { color-scheme: light dark; }` to the app
+  CSS to keep automatic dark appearance.
+
+New in 0.3:
+
+- `dateTime(predicate, { optional })` in `@sempods/client-sdk/edit` reads and
+  writes one `xsd:dateTime` literal. Store points in time with it rather than
+  as text; values need an explicit time zone.
+- `allowedPods` restricts a browser runtime to exact Pod URLs, separately from
+  `preset`; see [restrict the permitted Pods](browser-runtime.md#restrict-the-permitted-pods).
+- `@sempods/app-sdk` ships its app-author reference. Point your coding assistant
+  to `node_modules/@sempods/app-sdk/docs/ai-app-builder.md`; it matches the
+  installed version.
+- Creating several resources from one input is a documented pattern; see
+  [several resources from one input](react-authoring.md#several-resources-from-one-input).
+- `AppAccess` is a composable sign-in and access-recovery surface for app-owned
+  layouts, with optional `podNames` for readable Pod names.
+- Context selectors show readable names: the runtime reads each context's
+  registry label (`rdfs:label`) in the background, and client-sdk exposes
+  `contextDescription()` for the same read.
+- SDK access, notice and editor components share inherited `--sempods-*`
+  theme tokens.
+
+### Access UI and AppShell
+
 Existing `AppShell` calls use the new access UI without changing app code. The
 shell now has a title and **Data access** button; connection administration hides
 when the target is usable, including read-only access, and opens explicitly.

@@ -10,14 +10,14 @@ Follow the [quickstart](quickstart.md) to create a Vite React/TypeScript app
 (Node 24.15 or newer). Install the matching pair:
 
 ```sh
-npm install --save-exact @sempods/app-sdk@0.2.0 @sempods/client-sdk@0.2.0
+npm install --save-exact @sempods/app-sdk@0.3.0 @sempods/client-sdk@0.3.0
 ```
 
-Commit the lockfile. To try unreleased SDK changes, use the quickstart's
+Commit the lockfile. Point your coding assistant to
+`node_modules/@sempods/app-sdk/docs/ai-app-builder.md`: the package ships its
+guides and examples at the installed version. To try unreleased SDK changes, use the quickstart's
 [packed SDK archives](quickstart.md#trying-unreleased-sdk-changes). To ship it
 as an installable app, add the [PWA setup](pwa.md).
-`AppAccess` below is new in this checkout; use packed archives until a release
-contains it, or the reference bundled with your installed version.
 Use a dedicated test context and synthetic data; follow
 [local or hosted Pod testing](local-testing.md) for setup.
 

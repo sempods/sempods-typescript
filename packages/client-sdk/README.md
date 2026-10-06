@@ -100,7 +100,7 @@ if (read.kind === 'ok') {
 }
 ```
 
-Supported operations (as of 0.2):
+Supported operations (as of 0.3):
 
 | Operation                                     | Request                                                                                             | Results                                                                                                                          |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -289,6 +289,6 @@ here remain browser/Node portable. Licensed under Apache-2.0 (see LICENSE and
 NOTICE).
 
 Supported: Node 24.15 or newer (ESM only) and current browsers. See
-[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.2.0/README.md#supported-environments).
+[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.3.0/README.md#supported-environments).
 
 [Provenance](PROVENANCE.md) records the source revision and adaptations.
