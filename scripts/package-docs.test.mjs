@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
   checkReference,
   referenceFiles,
+  selfContainedTsconfig,
   writeReference,
 } from './package-docs.mjs';
 
@@ -98,6 +99,23 @@ describe('the shipped reference', () => {
     // Code blocks are text, not links.
     assert.ok(entry.includes('[not a link](../AGENTS.md)'));
     assert.deepEqual(checkReference(pkg), []);
+  });
+});
+
+describe('shipped TypeScript configs', () => {
+  it('merge their base config instead of extending a file outside the package', () => {
+    file(
+      'tsconfig.base.json',
+      '{ "compilerOptions": { "strict": true, "target": "ES2020" } }\n',
+    );
+    file(
+      'examples/tsconfig.json',
+      '{ "extends": "../tsconfig.base.json", "compilerOptions": { "target": "ES2022" }, "include": ["**/*.ts"] }\n',
+    );
+    assert.deepEqual(selfContainedTsconfig(root, 'examples/tsconfig.json'), {
+      compilerOptions: { strict: true, target: 'ES2022' },
+      include: ['**/*.ts'],
+    });
   });
 });
 

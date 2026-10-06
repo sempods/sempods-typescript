@@ -91,7 +91,10 @@ try {
     const path = join(temp, name);
     await mkdir(path);
     const devDependencies = { typescript: tools.typescript };
-    if (name === 'plain') devDependencies['@types/node'] = tools['@types/node'];
+    // The React consumer also type-checks the shipped examples (types: node);
+    // the DOM-only browser consumer stays without Node types.
+    if (name === 'plain' || react)
+      devDependencies['@types/node'] = tools['@types/node'];
     if (react)
       Object.assign(devDependencies, {
         react: tools.react,
@@ -134,6 +137,17 @@ try {
   assert.deepEqual(
     checkReference(join(withReact, 'node_modules/@sempods/app-sdk')),
     [],
+  );
+  // The shipped examples type-check with their own shipped config against the
+  // installed packages; nothing outside the package is needed.
+  run(
+    process.execPath,
+    [
+      join(withReact, 'node_modules/typescript/bin/tsc'),
+      '-p',
+      'node_modules/@sempods/app-sdk/examples/tsconfig.json',
+    ],
+    withReact,
   );
   const strict = {
     target: 'ES2022',

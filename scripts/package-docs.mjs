@@ -136,6 +136,27 @@ export function pinLinks(source, file, shipped, version) {
   return result;
 }
 
+/**
+ * A TypeScript config whose `extends` chain is merged in, so a shipped config
+ * does not depend on a base file outside the package. The configs are plain
+ * JSON; a later `compilerOptions` entry overrides an earlier one.
+ */
+export function selfContainedTsconfig(root, file) {
+  const config = JSON.parse(readFileSync(join(root, file), 'utf8'));
+  if (typeof config.extends !== 'string') return config;
+  const base = selfContainedTsconfig(
+    root,
+    posix.join(posix.dirname(file), config.extends),
+  );
+  const merged = {
+    ...base,
+    ...config,
+    compilerOptions: { ...base.compilerOptions, ...config.compilerOptions },
+  };
+  delete merged.extends;
+  return merged;
+}
+
 /** Writes the reference into the app-sdk package directory. */
 export function writeReference(root) {
   const pkg = join(root, 'packages', 'app-sdk');
@@ -158,6 +179,11 @@ export function writeReference(root) {
           shipped,
           version,
         ),
+      );
+    else if (/(^|\/)tsconfig[^/]*\.json$/.test(file))
+      writeFileSync(
+        to,
+        `${JSON.stringify(selfContainedTsconfig(root, file), null, 2)}\n`,
       );
     else copyFileSync(join(root, file), to);
   }
