@@ -1,4 +1,4 @@
-import type { CatalogueResult } from '@sempods/client-sdk';
+import type { CatalogueContext, CatalogueResult } from '@sempods/client-sdk';
 import type { Entry } from './connection.js';
 import { RuntimeError } from './errors.js';
 
@@ -19,7 +19,12 @@ export function loadCatalogue(
   const generation = e.generation;
   const previous =
     'contexts' in e.view.catalogue ? e.view.catalogue.contexts : undefined;
-  const known = previous ? { contexts: previous } : {};
+  const labels =
+    'labels' in e.view.catalogue ? e.view.catalogue.labels : undefined;
+  const known = {
+    ...(previous ? { contexts: previous } : {}),
+    ...(labels ? { labels } : {}),
+  };
   e.view = {
     ...e.view,
     catalogue: Object.freeze({ kind: 'loading', ...known }),
@@ -44,8 +49,13 @@ export function loadCatalogue(
           invalidate(e);
         e.view = {
           ...e.view,
-          catalogue: Object.freeze({ kind: 'ready', contexts }),
+          catalogue: Object.freeze({
+            kind: 'ready',
+            contexts,
+            ...(labels ? { labels } : {}),
+          }),
         };
+        void loadLabels(e, owner, contexts, generation);
         // Apply an explicit configured/remembered choice only while readable;
         // never a fallback to any other context.
         const choice = e.view.selectedContext ? undefined : remembered(e);
@@ -77,4 +87,64 @@ export function loadCatalogue(
   })();
   e.catalogue = operation;
   return operation;
+}
+
+/** Context descriptions read at once, and at most per catalogue. */
+const LABEL_READS = 3;
+const LABEL_LIMIT = 50;
+
+/**
+ * Reads the registry labels of the readable contexts after a ready catalogue
+ * (SPS-CTX-032), in the background and bound to the connection lifetime. It
+ * never blocks selection or startup; a failed read leaves that label out. The
+ * result is published only while this exact catalogue is still current.
+ */
+async function loadLabels(
+  e: Entry,
+  owner: CatalogueOwner,
+  contexts: readonly CatalogueContext[],
+  generation: string,
+): Promise<void> {
+  const targets = contexts
+    .filter((c) => c.readable)
+    .slice(0, LABEL_LIMIT)
+    .map((c) => c.iri);
+  if (!targets.length) return;
+  const found: Record<string, string> = {};
+  let next = 0;
+  const read = async () => {
+    while (next < targets.length && owner.eligible(e, generation)) {
+      const iri = targets[next++]!;
+      try {
+        const result = await e.clientPod.contextDescription(iri, {
+          signal: e.lifetime.signal,
+        });
+        const label = result.kind === 'ok' ? result.body.label?.trim() : '';
+        if (label) found[iri] = label;
+      } catch {
+        // Display text only: an unreadable description keeps today's name.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: LABEL_READS }, read));
+  const fact = e.view.catalogue;
+  if (
+    !owner.eligible(e, generation) ||
+    fact.kind !== 'ready' ||
+    fact.contexts !== contexts ||
+    sameLabels(fact.labels ?? {}, found)
+  )
+    return;
+  e.view = {
+    ...e.view,
+    catalogue: Object.freeze({ ...fact, labels: Object.freeze(found) }),
+  };
+  owner.publish();
+}
+
+function sameLabels(a: Record<string, string>, b: Record<string, string>) {
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
+  );
 }

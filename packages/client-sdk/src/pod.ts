@@ -1,6 +1,7 @@
 import type { PodAuth } from './auth.js';
 import type {
   CatalogueResult,
+  ContextDescriptionResult,
   CreateCondition,
   GetResult,
   JsonLd,
@@ -47,6 +48,15 @@ export interface Pod {
   context(contextIri: string, options?: ContextOptions): ContextView;
   /** The caller-relative context catalogue: known access facts, not server authority. */
   catalogue(options?: ReadOptions): Promise<CatalogueResult>;
+  /**
+   * One Context's registry description (SPS-CTX-032), read from the Context IRI:
+   * label, description, public flag and creation time. Descriptive facts only,
+   * never authorization; `contextIri` must be a context IRI of this Pod.
+   */
+  contextDescription(
+    contextIri: string,
+    options?: ReadOptions,
+  ): Promise<ContextDescriptionResult>;
 }
 
 export interface ContextView {

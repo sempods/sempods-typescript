@@ -221,6 +221,12 @@ Snapshots contain session, feature-scope and catalogue facts, never credentials.
 `requestedScopes`, `grantedScopes` and `missingRequiredScopes` remain distinct.
 Missing required features block bound operations; a missing optional feature
 does not. The catalogue supplies context rights separately from token scopes.
+After a ready catalogue, the runtime reads the registry description of each
+readable context in the background (at most 3 at once and 50 per catalogue) and
+publishes `catalogue.labels`: exact context IRI → `rdfs:label` (SPS-CTX-032).
+Labels are display text only, never identities or grants; they never block
+selection, a failed read leaves that label out, and the known labels stay while
+a later catalogue reloads.
 There is no automatic consent redirect after a refusal.
 
 Select one readable context explicitly. Empty selection does not mean all or

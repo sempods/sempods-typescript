@@ -1,4 +1,10 @@
-import { decodeCatalogue, type CatalogueContext } from './catalogue.js';
+import {
+  decodeCatalogue,
+  decodeContextDescription,
+  isContextIri,
+  type CatalogueContext,
+  type ContextDescription,
+} from './catalogue.js';
 import { SdkError, type SdkFailure } from './errors.js';
 import {
   createExecutor,
@@ -341,6 +347,27 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
       return read(exchange, url, options.signal, async (response) => ({
         kind: 'ok' as const,
         body: decodeCatalogue(await json(response), base),
+      }));
+    },
+    async contextDescription(
+      contextIri: string,
+      options: ReadOptions = {},
+    ): Promise<QueryResult<ContextDescription>> {
+      // The Context IRI is its own registry route (SPS-CTX-031).
+      if (!isContextIri(contextIri, base))
+        throw failure({ code: 'invalid-argument', argument: 'context' });
+      const exchange = await execute(
+        request(
+          'GET',
+          contextIri,
+          { accept: JSON_LD },
+          podGuards,
+          options.signal,
+        ),
+      );
+      return read(exchange, contextIri, options.signal, async (response) => ({
+        kind: 'ok' as const,
+        body: decodeContextDescription(await json(response), contextIri, base),
       }));
     },
   });

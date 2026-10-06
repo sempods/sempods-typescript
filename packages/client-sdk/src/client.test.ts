@@ -208,6 +208,54 @@ describe('against a loopback HTTP pod', () => {
     expect(error).toBeInstanceOf(SdkError);
     expect(sdkFailure(error)).toEqual({ code: 'catalogue' });
   });
+
+  it('reads a Context description from the Context IRI', async () => {
+    const pod = createPod(podUrl, {
+      auth: bearer('secret'),
+      development: 'loopback-http',
+    });
+    const contextIri = `${podUrl}/_system/contexts/tasks`;
+    seen.length = 0;
+    reply = () =>
+      ldJson({
+        '@id': contextIri,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': contextIri },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': true }],
+        'http://www.w3.org/2000/01/rdf-schema#label': [{ '@value': 'Tasks' }],
+      });
+    expect(await pod.contextDescription(contextIri)).toEqual({
+      kind: 'ok',
+      body: { iri: contextIri, public: true, label: 'Tasks' },
+    });
+    expect(seen[0]?.method).toBe('GET');
+    expect(seen[0]?.url.pathname).toBe('/alice/_system/contexts/tasks');
+    expect(seen[0]?.headers.accept).toBe('application/ld+json');
+    expect(seen[0]?.headers.authorization).toBe('Bearer secret');
+    reply = () => ({ status: 403 });
+    expect(await pod.contextDescription(contextIri)).toEqual({
+      kind: 'refused',
+      status: 403,
+    });
+    // Like the catalogue, a missing description is an HTTP failure, not empty.
+    reply = () => ({ status: 404 });
+    const missing = await pod
+      .contextDescription(contextIri)
+      .catch((cause: unknown) => cause);
+    expect(sdkFailure(missing)).toEqual({ code: 'http', status: 404 });
+    // Never a request outside the Pod's context registry.
+    seen.length = 0;
+    for (const iri of [
+      `${podUrl}/tasks`,
+      'https://other.example/_system/contexts/x',
+    ])
+      await expect(pod.contextDescription(iri)).rejects.toBeInstanceOf(
+        SdkError,
+      );
+    expect(seen).toHaveLength(0);
+  });
 });
 
 describe('request executor', () => {

@@ -78,6 +78,12 @@ async function setup() {
 }
 const count = (f: Awaited<ReturnType<typeof setup>>, part: string) =>
   f.fetch.mock.calls.filter(([url]) => url.includes(part)).length;
+// The catalogue route exactly: context descriptions (`/_system/contexts/{name}`)
+// are separate background reads.
+const catalogueReads = (f: Awaited<ReturnType<typeof setup>>) =>
+  f.fetch.mock.calls.filter(([url]) =>
+    new URL(url).pathname.endsWith('/_system/contexts'),
+  ).length;
 
 it('useApp exposes only the guarded actions, as one stable object', async () => {
   const f = await setup();
@@ -106,11 +112,11 @@ it('useApp exposes only the guarded actions, as one stable object', async () => 
     'selectConnection',
     'selectContext',
   ]);
-  const before = count(f, '/_system/contexts');
+  const before = catalogueReads(f);
   await act(async () => {
     await seen[0]!.refreshContexts(f.id);
   });
-  expect(count(f, '/_system/contexts')).toBe(before + 1);
+  expect(catalogueReads(f)).toBe(before + 1);
 });
 
 it('inline fields() and read functions neither loop nor drop drafts', async () => {

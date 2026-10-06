@@ -109,3 +109,87 @@ export function isContextIri(iri: string, podUrl: string): boolean {
         segment !== '_system',
     );
 }
+
+/**
+ * A Context's registry description (SPS-CTX-031/032): what the Pod says about
+ * it, never what the caller may do. `label` and `description` are present only
+ * as exactly one plain string; `created` only as one `xsd:dateTime` literal.
+ * Additional descriptive predicates are tolerated and ignored.
+ */
+export interface ContextDescription {
+  readonly iri: string;
+  readonly public: boolean;
+  readonly label?: string;
+  readonly description?: string;
+  readonly created?: string;
+}
+
+const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
+const DCTERMS = 'http://purl.org/dc/terms/';
+const XSD = 'http://www.w3.org/2001/XMLSchema#';
+
+/** Decodes one canonical Context description; a malformed required part is a `CatalogueError`. */
+export function decodeContextDescription(
+  body: unknown,
+  contextIri: string,
+  podUrl: string,
+): ContextDescription {
+  const sd = 'http://www.w3.org/ns/sparql-service-description#';
+  if (
+    !isContextIri(contextIri, podUrl) ||
+    typeof body !== 'object' ||
+    body === null ||
+    Array.isArray(body)
+  )
+    throw new CatalogueError();
+  const data = body as Record<string, unknown>;
+  const values = (predicate: string): readonly Record<string, unknown>[] => {
+    const value = data[predicate];
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new CatalogueError();
+    return value.map((item: unknown) => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item))
+        throw new CatalogueError();
+      return item as Record<string, unknown>;
+    });
+  };
+  const names = values(`${sd}name`);
+  const isPublic = values('https://schema.sempods.org/public');
+  if (
+    '@context' in data ||
+    data['@id'] !== contextIri ||
+    !Array.isArray(data['@type']) ||
+    !data['@type'].includes(`${sd}NamedGraph`) ||
+    names.length !== 1 ||
+    names[0]!['@id'] !== contextIri ||
+    isPublic.length !== 1 ||
+    typeof isPublic[0]!['@value'] !== 'boolean'
+  )
+    throw new CatalogueError();
+  // Descriptive text: one plain string, untagged or xsd:string; anything else is left out.
+  const text = (predicate: string): string | undefined => {
+    const found = values(predicate);
+    if (found.length !== 1) return undefined;
+    const [value] = found;
+    const type = value!['@type'];
+    return typeof value!['@value'] === 'string' &&
+      value!['@language'] === undefined &&
+      (type === undefined || type === `${XSD}string`)
+      ? value!['@value']
+      : undefined;
+  };
+  const created = values(`${DCTERMS}created`);
+  const label = text(RDFS_LABEL);
+  const description = text(`${DCTERMS}description`);
+  return Object.freeze({
+    iri: contextIri,
+    public: isPublic[0]!['@value'] as boolean,
+    ...(label === undefined ? {} : { label }),
+    ...(description === undefined ? {} : { description }),
+    ...(created.length === 1 &&
+    typeof created[0]!['@value'] === 'string' &&
+    created[0]!['@type'] === `${XSD}dateTime`
+      ? { created: created[0]!['@value'] }
+      : {}),
+  });
+}
