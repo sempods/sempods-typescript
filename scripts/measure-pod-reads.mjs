@@ -183,6 +183,8 @@ function clientCredentials(client, counters) {
       counters.token++;
       const response = await fetch(tokenEndpoint, {
         signal: globalThis.AbortSignal.timeout(options.timeout),
+        // A redirect would carry the Basic credentials to a recipient other than this endpoint.
+        redirect: 'error',
         method: 'POST',
         headers: {
           authorization: `Basic ${basic}`,
