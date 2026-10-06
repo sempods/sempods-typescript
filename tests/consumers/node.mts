@@ -71,6 +71,26 @@ const server = createServer((req, res) => {
     }
     return;
   }
+  if (req.url === '/alice/_system/contexts/tasks') {
+    // A Context description (SPS-CTX-032) is read with the caller's bearer.
+    assert.equal(req.headers.authorization, 'Bearer node-token');
+    const context = `${pod}/_system/contexts/tasks`;
+    res.writeHead(200, { 'content-type': 'application/ld+json' });
+    res.end(
+      JSON.stringify({
+        '@id': context,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': context },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': false }],
+        'http://www.w3.org/2000/01/rdf-schema#label': [
+          { '@value': 'Aufgaben' },
+        ],
+      }),
+    );
+    return;
+  }
   assert.equal(req.headers.authorization, undefined);
   const resource = {
     resource: pod,
@@ -128,10 +148,17 @@ try {
   assert.equal('expiresAt' in authorization.attempt, false);
   assert.equal(requests, 2); // Preparation is portable computation, without browser/storage/I/O.
 
-  const tasks = createPod(pod, {
+  const tasksPod = createPod(pod, {
     auth: bearer('node-token'),
     development: 'loopback-http',
-  }).context(`${pod}/_system/contexts/tasks`);
+  });
+  const described = await tasksPod.contextDescription(
+    `${pod}/_system/contexts/tasks`,
+  );
+  assert.ok(described.kind === 'ok');
+  assert.equal(described.body.label, 'Aufgaben');
+  assert.equal(described.body.public, false);
+  const tasks = tasksPod.context(`${pod}/_system/contexts/tasks`);
   const read = await tasks.subjects.get(`${pod}/tasks/1`);
   assert.ok(read.kind === 'ok');
   assert.equal(read.etag, '"v1"');
@@ -177,7 +204,7 @@ try {
       },
     ],
   });
-  assert.equal(routes.length, 6);
+  assert.equal(routes.length, 7);
   assert.deepEqual(routes.slice(0, 2), [
     'GET /alice/.well-known/oauth-protected-resource',
     'GET /alice/.well-known/oauth-authorization-server',
@@ -190,5 +217,5 @@ try {
   );
 }
 console.log(
-  'Packed Node ESM, Node-only declarations, loopback discovery, a conditional read/write and the edit entry passed.',
+  'Packed Node ESM, Node-only declarations, loopback discovery, a context description, a conditional read/write and the edit entry passed.',
 );

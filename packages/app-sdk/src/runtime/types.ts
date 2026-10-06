@@ -22,16 +22,29 @@ export type SessionFact =
       readonly problem: RuntimeProblem;
       readonly failure?: SdkFailure;
     };
+/**
+ * Registry labels (`rdfs:label`, SPS-CTX-032) keyed by exact context IRI, read
+ * in the background after a ready catalogue. Display text only: absent while
+ * unread, for contexts without a label and after a failed read; never an
+ * identity or a grant.
+ */
+export type ContextLabels = Readonly<Record<string, string>>;
 export type CatalogueFact =
   | { readonly kind: 'unknown' }
   | {
       readonly kind: 'loading';
       readonly contexts?: readonly CatalogueContext[];
+      readonly labels?: ContextLabels;
     }
-  | { readonly kind: 'ready'; readonly contexts: readonly CatalogueContext[] }
+  | {
+      readonly kind: 'ready';
+      readonly contexts: readonly CatalogueContext[];
+      readonly labels?: ContextLabels;
+    }
   | {
       readonly kind: 'failed';
       readonly contexts?: readonly CatalogueContext[];
+      readonly labels?: ContextLabels;
     };
 export interface Connection {
   readonly id: string;
