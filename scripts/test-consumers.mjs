@@ -18,7 +18,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
-import { discoveryDocument, resourceAnswer } from './consumer-fixture.mjs';
+import {
+  discoveryDocument,
+  resourceAnswer,
+  queryAnswer,
+} from './consumer-fixture.mjs';
 import { checkReference, ENTRY } from './package-docs.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -175,6 +179,39 @@ try {
     plain,
   );
   run(process.execPath, ['out/node.mjs'], plain);
+
+  // Sparse SELECT bindings must remain optional for consumers that turn off
+  // noUncheckedIndexedAccess. Compile the portable README example verbatim too.
+  await cp(
+    join(root, 'tests/consumers/select-types.ts'),
+    join(plain, 'select-types.ts'),
+  );
+  const clientReadme = await readFile(
+    join(plain, 'node_modules/@sempods/client-sdk/README.md'),
+    'utf8',
+  );
+  const overview = clientReadme
+    .split('## Reading across the Pod')[1]
+    ?.match(/```ts\n([\s\S]*?)```/)?.[1];
+  assert.ok(overview, 'Portable Pod-read example missing');
+  await writeFile(join(plain, 'pod-overview.ts'), overview);
+  await json(join(plain, 'tsconfig.select.json'), {
+    compilerOptions: {
+      ...strict,
+      noUncheckedIndexedAccess: false,
+      module: 'NodeNext',
+      moduleResolution: 'NodeNext',
+      lib: ['ES2022'],
+      types: ['node'],
+      noEmit: true,
+    },
+    files: ['select-types.ts', 'pod-overview.ts'],
+  });
+  run(
+    process.execPath,
+    ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.select.json'],
+    plain,
+  );
 
   // The ordinary browser consumer deliberately uses OAuth and app-sdk too.
   // Inspect a separate root-only graph, retaining all exports and imports.
@@ -432,7 +469,9 @@ try {
   server = createServer((req, res) => {
     const path = req.url ?? '';
     const origin = `http://${req.headers.host}`;
-    const resource = resourceAnswer(origin, req.method, path, req.headers);
+    const resource =
+      resourceAnswer(origin, req.method, path, req.headers) ??
+      queryAnswer(origin, req.method, path, req.headers);
     if (resource) {
       requests.push({
         path,
@@ -499,15 +538,17 @@ try {
     [
       '/alice/.well-known/oauth-protected-resource',
       '/alice/.well-known/oauth-authorization-server',
-      requests[2]?.path.split('?')[0],
-      requests[2]?.path.split('?')[0],
-      requests[2]?.path.split('?')[0],
+      '/alice/_system/sparql/query',
+      '/alice/_system/sparql/query',
+      requests[4]?.path.split('?')[0],
+      requests[4]?.path.split('?')[0],
+      requests[4]?.path.split('?')[0],
     ],
   );
-  assert.ok(requests[2]?.path.startsWith('/alice/_system/resources/'));
+  assert.ok(requests[4]?.path.startsWith('/alice/_system/resources/'));
   assert.deepEqual(
     requests.slice(2).map((req) => req.method),
-    ['GET', 'PATCH', 'GET'],
+    ['POST', 'POST', 'GET', 'PATCH', 'GET'],
   );
   // Ambient cookies are never sent; the bearer goes only to data requests.
   assert.ok(requests.every((req) => req.cookie === undefined));

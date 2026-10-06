@@ -63,11 +63,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   also fail the probe. OAuth remains an installed dependency used by the
   separate `./oauth` entry.
 - Packed Node: NodeNext, no DOM lib, strict declaration checking, actual execution;
-  discovery and a bearer read plus conditional writes hit a loopback HTTP fixture.
+  discovery, Pod SELECT/CONSTRUCT and a bearer read plus conditional writes hit a loopback HTTP fixture. A separate packed type check disables `noUncheckedIndexedAccess` and still requires a guard for absent SELECT bindings; the portable Pod-read README example is compiled verbatim.
   Portable did:web authorization preparation needs no browser session fields.
   Import starts no requests.
 - Packed browser: DOM only, no Node globals, esbuild browser bundle and Chromium
-  execution; real discovery, a bearer read and a conditional write; verifies
+  execution; real loopback discovery, Pod SELECT/CONSTRUCT, a bearer read and a conditional write; verifies
   ambient cookies are omitted and the bearer reaches only data requests.
 - Packed React: separately installs React/ReactDOM and their types, compiles and
   renders a provider/hook consumer in Chromium; language change retains the draft.

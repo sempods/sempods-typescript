@@ -52,7 +52,10 @@ in a custom layout at `/custom`; both need a Pod for real data.
 
 `@sempods/app-sdk` depends on `@sempods/client-sdk`; React is an optional peer
 through `@sempods/app-sdk/react`. Both packages emit ESM and TypeScript declarations.
-The portable client also provides the field definitions used by browser apps.
+The portable client also provides Pod-wide SELECT/CONSTRUCT queries without
+Context enumeration, and the field definitions used by browser apps. See
+[Pod reads](packages/client-sdk/README.md#reading-across-the-pod); runtime/React
+integration remains separate follow-up work.
 [Architecture decisions](docs/decisions.md) explain these boundaries.
 
 For all guides and contributor workflows, use the [documentation map](docs/README.md).

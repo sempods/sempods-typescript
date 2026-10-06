@@ -35,6 +35,7 @@ import type {
   WriteResult,
 } from './results.js';
 import { ABSOLUTE_IRI } from './iri.js';
+import { decodeSelect } from './sparql.js';
 
 const cancelled: Cancelled = Object.freeze({ kind: 'cancelled' });
 const stopped: Stopped = Object.freeze({ kind: 'stopped' });
@@ -303,40 +304,59 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
         ) => change('DELETE', iri, condition, options, [200, 204]),
       }),
       sparql: Object.freeze({
-        async construct(
-          query: string,
-          options: ReadOptions = {},
-        ): Promise<QueryResult<readonly JsonLd[]>> {
-          if (!query.trim())
-            throw failure({ code: 'invalid-argument', argument: 'query' });
-          const url = new URL(`${base}/_system/sparql/query`);
-          // Downscope to exactly this context (SPS-SPARQL-011–014).
-          url.searchParams.set('default-graph-uri', contextIri);
-          url.searchParams.set('named-graph-uri', contextIri);
-          const exchange = await execute(
-            request(
-              'POST',
-              url.href,
-              { accept: JSON_LD, 'content-type': 'application/sparql-query' },
-              guards,
-              options.signal,
-              query,
-            ),
-          );
-          return read(exchange, url.href, options.signal, async (response) => {
-            const body = await json(response);
-            if (!Array.isArray(body) || !body.every(isNode))
-              throw failure({ code: 'response', problem: 'body' });
-            return { kind: 'ok' as const, body: Object.freeze(body) };
-          });
-        },
+        construct: (query: string, options: ReadOptions = {}) =>
+          sparql(query, JSON_LD, constructBody, guards, options, contextIri),
       }),
     });
+  }
+
+  async function sparql<T>(
+    query: string,
+    accept: string,
+    decode: (body: unknown) => T,
+    guards: readonly DispatchGuard[],
+    options: ReadOptions,
+    contextIri?: string,
+  ): Promise<QueryResult<T>> {
+    if (!query.trim())
+      throw failure({ code: 'invalid-argument', argument: 'query' });
+    const url = new URL(`${base}/_system/sparql/query`);
+    if (contextIri !== undefined) {
+      // Keep this downscope on every dispatch, including authentication retry.
+      url.searchParams.set('default-graph-uri', contextIri);
+      url.searchParams.set('named-graph-uri', contextIri);
+    }
+    const exchange = await execute(
+      request(
+        'POST',
+        url.href,
+        { accept, 'content-type': 'application/sparql-query' },
+        guards,
+        options.signal,
+        query,
+      ),
+    );
+    return read(exchange, url.href, options.signal, async (response) => ({
+      kind: 'ok' as const,
+      body: decode(await json(response, accept)),
+    }));
   }
 
   return Object.freeze({
     podUrl: base,
     context,
+    sparql: Object.freeze({
+      select: (query: string, options: ReadOptions = {}) =>
+        sparql(
+          query,
+          'application/sparql-results+json',
+          decodeSelect,
+          podGuards,
+          options,
+        ),
+      construct: (query: string, options: ReadOptions = {}) =>
+        sparql(query, JSON_LD, constructBody, podGuards, options),
+    }),
     async catalogue(
       options: ReadOptions = {},
     ): Promise<QueryResult<readonly CatalogueContext[]>> {
@@ -381,9 +401,16 @@ function discard(response: Response): void {
   void response.body?.cancel().catch(() => {});
 }
 
-async function json(response: Response): Promise<unknown> {
-  const type = response.headers.get('content-type')?.split(';')[0]?.trim();
-  if (type !== JSON_LD && type !== 'application/json') {
+async function json(response: Response, expected = JSON_LD): Promise<unknown> {
+  const type = response.headers
+    .get('content-type')
+    ?.split(';')[0]
+    ?.trim()
+    .toLowerCase();
+  if (
+    type !== expected &&
+    !(expected === JSON_LD && type === 'application/json')
+  ) {
     discard(response);
     throw failure({ code: 'response', problem: 'content-type' });
   }
@@ -392,6 +419,12 @@ async function json(response: Response): Promise<unknown> {
   } catch (cause) {
     throw failure({ code: 'response', problem: 'body' }, cause);
   }
+}
+
+function constructBody(body: unknown): readonly JsonLd[] {
+  if (!Array.isArray(body) || !body.every(isNode))
+    throw failure({ code: 'response', problem: 'body' });
+  return Object.freeze(body);
 }
 
 function isNode(value: unknown): value is JsonLd {

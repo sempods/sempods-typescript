@@ -73,16 +73,29 @@ targets only the version the person saw.
 _Why:_ safety must not mean a conflict dialog for every unrelated change, and a
 merge must never guess for definitions whose dependencies are unknown.
 
-## One explicit context per view
+## Reads span the readable Pod; writes name one context
 
-Every write names exactly one selected context; reads in a view are scoped to
-it. An empty selection never means "all", and a 404 or an empty catalogue never
-redirects a request elsewhere. The context catalogue is validated against the
-grant model (write and manage imply read) and treated as facts about this
-response, not as permission for later requests.
+A portable Pod read is an explicit, read-only operation on the Pod handle. Without
+query-level dataset selection it queries the caller's authorized Pod dataset;
+the server enforces that boundary. It needs neither Context selection nor a
+catalogue. Provenance is requested in the query, for example `GRAPH ?g` in SELECT.
 
-_Why:_ context boundaries are the Pod's access model; silently widening or
-retargeting a write breaks that model.
+Context views retain scoped reads and are the only write path. Every write names
+one Context; an empty selection, 404 or empty catalogue never retargets a request.
+Context queries send dataset parameters and never retry without them. A merged
+Pod result is not an editable snapshot: editing requires a known target and a
+fresh Context-bound resource read with its applicable ETag. The complete catalogue
+is a validated, response-relative permission summary; the server authorizes each
+later request.
+
+_Why:_ overviews and cross-Context joins need one authorized query, while scoped
+reads and writes need explicit targets. Readers do not need to enumerate Contexts.
+
+This is implemented in client-sdk. Browser-runtime Pod handles and on-demand
+Context discovery remain tracked in
+[#38](https://github.com/sempods/sempods-typescript/issues/38) and
+[#39](https://github.com/sempods/sempods-typescript/issues/39); current app-sdk
+views and startup behavior still depend on Context selection.
 
 A reload may reselect the context the person chose last for that connection.
 That is their own explicit choice, remembered as a browser preference rather

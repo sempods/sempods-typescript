@@ -13,6 +13,7 @@ import type {
   WriteResult,
 } from './results.js';
 import type { PodFetch } from './transport.js';
+import type { SelectResult } from './sparql.js';
 
 /** Configuration consumed by `createPod`. */
 export interface PodOptions {
@@ -44,6 +45,23 @@ export interface ContextOptions {
 /** One validated Pod and one credential owner. Requests go only to its constructed endpoints. */
 export interface Pod {
   readonly podUrl: string;
+  /**
+   * Read-only queries over the caller's authorized Pod dataset (SPS-SPARQL-007).
+   * Requires neither Context selection nor a catalogue. Sends no SDK-added
+   * dataset parameters; query text is unchanged and server authorization applies.
+   */
+  readonly sparql: {
+    /** SELECT bindings; preserves order, duplicates and unbound variables. */
+    select(
+      query: string,
+      options?: ReadOptions,
+    ): Promise<QueryResult<SelectResult>>;
+    /** Expanded JSON-LD nodes, without automatic source-Context provenance. */
+    construct(
+      query: string,
+      options?: ReadOptions,
+    ): Promise<QueryResult<readonly JsonLd[]>>;
+  };
   /** Operations bound to one explicitly selected context. Never "all contexts". */
   context(contextIri: string, options?: ContextOptions): ContextView;
   /** The caller-relative context catalogue: known access facts, not server authority. */
@@ -90,7 +108,10 @@ export interface SubjectOperations {
 }
 
 export interface SparqlOperations {
-  /** Scoped to the view's context; an empty result is a valid `ok`. */
+  /**
+   * Sends both dataset parameters for this Context; never retries unscoped.
+   * An unsupported downscope is a failure, and an empty result is a valid `ok`.
+   */
   construct(
     query: string,
     options?: ReadOptions,
