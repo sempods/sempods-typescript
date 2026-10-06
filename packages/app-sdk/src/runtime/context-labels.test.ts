@@ -137,3 +137,69 @@ it('caps the reads at 50 contexts per catalogue', async () => {
   expect(reads).toBe(50);
   runtime.dispose();
 });
+
+it('drops labels of contexts the refreshed catalogue no longer lists', async () => {
+  const f = fixture();
+  f.setDescriptions(labelled({ [work]: 'Arbeit', [personal]: 'Privat' }));
+  const { runtime, id } = await f.login();
+  await vi.waitFor(() => {
+    const fact = runtime.getSnapshot()[0]!.catalogue;
+    expect(
+      fact.kind === 'ready' && Object.keys(fact.labels ?? {}),
+    ).toHaveLength(2);
+  });
+  // A valid empty catalogue carries no labels; a smaller one only its own.
+  f.setCatalogue(async () => catalogue([], []));
+  await runtime.loadContexts(id);
+  expect(runtime.getSnapshot()[0]!.catalogue).toEqual({
+    kind: 'ready',
+    contexts: [],
+  });
+  f.setCatalogue(async () => catalogue([work], [work]));
+  f.setDescriptions(async () => new Response(null, { status: 404 }));
+  await runtime.loadContexts(id);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const fact = runtime.getSnapshot()[0]!.catalogue;
+  expect(fact.kind === 'ready' && fact.labels).toBeFalsy();
+  runtime.dispose();
+});
+
+it('stops a superseded loader instead of reading on in parallel', async () => {
+  const f = fixture();
+  const many = Array.from(
+    { length: 20 },
+    (_, i) => `${pod}/_system/contexts/c${i}`,
+  );
+  f.setCatalogue(async () => catalogue([work, ...many], [work]));
+  const gates: Array<() => void> = [];
+  let released = false;
+  let open = 0;
+  let peak = 0;
+  f.setDescriptions(async (url) => {
+    open++;
+    peak = Math.max(peak, open);
+    if (!released) await new Promise<void>((resolve) => gates.push(resolve));
+    open--;
+    return description(url, 'x');
+  });
+  const { runtime, id } = await f.login();
+  await vi.waitFor(() => expect(open).toBe(3));
+  // A refresh while the first loader's reads are pending supersedes it.
+  await runtime.loadContexts(id);
+  await vi.waitFor(() => expect(gates.length).toBe(6));
+  released = true;
+  while (gates.length) gates.shift()!();
+  await vi.waitFor(() => {
+    const fact = runtime.getSnapshot()[0]!.catalogue;
+    expect(
+      fact.kind === 'ready' && Object.keys(fact.labels ?? {}),
+    ).toHaveLength(21);
+  });
+  // The old loader finished only its in-flight reads, then stopped.
+  const reads = f.fetch.mock.calls.filter(([url]) =>
+    /\/_system\/contexts\/[^/]+$/.test(new URL(url).pathname),
+  ).length;
+  expect(reads).toBe(3 + 21);
+  expect(peak).toBeLessThanOrEqual(6);
+  runtime.dispose();
+});

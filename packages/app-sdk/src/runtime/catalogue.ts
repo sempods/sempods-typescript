@@ -47,12 +47,22 @@ export function loadCatalogue(
           before?.writable !== after?.writable
         )
           invalidate(e);
+        // Keep known labels only for contexts this catalogue still lists.
+        const kept = labels
+          ? Object.fromEntries(
+              Object.entries(labels).filter(([iri]) =>
+                contexts.some((c) => c.iri === iri),
+              ),
+            )
+          : {};
         e.view = {
           ...e.view,
           catalogue: Object.freeze({
             kind: 'ready',
             contexts,
-            ...(labels ? { labels } : {}),
+            ...(Object.keys(kept).length
+              ? { labels: Object.freeze(kept) }
+              : {}),
           }),
         };
         void loadLabels(e, owner, contexts, generation);
@@ -111,9 +121,18 @@ async function loadLabels(
     .map((c) => c.iri);
   if (!targets.length) return;
   const found: Record<string, string> = {};
+  // A newer catalogue load supersedes this one: stop issuing its reads.
+  const current = () => {
+    const fact = e.view.catalogue;
+    return (
+      owner.eligible(e, generation) &&
+      fact.kind === 'ready' &&
+      fact.contexts === contexts
+    );
+  };
   let next = 0;
   const read = async () => {
-    while (next < targets.length && owner.eligible(e, generation)) {
+    while (next < targets.length && current()) {
       const iri = targets[next++]!;
       try {
         const result = await e.clientPod.contextDescription(iri, {
@@ -129,9 +148,8 @@ async function loadLabels(
   await Promise.all(Array.from({ length: LABEL_READS }, read));
   const fact = e.view.catalogue;
   if (
-    !owner.eligible(e, generation) ||
+    !current() ||
     fact.kind !== 'ready' ||
-    fact.contexts !== contexts ||
     sameLabels(fact.labels ?? {}, found)
   )
     return;
