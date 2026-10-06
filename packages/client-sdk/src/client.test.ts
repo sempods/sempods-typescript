@@ -245,6 +245,26 @@ describe('against a loopback HTTP pod', () => {
       .contextDescription(contextIri)
       .catch((cause: unknown) => cause);
     expect(sdkFailure(missing)).toEqual({ code: 'http', status: 404 });
+    // A raw-Unicode context IRI is sent in its serialized URL form.
+    const unicode = `${podUrl}/_system/contexts/grüße`;
+    seen.length = 0;
+    reply = () =>
+      ldJson({
+        '@id': unicode,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': unicode },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': false }],
+        'http://www.w3.org/2000/01/rdf-schema#label': [{ '@value': 'Grüße' }],
+      });
+    expect(await pod.contextDescription(unicode)).toEqual({
+      kind: 'ok',
+      body: { iri: unicode, public: false, label: 'Grüße' },
+    });
+    expect(seen[0]?.url.pathname).toBe(
+      '/alice/_system/contexts/gr%C3%BC%C3%9Fe',
+    );
     // Never a request outside the Pod's context registry.
     seen.length = 0;
     for (const iri of [

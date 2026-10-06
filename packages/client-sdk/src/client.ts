@@ -353,19 +353,15 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
       contextIri: string,
       options: ReadOptions = {},
     ): Promise<QueryResult<ContextDescription>> {
-      // The Context IRI is its own registry route (SPS-CTX-031).
+      // The Context IRI is its own registry route (SPS-CTX-031). Raw Unicode is
+      // allowed in the IRI; the request uses its one serialized URL form.
       if (!isContextIri(contextIri, base))
         throw failure({ code: 'invalid-argument', argument: 'context' });
+      const url = new URL(contextIri).href;
       const exchange = await execute(
-        request(
-          'GET',
-          contextIri,
-          { accept: JSON_LD },
-          podGuards,
-          options.signal,
-        ),
+        request('GET', url, { accept: JSON_LD }, podGuards, options.signal),
       );
-      return read(exchange, contextIri, options.signal, async (response) => ({
+      return read(exchange, url, options.signal, async (response) => ({
         kind: 'ok' as const,
         body: decodeContextDescription(await json(response), contextIri, base),
       }));

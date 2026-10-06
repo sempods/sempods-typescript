@@ -133,6 +133,12 @@ async function loadLabels(
   let next = 0;
   const read = async () => {
     while (next < targets.length && current()) {
+      // One cap per connection, shared with superseded loaders still in flight.
+      await acquire(e);
+      if (!current() || next >= targets.length) {
+        release(e);
+        break;
+      }
       const iri = targets[next++]!;
       try {
         const result = await e.clientPod.contextDescription(iri, {
@@ -142,6 +148,8 @@ async function loadLabels(
         if (label) found[iri] = label;
       } catch {
         // Display text only: an unreadable description keeps today's name.
+      } finally {
+        release(e);
       }
     }
   };
@@ -165,4 +173,30 @@ function sameLabels(a: Record<string, string>, b: Record<string, string>) {
   return (
     keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
   );
+}
+
+/** Description reads in flight per connection, and the reads waiting for a slot. */
+const slots = new WeakMap<
+  Entry,
+  { active: number; readonly waiting: (() => void)[] }
+>();
+
+function acquire(e: Entry): Promise<void> {
+  let slot = slots.get(e);
+  if (!slot) slots.set(e, (slot = { active: 0, waiting: [] }));
+  if (slot.active < LABEL_READS) {
+    slot.active++;
+    return Promise.resolve();
+  }
+  const waiting = slot.waiting;
+  return new Promise((resolve) => waiting.push(resolve));
+}
+
+function release(e: Entry) {
+  const slot = slots.get(e);
+  if (!slot) return;
+  const next = slot.waiting.shift();
+  // Hand the slot straight to the next waiting read, or free it.
+  if (next) next();
+  else slot.active--;
 }

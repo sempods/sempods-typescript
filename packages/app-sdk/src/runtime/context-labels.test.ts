@@ -186,7 +186,8 @@ it('stops a superseded loader instead of reading on in parallel', async () => {
   await vi.waitFor(() => expect(open).toBe(3));
   // A refresh while the first loader's reads are pending supersedes it.
   await runtime.loadContexts(id);
-  await vi.waitFor(() => expect(gates.length).toBe(6));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(gates.length).toBe(3);
   released = true;
   while (gates.length) gates.shift()!();
   await vi.waitFor(() => {
@@ -200,6 +201,7 @@ it('stops a superseded loader instead of reading on in parallel', async () => {
     /\/_system\/contexts\/[^/]+$/.test(new URL(url).pathname),
   ).length;
   expect(reads).toBe(3 + 21);
-  expect(peak).toBeLessThanOrEqual(6);
+  // The cap holds across loaders: the new one waits for the old in-flight reads.
+  expect(peak).toBe(3);
   runtime.dispose();
 });
