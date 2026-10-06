@@ -553,10 +553,10 @@ try {
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page
       .getByRole('option', { name: 'Tasks · ' + work, exact: true })
-      .waitFor();
+      .waitFor({ state: 'attached' });
     await page
       .getByRole('option', { name: 'Tasks · ' + personal, exact: true })
-      .waitFor();
+      .waitFor({ state: 'attached' });
     await page.getByLabel('Data context', { exact: true }).selectOption(work);
     await page
       .getByRole('region', { name: 'Data access', exact: true })
