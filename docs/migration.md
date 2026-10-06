@@ -12,12 +12,20 @@ Upgrade both packages together; Node 24.15 or newer stays the requirement:
 npm install --save-exact @sempods/app-sdk@0.3.0 @sempods/client-sdk@0.3.0
 ```
 
-Runtime behavior of existing apps is unchanged. One type change can need an
-edit: `TextField` (and the new `DateTimeField`) carry their optionality as a
-type parameter. A field annotated as plain `TextField` now reads `string | null`
-in drafts, because its optionality is unknown; annotate a required field as
-`TextField<false>` to keep `string`. Fields used without an annotation are
-unaffected.
+Session storage, guards and write recovery are unchanged. Three changes can
+need attention:
+
+- **Field types.** `TextField` (and the new `DateTimeField`) carry their optionality as a
+  type parameter. A field annotated as plain `TextField` now reads
+  `string | null` in drafts, because its optionality is unknown; annotate a
+  required field as `TextField<false>` to keep `string`. Fields used without an
+  annotation are unaffected.
+- **AppShell presentation.** `AppShell` now shows the new access UI; see
+  [access UI and AppShell](#access-ui-and-appshell). Tests that matched raw
+  context IRIs or the previous labels need updating.
+- **Dark appearance.** SDK components follow the page's color scheme instead of
+  the operating system's. Add `:root { color-scheme: light dark; }` to the app
+  CSS to keep automatic dark appearance.
 
 New in 0.3:
 
@@ -31,6 +39,47 @@ New in 0.3:
   installed version.
 - Creating several resources from one input is a documented pattern; see
   [several resources from one input](react-authoring.md#several-resources-from-one-input).
+- `AppAccess` is a composable sign-in and access-recovery surface for app-owned
+  layouts, with optional `podNames` for readable Pod names.
+- Context selectors show readable names: the runtime reads each context's
+  registry label (`rdfs:label`) in the background, and client-sdk exposes
+  `contextDescription()` for the same read.
+- SDK access, notice and editor components share inherited `--sempods-*`
+  theme tokens.
+
+### Access UI and AppShell
+
+Existing `AppShell` calls use the new access UI without changing app code. The
+shell now has a title and **Data access** button; connection administration hides
+when the target is usable, including read-only access, and opens explicitly.
+`title`, `style` and `components={{ Connections: MyPicker }}` remain supported.
+Replacement controls follow the same open/recovery visibility; they are no longer
+always mounted. Keep app drafts/controllers in the shell content, not inside a
+replacement picker. `mode="single"` remains presentation only; `allowedPods`
+enforces a Pod restriction. Content still waits for durable startup, then remains
+mounted during same-target access loss and management changes.
+
+`ConnectionControls` remains available for custom layouts. Selectors now show
+readable Pod/context names and disambiguate duplicates; **Full addresses** exposes
+the identities. Context names prefer the runtime's description labels and fall
+back to the final path segment. Late labels preserve selection and drafts.
+Select option values stay exact. Tests or code that matched raw
+IRI text should use the option value or accessible control name instead. The
+AppShell free input is **Your Pod** / **Dein Pod** with **Sign in** / **Anmelden**;
+access refresh is **Check access** / **Zugriff prüfen**. Existing direct
+ConnectionControls keeps its form/action labels.
+
+All SDK access, notice and editor components share the
+[scoped styling baseline](react-authoring.md#shared-sdk-appearance). Set inherited
+`--sempods-*` tokens to theme them together; previous `--sempods-access-*` variables
+remain fallback aliases. Root `style` still styles the AppShell container;
+component controls use the shared tokens. SDK surfaces now inherit the host color
+scheme: use `:root { color-scheme: light dark; }` in the app CSS to enable automatic
+dark appearance, and adapt any hard-coded page colors accordingly. Embedded notices,
+editors and connection controls have transparent backgrounds. There is no stylesheet import. The CSP
+must permit the inline styles, or the host supplies hook-based custom UI.
+App-owned list rows and other content outside SDK controls/editors remain unstyled.
+Target guards, conflict review and unconfirmed-write recovery are unchanged.
 
 ## From 0.1 to 0.2
 

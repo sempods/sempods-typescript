@@ -2,8 +2,7 @@ import { Fragment, StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
-  CallbackNotice,
-  ConnectionControls,
+  AppAccess,
   SempodsProvider,
   useAppState,
   useSdkLocale,
@@ -19,13 +18,15 @@ const runtime = createBrowserRuntime({
     redirectUri: location.origin + '/callback?identity=widgets',
   },
   preset: { podUrl, contextIri: podUrl + '/_system/contexts/work' },
+  allowedPods: [podUrl],
   returnTo: '/app?identity=widgets',
   development: 'loopback-http',
 });
 window.addEventListener('pagehide', () => runtime.dispose());
 function Host() {
   const state = useAppState();
-  const { messages: m, error } = useSdkLocale();
+  const { messages: m } = useSdkLocale();
+  const [open, setOpen] = useState(false);
   const [list, setList] = useState(true);
   const [fallback, setFallback] = useState<'hidden' | 'disabled' | 'custom'>(
     'hidden',
@@ -36,21 +37,15 @@ function Host() {
       : fallback;
   return (
     <main style={{ maxWidth: 640, margin: 'auto', padding: 12 }}>
-      <h1>My dashboard</h1>
-      {!state.startup && !state.startupError && (
-        <p role="status">{m.controls.loading}</p>
-      )}
-      {state.startupError ? (
-        <p role="alert">{error(state.startupError)}</p>
-      ) : null}
-      {state.startup?.storage === 'busy' && (
-        <p role="alert">{m.controls.busy}</p>
-      )}
-      {state.startup?.storage === 'unavailable' && (
-        <p role="alert">{m.controls.storage}</p>
-      )}
-      <CallbackNotice />
-      <ConnectionControls mode="single" />
+      {state.view && <h1>My dashboard</h1>}
+      <button aria-expanded={open} onClick={() => setOpen(!open)}>
+        {m.controls.dataAccess}
+      </button>
+      <AppAccess
+        appName="My dashboard"
+        open={open}
+        podNames={{ [podUrl]: 'My Pod' }}
+      />
       <output aria-label="Connections">{state.connections.length}</output>
       <label>
         Fallback

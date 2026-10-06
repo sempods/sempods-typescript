@@ -184,7 +184,7 @@ try {
         });
         if (url.searchParams.get('identity') === 'widgets') {
           res.end(
-            '<html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="' +
+            '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="' +
               (url.searchParams.has('duplicate')
                 ? '/widgets-duplicate.js'
                 : '/widgets.js') +
@@ -192,9 +192,12 @@ try {
           );
           return;
         }
-        if (url.searchParams.get('identity') === 'preset') {
+        if (
+          url.searchParams.get('identity') === 'preset' ||
+          url.searchParams.get('identity')?.startsWith('access-')
+        ) {
           res.end(
-            '<div id="app"></div><script type="module" src="/preset.js"></script>',
+            '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/preset.js"></script></html>',
           );
           return;
         }
@@ -725,6 +728,7 @@ try {
     await page.getByLabel('Data context', { exact: true }).count(),
     0,
   );
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
   await presetDraft.fill('Keep this draft');
   await page
     .getByRole('button', { name: 'Update access', exact: true })
@@ -768,6 +772,72 @@ try {
       .every((t) => t.cookie === undefined),
   );
   await checkWidgets(page, origin, widgetFixture);
+  for (const mode of ['one', 'set', 'free']) {
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.emulateMedia({ colorScheme: mode === 'set' ? 'dark' : 'light' });
+    await page.goto(origin + '/app?identity=access-' + mode);
+    await page.getByRole('heading', { name: 'Shopping', level: 1 }).waitFor();
+    if (process.env.SEMPODS_UI_PREVIEW_DIR)
+      await page.screenshot({
+        path: join(
+          process.env.SEMPODS_UI_PREVIEW_DIR,
+          'login-' + mode + '.png',
+        ),
+      });
+    if (mode === 'one') {
+      assert.equal(await page.getByRole('textbox').count(), 0);
+      assert.equal(await page.getByRole('combobox').count(), 0);
+    } else if (mode === 'set') {
+      await page.getByLabel('Your Pod').selectOption(origin + '/alice');
+      assert.equal(await page.getByRole('textbox').count(), 0);
+    } else await page.getByLabel('Your Pod').fill('  ' + origin + '/alice/  ');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).focus();
+    await Promise.all([
+      page.waitForURL('**/callback?**'),
+      page.keyboard.press('Enter'),
+    ]);
+    await page.waitForURL('**/app?identity=access-' + mode);
+    const picker = page.getByLabel('Data context', { exact: true });
+    await picker.waitFor();
+    assert.equal(await picker.inputValue(), '');
+    await picker
+      .getByRole('option', { name: 'work', exact: true })
+      .waitFor({ state: 'attached' });
+    await picker.focus();
+    await picker.selectOption(origin + '/alice/_system/contexts/work');
+    await page.getByLabel('Preset draft').waitFor();
+    await page
+      .getByRole('region', { name: 'Data access', exact: true })
+      .waitFor({ state: 'hidden' });
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent),
+      'Data access',
+    );
+    await page
+      .getByRole('button', { name: 'Data access', exact: true })
+      .click();
+    await page
+      .getByRole('heading', { name: 'Data access', level: 2 })
+      .waitFor();
+    await page
+      .getByRole('button', { name: 'Check access', exact: true })
+      .waitFor();
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    );
+    if (process.env.SEMPODS_UI_PREVIEW_DIR)
+      await page.screenshot({
+        path: join(
+          process.env.SEMPODS_UI_PREVIEW_DIR,
+          'access-' + mode + '.png',
+        ),
+      });
+  }
+  console.log(
+    'Packed AppAccess: one/set/free Pod UI, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+  );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
   console.log(

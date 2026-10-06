@@ -315,6 +315,7 @@ export async function checkWidgets(page, origin, data) {
     .getByRole('listitem')
     .filter({ hasText: 'From the add widget' })
     .waitFor();
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
   await page
     .getByRole('button', { name: 'Update access', exact: true })
     .click();
@@ -322,7 +323,7 @@ export async function checkWidgets(page, origin, data) {
   await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   assert.equal(await input.inputValue(), 'Keep this draft');
   const refresh = () =>
-    page.getByRole('button', { name: 'Check again', exact: true }).click();
+    page.getByRole('button', { name: 'Check access', exact: true }).click();
   data.access(true, false);
   await refresh();
   await page.waitForFunction(

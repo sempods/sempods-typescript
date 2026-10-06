@@ -31,6 +31,7 @@ export type {
   Connection,
   SessionFact,
   CatalogueFact,
+  ContextLabels,
   FeatureScopes,
   StartupReport,
   DisconnectResult,

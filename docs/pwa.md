@@ -131,7 +131,7 @@ createRoot(document.getElementById('root')!).render(
 ```
 
 Keep any existing CSS imports in `main.tsx` and use your HTML root element's ID.
-In `src/App.tsx`, keep the quickstart's existing imports, runtime and `Tasks`
+In `src/App.tsx`, keep the quickstart's existing imports, runtime, `AppContent` and `Tasks`
 component; add the type import and replace its `App` function with:
 
 ```tsx
@@ -141,11 +141,7 @@ export default function App({ children }: { readonly children?: ReactNode }) {
   return (
     <SempodsProvider runtime={runtime}>
       {children}
-      <AppShell title="My tasks">
-        <TargetScreen>
-          <Tasks />
-        </TargetScreen>
-      </AppShell>
+      <AppContent />
     </SempodsProvider>
   );
 }

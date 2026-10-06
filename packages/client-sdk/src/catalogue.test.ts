@@ -1,5 +1,10 @@
 import { expect, it } from 'vitest';
-import { decodeCatalogue, isContextIri } from './catalogue.js';
+import {
+  CatalogueError,
+  decodeCatalogue,
+  decodeContextDescription,
+  isContextIri,
+} from './catalogue.js';
 const pod = 'https://pod.example/alice';
 const sd = 'http://www.w3.org/ns/sparql-service-description#';
 const sps = 'https://schema.sempods.org/';
@@ -161,4 +166,85 @@ it('exposes the same canonical context check for caller configuration, without i
     notes.replace('/alice/', '/bob/'),
   ])
     expect(isContextIri(value, pod)).toBe(false);
+});
+
+const described = {
+  '@id': tasks,
+  '@type': [`${sd}NamedGraph`],
+  [`${sd}name`]: [{ '@id': tasks }],
+  [`${sps}public`]: [{ '@value': false }],
+};
+const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
+const DCT = 'http://purl.org/dc/terms/';
+const XSD = 'http://www.w3.org/2001/XMLSchema#';
+
+it('reads a Context description: label, description, public flag and creation time (SPS-CTX-032)', () => {
+  expect(
+    decodeContextDescription(
+      {
+        ...described,
+        [RDFS_LABEL]: [{ '@value': 'Aufgaben' }],
+        [`${DCT}description`]: [{ '@value': 'Tasks', '@type': `${XSD}string` }],
+        [`${DCT}created`]: [
+          { '@value': '2026-10-01T08:00:00Z', '@type': `${XSD}dateTime` },
+        ],
+        'http://www.w3.org/2000/01/rdf-schema#seeAlso': [
+          { '@id': `${pod}/_system/resources/x` },
+        ],
+        'https://example.org/extra': [{ '@value': 'tolerated' }],
+      },
+      tasks,
+      pod,
+    ),
+  ).toEqual({
+    iri: tasks,
+    public: false,
+    label: 'Aufgaben',
+    description: 'Tasks',
+    created: '2026-10-01T08:00:00Z',
+  });
+});
+
+it('leaves out absent, ambiguous or non-plain descriptive text', () => {
+  const read = (extra: Record<string, unknown>) =>
+    decodeContextDescription({ ...described, ...extra }, tasks, pod);
+  expect(read({})).toEqual({ iri: tasks, public: false });
+  for (const label of [
+    [{ '@value': 'A' }, { '@value': 'B' }],
+    [{ '@value': 'Privat', '@language': 'de' }],
+    [{ '@value': 3 }],
+    [{ '@id': 'https://example.org/label' }],
+    [{ '@value': 'x', '@type': `${XSD}token` }],
+  ])
+    expect(read({ [RDFS_LABEL]: label }).label).toBeUndefined();
+  expect(
+    read({ [`${DCT}created`]: [{ '@value': '2026-10-01' }] }).created,
+  ).toBeUndefined();
+});
+
+it('rejects a malformed description as a catalogue failure', () => {
+  const bad: unknown[] = [
+    null,
+    [described],
+    { ...described, '@context': {} },
+    { ...described, '@id': notes },
+    { ...described, '@type': [`${sd}GraphCollection`] },
+    { ...described, [`${sd}name`]: [] },
+    { ...described, [`${sd}name`]: [{ '@id': notes }] },
+    { ...described, [`${sps}public`]: [{ '@value': 'false' }] },
+    { ...described, [`${sps}public`]: [] },
+    { ...described, [RDFS_LABEL]: { '@value': 'not an array' } },
+  ];
+  for (const body of bad)
+    expect(() => decodeContextDescription(body, tasks, pod)).toThrow(
+      CatalogueError,
+    );
+  // The asked IRI must be a context IRI of this Pod.
+  expect(() =>
+    decodeContextDescription(
+      { ...described, '@id': `${pod}/tasks` },
+      `${pod}/tasks`,
+      pod,
+    ),
+  ).toThrow(CatalogueError);
 });

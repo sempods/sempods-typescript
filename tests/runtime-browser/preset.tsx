@@ -1,8 +1,10 @@
 import { createRoot } from 'react-dom/client';
+import { useRef, useState } from 'react';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AppShell,
+  AppAccess,
   SempodsProvider,
   TargetScreen,
   UpdateNotice,
@@ -12,16 +14,26 @@ import {
 } from '@sempods/app-sdk/react';
 
 const podUrl = location.origin + '/alice';
+const identity =
+  new URL(location.href).searchParams.get('identity') ?? 'preset';
+const accessUI = identity.startsWith('access-');
 const runtime = createBrowserRuntime({
   identity: {
     kind: 'dynamic',
     name: 'Preset consumer',
-    redirectUri: location.origin + '/callback?identity=preset',
+    redirectUri: location.origin + '/callback?identity=' + identity,
   },
-  preset: { podUrl, contextIri: podUrl + '/_system/contexts/work' },
+  ...(!accessUI
+    ? { preset: { podUrl, contextIri: podUrl + '/_system/contexts/work' } }
+    : {}),
+  ...(identity === 'access-one'
+    ? { allowedPods: [podUrl] }
+    : identity === 'access-set'
+      ? { allowedPods: [podUrl, location.origin + '/bob'] }
+      : {}),
   scopes: { required: ['tasks'], optional: ['ai'] },
   development: 'loopback-http',
-  returnTo: '/app?identity=preset',
+  returnTo: '/app?identity=' + identity,
 });
 window.addEventListener('pagehide', () => runtime.dispose());
 const task = fields({
@@ -47,17 +59,48 @@ function Draft() {
 }
 function Evidence() {
   const state = useAppState();
+  const [open, setOpen] = useState(false);
+  const target = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <output aria-label="Connections">{state.connections.length}</output>
-      <output aria-label="Selected context">
-        {state.view?.contextIri ?? ''}
-      </output>
-      <AppShell title="Known Pod" mode="single">
-        <TargetScreen>
-          <Draft />
-        </TargetScreen>
-      </AppShell>
+      <div hidden>
+        <output aria-label="Connections">{state.connections.length}</output>
+        <output aria-label="Selected context">
+          {state.view?.contextIri ?? ''}
+        </output>
+      </div>
+      {accessUI ? (
+        <>
+          {state.connections.length > 0 && (
+            <button
+              ref={target}
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+            >
+              Data access
+            </button>
+          )}
+          <AppAccess
+            appName="Shopping"
+            icon={<span>✓</span>}
+            podNames={{
+              [podUrl]: 'Personal',
+              [location.origin + '/bob']: 'Team',
+            }}
+            open={open}
+            focusTarget={target}
+          />
+          <TargetScreen>
+            <Draft />
+          </TargetScreen>
+        </>
+      ) : (
+        <AppShell title="Known Pod" mode="single">
+          <TargetScreen>
+            <Draft />
+          </TargetScreen>
+        </AppShell>
+      )}
     </>
   );
 }

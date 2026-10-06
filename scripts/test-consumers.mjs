@@ -380,13 +380,15 @@ try {
   assert.ok(pwaMain, 'PWA entry missing');
   const quickstartApp = block('tsx');
   const appStart = quickstartApp.indexOf('export default function App(');
-  const tasksStart = quickstartApp.indexOf('\nfunction Tasks()');
-  assert.ok(appStart >= 0 && tasksStart > appStart);
+  const contentStart = quickstartApp.indexOf('\nfunction AppContent()');
+  assert.ok(appStart >= 0 && contentStart > appStart);
   const pwaDocs = join(withReact, 'pwa-docs');
   await cp(quickstart, pwaDocs, { recursive: true });
   await writeFile(
     join(pwaDocs, 'App.tsx'),
-    quickstartApp.slice(0, appStart) + pwaApp + quickstartApp.slice(tasksStart),
+    quickstartApp.slice(0, appStart) +
+      pwaApp +
+      quickstartApp.slice(contentStart),
   );
   await writeFile(join(pwaDocs, 'main.tsx'), pwaMain);
   await cp(
@@ -527,9 +529,9 @@ try {
   // The quickstart app starts and offers its first step.
   await page.goto(`${origin}/quickstart`);
   await page.getByText('My tasks', { exact: true }).waitFor();
-  await page.getByLabel('Pod URL').waitFor();
+  await page.getByLabel('Your Pod').waitFor();
   assert.equal(
-    await page.getByRole('button', { name: 'Connect', exact: true }).count(),
+    await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
     1,
   );
   await page.goto(`${origin}/pwa-docs`);

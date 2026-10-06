@@ -28,6 +28,7 @@ it.each([
     () => import('./react/index.js'),
     [
       'AccessNotice',
+      'AppAccess',
       'AppShell',
       'CallbackNotice',
       'ConnectionControls',

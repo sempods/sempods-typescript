@@ -14,6 +14,7 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   fixture,
   catalogue,
+  pod,
   personal,
   work,
   deferred,
@@ -25,6 +26,7 @@ import type { BrowserRuntime, StartupReport } from '../index.js';
 import {
   SempodsProvider,
   AppShell,
+  AppAccess,
   ConnectionControls,
   ResourceEditor,
   useApp,
@@ -132,6 +134,7 @@ it('replacement picker uses guarded actions and confirmation restores focus on c
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Unfinished' },
   });
+  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
   const picker = screen.getByText('Custom picker');
   picker.focus();
   fireEvent.click(picker);
@@ -684,10 +687,10 @@ it('names why connecting failed instead of a generic failure', async () => {
   );
   await screen.findByText('Tasks mounted');
   f.fetch.mockRejectedValue(new TypeError('offline'));
-  fireEvent.change(screen.getByLabelText('Pod URL'), {
+  fireEvent.change(screen.getByLabelText('Your Pod'), {
     target: { value: 'https://pod.example/carol' },
   });
-  fireEvent.submit(screen.getByLabelText('Pod URL').closest('form')!);
+  fireEvent.submit(screen.getByLabelText('Your Pod').closest('form')!);
   expect((await screen.findByRole('alert')).textContent).toBe(
     'The pod’s connection information could not be loaded. Try again.',
   );
@@ -840,5 +843,146 @@ it.each([
     // It still re-authorizes the same connection.
     await act(async () => button.click());
     await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
+  },
+);
+
+it('AppShell preserves title/style/content and hides management until explicitly opened', async () => {
+  const f = await connected();
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppShell title="My notebook" style={{ maxWidth: 480 }}>
+        <Form />
+      </AppShell>
+    </SempodsProvider>,
+  );
+  await screen.findByDisplayValue('Original');
+  expect(
+    screen.getByRole('heading', { level: 1, name: 'My notebook' }),
+  ).toBeTruthy();
+  expect(screen.getByRole('main').style.maxWidth).toBe('480px');
+  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  const field = screen.getByLabelText('Title');
+  fireEvent.change(field, { target: { value: 'Mounted draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  expect(
+    screen.getByRole('heading', { level: 2, name: 'Data access' }),
+  ).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Check access' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  expect(screen.getByLabelText('Title')).toBe(field);
+  expect((field as HTMLInputElement).value).toBe('Mounted draft');
+});
+
+it('standalone ConnectionControls shows readable names while preserving exact values and full addresses', async () => {
+  const f = await connected();
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <ConnectionControls podNames={{ [pod]: 'Personal Pod' }} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('option', { name: 'work' });
+  expect(
+    (screen.getByRole('option', { name: 'work' }) as HTMLOptionElement).value,
+  ).toBe(work);
+  expect(screen.getByRole('option', { name: 'Personal Pod' })).toBeTruthy();
+  const details = screen.getByText('Full addresses').closest('details')!;
+  expect(details.textContent).toContain(work);
+  expect(details.textContent).toContain(personal);
+  expect(details.textContent).toContain(pod);
+  const exactAddresses = () =>
+    [...details.querySelectorAll('p, dd')].filter(
+      (entry) => entry.textContent === work,
+    );
+  expect(exactAddresses()).toHaveLength(1);
+  // An unavailable selected context still needs its full address outside the readable list.
+  f.setCatalogue(async () => catalogue([personal], []));
+  await act(() => f.runtime.loadContexts(f.id));
+  expect(exactAddresses()).toHaveLength(1);
+});
+
+it('distinguishes an unconnected preset from a same-named active Pod and exposes both addresses', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ preset: { podUrl: other } });
+  const session = await f.login();
+  cleanups.push(() => session.runtime.dispose());
+  render(
+    <SempodsProvider runtime={session.runtime}>
+      <ConnectionControls podNames={{ [pod]: 'Shared', [other]: 'Shared' }} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('option', { name: `Shared · ${pod}` });
+  const signIn = screen.getByRole('button', { name: 'Sign in' });
+  expect(signIn.parentElement!.textContent).toContain(`Shared · ${other}`);
+  const details = screen.getByText('Full addresses').closest('details')!;
+  expect(
+    [...details.querySelectorAll('dd')].map((entry) => entry.textContent),
+  ).toEqual(expect.arrayContaining([pod, other]));
+});
+
+it.each(['access', 'connections'] as const)(
+  '%s prefers late context labels, disambiguates duplicates and retains the exact target and draft',
+  async (kind) => {
+    const f = await connected();
+    const pending = deferred<void>();
+    let labels: Record<string, string> = {
+      [work]: '  Team\u202e  ',
+      [personal]: 'Team',
+    };
+    f.setDescriptions(async (url) => {
+      await pending.promise;
+      return Response.json({
+        '@id': url,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': url },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': false }],
+        ...(labels[url]
+          ? {
+              'http://www.w3.org/2000/01/rdf-schema#label': [
+                { '@value': labels[url] },
+              ],
+            }
+          : {}),
+      });
+    });
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        {kind === 'access' ? (
+          <AppAccess appName="Notes" open />
+        ) : (
+          <ConnectionControls />
+        )}
+        <Form />
+      </SempodsProvider>,
+    );
+    await screen.findByDisplayValue('Original');
+    const field = screen.getByLabelText('Title');
+    fireEvent.change(field, { target: { value: 'Unsaved' } });
+    await act(() => f.runtime.loadContexts(f.id));
+    await screen.findByRole('option', { name: 'work' });
+    await act(async () => pending.resolve());
+    const option = await screen.findByRole('option', {
+      name: `Team · ${work}`,
+    });
+    expect((option as HTMLOptionElement).value).toBe(work);
+    expect(
+      screen.getByRole('option', { name: `Team · ${personal}` }),
+    ).toBeTruthy();
+    expect(
+      (screen.getByLabelText('Data context') as HTMLSelectElement).value,
+    ).toBe(work);
+    expect(screen.getByLabelText('Title')).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('Unsaved');
+    const details = screen.getByText('Full addresses').closest('details')!;
+    expect(details.textContent).toContain(work);
+    expect(details.textContent).toContain(personal);
+    labels = { [work]: 'Arbeit' };
+    await act(() => f.runtime.loadContexts(f.id));
+    await screen.findByRole('option', { name: 'Arbeit' });
+    expect(screen.getByRole('option', { name: 'personal' })).toBeTruthy();
+    expect(screen.getByLabelText('Title')).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('Unsaved');
   },
 );

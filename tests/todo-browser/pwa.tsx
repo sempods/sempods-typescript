@@ -20,7 +20,7 @@ const runtime = createBrowserRuntime({
 });
 const registration = registerAppWorker('/sw.js');
 createRoot(document.getElementById('root')!).render(
-  <TodoApp runtime={runtime}>
+  <TodoApp runtime={runtime} legacy>
     <NewVersionNotice registration={registration} />
   </TodoApp>,
 );

@@ -91,6 +91,8 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
   let resource: PodFetch = async () =>
     Response.json({ '@id': 'urn:item' }, { headers: { etag: '"v1"' } });
   let contexts: PodFetch = async () => catalogue();
+  // Context descriptions (SPS-CTX-032): none by default, so no labels appear.
+  let descriptions: PodFetch = async () => new Response(null, { status: 404 });
   const fetch = vi.fn<PodFetch>(async (url, init) => {
     const base = url.split('/.well-known')[0]!.split('/_system')[0]!;
     if (url.endsWith('/.well-known/oauth-protected-resource'))
@@ -124,6 +126,7 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
       );
     if (url.endsWith('/token')) return token(url, init);
     if (url.endsWith('/_system/contexts')) return contexts(url, init);
+    if (url.includes('/_system/contexts/')) return descriptions(url, init);
     if (url.includes('/_system/sparql/query')) return query(url, init);
     if (url.includes('/_system/resources/')) return resource(url, init);
     throw new Error('Unexpected fixture route.');
@@ -191,6 +194,9 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
     },
     setCatalogue: (fn: PodFetch) => {
       contexts = fn;
+    },
+    setDescriptions: (fn: PodFetch) => {
+      descriptions = fn;
     },
     count: (suffix: string) =>
       fetch.mock.calls.filter(([url]) => new URL(url).pathname.endsWith(suffix))

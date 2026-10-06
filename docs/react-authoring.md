@@ -10,7 +10,7 @@ keep it stable. The caller owns `runtime.dispose()` at application shutdown.
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
   SempodsProvider,
-  AppShell,
+  AppAccess,
   TargetScreen,
 } from '@sempods/app-sdk/react';
 
@@ -25,11 +25,10 @@ const runtime = createBrowserRuntime({
 });
 
 <SempodsProvider runtime={runtime} language="de" locale="de-CH">
-  <AppShell title="My tasks" mode="multiple">
-    <TargetScreen>
-      <TaskScreen />
-    </TargetScreen>
-  </AppShell>
+  <AppAccess appName="My tasks" />
+  <TargetScreen>
+    <TaskScreen />
+  </TargetScreen>
 </SempodsProvider>;
 ```
 
@@ -39,13 +38,126 @@ connection becomes active; context selection stays explicit. The startup report
 exposes `connectionId` for headless hosts. Screens never handle callbacks,
 credentials, ETags or authentication recovery. See [browser runtime](browser-runtime.md)
 for deployment identity, persisted sessions and the one-active-tab contract.
-AppShell displays startup loading, callback failure or cancellation (with its
-cause), unavailable storage and a localized second-tab notice. A custom layout
-without AppShell places `<CallbackNotice />` itself next to its connection
-controls. The context picker lists readable contexts only and says so when the
+`AppAccess` is the default composition for new apps: a centered login/recovery
+surface beside your content, with no mandatory outer frame or persistent header.
+It displays startup loading, callback failure/cancellation, unavailable storage
+and a localized second-tab notice. It hides once the selected target is readable,
+including read-only access; catalogue failures remain visible even if the runtime
+retains previous access facts. The context picker lists readable contexts only and says so when the
 Pod grants none. Unavailable session storage prevents startup; controls
-remain blocked with a reload notice (there is no in-memory session fallback). `mode="single"` hides adding further Pods once one
-is connected; it uses the same runtime and guarded selectors as multiple mode.
+remain blocked with a reload notice (there is no in-memory session fallback).
+`AppShell`, `ConnectionControls` and fully custom layouts remain supported;
+custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
+
+## Login without an app frame
+
+An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
+No icon is required. `podNames` maps exact canonical Pod URLs to display names;
+the destination remains visible, and duplicate names are disambiguated. Both controls prefer `connection.catalogue.labels?.[iri]` from the runtime's
+background description reads, falling back to a safe readable last path segment.
+Duplicate context names include the full IRI; **Full addresses** exposes all readable
+context identities. Names never replace Pod/context identity, and displaying them
+starts no additional requests. Late or refreshed labels do not change selection
+or discard drafts.
+
+One `allowedPods` entry or a preset needs no URL input. Several permitted Pods
+get a finite picker; selecting an option does not start sign-in. When a connection
+already exists, adding another Pod is a secondary action; signing into the current
+connection remains prominent when needed. Unrestricted
+apps show **Your Pod** with a short hint. The input may omit `https://`; presentation
+adds it, trims surrounding whitespace and removes one trailing slash before
+calling the runtime. Other noncanonical input remains rejected; configured Pod
+URLs still require the strict canonical form.
+For local HTTP development enter `http://127.0.0.1:…` explicitly. There is no silent
+auth or automatic redirect. Login/consent on the Pod retains the Pod's own UI.
+
+The initial login uses an `h1`; recovery with an existing target and explicitly
+opened management use an `h2`, below the app’s own main heading.
+
+The app may put a **Data access** button in its own menu or header. `open` shows
+management; toggling it changes presentation only. Pod/context changes still run
+through the same leave guards. Supply `focusTarget` for focus recovery when a
+focused access control disappears. For example, inside the provider:
+
+```tsx
+function AppContent() {
+  const [open, setOpen] = useState(false);
+  const target = useRef<HTMLButtonElement>(null);
+  const { connections } = useAppState();
+  const { messages } = useSdkLocale();
+  return (
+    <>
+      {connections.length > 0 && (
+        <button
+          ref={target}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {messages.controls.dataAccess}
+        </button>
+      )}
+      <AppAccess
+        appName="My tasks"
+        open={open}
+        focusTarget={target}
+        icon={<img src="/icon.png" alt="" />}
+        podNames={{ 'https://pods.example/alice': 'Personal' }}
+      />
+      <TargetScreen>
+        <TaskScreen />
+      </TargetScreen>
+    </>
+  );
+}
+```
+
+Import `useState`/`useRef` from React and the other names from
+`@sempods/app-sdk/react`. The [TODO source](../examples/todo/src/app.tsx) is a complete
+example. `AppAccess` takes no content children and does not gate/unmount your
+screen: keep `TargetScreen` and mutation controllers mounted through same-target
+access loss. Keep uncertain-write recovery outside hidden/inert widget regions.
+Read-only content remains useful; use `AccessNotice` where a write limitation
+needs explanation and operation eligibility to disable edits.
+
+### Shared SDK appearance
+
+`AppAccess`, `AppShell`, `ConnectionControls`, `ResourceEditor`, `UpdateNotice`,
+`AccessNotice` and `CallbackNotice` share a scoped baseline: light/dark appearance,
+44px touch targets, visible keyboard focus and wrapping comparisons. No stylesheet
+import or UI framework is required. AppShell styles its own header; it does not
+style app list rows or controls elsewhere in its children. ResourceEditor styles
+the fields rendered inside that editor as well as its review/actions.
+
+The host owns the color scheme; SDK surfaces inherit it. A page without a scheme
+stays light even when the system prefers dark. Enable page-wide automatic dark
+appearance in the app's CSS:
+
+```css
+:root {
+  color-scheme: light dark;
+}
+```
+
+Keep any explicit page backgrounds/text colors compatible with that choice
+(for example with `light-dark()`). Embedded notices, editors and connection controls
+have transparent surfaces; their fields/buttons use the shared tokens. AppShell
+and AppAccess retain their themed background.
+
+Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
+`--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
+`style`/`className` where supported. They inherit across SDK components. Existing
+`--sempods-access-*` names remain fallback aliases; the shared names take priority.
+React 19 hoists and deduplicates the static scoped sheets using its
+[`style` resource support](https://react.dev/reference/react-dom/components/style).
+Inline scoped styles still require a compatible CSP. Hosts that prohibit them can
+compose their own presentation using the public hooks.
+
+`components={{ Connections: YourControls }}` replaces access controls while
+retaining startup/callback presentation. All actions must still use `useApp()`.
+`mode="single"` hides adding another Pod once selected; it is a presentation choice,
+not a restriction. Use runtime `allowedPods` to enforce the permitted Pods.
+When a host already provides its title, use `headingLevel={2}` for subordinate
+access headings; AppShell does this automatically.
 
 ## A screen
 
@@ -224,9 +336,8 @@ const runtime = createBrowserRuntime({
 ```
 
 `Tasks` is your existing app screen. The first visit offers **Sign in** without a
-Pod URL input; after consent, the person chooses a context. The preset also hides
-the standard new-Pod URL form in `mode="multiple"`; connecting a different Pod
-requires custom controls or headless calls with an explicit URL. Existing foreign
+Pod URL input; after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
+**Data access** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
 connections remain available for selection. Add the optional
 `contextIri` inside `preset` to declare an exact context instead. The SDK waits for
 fresh readable catalogue evidence, displays that fixed context instead of a
@@ -248,8 +359,8 @@ that configuration. Custom controls can read `useAppState().allowedPods`; one
 allowed Pod also supports argument-free `useApp().connect()` without a preset.
 With several allowed Pods and no preset, pass the chosen URL. The runtime enforces
 the policy for restore and callbacks too; see
-[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). Existing default
-controls continue to use `preset` for their presentation.
+[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). `AppAccess` and AppShell present allowed Pod sets directly; standalone
+ConnectionControls continues to use `preset` for its form presentation.
 
 The [runtime guide](browser-runtime.md#one-known-pod) explains validation, exact
 context precedence, reload and foreign-session behavior. The recipe below
@@ -295,6 +406,11 @@ is inferred from an absent grant. Each server operation remains authoritative.
 ## Customize without replacing safety
 
 `AppShell` accepts `title`, `style` and `components={{ Connections: MyPicker }}`.
+It composes a title/management header, `AppAccess`, and the content. Usable access
+hides administration; **Data access** opens it, including replacement controls.
+Startup still gates content until durable storage is ready; later access loss or
+management toggles retain mounted content and its drafts. Read-only feedback stays
+visible. See [0.3 migration](migration.md#from-02-to-03) for the changed presentation.
 A replacement uses `useConnections`, `useAppState` and guarded `useApp()` actions;
 it must not call raw runtime selection directly. For a different layout, omit
 AppShell, keep the provider, and place `ConnectionControls`/`AccessNotice` and
