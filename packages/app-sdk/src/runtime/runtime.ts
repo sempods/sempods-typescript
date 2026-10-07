@@ -268,7 +268,10 @@ export function createBrowserRuntime(
     const generation = e.generation;
     if (!eligible(e, generation) || !e.credentials)
       return Promise.resolve(false);
-    if (e.credential !== refused && !e.refresh) return Promise.resolve(true);
+    // A replacement is already available. A renewal started ahead of its expiry
+    // does not hold it back; one after its refusal does.
+    if (e.credential !== refused && (!e.refresh || e.refresh === e.ahead))
+      return Promise.resolve(true);
     if (!e.refresh) {
       const before = e.credentials;
       if (!before.refreshToken) {

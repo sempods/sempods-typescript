@@ -252,6 +252,40 @@ it('checks a replacement again when it expired while the renewal completed', asy
   expect(pod.sent).toHaveLength(2);
 });
 
+it('resends a delayed refusal of a replaced credential without waiting for an early renewal', async () => {
+  const f = await logged();
+  const delayed = deferred<Response>();
+  const sent: string[] = [];
+  f.setQuery((_url, init) => {
+    sent.push(new Headers(init?.headers).get('authorization')!);
+    return sent.length === 1
+      ? delayed.promise
+      : Promise.resolve(Response.json([]));
+  });
+  // A is due: it is still sent, and B replaces it in the background.
+  advance(3600_000 - 30_000);
+  const first = f.view.sparql.construct(query);
+  await vi.waitFor(() => {
+    expect(sent).toHaveLength(1);
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active');
+  });
+  // B is due as well; its renewal hangs.
+  f.setToken(() => new Promise<Response>(() => {}));
+  advance(3600_000 - 30_000);
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+  expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('renewing');
+  delayed.resolve(
+    new Response(null, {
+      status: 401,
+      headers: { 'www-authenticate': 'Bearer error="invalid_token"' },
+    }),
+  );
+  expect(await first).toEqual({ kind: 'ok', body: [] });
+  expect(sent).toHaveLength(3);
+  expect(sent[2]).toBe(sent[1]);
+  expect(sent[2]).not.toBe(sent[0]);
+});
+
 it('keeps a credential outside the renewal margin', async () => {
   const f = await logged();
   const exchanged = tokenRequests(f).length;
