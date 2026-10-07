@@ -1121,8 +1121,25 @@ try {
     await page.getByLabel('New note').inputValue(),
     'Draft elsewhere',
   );
+  // Choosing another Context elsewhere while a row is edited retires the editor
+  // instead of selecting its old Context again.
+  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
+  await editRegion.getByLabel('Note title').waitFor();
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await page
+    .getByLabel('Data context')
+    .selectOption(origin + '/overview-pod/_system/contexts/notes');
+  await page
+    .getByRole('button', { name: 'Discard and continue', exact: true })
+    .click();
+  await editRegion.waitFor({ state: 'detached' });
+  await page.waitForTimeout(200);
+  assert.equal(
+    await page.getByLabel('Data context').inputValue(),
+    origin + '/overview-pod/_system/contexts/notes',
+  );
   console.log(
-    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change) passed.',
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change, external Context change) passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);

@@ -144,10 +144,26 @@ function EditInContext({
   close.current = onClose;
   // One selection attempt per Context, also across StrictMode's repeated effects.
   const attempt = useRef<string | null>(null);
+  // Set once this editor's Context was selected; a later change came from elsewhere.
+  const activated = useRef(false);
+  const retired = useRef(false);
   useEffect(() => {
-    if (!readable || selected === target.graph) return;
+    if (selected === target.graph) {
+      activated.current = true;
+      return;
+    }
+    if (changing || confirmingLeave) return;
+    if (activated.current) {
+      // The person chose another Context (for example in AppAccess): retire this
+      // editor rather than selecting its old Context again.
+      if (!retired.current) {
+        retired.current = true;
+        close.current();
+      }
+      return;
+    }
     // The Edit click itself runs as a guarded navigation; select only once it settled.
-    if (changing || confirmingLeave || attempt.current === target.graph) return;
+    if (!readable || attempt.current === target.graph) return;
     const graph = target.graph;
     attempt.current = graph;
     // Guarded like any Context change: drafts elsewhere ask before leaving. When the
@@ -221,7 +237,13 @@ function Content() {
           <NewNote />
         </TargetScreen>
       )}
-      {editing && <EditInContext target={editing} onClose={() => edit(null)} />}
+      {editing && (
+        <EditInContext
+          key={`${editing.graph} ${editing.item}`}
+          target={editing}
+          onClose={() => edit(null)}
+        />
+      )}
     </main>
   );
 }
