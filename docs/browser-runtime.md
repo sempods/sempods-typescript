@@ -244,8 +244,8 @@ A `BoundView` exposes client subject/query operations without tokens. Its
 `key` stays stable through refresh and same-target access changes. Switching
 A → B → A creates a new lifetime; the old A view cannot become valid again.
 Pending reads resolve promptly as `invalidated` after target/access changes;
-caller cancellation is `cancelled`. The future React load helper owns the
-bounded silent retry. Writes preserve their original client result, including
+caller cancellation is `cancelled`. The shared loader (`createViewLoader`,
+used by `useLoad` and `usePodLoad`) owns the bounded silent retry. Writes preserve their original client result, including
 an already confirmed `refused 401` or `applied` result after a target change.
 
 A bound 403 triggers one shared catalogue reload for concurrent refusals.
@@ -276,8 +276,8 @@ if (reader.getSnapshot().read) {
 ```
 
 Binding and dispatch require no selected Context or catalogue and initiate no
-discovery. `bindPod` requires an eligible signed-in connection; it rejects during
-restoration or after session end. A handle may be current with `read: false`
+discovery. `bindPod` requires an eligible signed-in connection; it throws
+`RuntimeError('disconnected')` during restoration or after session end. A handle may be current with `read: false`
 when required scopes are missing; dispatch rechecks eligibility and returns
 `invalidated` without sending. Readability means permission to attempt the read,
 not that readable data exists. The server authorizes its dataset.
@@ -465,5 +465,5 @@ transfers attempts or tokens between storage containers. See
 
 Owner live validation remains follow-up work. React/AppShell and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
-checks. Multi-tab concurrent operation, proactive refresh, revocation, anonymous
-reading and on-demand controller/React discovery are not implemented here.
+checks. Multi-tab concurrent operation, proactive refresh, revocation and anonymous
+reading are not implemented here.

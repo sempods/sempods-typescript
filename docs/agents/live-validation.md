@@ -4,6 +4,9 @@ Use the [local testing checklist](../local-testing.md) for app flows and
 [PWA guide](../pwa.md) for installed-device cases. Agree on an authorized Pod,
 dedicated context and synthetic resources. GitHub access is not Pod access.
 Have the person complete login/consent in their browser; do not request credentials.
+For measurements with [`measure-pod-reads.mjs`](../development.md), the maintainer
+provides service-client credentials in a local file. Keep that file and its
+secrets out of the repository, logs and evidence.
 
 Record package versions and installation method, app origin/callback and identity
 mode, browser/platform, and actual deployed Pod/spec revisions where available.

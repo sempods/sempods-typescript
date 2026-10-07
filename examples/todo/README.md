@@ -15,6 +15,9 @@ the [quickstart](../../docs/quickstart.md), copy `src/domain.ts`, `src/app.tsx`
 and `src/style.css` into its `src/`, and render `<TodoApp runtime={runtime} />`
 from your entry with the runtime configuration shown in `src/main.tsx`. The
 shipped `package.json` names the exact SDK version the sources belong to.
+`recipes/sign-in.tsx` (known-Pod sign-in) and `recipes/pod-overview.tsx` (a Pod
+overview with on-demand Contexts, plus creating and editing in an explicit
+Context) are further copyable screens.
 
 Open `http://127.0.0.1:5173/` for the centered `AppAccess` login and app-owned
 layout. Use **Data access** to open management after connecting. `/legacy` retains

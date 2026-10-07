@@ -55,6 +55,8 @@ const noSubscription = () => () => {};
 /**
  * Centered login/recovery UI beside, never around, app content. Uses the host's
  * existing runtime facts/actions; hides when a target is readable unless open.
+ * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
+ * offers Context selection only once a Context flow (`TargetScreen`, `open`) asks.
  * Read-only targets remain usable. Callback failures remain visible separately.
  * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
  * children mounted during same-target access loss; this is not a content gate.

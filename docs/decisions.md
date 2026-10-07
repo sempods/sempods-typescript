@@ -9,7 +9,7 @@ code is the way it is.
 `@sempods/client-sdk` is the portable protocol client for browsers and Node:
 Pod handle, context views, subject and query operations, portable OAuth and
 editing. `@sempods/app-sdk` adds the browser runtime (login, durable sessions,
-bound views), UI messages and an optional React layer. app-sdk depends on
+bound views and Pod readers), UI messages and an optional React layer. app-sdk depends on
 client-sdk, never the other way round.
 
 _Why:_ scripts, servers and agents need the protocol without browser storage or
@@ -96,7 +96,8 @@ Client-sdk and the browser runtime implement independent Pod readers.
 switches and catalogue/label changes affect only Context-bound flows. The
 headless controller exposes the active reader in `AppSnapshot.pod`.
 Automatic labels load only for the selected, validated Context for every catalogue
-size, with fallback names and cache lifetime tied to access authority.
+size, with fallback names and cache lifetime tied to access authority, so a Pod
+with thousands of Contexts never costs one description request per entry.
 
 Controller/provider `contextSelection: 'required' | 'on-demand'` defaults to
 `required`, preserving automatic catalogues and Context-based access UI.

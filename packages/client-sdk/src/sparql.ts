@@ -18,7 +18,12 @@ export type SparqlTerm =
   | { readonly type: 'blank'; readonly value: string }
   | {
       readonly type: 'literal';
+      /** The lexical form, as received. */
       readonly value: string;
+      /**
+       * As received. Absent means `xsd:string` for a literal without `language`, and
+       * `rdf:langString` for one with it (RDF 1.1); the SDK does not fill it in.
+       */
       readonly datatype?: string;
       readonly language?: string;
     }
