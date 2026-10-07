@@ -52,6 +52,9 @@ import { browserPreferences, createContextMemory } from './context-memory.js';
 
 import { assertCredentialRecipient, type Entry } from './connection.js';
 
+/** How long before its expiry a credential is renewed before dispatch. */
+const RENEWAL_MARGIN = 60_000;
+
 /** Creates no storage, request or navigation until initialize/connect is called. */
 export function createBrowserRuntime(
   options: BrowserRuntimeOptions,
@@ -346,6 +349,22 @@ export function createBrowserRuntime(
     }
     return waitFor(e.refresh, e.lifetime.signal, signal).catch(() => false);
   }
+  /**
+   * Renews ahead of the credential's own expiry, so dispatch does not depend on
+   * the Pod's 401 challenge. Due within a minute of `expiresAt` (half the
+   * lifetime for short tokens). Without a refresh token the credential is still
+   * sent until it expires; an expired one ends the session (`expired`).
+   */
+  function renewBeforeExpiry(e: Entry) {
+    const credentials = e.credentials;
+    if (e.refresh || !e.credential || !credentials) return;
+    const now = Date.now();
+    const lifetime = credentials.expiresAt - credentials.receivedAt;
+    const margin = Math.min(RENEWAL_MARGIN, Math.max(lifetime, 0) / 2);
+    if (now < credentials.expiresAt - margin) return;
+    if (!credentials.refreshToken && now < credentials.expiresAt) return;
+    void renew(e, e.credential);
+  }
   function createEntry(
     pod: PodDiscovery,
     client: OAuthClient,
@@ -381,6 +400,7 @@ export function createBrowserRuntime(
     const auth: Entry['auth'] = {
       async credential(request) {
         assertCredentialRecipient(e.pod.podUrl, request.url);
+        if (eligible(e)) renewBeforeExpiry(e);
         if (e.refresh)
           await waitFor(e.refresh, e.lifetime.signal, request.signal);
         if (!eligible(e) || !e.credential)

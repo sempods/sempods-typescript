@@ -138,18 +138,21 @@ parameter whenever the Pod announces it (RFC 9207).
 _Why:_ the app's identity follows from where its callback lives, and mix-up
 attacks between Pods are ruled out wherever servers support it.
 
-## Durable sessions, one active tab, reactive renewal
+## Durable sessions, one active tab, renewal before expiry
 
 Sessions are stored as validated, versioned IndexedDB records with
 compare-and-swap. One tab per app is active; a second tab shows a clear notice.
-Renewal happens when a request is refused; a consumed refresh token is removed
-durably before it is sent, while a failure before that point keeps the session
-signed in. Startup never waits for a Pod's discovery. The storage namespace
+Renewal happens on demand: before a request whose credential is about to expire,
+or after a request refused with a Bearer challenge. There is no background timer.
+A consumed refresh token is removed durably before it is sent, while a failure
+before that point keeps the session signed in. Startup never waits for a Pod's discovery. The storage namespace
 derives from the app identity, so renaming the app or changing scopes keeps
 sessions.
 
 _Why:_ a reload or a short network failure must not log people out, and a spent
-refresh token must never be reused.
+refresh token must never be reused. The token's own lifetime justifies renewal
+without trusting a response, so a Pod that omits its challenge cannot strand a
+session; idle apps send nothing.
 
 ## Bound views, guarded navigation, safe UI defaults
 

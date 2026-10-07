@@ -154,6 +154,13 @@ try {
   let exchanges = 0;
   let refreshes = 0;
   let overviewRefuse = false;
+  // The expiring Pod issues short-lived tokens and refuses them after expiry,
+  // without a challenge ('none') or with `Bearer error="invalid_token"`.
+  const expiringLifetime = 4;
+  const accessExpiry = new Map();
+  let expiringChallenge = 'none';
+  let expiringRefusal = false;
+  let expiredRejections = 0;
   // The overview recipe's editable note, read and written only inside its Context.
   let overviewNote = {
     '@id': 'urn:overview-note',
@@ -174,9 +181,9 @@ try {
   };
   const encode = (value) =>
     Buffer.from(JSON.stringify(value)).toString('base64url');
-  function token(base, client, scope = 'tasks') {
+  function token(base, client, scope = 'tasks', lifetime = 3600) {
     const now = Math.floor(Date.now() / 1000);
-    return (
+    const issued =
       encode({ alg: 'RS256' }) +
       '.' +
       encode({
@@ -184,11 +191,12 @@ try {
         client_id: client,
         sub: base + '/person',
         iat: now,
-        exp: now + 3600,
+        exp: now + lifetime,
         scope,
       }) +
-      '.c2lnbmF0dXJl'
-    );
+      '.c2lnbmF0dXJl';
+    accessExpiry.set(issued, (now + lifetime) * 1000);
+    return issued;
   }
   server = createServer(async (req, res) => {
     try {
@@ -213,7 +221,10 @@ try {
           'content-type': 'text/html',
           'set-cookie': 'ambient=owner; Path=/',
         });
-        if (url.searchParams.get('identity') === 'overview') {
+        if (
+          url.searchParams.get('identity') === 'overview' ||
+          url.searchParams.get('identity') === 'expiring'
+        ) {
           res.end(
             '<html><div id="app"></div><script type="module" src="/overview.js"></script></html>',
           );
@@ -339,17 +350,26 @@ try {
           assert.deepEqual(previous, { base, client });
           grants.delete(params.get('refresh_token'));
           refreshes++;
+          if (name === 'expiring-pod' && expiringRefusal) {
+            json({ error: 'invalid_grant' }, 400);
+            return;
+          }
         }
         const rotated = 'refresh-' + (exchanges + refreshes);
         grants.set(rotated, { base, client });
+        const expiring = name === 'expiring-pod';
         json({
           access_token: token(
             base,
             client,
-            name === 'widgets-pod' || name === 'overview-pod' ? '' : 'tasks',
+            name === 'widgets-pod' || name === 'overview-pod' || expiring
+              ? ''
+              : 'tasks',
+            expiring ? expiringLifetime : 3600,
           ),
           token_type: 'Bearer',
           refresh_token: rotated,
+          ...(expiring ? { expires_in: expiringLifetime } : {}),
         });
         return;
       }
@@ -458,7 +478,22 @@ try {
         assert.equal(req.method, 'POST');
         assert.equal(req.headers.cookie, undefined);
         assert.ok(req.headers.authorization?.startsWith('Bearer '));
-        if (name === 'overview-pod') {
+        if (name === 'expiring-pod') {
+          const presented = req.headers.authorization.slice('Bearer '.length);
+          assert.ok(accessExpiry.has(presented));
+          if (accessExpiry.get(presented) <= Date.now()) {
+            expiredRejections++;
+            json(
+              {},
+              401,
+              expiringChallenge === 'bearer'
+                ? { 'www-authenticate': 'Bearer error="invalid_token"' }
+                : {},
+            );
+            return;
+          }
+        }
+        if (name === 'overview-pod' || name === 'expiring-pod') {
           assert.equal(url.search, '');
           assert.equal(req.headers.accept, 'application/sparql-results+json');
           if (overviewRefuse) {
@@ -1171,6 +1206,69 @@ try {
   );
   console.log(
     'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change, external Context change, Pod switch) passed.',
+  );
+  // Short-lived tokens: the recipe renews before expiry, whether the Pod refuses
+  // an expired token with or without a Bearer challenge (#51).
+  const expiringQueries = () =>
+    traffic.filter((r) => r.path === '/expiring-pod/_system/sparql/query');
+  const overviewLoaded = () =>
+    page.getByText('urn:overview-note', { exact: false }).waitFor();
+  await page.goto(origin + '/app?identity=expiring');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=expiring');
+  await overviewLoaded();
+  let probes = 0;
+  for (const mode of ['none', 'bearer']) {
+    expiringChallenge = mode;
+    const before = { refreshes };
+    const previous = expiringQueries().at(-1).authorization;
+    await page.waitForTimeout(expiringLifetime * 1000 + 500);
+    // The fixture really refuses the expired token in this mode.
+    const probe = await fetch(origin + '/expiring-pod/_system/sparql/query', {
+      method: 'POST',
+      headers: { authorization: previous },
+    });
+    probes++;
+    assert.equal(probe.status, 401);
+    assert.equal(
+      probe.headers.get('www-authenticate'),
+      mode === 'bearer' ? 'Bearer error="invalid_token"' : null,
+    );
+    before.queries = expiringQueries().length;
+    const answered = page.waitForResponse((r) =>
+      r.url().endsWith('/expiring-pod/_system/sparql/query'),
+    );
+    await page.getByRole('button', { name: 'Reload overview' }).click();
+    assert.equal((await answered).status(), 200);
+    await overviewLoaded();
+    assert.equal(refreshes, before.refreshes + 1);
+    assert.equal(expiringQueries().length, before.queries + 1);
+    assert.notEqual(expiringQueries().at(-1).authorization, previous);
+    assert.equal(expiredRejections, probes);
+  }
+  // A refused renewal ends the session with a visible sign-in, without
+  // sending the expired token; signing in again restores the overview.
+  expiringRefusal = true;
+  const beforeRefusal = expiringQueries().length;
+  await page.waitForTimeout(expiringLifetime * 1000 + 500);
+  await page.getByRole('button', { name: 'Reload overview' }).click();
+  const signInAgain = page.getByRole('button', {
+    name: 'Sign in',
+    exact: true,
+  });
+  await signInAgain.waitFor();
+  assert.equal(expiringQueries().length, beforeRefusal);
+  assert.equal(expiredRejections, probes);
+  expiringRefusal = false;
+  await Promise.all([page.waitForURL('**/callback?**'), signInAgain.click()]);
+  await page.waitForURL(origin + '/app?identity=expiring');
+  await overviewLoaded();
+  assert.equal(expiredRejections, probes);
+  console.log(
+    'Packed short-lived tokens: renewal before expiry with challenge-less and Bearer 401 Pods, no expired token sent, refused renewal ends in a visible sign-in and recovers passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
