@@ -54,6 +54,8 @@ import { assertCredentialRecipient, type Entry } from './connection.js';
 
 /** How long before its expiry a credential is renewed before dispatch. */
 const RENEWAL_MARGIN = 60_000;
+/** How often one dispatch checks a replacement credential before using it. */
+const RENEWAL_ROUNDS = 3;
 
 /** Creates no storage, request or navigation until initialize/connect is called. */
 export function createBrowserRuntime(
@@ -408,17 +410,27 @@ export function createBrowserRuntime(
     const auth: Entry['auth'] = {
       async credential(request) {
         assertCredentialRecipient(e.pod.podUrl, request.url);
-        if (eligible(e)) renewBeforeExpiry(e);
-        // Wait for a renewal after a refusal, or once the credential expired.
-        if (
-          e.refresh &&
-          !(
-            e.refresh === e.ahead &&
-            e.credentials &&
-            Date.now() < e.credentials.expiresAt
+        // A replacement can itself be due once the wait ends (a slow commit, a
+        // suspended tab): check each new credential again, a bounded number of times.
+        let checked: AuthCredential | undefined;
+        for (
+          let round = 0;
+          round < RENEWAL_ROUNDS && eligible(e) && e.credential !== checked;
+          round++
+        ) {
+          checked = e.credential;
+          renewBeforeExpiry(e);
+          // Wait for a renewal after a refusal, or once the credential expired.
+          if (
+            e.refresh &&
+            !(
+              e.refresh === e.ahead &&
+              e.credentials &&
+              Date.now() < e.credentials.expiresAt
+            )
           )
-        )
-          await waitFor(e.refresh, e.lifetime.signal, request.signal);
+            await waitFor(e.refresh, e.lifetime.signal, request.signal);
+        }
         if (!eligible(e) || !e.credential)
           throw new RuntimeError('disconnected');
         return e.credential;

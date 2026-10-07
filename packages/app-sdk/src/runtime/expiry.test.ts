@@ -215,6 +215,43 @@ it('shares one renewal with a read a subscriber starts on the renewing snapshot'
   expect(tokenRequests(f)).toHaveLength(exchanged + 1);
 });
 
+it('checks a replacement again when it expired while the renewal completed', async () => {
+  const f = await logged();
+  const pod = expiringPod(f, false);
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+  pod.expire();
+  const exchanged = tokenRequests(f).length;
+  let short = true;
+  f.setToken(async () => {
+    const now = Math.floor(Date.now() / 1000);
+    return Response.json({
+      access_token: short ? jwt({ iat: now, exp: now + 10 }) : jwt(),
+      token_type: 'Bearer',
+      ...(short ? { expires_in: 10 } : {}),
+      refresh_token: 'refresh-' + ++issued,
+    });
+  });
+  // Time passes once the short replacement is installed (a suspended tab).
+  const stop = f.runtime.subscribe(() => {
+    if (short && f.runtime.getSnapshot()[0]?.session.kind === 'active') {
+      short = false;
+      pod.expire();
+      advance(20_000);
+    }
+  });
+  try {
+    advance(3600_000);
+    expect(await f.view.sparql.construct(query)).toEqual({
+      kind: 'ok',
+      body: [],
+    });
+  } finally {
+    stop();
+  }
+  expect(tokenRequests(f)).toHaveLength(exchanged + 2);
+  expect(pod.sent).toHaveLength(2);
+});
+
 it('keeps a credential outside the renewal margin', async () => {
   const f = await logged();
   const exchanged = tokenRequests(f).length;
