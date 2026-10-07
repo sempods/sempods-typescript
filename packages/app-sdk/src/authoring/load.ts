@@ -7,9 +7,10 @@ import type { BoundPod, BoundRead, BoundView } from '../runtime/view.js';
  * changed access revision while the read runs, become `unavailable` (one
  * same-target retry). Any other result, such as `refused`, becomes `failed`
  * with that result as `error`; a thrown error becomes `failed` with the thrown
- * value. After settling, lost read access makes any loader `unavailable`; a
- * later revision change starts a fresh cycle for a ready Pod loader, while a
- * ready Context loader keeps its data.
+ * value. After settling, lost read access makes a loader `unavailable` unless
+ * it is `cancelled`, which stays until reload; a later revision change starts
+ * a fresh cycle for a ready Pod loader, while a ready Context loader keeps its
+ * data.
  */
 export type LoadState<T> =
   | { readonly kind: 'loading' | 'cancelled' | 'unavailable' }
