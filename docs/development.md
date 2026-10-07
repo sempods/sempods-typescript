@@ -110,7 +110,10 @@ stylesheet at 320/375px in EN/DE and light/dark, including host-controlled color
 44px targets, keyboard focus, and isolation from app-owned list styling.
 `test:runtime` also covers packed `AppAccess` one/set/free Pod choices, keyboard
 sign-in and focus recovery, and the widget host with retained drafts/uncertain
-writes. These are Chromium fixture checks, not live-Pod or installed-PWA evidence. See
+writes. With one permitted Pod and Contexts on demand, a Pod with slow discovery
+shows that `AppAccess` passes only through its loading status after the callback
+and during restore before hiding, while an ended session and missing required
+scopes show their recovery views directly. These are Chromium fixture checks, not live-Pod or installed-PWA evidence. See
 [browser runtime](browser-runtime.md) for the implemented API and its limits.
 
 No implementation/test command publishes packages. Both SDK packages are

@@ -154,6 +154,8 @@ try {
   let exchanges = 0;
   let refreshes = 0;
   let overviewRefuse = false;
+  let delayedOffline = false;
+  let delayedScope = 'tasks';
   // The expiring Pod issues short-lived tokens and refuses them after expiry,
   // without a challenge ('none') or with `Bearer error="invalid_token"`.
   const expiringLifetime = 4;
@@ -279,6 +281,16 @@ try {
         res.end(bundle.outputFiles[0].text);
         return;
       }
+      // The delayed Pod answers discovery slowly, so its reader becomes
+      // readable only after a delay, both after the callback and on restore.
+      if (name === 'delayed' && url.pathname.includes('/.well-known/')) {
+        if (delayedOffline) {
+          res.writeHead(503);
+          res.end();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
       if (url.pathname.endsWith('/.well-known/oauth-protected-resource')) {
         json({
           resource: base,
@@ -364,7 +376,9 @@ try {
             client,
             name === 'widgets-pod' || name === 'overview-pod' || expiring
               ? ''
-              : 'tasks',
+              : name === 'delayed'
+                ? delayedScope
+                : 'tasks',
             expiring ? expiringLifetime : 3600,
           ),
           token_type: 'Bearer',
@@ -1044,6 +1058,41 @@ try {
   }
   console.log(
     'Packed AppAccess: one/set/free Pod UI, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+  );
+  // One permitted Pod, Contexts on demand: until the Pod reader is readable
+  // (callback, then restore), the surface shows only its loading status and
+  // never the connection view with "Full addresses"; then it hides. Recovery
+  // views (ended session, missing required scopes) still appear directly.
+  const accessTrace = () => page.evaluate(() => window.accessTrace);
+  const settled = (state) =>
+    page.waitForFunction((last) => window.accessTrace.at(-1) === last, state);
+  await page.goto(origin + '/app?identity=access-delayed');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL('**/app?identity=access-delayed');
+  await settled('hidden');
+  assert.deepEqual(await accessTrace(), ['loading', 'hidden']);
+  await page.reload();
+  await settled('hidden');
+  assert.deepEqual(await accessTrace(), ['loading', 'hidden']);
+  delayedOffline = true;
+  await page.reload();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  delayedOffline = false;
+  delayedScope = '';
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL('**/app?identity=access-delayed');
+  await page.getByText('Review required feature access: tasks.').waitFor();
+  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  delayedScope = 'tasks';
+  console.log(
+    'Packed AppAccess, one Pod on demand: loading status only (no Full addresses) from callback and restore until the delayed Pod reader is readable, then hidden; ended session and missing required scopes show recovery directly passed.',
   );
   // The copyable recipe, installed archives and native browser storage: a Pod
   // overview loads/restores/renews without touching Context discovery.

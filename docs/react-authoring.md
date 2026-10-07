@@ -45,7 +45,11 @@ surface beside your content, with no mandatory outer frame or persistent header.
 It displays startup loading, callback failure/cancellation, unavailable storage
 and a localized second-tab notice. It hides once the selected target is readable,
 including read-only access; catalogue failures remain visible even if the runtime
-retains previous access facts. The context picker lists readable contexts only and says so when the
+retains previous access facts. While the active connection restores, or is signed
+in but its Pod reader is not yet readable, it shows only the loading status: the
+connection view (with its addresses and actions) appears when something needs a
+decision, such as an ended session or missing required scopes, or when the host
+opens it with `open`. The context picker lists readable contexts only and says so when the
 Pod grants none. Unavailable session storage prevents startup; controls
 remain blocked with a reload notice (there is no in-memory session fallback).
 `AppShell`, `ConnectionControls` and fully custom layouts remain supported;

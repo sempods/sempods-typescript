@@ -57,6 +57,8 @@ const noSubscription = () => () => {};
  * existing runtime facts/actions; hides when a target is readable unless open.
  * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
  * offers Context selection only once a Context flow (`TargetScreen`, `open`) asks.
+ * While the active connection restores, or its Pod reader is not yet readable,
+ * it shows only the loading status until something needs a decision.
  * Read-only targets remain usable. Callback failures remain visible separately.
  * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
  * children mounted during same-target access loss; this is not a content gate.
@@ -95,6 +97,20 @@ export function AppAccess({
     (contextRequired &&
       (!access.read || access.connection?.catalogue.kind === 'failed'));
   const hidden = !needsAttention && !open && !callbackFailed;
+  // The active connection is still being validated (restoring, or signed in
+  // while its Pod reader is not yet readable) and nothing awaits a decision:
+  // show the loading status, not the connection view, until it settles.
+  const c = access.connection;
+  const validating =
+    !open &&
+    !callbackFailed &&
+    Boolean(c) &&
+    c?.catalogue.kind !== 'failed' &&
+    !(contextRequired && c?.catalogue.kind === 'ready') &&
+    (c?.session.kind === 'restoring' ||
+      ((c?.session.kind === 'active' || c?.session.kind === 'renewing') &&
+        c.missingRequiredScopes.length === 0 &&
+        !podAccess.read));
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
     // focus only after that transition, when the host control can receive it.
@@ -190,19 +206,24 @@ export function AppAccess({
             {(needsAttention || open) && (
               <>
                 {Connections ? (
-                  <Connections
-                    mode={mode}
-                    {...(podNames ? { podNames } : {})}
-                  />
+                  validating ? (
+                    <p role="status">{m.controls.loading}</p>
+                  ) : (
+                    <Connections
+                      mode={mode}
+                      {...(podNames ? { podNames } : {})}
+                    />
+                  )
                 ) : (
                   <AccessConnections
                     contextRequired={contextRequired}
                     manage={open}
                     mode={mode}
+                    validating={validating}
                     {...(podNames ? { podNames } : {})}
                   />
                 )}
-                {showNotice && <AccessNotice />}
+                {showNotice && !validating && <AccessNotice />}
               </>
             )}
           </>
@@ -225,11 +246,14 @@ function AccessConnections({
   mode,
   podNames,
   contextRequired,
+  validating,
 }: {
   readonly manage: boolean;
   readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
   readonly contextRequired: boolean;
+  /** Only the loading status (and a switch to another saved Pod) applies. */
+  readonly validating: boolean;
 }) {
   const app = useApp();
   const state = useAppState();
@@ -306,6 +330,41 @@ function AccessConnections({
       iri,
       readable.map((entry) => entry.iri),
       (value) => contextName(value, labels),
+    );
+  const activePod = state.connections.length > 1 && (
+    <label>
+      {m.activePod}
+      <select
+        aria-label={m.activePod}
+        value={state.activeId ?? ''}
+        disabled={unavailable}
+        onChange={(event) =>
+          void act(() => app.selectConnection(event.target.value))
+        }
+      >
+        <option value="" disabled>
+          {m.controls.choosePod}
+        </option>
+        {state.connections.map((entry) => (
+          <option key={entry.id} value={entry.id}>
+            {name(entry.podUrl)}
+            {state.connections.filter((other) => other.podUrl === entry.podUrl)
+              .length > 1
+              ? ` · ${state.connections.indexOf(entry) + 1}`
+              : ''}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  // A restore that never settles must not hide switching to another saved Pod.
+  if (validating)
+    return (
+      <>
+        {activePod}
+        <p role="status">{m.controls.loading}</p>
+        {failure && <p role="alert">{error(failure.cause)}</p>}
+      </>
     );
   return (
     <>
@@ -407,33 +466,7 @@ function AccessConnections({
       {!active && !c && (
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
-      {state.connections.length > 1 && (
-        <label>
-          {m.activePod}
-          <select
-            aria-label={m.activePod}
-            value={state.activeId ?? ''}
-            disabled={unavailable}
-            onChange={(event) =>
-              void act(() => app.selectConnection(event.target.value))
-            }
-          >
-            <option value="" disabled>
-              {m.controls.choosePod}
-            </option>
-            {state.connections.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {name(entry.podUrl)}
-                {state.connections.filter(
-                  (other) => other.podUrl === entry.podUrl,
-                ).length > 1
-                  ? ` · ${state.connections.indexOf(entry) + 1}`
-                  : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      {activePod}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
