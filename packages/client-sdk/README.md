@@ -184,6 +184,81 @@ Supported operations in 0.4 (Pod-wide `select` and `construct` are new in 0.4.0)
 | `pod.sparql.construct(query)`                 | Same route, accepts JSON-LD; no SDK-added dataset parameters                                        | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `view.sparql.construct(query)`                | `POST {pod}/_system/sparql/query` with `default-graph-uri` and `named-graph-uri` = the view context | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 
+### JSON-LD read bodies
+
+The SDK returns JSON-LD bodies as the Pod answered them. It does not compact,
+frame, reorder or otherwise normalize them; it only checks the outer structure.
+Values are typed `unknown`, so check each one before using it.
+
+`subjects.get` accepts only a JSON object; an array or other JSON rejects with
+`response/body`. The SDK never requests `include_contexts`, so a conforming Pod
+answers one merged node for the resource (SPS-CRUD-021/023), not `@graph`: its
+`@id` is the resource IRI, `@type` carries its `rdf:type` values, predicate keys
+are absolute IRIs and every value is an array of `{"@id"}` or `{"@value"}`
+objects. The SDK does not check `@id` or the value objects.
+
+```json
+{
+  "@id": "https://pods.example/alice/tasks/1",
+  "@type": ["https://schema.org/Action"],
+  "https://schema.org/actionStatus": [
+    { "@id": "https://schema.org/ActiveActionStatus" }
+  ]
+}
+```
+
+The body holds only statements whose subject is the resource (SPS-CRUD-020).
+A blank node it points to is not described in the same body, and SPS-CRUD-023
+does not define how that value is written; the SDK passes it through. A blank
+node cannot be read on its own, because `subjects.get` takes absolute IRIs only
+and rejects `_:b0` with `invalid-argument`. Reach blank nodes through a CONSTRUCT
+that follows the reference.
+
+A CONSTRUCT `ok` body is always a top-level array of node objects; a single
+object or `{"@graph": [...]}` rejects with `response/body`. SPS-SPARQL-016
+requires JSON-LD but not the canonical resource shape, so the representation
+of each node depends on the Pod. The standard RDF-to-JSON-LD serialization
+writes `rdf:type` as `@type` by default, but an `rdf:type` predicate key is
+valid JSON-LD too and the SDK does not convert it. A generic reader checks both:
+
+```json
+[
+  {
+    "@id": "https://pods.example/alice/tasks/1",
+    "@type": ["https://schema.org/Action"]
+  },
+  {
+    "@id": "https://pods.example/alice/tasks/2",
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+      { "@id": "https://schema.org/Action" }
+    ]
+  }
+]
+```
+
+JSON-LD blank-node identifiers start with `_:`, and their labels are local to
+one response. The [editing helpers](#editing-safely-edit) skip such nodes.
+
+A literal is a `@value` object with an optional `@language` or a datatype IRI
+in `@type`. A string `@value` without either is an `xsd:string` (RDF 1.1); a
+Pod may also send that datatype explicitly. Language tags and lexical values
+stay as answered, without case normalization or conversion to numbers or dates:
+
+```json
+{
+  "https://schema.org/name": [
+    { "@value": "Buy milk" },
+    { "@value": "Milch kaufen", "@language": "de-CH" }
+  ],
+  "https://schema.org/startTime": [
+    {
+      "@value": "2026-10-05T09:30:00Z",
+      "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+    }
+  ]
+}
+```
+
 ### Deliberately not covered yet
 
 Checked against the sempods specification revision recorded in

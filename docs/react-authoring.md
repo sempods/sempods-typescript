@@ -212,6 +212,74 @@ Repeated invalidation settles unavailable; target switch/disconnect/cancellation
 never restarts an old loader. Write-only access loss keeps displayed read data;
 read loss removes it.
 
+## Read arbitrary resources
+
+An explorer or search view reads resources that have no `fields()` definition.
+Inside `TargetScreen`, use `useLoad` with the view's raw reads. A `ViewRead` must
+settle with a `QueryResult`, which has no `not-found`, so carry an absent
+resource inside the `ok` body:
+
+```tsx
+import type { ViewRead } from '@sempods/app-sdk';
+import { useLoad } from '@sempods/app-sdk/react';
+import type { JsonLd } from '@sempods/client-sdk';
+
+/** `null`: no description of `iri` is readable in this Context. */
+const resource =
+  (iri: string): ViewRead<JsonLd | null> =>
+  async (view, signal) => {
+    const read = await view.subjects.get(iri, { signal });
+    if (read.kind === 'ok') return { kind: 'ok', body: read.body };
+    if (read.kind === 'not-found') return { kind: 'ok', body: null };
+    return read; // refused, cancelled or invalidated
+  };
+
+export function Resource({ iri }: { readonly iri: string }) {
+  const { state, reload } = useLoad(resource(iri));
+  if (state.kind === 'ready')
+    return state.data ? (
+      <pre>{JSON.stringify(state.data, null, 2)}</pre>
+    ) : (
+      <p>Not found in this Context.</p>
+    );
+  if (state.kind === 'failed')
+    return <button onClick={() => void reload()}>Retry</button>;
+  return <p>{state.kind}</p>;
+}
+```
+
+Render it as `<Resource key={iri} iri={iri} />`, or call `reload()` after the
+IRI changes. A CONSTRUCT needs no wrapping:
+`useLoad((view, signal) => view.sparql.construct(query, { signal }))` is ready
+with the node array. `not-found` means absent or hidden in this Context; the
+two look the same.
+
+The loader turns each settled read into one state:
+
+| The read settles with                                                       | `LoadState`                                                                              |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `ok`                                                                        | `ready`; `data` is the body                                                              |
+| `cancelled`                                                                 | `cancelled` until `reload()`                                                             |
+| `invalidated`, or the view lost read access or changed while the read ran   | `unavailable`; one retry while the same target stays readable, then it stays unavailable |
+| `refused` (`401` or `403`)                                                  | `failed`; `error` is the result, such as `{ kind: 'refused', status: 403 }`              |
+| another kind, such as an unwrapped `not-found` (a type error in `ViewRead`) | `failed`; `error` is the result                                                          |
+| a thrown error, such as an `SdkError` for a network failure or bad answer   | `failed`; `error` is the thrown value                                                    |
+
+A refusal is `failed`, not `unavailable`. Before a Context read reports a `403`,
+the runtime [reloads the catalogue](browser-runtime.md#subscribe-and-bind). If
+the Context is no longer readable there, the view loses read access and the
+loader shows `unavailable` instead. If it is still listed, or the reload fails,
+the refusal stays `failed`. A `401` the session could not renew is `failed`
+too. Nothing repeats a refusal on its own; offer `reload()`. `sdkFailure(error)` from `@sempods/client-sdk` gives a
+thrown `SdkError`'s reason. A guard stop never reaches the read as `stopped`:
+the runtime reports it as `invalidated`. `usePodLoad` maps Pod results the same
+way, without the catalogue check (see below).
+
+The [client README](../packages/client-sdk/README.md#json-ld-read-bodies)
+describes the bodies: a single node from `subjects.get`, CONSTRUCT node arrays,
+blank nodes, types and literals with a language or datatype. Pod SELECT rows
+use their own [term shapes](../packages/client-sdk/README.md#reading-across-the-pod).
+
 ## Pod overviews with Contexts on-demand
 
 Keep `contextSelection` omitted (or `'required'`) for the existing Context-based
