@@ -37,7 +37,10 @@ export interface AppControllerOptions {
   /** Required preserves automatic catalogues; on-demand uses explicit discovery/Context flows. */
   readonly contextSelection?: 'required' | 'on-demand';
 }
-/** Selection/leave policy only. Authentication and request authority remain in the runtime. */
+/**
+ * Selection/leave policy, the active Pod reader and the Context-discovery policy
+ * (`contextSelection`). Authentication and request authority remain in the runtime.
+ */
 export function createAppController(
   runtime: BrowserRuntime,
   options: AppControllerOptions = {},

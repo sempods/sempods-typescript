@@ -29,6 +29,8 @@ export type ListResult<D, R extends QueryOutcome = QueryOutcome> =
  * The query returns each subject's whole description there, so a snapshot
  * also supports `removeSnapshot`. Subjects that do not fit the definition are
  * counted in `skipped`. Network failures reject like other client reads.
+ * A type that is not an embeddable IRI (including U+0000–U+0020) throws
+ * `TypeError` before any query is sent.
  */
 export async function listSubjects<D, R extends QueryOutcome = QueryOutcome>(
   source: ListSource<R>,

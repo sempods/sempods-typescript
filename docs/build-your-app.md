@@ -99,7 +99,8 @@ Keep the runtime instance stable as you change presentation; `fields()` definiti
 may be written inline.
 
 The first supported path is deliberately small: one explicitly selected context
-per view, durable browser storage, and one active tab per runtime configuration.
+per view (Pod-wide reads use `usePodLoad` without one), durable browser storage,
+and one active tab per runtime configuration.
 For the exact supported operations and deferred features, read the
 [client reference](../packages/client-sdk/README.md) and
 [runtime limits](browser-runtime.md). Protocol features mentioned on the website

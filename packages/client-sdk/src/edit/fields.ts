@@ -179,6 +179,11 @@ export function flag(
   });
 }
 
+/**
+ * One IRI value. A value that cannot be embedded as an IRIREF (whitespace,
+ * U+0000–U+0020, angle brackets, quotes, braces, pipe, caret, backslash or
+ * backtick) makes the draft invalid.
+ */
 export function iri(predicate: string): IriField {
   return Object.freeze({ kind: 'iri', predicate: predicateOf(predicate) });
 }

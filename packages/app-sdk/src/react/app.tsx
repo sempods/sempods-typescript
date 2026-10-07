@@ -164,6 +164,7 @@ export function useContextDemand(active: boolean) {
   }, [active, state.contextSelection, id, session, catalogue, value.actions]);
   return state.contextSelection === 'required' || active || value.contextDemand;
 }
+/** Context-view access for the active connection, in both modes; Pod readers have their own snapshot. */
 export function useWorkflowAccess() {
   const { view, connections, activeId } = useAppState();
   const access = useSyncExternalStore(

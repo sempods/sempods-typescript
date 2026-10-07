@@ -80,21 +80,22 @@ checkout and record your revision; it is not a claim of a completed live login.
 Run these checks against the installed SDK revision and record the result, Pod
 version, app origin and browser. Keep credentials and private data out of reports.
 
-| Check                                          | Expected observation                                                                                                      |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Connect and consent                            | Sign-in occurs on the Pod/provider; the callback returns to the app; context choice is explicit                           |
-| Cancel sign-in                                 | Visible cancellation/failure; existing connections and drafts remain usable where eligible                                |
-| Create, list, complete, reopen, rename, delete | Correct resource in the selected context; list updates after confirmed writes; deletion checks the version the person saw |
-| Reload                                         | Accepted connection restores; the last readable context is selected again; no app-owned token handling                    |
-| Change target with a draft                     | Leaving requires confirmation; cancelled navigation preserves the draft                                                   |
-| Concurrent change to the same title            | Save offers comparison with the Pod version and preserves the local draft                                                 |
-| Concurrent change to a different mapped field  | The bounded rebase preserves both changes when its evidence permits; otherwise review is explicit                         |
-| Lose a write's response                        | The UI says unconfirmed and offers inspection of the captured resource; no blind resend or duplicate creation             |
-| Remove write access on the Pod                 | Readable data/draft remains; writes become disabled after access revalidation                                             |
-| Remove read access on the Pod                  | Ineligible server data is cleared after revalidation; no fallback to another context                                      |
-| Second tab                                     | One tab holds the runtime; the other shows busy rather than taking it over                                                |
-| Another Pod                                    | Sequential connection leaves the first connection available; switching remains guarded                                    |
-| Language, phone layout, keyboard               | Labels and feedback are understandable; locale changes preserve drafts; controls remain reachable                         |
+| Check                                          | Expected observation                                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Connect and consent                            | Sign-in occurs on the Pod/provider; the callback returns to the app; context choice is explicit                             |
+| Cancel sign-in                                 | Visible cancellation/failure; existing connections and drafts remain usable where eligible                                  |
+| Create, list, complete, reopen, rename, delete | Correct resource in the selected context; list updates after confirmed writes; deletion checks the version the person saw   |
+| Reload                                         | Accepted connection restores; the last readable context is selected again; no app-owned token handling                      |
+| Change target with a draft                     | Leaving requires confirmation; cancelled navigation preserves the draft                                                     |
+| Concurrent change to the same title            | Save offers comparison with the Pod version and preserves the local draft                                                   |
+| Concurrent change to a different mapped field  | The bounded rebase preserves both changes when its evidence permits; otherwise review is explicit                           |
+| Lose a write's response                        | The UI says unconfirmed and offers inspection of the captured resource; no blind resend or duplicate creation               |
+| Remove write access on the Pod                 | Readable data/draft remains; writes become disabled after access revalidation                                               |
+| Remove read access on the Pod                  | Ineligible server data is cleared after revalidation; no fallback to another context                                        |
+| Second tab                                     | One tab holds the runtime; the other shows busy rather than taking it over                                                  |
+| Another Pod                                    | Sequential connection leaves the first connection available; switching remains guarded                                      |
+| Pod overview with on-demand Contexts           | The overview loads without a context choice or catalogue request; a refused read shows as failed; editing selects a context |
+| Language, phone layout, keyboard               | Labels and feedback are understandable; locale changes preserve drafts; controls remain reachable                           |
 
 For concurrent edits, use another browser profile, a private window or another
 device. Two tabs in the same profile intentionally exercise the busy state.

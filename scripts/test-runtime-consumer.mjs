@@ -154,6 +154,14 @@ try {
   let exchanges = 0;
   let refreshes = 0;
   let overviewRefuse = false;
+  // The overview recipe's editable note, read and written only inside its Context.
+  let overviewNote = {
+    '@id': 'urn:overview-note',
+    '@type': ['urn:Note'],
+    'urn:note:title': [{ '@value': 'First note' }],
+  };
+  let overviewNoteVersion = 1;
+  let overviewNoteWrites = 0;
   let writeMode = 'normal';
   let writes = 0;
   let version = 1;
@@ -356,14 +364,52 @@ try {
           ],
           ['http://www.w3.org/ns/sparql-service-description#namedGraph']: [
             { '@id': base + '/_system/contexts/work' },
+            // The overview Pod's second Context holds a note in another Context.
+            ...(name === 'overview-pod'
+              ? [{ '@id': base + '/_system/contexts/notes' }]
+              : []),
           ],
           ['https://schema.sempods.org/readableContext']: [
             { '@id': base + '/_system/contexts/work' },
+            ...(name === 'overview-pod'
+              ? [{ '@id': base + '/_system/contexts/notes' }]
+              : []),
           ],
           ['https://schema.sempods.org/writableContext']: [
             { '@id': base + '/_system/contexts/work' },
           ],
         });
+        return;
+      }
+      if (
+        name === 'overview-pod' &&
+        url.pathname.includes('/_system/resources/')
+      ) {
+        assert.equal(req.headers.cookie, undefined);
+        assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        assert.equal(
+          url.searchParams.get('context'),
+          base + '/_system/contexts/work',
+        );
+        assert.equal(
+          Buffer.from(url.pathname.split('/').at(-1), 'base64url').toString(),
+          'urn:overview-note',
+        );
+        if (req.method === 'GET') {
+          json(overviewNote, 200, { etag: `"n${overviewNoteVersion}"` });
+          return;
+        }
+        assert.equal(req.method, 'PATCH');
+        assert.equal(req.headers['if-match'], `"n${overviewNoteVersion}"`);
+        assert.equal(
+          req.headers['content-type'],
+          'application/merge-patch+json',
+        );
+        overviewNote = { ...overviewNote, ...JSON.parse(body) };
+        overviewNoteVersion++;
+        overviewNoteWrites++;
+        res.writeHead(204);
+        res.end();
         return;
       }
       if (url.pathname.includes('/_system/resources/')) {
@@ -431,6 +477,13 @@ try {
                       graph: {
                         type: 'uri',
                         value: base + '/_system/contexts/work',
+                      },
+                    },
+                    {
+                      item: { type: 'uri', value: 'urn:second-note' },
+                      graph: {
+                        type: 'uri',
+                        value: base + '/_system/contexts/notes',
                       },
                     },
                   ],
@@ -1022,8 +1075,102 @@ try {
     3,
   );
   assert.ok(contextTraffic().length >= afterRestore + 1);
+  // Editing an overview row: the Context comes from its GRAPH binding, the editor
+  // reads the resource fresh in that Context and writes with its version.
+  const beforeEdit = podQueries();
+  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
+  const editRegion = page.getByRole('region', { name: 'Edit note' });
+  const title = editRegion.getByLabel('Note title');
+  await title.waitFor();
+  assert.equal(await title.inputValue(), 'First note');
+  await title.fill('Edited note');
+  const patched = page.waitForResponse(
+    (r) =>
+      r.url().includes('/overview-pod/_system/resources/') &&
+      r.request().method() === 'PATCH',
+  );
+  await editRegion.getByRole('button', { name: 'Save', exact: true }).click();
+  assert.equal((await patched).status(), 204);
+  assert.equal(overviewNoteWrites, 1);
+  assert.deepEqual(overviewNote['urn:note:title'], [
+    { '@value': 'Edited note' },
+  ]);
+  assert.equal(podQueries(), beforeEdit);
+  // Closing the editor with an unsaved draft runs under the leave policy.
+  await title.fill('Unsaved draft');
+  await editRegion
+    .getByRole('button', { name: 'Close editor', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  assert.equal(await title.inputValue(), 'Unsaved draft');
+  await editRegion
+    .getByRole('button', { name: 'Close editor', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Discard and continue', exact: true })
+    .click();
+  await editRegion.waitFor({ state: 'detached' });
+  assert.equal(overviewNoteWrites, 1);
+  // Editing a row in another Context while a draft exists in this one: declining
+  // the Context change keeps the draft and leaves no empty editor behind.
+  await page.getByLabel('New note').fill('Draft elsewhere');
+  await page.getByRole('button', { name: 'Edit urn:second-note' }).click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await editRegion.waitFor({ state: 'detached' });
+  assert.equal(
+    await page.getByLabel('New note').inputValue(),
+    'Draft elsewhere',
+  );
+  // Choosing another Context elsewhere while a row is edited retires the editor
+  // instead of selecting its old Context again.
+  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
+  await editRegion.getByLabel('Note title').waitFor();
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await page
+    .getByLabel('Data context')
+    .selectOption(origin + '/overview-pod/_system/contexts/notes');
+  await page
+    .getByRole('button', { name: 'Discard and continue', exact: true })
+    .click();
+  await editRegion.waitFor({ state: 'detached' });
+  await page.waitForTimeout(200);
+  assert.equal(
+    await page.getByLabel('Data context').inputValue(),
+    origin + '/overview-pod/_system/contexts/notes',
+  );
+  // Switching Pods retires an editor that belongs to the previous connection.
+  await page.getByLabel('Your Pod').fill(origin + '/second-pod');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=overview');
+  const choosePod = async (name) => {
+    const pods = page.getByLabel('Active pod');
+    const value = await pods.evaluate(
+      (select, wanted) =>
+        [...select.options].find((o) => o.text.includes(wanted))?.value,
+      name,
+    );
+    assert.ok(value, 'pod option ' + name);
+    await pods.selectOption(value);
+  };
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await choosePod('overview-pod');
+  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
+  await editRegion.getByLabel('Note title').waitFor();
+  await choosePod('second-pod');
+  await editRegion.waitFor({ state: 'detached' });
+  await page.waitForTimeout(200);
+  // The retired editor never demanded discovery from the newly active Pod.
+  assert.deepEqual(
+    traffic
+      .slice(beforeOverview)
+      .filter((r) => r.path.startsWith('/second-pod/_system/contexts')),
+    [],
+  );
   console.log(
-    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection and draft-preserving revalidation passed.',
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change, external Context change, Pod switch) passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);

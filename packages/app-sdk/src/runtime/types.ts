@@ -157,7 +157,8 @@ export interface BrowserRuntime {
   ): Promise<BoundRead<CatalogueResult>>;
   selectContext(id: string, iri: string): void;
   bind(id: string): BoundView;
-  /** Requires a signed-in eligible connection, but neither selection nor catalogue.
+  /** Requires a signed-in eligible connection, but neither selection nor catalogue;
+   * throws `RuntimeError('disconnected')` while restoring or after the session ended.
    * Missing required scopes leave the handle current with read=false and stop dispatch.
    * Pod 403 returns refused without catalogue recovery or inferred session changes.
    */

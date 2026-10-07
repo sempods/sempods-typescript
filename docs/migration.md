@@ -4,6 +4,44 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.3 to the next release
+
+These changes are on `main` and not yet released. Session storage, guards and
+write recovery are unchanged, and the defaults keep 0.3 behaviour except for
+labels. Check these points:
+
+- **Context labels.** The runtime now loads the registry label only for the
+  selected, validated Context, in both `contextSelection` modes, and no longer
+  reads labels for other catalogue entries. Picker entries without a label show
+  a derived name or the IRI. Tests or UI that expected names in
+  `catalogue.labels` for unselected Contexts need updating.
+- **Stricter IRIs in the edit helpers.** Field predicates, `fields({ type })`,
+  `flag()` on/off values and the `listSubjects` type now throw `TypeError` for
+  IRIs containing U+0000–U+0020, and an `iri()` value containing one makes the
+  draft invalid. Such IRIs could not be embedded in SPARQL or Turtle.
+- **Custom Pods, runtimes and snapshots.** These interfaces gained required
+  members:
+  - `Pod.sparql`: a custom `podFactory` result or a `Pod` test double must
+    provide it, because `runtime.bindPod` builds readers through the factory.
+  - `BrowserRuntime.bindPod`: a fake runtime must provide it, because the app
+    controller calls it.
+  - `AppSnapshot.pod` and `AppSnapshot.contextSelection`: hand-built snapshots
+    must add them.
+- **`createViewLoader`** has overloads for views and Pod readers. Existing
+  `(view, read)` calls are unaffected.
+
+New:
+
+- Pod-wide SPARQL reads without selecting a Context: `pod.sparql.select()` and
+  `construct()` with the `SelectResult`/`SparqlTerm` types; see
+  [reading across the Pod](../packages/client-sdk/README.md#reading-across-the-pod).
+- `runtime.bindPod(id)` returns a `BoundPod` with its own read lifetime; see
+  [read the authorized Pod dataset](browser-runtime.md#read-the-authorized-pod-dataset).
+- `usePodLoad` / `PodRead` and the `contextSelection: 'on-demand'` option on
+  `SempodsProvider` and `createAppController`. The default `'required'` keeps
+  automatic catalogue loading; see
+  [Pod overviews with Contexts on-demand](react-authoring.md#pod-overviews-with-contexts-on-demand).
+
 ## From 0.2 to 0.3
 
 Upgrade both packages together; Node 24.15 or newer stays the requirement:

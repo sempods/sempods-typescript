@@ -123,7 +123,8 @@ responses, including manage-only grants/revocations for cached, failed and pendi
 label attempts while Pod reads remain valid. Packed React-free declarations include `BoundPod` and `AppSnapshot.pod`;
 the Chromium runtime consumer verifies bound SELECT/CONSTRUCT with no dataset
 parameters and no accompanying catalogue requests. These are client/runtime
-fixture checks; #40 owns live scale evidence.
+fixture checks; [#40](https://github.com/sempods/sempods-typescript/issues/40)
+recorded the scale evidence described below.
 
 React/headless on-demand regressions cover catalogue/description-free startup,
 restore, reads and recovery (including preset/remembered targets and saved Pods),
@@ -132,9 +133,35 @@ empty/failed discovery, label fallback and obsolete Pod results. Packed consumer
 types preserve Context/Pod callback inference, including explicit result generics
 and rejection of mismatched handles. `test:runtime` executes the copyable
 Pod-overview recipe against installed archives in Chromium: native storage/PKCE,
-catalogue-free overview restore and 401 recovery, later validated Context demand
-and draft-preserving revalidation. These fixtures do not establish server dataset
-semantics or deployed scale; #40 remains separate.
+catalogue-free overview restore and 401 recovery, later validated Context demand,
+draft-preserving revalidation, and editing an overview row in its own Context
+(fresh read, `If-Match` write). These fixtures do not establish server dataset
+semantics or deployed scale.
+
+Scale fixtures (`packages/app-sdk/src/runtime/pod-scale.test.ts`) assert request
+counts for Pod reads at catalogues of 1, 101 and 20,001 Contexts. Each read is one
+query, and no catalogue or description is requested without Context demand. This
+holds through restore, `401` renewal, `403` refusal, Context switches and
+on-demand startup with a preset Context, while required mode loads one catalogue
+and one selected description. `SEMPODS_SCALE_TIMING=1` (with `--silent=false`)
+reports the in-process load time of the complete broad catalogue. The fixtures
+prove client request behaviour, not backend scale.
+
+`scripts/measure-pod-reads.mjs` records live Pod-read evidence through the built
+client:
+
+- Run `pnpm build` first.
+- `POD_READ_CREDENTIALS` names a local JSON file of sempods service-client
+  credentials. Never commit that file.
+- The script sends client secrets only to the Pod's own token endpoint, and
+  rejects redirects.
+- Options: `--clients`, `--runs`, `--warmup`, `--timeout`, `--catalogue`.
+- Raw evidence goes to the git-ignored `test-results/pod-reads/`.
+
+The script is not part of `pnpm check`. Follow [live validation](agents/live-validation.md)
+for the Pod and data it runs against;
+[#52](https://github.com/sempods/sempods-typescript/issues/52) tracks evidence on
+a deployed Pod and in a browser.
 
 Pod/label regressions and the packed Chromium runtime also run with
 `AbortSignal.any` unavailable. Signal tests verify cancellation propagation and

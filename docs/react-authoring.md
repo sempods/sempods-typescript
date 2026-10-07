@@ -226,8 +226,8 @@ infers the callback's Pod handle and data type, with the same states, `reload`,
 `cancel`, obsolete-result handling and bounded recovery as `useLoad`. Pass the
 signal into every read. Ordinary renders, Context switches, catalogue/label
 updates do not restart it. Pod/session changes retire the old loader; scope loss
-clears displayed data and changed grants renew it within the existing recovery
-bound. An absent reader reports unavailable once startup completes or fails. Inline reads
+clears displayed data and changed grants refresh it in a fresh bounded recovery
+cycle. An absent reader reports unavailable once startup completes or fails. Inline reads
 do not loop; call `reload()` when your query/domain inputs change.
 
 Pod-only startup, restored sessions, first reads and recovery initiate **zero**
@@ -603,23 +603,25 @@ at subscription time and unsubscribe during cleanup. A permanently invalid view
 never becomes valid again; obtain the next view from the runtime.
 
 `createAppController(runtime)` supplies the same guarded selection policy to a
-non-React UI; call `start()` and `stop()` around its lifetime. Its snapshot also
-exposes the active `BoundPod` as `pod`, independently of the Context `view`.
-Use its `sparql.select`/`construct` methods and subscribe to its access snapshot
-for direct headless Pod reads; see [the runtime reader](browser-runtime.md#read-the-authorized-pod-dataset).
-Pass `{ contextSelection: 'on-demand' }` as the second controller argument to
-defer catalogues; explicitly call `runtime.loadContexts(id)` for a Context flow.
-`createViewLoader(pod, read)` accepts `PodRead<T>` through the same bounded loader
-as Context reads, with correlated callback types and no scoped-to-Pod fallback.
-Register draft guards
+non-React UI; call `start()` and `stop()` around its lifetime. Register draft guards
 with `register`. Guards default to local scope; use `scope: 'target'` for drafts
 or mutation outcomes that survive row navigation and `unconfirmed()` for pending
 write-outcome evidence. Headless hosts must prevent input while the controller's
 `changing` or `confirmingLeave` snapshot field is true, as the React provider does.
+
+The controller snapshot also exposes the active `BoundPod` as `pod`, independently
+of the Context `view`. Use its `sparql.select`/`construct` methods and subscribe to
+its access snapshot for direct headless Pod reads; see
+[the runtime reader](browser-runtime.md#read-the-authorized-pod-dataset). Pass
+`{ contextSelection: 'on-demand' }` as the second controller argument to defer
+catalogues, and call `runtime.loadContexts(id)` explicitly for a Context flow.
+
 `createViewLoader(view, read)` and
 `bindResourceEditor(view, iri, definition)` provide the same read/access behavior
-as their hooks. A loader starts without a request; call `reload()` for its first
-read. Dispose both when the target changes. A framework may instead
+as their hooks; `createViewLoader(pod, read)` does the same for a `PodRead<T>`, with
+correlated callback types and no fallback from a Context read to a Pod read. A
+loader starts without a request; call `reload()` for its first read. Dispose both
+when the target changes. A framework may instead
 subscribe to a view directly and render its facts without either helper.
 Subscriber exceptions are reported asynchronously to the host, isolated from
 other subscribers and operation settlement; `editor.loaded` still settles.

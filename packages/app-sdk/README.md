@@ -77,7 +77,7 @@ Session replacement/end and changed grants do. A Pod `403` is an operation refus
 without a catalogue reload or inferred session change. Writes remain on `BoundView`.
 The headless controller exposes the active reader as `AppSnapshot.pod`.
 
-Automatic Context descriptions now load only for the selected, validated Context,
+Automatic Context descriptions load only for the selected, validated Context,
 including preset/remembered restoration. Other picker entries immediately use
 IRI/derived names, for small and large Pods alike. Completed label attempts are
 cached within the access lifetime; failed attempts keep the fallback without an

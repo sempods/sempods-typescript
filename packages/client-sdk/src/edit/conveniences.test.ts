@@ -8,6 +8,7 @@ import {
   createResourceEditor,
   fields,
   flag,
+  iri,
   listSubjects,
   newSubjectIri,
   prepareCreation,
@@ -194,6 +195,48 @@ describe('lists without SPARQL (F3)', () => {
       listSubjects(pod.source, { ...task } as typeof task),
     ).rejects.toThrow(TypeError);
   });
+});
+
+describe('IRIs embedded by edit helpers reject C0 controls (#47)', () => {
+  // U+0000–U+0020 are excluded from IRIREF; space and other whitespace already were.
+  const controls = ['\u0000', '\u0001', '\u0007', '\u001f'];
+
+  it.each(controls)(
+    'rejects %j in an iri() field value as an invalid draft',
+    (c) => {
+      const linked = fields({ link: iri(`${S}url`) });
+      expect(linked.valid?.({ link: 'https://x.example/a' })).toBe(true);
+      expect(linked.valid?.({ link: `https://x.example/a${c}b` })).toBe(false);
+    },
+  );
+
+  it.each(controls)(
+    'rejects %j in predicates, flag values and the subject type',
+    (c) => {
+      expect(() => text(`${S}na${c}me`, { language: null })).toThrow(TypeError);
+      expect(() => iri(`${S}u${c}rl`)).toThrow(TypeError);
+      expect(() =>
+        flag(`${S}actionStatus`, { on: `${DONE}${c}`, off: OPEN }),
+      ).toThrow(TypeError);
+      expect(() =>
+        fields(
+          { title: text(`${S}name`, { language: null }) },
+          { type: `${TASK}${c}` },
+        ),
+      ).toThrow(TypeError);
+    },
+  );
+
+  it.each(controls)(
+    'rejects %j in a list type before any query is sent',
+    async (c) => {
+      const pod = memoryContext();
+      await expect(
+        listSubjects(pod.source, task, { type: `${TASK}${c}` }),
+      ).rejects.toThrow(TypeError);
+      expect(pod.queries).toEqual([]);
+    },
+  );
 });
 
 describe('creation from a definition (F4) with a subject IRI (F5)', () => {

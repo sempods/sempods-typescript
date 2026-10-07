@@ -115,7 +115,9 @@ export async function overview(pod: Pod, signal: AbortSignal) {
 The exported `SelectResult` and `SparqlTerm` types preserve projected names,
 solution order, repeated rows and RDF lexical values. Unbound variables are
 absent, so every binding needs a guard. Known terms decode to `iri`, `blank` or
-`literal`; literals retain optional `language` or `datatype`. Blank-node labels
+`literal`; literals retain optional `language` or `datatype`. A missing
+`datatype` means `xsd:string`, or `rdf:langString` with `language` (RDF 1.1); the
+SDK reports the term as received and does not fill one in. Blank-node labels
 are local to one result document. Unsupported term types retain their opaque
 JSON in `term` with `type: 'unsupported'`. This also applies to extensions
 on known term types, such as a literal's `its:dir`: known fields are validated
@@ -168,7 +170,7 @@ if (read.kind === 'ok') {
 }
 ```
 
-Supported operations in this source revision (Pod queries are new since 0.3.0):
+Supported operations in this source revision:
 
 | Operation                                     | Request                                                                                             | Results                                                                                                                          |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -305,6 +307,10 @@ if (opened.phase === 'ready') {
   stored unchanged, so the offset survives; untyped strings, other datatypes and
   IRIs are preserved; `optional: true` as for `text`). Fields writing the same
   terms are rejected; a `text` and a `dateTime` may share a predicate.
+  Predicates, `fields({ type })`, `flag` IRIs and `iri` values must be absolute
+  IRIs without whitespace, U+0000–U+0020, angle brackets, quotes, braces, pipe,
+  caret, backslash or backtick, because they are embedded in SPARQL and Turtle:
+  definitions throw `TypeError`, and such an `iri` value makes the draft invalid.
   `EditDefinition` (`read`/`patch`/`valid`) is the escape hatch for other
   mappings. `isFieldDefinition(definition)` tells whether a definition was
   created by `fields()` (copies and look-alikes are not).
