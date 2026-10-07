@@ -179,6 +179,11 @@ function Content() {
   const [manage, setManage] = useState(false);
   const [scoped, setScoped] = useState(false);
   const [editing, setEditing] = useState<EditTarget | null>(null);
+  // Changing or closing the edited row unmounts its editor: run it under the leave
+  // policy, so an unsaved draft or a pending write asks before it is discarded.
+  const app = useApp();
+  const edit = (target: EditTarget | null) =>
+    void app.navigate(() => setEditing(target));
   const menu = useRef<HTMLButtonElement>(null);
   const { messages: m } = useSdkLocale();
   return (
@@ -191,7 +196,7 @@ function Content() {
         {m.controls.dataAccess}
       </button>
       <AppAccess appName="Notes overview" open={manage} focusTarget={menu} />
-      <Overview onEdit={setEditing} />
+      <Overview onEdit={edit} />
       <button onClick={() => setScoped(true)} disabled={scoped}>
         Create a note
       </button>
@@ -203,9 +208,7 @@ function Content() {
           <NewNote />
         </TargetScreen>
       )}
-      {editing && (
-        <EditInContext target={editing} onClose={() => setEditing(null)} />
-      )}
+      {editing && <EditInContext target={editing} onClose={() => edit(null)} />}
     </main>
   );
 }

@@ -1082,8 +1082,23 @@ try {
     { '@value': 'Edited note' },
   ]);
   assert.equal(podQueries(), beforeEdit);
+  // Closing the editor with an unsaved draft runs under the leave policy.
+  await title.fill('Unsaved draft');
+  await editRegion
+    .getByRole('button', { name: 'Close editor', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  assert.equal(await title.inputValue(), 'Unsaved draft');
+  await editRegion
+    .getByRole('button', { name: 'Close editor', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Discard and continue', exact: true })
+    .click();
+  await editRegion.waitFor({ state: 'detached' });
+  assert.equal(overviewNoteWrites, 1);
   console.log(
-    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match) passed.',
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close) passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
