@@ -66,11 +66,54 @@ The sempods check is different. The Pod structurally parses `did:web`, binds it
 to the callback host and port, and checks any DID path prefix on a segment boundary.
 It sends the code to that matching callback. Under SPS-AUTH-003–007, it **does not
 fetch a DID document or client metadata, and does not register a did:web client**.
-Do not add a `.well-known/did.json`, a sempods DNS challenge or a private signing
-key for this login flow. DNS/TLS and control of the hosting account establish who
-can serve the callback; user consent establishes the app's context access.
+This login flow needs no sempods DNS challenge or private signing key, and a
+conforming Pod needs no DID document; some Pods nevertheless
+[require one](#pods-that-also-require-a-did-document). DNS/TLS and control of
+the hosting account establish who can serve the callback; user consent
+establishes the app's context access.
 See the [normative auth contract](https://github.com/sempods/sempods-spec/blob/10d91f307ad91c9bdca16e037b4088c27be49dbf/spec/core/auth.md)
 at the revision checked for this guide.
+
+### Pods that also require a DID document
+
+Some Pod implementations check more than the protocol asks for. At least one
+accepts a `did:web` client only if the app's host is on the Pod's allow-list
+**and** the app's DID document resolves over HTTPS with an `id` equal to the
+client ID. This is observed Pod behaviour, not a sempods protocol rule.
+
+The symptom: the app loads, the identity and callback match, yet sign-in fails
+or the Pod rejects the client before or at its consent screen. The runtime
+cannot work around this, and falling back to another identity is not a fix.
+
+Two things help, and neither affects a Pod that does not check them:
+
+- Publish a minimal, static DID document at the location the
+  [did:web method](https://w3c-ccg.github.io/did-method-web/#read-resolve) derives
+  from your client ID. Its `id` is exactly your client ID; it contains no keys
+  or secrets:
+
+  ```json
+  {
+    "@context": "https://www.w3.org/ns/did/v1",
+    "id": "did:web:my-tasks.netlify.app"
+  }
+  ```
+
+  | App identity (`clientId`)        | DID document URL                                    |
+  | -------------------------------- | --------------------------------------------------- |
+  | `did:web:my-tasks.netlify.app`   | `https://my-tasks.netlify.app/.well-known/did.json` |
+  | `did:web:tasks.example.org`      | `https://tasks.example.org/.well-known/did.json`    |
+  | `did:web:apps.example.org:tasks` | `https://apps.example.org/tasks/did.json`           |
+
+  A host-only identity uses `/.well-known/did.json`; a path identity uses the
+  path followed by `/did.json`. With Vite, a file in `public/` is copied into
+  `dist/` unchanged, for example `public/.well-known/did.json` for a root app or
+  `public/did.json` for the `/tasks/` app [below](#several-apps-under-one-site).
+  After deploying, request the URL and check that it returns this JSON, not the
+  app's `index.html` from the SPA fallback.
+
+- Ask the Pod's operator to add your app's host to its allow-list. That is Pod
+  configuration; the app cannot change it.
 
 Moving from a Netlify subdomain to a custom domain changes app identity, origin
 storage and consent continuity. Plan fresh login/grants; it is not a token-store
@@ -125,7 +168,9 @@ Changing Vite's base alone does not move output into a subdirectory.
 An installable app needs the same paths in its manifest and service worker; see
 [the PWA guide](pwa.md). Older apps
 may also contain custom token handling, generated DID documents, edge functions
-or provider proxies. Those are not requirements of an ordinary app-sdk frontend.
+or provider proxies. Those are not requirements of an ordinary app-sdk frontend;
+at most, a Pod may need the
+[minimal static DID document](#pods-that-also-require-a-did-document).
 Keep the current SDK/specification contract when adapting the hosting pattern.
 
 ## 4. Keep public configuration and credentials separate
@@ -156,7 +201,9 @@ Open the exact chosen HTTPS URL in a fresh browser profile and complete
 [the app checklist](local-testing.md#walk-through-one-complete-app). Specifically
 verify that `/callback` loads the app on a direct visit, that an actual sign-in
 returns to that origin, and that create/edit/reload work in the test context.
-A direct callback visit alone does not prove the OAuth flow.
+A direct callback visit alone does not prove the OAuth flow. If the Pod rejects
+the client before or at consent, see
+[Pods that also require a DID document](#pods-that-also-require-a-did-document).
 
 Deploy previews get different origins. Use a separately configured test identity
 and test Pod/context for an interactive preview, or keep it as a UI-only preview.
