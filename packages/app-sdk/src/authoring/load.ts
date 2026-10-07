@@ -3,10 +3,13 @@ import type { BoundPod, BoundRead, BoundView } from '../runtime/view.js';
 
 /**
  * What a loader shows for its latest read. `ok` becomes `ready`; `cancelled`
- * stays `cancelled` until reload; `invalidated`, lost read access or a changed
- * access revision become `unavailable` (one same-target retry). Any other
- * result, such as `refused`, becomes `failed` with that result as `error`; a
- * thrown error becomes `failed` with the thrown value.
+ * stays `cancelled` until reload; `invalidated`, or lost read access or a
+ * changed access revision while the read runs, become `unavailable` (one
+ * same-target retry). Any other result, such as `refused`, becomes `failed`
+ * with that result as `error`; a thrown error becomes `failed` with the thrown
+ * value. After settling, lost read access makes any loader `unavailable`; a
+ * later revision change starts a fresh cycle for a ready Pod loader, while a
+ * ready Context loader keeps its data.
  */
 export type LoadState<T> =
   | { readonly kind: 'loading' | 'cancelled' | 'unavailable' }
