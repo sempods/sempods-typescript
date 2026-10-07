@@ -375,8 +375,10 @@ are reported separately through `StartupReport.unreadable`.
 
 The runtime renews a credential before dispatch once it is within a minute of
 its own expiry (half its lifetime for shorter tokens), so a session survives
-token expiry without relying on the Pod's `401`. A credential without a refresh
-token is sent until it expires; the next request then ends the session as
+token expiry without relying on the Pod's `401`. While the credential is still
+valid, requests keep using it until the renewal completes; once it has expired,
+they wait for the renewal. A credential without a refresh
+token is sent until it expires by this device's clock; the next request then ends the session as
 `expired`. Renewal remains reactive as well: after a validated `401` with a
 Bearer challenge, the client requests renewal and may resend once. A `401`
 without a challenge does not trigger renewal or a resend, because
@@ -461,8 +463,8 @@ integration tests exercise it with the runtime-bound editor.
 deterministic transports and the production client. `pnpm test:runtime` installs packed SDKs outside
 the workspace and runs Chromium with real redirects, PKCE exchanges, IndexedDB and
 Web Locks against a loopback server. It checks sequential multi-Pod, reload,
-did:web without DCR, reactive refresh, renewal before expiry of short-lived
-tokens (with and without a Pod challenge), cookie omission, Context-scoped and bound Pod queries,
+did:web without DCR, reactive refresh, renewal of expired short-lived tokens
+before dispatch (for Pods refusing them with or without a challenge), cookie omission, Context-scoped and bound Pod queries,
 and editor saves with strong `If-Match`, conflicts and unknown write outcomes.
 The unknown-outcome scenario applies the request on the server and deliberately
 withholds its answer at the test network boundary. The SDK does not resend it;

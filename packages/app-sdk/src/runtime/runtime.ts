@@ -327,7 +327,7 @@ export function createBrowserRuntime(
             if (!consumed && transientBeforeClaim(error)) {
               // Nothing was spent and the cause may pass (offline or failing
               // discovery, storage that could not be written): stay signed in
-              // with the unspent refresh token, so the next refused request can
+              // with the unspent refresh token, so the next due or refused request can
               // try again without a reload. A changed binding or invalid
               // metadata ends the session below and needs a new sign-in.
               e.view = {
@@ -352,8 +352,9 @@ export function createBrowserRuntime(
   /**
    * Renews ahead of the credential's own expiry, so dispatch does not depend on
    * the Pod's 401 challenge. Due within a minute of `expiresAt` (half the
-   * lifetime for short tokens). Without a refresh token the credential is still
-   * sent until it expires; an expired one ends the session (`expired`).
+   * lifetime for short tokens). Until it expires, the current credential is
+   * still sent while the renewal runs. Without a refresh token it is sent until
+   * it expires; an expired one ends the session (`expired`).
    */
   function renewBeforeExpiry(e: Entry) {
     const credentials = e.credentials;
@@ -364,6 +365,7 @@ export function createBrowserRuntime(
     if (now < credentials.expiresAt - margin) return;
     if (!credentials.refreshToken && now < credentials.expiresAt) return;
     void renew(e, e.credential);
+    if (e.refresh) e.ahead = e.refresh;
   }
   function createEntry(
     pod: PodDiscovery,
@@ -401,7 +403,15 @@ export function createBrowserRuntime(
       async credential(request) {
         assertCredentialRecipient(e.pod.podUrl, request.url);
         if (eligible(e)) renewBeforeExpiry(e);
-        if (e.refresh)
+        // Wait for a renewal after a refusal, or once the credential expired.
+        if (
+          e.refresh &&
+          !(
+            e.refresh === e.ahead &&
+            e.credentials &&
+            Date.now() < e.credentials.expiresAt
+          )
+        )
           await waitFor(e.refresh, e.lifetime.signal, request.signal);
         if (!eligible(e) || !e.credential)
           throw new RuntimeError('disconnected');

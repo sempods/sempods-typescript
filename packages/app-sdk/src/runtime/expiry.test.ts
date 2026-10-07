@@ -104,6 +104,7 @@ it.each([
 it('renews within a minute of expiry and shares one refresh across reads', async () => {
   const f = await logged();
   const pod = expiringPod(f, false);
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
   const exchanged = tokenRequests(f).length;
   advance(3600_000 - 30_000);
   const reads = await Promise.all([
@@ -112,14 +113,46 @@ it('renews within a minute of expiry and shares one refresh across reads', async
     f.view.sparql.construct(query),
   ]);
   expect(reads).toEqual(Array(3).fill({ kind: 'ok', body: [] }));
+  // Still valid: sent without waiting while one renewal runs.
+  expect(new Set(pod.sent)).toEqual(new Set([pod.sent[0]]));
+  await vi.waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
   expect(tokenRequests(f)).toHaveLength(exchanged + 1);
-  expect(new Set(pod.sent).size).toBe(1);
-  // The renewed credential is not due again.
-  expect(await f.view.sparql.construct(query)).toEqual({
-    kind: 'ok',
-    body: [],
-  });
+  // The renewed credential is used and not due again.
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+  expect(pod.sent.at(-1)).not.toBe(pod.sent[0]);
   expect(tokenRequests(f)).toHaveLength(exchanged + 1);
+});
+
+it('does not hold back a still-valid credential behind a hanging renewal, but waits once it expired', async () => {
+  const f = await logged();
+  const pod = expiringPod(f, false);
+  const hanging = deferred<Response>();
+  f.setToken(() => hanging.promise);
+  advance(3600_000 - 30_000);
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+  expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('renewing');
+  advance(30_000);
+  const caller = new AbortController();
+  const waiting = f.view.sparql.construct(query, { signal: caller.signal });
+  await settleLease();
+  expect(pod.sent).toHaveLength(1);
+  caller.abort();
+  expect(await waiting).toEqual({ kind: 'cancelled' });
+  expect(pod.sent).toHaveLength(1);
+  hanging.resolve(
+    Response.json({
+      access_token: jwt(),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-' + ++issued,
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+  expect(pod.sent.at(-1)).not.toBe(pod.sent[0]);
 });
 
 it('keeps a credential outside the renewal margin', async () => {
@@ -147,7 +180,7 @@ it('uses half the lifetime as margin for short tokens', async () => {
   expect(tokenRequests(f)).toHaveLength(exchanged);
   advance(2_000);
   expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
-  expect(tokenRequests(f)).toHaveLength(exchanged + 1);
+  await vi.waitFor(() => expect(tokenRequests(f)).toHaveLength(exchanged + 1));
 });
 
 it('renews a restored credential that expired while the app was closed', async () => {

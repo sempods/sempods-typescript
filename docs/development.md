@@ -87,8 +87,10 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   editor composition, conditional saves, conflicts and an applied write
   whose answer is withheld at the test network boundary (no SDK resend).
   A Pod issuing four-second tokens refuses expired ones with and without a
-  Bearer challenge; the overview recipe renews before expiry without sending an
-  expired token, and a refused renewal ends in a visible sign-in that recovers.
+  Bearer challenge; the overview recipe renews expired tokens before dispatch,
+  so the Pod never receives one, and a refused renewal ends in a visible
+  sign-in that recovers. Renewal within the margin before expiry is covered by
+  unit tests.
 
 The consumer harness uses npm to install exact SDK tarballs and exact direct test
 versions; normal workspace development uses pinned pnpm. Consumer directories are

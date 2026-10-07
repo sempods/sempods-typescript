@@ -1207,8 +1207,8 @@ try {
   console.log(
     'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change, external Context change, Pod switch) passed.',
   );
-  // Short-lived tokens: the recipe renews before expiry, whether the Pod refuses
-  // an expired token with or without a Bearer challenge (#51).
+  // Short-lived tokens: the recipe renews an expired token before dispatch, so
+  // a Pod refusing it with or without a Bearer challenge never sees it (#51).
   const expiringQueries = () =>
     traffic.filter((r) => r.path === '/expiring-pod/_system/sparql/query');
   const overviewLoaded = () =>
@@ -1223,9 +1223,11 @@ try {
   let probes = 0;
   for (const mode of ['none', 'bearer']) {
     expiringChallenge = mode;
-    const before = { refreshes };
     const previous = expiringQueries().at(-1).authorization;
-    await page.waitForTimeout(expiringLifetime * 1000 + 500);
+    // Every token issued so far, including one renewed early in the background,
+    // has expired once this wait ends.
+    await page.waitForTimeout(expiringLifetime * 1000 + 1000);
+    const before = { refreshes };
     // The fixture really refuses the expired token in this mode.
     const probe = await fetch(origin + '/expiring-pod/_system/sparql/query', {
       method: 'POST',
@@ -1252,8 +1254,8 @@ try {
   // A refused renewal ends the session with a visible sign-in, without
   // sending the expired token; signing in again restores the overview.
   expiringRefusal = true;
+  await page.waitForTimeout(expiringLifetime * 1000 + 1000);
   const beforeRefusal = expiringQueries().length;
-  await page.waitForTimeout(expiringLifetime * 1000 + 500);
   await page.getByRole('button', { name: 'Reload overview' }).click();
   const signInAgain = page.getByRole('button', {
     name: 'Sign in',
@@ -1268,7 +1270,7 @@ try {
   await overviewLoaded();
   assert.equal(expiredRejections, probes);
   console.log(
-    'Packed short-lived tokens: renewal before expiry with challenge-less and Bearer 401 Pods, no expired token sent, refused renewal ends in a visible sign-in and recovers passed.',
+    'Packed short-lived tokens: renewal before dispatch for Pods refusing expired tokens with or without a challenge, no expired token sent, refused renewal ends in a visible sign-in and recovers passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
