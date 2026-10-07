@@ -4,9 +4,12 @@ import type { SdkFailure } from './errors.js';
 /**
  * Portable client result contract.
  *
- * One expanded JSON-LD node object in the canonical wire shape (SPS-CRUD-023):
- * absolute IRIs as keys, values as arrays of `@value`/`@id` objects. Raw, not a
- * general JSON-LD processing result.
+ * One JSON-LD node object, raw as answered or sent; not a general JSON-LD
+ * processing result. Resource reads and writes use the canonical wire shape
+ * (SPS-CRUD-023): absolute IRIs as keys, values as arrays of `@value`/`@id`
+ * objects. CONSTRUCT nodes are JSON-LD without that guarantee (SPS-SPARQL-016),
+ * for example an `rdf:type` key instead of `@type`. The SDK checks only that a
+ * read body is a JSON object (a CONSTRUCT body: an array of them).
  */
 export type JsonLd = { readonly [key: string]: unknown };
 
