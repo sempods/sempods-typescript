@@ -4,11 +4,16 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
-## From 0.3 to the next release
+## From 0.3 to 0.4
 
-These changes are on `main` and not yet released. Session storage, guards and
-write recovery are unchanged, and the defaults keep 0.3 behaviour except for
-labels. Check these points:
+Upgrade both packages together; Node 24.15 or newer stays the requirement:
+
+```sh
+npm install --save-exact @sempods/app-sdk@0.4.0 @sempods/client-sdk@0.4.0
+```
+
+Session storage, guards and write recovery are unchanged, and the defaults keep
+0.3 behaviour except for labels. Check these points:
 
 - **Context labels.** The runtime now loads the registry label only for the
   selected, validated Context, in both `contextSelection` modes, and no longer
@@ -30,7 +35,7 @@ labels. Check these points:
 - **`createViewLoader`** has overloads for views and Pod readers. Existing
   `(view, read)` calls are unaffected.
 
-New:
+New in 0.4:
 
 - Pod-wide SPARQL reads without selecting a Context: `pod.sparql.select()` and
   `construct()` with the `SelectResult`/`SparqlTerm` types; see

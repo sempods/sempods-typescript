@@ -20,7 +20,7 @@ access when consenting (SPS-AUTH-024).
 npm create vite@latest my-tasks -- --template react-ts --no-immediate
 cd my-tasks
 npm install
-npm install --save-exact @sempods/app-sdk@0.3.0 @sempods/client-sdk@0.3.0
+npm install --save-exact @sempods/app-sdk@0.4.0 @sempods/client-sdk@0.4.0
 ```
 
 `--no-immediate` keeps Vite from installing and starting its demo server right
