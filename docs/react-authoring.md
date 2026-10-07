@@ -55,8 +55,18 @@ custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 
 An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
 No icon is required. `podNames` maps exact canonical Pod URLs to display names;
-the destination remains visible, and duplicate names are disambiguated. Both controls prefer `connection.catalogue.labels?.[iri]` from the runtime's
+the destination remains visible, and duplicate names are disambiguated. Both controls prefer the label from the runtime's
 selected-Context description reads, falling back to a safe readable last path segment.
+An `unknown` catalogue carries no labels, so narrow it before reading one:
+
+```ts
+const labels =
+  connection.catalogue.kind !== 'unknown'
+    ? connection.catalogue.labels
+    : undefined;
+const label = labels?.[iri];
+```
+
 Only the selected, validated Context is fetched automatically; other entries use
 the fallback immediately, including on small Pods.
 Duplicate context names include the full IRI; **Full addresses** exposes all readable

@@ -10,7 +10,7 @@ Follow the [quickstart](quickstart.md) to create a Vite React/TypeScript app
 (Node 24.15 or newer). Install the matching pair:
 
 ```sh
-npm install --save-exact @sempods/app-sdk@0.3.0 @sempods/client-sdk@0.3.0
+npm install --save-exact @sempods/app-sdk@0.4.0 @sempods/client-sdk@0.4.0
 ```
 
 Commit the lockfile. Point your coding assistant to
