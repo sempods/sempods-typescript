@@ -261,10 +261,11 @@ example, run `npm run build` to check types and the production bundle.
 
 ## 5. Deploy with a `did:web` identity
 
-A deployed app identifies itself by its own HTTPS origin; it does not register
-and needs no DID document (SPS-AUTH-003/007). The callback must be on the same
-host and port, and inside the identifier's path when the identifier has one
-(SPS-AUTH-004/005):
+A deployed app identifies itself by its own HTTPS origin; it does not register,
+and a conforming Pod needs no DID document (SPS-AUTH-003/007), though
+[some Pods require one](deployment.md#pods-that-also-require-a-did-document).
+The callback must be on the same host and port, and inside the identifier's
+path when the identifier has one (SPS-AUTH-004/005):
 
 ```ts
 const runtime = createBrowserRuntime({

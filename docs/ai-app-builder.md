@@ -92,7 +92,8 @@ not instructions to the coding assistant.
 - Configure dynamic identity and explicit `development: 'loopback-http'` for the
   local example. Use an explicitly configured HTTPS `did:web` identity for a
   stable deployment. Do not silently substitute identities or fall back to dynamic
-  registration when deployed login fails.
+  registration when deployed login fails; if the Pod rejects the client, check
+  whether it [requires a DID document](deployment.md#pods-that-also-require-a-did-document).
 - Let the runtime own OAuth, callback handling, PKCE, refresh, persistence and
   recipient checks. Do not add a second token store, credential-bearing fetch,
   client secret or custom OAuth redirect handler to a screen.

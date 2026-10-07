@@ -56,8 +56,10 @@ Full signatures and examples:
 - **Local and deployed identities differ.** Local HTTP uses the quickstart's
   dynamic identity and `loopback-http` option. Deployment uses an explicit
   `did:web` identity, matching HTTPS callback host/port/path, and a route that
-  serves the app. No DID document or client secret is needed for this sempods
-  flow. [Domain setup and Netlify example](deployment.md).
+  serves the app. No client secret is needed, and a conforming Pod needs no DID
+  document. If the Pod rejects the app before or at consent, it may require
+  [a DID document and an allow-listed host](deployment.md#pods-that-also-require-a-did-document).
+  [Domain setup and Netlify example](deployment.md).
 - **A frontend cannot hide secrets.** `VITE_*` values enter the public bundle.
   Leave session tokens to the SDK; keep hosting/provider keys out of source,
   logs and AI prompts. UI language does not change RDF text language.
