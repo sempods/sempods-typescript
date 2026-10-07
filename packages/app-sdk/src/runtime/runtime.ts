@@ -347,6 +347,8 @@ export function createBrowserRuntime(
       })();
       e.refresh = operation;
     }
+    // The Pod refused the current credential: later requests wait for the renewal.
+    if (refused === e.credential) delete e.ahead;
     return waitFor(e.refresh, e.lifetime.signal, signal).catch(() => false);
   }
   /**

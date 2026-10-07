@@ -155,6 +155,42 @@ it('does not hold back a still-valid credential behind a hanging renewal, but wa
   expect(pod.sent.at(-1)).not.toBe(pod.sent[0]);
 });
 
+it('waits for an early renewal once the Pod refused the still-valid credential', async () => {
+  const f = await logged();
+  const hanging = deferred<Response>();
+  f.setToken(() => hanging.promise);
+  const sent: string[] = [];
+  f.setQuery(async (_url, init) => {
+    const authorization = new Headers(init?.headers).get('authorization')!;
+    sent.push(authorization);
+    // This Pod revokes the old token as soon as its refresh begins.
+    return sent.length === 1
+      ? new Response(null, {
+          status: 401,
+          headers: { 'www-authenticate': 'Bearer error="invalid_token"' },
+        })
+      : Response.json([]);
+  });
+  advance(3600_000 - 30_000);
+  const refused = f.view.sparql.construct(query);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  const later = f.view.sparql.construct(query);
+  await settleLease();
+  expect(sent).toHaveLength(1);
+  hanging.resolve(
+    Response.json({
+      access_token: jwt(),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-' + ++issued,
+    }),
+  );
+  expect(await refused).toEqual({ kind: 'ok', body: [] });
+  expect(await later).toEqual({ kind: 'ok', body: [] });
+  expect(sent).toHaveLength(3);
+  expect(sent[1]).toBe(sent[2]);
+  expect(sent[1]).not.toBe(sent[0]);
+});
+
 it('keeps a credential outside the renewal margin', async () => {
   const f = await logged();
   const exchanged = tokenRequests(f).length;
