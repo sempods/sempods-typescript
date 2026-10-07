@@ -257,11 +257,13 @@ only the selected Context's label loads, and a pending/failed label never gates
 reads, selection or drafts. The policy does not change the complete-catalogue API.
 
 The [copyable overview recipe](../examples/todo/recipes/pod-overview.tsx) combines
-a Pod SELECT with provenance and a later Context-bound creation form. It keeps
-the demand boundary mounted while the form owns drafts/outcomes. An overview row
-is not an editable snapshot: editing existing data requires a known target and
-a fresh Context-bound resource read with its ETag. The packed browser test runs
-this recipe with installed archives; live scalability remains #40.
+a Pod SELECT with provenance, a later Context-bound creation form and editing of
+an overview row. It keeps the demand boundary mounted while the form owns
+drafts/outcomes. An overview row is not an editable snapshot, only a pointer: its
+`GRAPH` binding names the Context, and the editor reads the resource fresh in
+that Context and saves with its ETag. The packed browser test runs this recipe,
+including an edit, with installed archives. Evidence on a deployed Pod and in a
+real browser is tracked in [#52](https://github.com/sempods/sempods-typescript/issues/52).
 
 ## Lists and creation
 
