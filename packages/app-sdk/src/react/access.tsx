@@ -58,7 +58,8 @@ const noSubscription = () => () => {};
  * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
  * offers Context selection only once a Context flow (`TargetScreen`, `open`) asks.
  * While the active connection restores, or its Pod reader is not yet readable,
- * it shows only the loading status until something needs a decision.
+ * it shows the loading status (plus the active-Pod selector when several
+ * connections are saved) until something needs a decision.
  * Read-only targets remain usable. Callback failures remain visible separately.
  * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
  * children mounted during same-target access loss; this is not a content gate.
