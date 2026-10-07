@@ -154,6 +154,14 @@ try {
   let exchanges = 0;
   let refreshes = 0;
   let overviewRefuse = false;
+  // The overview recipe's editable note, read and written only inside its Context.
+  let overviewNote = {
+    '@id': 'urn:overview-note',
+    '@type': ['urn:Note'],
+    'urn:note:title': [{ '@value': 'First note' }],
+  };
+  let overviewNoteVersion = 1;
+  let overviewNoteWrites = 0;
   let writeMode = 'normal';
   let writes = 0;
   let version = 1;
@@ -364,6 +372,37 @@ try {
             { '@id': base + '/_system/contexts/work' },
           ],
         });
+        return;
+      }
+      if (
+        name === 'overview-pod' &&
+        url.pathname.includes('/_system/resources/')
+      ) {
+        assert.equal(req.headers.cookie, undefined);
+        assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        assert.equal(
+          url.searchParams.get('context'),
+          base + '/_system/contexts/work',
+        );
+        assert.equal(
+          Buffer.from(url.pathname.split('/').at(-1), 'base64url').toString(),
+          'urn:overview-note',
+        );
+        if (req.method === 'GET') {
+          json(overviewNote, 200, { etag: `"n${overviewNoteVersion}"` });
+          return;
+        }
+        assert.equal(req.method, 'PATCH');
+        assert.equal(req.headers['if-match'], `"n${overviewNoteVersion}"`);
+        assert.equal(
+          req.headers['content-type'],
+          'application/merge-patch+json',
+        );
+        overviewNote = { ...overviewNote, ...JSON.parse(body) };
+        overviewNoteVersion++;
+        overviewNoteWrites++;
+        res.writeHead(204);
+        res.end();
         return;
       }
       if (url.pathname.includes('/_system/resources/')) {
@@ -1022,8 +1061,29 @@ try {
     3,
   );
   assert.ok(contextTraffic().length >= afterRestore + 1);
+  // Editing an overview row: the Context comes from its GRAPH binding, the editor
+  // reads the resource fresh in that Context and writes with its version.
+  const beforeEdit = podQueries();
+  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
+  const editRegion = page.getByRole('region', { name: 'Edit note' });
+  const title = editRegion.getByLabel('Note title');
+  await title.waitFor();
+  assert.equal(await title.inputValue(), 'First note');
+  await title.fill('Edited note');
+  const patched = page.waitForResponse(
+    (r) =>
+      r.url().includes('/overview-pod/_system/resources/') &&
+      r.request().method() === 'PATCH',
+  );
+  await editRegion.getByRole('button', { name: 'Save', exact: true }).click();
+  assert.equal((await patched).status(), 204);
+  assert.equal(overviewNoteWrites, 1);
+  assert.deepEqual(overviewNote['urn:note:title'], [
+    { '@value': 'Edited note' },
+  ]);
+  assert.equal(podQueries(), beforeEdit);
   console.log(
-    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection and draft-preserving revalidation passed.',
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match) passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
