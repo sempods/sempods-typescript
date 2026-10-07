@@ -43,9 +43,12 @@ With no configured features, omit `scopes`.
 A deployed identity instead supplies
 `{ kind: 'did-web', clientId: 'did:web:app.example', redirectUri: '…' }`.
 The Pod checks the identifier locally against the callback's host, port and
-path; it fetches no DID document and requires no registration (SPS-AUTH-003…007). The runtime never silently falls back to
-dynamic registration. For explicit local HTTP fixtures use
-`development: 'loopback-http'`; production configuration requires HTTPS.
+path; a conforming Pod fetches no DID document and requires no registration
+(SPS-AUTH-003…007). Some Pods
+[require a DID document anyway](deployment.md#pods-that-also-require-a-did-document).
+The runtime never silently falls back to dynamic registration. For explicit
+local HTTP fixtures use `development: 'loopback-http'`; production configuration
+requires HTTPS.
 
 Call `initialize()` once at startup, including on the callback route. Repeated
 calls share one promise and one report. The runtime scrubs callback parameters

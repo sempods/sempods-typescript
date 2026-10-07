@@ -131,9 +131,10 @@ never substituted by another context.
 
 Login uses Authorization Code with PKCE. Local development registers a dynamic
 client on a loopback callback; deployed apps identify themselves as `did:web` on
-their own HTTPS origin, with no DID document and no registration. The runtime
-never falls back from did:web to registration, and requires the `iss` callback
-parameter whenever the Pod announces it (RFC 9207).
+their own HTTPS origin, with no registration; a conforming Pod needs no DID
+document, though [some Pods require one](deployment.md#pods-that-also-require-a-did-document).
+The runtime never falls back from did:web to registration, and requires the
+`iss` callback parameter whenever the Pod announces it (RFC 9207).
 
 _Why:_ the app's identity follows from where its callback lives, and mix-up
 attacks between Pods are ruled out wherever servers support it.
