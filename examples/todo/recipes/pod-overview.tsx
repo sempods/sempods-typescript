@@ -29,14 +29,18 @@ const note = fields(
   },
 );
 /** An overview row is only a pointer: the subject and the Context its GRAPH binding names. */
-interface EditTarget {
+interface RowTarget {
   readonly item: string;
   readonly graph: string;
+}
+/** The row, plus the connection that was active when editing started. */
+interface EditTarget extends RowTarget {
+  readonly connection: string;
 }
 function Overview({
   onEdit,
 }: {
-  readonly onEdit: (target: EditTarget) => void;
+  readonly onEdit: (target: RowTarget) => void;
 }) {
   const { state, reload } = usePodLoad((pod, signal) =>
     pod.sparql.select(query, { signal }),
@@ -147,22 +151,24 @@ function EditInContext({
   // Set once this editor's Context was selected; a later change came from elsewhere.
   const activated = useRef(false);
   const retired = useRef(false);
+  const current = activeId === target.connection;
   useEffect(() => {
+    // The Edit click itself runs as a guarded navigation; act only once it settled.
+    if (changing || confirmingLeave) return;
+    const retire = () => {
+      if (retired.current) return;
+      retired.current = true;
+      close.current();
+    };
+    // Another Pod connection became active: this row belongs to the old one.
+    if (!current) return retire();
     if (selected === target.graph) {
       activated.current = true;
       return;
     }
-    if (changing || confirmingLeave) return;
-    if (activated.current) {
-      // The person chose another Context (for example in AppAccess): retire this
-      // editor rather than selecting its old Context again.
-      if (!retired.current) {
-        retired.current = true;
-        close.current();
-      }
-      return;
-    }
-    // The Edit click itself runs as a guarded navigation; select only once it settled.
+    // The person chose another Context after this one (for example in AppAccess):
+    // retire the editor rather than selecting its old Context again.
+    if (activated.current) return retire();
     if (!readable || attempt.current === target.graph) return;
     const graph = target.graph;
     attempt.current = graph;
@@ -173,17 +179,28 @@ function EditInContext({
       attempt.current = null;
       if (!accepted) close.current();
     });
-  }, [app, readable, selected, target.graph, changing, confirmingLeave]);
+  }, [
+    app,
+    current,
+    readable,
+    selected,
+    target.graph,
+    changing,
+    confirmingLeave,
+  ]);
   return (
     <section aria-label="Edit note">
-      {catalogue?.kind === 'ready' && !readable && (
+      {current && catalogue?.kind === 'ready' && !readable && (
         <p role="alert">This note's Context is not available for editing.</p>
       )}
-      <TargetScreen>
-        {view?.contextIri === target.graph && (
-          <NoteEditor key={target.item} item={target.item} />
-        )}
-      </TargetScreen>
+      {/* Only the originating connection may demand discovery for this row. */}
+      {current && (
+        <TargetScreen>
+          {view?.contextIri === target.graph && (
+            <NoteEditor key={target.item} item={target.item} />
+          )}
+        </TargetScreen>
+      )}
       <button onClick={onClose}>Close editor</button>
     </section>
   );
@@ -211,6 +228,7 @@ function Content() {
   // Changing or closing the edited row unmounts its editor: run it under the leave
   // policy, so an unsaved draft or a pending write asks before it is discarded.
   const app = useApp();
+  const { activeId } = useAppState();
   const edit = (target: EditTarget | null) =>
     void app.navigate(() => setEditing(target));
   const menu = useRef<HTMLButtonElement>(null);
@@ -225,7 +243,11 @@ function Content() {
         {m.controls.dataAccess}
       </button>
       <AppAccess appName="Notes overview" open={manage} focusTarget={menu} />
-      <Overview onEdit={edit} />
+      <Overview
+        onEdit={(row) => {
+          if (activeId) edit({ ...row, connection: activeId });
+        }}
+      />
       <button onClick={() => setScoped(true)} disabled={scoped}>
         Create a note
       </button>
@@ -239,7 +261,7 @@ function Content() {
       )}
       {editing && (
         <EditInContext
-          key={`${editing.graph} ${editing.item}`}
+          key={`${editing.connection} ${editing.graph} ${editing.item}`}
           target={editing}
           onClose={() => edit(null)}
         />

@@ -1138,8 +1138,39 @@ try {
     await page.getByLabel('Data context').inputValue(),
     origin + '/overview-pod/_system/contexts/notes',
   );
+  // Switching Pods retires an editor that belongs to the previous connection.
+  await page.getByLabel('Your Pod').fill(origin + '/second-pod');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=overview');
+  const choosePod = async (name) => {
+    const pods = page.getByLabel('Active pod');
+    const value = await pods.evaluate(
+      (select, wanted) =>
+        [...select.options].find((o) => o.text.includes(wanted))?.value,
+      name,
+    );
+    assert.ok(value, 'pod option ' + name);
+    await pods.selectOption(value);
+  };
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await choosePod('overview-pod');
+  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
+  await editRegion.getByLabel('Note title').waitFor();
+  await choosePod('second-pod');
+  await editRegion.waitFor({ state: 'detached' });
+  await page.waitForTimeout(200);
+  // The retired editor never demanded discovery from the newly active Pod.
+  assert.deepEqual(
+    traffic
+      .slice(beforeOverview)
+      .filter((r) => r.path.startsWith('/second-pod/_system/contexts')),
+    [],
+  );
   console.log(
-    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change, external Context change) passed.',
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change, external Context change, Pod switch) passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
