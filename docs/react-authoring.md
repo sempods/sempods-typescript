@@ -47,8 +47,9 @@ and a localized second-tab notice. It hides once the selected target is readable
 including read-only access; catalogue failures remain visible even if the runtime
 retains previous access facts. While the active connection restores, or is signed
 in but its Pod reader is not yet readable, it shows the loading status and, when
-several connections are saved, the active-Pod selector, so a restore that does not
-settle never blocks switching Pods. A custom `components.Connections` is replaced
+they apply, the active-Pod selector for several saved connections and the sign-in
+for a configured Pod other than the active one, so a restore that does not settle
+never blocks switching Pods or signing in. A custom `components.Connections` is replaced
 by the loading status alone. The connection view (with its addresses and actions)
 appears when something needs a decision, such as an ended session or missing
 required scopes; while a demanded catalogue loads, in `'required'` mode or under a

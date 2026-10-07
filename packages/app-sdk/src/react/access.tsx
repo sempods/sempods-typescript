@@ -58,8 +58,9 @@ const noSubscription = () => () => {};
  * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
  * offers Context selection only once a Context flow (`TargetScreen`, `open`) asks.
  * While the active connection restores, or its Pod reader is not yet readable,
- * it shows the loading status (plus the active-Pod selector when several
- * connections are saved) until something needs a decision.
+ * it shows the loading status (plus the active-Pod selector for several saved
+ * connections and the sign-in for another configured Pod) until something
+ * needs a decision.
  * Read-only targets remain usable. Callback failures remain visible separately.
  * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
  * children mounted during same-target access loss; this is not a content gate.
@@ -332,8 +333,31 @@ function AccessConnections({
       readable.map((entry) => entry.iri),
       (value) => contextName(value, labels),
     );
+  // Keyed so that switching between the validating and connection views keeps
+  // these controls (and keyboard focus) mounted.
+  const defaultSignIn = showDefault && defaultUrl && (
+    <div key="default-sign-in">
+      <p>{name(defaultUrl)}</p>
+      {podNames?.[defaultUrl] && (
+        <p className="sp-access-address">{defaultUrl}</p>
+      )}
+      <button
+        className={c ? undefined : 'sp-access-primary'}
+        disabled={
+          unavailable ||
+          state.connections.some(
+            (entry) =>
+              entry.podUrl === defaultUrl && entry.session.kind === 'restoring',
+          )
+        }
+        onClick={() => void act(() => connect(defaultUrl))}
+      >
+        {m.controls.signIn}
+      </button>
+    </div>
+  );
   const activePod = state.connections.length > 1 && (
-    <label>
+    <label key="active-pod">
       {m.activePod}
       <select
         aria-label={m.activePod}
@@ -358,10 +382,12 @@ function AccessConnections({
       </select>
     </label>
   );
-  // A restore that never settles must not hide switching to another saved Pod.
+  // A restore that never settles must not hide signing in to the configured
+  // Pod or switching to another saved one.
   if (validating)
     return (
       <>
+        {defaultSignIn}
         {activePod}
         <p role="status">{m.controls.loading}</p>
         {failure && <p role="alert">{error(failure.cause)}</p>}
@@ -410,27 +436,8 @@ function AccessConnections({
             {m.controls.signIn}
           </button>
         </form>
-      ) : showDefault ? (
-        <div>
-          <p>{name(defaultUrl)}</p>
-          {podNames?.[defaultUrl] && (
-            <p className="sp-access-address">{defaultUrl}</p>
-          )}
-          <button
-            className={c ? undefined : 'sp-access-primary'}
-            disabled={
-              unavailable ||
-              state.connections.some(
-                (entry) =>
-                  entry.podUrl === defaultUrl &&
-                  entry.session.kind === 'restoring',
-              )
-            }
-            onClick={() => void act(() => connect(defaultUrl))}
-          >
-            {m.controls.signIn}
-          </button>
-        </div>
+      ) : defaultSignIn ? (
+        defaultSignIn
       ) : showNew && !state.allowedPods && (!state.preset || manage) ? (
         <form
           onSubmit={(event) => {
