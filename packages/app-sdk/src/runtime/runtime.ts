@@ -52,6 +52,11 @@ import { browserPreferences, createContextMemory } from './context-memory.js';
 
 import { assertCredentialRecipient, type Entry } from './connection.js';
 
+/** How long before its expiry a credential is renewed before dispatch. */
+const RENEWAL_MARGIN = 60_000;
+/** How often one dispatch checks a replacement credential before using it. */
+const RENEWAL_ROUNDS = 3;
+
 /** Creates no storage, request or navigation until initialize/connect is called. */
 export function createBrowserRuntime(
   options: BrowserRuntimeOptions,
@@ -258,22 +263,21 @@ export function createBrowserRuntime(
     e: Entry,
     refused: AuthCredential,
     signal?: AbortSignal,
+    ahead = false,
   ): Promise<boolean> {
     const generation = e.generation;
     if (!eligible(e, generation) || !e.credentials)
       return Promise.resolve(false);
-    if (e.credential !== refused && !e.refresh) return Promise.resolve(true);
+    // A replacement is already available. A renewal started ahead of its expiry
+    // does not hold it back; one after its refusal does.
+    if (e.credential !== refused && (!e.refresh || e.refresh === e.ahead))
+      return Promise.resolve(true);
     if (!e.refresh) {
       const before = e.credentials;
       if (!before.refreshToken) {
         end(e, new RuntimeError('expired'));
         return Promise.resolve(false);
       }
-      e.view = {
-        ...e.view,
-        session: Object.freeze({ kind: 'renewing', subject: before.subject }),
-      };
-      publish();
       const operation = (async () => {
         let consumed = false;
         try {
@@ -324,7 +328,7 @@ export function createBrowserRuntime(
             if (!consumed && transientBeforeClaim(error)) {
               // Nothing was spent and the cause may pass (offline or failing
               // discovery, storage that could not be written): stay signed in
-              // with the unspent refresh token, so the next refused request can
+              // with the unspent refresh token, so the next due or refused request can
               // try again without a reload. A changed binding or invalid
               // metadata ends the session below and needs a new sign-in.
               e.view = {
@@ -342,9 +346,37 @@ export function createBrowserRuntime(
           if (e.generation === generation) delete e.refresh;
         }
       })();
+      // Register the shared renewal before notifying subscribers: a read they
+      // start in response joins it instead of starting another one.
       e.refresh = operation;
+      if (ahead) e.ahead = operation;
+      e.view = {
+        ...e.view,
+        session: Object.freeze({ kind: 'renewing', subject: before.subject }),
+      };
+      publish();
+    } else if (!ahead && refused === e.credential) {
+      // The Pod refused the current credential: later requests wait for the renewal.
+      delete e.ahead;
     }
     return waitFor(e.refresh, e.lifetime.signal, signal).catch(() => false);
+  }
+  /**
+   * Renews ahead of the credential's own expiry, so dispatch does not depend on
+   * the Pod's 401 challenge. Due within a minute of `expiresAt` (half the
+   * lifetime for short tokens). Until it expires, the current credential is
+   * still sent while the renewal runs. Without a refresh token it is sent until
+   * it expires; an expired one ends the session (`expired`).
+   */
+  function renewBeforeExpiry(e: Entry) {
+    const credentials = e.credentials;
+    if (e.refresh || !e.credential || !credentials) return;
+    const now = Date.now();
+    const lifetime = credentials.expiresAt - credentials.receivedAt;
+    const margin = Math.min(RENEWAL_MARGIN, Math.max(lifetime, 0) / 2);
+    if (now < credentials.expiresAt - margin) return;
+    if (!credentials.refreshToken && now < credentials.expiresAt) return;
+    void renew(e, e.credential, undefined, true);
   }
   function createEntry(
     pod: PodDiscovery,
@@ -381,8 +413,27 @@ export function createBrowserRuntime(
     const auth: Entry['auth'] = {
       async credential(request) {
         assertCredentialRecipient(e.pod.podUrl, request.url);
-        if (e.refresh)
-          await waitFor(e.refresh, e.lifetime.signal, request.signal);
+        // A replacement can itself be due once the wait ends (a slow commit, a
+        // suspended tab): check each new credential again, a bounded number of times.
+        let checked: AuthCredential | undefined;
+        for (
+          let round = 0;
+          round < RENEWAL_ROUNDS && eligible(e) && e.credential !== checked;
+          round++
+        ) {
+          checked = e.credential;
+          renewBeforeExpiry(e);
+          // Wait for a renewal after a refusal, or once the credential expired.
+          if (
+            e.refresh &&
+            !(
+              e.refresh === e.ahead &&
+              e.credentials &&
+              Date.now() < e.credentials.expiresAt
+            )
+          )
+            await waitFor(e.refresh, e.lifetime.signal, request.signal);
+        }
         if (!eligible(e) || !e.credential)
           throw new RuntimeError('disconnected');
         return e.credential;

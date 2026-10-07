@@ -10,7 +10,8 @@ Browser coordination and presentation primitives, with optional React.
   optional peer; consumers of this entry install it themselves.
 
 The runtime handles dynamic/did:web Code + PKCE login, durable sessions,
-sequential multi-Pod connections, shared reactive refresh and lifetime-bound
+sequential multi-Pod connections, shared refresh before expiry or after a
+refused request, and lifetime-bound
 views and independent Pod readers. Configure `preset: { podUrl, contextIri? }` for a known Pod: the default
 controls offer sign-in without a URL input, and guarded `useApp().connect()` can
 omit the URL. `runtime.preset` / `useAppState().preset` expose the frozen

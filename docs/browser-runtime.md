@@ -373,7 +373,20 @@ material and hide the connection. Until one of those actions, a retained
 cleanup in this increment. Corrupt/future-version records remain untouched and
 are reported separately through `StartupReport.unreadable`.
 
-Refresh is reactive: the client encounters a validated 401 and requests renewal.
+The runtime renews a credential before dispatch once it is within a minute of
+its own expiry (half its lifetime for shorter tokens), so a session survives
+token expiry without relying on the Pod's `401`. While the credential is still
+valid, requests keep using it until the renewal completes; once it has expired,
+they wait for the renewal. A credential without a refresh
+token is sent until it expires by this device's clock; the next request then ends the session as
+`expired`. Renewal remains reactive as well: after a validated `401` with a
+Bearer challenge, the client requests renewal and may resend once. A `401`
+without a challenge does not trigger renewal or a resend, because
+[SPS-CORE-015](https://github.com/sempods/sempods-spec/blob/5e2baab8a224e06a6759e39788b3e876e44293f5/spec/core/index.md#SPS-CORE-015)
+requires a Bearer challenge for a rejected token; such a Pod still works as long
+as it honours the advertised token lifetime. Pods should answer an expired token
+with `401` and `WWW-Authenticate: Bearer error="invalid_token"`, and expose that
+header to cross-origin apps.
 The runtime shares one refresh across callers; cancelling one waiter does not
 cancel another. Immutable credential objects retain their identity until an
 accepted replacement. A delayed refusal of the old credential reuses that
@@ -385,8 +398,9 @@ unordered sets; duplicates and mismatches are rejected.
 A transient failure before a committed refresh claim (unreachable Pod, failing
 discovery with a 5xx/408/429 answer, a write the open store could not complete)
 spends nothing: the connection stays signed in with its unspent refresh token
-and the durable `ready` record, the refused request keeps its `refused 401`, and
-the next refused request tries the renewal again, without a reload. A permanent
+and the durable `ready` record, the request keeps its answer (for example a
+`refused 401`), and the next due or refused request tries the renewal again,
+without a reload. A permanent
 one (a changed token endpoint, issuer, client or refresh support, unsupported or
 invalid metadata, a store closed by a newer database version) ends the session
 visibly with its problem and needs a new sign-in; the unspent record is kept but
@@ -449,7 +463,8 @@ integration tests exercise it with the runtime-bound editor.
 deterministic transports and the production client. `pnpm test:runtime` installs packed SDKs outside
 the workspace and runs Chromium with real redirects, PKCE exchanges, IndexedDB and
 Web Locks against a loopback server. It checks sequential multi-Pod, reload,
-did:web without DCR, reactive refresh, cookie omission, Context-scoped and bound Pod queries,
+did:web without DCR, reactive refresh, renewal of expired short-lived tokens
+before dispatch (for Pods refusing them with or without a challenge), cookie omission, Context-scoped and bound Pod queries,
 and editor saves with strong `If-Match`, conflicts and unknown write outcomes.
 The unknown-outcome scenario applies the request on the server and deliberately
 withholds its answer at the test network boundary. The SDK does not resend it;
@@ -465,5 +480,5 @@ transfers attempts or tokens between storage containers. See
 
 Owner live validation remains follow-up work. React/AppShell and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
-checks. Multi-tab concurrent operation, proactive refresh, revocation and anonymous
-reading are not implemented here.
+checks. Multi-tab concurrent operation, revocation and anonymous reading are not
+implemented here.

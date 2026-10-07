@@ -34,6 +34,8 @@ export interface Entry {
   catalogue?: Promise<CatalogueResult>;
   revalidation?: Promise<void>;
   refresh?: Promise<boolean>;
+  /** The refresh started ahead of expiry, which a still-valid credential need not wait for. */
+  ahead?: Promise<boolean>;
   clientPod: Pod;
 }
 

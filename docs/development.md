@@ -47,7 +47,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 - `test`: retained catalogue/discovery validation cases (including real loopback
   HTTP), locale/date formatting and React draft preservation. These are fixture
   tests, not live Kotlin interoperability evidence. Runtime scenarios also cover
-  durable storage, callbacks, scope/identity continuity, refresh and target races.
+  durable storage, callbacks, scope/identity continuity, refresh (including
+  renewal before expiry) and target races.
 - `test:consumers`: packs both packages and installs their tarballs together in
   fresh directories outside the workspace. Checks packed file allowlists and
   rewritten workspace dependency, rejects linked workspace packages, and verifies
@@ -85,6 +86,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   and restoring preserved sessions after widening the policy. Also covers
   editor composition, conditional saves, conflicts and an applied write
   whose answer is withheld at the test network boundary (no SDK resend).
+  A Pod issuing four-second tokens refuses expired ones with and without a
+  Bearer challenge; the overview recipe renews expired tokens before dispatch,
+  so the Pod never receives one, and a refused renewal ends in a visible
+  sign-in that recovers. Renewal within the margin before expiry is covered by
+  unit tests.
 
 The consumer harness uses npm to install exact SDK tarballs and exact direct test
 versions; normal workspace development uses pinned pnpm. Consumer directories are
