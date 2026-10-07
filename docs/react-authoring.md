@@ -51,7 +51,9 @@ several connections are saved, the active-Pod selector, so a restore that does n
 settle never blocks switching Pods. A custom `components.Connections` is replaced
 by the loading status alone. The connection view (with its addresses and actions)
 appears when something needs a decision, such as an ended session or missing
-required scopes, or when the host opens it with `open`. The context picker lists readable contexts only and says so when the
+required scopes; while a demanded catalogue loads, in `'required'` mode or under a
+mounted `TargetScreen`, with its pending-catalogue notice before the Context
+choice; or when the host opens it with `open`. The context picker lists readable contexts only and says so when the
 Pod grants none. Unavailable session storage prevents startup; controls
 remain blocked with a reload notice (there is no in-memory session fallback).
 `AppShell`, `ConnectionControls` and fully custom layouts remain supported;
