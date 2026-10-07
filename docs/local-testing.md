@@ -112,6 +112,7 @@ Report a manual uncertainty check as untested if you cannot reproduce it safely.
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | Callback is a 404 or shows a hosting error | Serve the same app at `/callback`; for a subpath, use its matching callback and rewrite                         |
 | Callback rejected or login appears lost    | Exact app origin/path, app DID, stable port, stored attempt, fresh sign-in; use [recovery](migration.md)        |
+| Pod rejects the deployed app at sign-in    | Pod's host allow-list and [DID document](deployment.md#pods-that-also-require-a-did-document)                   |
 | Discovery fails                            | Full Pod URL, advertised endpoints, HTTPS/loopback policy, network and server version                           |
 | Browser reports CORS                       | Pod/proxy OPTIONS handling and exposed headers; keep SDK requests cookie-free                                   |
 | No contexts or no write controls           | Actual context grants and current catalogue; feature scopes are separate                                        |
