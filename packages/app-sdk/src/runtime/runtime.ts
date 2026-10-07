@@ -261,6 +261,7 @@ export function createBrowserRuntime(
     e: Entry,
     refused: AuthCredential,
     signal?: AbortSignal,
+    ahead = false,
   ): Promise<boolean> {
     const generation = e.generation;
     if (!eligible(e, generation) || !e.credentials)
@@ -272,11 +273,6 @@ export function createBrowserRuntime(
         end(e, new RuntimeError('expired'));
         return Promise.resolve(false);
       }
-      e.view = {
-        ...e.view,
-        session: Object.freeze({ kind: 'renewing', subject: before.subject }),
-      };
-      publish();
       const operation = (async () => {
         let consumed = false;
         try {
@@ -345,10 +341,19 @@ export function createBrowserRuntime(
           if (e.generation === generation) delete e.refresh;
         }
       })();
+      // Register the shared renewal before notifying subscribers: a read they
+      // start in response joins it instead of starting another one.
       e.refresh = operation;
+      if (ahead) e.ahead = operation;
+      e.view = {
+        ...e.view,
+        session: Object.freeze({ kind: 'renewing', subject: before.subject }),
+      };
+      publish();
+    } else if (!ahead && refused === e.credential) {
+      // The Pod refused the current credential: later requests wait for the renewal.
+      delete e.ahead;
     }
-    // The Pod refused the current credential: later requests wait for the renewal.
-    if (refused === e.credential) delete e.ahead;
     return waitFor(e.refresh, e.lifetime.signal, signal).catch(() => false);
   }
   /**
@@ -366,8 +371,7 @@ export function createBrowserRuntime(
     const margin = Math.min(RENEWAL_MARGIN, Math.max(lifetime, 0) / 2);
     if (now < credentials.expiresAt - margin) return;
     if (!credentials.refreshToken && now < credentials.expiresAt) return;
-    void renew(e, e.credential);
-    if (e.refresh) e.ahead = e.refresh;
+    void renew(e, e.credential, undefined, true);
   }
   function createEntry(
     pod: PodDiscovery,

@@ -191,6 +191,30 @@ it('waits for an early renewal once the Pod refused the still-valid credential',
   expect(sent[1]).not.toBe(sent[0]);
 });
 
+it('shares one renewal with a read a subscriber starts on the renewing snapshot', async () => {
+  const f = await logged();
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+  const exchanged = tokenRequests(f).length;
+  advance(3600_000 - 30_000);
+  let nested: Promise<unknown> | undefined;
+  const stop = f.runtime.subscribe(() => {
+    if (nested || f.runtime.getSnapshot()[0]?.session.kind !== 'renewing')
+      return;
+    nested = f.view.sparql.construct(query);
+  });
+  try {
+    expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+    expect(nested).toBeDefined();
+    expect(await nested).toMatchObject({ kind: 'ok' });
+  } finally {
+    stop();
+  }
+  await vi.waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
+  expect(tokenRequests(f)).toHaveLength(exchanged + 1);
+});
+
 it('keeps a credential outside the renewal margin', async () => {
   const f = await logged();
   const exchanged = tokenRequests(f).length;
