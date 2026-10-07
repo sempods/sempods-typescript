@@ -57,4 +57,6 @@ existing catalogue/selection actions. The copyable Pod-overview recipe is new
 app-owned example code using public exports. Its packed Chromium and React tests
 use synthetic transports/loopback responses, including native browser storage and
 real PKCE redirects. This establishes package composition and request behavior;
-live scale evidence remains separate in #40, with no new device-support claim.
+scale evidence against a local reference server is in #40, and evidence on a
+deployed Pod and in a real browser remains separate in #52, with no new
+device-support claim.

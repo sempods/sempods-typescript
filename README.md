@@ -57,8 +57,10 @@ Context enumeration, and the field definitions used by browser apps. See
 [Pod reads](packages/client-sdk/README.md#reading-across-the-pod) and
 [React Pod overviews](docs/react-authoring.md#pod-overviews-with-contexts-on-demand).
 The runtime supplies independent readers; React/controller on-demand mode keeps
-overview startup and recovery free of Context discovery. Live scale evidence is
-tracked in [#40](https://github.com/sempods/sempods-typescript/issues/40).
+overview startup and recovery free of Context discovery. Scale evidence against a
+local reference server is in [#40](https://github.com/sempods/sempods-typescript/issues/40);
+evidence on a deployed Pod and in a real browser is tracked in
+[#52](https://github.com/sempods/sempods-typescript/issues/52).
 [Architecture decisions](docs/decisions.md) explain these boundaries.
 
 For all guides and contributor workflows, use the [documentation map](docs/README.md).

@@ -117,8 +117,10 @@ response; no paging, description sweep or per-Context query fallback is introduc
 
 _Why:_ a Pod overview should not pay for Context discovery, while editing still
 requires explicit, validated Context authority. One loader and the existing
-coordinator keep these paths small and consistent. Live scale evidence remains
-tracked in [#40](https://github.com/sempods/sempods-typescript/issues/40).
+coordinator keep these paths small and consistent. Scale evidence against a local
+reference server is in [#40](https://github.com/sempods/sempods-typescript/issues/40);
+evidence on a deployed Pod and in a real browser is tracked in
+[#52](https://github.com/sempods/sempods-typescript/issues/52).
 
 A reload may reselect the context the person chose last for that connection.
 That is their own explicit choice, remembered as a browser preference rather
