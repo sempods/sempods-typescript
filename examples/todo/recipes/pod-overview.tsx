@@ -132,7 +132,7 @@ function EditInContext({
   readonly onClose: () => void;
 }) {
   const app = useApp();
-  const { connections, activeId } = useAppState();
+  const { connections, activeId, changing, confirmingLeave } = useAppState();
   const view = useView();
   const connection = connections.find((c) => c.id === activeId);
   const catalogue = connection?.catalogue;
@@ -140,11 +140,24 @@ function EditInContext({
     catalogue?.kind === 'ready' &&
     catalogue.contexts.some((c) => c.iri === target.graph && c.readable);
   const selected = connection?.selectedContext ?? null;
+  const close = useRef(onClose);
+  close.current = onClose;
+  // One selection attempt per Context, also across StrictMode's repeated effects.
+  const attempt = useRef<string | null>(null);
   useEffect(() => {
-    // Guarded like any Context change: open drafts elsewhere ask before leaving.
-    if (readable && selected !== target.graph)
-      void app.selectContext(target.graph);
-  }, [app, readable, selected, target.graph]);
+    if (!readable || selected === target.graph) return;
+    // The Edit click itself runs as a guarded navigation; select only once it settled.
+    if (changing || confirmingLeave || attempt.current === target.graph) return;
+    const graph = target.graph;
+    attempt.current = graph;
+    // Guarded like any Context change: drafts elsewhere ask before leaving. When the
+    // person keeps them, close this editor instead of leaving an empty shell open.
+    void app.selectContext(graph).then((accepted) => {
+      if (attempt.current !== graph) return;
+      attempt.current = null;
+      if (!accepted) close.current();
+    });
+  }, [app, readable, selected, target.graph, changing, confirmingLeave]);
   return (
     <section aria-label="Edit note">
       {catalogue?.kind === 'ready' && !readable && (

@@ -364,9 +364,16 @@ try {
           ],
           ['http://www.w3.org/ns/sparql-service-description#namedGraph']: [
             { '@id': base + '/_system/contexts/work' },
+            // The overview Pod's second Context holds a note in another Context.
+            ...(name === 'overview-pod'
+              ? [{ '@id': base + '/_system/contexts/notes' }]
+              : []),
           ],
           ['https://schema.sempods.org/readableContext']: [
             { '@id': base + '/_system/contexts/work' },
+            ...(name === 'overview-pod'
+              ? [{ '@id': base + '/_system/contexts/notes' }]
+              : []),
           ],
           ['https://schema.sempods.org/writableContext']: [
             { '@id': base + '/_system/contexts/work' },
@@ -470,6 +477,13 @@ try {
                       graph: {
                         type: 'uri',
                         value: base + '/_system/contexts/work',
+                      },
+                    },
+                    {
+                      item: { type: 'uri', value: 'urn:second-note' },
+                      graph: {
+                        type: 'uri',
+                        value: base + '/_system/contexts/notes',
                       },
                     },
                   ],
@@ -1097,8 +1111,18 @@ try {
     .click();
   await editRegion.waitFor({ state: 'detached' });
   assert.equal(overviewNoteWrites, 1);
+  // Editing a row in another Context while a draft exists in this one: declining
+  // the Context change keeps the draft and leaves no empty editor behind.
+  await page.getByLabel('New note').fill('Draft elsewhere');
+  await page.getByRole('button', { name: 'Edit urn:second-note' }).click();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await editRegion.waitFor({ state: 'detached' });
+  assert.equal(
+    await page.getByLabel('New note').inputValue(),
+    'Draft elsewhere',
+  );
   console.log(
-    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close) passed.',
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change) passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
