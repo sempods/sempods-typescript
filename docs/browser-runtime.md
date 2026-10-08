@@ -32,10 +32,11 @@ const report = await runtime.initialize();
 
 // Call from the host's sign-in button after startup.
 async function signIn(podUrl: string) {
-  if (report.storage !== 'durable') {
-    throw new Error(
-      'Restore browser storage or close the other active tab first.',
-    );
+  if (report.storage === 'busy') {
+    throw new Error('Close the other active tab, then reload this page.');
+  }
+  if (report.storage === 'unavailable') {
+    throw new Error('Restore browser storage access, then reload this page.');
   }
 
   const connection = await runtime.connect(podUrl);
@@ -104,6 +105,9 @@ const runtime = createBrowserRuntime({
   scopes: { required: [], optional: [] },
 });
 ```
+
+`runtime.preset` and `useAppState().preset` expose this frozen configuration
+as `PodPreset | undefined`. `PodPreset` is exported by `@sempods/app-sdk`.
 
 The runtime validates and copies the preset at construction. An invalid Pod URL
 throws the client's `SdkError` with `reason.code: 'invalid-pod-url'`; an invalid
@@ -352,7 +356,9 @@ A second tab reports `busy`; lack of durable storage or coordination (no Web
 Locks, `locks: null`) does not silently fall back to memory and leaves stored
 records untouched, so a later start with coordination restores them. The runtime
 requests its lock only if available and never steals it from another tab: the
-holder keeps working until it is closed or disposed. A store closed by a newer
+holder keeps working until it is closed or disposed. The
+runtime never retries a busy startup: after closing the holder, reload the busy
+page to create a fresh runtime and acquire the lease. A store closed by a newer
 database version (`versionchange`, e.g. after an upgrade in another tab) stays
 closed for this runtime; renewals then end the session with `storage`. Call
 `dispose()` on application shutdown to release the lease. See [React/headless authoring](react-authoring.md) for lifecycle integration.

@@ -216,6 +216,24 @@ try {
     plain,
   );
 
+  // Recipes must also work for consumers with indexed-access checks enabled.
+  await json(join(plain, 'tsconfig.recipes.json'), {
+    compilerOptions: {
+      ...strict,
+      module: 'NodeNext',
+      moduleResolution: 'NodeNext',
+      lib: ['ES2022'],
+      types: ['node'],
+      noEmit: true,
+    },
+    files: recipeFiles,
+  });
+  run(
+    process.execPath,
+    ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.recipes.json'],
+    plain,
+  );
+
   // The ordinary browser consumer deliberately uses OAuth and app-sdk too.
   // Inspect a separate root-only graph, retaining all exports and imports.
   await cp(

@@ -77,6 +77,9 @@ and the runnable [TODO example](https://github.com/sempods/sempods-typescript/bl
   fallback to another context. Context grants and feature scopes remain separate;
   the Pod authorizes every operation.
 
+`runtime.preset` and `useAppState().preset` expose the frozen default as
+`PodPreset | undefined`; `PodPreset` is exported by the root entry.
+
 The runtime supports dynamic/did:web Code + PKCE login, IndexedDB sessions,
 sequential multi-Pod connections and shared renewal before expiry or after a
 refused request. Screens receive bound views/readers without credentials.
@@ -108,6 +111,13 @@ choices. `SempodsProvider` accepts locale/message options; SDK controls share
 inherited `--sempods-*` styling tokens. Translating or theming the screen preserves
 its drafts. The [authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.4.0/docs/react-authoring.md)
 shows message overrides, custom controls and non-React composition.
+
+Override individual failure texts with `messages.errors[code]` as well as UI
+text with `messages.controls`. Overrides are partial: new SDK failure codes
+keep their defaults without requiring app changes. For headless presentation,
+`createLocale(options).error(cause)` formats a caught cause;
+`describeFailure(errors, reason)` formats an already structured failure using
+a complete message catalog. Both helpers omit diagnostic details.
 
 This package ships its app-author reference at the same version as the code.
 Point your coding assistant to

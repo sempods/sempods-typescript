@@ -155,7 +155,10 @@ default is `'required'`. See
 
 A host supplies the context view and authentication; the
 [Node example](https://github.com/sempods/sempods-typescript/blob/v0.4.0/examples/node-script/README.md)
-shows that setup. This helper changes only the title at the version it reads:
+shows that setup. This helper replaces all `schema:name` values with one
+untagged string at the version it reads. JSON Merge Patch replaces an array
+wholesale, so names in other languages or with other datatypes are removed too.
+Use the field-editing helpers below to preserve those values.
 
 ```ts
 import type { ContextView } from '@sempods/client-sdk';
@@ -342,7 +345,9 @@ conflict recovery. It works with a client `ContextView` and with an app-sdk
 These helpers show creation, a snapshot-based row action and a one-shot edit.
 `addTask` returns the captured creation command with its outcome; retain it for
 recovery instead of calling `addTask` again after an unconfirmed answer.
-`completeTask` returns `null` when there is no matching supported task.
+`listTasks` loads supported rows; pass an original row snapshot from that result
+to `completeTask` with the same context view. Completing a row does not reload
+the list. For a known IRI without a snapshot, use an editor as below.
 A browser form normally keeps its editor alive for the screen's lifetime;
 `renameWithEditor` returns the outcome and editor state for inspection, then
 disposes the editor. Keep it alive if the caller needs to continue recovery
@@ -350,6 +355,7 @@ through the editor's review actions.
 
 ```ts
 import type { ContextView } from '@sempods/client-sdk';
+import type { Snapshot } from '@sempods/client-sdk/edit';
 import {
   createResourceEditor,
   fields,
@@ -388,13 +394,13 @@ export async function addTask(tasks: ContextView, title: string) {
   return { iri, creation, outcome: await creation.run() };
 }
 
-export async function completeTask(tasks: ContextView, taskIri: string) {
-  const list = await listSubjects(tasks, task);
-  if (list.kind !== 'ok') return list;
+export function listTasks(tasks: ContextView) {
+  return listSubjects(tasks, task);
+}
 
-  const item = list.body.items.find((item) => item.iri === taskIri);
-  if (!item) return null; // No matching, supported task in this context.
+type Task = ReturnType<typeof task.read>;
 
+export function completeTask(tasks: ContextView, item: Snapshot<Task>) {
   // Pass the original snapshot, including evidence of the fields that were read.
   return updateFields(tasks, item, task, { done: true });
 }

@@ -1490,14 +1490,38 @@ try {
       )
     ).stdout;
   const created = await node(['create', 'Node task']);
-  assert.match(created, /created/);
-  const iri = created.split(' ')[0];
+  const { iri, outcome } = JSON.parse(created);
+  assert.equal(outcome.kind, 'created');
+  assert.equal(
+    JSON.parse(await node(['create-at', iri, 'Node task'])).outcome.kind,
+    'exists',
+  );
+  // Repeating the same IRI cannot duplicate it; a fresh IRI can be created explicitly.
+  assert.equal(JSON.parse(await node(['list'])).length, 1);
+  const explicitIri = 'urn:uuid:node-create-at';
+  assert.equal(
+    JSON.parse(await node(['create-at', explicitIri, 'Explicit Node task']))
+      .outcome.kind,
+    'created',
+  );
+  assert.equal(
+    JSON.parse(await node(['delete', explicitIri])).outcome.kind,
+    'removed',
+  );
   assert.equal(JSON.parse(await node(['list']))[0].title, 'Node task');
-  assert.match(await node(['rename', iri, 'Renamed in Node']), /saved/);
-  assert.match(await node(['complete', iri]), /saved/);
+  assert.equal(
+    JSON.parse(await node(['rename', iri, 'Renamed in Node'])).outcome.kind,
+    'saved',
+  );
+  assert.equal(
+    JSON.parse(await node(['rename', iri, ' '])).outcome.kind,
+    'not-saved',
+  );
+  assert.equal(JSON.parse(await node(['list']))[0].title, 'Renamed in Node');
+  assert.equal(JSON.parse(await node(['complete', iri])).outcome.kind, 'saved');
   assert.equal(JSON.parse(await node(['list']))[0].done, true);
-  assert.match(await node(['reopen', iri]), /saved/);
-  assert.match(await node(['delete', iri]), /removed/);
+  assert.equal(JSON.parse(await node(['reopen', iri])).outcome.kind, 'saved');
+  assert.equal(JSON.parse(await node(['delete', iri])).outcome.kind, 'removed');
   assert.deepEqual(JSON.parse(await node(['list'])), []);
   assert.deepEqual(serverErrors, []);
   console.log(

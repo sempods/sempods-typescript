@@ -580,6 +580,18 @@ EN/DE messages, `locale`/`timeZone` control formatting, and `direction` controls
 direction. RDF text language is selected explicitly in domain field definitions;
 a UI-language change never changes the RDF slot being edited.
 
+Failure text is overridden per code with `messages.errors`, independently of
+`messages.controls`. For example, `messages={{ errors: { catalogue: () =>
+'The context list could not be loaded.' } }}` replaces only that failure's text;
+other codes keep the SDK defaults. Overrides are partial, so adding a failure
+code to the SDK does not require changes to an app's overrides.
+
+For headless presentation, `createLocale(options).error(cause)` converts a caught
+cause to structured failure text using the same defaults and overrides.
+`describeFailure(errors, reason)` accepts a complete `FailureMessages` catalog
+and an already structured `SdkFailure`. Both helpers are exported from
+`@sempods/app-sdk`; they present messages without showing diagnostic details.
+
 The default confirmation has keyboard focus, Escape cancellation and focus
 restoration. TODO inputs/buttons use visible focus and mobile touch targets.
 Applications retain responsibility for labels and accessibility of custom fields.
