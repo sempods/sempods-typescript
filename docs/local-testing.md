@@ -32,8 +32,10 @@ not relax validation of a remote Pod or make the hosted Pod accept an unsupporte
 client policy. Enter its full HTTPS URL in the app's sign-in form, sign in on the Pod's page,
 grant only the test context, return to the app and explicitly select it.
 
-A successful sign-in without a writable context is not setup completion: the
-owner must create or grant one through their Pod's supported administration tools.
+A successful sign-in without a writable context is not setup completion for an
+app that writes; an [app that only reads](#test-an-app-that-only-reads) needs a
+readable one. The owner must create or grant it through their Pod's supported
+administration tools.
 Context administration is outside this SDK's current operation set. Do not fix
 missing access by inventing a scope or choosing a different context silently.
 
@@ -142,15 +144,15 @@ first. An explorer is often meant for a Pod with real data: connect it only afte
 the network check passed, with the person's explicit agreement, and record which
 contexts it reads in the app's notes.
 
-| Check                             | Expected observation                                                                                                             |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Connect and consent               | Only the contexts the app reads are granted; an on-demand overview loads without a context choice                                |
-| Loading, empty and failed         | Loading, an empty result and a failed read look different; a refused or failed read never shows as empty                         |
-| Read access only                  | Where the Pod lets you grant read access alone, the app works fully; `AppShell` may show its read-only notice, which is expected |
-| Remove read access, Context reads | For `useLoad`/`useList`, displayed data is cleared after revalidation; no fallback to another context                            |
-| Remove read access, Pod overview  | A `usePodLoad` result stays on screen; after `reload()` it no longer contains that Context's data                                |
-| No writes                         | The browser's network panel over a full session shows no `PUT`, `PATCH` or `DELETE`; `POST` only for queries and login           |
-| Reload, second tab, language      | As in the [complete walkthrough](#walk-through-one-complete-app)                                                                 |
+| Check                             | Expected observation                                                                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Connect and consent               | Only the contexts the app reads are granted; an on-demand overview loads without a context choice                                       |
+| Loading, empty and failed         | Loading, an empty result and a failed read look different; a refused or failed read never shows as empty                                |
+| Read access only                  | Where the Pod lets you grant read access alone, the app works fully; `AppShell` may show its read-only notice, which is expected        |
+| Remove read access, Context reads | For `useLoad`/`useList`, displayed data is cleared after revalidation; no fallback to another context                                   |
+| Remove read access, Pod overview  | A `usePodLoad` result stays on screen; after `reload()` it no longer contains that Context's data                                       |
+| No writes                         | The browser's network panel over a full session shows no `PUT`, `PATCH` or `DELETE`; `POST` only for queries, sign-in and token renewal |
+| Reload, second tab, language      | As in the [complete walkthrough](#walk-through-one-complete-app)                                                                        |
 
 Queries are sent as `POST` to the Pod's `/_system/sparql/query`; sign-in (client
 registration, token exchange) and token renewal also use `POST`. Treat any other
