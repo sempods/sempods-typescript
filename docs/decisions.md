@@ -231,6 +231,23 @@ need separate contracts and evidence.
 _Why:_ the small composition proves useful libraries with today's API while
 keeping session authority and pending work in one place. See [widgets](widgets.md).
 
+## Read-only is the app's choice, not a grant
+
+An app cannot ask a Pod for read access only. The standard delegation flow
+defines no way for an app to request per-context grants or a permission level;
+the person selects contexts at consent time
+([SPS-AUTH-024](https://github.com/sempods/sempods-spec/blob/5e2baab8a224e06a6759e39788b3e876e44293f5/spec/core/auth.md#SPS-AUTH-024)),
+and the Pod enforces what was granted. app-sdk has no read-only mode. An app that
+only reads leaves out the write APIs; a Pod overview through `BoundPod` has none
+to call. That restricts the app's code, not its authority, and the person
+consenting cannot see the difference.
+
+_Why:_ an SDK switch that disables write hooks would look like a permission while
+the granted access still allows writes. A read-only request that the consent
+screen can show needs a protocol decision first. Until then,
+[local testing](local-testing.md#test-an-app-that-only-reads) explains how to
+keep an app read-only and check it.
+
 ## Not implemented yet
 
 Preferred-language editing and multi-language maps, concurrently active tabs,
