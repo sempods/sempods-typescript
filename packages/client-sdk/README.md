@@ -153,22 +153,42 @@ default is `'required'`. See
 
 ## Reading and writing one context
 
+A host supplies the context view and authentication; the
+[Node example](https://github.com/sempods/sempods-typescript/blob/v0.4.0/examples/node-script/README.md)
+shows that setup. This helper replaces all `schema:name` values with one
+untagged string at the version it reads. JSON Merge Patch replaces an array
+wholesale, so names in other languages or with other datatypes are removed too.
+Use the field-editing helpers below to preserve those values.
+
 ```ts
-import { bearer, createPod } from '@sempods/client-sdk';
+import type { ContextView } from '@sempods/client-sdk';
 
-const pod = createPod('https://pods.example/alice', { auth: bearer(token) });
-const tasks = pod.context('https://pods.example/alice/_system/contexts/tasks');
+export async function renameTask(
+  tasks: ContextView,
+  taskIri: string,
+  title: string,
+) {
+  const read = await tasks.subjects.get(taskIri);
+  if (read.kind !== 'ok') return read;
 
-const read = await tasks.subjects.get(taskIri);
-if (read.kind === 'ok') {
-  const write = await tasks.subjects.patch(taskIri, change, {
-    ifMatch: read.etag,
-  });
-  if (write.kind === 'precondition-failed') {
-    /* changed on the pod: read again and decide */
-  }
+  return tasks.subjects.patch(
+    taskIri,
+    {
+      'https://schema.org/name': [
+        {
+          '@value': title,
+          '@type': 'http://www.w3.org/2001/XMLSchema#string',
+        },
+      ],
+    },
+    { ifMatch: read.etag },
+  );
 }
 ```
+
+Handle the returned outcome: `precondition-failed` means the resource changed
+between read and write; reread and decide. `uncertain` means the answer does not
+establish whether the write happened. For form editing, use the helpers below.
 
 Supported operations in 0.4 (Pod-wide `select` and `construct` are new in 0.4.0):
 
@@ -322,7 +342,20 @@ The app describes its fields once; the editor owns the version, the draft and
 conflict recovery. It works with a client `ContextView` and with an app-sdk
 `BoundView` (`ResourceSource` is the shared boundary).
 
+These helpers show creation, a snapshot-based row action and a one-shot edit.
+`addTask` returns the captured creation command with its outcome; retain it for
+recovery instead of calling `addTask` again after an unconfirmed answer.
+`listTasks` loads supported rows; pass an original row snapshot from that result
+to `completeTask` with the same context view. Completing a row does not reload
+the list. For a known IRI without a snapshot, use an editor as below.
+A browser form normally keeps its editor alive for the screen's lifetime;
+`renameWithEditor` returns the outcome and editor state for inspection, then
+disposes the editor. Keep it alive if the caller needs to continue recovery
+through the editor's review actions.
+
 ```ts
+import type { ContextView } from '@sempods/client-sdk';
+import type { Snapshot } from '@sempods/client-sdk/edit';
 import {
   createResourceEditor,
   fields,
@@ -349,27 +382,46 @@ const task = fields(
   { type: 'https://schema.org/Action' }, // lists and creation use it
 );
 
-// Create: the IRI is captured once, so running it again never duplicates.
-const iri = newSubjectIri(tasks, 'tasks');
-await prepareCreation(tasks, iri, task, {
-  title: 'Buy milk',
-  note: null,
-  done: false,
-}).run();
+export async function addTask(tasks: ContextView, title: string) {
+  const iri = newSubjectIri(tasks, 'tasks');
+  const creation = prepareCreation(tasks, iri, task, {
+    title,
+    note: null,
+    done: false,
+  });
 
-// List without SPARQL, then complete one with a click.
-const list = await listSubjects(tasks, task);
-if (list.kind === 'ok')
-  await updateFields(tasks, list.body.items[0]!, task, { done: true });
+  // Keep this command if recovery requires checking or retrying the same IRI.
+  return { iri, creation, outcome: await creation.run() };
+}
 
-// Edit: only the changed fields.
-const editor = createResourceEditor(tasks, iri, task); // starts reading
-editor.subscribe(() => render(editor.state)); // a UI acts on state.phase
-const opened = await editor.loaded; // a script waits for the first read
-if (opened.phase === 'ready') {
-  editor.change({ title: 'Buy oat milk' });
-  const outcome = await editor.save(); // 'saved' | 'review' | 'not-saved'
-} // otherwise `state.problem` says why (not-found, refused, not-mappable, …)
+export function listTasks(tasks: ContextView) {
+  return listSubjects(tasks, task);
+}
+
+type Task = ReturnType<typeof task.read>;
+
+export function completeTask(tasks: ContextView, item: Snapshot<Task>) {
+  // Pass the original snapshot, including evidence of the fields that were read.
+  return updateFields(tasks, item, task, { done: true });
+}
+
+export async function renameWithEditor(
+  tasks: ContextView,
+  taskIri: string,
+  title: string,
+) {
+  const editor = createResourceEditor(tasks, taskIri, task);
+  try {
+    const opened = await editor.loaded;
+    if (opened.phase !== 'ready') return opened;
+
+    editor.change({ title });
+    const outcome = await editor.save(); // saved, review or not-saved
+    return { outcome, state: editor.state }; // Retain draft and review evidence.
+  } finally {
+    editor.dispose();
+  }
+}
 ```
 
 - Fields: `text` (one value in a fixed language or untagged; other languages,
@@ -426,7 +478,7 @@ if (opened.phase === 'ready') {
   and `await` each `run()` before the next. Stop at the first result that is
   not `created` and leave the rest unsent; an `unconfirmed` item is retried
   only through its own creation, never under a new IRI.
-- Not in 0.1: preferred-language editing, `texts`, and merging two changes to
+- Not implemented yet: preferred-language editing, `texts`, and merging two changes to
   the same field.
 
 Discovered support is not a granted scope or context right. HTTPS is required;

@@ -581,6 +581,18 @@ EN/DE messages, `locale`/`timeZone` control formatting, and `direction` controls
 direction. RDF text language is selected explicitly in domain field definitions;
 a UI-language change never changes the RDF slot being edited.
 
+Failure text is overridden per code with `messages.errors`, independently of
+`messages.controls`. For example, `messages={{ errors: { catalogue: () =>
+'The context list could not be loaded.' } }}` replaces only that failure's text;
+other codes keep the SDK defaults. Overrides are partial, so adding a failure
+code to the SDK does not require changes to an app's overrides.
+
+For headless presentation, `createLocale(options).error(cause)` converts a caught
+cause to structured failure text using the same defaults and overrides.
+`describeFailure(errors, reason)` accepts a complete `FailureMessages` catalog
+and an already structured `SdkFailure`. Both helpers are exported from
+`@sempods/app-sdk`; they present messages without showing diagnostic details.
+
 The default confirmation has keyboard focus, Escape cancellation and focus
 restoration. TODO inputs/buttons use visible focus and mobile touch targets.
 Applications retain responsibility for labels and accessibility of custom fields.
@@ -674,9 +686,10 @@ PKCE callback, explicit context, reauthorization back to the remembered context,
 draft guards, EN/DE, each access
 fallback and the second-tab notice. Focused React tests also exercise callback
 failure alongside an active session and unconfirmed creation through read loss.
-These are synthetic fixtures, not live Pod or installed-PWA evidence. Enforced
-Pod sets, per-widget scopes, independent targets and new public gate APIs require
-separate contracts; this example does not implement them.
+These are synthetic fixtures, not live Pod or installed-PWA evidence. Enforce
+Pod sets with the runtime's existing `allowedPods` option; this recipe alone is
+a known-Pod UI. Per-widget scopes, independent targets and additional gate APIs
+remain separate design work.
 
 ## Several widgets in one host
 
@@ -725,9 +738,8 @@ mobile width and a busy second tab. It also executes the Node CRUD loop. Unit an
 React tests cover access/draft preservation, lifecycle and cancellation. These are
 fixture results, not live Kotlin compatibility or independent usability evidence.
 
-TODO and Node now consume the portable typed list/create/IRI helpers and partial
-changes. Their shared definitions replace the earlier handwritten SPARQL mapper
-and raw creation body. Live Pod evidence belongs to the quickstart validation;
+TODO and Node share portable field definitions, typed lists, captured creation
+commands and partial changes. Live Pod evidence belongs to the quickstart validation;
 the provisional Action profile does not settle the outstanding task-vocabulary
 or mixed-Action collection decisions.
 

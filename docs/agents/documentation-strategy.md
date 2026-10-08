@@ -30,6 +30,13 @@ constraints; link standards rather than copying their tutorials. Preserve useful
 rationale, but remove superseded wording instead of accumulating correction logs.
 Keep migration instructions when users still need them.
 
+Start guides with the task and a small working path before advanced constraints.
+Use descriptive names and blank lines between imports, configuration, requests
+and result handling. Keep examples on public exports, guard empty/absent results
+and show failures separately from empty data. Label composition fragments and
+application-specific placeholders; link a complete example alongside them.
+Prefer a few comments explaining intent over a running implementation diary.
+
 A behavior or public API change updates its defining comments, guides and affected
 examples in the same PR, or explains why none need changing. Distinguish fixture,
 packed-consumer, real-Pod, device and independent-human evidence. A TypeScript

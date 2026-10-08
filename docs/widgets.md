@@ -158,7 +158,7 @@ Duplicate modules do not bypass the browser's lease.
 
 ## Embedding profiles and limits
 
-| Profile                                    | Status of this increment                                                                                          |
+| Profile                                    | Current support                                                                                                   |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | Components imported into the host document | Demonstrated: two widgets, shared target, one runtime/provider.                                                   |
 | Standalone mini app                        | Use a host around one widget; deployment/installed-PWA evidence is separate.                                      |
