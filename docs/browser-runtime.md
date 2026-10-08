@@ -271,6 +271,9 @@ from catalogue facts, not a second login implementation. Read-only Pod queries u
 A `BoundView` exposes client subject/query operations without tokens. Its
 `key` stays stable through refresh and same-target access changes. Switching
 A → B → A creates a new lifetime; the old A view cannot become valid again.
+Write observation is per Context, not per handle, so the old and the new A
+handles share it: a save that was already under way through an editor on the
+old handle still refreshes lists on the new one when it is confirmed.
 Pending reads resolve promptly as `invalidated` after target/access changes;
 caller cancellation is `cancelled`. The shared loader (`createViewLoader`,
 used by `useLoad` and `usePodLoad`) owns the bounded silent retry. Writes preserve their original client result, including
@@ -324,6 +327,14 @@ pending reads nor change its target.
   disconnect or disposal) invalidate all of the connection's bindings, explicit
   and selected alike. Writes keep their actual result, as for every
   `BoundView`.
+- **Write observation.** Handles for the same Context of one authorization
+  lifetime share their write events and write-start counts. A confirmed write
+  made through the SDK's editors and hooks (`bindResourceEditor` or
+  `useResourceEditor`, `useCreation`, `useFieldUpdate`) on an explicit view
+  refreshes a `useList` on the selected view of that Context, and its start
+  retires success feedback across those handles. Direct `subjects`
+  writes on a view emit no write event. Nothing is shared across Contexts,
+  connections, subjects or generations, and this is no server subscription.
 
 ## Read the authorized Pod dataset
 

@@ -76,6 +76,9 @@ New in the next release:
 - `runtime.bindContext(id, contextIri)` binds a `BoundView` to an explicit
   Context without changing the selection, with its own read invalidation; see
   [bind an explicit Context](browser-runtime.md#bind-an-explicit-context).
+  Writes through the SDK's editors and hooks on it refresh lists and retire
+  success feedback on the selected view of the same Context, and the other way
+  round.
 - `AppAccess` accepts `podAddress="hidden"` to omit the Pod address from
   signing in when the runtime permits exactly one Pod. It defaults to
   `'visible'`, so existing apps are unchanged; see

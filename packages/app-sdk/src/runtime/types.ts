@@ -178,6 +178,11 @@ export interface BrowserRuntime {
    * Context, changed grants, session end, subject change, a new authorization
    * or disconnect invalidate its pending reads; a selection change does not.
    *
+   * It shares write observation with every other handle for the same Context of
+   * this authorization lifetime, including the selected view: writes made
+   * through the SDK's editors and hooks on either refresh the other's lists and
+   * retire its success feedback.
+   *
    * Throws `RuntimeError('disconnected')` without an eligible signed-in
    * session, and `RuntimeError('configuration')` for an IRI that is not a
    * Context of this connection's Pod, or for another Context than an exact

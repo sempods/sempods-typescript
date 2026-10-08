@@ -389,7 +389,10 @@ real browser is tracked in [#52](https://github.com/sempods/sempods-typescript/i
 `useList(definition, { type? })` is the ordinary typed-list path. It uses
 `listSubjects` through the same loader, exposing the same states/cancel/reload.
 It refreshes after a confirmed creation, row mutation or bound editor save/delete
-on that exact view. Explicitly cancelled lists stay cancelled until `reload()`.
+on the same target: one Context of the same connection, signed-in subject and
+authorization generation, through any of its handles (the selected view or an
+explicit one from `runtime.bindContext`). Explicitly cancelled lists stay
+cancelled until `reload()`.
 It does not poll, subscribe to other clients' writes or invalidate other Pods.
 An equal inline definition or `type` does not restart it; a real change reads again.
 
@@ -428,8 +431,8 @@ Use `<UpdateNotice {...creation.notice} />` and bind input disabled state to
 Creation, row and editor feedback on one target follow one rule, so notices
 rendered side by side describe the last write. A success (`created`, `saved`,
 `removed`) retires as soon as another `useCreation`, `useFieldUpdate` or
-`useResourceEditor` write starts on the same target, and is not shown if one
-started while it was pending. Writes through the client-sdk functions or an
+`useResourceEditor` write starts on the same target, through any of its
+handles, and is not shown if one started while it was pending. Writes through the client-sdk functions or an
 unbound editor do not take part. A failure stays until its own source acts
 again. An unresolved outcome (`unconfirmed`,
 `changed-on-pod`) stays until it is checked and acknowledged; a later success

@@ -230,6 +230,7 @@ export function createBrowserRuntime(
       if (previousSubject !== result.subject) {
         delete e.boundPod;
         delete e.explicit;
+        delete e.observations;
         delete e.bound;
       }
     }
@@ -245,6 +246,7 @@ export function createBrowserRuntime(
     resetLabels(e);
     delete e.boundPod;
     delete e.explicit;
+    delete e.observations;
     e.lifetime.abort(new RuntimeError('disconnected'));
     e.view = {
       ...e.view,
@@ -835,6 +837,7 @@ export function createBrowserRuntime(
         delete e.bound;
         delete e.boundPod;
         delete e.explicit;
+        delete e.observations;
         delete e.refresh;
         delete e.catalogue;
         delete e.revalidation;
@@ -887,6 +890,7 @@ export function createBrowserRuntime(
       resetLabels(e);
       delete e.boundPod;
       delete e.explicit;
+      delete e.observations;
       e.view = {
         ...e.view,
         session: Object.freeze({ kind: 'ended', problem: 'disconnected' }),
@@ -1013,6 +1017,7 @@ export function createBrowserRuntime(
         resetLabels(e);
         delete e.boundPod;
         delete e.explicit;
+        delete e.observations;
       }
       entries.clear();
       lease?.close();
