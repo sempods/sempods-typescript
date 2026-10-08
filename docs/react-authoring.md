@@ -365,8 +365,10 @@ An equal inline definition or `type` does not restart it; a real change reads ag
 unresolved outcomes together), `update`, `remove` and `notice`. Render
 `<UpdateNotice {...mutation.notice} />`: comparison reads the captured subject,
 shows the observed domain values (or explicit absence), refreshes local lists,
-and requires explicit acknowledgement without replay. A failed or unmappable
-comparison does not enable acknowledgement; list reload success is not required
+and requires explicit acknowledgement without replay. A failed comparison read
+does not enable acknowledgement. A present resource the definition cannot read is
+evidence too: the notice sets `unreadable` instead of `current`, shows no field
+comparison and enables acknowledgement. List reload success is not required
 because the exact-subject evidence is displayed in the notice itself.
 The raw `create(iri, body)` remains available; its typed overload is
 `create(iri, definition, draft)`. Ordinary forms use the creation hook instead.
@@ -377,7 +379,8 @@ be blank for the app's form; inline equivalent values are allowed. Changes are
 frozen copies. A pending command or uncertain result locks the draft in both UI
 and the change action. One subject IRI/command is captured until completion or
 explicitly settled recovery; nothing is replayed automatically. Confirmed creation
-or acknowledgement of present evidence resets only this creation's draft. If the
+or acknowledgement of present evidence resets only this creation's draft; an
+`unreadable` resource counts as present. If the
 comparison observes absence, acknowledgement keeps the draft and captured command:
 Create becomes available for an explicit retry of the same IRI and body with
 `If-None-Match: *`. The draft stays locked until recovery settles, including against
@@ -447,9 +450,10 @@ bound to `change` and disabled by `!creation.canEdit`, and Create disabled by
   (`canEdit` and `canCreate` are false). Settle it as described above: present
   evidence resets the draft; observed absence enables Create for the explicit
   retry of the same IRI and body.
-- `exists` or `not-created`: nothing was written. The item stays in the editable
-  draft. Create sends it again (`exists` under a new IRI, `not-created` under
-  the captured one); editing or clearing it is the person's choice.
+- `not-created`: nothing was written. The item stays in the editable draft.
+  Create sends it again under the captured IRI; editing or clearing it is the
+  person's choice. A taken IRI (`412`) is never reported as definitive: it
+  stays `unconfirmed`, because the resource there may be this creation's own.
 - `undefined`: usually nothing was sent, for example after write access was
   lost; the item stays in the editable draft and `outcome` is empty. But
   `create` also returns `undefined` when the target lifetime ended while the

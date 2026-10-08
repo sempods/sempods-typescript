@@ -1492,9 +1492,10 @@ try {
   const created = await node(['create', 'Node task']);
   const { iri, outcome } = JSON.parse(created);
   assert.equal(outcome.kind, 'created');
-  assert.equal(
-    JSON.parse(await node(['create-at', iri, 'Node task'])).outcome.kind,
-    'exists',
+  // A taken IRI is never definitive: it may hold this creation's own resource.
+  assert.deepEqual(
+    JSON.parse(await node(['create-at', iri, 'Node task'])).outcome,
+    { kind: 'unconfirmed', desiredObserved: true },
   );
   // Repeating the same IRI cannot duplicate it; a fresh IRI can be created explicitly.
   assert.equal(JSON.parse(await node(['list'])).length, 1);

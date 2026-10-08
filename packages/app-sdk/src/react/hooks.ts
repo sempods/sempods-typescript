@@ -351,6 +351,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     lane: typeof lane;
     version: number;
     value: D | null;
+    /** Present, but the definition cannot read it. */
+    unreadable: boolean;
   } | null>(null);
   useEffect(() => {
     lane.alive = true;
@@ -438,8 +440,16 @@ function useMutation<D>(definition: FieldDefinition<D>) {
       if (!eligible() || !lane.unresolved || lane.version !== version)
         return false;
       if (read.kind !== 'ok' && read.kind !== 'not-found') return false;
-      const value = read.kind === 'ok' ? definition.read(read.body) : null;
-      setEvidence({ lane, version, value });
+      let value: D | null = null;
+      let unreadable = false;
+      if (read.kind === 'ok')
+        try {
+          value = definition.read(read.body);
+        } catch {
+          // Still evidence of presence: settling must not depend on mapping it.
+          unreadable = true;
+        }
+      setEvidence({ lane, version, value, unreadable });
       lane.absent = read.kind === 'not-found';
       lane.checked = true;
       changed(view);
@@ -468,9 +478,15 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     notice: {
       outcome: visible?.outcome ?? null,
       current:
-        evidence?.lane === lane && evidence.version === lane.version
+        evidence?.lane === lane &&
+        evidence.version === lane.version &&
+        !evidence.unreadable
           ? evidence.value
           : undefined,
+      unreadable:
+        evidence?.lane === lane &&
+        evidence.version === lane.version &&
+        evidence.unreadable,
       onCheck: check,
       onAcknowledge: () => {
         if (lane.checked) acknowledge();
@@ -643,10 +659,6 @@ export function useCreation<D extends object>(
       const outcome = await mutation.execute('create', captured.iri, () =>
         captured.run(),
       );
-      // The generated IRI is taken: the next explicit create gets a fresh one.
-      // (A retry after a lost answer reports unconfirmed, never exists.)
-      if (outcome?.kind === 'exists' && command.current?.creation === captured)
-        command.current = null;
       if (outcome?.kind === 'created' && current.current === submitted) reset();
       return outcome;
     },

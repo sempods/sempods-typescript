@@ -486,6 +486,17 @@ and editor saves with strong `If-Match`, conflicts and unknown write outcomes.
 The unknown-outcome scenario applies the request on the server and deliberately
 withholds its answer at the test network boundary. The SDK does not resend it;
 this is not a guarantee against retries inside a browser's HTTP stack.
+Chromium 153 resends a request on its own when a reused keep-alive connection
+closes without an answer, also after the Pod applied it; on a fresh connection
+it reports a network error instead. The write conditions turn such a resend into
+a `412`, so nothing is applied twice, but the SDK sees the `412` instead of a lost
+answer. A creation therefore reports every failed create-only condition as
+`unconfirmed` and keeps its IRI; `desiredObserved` tells whether the IRI holds
+its body. An update reports a conflict. Its comparison usually shows that the
+Pod already holds the change, but it cannot prove it: the read may fail, or
+another writer may have changed the fields since. A resent deletion finds the resource gone: a Pod answering `412`
+yields a conflict, one answering `404` yields `not-removed` with reason
+`not-found`. Neither tells whether this deletion or another writer removed it.
 
 Supported environments: current browsers with IndexedDB and Web Locks in a
 normal browser tab; automated checks run in Chromium. Installed PWAs are

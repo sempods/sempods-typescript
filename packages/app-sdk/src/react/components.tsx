@@ -39,10 +39,13 @@ export function UpdateNotice({
   onCheck,
   onAcknowledge,
   current,
+  unreadable,
   labels,
 }: {
   /** Successfully read domain data, null for observed absence; undefined until compared. */
   readonly current?: unknown;
+  /** Compared: the resource is present, but the definition cannot read it. */
+  readonly unreadable?: boolean;
   /** Field display names for the comparison. */
   readonly labels?: FieldLabels;
   readonly onCheck?: () => Promise<boolean>;
@@ -83,10 +86,12 @@ export function UpdateNotice({
     <section data-sempods-ui="notice">
       <SdkStyles />
       <p role="status">{text}</p>
-      {uncertain && current !== undefined && (
+      {uncertain && (current !== undefined || unreadable) && (
         <section aria-label={m.current}>
           <h3>{m.current}</h3>
-          {current === null ? (
+          {unreadable ? (
+            <p>{m.unreadable}</p>
+          ) : current === null ? (
             <p>{m.notPresent}</p>
           ) : (
             <Comparison value={current} labels={labels} />
