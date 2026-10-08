@@ -316,12 +316,14 @@ pending reads nor change its target.
   catalogue removes the permission, requests are not dispatched. A failed
   refresh keeps the retained evidence. A Context `403` uses the shared
   catalogue revalidation.
-- **Invalidation.** Each explicit Context has its own read domain. A permission
-  change for that Context cancels its pending reads, including a late answer
-  after access was lost and regained. Changed grants, session end, a changed
-  subject, a new authorization and disconnect do the same. Explicit views of
-  other Contexts and the selected view are unaffected. Writes keep their actual
-  result, as for every `BoundView`.
+- **Invalidation.** Each explicit Context has its own read domain. A
+  permission change for that Context cancels its pending reads, including a
+  late answer after access was lost and regained, and leaves explicit views of
+  other Contexts and the selected view unaffected. Connection-wide events
+  (changed grants, session end, a changed subject, a new authorization,
+  disconnect or disposal) invalidate all of the connection's bindings, explicit
+  and selected alike. Writes keep their actual result, as for every
+  `BoundView`.
 
 ## Read the authorized Pod dataset
 

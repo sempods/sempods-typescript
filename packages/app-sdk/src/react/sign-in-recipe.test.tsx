@@ -37,6 +37,17 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+/**
+ * The target-bound note. Before startup settles there is no view yet (#80) and
+ * the recipe shows a read-only placeholder inside a disabled fieldset.
+ */
+function liveNote() {
+  return waitFor(() => {
+    const input = screen.getByLabelText('Note') as HTMLInputElement;
+    expect(input.closest('fieldset[disabled]')).toBeNull();
+    return input;
+  });
+}
 async function connected(f = fixture()) {
   const session = await f.login();
   dispose.push(() => session.runtime.dispose());
@@ -123,7 +134,7 @@ it.each(['hidden', 'disabled', 'custom'] as const)(
         }
       />,
     );
-    const input = (await screen.findByLabelText('Note')) as HTMLInputElement;
+    const input = await liveNote();
     fireEvent.change(input, { target: { value: 'Unfinished' } });
     input.focus();
     f.setCatalogue(async () => catalogue([work, personal], []));
@@ -158,7 +169,7 @@ it('keeps an unconfirmed creation notice outside hidden content and guards sign-
     throw new TypeError('lost answer');
   });
   render(<KnownPodExample runtime={f.runtime} podUrl={pod} />);
-  fireEvent.change(await screen.findByLabelText('Note'), {
+  fireEvent.change(await liveNote(), {
     target: { value: 'One captured note' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -189,7 +200,7 @@ it.each(['failed', 'cancelled'] as const)(
       unreadable: [],
     });
     render(<KnownPodExample runtime={f.runtime} podUrl={pod} />);
-    const input = (await screen.findByLabelText('Note')) as HTMLInputElement;
+    const input = await liveNote();
     expect(screen.getByRole('alert')).toBeTruthy();
     expect(input.disabled).toBe(false);
     fireEvent.change(input, { target: { value: 'Still mine' } });
@@ -208,7 +219,7 @@ it.each(['failed', 'cancelled'] as const)(
 it('guards a context change and keeps one runtime alive after unmount', async () => {
   const f = await connected();
   const mounted = render(<KnownPodExample runtime={f.runtime} podUrl={pod} />);
-  fireEvent.change(await screen.findByLabelText('Note'), {
+  fireEvent.change(await liveNote(), {
     target: { value: 'Keep me' },
   });
   fireEvent.change(screen.getByRole('combobox'), {
@@ -228,7 +239,7 @@ it.each(['required', 'optional'] as const)(
   async (kind) => {
     const f = await connected(fixture({ scopes: { [kind]: ['notes'] } }));
     render(<KnownPodExample runtime={f.runtime} podUrl={pod} />);
-    const input = (await screen.findByLabelText('Note')) as HTMLInputElement;
+    const input = await liveNote();
     expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active');
     expect(Boolean(input.closest('[hidden]'))).toBe(kind === 'required');
     expect(input.disabled).toBe(kind === 'required');
@@ -246,7 +257,7 @@ it('keeps the target mounted during renewal and retains its draft when the sessi
       }),
   );
   render(<KnownPodExample runtime={f.runtime} podUrl={pod} />);
-  const input = (await screen.findByLabelText('Note')) as HTMLInputElement;
+  const input = await liveNote();
   fireEvent.change(input, { target: { value: 'Still my draft' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   await waitFor(() =>
