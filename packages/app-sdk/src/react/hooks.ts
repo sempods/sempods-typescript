@@ -473,8 +473,9 @@ export function useContextEditor<D>(
   const bound = binding === 'refused' ? null : binding;
   const activated = state?.activated ?? false;
   const live = liveLane(state, activeId);
-  // Only the originating connection may demand discovery for this target.
-  useContextDemand(live && binding !== 'refused');
+  // Only the originating connection may demand discovery for this target, and
+  // only once the runtime accepted the binding: a refused target sends nothing.
+  useContextDemand(live && bound !== null);
   const catalogue = live
     ? connections.find((c) => c.id === lane!.connection)?.catalogue
     : undefined;

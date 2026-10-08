@@ -106,7 +106,9 @@ Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
 validated Context's label is fetched; cached labels never gate selection or
 reads. After 0.4.1, `useContextEditor` edits an overview row in the Context its
 `GRAPH` binding names, without changing the selection. The [copyable 0.4.1 Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.4.1/examples/todo/recipes/pod-overview.tsx)
-still does this in app code.
+rereads and conditionally saves the row in its Context in app code, but selects
+that Context to do so, which can prompt about or retarget other Context-bound
+drafts; editing without changing the selection is new with the hook.
 
 ## Presentation and documentation
 

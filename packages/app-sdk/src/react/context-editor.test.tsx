@@ -401,6 +401,8 @@ it.each([
     await waitFor(() => expect(phase()).toBe('unavailable:refused'));
     await act(async () => {});
     expect(reads).toEqual([]);
+    // Not even the catalogue is requested for a refused target.
+    expect(f.count('/_system/contexts')).toBe(0);
     expect(select).not.toHaveBeenCalled();
     expect(f.runtime.getSnapshot()[0]?.selectedContext ?? null).not.toBe(work);
     fireEvent.click(screen.getByText('Close editor'));
@@ -532,9 +534,7 @@ it('binds nothing until startup settles', async () => {
   const bind = vi.spyOn(f.runtime, 'bindContext');
   render(ui(f.runtime));
   await open('Edit urn:a in work');
-  await waitFor(() =>
-    expect(f.runtime.getSnapshot()[0]?.catalogue.kind).toBe('ready'),
-  );
+  await act(async () => {});
   expect(phase()).toBe('loading');
   expect(bind).not.toHaveBeenCalled();
   expect(reads).toEqual([]);

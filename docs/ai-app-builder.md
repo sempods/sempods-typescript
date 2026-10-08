@@ -116,7 +116,9 @@ not instructions to the coding assistant.
   retry. The default `'required'` policy preserves ordinary CRUD startup.
   `useWorkflowAccess` stays Context-only. Query rows are read-only pointers: to
   edit an existing item, reread it in its explicit Context with its ETag. With
-  0.4.1, follow the installed overview recipe, which does this in app code.
+  0.4.1, follow the installed overview recipe, which does this in app code by
+  selecting the row's Context, so other Context-bound drafts may be asked about
+  first.
   After 0.4.1, pass the row's subject and its `GRAPH` Context to `open` of
   `useContextEditor(definition)` instead. It binds that Context without changing
   the selection, rereads the item there and saves with its ETag. Render its
