@@ -365,8 +365,10 @@ An equal inline definition or `type` does not restart it; a real change reads ag
 unresolved outcomes together), `update`, `remove` and `notice`. Render
 `<UpdateNotice {...mutation.notice} />`: comparison reads the captured subject,
 shows the observed domain values (or explicit absence), refreshes local lists,
-and requires explicit acknowledgement without replay. A failed or unmappable
-comparison does not enable acknowledgement; list reload success is not required
+and requires explicit acknowledgement without replay. A failed comparison read
+does not enable acknowledgement. A present resource the definition cannot read is
+evidence too: the notice sets `unreadable` instead of `current`, shows no field
+comparison and enables acknowledgement. List reload success is not required
 because the exact-subject evidence is displayed in the notice itself.
 The raw `create(iri, body)` remains available; its typed overload is
 `create(iri, definition, draft)`. Ordinary forms use the creation hook instead.
@@ -377,9 +379,8 @@ be blank for the app's form; inline equivalent values are allowed. Changes are
 frozen copies. A pending command or uncertain result locks the draft in both UI
 and the change action. One subject IRI/command is captured until completion or
 explicitly settled recovery; nothing is replayed automatically. Confirmed creation
-or acknowledgement of present evidence resets only this creation's draft. A
-resource the definition cannot read also counts as present: the notice then sets
-`unreadable` instead of `current` and shows no field comparison. If the
+or acknowledgement of present evidence resets only this creation's draft; an
+`unreadable` resource counts as present. If the
 comparison observes absence, acknowledgement keeps the draft and captured command:
 Create becomes available for an explicit retry of the same IRI and body with
 `If-None-Match: *`. The draft stays locked until recovery settles, including against
