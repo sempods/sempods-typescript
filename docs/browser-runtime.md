@@ -410,7 +410,12 @@ Bearer challenge, the client requests renewal and may resend once. A `401`
 without a challenge does not trigger renewal or a resend, because
 [SPS-CORE-015](https://github.com/sempods/sempods-spec/blob/5e2baab8a224e06a6759e39788b3e876e44293f5/spec/core/index.md#SPS-CORE-015)
 requires a Bearer challenge for a rejected token; such a Pod still works as long
-as it honours the advertised token lifetime. Pods should answer an expired token
+as it honours the advertised token lifetime. If it refuses an unexpired token
+without a challenge, for example after revocation or a restart that lost its
+tokens, the session stays active and requests return `refused 401` until the
+renewal near the credential's own expiry, or until the session ends as
+`expired` without a refresh token. `beginAuthorization(id)` (**Update access**
+in the SDK components) recovers sooner. Pods should answer an expired token
 with `401` and `WWW-Authenticate: Bearer error="invalid_token"`, and expose that
 header to cross-origin apps.
 The runtime shares one refresh across callers; cancelling one waiter does not
