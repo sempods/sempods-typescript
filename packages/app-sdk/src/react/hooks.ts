@@ -242,9 +242,17 @@ export function useResourceEditor<D>(
   iri: string | null,
   definition: EditDefinition<D>,
 ) {
+  return useBoundEditor(iri, definition, 'useResourceEditor');
+}
+/** The editor lifetime behind `useResourceEditor`; `hook` names the caller in warnings. */
+function useBoundEditor<D>(
+  iri: string | null,
+  definition: EditDefinition<D>,
+  hook: string,
+) {
   const view = useView();
   const app = useController();
-  const { key, latest } = useDefinition(definition, 'useResourceEditor');
+  const { key, latest } = useDefinition(definition, hook);
   const [active, setActive] = useState<{
     view: BoundView;
     iri: string;
@@ -264,7 +272,7 @@ export function useResourceEditor<D>(
         before.editor.state.review !== null)
     )
       warn(
-        'useResourceEditor: the field definition changed for the same subject; its unsaved draft, pending write or open review was discarded.',
+        `${hook}: the field definition changed for the same subject; its unsaved draft, pending write or open review was discarded.`,
       );
     if (!view || !iri) {
       previous.current = null;
@@ -289,7 +297,8 @@ export function useResourceEditor<D>(
       editor.dispose();
     };
     // `key` stands for the definition (see useDefinition); `latest` is its ref.
-  }, [view, iri, key, app, latest]);
+    // `hook` only names the caller in a warning.
+  }, [view, iri, key, app, latest, hook]);
   const editor =
     active?.view === view && active.iri === iri && active.key === key
       ? active.editor
@@ -312,6 +321,7 @@ export type ContextEditorPhase =
 /** Why `useContextEditor` retired its target. */
 export type ContextEditorRetirement =
   'declined' | 'context-changed' | 'connection-changed';
+/** What `useContextEditor` returns: the opened target, its phase and, while ready, its editor. */
 export interface ContextEditor<D, U = D> {
   /** The opened target, kept while retired so the app can name it. */
   readonly target: ContextTarget | null;
@@ -344,9 +354,11 @@ interface ContextLane {
  *
  * - `idle`: nothing is open.
  * - `activating`: discovery or the selection is under way.
- * - `unavailable`: the catalogue does not list the Context as readable. The demand
- *   stays, so a later catalogue that lists it (for example after AppAccess's
- *   "Check access") still activates the target.
+ * - `unavailable`: the catalogue does not list the Context as readable, or
+ *   discovery failed. The demand stays, so a later catalogue that lists it (for
+ *   example after AppAccess's "Check access") still activates the target. While
+ *   the connection is signed out, the target stays `activating`; AppAccess
+ *   offers sign-in.
  * - `ready`: `editor` exists, for a view of exactly that Context.
  * - `retired`: the editor is gone and the hook never selects the old Context
  *   again. `reason` says why: the selection was `declined` (the person kept a
@@ -402,6 +414,10 @@ export function useContextEditor<D>(
     catalogue?.kind === 'ready' &&
     catalogue.contexts.some((c) => c.iri === lane.target.context && c.readable);
   const selected = connection?.selectedContext ?? null;
+  // Nothing more happens without the person: an explicit retry or other access.
+  // (Sessions are not checked: one is briefly `ended` while a callback completes.)
+  const stuck =
+    catalogue?.kind === 'failed' || (catalogue?.kind === 'ready' && !readable);
   // Another connection became active: the target belongs to the old one. This
   // also holds during a guarded change and before activation.
   useEffect(() => {
@@ -427,30 +443,34 @@ export function useContextEditor<D>(
       () => retire(lane, 'declined'),
     );
   }, [app, lane, live, changing, confirmingLeave, selected, readable, retire]);
-  const editor = useResourceEditor(
+  const editor = useBoundEditor(
     lane && live && view?.contextIri === lane.target.context
       ? lane.target.subject
       : null,
     definition,
+    'useContextEditor',
   );
+  // A connection change retires in the same render; the effect above keeps it.
+  const reason =
+    retired ?? (lane && !current ? ('connection-changed' as const) : null);
   const phase: ContextEditorPhase = !lane
     ? 'idle'
-    : retired
+    : reason
       ? 'retired'
       : editor
         ? 'ready'
-        : current && catalogue?.kind === 'ready' && !readable
+        : stuck
           ? 'unavailable'
           : 'activating';
   return {
     target: lane?.target ?? null,
     phase,
-    reason: retired,
+    reason,
     editor,
     open: (target) => {
       if (
         lane &&
-        retired === null &&
+        reason === null &&
         lane.target.subject === target.subject &&
         lane.target.context === target.context
       )

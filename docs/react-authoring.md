@@ -396,9 +396,11 @@ with its ETag (`If-Match`), like `useResourceEditor`. Opening another target and
 `close()` run under the leave policy, so an unsaved draft, an open review or a
 pending write asks first.
 
-`phase` is `idle`, `activating`, `unavailable` (the catalogue does not list the
-Context as readable; a later catalogue that lists it, for example after **Check
-access**, still activates it), `ready` or `retired`. A retired target has no
+`phase` is `idle`, `activating`, `unavailable`, `ready` or `retired`.
+`unavailable` means the catalogue does not list the Context as readable, or
+discovery failed. `AppAccess` offers **Check access**, and a later catalogue that
+lists the Context still activates it. While the connection is signed out, the
+target stays `activating` and `AppAccess` offers sign-in. A retired target has no
 editor, and the hook never selects its old Context again; `reason` says why:
 
 - `declined`: the guarded selection was declined (the person kept a draft

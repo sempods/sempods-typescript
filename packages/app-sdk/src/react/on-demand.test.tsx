@@ -1095,25 +1095,33 @@ it.each(['before', 'after'] as const)(
   },
 );
 
-it('reports an unreadable Context as unavailable until the catalogue lists it', async () => {
-  const f = await returned();
-  notes(f);
-  f.setCatalogue(async () => catalogue([personal], [personal]));
-  const select = vi.spyOn(f.runtime, 'selectContext');
-  render(
-    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
-      <RowEditor />
-    </SempodsProvider>,
-  );
-  await edit('Edit urn:a in work');
-  await waitFor(() => expect(phase()).toBe('unavailable'));
-  expect(select).not.toHaveBeenCalled();
-  // AppAccess offers the explicit retry for the demanded catalogue.
-  f.setCatalogue(async () => catalogue());
-  fireEvent.click(screen.getByRole('button', { name: 'Check access' }));
-  await waitFor(() => expect(title().value).toBe('A at work'));
-  expect(select.mock.calls).toEqual([[f.id, work]]);
-});
+it.each(['unreadable', 'refused', 'offline'] as const)(
+  'stays unavailable on %s discovery until the catalogue lists the Context',
+  async (mode) => {
+    const f = await returned();
+    notes(f);
+    f.setCatalogue(async () => {
+      if (mode === 'offline') throw new TypeError('offline');
+      return mode === 'refused'
+        ? new Response(null, { status: 403 })
+        : catalogue([personal], [personal]);
+    });
+    const select = vi.spyOn(f.runtime, 'selectContext');
+    render(
+      <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+        <RowEditor />
+      </SempodsProvider>,
+    );
+    await edit('Edit urn:a in work');
+    await waitFor(() => expect(phase()).toBe('unavailable'));
+    expect(select).not.toHaveBeenCalled();
+    // AppAccess offers the explicit retry for the demanded catalogue.
+    f.setCatalogue(async () => catalogue());
+    fireEvent.click(screen.getByRole('button', { name: 'Check access' }));
+    await waitFor(() => expect(title().value).toBe('A at work'));
+    expect(select.mock.calls).toEqual([[f.id, work]]);
+  },
+);
 
 it('keeps the editor and its draft through read loss after activation', async () => {
   const f = await returned();
