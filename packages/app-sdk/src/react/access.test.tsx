@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useRef, useState } from 'react';
+import { StrictMode, useRef, useState } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -645,6 +645,188 @@ it('shows only the loading status between the callback and a readable Pod reader
     listeners.forEach((listener) => listener());
   });
   expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+});
+
+/** Every state the access surface passes through, recorded from its first render. */
+function traceAccess() {
+  const states: string[] = [];
+  const observer = new MutationObserver(() => {
+    const section = document.querySelector('[data-sempods-access]');
+    if (!section) return;
+    const state = section.hasAttribute('hidden')
+      ? 'hidden'
+      : section.textContent?.includes('Full addresses')
+        ? 'connection'
+        : section.querySelector('[role="status"]')?.textContent === 'Loading…'
+          ? 'loading'
+          : 'other';
+    if (states.at(-1) !== state) states.push(state);
+  });
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    characterData: true,
+  });
+  cleanups.push(() => observer.disconnect());
+  return states;
+}
+
+it.each([
+  ['required', 'callback'],
+  ['required', 'restore'],
+  ['on-demand', 'callback'],
+  ['on-demand', 'restore'],
+] as const)(
+  'shows only the loading status while a demanded catalogue loads (%s, %s)',
+  async (mode, phase) => {
+    const f = fixture({ preset: { podUrl: pod, contextIri: work } });
+    let runtime: BrowserRuntime;
+    if (phase === 'callback') {
+      await f.begin();
+      f.runtime.dispose();
+      await settleLease();
+      runtime = f.returned();
+    } else {
+      const signed = await f.login();
+      signed.runtime.dispose();
+      await settleLease();
+      runtime = createBrowserRuntime(f.options);
+    }
+    cleanups.push(() => runtime.dispose());
+    const answer = deferred<void>();
+    f.setCatalogue(async () => {
+      await answer.promise;
+      return catalogue();
+    });
+    const states = traceAccess();
+    render(
+      <StrictMode>
+        <SempodsProvider runtime={runtime} contextSelection={mode}>
+          <AppAccess appName="Shopping" />
+          <Started />
+          <TargetScreen>
+            <p>Context screen</p>
+          </TargetScreen>
+        </SempodsProvider>
+      </StrictMode>,
+    );
+    await screen.findByText('started');
+    await waitFor(() =>
+      expect(runtime.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
+    );
+    expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
+    expectLoadingOnly();
+    await act(async () => answer.resolve());
+    await screen.findByText('Context screen');
+    expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+    // The preset Context settles the target: nothing for the person to decide.
+    expect(states).toEqual(['loading', 'hidden']);
+  },
+);
+
+it.each(['required', 'on-demand'] as const)(
+  'ends a demanded catalogue load at the chooser or the failure view (%s)',
+  async (mode) => {
+    for (const outcome of ['choice', 'failure'] as const) {
+      const f = fixture({ preferences: null });
+      await f.begin();
+      f.runtime.dispose();
+      await settleLease();
+      const runtime = f.returned();
+      const answer = deferred<void>();
+      f.setCatalogue(async () => {
+        await answer.promise;
+        return outcome === 'choice'
+          ? catalogue()
+          : new Response(null, { status: 503 });
+      });
+      const states = traceAccess();
+      const view = render(
+        <StrictMode>
+          <SempodsProvider runtime={runtime} contextSelection={mode}>
+            <AppAccess appName="Shopping" />
+            <Started />
+            <TargetScreen>
+              <p>Context screen</p>
+            </TargetScreen>
+          </SempodsProvider>
+        </StrictMode>,
+      );
+      await screen.findByText('started');
+      await waitFor(() =>
+        expect(runtime.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
+      );
+      expectLoadingOnly();
+      await act(async () => answer.resolve());
+      if (outcome === 'choice')
+        await screen.findByRole('combobox', { name: 'Data context' });
+      else
+        await screen.findByText(
+          'Context catalogue unavailable. Access is unknown.',
+        );
+      expect(states, outcome).toEqual(['loading', 'connection']);
+      // A reload the person starts keeps the connection view and its focus.
+      const check = screen.getByRole('button', { name: 'Check access' });
+      check.focus();
+      const again = deferred<void>();
+      f.setCatalogue(async () => {
+        await again.promise;
+        return catalogue();
+      });
+      fireEvent.click(check);
+      await waitFor(() =>
+        expect(runtime.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
+      );
+      expect(screen.getByRole('button', { name: 'Check access' })).toBe(check);
+      expect(document.activeElement).toBe(check);
+      await act(async () => again.resolve());
+      await screen.findByRole('combobox', { name: 'Data context' });
+      expect(states, outcome).toEqual(['loading', 'connection']);
+      view.unmount();
+      runtime.dispose();
+      await settleLease();
+    }
+  },
+);
+
+it('loads the first catalogue again after the host replaces the runtime', async () => {
+  const f = fixture({ preset: { podUrl: pod, contextIri: work } });
+  const signed = await f.login();
+  signed.runtime.dispose();
+  await settleLease();
+  const first = createBrowserRuntime(f.options);
+  const ui = (runtime: BrowserRuntime) => (
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Shopping" />
+      <TargetScreen>
+        <p>Context screen</p>
+      </TargetScreen>
+    </SempodsProvider>
+  );
+  const view = render(ui(first));
+  await screen.findByText('Context screen');
+  first.dispose();
+  await settleLease();
+  const answer = deferred<void>();
+  f.setCatalogue(async () => {
+    await answer.promise;
+    return catalogue();
+  });
+  const second = createBrowserRuntime(f.options);
+  cleanups.push(() => second.dispose());
+  const states = traceAccess();
+  view.rerender(ui(second));
+  await waitFor(() =>
+    expect(second.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
+  );
+  // The same connection ID restored by another runtime has not settled here.
+  expect(second.getSnapshot()[0]?.id).toBe(signed.id);
+  expect(second.getSnapshot()[0]?.session.kind).toBe('active');
+  expectLoadingOnly();
+  await act(async () => answer.resolve());
+  await screen.findByText('Context screen');
+  expect(states).not.toContain('connection');
 });
 
 /** Restarts [f]'s saved sessions with Pod discovery held (for [held] URLs) until the gate settles. */
