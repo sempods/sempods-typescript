@@ -96,7 +96,10 @@ an explicit, catalogue-checked Context without changing or remembering the
 selection. It always returns a handle of its own and keeps a read-invalidation
 domain per Context that selection changes never touch. Access follows the same
 retained catalogue evidence as the selected view. An exact preset `contextIri`
-also restricts explicit targets on its Pod.
+also restricts explicit targets on its Pod. Handles for one Context of one
+authorization lifetime share an internal write-observation identity owned by
+the connection, so writes through either refresh the other's lists; handle
+lifetimes and `key`s stay separate.
 
 Client-sdk and the browser runtime implement independent Pod readers.
 `BoundPod` invalidation depends on connection/session/grants, while Context

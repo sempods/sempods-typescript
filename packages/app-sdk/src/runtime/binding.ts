@@ -26,6 +26,28 @@ export interface ViewTarget {
   };
   /** Appended to the view key; distinguishes handle lifetimes. */
   readonly key: readonly unknown[];
+  /** Shared by every handle for the same Context of one authorization lifetime. */
+  readonly observation: object;
+}
+/**
+ * The write-observation identity of a bound target: one object per Context for
+ * the entry's authorization lifetime, cleared with its handles. Selected and
+ * explicit handles for the same Context share it; connections, subjects and
+ * generations never do.
+ */
+function observationFor(e: Entry, contextIri: string): object {
+  e.observations ??= new Map();
+  let observation = e.observations.get(contextIri);
+  if (!observation) e.observations.set(contextIri, (observation = {}));
+  return observation;
+}
+const observations = new WeakMap<BoundView, object>();
+/**
+ * What write observation keys by. A view created elsewhere, for example a test
+ * double, is its own identity.
+ */
+export function observationOf(view: BoundView): object {
+  return observations.get(view) ?? view;
 }
 /** The selected Context's target: one selection version, the entry's read domain. */
 export function selectedTarget(e: Entry): ViewTarget {
@@ -38,6 +60,7 @@ export function selectedTarget(e: Entry): ViewTarget {
       e.view.selectedContext === contextIri,
     reads: () => ({ epoch: e.epoch, signal: e.reads.signal }),
     key: [selectedVersion],
+    observation: observationFor(e, contextIri),
   };
 }
 /**
@@ -59,6 +82,7 @@ export function explicitTarget(e: Entry, contextIri: string): ViewTarget {
       return { epoch: domain.epoch, signal: domain.reads.signal };
     },
     key: ['explicit'],
+    observation: observationFor(e, contextIri),
   };
 }
 /** Invalidates pending reads of explicit Context views: one Context, or all of them. */
@@ -168,7 +192,7 @@ export function bindView(
     // Even if the target changed, a validated applied response remains applied to this original view.
     return result;
   }
-  return Object.freeze({
+  const view = Object.freeze({
     key: JSON.stringify([
       e.view.id,
       subject,
@@ -211,4 +235,6 @@ export function bindView(
         read(() => reads.sparql.construct(query, options), options),
     }),
   } satisfies BoundView);
+  observations.set(view, target.observation);
+  return view;
 }

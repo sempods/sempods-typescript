@@ -33,6 +33,8 @@ export interface Entry {
   boundPod?: BoundPod;
   /** Views of explicit Contexts, by Context IRI, for this authorization lifetime. */
   explicit?: Map<string, BoundView>;
+  /** Write-observation identities of this authorization lifetime, by Context IRI. */
+  observations?: Map<string, object>;
   /** Read-invalidation domains of explicit Context views, by Context IRI. */
   contextReads?: Map<string, { epoch: number; reads: AbortController }>;
   catalogue?: Promise<CatalogueResult>;

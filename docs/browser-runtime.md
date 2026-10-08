@@ -324,6 +324,12 @@ pending reads nor change its target.
   disconnect or disposal) invalidate all of the connection's bindings, explicit
   and selected alike. Writes keep their actual result, as for every
   `BoundView`.
+- **Write observation.** Handles for the same Context of one authorization
+  lifetime share their write events and write-start counts. A confirmed write
+  through an explicit view refreshes a `useList` on the selected view of that
+  Context, and a write start retires success feedback across those handles.
+  Nothing is shared across Contexts, connections, subjects or generations, and
+  this is no server subscription.
 
 ## Read the authorized Pod dataset
 

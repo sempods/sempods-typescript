@@ -37,6 +37,7 @@ import {
   useSelection,
 } from './index.js';
 import { useController } from './app.js';
+import { bindResourceEditor } from '../authoring/editor.js';
 const definition = fields(
   {
     title: text('urn:title', { language: null }),
@@ -1108,4 +1109,54 @@ it('an editor delete retires a row success and a later creation retires it', asy
   });
   expect(shown('Created.')).toBe(1);
   expect(shown('Deleted.')).toBe(0);
+});
+
+/** A resource editor on an explicit handle of the list's own Context. */
+async function explicitEditor(f: Setup) {
+  const editor = bindResourceEditor(
+    f.runtime.bindContext(f.id, work),
+    'urn:one',
+    definition,
+  );
+  cleanups.push(() => editor.dispose());
+  await editor.loaded;
+  return editor;
+}
+const listTitles = (f: Setup) =>
+  f.api.list.state.kind === 'ready'
+    ? f.api.list.state.data.items.map((item) => item.data.title)
+    : [];
+it('refreshes a list and retires its success after a write through an explicit handle of the same Context', async () => {
+  const f = await setup();
+  const queries = () => f.count('/_system/sparql/query');
+  await act(async () => {
+    await f.api.mutation.update(await firstRow(f), { done: true });
+  });
+  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  await waitFor(() => expect(f.api.list.state.kind).toBe('ready'));
+  const before = queries();
+  const editor = await explicitEditor(f);
+  editor.change({ title: 'From the overview' });
+  await act(async () => {
+    expect((await editor.save()).kind).toBe('saved');
+  });
+  // The explicit write's start retired the row's success; its confirmation
+  // refreshed the list of the selected handle.
+  expect(f.api.mutation.outcome).toBeNull();
+  await waitFor(() => expect(queries()).toBe(before + 1));
+  await waitFor(() => expect(listTitles(f)).toContain('From the overview'));
+});
+it('keeps an explicitly cancelled list cancelled after a write through an explicit handle', async () => {
+  const f = await setup();
+  await firstRow(f);
+  act(() => f.api.list.cancel());
+  const before = f.count('/_system/sparql/query');
+  const editor = await explicitEditor(f);
+  editor.change({ title: 'Elsewhere' });
+  await act(async () => {
+    expect((await editor.save()).kind).toBe('saved');
+  });
+  await act(async () => {});
+  expect(f.count('/_system/sparql/query')).toBe(before);
+  expect(f.api.list.state.kind).toBe('cancelled');
 });
