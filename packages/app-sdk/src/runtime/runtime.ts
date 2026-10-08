@@ -685,7 +685,13 @@ export function createBrowserRuntime(
       }
       return {
         ...report,
-        interaction: problem === 'denied' ? 'cancelled' : 'failed',
+        // Without a callback there was no sign-in to fail; storage and
+        // problem carry the startup failure.
+        interaction: !callback
+          ? 'none'
+          : problem === 'denied'
+            ? 'cancelled'
+            : 'failed',
         storage: problem === 'busy' ? 'busy' : report.storage,
         ...(attempted && entries.has(attempted)
           ? { attemptConnectionId: attempted }

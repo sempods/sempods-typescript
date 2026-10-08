@@ -12,6 +12,7 @@ import {
 import { bindResourceEditor } from './editor.js';
 import { createAppController } from './app.js';
 import { createViewLoader } from './load.js';
+import { createBrowserRuntime } from '../runtime/runtime.js';
 const cleanups: (() => void)[] = [];
 afterEach(() => {
   cleanups.splice(0).forEach((fn) => fn());
@@ -147,6 +148,23 @@ it('A → B → A creates a new target lifetime and invalidates old subscription
   f.runtime.selectContext(f.id, work);
   expect(f.runtime.bind(f.id).key).not.toBe(f.view.key);
   expect(listener).toHaveBeenCalled();
+});
+it('reports no callback outcome when a normal startup finds the lease busy', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  await f.runtime.initialize();
+  const another = createBrowserRuntime(f.options);
+  cleanups.push(() => another.dispose());
+  const app = createAppController(another);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().startup).toBeDefined());
+  expect(app.getSnapshot().startup).toMatchObject({
+    interaction: 'none',
+    storage: 'busy',
+    problem: 'busy',
+  });
+  expect(app.getSnapshot().callbackNotice).toBe(false);
 });
 it('guards target and row changes, with busy writes unconditionally blocking', async () => {
   const f = await connected();

@@ -72,6 +72,7 @@ export interface StartupReport {
    * the cause when the provider answered with an error.
    */
   readonly attemptConnectionId?: string;
+  /** The returning sign-in's outcome; `none` without a callback, even when startup fails. */
   readonly interaction: 'none' | 'completed' | 'cancelled' | 'failed';
   readonly storage: 'durable' | 'unavailable' | 'busy';
   readonly problem?: RuntimeProblem;
