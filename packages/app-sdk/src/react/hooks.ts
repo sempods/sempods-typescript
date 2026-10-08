@@ -643,10 +643,6 @@ export function useCreation<D extends object>(
       const outcome = await mutation.execute('create', captured.iri, () =>
         captured.run(),
       );
-      // The generated IRI is taken: the next explicit create gets a fresh one.
-      // (A retry after a lost answer reports unconfirmed, never exists.)
-      if (outcome?.kind === 'exists' && command.current?.creation === captured)
-        command.current = null;
       if (outcome?.kind === 'created' && current.current === submitted) reset();
       return outcome;
     },

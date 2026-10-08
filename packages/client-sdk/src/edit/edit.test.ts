@@ -1615,12 +1615,14 @@ describe('creation', () => {
     expect(titleOf(pod.body(NEW))[0]?.['@value']).toBe('New');
   });
 
-  it('reports an existing different resource without writing', async () => {
+  it('keeps a failed condition unconfirmed when another resource holds the IRI', async () => {
+    // It may be this creation's resent resource, changed by another writer.
     const pod = memoryPod({
       [NEW]: { '@id': NEW, [NAME]: [{ '@value': 'x' }] },
     });
     expect(await prepareCreation(pod.source, NEW, body).run()).toEqual({
-      kind: 'exists',
+      kind: 'unconfirmed',
+      desiredObserved: false,
     });
     expect(pod.body(NEW)).toEqual({ '@id': NEW, [NAME]: [{ '@value': 'x' }] });
     expect(() =>

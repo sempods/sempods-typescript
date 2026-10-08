@@ -419,9 +419,10 @@ if (opened.phase === 'ready') {
 - `prepareCreation(source, iri, definition, draft)` derives the body (type
   included) from a `fields()` definition; `prepareCreation(source, iri, body)`
   takes a raw body. Either captures one IRI and body. Only the
-  Pod's answer confirms `created`; after a lost answer, running it again is
-  safe, and a found resource stays `unconfirmed` (`desiredObserved` is not
-  proof). For several resources from one input, prepare one creation per item
+  Pod's answer confirms `created`. A lost answer or a taken IRI (`412`, which a
+  browser's own resend of an applied creation also causes) is `unconfirmed`;
+  running it again is safe, and a found resource stays `unconfirmed`
+  (`desiredObserved` is not proof). For several resources from one input, prepare one creation per item
   and `await` each `run()` before the next. Stop at the first result that is
   not `created` and leave the rest unsent; an `unconfirmed` item is retried
   only through its own creation, never under a new IRI.

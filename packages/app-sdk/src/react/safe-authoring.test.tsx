@@ -566,30 +566,30 @@ it.each([false, true])(
   },
 );
 
-it('R3: after a definitive exists, the next explicit create uses a fresh IRI', async () => {
+it('R3: a taken IRI stays unconfirmed; the draft is never re-sent under a fresh IRI', async () => {
   const f = await setup();
   const attempts: string[] = [];
   f.setResource(async (url, init) => {
     if (init?.method !== 'PUT') return f.resource(url, init);
     attempts.push(url);
-    // The generated IRI is already taken on the first attempt.
-    if (attempts.length === 1) return taken(f, url);
-    return f.resource(url, init);
+    // Another resource holds the generated IRI. It might also be this
+    // creation's own, resent below Fetch and changed by another writer since.
+    return taken(f, url);
   });
   act(() => f.api.creation.change({ title: 'Unchanged' }));
   await act(async () => {
-    expect(await f.api.creation.create()).toMatchObject({ kind: 'exists' });
+    expect(await f.api.creation.create()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: false,
+    });
   });
-  // The draft stays editable and is still there; nothing was retried.
   expect(f.api.creation.draft.title).toBe('Unchanged');
-  expect(f.api.creation.canEdit).toBe(true);
-  expect(attempts).toHaveLength(1);
+  expect(f.api.creation.canEdit).toBe(false);
+  expect(f.api.creation.canCreate).toBe(false);
   await act(async () => {
-    expect(await f.api.creation.create()).toMatchObject({ kind: 'created' });
+    expect(await f.api.creation.create()).toBeUndefined();
   });
-  expect(attempts).toHaveLength(2);
-  expect(attempts[1]).not.toBe(attempts[0]);
-  expect(f.api.creation.draft).toEqual(initial);
+  expect(attempts).toHaveLength(1);
 });
 
 it('a creation the browser resent is not taken for a collision and gets no fresh IRI', async () => {
@@ -732,11 +732,11 @@ it.each([
     rows: 3,
   },
   {
-    stop: 'exists',
+    stop: 'taken',
     answer: async (f: Setup, url: string) => taken(f, url),
-    outcome: { kind: 'exists' },
-    held: false,
-    canCreate: true,
+    outcome: { kind: 'unconfirmed', desiredObserved: false },
+    held: true,
+    canCreate: false,
     rows: 4, // the other resource holding the IRI
   },
   {

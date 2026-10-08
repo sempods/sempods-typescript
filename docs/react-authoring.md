@@ -447,9 +447,10 @@ bound to `change` and disabled by `!creation.canEdit`, and Create disabled by
   (`canEdit` and `canCreate` are false). Settle it as described above: present
   evidence resets the draft; observed absence enables Create for the explicit
   retry of the same IRI and body.
-- `exists` or `not-created`: nothing was written; `exists` means a different
-  resource holds the IRI. The item stays in the editable draft. Create sends it again (`exists` under a new IRI, `not-created` under
-  the captured one); editing or clearing it is the person's choice.
+- `not-created`: nothing was written. The item stays in the editable draft.
+  Create sends it again under the captured IRI; editing or clearing it is the
+  person's choice. A taken IRI (`412`) is never reported as definitive: it
+  stays `unconfirmed`, because the resource there may be this creation's own.
 - `undefined`: usually nothing was sent, for example after write access was
   lost; the item stays in the editable draft and `outcome` is empty. But
   `create` also returns `undefined` when the target lifetime ended while the
