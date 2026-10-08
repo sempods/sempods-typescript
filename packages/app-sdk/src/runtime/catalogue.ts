@@ -7,6 +7,8 @@ import { combineSignals } from './signals.js';
 export interface CatalogueOwner {
   eligible(entry: Entry, generation?: string): boolean;
   invalidate(entry: Entry): void;
+  /** Invalidates pending reads of the explicit view of one Context. */
+  invalidateContext(entry: Entry, contextIri: string): void;
   publish(): void;
   /** The configured exact context, or the person's remembered explicit choice. */
   remembered(entry: Entry): string | undefined;
@@ -15,7 +17,8 @@ export function loadCatalogue(
   e: Entry,
   owner: CatalogueOwner,
 ): Promise<CatalogueResult> {
-  const { eligible, invalidate, publish, remembered } = owner;
+  const { eligible, invalidate, invalidateContext, publish, remembered } =
+    owner;
   if (e.catalogue) return e.catalogue;
   const generation = e.generation;
   const previous =
@@ -48,6 +51,13 @@ export function loadCatalogue(
           before?.writable !== after?.writable
         )
           invalidate(e);
+        // Explicit views compare their own Context; the selection is not theirs.
+        for (const iri of e.explicit?.keys() ?? []) {
+          const was = previous?.find((c) => c.iri === iri);
+          const is = contexts.find((c) => c.iri === iri);
+          if (was?.readable !== is?.readable || was?.writable !== is?.writable)
+            invalidateContext(e, iri);
+        }
         pruneLabels(e, previous, contexts);
         // Keep labels only for contexts with unchanged readable authority.
         const labels =

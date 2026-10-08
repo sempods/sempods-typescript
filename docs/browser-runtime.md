@@ -281,11 +281,49 @@ Successful revalidation publishes current rights. Loading or failed catalogues
 retain last-known facts; a network failure is not proof of revocation. UI
 consumers clear server data when read permission is lost, and retain readable
 data while disabling actions when only write permission is lost. This runtime
-does not own a screen's data cache or local drafts. Revalidation invalidates pending
-reads only when the selected context's access facts change; unchanged rights,
+does not own a screen's data cache or local drafts. Revalidation invalidates a view's pending
+reads only when its own Context's access facts change; unchanged rights,
 unrelated-context changes and failed reloads retain eligible reads. A caller can
 cancel its wait for a write-triggered revalidation; the already confirmed write
 result still returns, and the shared catalogue operation may finish separately.
+
+## Bind an explicit Context
+
+```ts
+// The Context a Pod-overview row's GRAPH binding names.
+const notes = runtime.bindContext(connectionId, rowContextIri);
+if (notes.getSnapshot().read) {
+  const read = await notes.subjects.get(rowSubject);
+  // Edit with the read's ETag, as with the selected Context's view.
+}
+```
+
+`bindContext` returns a `BoundView` for one explicit Context without changing
+or remembering the connection's selection, and loads no label. It is always its
+own handle, also when the IRI is the selected Context, and repeated calls return
+the same handle for one authorization lifetime (connection, generation and
+subject). Selection changes, including A → B → A, neither invalidate its
+pending reads nor change its target.
+
+- **Preconditions.** It needs an eligible signed-in connection and throws
+  `RuntimeError('disconnected')` otherwise. It throws
+  `RuntimeError('configuration')` for an IRI that is not a Context of that
+  connection's Pod (`isContextIri`), or for another Context than an exact
+  preset `contextIri` on the preset's Pod; connections to other Pods are
+  unaffected. Creating the handle sends no request and needs no catalogue.
+- **Access.** Like the selected view, it follows the last confirmed catalogue
+  evidence for its Context. Without that evidence, or once a successful
+  catalogue removes the permission, requests are not dispatched. A failed
+  refresh keeps the retained evidence. A Context `403` uses the shared
+  catalogue revalidation.
+- **Invalidation.** Each explicit Context has its own read domain. A
+  permission change for that Context cancels its pending reads, including a
+  late answer after access was lost and regained, and leaves explicit views of
+  other Contexts and the selected view unaffected. Connection-wide events
+  (changed grants, session end, a changed subject, a new authorization,
+  disconnect or disposal) invalidate all of the connection's bindings, explicit
+  and selected alike. Writes keep their actual result, as for every
+  `BoundView`.
 
 ## Read the authorized Pod dataset
 

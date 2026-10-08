@@ -45,7 +45,12 @@ import {
   transientBeforeClaim,
 } from './errors.js';
 import { waitFor } from './wait.js';
-import { bindView } from './binding.js';
+import {
+  bindView,
+  explicitTarget,
+  invalidateContexts,
+  selectedTarget,
+} from './binding.js';
 import { bindPod } from './pod-binding.js';
 import { loadCatalogue, loadSelectedLabel, resetLabels } from './catalogue.js';
 import { browserPreferences, createContextMemory } from './context-memory.js';
@@ -138,6 +143,13 @@ export function createBrowserRuntime(
     e.reads.abort();
     e.reads = new AbortController();
   }
+  /** Runtime change notifications for bound views. */
+  function subscribe(listener: () => void) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
   function invalidatePod(e: Entry) {
     e.podEpoch++;
     e.podReads.abort();
@@ -213,9 +225,11 @@ export function createBrowserRuntime(
     ) {
       invalidate(e);
       invalidatePod(e);
+      invalidateContexts(e);
       resetLabels(e);
       if (previousSubject !== result.subject) {
         delete e.boundPod;
+        delete e.explicit;
         delete e.bound;
       }
     }
@@ -227,8 +241,10 @@ export function createBrowserRuntime(
     delete e.credential;
     invalidate(e);
     invalidatePod(e);
+    invalidateContexts(e);
     resetLabels(e);
     delete e.boundPod;
+    delete e.explicit;
     e.lifetime.abort(new RuntimeError('disconnected'));
     e.view = {
       ...e.view,
@@ -463,6 +479,7 @@ export function createBrowserRuntime(
     return loadCatalogue(e, {
       eligible,
       invalidate,
+      invalidateContext: invalidateContexts,
       publish,
       remembered: (entry) =>
         (entry.view.podUrl === preset?.podUrl
@@ -817,11 +834,13 @@ export function createBrowserRuntime(
         delete e.credential;
         delete e.bound;
         delete e.boundPod;
+        delete e.explicit;
         delete e.refresh;
         delete e.catalogue;
         delete e.revalidation;
         invalidate(e);
         invalidatePod(e);
+        invalidateContexts(e);
         resetLabels(e);
         e.selectedVersion++;
         e.view = {
@@ -864,8 +883,10 @@ export function createBrowserRuntime(
       e.lifetime.abort();
       invalidate(e);
       invalidatePod(e);
+      invalidateContexts(e);
       resetLabels(e);
       delete e.boundPod;
+      delete e.explicit;
       e.view = {
         ...e.view,
         session: Object.freeze({ kind: 'ended', problem: 'disconnected' }),
@@ -945,16 +966,39 @@ export function createBrowserRuntime(
       if (!e.view.selectedContext) throw new RuntimeError('configuration');
       e.bound ??= bindView(
         e,
+        selectedTarget(e),
         () => eligible(e),
         () => forbidden(e),
-        (listener) => {
-          listeners.add(listener);
-          return () => {
-            listeners.delete(listener);
-          };
-        },
+        subscribe,
       );
       return e.bound;
+    },
+    bindContext(id, contextIri) {
+      const e = get(id);
+      ready(e);
+      if (!isContextIri(contextIri, e.pod.podUrl))
+        throw new RuntimeError('configuration');
+      // An exact preset is the app's only write target on its Pod.
+      if (
+        e.view.podUrl === preset?.podUrl &&
+        preset.contextIri !== undefined &&
+        contextIri !== preset.contextIri
+      )
+        throw new RuntimeError('configuration');
+      e.explicit ??= new Map();
+      let view = e.explicit.get(contextIri);
+      if (!view)
+        e.explicit.set(
+          contextIri,
+          (view = bindView(
+            e,
+            explicitTarget(e, contextIri),
+            () => eligible(e),
+            () => forbidden(e),
+            subscribe,
+          )),
+        );
+      return view;
     },
     dispose() {
       disposed = true;
@@ -965,8 +1009,10 @@ export function createBrowserRuntime(
         e.lifetime.abort();
         invalidate(e);
         invalidatePod(e);
+        invalidateContexts(e);
         resetLabels(e);
         delete e.boundPod;
+        delete e.explicit;
       }
       entries.clear();
       lease?.close();

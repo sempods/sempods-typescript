@@ -31,6 +31,10 @@ export interface Entry {
   selectedVersion: number;
   bound?: BoundView;
   boundPod?: BoundPod;
+  /** Views of explicit Contexts, by Context IRI, for this authorization lifetime. */
+  explicit?: Map<string, BoundView>;
+  /** Read-invalidation domains of explicit Context views, by Context IRI. */
+  contextReads?: Map<string, { epoch: number; reads: AbortController }>;
   catalogue?: Promise<CatalogueResult>;
   revalidation?: Promise<void>;
   refresh?: Promise<boolean>;

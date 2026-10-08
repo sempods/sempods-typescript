@@ -164,6 +164,26 @@ export interface BrowserRuntime {
   ): Promise<BoundRead<CatalogueResult>>;
   selectContext(id: string, iri: string): void;
   bind(id: string): BoundView;
+  /**
+   * A view of one explicit Context of a signed-in eligible connection, for
+   * example the Context a Pod-overview row names. It never changes or
+   * remembers the selection and loads no label. It is always its own handle,
+   * also when `contextIri` is the selected Context, and it survives selection
+   * changes. Repeated calls return the same handle for the same authorization
+   * lifetime (connection, generation, subject).
+   *
+   * Access follows the last confirmed catalogue evidence for this Context, as
+   * for the selected view: without it, or once a successful catalogue removes
+   * the permission, requests are not dispatched. A permission change for this
+   * Context, changed grants, session end, subject change, a new authorization
+   * or disconnect invalidate its pending reads; a selection change does not.
+   *
+   * Throws `RuntimeError('disconnected')` without an eligible signed-in
+   * session, and `RuntimeError('configuration')` for an IRI that is not a
+   * Context of this connection's Pod, or for another Context than an exact
+   * preset `contextIri` on the preset's Pod.
+   */
+  bindContext(id: string, contextIri: string): BoundView;
   /** Requires a signed-in eligible connection, but neither selection nor catalogue;
    * throws `RuntimeError('disconnected')` while restoring or after the session ended.
    * Missing required scopes leave the handle current with read=false and stop dispatch.
