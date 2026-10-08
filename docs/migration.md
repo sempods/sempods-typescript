@@ -43,13 +43,27 @@ automatic conversion of legacy app data or stored credentials.
   chooser, the pending-catalogue notice, **Update access** and **Check
   access**. App end-to-end tests that waited for those controls in that phase
   should wait for the chooser, the hidden surface or the failure view instead.
+- **A success notice retires when another write starts.** `created`, `saved`
+  and `removed` from `useCreation`, `useFieldUpdate` and `ResourceEditor` now
+  clear once another of them starts a write on the same target, and are not
+  shown if one started while they were pending, so notices rendered side by
+  side no longer pile up. Failures and unresolved outcomes are
+  unchanged. Code that read `creation.outcome?.kind === 'created'` later, after
+  another write, now sees `null`; read the result `create()` returns instead.
 - **A stale Context prompt selects nothing.** When the leave policy asks
   before `selectContext` and another connection becomes active before the
   person confirms (a completed callback, or the active one removed),
   `confirmLeave()` now rejects with `disconnected`. The guarded call resolves
   `false`, nothing is selected and no draft is discarded. Previously the
   inactive connection's Context changed.
-- **New: `useContextEditor`.** It edits a Pod-overview row in the Context its
+
+New in the next release:
+
+- `AppAccess` accepts `podAddress="hidden"` to omit the Pod address from
+  signing in when the runtime permits exactly one Pod. It defaults to
+  `'visible'`, so existing apps are unchanged; see
+  [login composition](react-authoring.md#login-without-an-app-frame).
+- `useContextEditor` edits a Pod-overview row in the Context its
   `GRAPH` binding names. An app that copied the 0.4 overview recipe's
   `EditInContext` component can replace it with the hook: call
   `edit.open({ subject, context })` from the row and render `edit.editor` with

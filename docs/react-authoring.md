@@ -77,7 +77,22 @@ custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 
 An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
 No icon is required. `podNames` maps exact canonical Pod URLs to display names;
-the destination remains visible, and duplicate names are disambiguated. Both controls prefer the label from the runtime's
+the destination remains visible, and duplicate names are disambiguated.
+
+When the runtime permits exactly one Pod (`allowedPods` with one entry),
+`podAddress="hidden"` omits that Pod's address from signing in, including
+signing in again after an ended session. A `podNames` name remains; without one,
+no Pod line is shown, and the **Active pod** selector numbers saved duplicate
+connections instead. The app's configuration then fixes the destination, the
+person cannot choose another Pod, and the Pod's provider shows its own login
+page and address. With several or
+unrestricted Pods, including a preset without `allowedPods`, the address stays
+visible, because there the person chooses or must recognize the destination.
+Management (`open`) and **Full addresses** always show it, and a custom
+`components.Connections` does not receive the option. The default is
+`'visible'`; SDK markup is not a stable hook for hiding the address with CSS.
+
+`AppAccess` and `ConnectionControls` prefer the Context label from the runtime's
 selected-Context description reads, falling back to a safe readable last path segment.
 An `unknown` catalogue carries no labels, so narrow it before reading one:
 
@@ -92,7 +107,8 @@ const label = labels?.[iri];
 Only the selected, validated Context is fetched automatically; other entries use
 the fallback immediately, including on small Pods.
 Duplicate context names include the full IRI; **Full addresses** exposes all readable
-context identities. Names never replace Pod/context identity, and displaying them
+context identities. Names never replace Pod/context identity, unless `podAddress`
+hides the address of the one permitted Pod; displaying them
 starts no additional requests. Late or refreshed labels do not change selection
 or discard drafts.
 
@@ -205,7 +221,8 @@ RDF terms once; it works with form editing, list actions and the Node consumer.
 renders only a draft and calls `change({ title })` for an original `fields()` definition.
 Copied or arbitrary definitions retain complete-draft replacement and typing, including unions. Feedback applies only to the
 editor state on which the operation settled; a newer dirty draft is never labelled
-saved. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
+saved. For an editor bound to its target (`useResourceEditor`), a success also
+retires when another creation, row mutation or editor write starts on that target. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
 (yes/no for flags, a dash for empty text); pass `labels={{ title: 'Task' }}` to
 name the fields instead of showing their keys.
 
@@ -479,6 +496,16 @@ a context/Pod/disconnect transition. A forced lifetime change retires old result
 Use `<UpdateNotice {...creation.notice} />` and bind input disabled state to
 `!creation.canEdit`, submit to `!creation.canCreate`.
 
+Creation, row and editor feedback on one target follow one rule, so notices
+rendered side by side describe the last write. A success (`created`, `saved`,
+`removed`) retires as soon as another `useCreation`, `useFieldUpdate` or
+`useResourceEditor` write starts on the same target, and is not shown if one
+started while it was pending. Writes through the client-sdk functions or an
+unbound editor do not take part. A failure stays until its own source acts
+again. An unresolved outcome (`unconfirmed`,
+`changed-on-pod`) stays until it is checked and acknowledged; a later success
+never hides or settles it.
+
 These hooks accept definitions created by `fields()`. Keep the collection stable
 for a form; a real definition change starts a fresh form lifetime.
 Advanced clients may also retain a portable `prepareCreation` command and
@@ -531,7 +558,8 @@ bound to `change` and disabled by `!creation.canEdit`, and Create disabled by
 `!creation.canCreate`. What each result leaves behind:
 
 - `created`: confirmed. The draft resets, lists refresh and the next item
-  captures a fresh subject IRI. `outcome` stays `created` until the next `change`.
+  captures a fresh subject IRI. `outcome` stays `created` until the next `change`
+  or until another hook or bound-editor write on the same target starts.
 - `unconfirmed`: the item may exist. Its draft and captured command stay locked
   (`canEdit` and `canCreate` are false). Settle it as described above: present
   evidence resets the draft; observed absence enables Create for the explicit
