@@ -86,6 +86,7 @@ function Evidence() {
           <AppAccess
             appName="Shopping"
             icon={<span>✓</span>}
+            podAddress="hidden"
             podNames={{
               [podUrl]: 'Personal',
               [location.origin + '/bob']: 'Team',

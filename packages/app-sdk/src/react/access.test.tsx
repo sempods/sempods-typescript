@@ -82,6 +82,72 @@ it.each(['en', 'de'] as const)(
   },
 );
 
+it.each([true, false])(
+  'one permitted Pod may omit its address from the first sign-in (podNames=%s)',
+  async (named) => {
+    const f = fixture({ allowedPods: [pod] });
+    cleanups.push(() => f.runtime.dispose());
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        <AppAccess
+          appName="Shopping"
+          podAddress="hidden"
+          {...(named ? { podNames: { [pod]: 'Personal' } } : {})}
+        />
+      </SempodsProvider>,
+    );
+    const button = await screen.findByRole('button', { name: 'Sign in' });
+    const region = screen.getByRole('region', { name: 'Data access' });
+    expect(region.textContent).not.toContain(pod.replace(/^https?:\/\//, ''));
+    expect(screen.queryByText('Personal')).toEqual(
+      named ? expect.anything() : null,
+    );
+    await act(async () => button.click());
+    await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(1));
+  },
+);
+
+it.each([
+  ['several permitted Pods', { allowedPods: [pod, 'https://pod.example/bob'] }],
+  ['an unrestricted preset', { preset: { podUrl: pod } }],
+] as const)('keeps the Pod address with %s', async (_, options) => {
+  const f = fixture(options);
+  cleanups.push(() => f.runtime.dispose());
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess
+        appName="Shopping"
+        podAddress="hidden"
+        podNames={{ [pod]: 'Personal' }}
+      />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('button', { name: 'Sign in' });
+  if ('allowedPods' in options)
+    fireEvent.change(screen.getByLabelText('Your Pod'), {
+      target: { value: pod },
+    });
+  expect(screen.getByText(pod)).toBeTruthy();
+});
+
+it('keeps the Pod address in management with one permitted Pod', async () => {
+  const f = fixture({ allowedPods: [pod] });
+  cleanups.push(() => f.runtime.dispose());
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess
+        appName="Shopping"
+        podAddress="hidden"
+        podNames={{ [pod]: 'Personal' }}
+        open
+      />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('button', { name: 'Sign in' });
+  expect(screen.getByText('Personal')).toBeTruthy();
+  expect(screen.getByText(pod)).toBeTruthy();
+});
+
 it('offers only the permitted finite choices, disambiguates names and does not sign in on selection', async () => {
   const other = 'https://pod.example/bob';
   const f = fixture({ allowedPods: [pod, other] });
@@ -449,6 +515,25 @@ it.each([
     expect(screen.queryByText(/draft|Entwurf/)).toBeNull();
   },
 );
+
+it('keeps the address of the one permitted Pod hidden when signing in again', async () => {
+  const f = fixture({ allowedPods: [pod] });
+  await f.begin();
+  f.runtime.dispose();
+  await settleLease();
+  const runtime = createBrowserRuntime(f.options);
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Shopping" podAddress="hidden" />
+    </SempodsProvider>,
+  );
+  expect(await screen.findByText('Sign in to use this pod.')).toBeTruthy();
+  expect(runtime.getSnapshot()[0]!.session.kind).toBe('ended');
+  expect(screen.queryByText(pod.replace(/^https?:\/\//, ''))).toBeNull();
+  // Full addresses still exposes the destination.
+  expect(screen.getByText(pod)).toBeTruthy();
+});
 
 it('preserves cancelled callback feedback and supports custom connection replacement', async () => {
   const f = fixture();

@@ -38,6 +38,10 @@ automatic conversion of legacy app data or stored credentials.
   previously selected target returns when the person selects it again. An
   `interrupted` or `expired` session shows the new `controls.signInRequired`
   message instead of `readLost`.
+- **Optional Pod address for one permitted Pod.** `AppAccess` accepts
+  `podAddress="hidden"` to omit the Pod address from signing in when the
+  runtime permits exactly one Pod. It defaults to `'visible'`, so existing apps
+  are unchanged; see [login composition](react-authoring.md#login-without-an-app-frame).
 
 ## From 0.3 to 0.4
 
