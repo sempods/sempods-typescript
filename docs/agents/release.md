@@ -35,8 +35,12 @@ both package versions, CI/review apply to the selected commit, and the maintaine
 npm environment is ready. Do not display or copy credentials.
 The workflow uses npm trusted publishing and holds no npm token: on npmjs.com, each
 package names `sempods/sempods-typescript`, `publish.yml` and the `npm` environment
-as its trusted publisher. Renaming the workflow file or environment breaks
-publication until the maintainer updates both packages there.
+as its trusted publisher, with the **Allow npm publish** action selected (newer
+configurations allow only `npm stage publish` by default, and the publisher runs
+`npm publish`). A new configuration expires unless its first publication succeeds
+within two days, so create it, or recreate an expired one, shortly before the
+authorized release. Renaming the workflow file or environment breaks publication
+until the maintainer updates both packages there.
 Creating or pushing a version tag triggers publication and is part of this mode.
 The GitHub `npm` environment requires reviewer approval before the job can publish.
 The active `protect-release-tags` ruleset protects `v*` tags against updates and
