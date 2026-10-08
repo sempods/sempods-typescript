@@ -6,7 +6,7 @@ on:
     tags: ['v*']
 permissions:
   contents: read
-  id-token: write # npm provenance
+  id-token: write # npm trusted publishing and provenance
 jobs:
   publish:
     name: Publish to npm
@@ -26,7 +26,9 @@ jobs:
           # another workflow run could feed what is packed and published.
           # setup-node v5+ caches automatically unless disabled.
           package-manager-cache: false
-          registry-url: https://registry.npmjs.org
+          # No registry-url: it writes an .npmrc with a placeholder token that
+          # the publisher's anonymous `npm view` would send. npm authenticates
+          # `npm publish` through the trusted publisher (OIDC) instead.
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm check
@@ -38,13 +40,19 @@ jobs:
               const { version } = require(`./packages/${name}/package.json`);
               if (version !== tag) throw new Error(`${name} is ${version}, tag is ${tag}`);
             }'
+      # Trusted publishing needs npm 11.5.1 or later; .node-version selects it.
+      - run: |
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1))))
+              throw new Error(`npm ${process.argv[1]} cannot use trusted publishing`);
+          ' "$(npm --version)"
       # pnpm pack resolves workspace:* to the exact version. The script publishes
       # client-sdk first and, on a rerun, skips a version that is already on the
-      # registry only if its contents equal the packed artifact.
+      # registry only if its contents equal the packed artifact. There is no npm
+      # token: npmjs.com trusts this workflow file in the `npm` environment.
       - run: |
           mkdir -p ../release
           pnpm --filter @sempods/client-sdk pack --pack-destination ../release
           pnpm --filter @sempods/app-sdk pack --pack-destination ../release
           node scripts/publish-packages.mjs ../release
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
