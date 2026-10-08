@@ -10,7 +10,7 @@ Follow the [quickstart](quickstart.md) to create a Vite React/TypeScript app
 (Node 24.15 or newer). Install the matching pair:
 
 ```sh
-npm install --save-exact @sempods/app-sdk@0.4.0 @sempods/client-sdk@0.4.0
+npm install --save-exact @sempods/app-sdk@0.4.1 @sempods/client-sdk@0.4.1
 ```
 
 Commit the lockfile. Point your coding assistant to
@@ -21,7 +21,7 @@ as an installable app, add the [PWA setup](pwa.md).
 Use a dedicated test context and synthetic data; follow
 [local or hosted Pod testing](local-testing.md) for setup.
 
-## Ten API groups to keep nearby
+## APIs to keep nearby
 
 Import the named APIs from the table's entry: **app** = `@sempods/app-sdk`,
 **React** = `@sempods/app-sdk/react`, **edit** = `@sempods/client-sdk/edit`.

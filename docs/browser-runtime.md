@@ -26,19 +26,28 @@ const runtime = createBrowserRuntime({
     redirectUri: 'https://app.example/oauth/callback',
   },
   returnTo: '/',
-  scopes: { required: ['tasks'], optional: ['ai'] },
 });
+
 const report = await runtime.initialize();
 
-if (report.storage === 'durable') {
-  // A connect button can invoke these guarded actions.
-  const connection = await runtime.connect('https://pods.example/alice');
+// Call from the host's sign-in button after startup.
+async function signIn(podUrl: string) {
+  if (report.storage === 'busy') {
+    throw new Error('Close the other active tab, then reload this page.');
+  }
+  if (report.storage === 'unavailable') {
+    throw new Error('Restore browser storage access, then reload this page.');
+  }
+
+  const connection = await runtime.connect(podUrl);
   await runtime.beginAuthorization(connection.id);
 }
 ```
 
-Scope names are illustrative: request only features supported by the chosen Pod.
-With no configured features, omit `scopes`.
+Ordinary data access uses context grants; no feature scopes are needed for this
+example. Add `scopes: { required, optional }` only for documented capabilities
+supported by your Pod. The host renders startup feedback and action failures;
+React apps can use `AppAccess` for that presentation.
 
 A deployed identity instead supplies
 `{ kind: 'did-web', clientId: 'did:web:app.example', redirectUri: '…' }`.
@@ -96,6 +105,9 @@ const runtime = createBrowserRuntime({
   scopes: { required: [], optional: [] },
 });
 ```
+
+`runtime.preset` and `useAppState().preset` expose this frozen configuration
+as `PodPreset | undefined`. `PodPreset` is exported by `@sempods/app-sdk`.
 
 The runtime validates and copies the preset at construction. An invalid Pod URL
 throws the client's `SdkError` with `reason.code: 'invalid-pod-url'`; an invalid
@@ -344,7 +356,9 @@ A second tab reports `busy`; lack of durable storage or coordination (no Web
 Locks, `locks: null`) does not silently fall back to memory and leaves stored
 records untouched, so a later start with coordination restores them. The runtime
 requests its lock only if available and never steals it from another tab: the
-holder keeps working until it is closed or disposed. A store closed by a newer
+holder keeps working until it is closed or disposed. The
+runtime never retries a busy startup: after closing the holder, reload the busy
+page to create a fresh runtime and acquire the lease. A store closed by a newer
 database version (`versionchange`, e.g. after an upgrade in another tab) stays
 closed for this runtime; renewals then end the session with `storage`. Call
 `dispose()` on application shutdown to release the lease. See [React/headless authoring](react-authoring.md) for lifecycle integration.
@@ -373,7 +387,7 @@ Neither is dispatched or silently retried on startup. Call `beginAuthorization(i
 for an explicit new attempt, or `disconnect(id)` to durably remove its secret
 material and hide the connection. Until one of those actions, a retained
 `authorizing` record still contains its verifier. There is no automatic expiry
-cleanup in this increment. Corrupt/future-version records remain untouched and
+cleanup. Corrupt/future-version records remain untouched and
 are reported separately through `StartupReport.unreadable`.
 
 The runtime renews a credential before dispatch once it is within a minute of
@@ -472,6 +486,17 @@ and editor saves with strong `If-Match`, conflicts and unknown write outcomes.
 The unknown-outcome scenario applies the request on the server and deliberately
 withholds its answer at the test network boundary. The SDK does not resend it;
 this is not a guarantee against retries inside a browser's HTTP stack.
+Chromium 153 resends a request on its own when a reused keep-alive connection
+closes without an answer, also after the Pod applied it; on a fresh connection
+it reports a network error instead. The write conditions turn such a resend into
+a `412`, so nothing is applied twice, but the SDK sees the `412` instead of a lost
+answer. A creation therefore reports every failed create-only condition as
+`unconfirmed` and keeps its IRI; `desiredObserved` tells whether the IRI holds
+its body. An update reports a conflict. Its comparison usually shows that the
+Pod already holds the change, but it cannot prove it: the read may fail, or
+another writer may have changed the fields since. A resent deletion finds the resource gone: a Pod answering `412`
+yields a conflict, one answering `404` yields `not-removed` with reason
+`not-found`. Neither tells whether this deletion or another writer removed it.
 
 Supported environments: current browsers with IndexedDB and Web Locks in a
 normal browser tab; automated checks run in Chromium. Installed PWAs are

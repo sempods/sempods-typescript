@@ -1,4 +1,6 @@
 node_modules/
+# Separate Claude checkouts may contain their own generated artifacts.
+.claude/worktrees/
 dist/
 pnpm-lock.yaml
 # Generated app-author reference (scripts/package-docs.mjs)

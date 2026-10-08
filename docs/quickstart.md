@@ -20,7 +20,7 @@ access when consenting (SPS-AUTH-024).
 npm create vite@latest my-tasks -- --template react-ts --no-immediate
 cd my-tasks
 npm install
-npm install --save-exact @sempods/app-sdk@0.4.0 @sempods/client-sdk@0.4.0
+npm install --save-exact @sempods/app-sdk@0.4.1 @sempods/client-sdk@0.4.1
 ```
 
 `--no-immediate` keeps Vite from installing and starting its demo server right
@@ -49,16 +49,18 @@ Then, in the app, `npm install` both `.tgz` files from that directory.
 
 ```ts
 import { fields, flag, text } from '@sempods/client-sdk/edit';
-const S = 'https://schema.org/';
+
+const schema = 'https://schema.org/';
+
 export const task = fields(
   {
-    title: text(`${S}name`, { language: null }),
-    done: flag(`${S}actionStatus`, {
-      on: `${S}CompletedActionStatus`,
-      off: `${S}PotentialActionStatus`,
+    title: text(`${schema}name`, { language: null }),
+    done: flag(`${schema}actionStatus`, {
+      on: `${schema}CompletedActionStatus`,
+      off: `${schema}PotentialActionStatus`,
     }),
   },
-  { type: `${S}Action` },
+  { type: `${schema}Action` },
 );
 ```
 
@@ -96,7 +98,9 @@ const runtime = createBrowserRuntime({
 });
 
 // Vite hot replacement ends this module's runtime lifetime.
-if (import.meta.hot) import.meta.hot.dispose(() => runtime.dispose());
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => runtime.dispose());
+}
 
 export default function App() {
   return (
@@ -108,21 +112,22 @@ export default function App() {
 
 function AppContent() {
   const [open, setOpen] = useState(false);
-  const target = useRef<HTMLButtonElement>(null);
+  const focusTarget = useRef<HTMLButtonElement>(null);
   const { connections } = useAppState();
   const { messages } = useSdkLocale();
+
   return (
     <main>
       {connections.length > 0 && (
         <button
-          ref={target}
+          ref={focusTarget}
           aria-expanded={open}
           onClick={() => setOpen(!open)}
         >
           {messages.controls.dataAccess}
         </button>
       )}
-      <AppAccess appName="My tasks" open={open} focusTarget={target} />
+      <AppAccess appName="My tasks" open={open} focusTarget={focusTarget} />
       <TargetScreen>
         <Tasks />
       </TargetScreen>
@@ -139,11 +144,12 @@ function Tasks() {
   const update = useFieldUpdate(task);
   const { selected, select } = useSelection();
   const editor = useResourceEditor(selected, task);
+
   return (
     <section>
       <form
-        onSubmit={(e) => {
-          e.preventDefault();
+        onSubmit={(event) => {
+          event.preventDefault();
           creation.change({ title: creation.draft.title.trim() });
           void creation.create();
         }}
@@ -152,7 +158,7 @@ function Tasks() {
           aria-label="New task"
           value={creation.draft.title}
           disabled={!creation.canEdit}
-          onChange={(e) => creation.change({ title: e.target.value })}
+          onChange={(event) => creation.change({ title: event.target.value })}
         />
         <button disabled={!creation.canCreate}>Add</button>
       </form>
@@ -165,16 +171,20 @@ function Tasks() {
         <p>Unsupported entries: {list.state.data.skipped}</p>
       )}
       {list.state.kind === 'ready' &&
-        list.state.data.items.map((t) => (
-          <p key={t.iri}>
+        list.state.data.items.map((item) => (
+          <p key={item.iri}>
             <input
               type="checkbox"
-              aria-label={`Complete ${t.data.title}`}
-              checked={t.data.done}
+              aria-label={`Complete ${item.data.title}`}
+              checked={item.data.done}
               disabled={!update.canMutate}
-              onChange={() => void update.update(t, { done: !t.data.done })}
+              onChange={() =>
+                void update.update(item, { done: !item.data.done })
+              }
             />
-            <button onClick={() => void select(t.iri)}>{t.data.title}</button>
+            <button onClick={() => void select(item.iri)}>
+              {item.data.title}
+            </button>
           </p>
         ))}
       {selected && (
@@ -183,7 +193,7 @@ function Tasks() {
             <input
               aria-label="Task title"
               value={draft.title}
-              onChange={(e) => change({ title: e.target.value })}
+              onChange={(event) => change({ title: event.target.value })}
             />
           )}
         </ResourceEditor>

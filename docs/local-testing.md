@@ -29,7 +29,7 @@ npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 The dynamic runtime configuration includes `development: 'loopback-http'`. That
 permits the local HTTP callback and, if used, local HTTP Pod endpoints. It does
 not relax validation of a remote Pod or make the hosted Pod accept an unsupported
-client policy. Enter its full HTTPS URL in AppShell, sign in on the Pod's page,
+client policy. Enter its full HTTPS URL in the app's sign-in form, sign in on the Pod's page,
 grant only the test context, return to the app and explicitly select it.
 
 A successful sign-in without a writable context is not setup completion: the

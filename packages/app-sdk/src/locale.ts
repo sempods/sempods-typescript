@@ -117,6 +117,7 @@ export interface UiMessages {
   readonly failure: string;
   readonly current: string;
   readonly notPresent: string;
+  readonly unreadable: string;
   readonly yes: string;
   readonly no: string;
   readonly mine: string;
@@ -189,6 +190,8 @@ export const englishMessages: SdkMessages = {
     failure: 'The operation could not be completed.',
     current: 'Current on the pod',
     notPresent: 'This resource is not currently present on the pod.',
+    unreadable:
+      'A resource is present on the pod, but this app cannot read it.',
     yes: 'Yes',
     no: 'No',
     mine: 'Your draft',
@@ -288,6 +291,8 @@ export const germanMessages: SdkMessages = {
     failure: 'Die Aktion konnte nicht abgeschlossen werden.',
     current: 'Aktuell auf dem Pod',
     notPresent: 'Diese Ressource ist aktuell nicht auf dem Pod vorhanden.',
+    unreadable:
+      'Auf dem Pod ist eine Ressource vorhanden, aber diese App kann sie nicht lesen.',
     yes: 'Ja',
     no: 'Nein',
     mine: 'Dein Entwurf',

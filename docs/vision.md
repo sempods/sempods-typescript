@@ -5,6 +5,10 @@ building another backend or moving that data into an app vendor's database.
 sempods apps can be static frontends: the Pod stores semantic data and enforces
 access; the app supplies a vocabulary, interactions and presentation.
 
+This repository supplies reusable modules and working examples. New app projects,
+especially those created with a coding assistant, start in
+[sempods-apps-template](https://github.com/sempods/sempods-apps-template).
+
 The TypeScript SDK makes this practical for people and coding assistants.
 `@sempods/app-sdk` is the ordinary app author's entry. Its default UI should make a
 first working slice easy; replacing that UI should preserve the same safe editing,

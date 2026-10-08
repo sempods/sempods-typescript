@@ -17,10 +17,19 @@ import { frozenCopy, sameNode } from './terms.js';
 export type CreateOutcome =
   /** Confirmed by the Pod's answer to this creation. */
   | { readonly kind: 'created' }
-  /** The IRI was already in use before this creation ran; nothing was written. */
+  /**
+   * @deprecated No longer reported: a failed create-only condition cannot show
+   * that this creation wrote nothing (see `unconfirmed`). Kept so existing
+   * exhaustive handling still compiles.
+   */
   | { readonly kind: 'exists' }
   /**
-   * An answer was lost, so this creation may or may not have happened.
+   * An answer was lost, so this creation may or may not have happened. This
+   * includes every failed create-only condition (`412`): a browser may resend
+   * a creation whose connection closed after the Pod applied it, and the
+   * resend then finds this creation's own resource, possibly already changed
+   * by another writer. `desiredObserved: false` means the IRI holds something
+   * else or nothing; it still does not prove that this creation wrote nothing.
    * Running it again is safe and cannot create a second resource. After a
    * lost answer, a found resource stays unconfirmed: `desiredObserved` (it
    * holds this body) is not proof that this creation wrote it.
@@ -102,8 +111,9 @@ export function prepareCreation<D>(
         lost = true;
         return { kind: 'unconfirmed' };
       case 'precondition-failed': {
-        // Without an earlier lost answer, the IRI was simply taken.
-        if (!lost) return { kind: 'exists' };
+        // A taken IRI and a creation resent below Fetch look alike, also when
+        // another writer changed the resent creation's resource since.
+        lost = true;
         const current = await fetchResource(source, iri, options.signal);
         if (current.kind === 'problem') return { kind: 'unconfirmed' };
         return {

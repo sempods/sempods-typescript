@@ -1559,10 +1559,50 @@ describe('creation', () => {
     expect(pod.count('patch')).toBe(0);
   });
 
-  it('R4: an equal resource that existed before the first run is not created by it', async () => {
+  it('R4: an equal resource found after a failed condition stays unconfirmed', async () => {
+    // Indistinguishable from this creation's own resource after a resend.
     const pod = memoryPod({ [NEW]: { ...body, '@id': NEW } });
-    expect(await prepareCreation(pod.source, NEW, body).run()).toEqual({
-      kind: 'exists',
+    const creation = prepareCreation(pod.source, NEW, body);
+    expect(await creation.run()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: true,
+    });
+    expect(await creation.run()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: true,
+    });
+    expect(pod.count('put')).toBe(2);
+  });
+
+  it('does not report its own creation as taken when a lower layer resends it', async () => {
+    // A browser resends a request whose reused connection closed after the
+    // Pod applied it; the resend's create-only condition then fails.
+    const pod = memoryPod({});
+    pod.once('put', async (real) => {
+      await real();
+      return real();
+    });
+    const creation = prepareCreation(pod.source, NEW, body);
+    expect(await creation.run()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: true,
+    });
+    expect(pod.count('put')).toBe(2);
+    expect(titleOf(pod.body(NEW))[0]?.['@value']).toBe('New');
+  });
+
+  it('stays unconfirmed when a failed condition cannot be explained by a read', async () => {
+    const refused = memoryPod({ [NEW]: { '@id': NEW } });
+    refused.setReadable(false);
+    expect(await prepareCreation(refused.source, NEW, body).run()).toEqual({
+      kind: 'unconfirmed',
+    });
+    // Taken when sent, gone when read: this creation may have been the one.
+    const gone = memoryPod({ [NEW]: { '@id': NEW } });
+    gone.once('get', async () => ({ kind: 'not-found' }));
+    expect(await prepareCreation(gone.source, NEW, body).run()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: false,
     });
   });
 
@@ -1575,12 +1615,14 @@ describe('creation', () => {
     expect(titleOf(pod.body(NEW))[0]?.['@value']).toBe('New');
   });
 
-  it('reports an existing different resource without writing', async () => {
+  it('keeps a failed condition unconfirmed when another resource holds the IRI', async () => {
+    // It may be this creation's resent resource, changed by another writer.
     const pod = memoryPod({
       [NEW]: { '@id': NEW, [NAME]: [{ '@value': 'x' }] },
     });
     expect(await prepareCreation(pod.source, NEW, body).run()).toEqual({
-      kind: 'exists',
+      kind: 'unconfirmed',
+      desiredObserved: false,
     });
     expect(pod.body(NEW)).toEqual({ '@id': NEW, [NAME]: [{ '@value': 'x' }] });
     expect(() =>
