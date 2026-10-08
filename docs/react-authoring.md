@@ -377,7 +377,9 @@ be blank for the app's form; inline equivalent values are allowed. Changes are
 frozen copies. A pending command or uncertain result locks the draft in both UI
 and the change action. One subject IRI/command is captured until completion or
 explicitly settled recovery; nothing is replayed automatically. Confirmed creation
-or acknowledgement of present evidence resets only this creation's draft. If the
+or acknowledgement of present evidence resets only this creation's draft. A
+resource the definition cannot read also counts as present: the notice then sets
+`unreadable` instead of `current` and shows no field comparison. If the
 comparison observes absence, acknowledgement keeps the draft and captured command:
 Create becomes available for an explicit retry of the same IRI and body with
 `If-None-Match: *`. The draft stays locked until recovery settles, including against

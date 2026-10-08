@@ -592,6 +592,37 @@ it('R3: a taken IRI stays unconfirmed; the draft is never re-sent under a fresh 
   expect(attempts).toHaveLength(1);
 });
 
+it('a taken IRI the definition cannot read can still be compared and settled', async () => {
+  const f = await setup();
+  f.setResource(async (url, init) => {
+    if (init?.method !== 'PUT') return f.resource(url, init);
+    const iri = iriOf(url);
+    f.rows.set(iri, {
+      '@id': iri,
+      '@type': ['urn:Task'],
+      'urn:title': [{ '@value': 'Other' }],
+      'urn:status': [{ '@id': 'urn:unknown' }],
+    });
+    return new Response(null, { status: 412 });
+  });
+  act(() => f.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    expect(await f.api.creation.create()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: false,
+    });
+  });
+  await act(async () => {
+    expect(await f.api.creation.notice.onCheck()).toBe(true);
+  });
+  // Present without a mappable value: no comparison, but evidence.
+  expect(f.api.creation.notice.unreadable).toBe(true);
+  expect(f.api.creation.notice.current).toBeUndefined();
+  act(() => f.api.creation.notice.onAcknowledge());
+  expect(f.api.creation.draft).toEqual(initial);
+  expect(f.api.creation.canEdit).toBe(true);
+});
+
 it('a creation the browser resent is not taken for a collision and gets no fresh IRI', async () => {
   const f = await setup();
   const attempts: string[] = [];

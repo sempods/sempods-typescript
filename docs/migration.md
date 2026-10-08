@@ -12,8 +12,9 @@ automatic conversion of legacy app data or stored credentials.
   `desiredObserved`: `true` means the IRI holds this body; `false` means another
   resource or none. Neither proves which request wrote it. `exists` remains in
   `CreateOutcome` but is deprecated and no longer reported. Code that chose a
-  new address after `exists` must now inspect the resource first: a new IRI is
-  safe only if the resource at the old IRI is clearly not this item. `useCreation`
+  new address after `exists` must stop doing so: a differing resource may still
+  be this creation's own, changed by another writer. Keep the item unconfirmed,
+  show what the IRI holds and let the person settle it explicitly. `useCreation`
   already follows its unconfirmed recovery and needs no change.
 
 ## From 0.3 to 0.4
