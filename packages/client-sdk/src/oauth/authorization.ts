@@ -3,7 +3,7 @@ import type { PodFetch } from '../index.js';
 import type { DiscoveryOptions } from './discovery.js';
 import { validateOAuthBinding, type OAuthBinding } from './binding.js';
 import { scopeList } from './scopes.js';
-import { OAuthError } from './errors.js';
+import { OAuthError, type OAuthProblem } from './errors.js';
 import { ABSOLUTE_IRI } from '../iri.js';
 
 export interface AuthorizationAttempt extends OAuthBinding {
@@ -61,7 +61,10 @@ export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Shared preflight for claims and exchanges; a bound denial is distinct from an invalid callback. */
+/**
+ * Shared preflight for claims and exchanges. An error answer bound to the attempt
+ * (denial, login required, …) is distinct from an invalid callback (`callback`).
+ */
 export function validateAuthorizationCallback(
   attempt: AuthorizationAttempt,
   callback: URL,
@@ -111,13 +114,29 @@ export function validateAuthorizationCallback(
       throw new Error();
     return params;
   } catch (error) {
-    if (
-      error instanceof oauth.AuthorizationResponseError &&
-      error.error === 'access_denied'
-    ) {
-      throw new OAuthError('denied');
-    }
+    // The library checks issuer and state first: this error answers the attempt.
+    if (error instanceof oauth.AuthorizationResponseError)
+      throw new OAuthError(authorizationProblem(error.error));
     throw new OAuthError('callback');
+  }
+}
+
+/** Classifies the error code only; the provider's free-text description is never kept. */
+function authorizationProblem(code: string): OAuthProblem {
+  switch (code) {
+    case 'access_denied':
+      return 'denied';
+    case 'login_required':
+      return 'login-required';
+    case 'interaction_required':
+      return 'interaction-required';
+    case 'consent_required':
+      return 'consent-required';
+    case 'temporarily_unavailable':
+    case 'server_error':
+      return 'provider-unavailable';
+    default:
+      return 'rejected';
   }
 }
 

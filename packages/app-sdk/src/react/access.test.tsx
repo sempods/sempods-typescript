@@ -22,6 +22,7 @@ import {
   useWorkflowAccess,
 } from './index.js';
 import {
+  callback,
   fixture,
   pod,
   work,
@@ -368,6 +369,88 @@ it.each(['busy', 'unavailable'] as const)(
     );
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+  },
+);
+
+it.each(['select', 'disconnect'] as const)(
+  'a login_required callback names its cause on its own connection and clears after %s',
+  async (action) => {
+    const other = 'https://pod.example/bob';
+    const f = fixture();
+    const session = await f.login();
+    const bob = await session.runtime.connect(other);
+    await session.runtime.beginAuthorization(bob.id);
+    const authorization = new URL(f.navigate.mock.calls.at(-1)![0]);
+    session.runtime.dispose();
+    await settleLease();
+    const runtime = createBrowserRuntime({
+      ...f.options,
+      location: () =>
+        `${callback}?error=login_required&error_description=Visit+evil.example&state=` +
+        authorization.searchParams.get('state'),
+    });
+    cleanups.push(() => runtime.dispose());
+    render(
+      <SempodsProvider runtime={runtime}>
+        <AppAccess appName="Shopping" />
+      </SempodsProvider>,
+    );
+    const message =
+      'The pod asked you to sign in at its provider first. Sign in there, then try again.';
+    expect((await screen.findByRole('alert')).textContent).toBe(message);
+    // Shown once, on the failed connection, which never claims access or a draft.
+    expect(screen.getAllByText(message)).toHaveLength(1);
+    expect(screen.queryByText(/draft/)).toBeNull();
+    expect(screen.queryByText(/evil/)).toBeNull();
+    expect(
+      runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
+    ).toMatchObject({ kind: 'ended', problem: 'login-required' });
+    const picker = screen.getByLabelText<HTMLSelectElement>('Active pod');
+    expect(picker.value).toBe(bob.id);
+    expect(f.count('/token')).toBe(1);
+    if (action === 'select')
+      await act(async () =>
+        fireEvent.change(picker, { target: { value: session.id } }),
+      );
+    else
+      await act(async () =>
+        screen.getByRole('button', { name: 'Disconnect' }).click(),
+      );
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(runtime.getSnapshot().some((c) => c.id === bob.id)).toBe(
+      action === 'select',
+    );
+  },
+);
+
+it.each([
+  ['en', 'interrupted', 'Sign in to use this pod.'],
+  ['de', 'interrupted', 'Melde dich an, um diesen Pod zu nutzen.'],
+  ['en', 'expired', 'Sign in to use this pod.'],
+] as const)(
+  'an abandoned first sign-in asks to sign in without claiming a kept draft (%s, %s)',
+  async (language, problem, text) => {
+    const f = fixture();
+    await f.begin();
+    f.runtime.dispose();
+    await settleLease();
+    // Reopened later than the attempt's ten-minute lifetime.
+    if (problem === 'expired')
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 600_001);
+    const runtime = createBrowserRuntime(f.options);
+    cleanups.push(() => runtime.dispose());
+    render(
+      <SempodsProvider runtime={runtime} language={language}>
+        <AppAccess appName="Shopping" />
+      </SempodsProvider>,
+    );
+    expect(await screen.findByText(text)).toBeTruthy();
+    expect(runtime.getSnapshot()[0]!.session).toMatchObject({
+      kind: 'ended',
+      problem,
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/draft|Entwurf/)).toBeNull();
   },
 );
 

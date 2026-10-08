@@ -574,6 +574,7 @@ export function createBrowserRuntime(
       unreadable: [],
     };
     let callback = false;
+    let attempted: string | undefined;
     let destination = returnTo;
     try {
       const location = new URL(
@@ -667,6 +668,7 @@ export function createBrowserRuntime(
       destination = pending.value.attempt.returnTo;
       if (!allows(sessionBinding(pending.value).pod.podUrl))
         throw new RuntimeError('configuration');
+      attempted = pending.id;
       const connectionId = await redeem(
         pending.id,
         pending.revision,
@@ -685,6 +687,9 @@ export function createBrowserRuntime(
         ...report,
         interaction: problem === 'denied' ? 'cancelled' : 'failed',
         storage: problem === 'busy' ? 'busy' : report.storage,
+        ...(attempted && entries.has(attempted)
+          ? { attemptConnectionId: attempted }
+          : {}),
         problem,
         ...runtimeFailure(error),
       };

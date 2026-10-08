@@ -17,6 +17,7 @@ const podUrl = location.origin + '/alice';
 const identity =
   new URL(location.href).searchParams.get('identity') ?? 'preset';
 const accessUI = identity.startsWith('access-');
+const language = identity.endsWith('-de') ? 'de' : 'en';
 const runtime = createBrowserRuntime({
   identity: {
     kind: 'dynamic',
@@ -134,7 +135,7 @@ createRoot(document.getElementById('app')!).render(
       <AppAccess appName="Shopping" />
     </SempodsProvider>
   ) : (
-    <SempodsProvider runtime={runtime}>
+    <SempodsProvider runtime={runtime} language={language}>
       <Evidence />
     </SempodsProvider>
   ),

@@ -139,7 +139,14 @@ export function AccessNotice() {
   const c = access.connection;
   if (!c) return <Notice>{m.controls.noTarget}</Notice>;
   if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
-    return <Notice>{m.controls.readLost}</Notice>;
+    return (
+      <Notice>
+        {/* Interrupted sign-ins are found at startup, before any draft. */}
+        {c.session.kind === 'ended' && c.session.problem === 'interrupted'
+          ? m.controls.signInRequired
+          : m.controls.readLost}
+      </Notice>
+    );
   if (c.missingRequiredScopes.length)
     return <Notice>{m.missingScopes(c.missingRequiredScopes, format)}</Notice>;
   if (c.catalogue.kind === 'failed') return <Notice>{m.catalogueError}</Notice>;
@@ -400,13 +407,15 @@ export function ConnectionControls({
 /**
  * The outcome of a returning sign-in that failed or was cancelled, with its
  * protocol cause when the runtime kept one. AppShell renders it; custom
- * layouts place it themselves. Renders nothing otherwise.
+ * layouts place it themselves. It clears once the person selects another
+ * connection, disconnects one or starts a sign-in (`callbackNotice`).
+ * Renders nothing otherwise.
  */
 export function CallbackNotice() {
   const state = useAppState();
   const { messages } = useSdkLocale();
   const interaction = state.startup?.interaction;
-  if (interaction !== 'failed' && interaction !== 'cancelled') return null;
+  if (!state.callbackNotice) return null;
   return (
     <Notice role="alert">
       {interaction === 'cancelled'

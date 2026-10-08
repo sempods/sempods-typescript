@@ -6,6 +6,7 @@ import {
   validateAuthorizationCallback,
 } from './authorization.js';
 import type { PodDiscovery } from './discovery.js';
+import type { OAuthError } from './errors.js';
 
 const pod: PodDiscovery = {
   podUrl: 'https://pod.example/alice',
@@ -364,15 +365,35 @@ it('does not judge iat against the local clock; receipt and expires_in bound the
 it('rejects error and denial callbacks distinctly and duplicate reserved parameters', async () => {
   const a = await attempt();
   const callback = (query: string) => new URL(`${client.redirectUri}?${query}`);
-  expect(() =>
-    validateAuthorizationCallback(
-      a,
-      callback(`error=access_denied&state=${a.state}`),
-    ),
-  ).toThrow(expect.objectContaining({ problem: 'denied' }));
+  for (const [code, problem] of [
+    ['access_denied', 'denied'],
+    ['login_required', 'login-required'],
+    ['interaction_required', 'interaction-required'],
+    ['consent_required', 'consent-required'],
+    ['temporarily_unavailable', 'provider-unavailable'],
+    ['server_error', 'provider-unavailable'],
+    ['invalid_scope', 'rejected'],
+  ] as const) {
+    let thrown: unknown;
+    try {
+      validateAuthorizationCallback(
+        a,
+        callback(
+          `error=${code}&error_description=Sign+in+at+evil.example&state=${a.state}`,
+        ),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown, code).toMatchObject({ problem });
+    // Only the classified code survives, never the provider's free text.
+    expect(JSON.stringify((thrown as OAuthError).reason)).not.toContain('evil');
+    expect((thrown as Error).message).not.toContain('evil');
+  }
   for (const query of [
     `error=access_denied&code=x&state=${a.state}`,
-    `error=server_error&state=${a.state}`,
+    `error=login_required&state=other`,
+    `error=login_required`,
     `code=x&state=${a.state}&state=${a.state}`,
     `code=x&code=y&state=${a.state}`,
     `code=&state=${a.state}`,

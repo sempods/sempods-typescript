@@ -109,7 +109,9 @@ keyboard/mobile and second-tab checks, plus the shared Node domain/edit path.
 stylesheet at 320/375px in EN/DE and light/dark, including host-controlled color schemes, transparent embedded surfaces, inherited token overrides,
 44px targets, keyboard focus, and isolation from app-owned list styling.
 `test:runtime` also covers packed `AppAccess` one/set/free Pod choices, keyboard
-sign-in and focus recovery, and the widget host with retained drafts/uncertain
+sign-in and focus recovery, a provider answering `login_required` (specific EN/DE
+cause without the provider's text, cleared by selecting another Pod or
+disconnecting), and the widget host with retained drafts/uncertain
 writes. With one permitted Pod and Contexts on demand, a Pod with slow discovery
 shows that `AppAccess` passes only through its loading status after the callback
 and during restore before hiding, while an ended session and missing required

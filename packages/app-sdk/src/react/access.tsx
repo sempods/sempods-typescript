@@ -61,7 +61,8 @@ const noSubscription = () => () => {};
  * it shows the loading status (plus the active-Pod selector for several saved
  * connections and the sign-in for another configured Pod) until something
  * needs a decision.
- * Read-only targets remain usable. Callback failures remain visible separately.
+ * Read-only targets remain usable. Callback failures remain visible separately
+ * until the person selects another connection, disconnects one or signs in again.
  * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
  * children mounted during same-target access loss; this is not a content gate.
  * Inline, scoped defaults use shared --sempods-* CSS variables; no stylesheet
@@ -91,9 +92,7 @@ export function AppAccess({
     state.contextSelection === 'on-demand' ? podAccess.read : access.read;
   const { messages: m, direction, error } = useSdkLocale();
   const heldFocus = useRef(false);
-  const callbackFailed =
-    state.startup?.interaction === 'failed' ||
-    state.startup?.interaction === 'cancelled';
+  const callbackFailed = state.callbackNotice;
   const needsAttention =
     !readable ||
     (contextRequired &&
@@ -481,13 +480,24 @@ function AccessConnections({
       {c && !active && c.session.kind !== 'restoring' && (
         <>
           <p>{name(c.podUrl)}</p>
-          {c.session.kind === 'ended' && (
-            <p role="status">
-              {c.session.failure
-                ? describeFailure(m.errors, c.session.failure)
-                : m.controls.readLost}
-            </p>
-          )}
+          {c.session.kind === 'ended' &&
+            // The callback notice already names why this sign-in ended.
+            !(
+              state.callbackNotice &&
+              state.startup?.attemptConnectionId === c.id &&
+              c.session.problem === state.startup.problem
+            ) && (
+              <p role="status">
+                {c.session.failure
+                  ? describeFailure(m.errors, c.session.failure)
+                  : // An unfinished sign-in or an expired session: signing in
+                    // navigates away, so no access or kept draft is implied.
+                    c.session.problem === 'interrupted' ||
+                      c.session.problem === 'expired'
+                    ? m.controls.signInRequired
+                    : m.controls.readLost}
+              </p>
+            )}
           <button
             className="sp-access-primary"
             disabled={unavailable}

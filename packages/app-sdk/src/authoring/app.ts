@@ -23,6 +23,12 @@ export interface AppSnapshot {
   readonly allowedPods?: readonly string[];
   readonly startup: StartupReport | undefined;
   readonly startupError: unknown;
+  /**
+   * Whether the startup's failed or cancelled callback still needs presenting.
+   * Cleared once the person selects another connection, disconnects one or
+   * starts a sign-in; `startup` itself stays unchanged.
+   */
+  readonly callbackNotice: boolean;
   readonly connections: readonly Connection[];
   readonly activeId: string | null;
   readonly view: BoundView | null;
@@ -56,6 +62,7 @@ export function createAppController(
   let startVersion = 0;
   let startup: StartupReport | undefined;
   let startupError: unknown;
+  let callbackNotice = false;
   let activeId: string | null = null;
   let view: BoundView | null = null;
   let pod: BoundPod | null = null;
@@ -72,6 +79,7 @@ export function createAppController(
     ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
     startup,
     startupError,
+    callbackNotice,
     connections: runtime.getSnapshot(),
     activeId,
     view,
@@ -115,6 +123,7 @@ export function createAppController(
       ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
       startup,
       startupError,
+      callbackNotice,
       connections,
       activeId,
       view,
@@ -188,12 +197,19 @@ export function createAppController(
       void runtime.initialize().then(
         (report) => {
           if (version !== startVersion) return;
-          if (
-            !startup &&
-            report.interaction === 'completed' &&
-            report.connectionId
-          )
-            activeId = report.connectionId;
+          if (!startup) {
+            // The returning sign-in's connection becomes active, also when it
+            // failed, so its cause and recovery are shown next to it.
+            const returned = report.connectionId ?? report.attemptConnectionId;
+            if (
+              returned &&
+              runtime.getSnapshot().some((c) => c.id === returned)
+            )
+              activeId = returned;
+            callbackNotice =
+              report.interaction === 'failed' ||
+              report.interaction === 'cancelled';
+          }
           startup = report;
           publish();
         },
@@ -261,6 +277,7 @@ export function createAppController(
           throw new RuntimeError('disconnected');
         activeId = id;
         view = null;
+        callbackNotice = false;
         publish();
       });
     },
@@ -277,6 +294,7 @@ export function createAppController(
     },
     connect(url = defaultPodUrl) {
       return guard(async () => {
+        callbackNotice = false;
         const connection =
           (url === defaultPodUrl
             ? runtime
@@ -291,11 +309,15 @@ export function createAppController(
       });
     },
     authorize(id: string) {
-      return guard(() => runtime.beginAuthorization(id));
+      return guard(() => {
+        callbackNotice = false;
+        return runtime.beginAuthorization(id);
+      });
     },
     disconnect(id: string) {
       return guard(async () => {
-        await runtime.disconnect(id);
+        if ((await runtime.disconnect(id)).kind === 'disconnected')
+          callbackNotice = false;
       });
     },
   };

@@ -66,7 +66,16 @@ what to render; the runtime does not render login or recovery UI.
 
 The report separates interaction (`none`, `completed`, `cancelled`, `failed`)
 from storage (`durable`, `unavailable`, `busy`). A rejected callback can coexist
-with other restored active connections. `unreadable` identifies corrupt or
+with other restored active connections. When the provider answers the stored
+attempt with an OAuth error, the runtime consumes that attempt, ends its
+connection with the classified cause and retires its record (it is listed until
+the next reload, also for a transient `provider-unavailable`): `access_denied` is `denied` (interaction
+`cancelled`); `login_required`, `interaction_required` and `consent_required`
+are `login-required`, `interaction-required` and `consent-required`;
+`temporarily_unavailable` and `server_error` are `provider-unavailable`; any
+other code is `rejected`. The provider's `error_description` is never kept or
+shown. `attemptConnectionId` names that connection; a forged or malformed
+callback leaves the attempt untouched. `unreadable` identifies corrupt or
 unsupported records without deleting them or hiding other valid records.
 Startup never waits for the discovery of saved Pods, on the callback route or
 otherwise. Saved connections report `session.kind: 'restoring'` until their own
