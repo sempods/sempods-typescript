@@ -184,7 +184,8 @@ export function useList<D>(
       });
     },
     // `listKey` stands for the definition and type: a real change reads again.
-    [listKey],
+    // `latest` is a ref and keeps its identity.
+    [listKey, latest, type],
   );
   const load = useLoad(read);
   // Until the read for a changed definition or type has started, the rows on
@@ -286,8 +287,8 @@ export function useResourceEditor<D>(
       unregister();
       editor.dispose();
     };
-    // `key` stands for the definition (see useDefinition).
-  }, [view, iri, key, app]);
+    // `key` stands for the definition (see useDefinition); `latest` is its ref.
+  }, [view, iri, key, app, latest]);
   const editor =
     active?.view === view && active.iri === iri && active.key === key
       ? active.editor
