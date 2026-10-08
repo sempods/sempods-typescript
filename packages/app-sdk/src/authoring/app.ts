@@ -201,11 +201,7 @@ export function createAppController(
             // The returning sign-in's connection becomes active, also when it
             // failed, so its cause and recovery are shown next to it.
             const returned = report.connectionId ?? report.attemptConnectionId;
-            if (
-              returned &&
-              runtime.getSnapshot().some((c) => c.id === returned)
-            )
-              activeId = returned;
+            if (returned) activeId = returned;
             callbackNotice =
               report.interaction === 'failed' ||
               report.interaction === 'cancelled';

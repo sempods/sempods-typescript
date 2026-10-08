@@ -22,7 +22,6 @@ import {
   useWorkflowAccess,
 } from './index.js';
 import {
-  callback,
   fixture,
   pod,
   work,
@@ -380,15 +379,12 @@ it.each(['select', 'disconnect'] as const)(
     const session = await f.login();
     const bob = await session.runtime.connect(other);
     await session.runtime.beginAuthorization(bob.id);
-    const authorization = new URL(f.navigate.mock.calls.at(-1)![0]);
     session.runtime.dispose();
     await settleLease();
-    const runtime = createBrowserRuntime({
-      ...f.options,
-      location: () =>
-        `${callback}?error=login_required&error_description=Visit+evil.example&state=` +
-        authorization.searchParams.get('state'),
-    });
+    const runtime = f.returned(
+      undefined,
+      'error=login_required&error_description=Visit+evil.example',
+    );
     cleanups.push(() => runtime.dispose());
     render(
       <SempodsProvider runtime={runtime}>

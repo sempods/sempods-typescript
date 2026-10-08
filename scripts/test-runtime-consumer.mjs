@@ -314,30 +314,25 @@ try {
         });
         return;
       }
-      if (url.pathname.endsWith('/authorize') && name === 'refusing') {
-        // A legitimate, state-bound OAuth error with untrusted free text.
-        const redirect = new URL(url.searchParams.get('redirect_uri'));
-        redirect.searchParams.set('error', 'login_required');
-        redirect.searchParams.set(
-          'error_description',
-          'You are not signed in to the app',
-        );
-        redirect.searchParams.set('iss', base);
-        redirect.searchParams.set('state', url.searchParams.get('state'));
-        res.writeHead(302, { location: redirect.href });
-        res.end();
-        return;
-      }
       if (url.pathname.endsWith('/authorize')) {
-        const code = 'code-' + codes.size;
-        codes.set(code, {
-          base,
-          client: url.searchParams.get('client_id'),
-          challenge: url.searchParams.get('code_challenge'),
-          redirect: url.searchParams.get('redirect_uri'),
-        });
         const redirect = new URL(url.searchParams.get('redirect_uri'));
-        redirect.searchParams.set('code', code);
+        if (name === 'refusing') {
+          // A legitimate, state-bound OAuth error with untrusted free text.
+          redirect.searchParams.set('error', 'login_required');
+          redirect.searchParams.set(
+            'error_description',
+            'You are not signed in to the app',
+          );
+        } else {
+          const code = 'code-' + codes.size;
+          codes.set(code, {
+            base,
+            client: url.searchParams.get('client_id'),
+            challenge: url.searchParams.get('code_challenge'),
+            redirect: url.searchParams.get('redirect_uri'),
+          });
+          redirect.searchParams.set('code', code);
+        }
         redirect.searchParams.set('iss', base);
         redirect.searchParams.set('state', url.searchParams.get('state'));
         res.writeHead(302, { location: redirect.href });

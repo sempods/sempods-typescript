@@ -12,7 +12,8 @@ import {
   useWorkflowAccess,
 } from './app.js';
 import { useSdkLocale } from './locale.js';
-import { describeFailure } from '../locale.js';
+import { describeFailure, type SdkMessages } from '../locale.js';
+import type { SessionFact } from '../runtime/types.js';
 import { AppAccess } from './access.js';
 import { SdkStyles } from './styles.js';
 import { contextName, podName, distinctName } from './names.js';
@@ -132,6 +133,23 @@ export function UpdateNotice({
     </section>
   );
 }
+/**
+ * Why an ended session is unusable. An interrupted sign-in is found at startup,
+ * before any draft. Next to a sign-in action, which navigates away, an expired
+ * session keeps none either, and the protocol cause is shown when kept.
+ */
+export function endedMessage(
+  session: Extract<SessionFact, { readonly kind: 'ended' }>,
+  m: SdkMessages,
+  signingIn = false,
+) {
+  if (signingIn && session.failure)
+    return describeFailure(m.errors, session.failure);
+  return session.problem === 'interrupted' ||
+    (signingIn && session.problem === 'expired')
+    ? m.controls.signInRequired
+    : m.controls.readLost;
+}
 export function AccessNotice() {
   const access = useWorkflowAccess();
   const { preset } = useAppState();
@@ -141,9 +159,8 @@ export function AccessNotice() {
   if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
     return (
       <Notice>
-        {/* Interrupted sign-ins are found at startup, before any draft. */}
-        {c.session.kind === 'ended' && c.session.problem === 'interrupted'
-          ? m.controls.signInRequired
+        {c.session.kind === 'ended'
+          ? endedMessage(c.session, m)
           : m.controls.readLost}
       </Notice>
     );

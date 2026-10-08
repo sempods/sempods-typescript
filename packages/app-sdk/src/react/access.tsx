@@ -19,11 +19,11 @@ import { useSdkLocale } from './locale.js';
 import {
   AccessNotice,
   CallbackNotice,
+  endedMessage,
   type ConnectionControlsProps,
 } from './components.js';
 import { SdkStyles } from './styles.js';
 import { contextName, podName, distinctName } from './names.js';
-import { describeFailure } from '../locale.js';
 
 export interface AppAccessProps {
   readonly appName: string;
@@ -92,19 +92,18 @@ export function AppAccess({
     state.contextSelection === 'on-demand' ? podAccess.read : access.read;
   const { messages: m, direction, error } = useSdkLocale();
   const heldFocus = useRef(false);
-  const callbackFailed = state.callbackNotice;
   const needsAttention =
     !readable ||
     (contextRequired &&
       (!access.read || access.connection?.catalogue.kind === 'failed'));
-  const hidden = !needsAttention && !open && !callbackFailed;
+  const hidden = !needsAttention && !open && !state.callbackNotice;
   // The active connection is still being validated (restoring, or signed in
   // while its Pod reader is not yet readable) and nothing awaits a decision:
   // show the loading status, not the connection view, until it settles.
   const c = access.connection;
   const validating =
     !open &&
-    !callbackFailed &&
+    !state.callbackNotice &&
     Boolean(c) &&
     c?.catalogue.kind !== 'failed' &&
     !(contextRequired && c?.catalogue.kind === 'ready') &&
@@ -318,6 +317,12 @@ function AccessConnections({
     c?.podUrl !== defaultUrl &&
     !(manage && !state.allowedPods);
   const choice = url || defaultUrl || '';
+  // The callback notice already names why this connection's sign-in ended.
+  const shownByNotice =
+    state.callbackNotice &&
+    state.startup?.attemptConnectionId === c?.id &&
+    c?.session.kind === 'ended' &&
+    c.session.problem === state.startup?.problem;
   const name = (target: string) =>
     distinctName(
       target,
@@ -480,24 +485,9 @@ function AccessConnections({
       {c && !active && c.session.kind !== 'restoring' && (
         <>
           <p>{name(c.podUrl)}</p>
-          {c.session.kind === 'ended' &&
-            // The callback notice already names why this sign-in ended.
-            !(
-              state.callbackNotice &&
-              state.startup?.attemptConnectionId === c.id &&
-              c.session.problem === state.startup.problem
-            ) && (
-              <p role="status">
-                {c.session.failure
-                  ? describeFailure(m.errors, c.session.failure)
-                  : // An unfinished sign-in or an expired session: signing in
-                    // navigates away, so no access or kept draft is implied.
-                    c.session.problem === 'interrupted' ||
-                      c.session.problem === 'expired'
-                    ? m.controls.signInRequired
-                    : m.controls.readLost}
-              </p>
-            )}
+          {c.session.kind === 'ended' && !shownByNotice && (
+            <p role="status">{endedMessage(c.session, m, true)}</p>
+          )}
           <button
             className="sp-access-primary"
             disabled={unavailable}
