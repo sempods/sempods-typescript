@@ -29,7 +29,8 @@ After an `unconfirmed` creation, keep its printed IRI and original title. Use
 using exactly those values. This is create-only (`If-None-Match: *`), so it cannot
 overwrite an existing resource or create a second task under a new IRI. A missing
 row does not rule out a delayed write. Do not retry with `create`, which generates
-another IRI. Each invocation has fresh local state: `exists` means the IRI is
-already in use, not that the earlier uncertain attempt was confirmed.
+another IRI. Each invocation has fresh local state, so a retry that finds the IRI
+in use stays `unconfirmed`; `desiredObserved: true` means the IRI holds this task,
+not that the earlier attempt was the one that wrote it.
 The script is a small interaction example, not a daemon or unattended retry tool.
 `pnpm test:todo` runs every command against a loopback fixture using packed SDKs.

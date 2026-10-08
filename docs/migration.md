@@ -4,6 +4,18 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.4 to the next release
+
+- **A taken IRI is no longer `exists`.** `prepareCreation(...).run()` reports
+  every failed create-only condition (`412`) as `unconfirmed`, because a
+  browser can resend an applied creation and the resend then fails. Read
+  `desiredObserved`: `true` means the IRI holds this body; `false` means another
+  resource or none. Neither proves which request wrote it. `exists` remains in
+  `CreateOutcome` but is deprecated and no longer reported. Code that chose a
+  new address after `exists` must now inspect the resource first: a new IRI is
+  safe only if the resource at the old IRI is clearly not this item. `useCreation`
+  already follows its unconfirmed recovery and needs no change.
+
 ## From 0.3 to 0.4
 
 Upgrade both packages together; Node 24.15 or newer stays the requirement:
