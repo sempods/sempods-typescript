@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -16,6 +17,15 @@ export default tseslint.config(
   {
     files: ['**/*.ts', '**/*.tsx'],
     rules: { '@typescript-eslint/no-explicit-any': 'error' },
+  },
+  {
+    // The classic hook rules; the React Compiler rules are not adopted.
+    files: ['**/*.ts', '**/*.tsx'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
+    },
   },
   {
     files: ['scripts/test-consumers.mjs'],

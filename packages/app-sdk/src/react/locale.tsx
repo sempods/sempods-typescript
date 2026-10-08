@@ -11,6 +11,8 @@ export function SdkLocaleProvider({
   const { locale, language, timeZone, direction, messages } = options;
   const value = useMemo(
     () => createLocale(options),
+    // `options` is a new rest object on every render; its fields are listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [locale, language, timeZone, direction, messages],
   );
   return (
