@@ -658,7 +658,10 @@ part of it. `useSelection<T>()` provides a guarded `select(value)` and
 `TargetScreen` to reset it per target without a handwritten keyed wrapper. Pending writes block navigation. Dirty editors or uncertain
 outcomes require explicit confirmation before leaving their scope. A rejected
 navigation action does not discard registered drafts; the current target remains selected when its requested
-replacement is no longer available. Local row navigation leaves editor guards
+replacement is no longer available. A prompt is about the connection that was
+active when it asked. If that connection stops being active outside a guarded
+action (a returning sign-in, or the connection removed), the controller cancels
+the prompt: the action resolves `false`, nothing runs and no draft is discarded. Local row navigation leaves editor guards
 only: list mutations and app-owned creation drafts survive, and uncertain outcomes still require comparison and
 acknowledgement. `useDraftGuard(dirty, discard)` is target-scoped by default;
 pass a third argument `'local'` only for a draft that row navigation leaves.
@@ -838,6 +841,9 @@ with `register`. Guards default to local scope; use `scope: 'target'` for drafts
 or mutation outcomes that survive row navigation and `unconfirmed()` for pending
 write-outcome evidence. Headless hosts must prevent input while the controller's
 `changing` or `confirmingLeave` snapshot field is true, as the React provider does.
+Close a custom leave prompt whenever `confirmingLeave` turns false, also without
+`confirmLeave()` or `cancelLeave()`: the controller cancels a prompt whose
+connection stopped being active.
 
 The controller snapshot also exposes the active `BoundPod` as `pod`, independently
 of the Context `view`. Use its `sparql.select`/`construct` methods and subscribe to
