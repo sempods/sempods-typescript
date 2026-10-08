@@ -36,7 +36,9 @@ const runtime = createBrowserRuntime({
 
 Serve the same application at the redirect path. Startup processes its callback
 and restores other connections independently. After a completed callback, its
-connection becomes active; context selection stays explicit. The startup report
+connection becomes active; context selection stays explicit. Context screens
+appear only once startup settles; see
+[selection and draft lifetime](#selection-and-draft-lifetime). The startup report
 exposes `connectionId` for headless hosts. Screens never handle callbacks,
 credentials, ETags or authentication recovery. See [browser runtime](browser-runtime.md)
 for deployment identity, persisted sessions and the one-active-tab contract.
@@ -584,10 +586,13 @@ active when it asked. If that connection stops being active outside a guarded
 action (a returning sign-in, or the connection removed), the controller cancels
 the prompt: the action resolves `false`, nothing runs and no draft is discarded.
 Until startup settles, the controller exposes no Context view, so `TargetScreen`
-renders nothing and no Context-bound draft can start. On a callback page, saved
-sessions restore while the returning sign-in is still being redeemed, and that
-connection becomes active afterwards. Pod reads (`useAppState().pod`,
-`usePodLoad`) stay available meanwhile. Local row navigation leaves editor guards
+renders nothing and no resource editor or other view-bound screen inside it can
+start. On a callback page, saved sessions restore while the returning sign-in is
+still being redeemed, and that connection becomes active afterwards. Pod reads
+(`useAppState().pod`, `usePodLoad`) stay available meanwhile. Hooks used outside
+`TargetScreen`, such as `useCreation`, still accept input while there is no view
+and reset that draft once one appears. Keep their inputs disabled while
+`useWorkflowAccess().write` is false, as the recipes do. Local row navigation leaves editor guards
 only: list mutations and app-owned creation drafts survive, and uncertain outcomes still require comparison and
 acknowledgement. `useDraftGuard(dirty, discard)` is target-scoped by default;
 pass a third argument `'local'` only for a draft that row navigation leaves.

@@ -262,7 +262,11 @@ function LeaveConfirmation() {
   );
 }
 
-/** Demand discovery before a view exists, then retain the screen through same-target recovery. */
+/**
+ * Demand discovery before a view exists, then retain the screen through
+ * same-target recovery. Renders nothing until the controller exposes a view,
+ * which it does only once startup settles.
+ */
 export function TargetScreen({ children }: { readonly children: ReactNode }) {
   useContextDemand(true);
   const view = useView();
