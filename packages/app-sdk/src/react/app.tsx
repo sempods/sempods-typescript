@@ -23,7 +23,12 @@ const Context = createContext<{
   readonly contextDemand: boolean;
   readonly retainContext: () => () => void;
 } | null>(null);
-/** Guarded user actions for custom screens and replacement controls. */
+/**
+ * Guarded user actions for custom screens and replacement controls. Each
+ * guarded action (all except `refreshContexts`) resolves `false`, discarding
+ * nothing, if the connection that was active when the person was asked stops
+ * being active outside a guarded action.
+ */
 export interface AppActions {
   /** Switch the active Pod connection; asks before leaving drafts or unconfirmed writes. */
   selectConnection(id: string): Promise<boolean>;

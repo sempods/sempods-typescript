@@ -5,6 +5,7 @@ import {
   catalogue,
   work,
   personal,
+  pod,
   deferred,
   jwt,
   settleLease,
@@ -203,6 +204,77 @@ it('guards target and row changes, with busy writes unconditionally blocking', a
   const row = vi.fn();
   expect(await app.navigate(row)).toBe(false);
   expect(row).not.toHaveBeenCalled();
+});
+it('cancels a leave prompt when another connection becomes active outside a guarded action', async () => {
+  const f = await connected();
+  const other = await f.runtime.connect('https://pod.example/bob');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().activeId).toBe(f.id));
+  const discard = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard });
+  const select = vi.spyOn(f.runtime, 'selectContext');
+  const change = app.selectContext(personal);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  // Removing the active connection activates another one without a guard.
+  await f.runtime.disconnect(f.id);
+  expect(await change).toBe(false);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: other.id,
+    confirmingLeave: false,
+  });
+  await app.confirmLeave();
+  expect(select).not.toHaveBeenCalled();
+  expect(discard).not.toHaveBeenCalled();
+});
+it('cancels a leave prompt when a returning sign-in activates another connection', async () => {
+  const f = await connected();
+  const report = await f.runtime.initialize();
+  const other = await f.runtime.connect('https://pod.example/bob');
+  // Startup is still settling, so Alice is active until the callback completes.
+  const startup = deferred<typeof report>();
+  vi.spyOn(f.runtime, 'initialize').mockReturnValue(startup.promise);
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  expect(app.getSnapshot().activeId).toBe(f.id);
+  const discard = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard });
+  const select = vi.spyOn(f.runtime, 'selectContext');
+  const change = app.selectContext(personal);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  startup.resolve({ ...report, connectionId: other.id });
+  expect(await change).toBe(false);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: other.id,
+    confirmingLeave: false,
+  });
+  await app.confirmLeave();
+  expect(select).not.toHaveBeenCalled();
+  expect(discard).not.toHaveBeenCalled();
+});
+it('keeps a leave prompt asked without an active connection when one appears', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  await f.runtime.initialize();
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  expect(app.getSnapshot().activeId).toBeNull();
+  const discard = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard });
+  const row = vi.fn();
+  const navigation = app.navigate(row);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  // A connection appears and becomes active; the prompt was not about one.
+  await f.runtime.connect(pod);
+  expect(app.getSnapshot().activeId).not.toBeNull();
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  await app.confirmLeave();
+  expect(await navigation).toBe(true);
+  expect(row).toHaveBeenCalledOnce();
+  expect(discard).toHaveBeenCalledOnce();
 });
 it('retries an invalidated custom read once, never indefinitely', async () => {
   const f = await connected();
