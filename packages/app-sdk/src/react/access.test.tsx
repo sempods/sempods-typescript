@@ -9,12 +9,14 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AppAccess,
   SempodsProvider,
   TargetScreen,
+  useApp,
   useCreation,
   useAppState,
   useWorkflowAccess,
@@ -24,9 +26,13 @@ import {
   pod,
   work,
   catalogue,
+  deferred,
+  jwt,
   settleLease,
 } from '../runtime/fixture.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
+import type { BrowserRuntime } from '../runtime/types.js';
+import type { BoundPod } from '../runtime/view.js';
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto);
@@ -431,5 +437,375 @@ it.each([
         await screen.findByRole('button', { name: 'Sign in' }),
       ).toBeTruthy();
     }
+  },
+);
+
+function Started() {
+  const { startup } = useAppState();
+  return <output data-testid="startup">{startup ? 'started' : ''}</output>;
+}
+function Validating({ mode }: { readonly mode: 'on-demand' | 'required' }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(!open)}>Manage</button>
+      <AppAccess appName="Shopping" open={open} />
+      <Started />
+      {mode === 'required' && (
+        <TargetScreen>
+          <p>Context screen</p>
+        </TargetScreen>
+      )}
+    </>
+  );
+}
+/** While a connection validates, the surface shows its heading and loading status only. */
+function expectLoadingOnly() {
+  const region = screen.getByRole('region', { name: 'Data access' });
+  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  expect(within(region).queryByText('Full addresses')).toBeNull();
+  expect(within(region).queryAllByRole('button')).toHaveLength(0);
+  expect(within(region).queryAllByRole('combobox')).toHaveLength(0);
+}
+
+it.each(['on-demand', 'required'] as const)(
+  'shows only the loading status while a saved connection restores (%s)',
+  async (mode) => {
+    const f = fixture({ allowedPods: [pod], preferences: null });
+    const signed = await f.login();
+    signed.runtime.dispose();
+    await settleLease();
+    const discovery = deferred<void>();
+    const runtime = createBrowserRuntime({
+      ...f.options,
+      fetch: async (url, init) => {
+        if (url.endsWith('/.well-known/oauth-protected-resource'))
+          await discovery.promise;
+        return f.fetch(url, init);
+      },
+    });
+    cleanups.push(() => runtime.dispose());
+    render(
+      <SempodsProvider runtime={runtime} contextSelection={mode}>
+        <Validating mode={mode} />
+      </SempodsProvider>,
+    );
+    await screen.findByText('started');
+    expect(runtime.getSnapshot()[0]?.session.kind).toBe('restoring');
+    expectLoadingOnly();
+    // Explicit management still shows the connection, including its addresses.
+    fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+    expect(screen.getByText('Full addresses')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+    expectLoadingOnly();
+    await act(async () => discovery.resolve());
+    if (mode === 'on-demand')
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('region', { name: 'Data access' }),
+        ).toBeNull(),
+      );
+    // A Context still awaiting a choice is a decision: the chooser appears.
+    else await screen.findByRole('combobox', { name: 'Data context' });
+    expect(screen.queryByText('Loading…')).toBeNull();
+  },
+);
+
+it('shows only the loading status between the callback and a readable Pod reader', async () => {
+  const f = fixture({ allowedPods: [pod], preferences: null });
+  await f.begin();
+  f.runtime.dispose();
+  await settleLease();
+  const runtime = f.returned();
+  cleanups.push(() => runtime.dispose());
+  // A signed-in reader that becomes readable only after a delay.
+  let readable = false;
+  const listeners = new Set<() => void>();
+  const readers = new WeakMap<BoundPod, BoundPod>();
+  const held = new WeakMap<object, ReturnType<BoundPod['getSnapshot']>>();
+  const bindPod = runtime.bindPod;
+  vi.spyOn(runtime, 'bindPod').mockImplementation((id) => {
+    const inner = bindPod(id);
+    let reader = readers.get(inner);
+    if (!reader) {
+      reader = {
+        ...inner,
+        getSnapshot() {
+          const snapshot = inner.getSnapshot();
+          if (readable) return snapshot;
+          let pending = held.get(snapshot);
+          if (!pending) {
+            pending = Object.freeze({ ...snapshot, read: false });
+            held.set(snapshot, pending);
+          }
+          return pending;
+        },
+        subscribe(listener) {
+          listeners.add(listener);
+          const stop = inner.subscribe(listener);
+          return () => {
+            listeners.delete(listener);
+            stop();
+          };
+        },
+      };
+      readers.set(inner, reader);
+    }
+    return reader;
+  });
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Validating mode="on-demand" />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
+  expectLoadingOnly();
+  act(() => {
+    readable = true;
+    listeners.forEach((listener) => listener());
+  });
+  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+});
+
+/** Restarts [f]'s saved sessions with Pod discovery held (for [held] URLs) until the gate settles. */
+async function restoring(
+  f: ReturnType<typeof fixture>,
+  runtime: BrowserRuntime,
+  held: (url: string) => boolean = () => true,
+) {
+  runtime.dispose();
+  await settleLease();
+  const discovery = deferred<void>();
+  const next = createBrowserRuntime({
+    ...f.options,
+    fetch: async (url, init) => {
+      if (url.endsWith('/.well-known/oauth-protected-resource') && held(url))
+        await discovery.promise;
+      return f.fetch(url, init);
+    },
+  });
+  cleanups.push(() => next.dispose());
+  return { runtime: next, discovery };
+}
+
+/** Signs in to [pod] and then to [other]; both sessions are saved, [other] is active. */
+async function bothSignedIn(f: ReturnType<typeof fixture>, other: string) {
+  const signed = await f.login();
+  const second = await signed.runtime.connect(other);
+  await signed.runtime.beginAuthorization(second.id);
+  signed.runtime.dispose();
+  await settleLease();
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt({ iss: other }),
+      token_type: 'Bearer',
+      refresh_token: 'other',
+    }),
+  );
+  const runtime = f.returned();
+  expect(await runtime.initialize()).toMatchObject({
+    interaction: 'completed',
+  });
+  return { runtime, first: signed.id, second: second.id };
+}
+
+it('keeps the active-Pod selector mounted, focused and usable while a saved connection restores', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ allowedPods: [pod, other], preferences: null });
+  const both = await bothSignedIn(f, other);
+  const { runtime, discovery } = await restoring(f, both.runtime);
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Validating mode="on-demand" />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const region = screen.getByRole('region', { name: 'Data access' });
+  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  expect(within(region).queryByText('Full addresses')).toBeNull();
+  const select = within(region).getByRole('combobox', {
+    name: 'Active pod',
+  }) as HTMLSelectElement;
+  expect(select.disabled).toBe(false);
+  const active = select.value;
+  select.focus();
+  // The restore fails and ends the session: the view changes, the selector stays.
+  await act(async () => discovery.reject(new Error('offline')));
+  await waitFor(() =>
+    expect(
+      runtime.getSnapshot().find((entry) => entry.id === active)?.session.kind,
+    ).toBe('ended'),
+  );
+  expect(screen.getByText('Full addresses')).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: 'Active pod' })).toBe(select);
+  expect(document.activeElement).toBe(select);
+});
+
+it('switches to another saved Pod from the selector while a restore is pending', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ allowedPods: [pod, other], preferences: null });
+  const both = await bothSignedIn(f, other);
+  both.runtime.dispose();
+  await settleLease();
+  // Each Pod's restore waits for its own gate.
+  const gates = new Map([pod, other].map((url) => [url, deferred<void>()]));
+  const runtime = createBrowserRuntime({
+    ...f.options,
+    fetch: async (url, init) => {
+      if (url.endsWith('/.well-known/oauth-protected-resource'))
+        await gates.get(url.split('/.well-known')[0]!)!.promise;
+      return f.fetch(url, init);
+    },
+  });
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Validating mode="on-demand" />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const region = screen.getByRole('region', { name: 'Data access' });
+  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  const select = within(region).getByRole('combobox', {
+    name: 'Active pod',
+  }) as HTMLSelectElement;
+  // The active Pod's restore keeps hanging; the other one restores.
+  const connections = runtime.getSnapshot();
+  const target = connections.find((entry) => entry.id !== select.value)!;
+  await act(async () => gates.get(target.podUrl)!.resolve());
+  await waitFor(() =>
+    expect(
+      runtime.getSnapshot().find((entry) => entry.id === target.id)?.session
+        .kind,
+    ).toBe('active'),
+  );
+  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  fireEvent.change(select, { target: { value: target.id } });
+  await waitFor(() =>
+    expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull(),
+  );
+});
+
+it('keeps the preset Pod sign-in and its failures while another saved Pod restores', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ preset: { podUrl: other }, preferences: null });
+  const signed = await f.login();
+  // Only the saved Pod's restore hangs; signing in to the preset Pod proceeds.
+  const { runtime } = await restoring(f, signed.runtime, (url) =>
+    url.startsWith(pod),
+  );
+  function SelectSaved() {
+    const app = useApp();
+    return (
+      <button onClick={() => void app.selectConnection(signed.id)}>
+        Select saved
+      </button>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <SelectSaved />
+      <Validating mode="on-demand" />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  // Startup prefers the preset Pod; the saved connection is active only on request.
+  await act(async () =>
+    screen.getByRole('button', { name: 'Select saved' }).click(),
+  );
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('restoring');
+  const region = screen.getByRole('region', { name: 'Data access' });
+  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  expect(within(region).queryByText('Full addresses')).toBeNull();
+  const signIn = within(region).getByRole('button', { name: 'Sign in' });
+  f.fetch.mockRejectedValueOnce(new Error('offline'));
+  await act(async () => signIn.click());
+  expect(await within(region).findByRole('alert')).toBeTruthy();
+  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  expect(within(region).queryByText('Full addresses')).toBeNull();
+});
+
+it('replaces custom Connections with the loading status while a saved connection restores', async () => {
+  const f = fixture({ allowedPods: [pod], preferences: null });
+  const signed = await f.login();
+  const { runtime, discovery } = await restoring(f, signed.runtime);
+  function Replacement() {
+    return <p>Custom connections</p>;
+  }
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <AppAccess appName="Shopping" components={{ Connections: Replacement }} />
+      <Started />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const region = screen.getByRole('region', { name: 'Data access' });
+  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  expect(screen.queryByText('Custom connections')).toBeNull();
+  await act(async () => discovery.resolve());
+  await waitFor(() =>
+    expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull(),
+  );
+});
+
+it.each(['missing scopes', 'ended session'] as const)(
+  'shows the %s recovery view as soon as startup completes',
+  async (kind) => {
+    const f = fixture({
+      allowedPods: [pod],
+      preferences: null,
+      scopes: { required: ['tasks'] },
+    });
+    await f.begin();
+    f.runtime.dispose();
+    await settleLease();
+    let runtime: BrowserRuntime;
+    // The fixture's default token grants no scopes, so `tasks` stays missing.
+    if (kind === 'missing scopes') runtime = f.returned();
+    else {
+      f.setToken(async () =>
+        Response.json({
+          access_token: jwt({ scope: 'tasks' }),
+          token_type: 'Bearer',
+          refresh_token: 'refresh-private',
+        }),
+      );
+      const callback = f.returned();
+      await callback.initialize();
+      callback.dispose();
+      await settleLease();
+      // Restoring the saved session fails, which ends it.
+      runtime = createBrowserRuntime({
+        ...f.options,
+        fetch: async (url, init) => {
+          if (url.endsWith('/.well-known/oauth-protected-resource'))
+            throw new Error('offline');
+          return f.fetch(url, init);
+        },
+      });
+    }
+    cleanups.push(() => runtime.dispose());
+    render(
+      <SempodsProvider runtime={runtime} contextSelection="on-demand">
+        <Validating mode="on-demand" />
+      </SempodsProvider>,
+    );
+    await screen.findByText('started');
+    if (kind === 'missing scopes') {
+      // Rendered in the same commit as the completed startup.
+      expect(
+        screen.getByText('Review required feature access: tasks.'),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole('button', { name: 'Update access' }),
+      ).toBeTruthy();
+    } else {
+      await waitFor(() =>
+        expect(runtime.getSnapshot()[0]?.session.kind).toBe('ended'),
+      );
+      expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+    }
+    expect(screen.queryByText('Loading…')).toBeNull();
   },
 );
