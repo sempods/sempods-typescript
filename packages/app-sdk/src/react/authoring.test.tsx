@@ -35,6 +35,7 @@ import {
   useDraftGuard,
   UpdateNotice,
   CallbackNotice,
+  TargetScreen,
 } from './index.js';
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
@@ -327,6 +328,8 @@ it('keeps an uncertain creation and unrelated draft after confirmed same-view ro
       <Rows />
     </SempodsProvider>,
   );
+  // The view exists once startup has settled (#80).
+  await act(async () => {});
   fireEvent.click(screen.getByText('Create'));
   await screen.findByText('unconfirmed');
   fireEvent.click(screen.getByText('Other row'));
@@ -565,6 +568,8 @@ it.each(['en', 'de'] as const)(
         <Picker />
       </SempodsProvider>,
     );
+    // The view exists once startup has settled (#80).
+    await act(async () => {});
     fireEvent.click(screen.getByText('Create'));
     await screen.findByText('unconfirmed');
     fireEvent.click(screen.getByText('Custom picker'));
@@ -1006,3 +1011,23 @@ it.each(['access', 'connections'] as const)(
     expect((field as HTMLInputElement).value).toBe('Unsaved');
   },
 );
+
+it('shows no Context screen while a returning sign-in is still being redeemed', async () => {
+  const f = await connected();
+  const report = await f.runtime.initialize();
+  const startup = deferred<StartupReport>();
+  vi.spyOn(f.runtime, 'initialize').mockReturnValue(startup.promise);
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <TargetScreen>
+        <input aria-label="Draft" />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  await act(async () => {});
+  // The restored connection has a selected Context, but no draft can start yet.
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
+  expect(screen.queryByLabelText('Draft')).toBeNull();
+  await act(async () => startup.resolve(report));
+  expect(await screen.findByLabelText('Draft')).toBeTruthy();
+});

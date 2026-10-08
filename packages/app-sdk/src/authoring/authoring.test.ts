@@ -276,6 +276,40 @@ it('keeps a leave prompt asked without an active connection when one appears', a
   expect(row).toHaveBeenCalledOnce();
   expect(discard).toHaveBeenCalledOnce();
 });
+it.each(['same', 'other'] as const)(
+  'exposes no Context view until startup settles, also when a returning sign-in activates the %s connection',
+  async (returning) => {
+    const f = await connected();
+    const report = await f.runtime.initialize();
+    const other = await f.runtime.connect('https://pod.example/bob');
+    // A returning sign-in is still being redeemed; Alice is already restored.
+    const startup = deferred<typeof report>();
+    vi.spyOn(f.runtime, 'initialize').mockReturnValue(startup.promise);
+    const app = createAppController(f.runtime);
+    const views: unknown[] = [];
+    app.subscribe(() => views.push(app.getSnapshot().view));
+    app.start();
+    cleanups.push(() => app.stop());
+    expect(app.getSnapshot().activeId).toBe(f.id);
+    expect(app.getSnapshot().view).toBeNull();
+    // Pod-wide reads stay available while startup settles.
+    expect(app.getSnapshot().pod).not.toBeNull();
+    await f.runtime.loadContexts(f.id);
+    expect(app.getSnapshot().view).toBeNull();
+    startup.resolve({
+      ...report,
+      connectionId: returning === 'same' ? f.id : other.id,
+    });
+    await vi.waitFor(() => expect(app.getSnapshot().startup).toBeDefined());
+    if (returning === 'same') expect(app.getSnapshot().view).toBe(f.view);
+    else {
+      expect(app.getSnapshot().activeId).toBe(other.id);
+      expect(app.getSnapshot().view).toBeNull();
+    }
+    // Alice's view was never exposed before the switch.
+    if (returning === 'other') expect(views).not.toContain(f.view);
+  },
+);
 it('retries an invalidated custom read once, never indefinitely', async () => {
   const f = await connected();
   const read = vi.fn(async () => ({ kind: 'invalidated' }) as const);

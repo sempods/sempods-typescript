@@ -170,7 +170,10 @@ surface and hooks over a framework-free controller. The app owns its frame and
 an optional way to open access management; `AppShell` provides an optional title/management wrapper around the same access surface.
 The access surface does not own children or unmount drafts when access is lost.
 Navigation that would replace a dirty draft or an
-unresolved outcome asks first, and the UI is inert while a transition prepares.
+unresolved outcome asks first, and the UI is inert while a transition prepares. The controller exposes no
+Context view until startup settles, so a returning sign-in that activates its
+connection never replaces a draft started during the callback; a pending prompt
+whose connection stops being active is cancelled without discarding anything.
 
 _Why:_ recovery should be the default behaviour of the building blocks, not
 code every app writes again.
