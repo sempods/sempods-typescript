@@ -399,8 +399,8 @@ pending write asks first.
 `phase` is `idle`, `activating`, `unavailable`, `ready` or `retired`.
 `unavailable` means the catalogue does not list the Context as readable, or
 discovery failed. `AppAccess` offers **Check access**, and a later catalogue that
-lists the Context still activates it. While the connection is signed out, the
-target stays `activating` and `AppAccess` offers sign-in. A retired target has no
+lists the Context still activates it. A signed-out connection recovers through
+`AppAccess`'s sign-in; the phase then follows the catalogue it keeps or loads. A retired target has no
 editor, and the hook never selects its old Context again; `reason` says why:
 
 - `declined`: the guarded selection was declined (the person kept a draft

@@ -356,9 +356,9 @@ interface ContextLane {
  * - `activating`: discovery or the selection is under way.
  * - `unavailable`: the catalogue does not list the Context as readable, or
  *   discovery failed. The demand stays, so a later catalogue that lists it (for
- *   example after AppAccess's "Check access") still activates the target. While
- *   the connection is signed out, the target stays `activating`; AppAccess
- *   offers sign-in.
+ *   example after AppAccess's "Check access") still activates the target. A
+ *   signed-out connection recovers through AppAccess's sign-in; the phase then
+ *   follows the catalogue it keeps or loads.
  * - `ready`: `editor` exists, for a view of exactly that Context.
  * - `retired`: the editor is gone and the hook never selects the old Context
  *   again. `reason` says why: the selection was `declined` (the person kept a
