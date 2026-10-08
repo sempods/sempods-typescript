@@ -366,6 +366,14 @@ interface ContextLane {
   readonly target: ContextTarget;
   readonly connection: string;
 }
+interface LaneState {
+  readonly lane: ContextLane;
+  readonly retired: ContextEditorRetirement | null;
+  /** The single selection attempt for this lane has started. */
+  readonly attempted: boolean;
+  /** This lane's Context was selected with readable evidence. */
+  readonly activated: boolean;
+}
 /**
  * Edits one Pod-overview row in its own Context. The SELECT row is only a
  * pointer: the editor reads the subject fresh in that Context and saves with its
@@ -418,14 +426,19 @@ export function useContextEditor<D>(
   const app = useController();
   const { connections, activeId, changing, confirmingLeave, view } =
     useAppState();
-  const [state, setState] = useState<{
-    readonly lane: ContextLane;
-    readonly retired: ContextEditorRetirement | null;
-    /** The single selection attempt for this lane has started. */
-    readonly attempted: boolean;
-    /** This lane's Context was selected with readable evidence. */
-    readonly activated: boolean;
-  } | null>(null);
+  const [state, setState] = useState<LaneState | null>(null);
+  // The latest lane state, ahead of rendering: open() and close() chained from
+  // one render (`await open(); await close()`) act on what is current.
+  const latest = useRef<LaneState | null>(null);
+  const apply = useCallback(
+    (change: (s: LaneState | null) => LaneState | null) => {
+      const next = change(latest.current);
+      if (next === latest.current) return;
+      latest.current = next;
+      setState(next);
+    },
+    [],
+  );
   const lane = state?.lane ?? null;
   const retired = state?.retired ?? null;
   const attempted = state?.attempted ?? false;
@@ -440,10 +453,10 @@ export function useContextEditor<D>(
         activated: true;
       }>,
     ) =>
-      setState((s) =>
+      apply((s) =>
         s?.lane === lane && s.retired === null ? { ...s, ...change } : s,
       ),
-    [],
+    [apply],
   );
   const retire = useCallback(
     (lane: ContextLane, reason: ContextEditorRetirement) =>
@@ -544,11 +557,13 @@ export function useContextEditor<D>(
     reason,
     editor,
     open: (target) => {
+      const now = latest.current;
       if (
-        lane &&
-        reason === null &&
-        lane.target.subject === target.subject &&
-        lane.target.context === target.context
+        now &&
+        now.retired === null &&
+        now.lane.connection === app.getSnapshot().activeId &&
+        now.lane.target.subject === target.subject &&
+        now.lane.target.context === target.context
       )
         return Promise.resolve(true);
       // Repeated before a re-render (a double click): share the first call.
@@ -565,7 +580,7 @@ export function useContextEditor<D>(
       if (!connection) return Promise.resolve(false);
       const result = app
         .navigate(() =>
-          setState({
+          apply(() => ({
             lane: {
               target: { subject: target.subject, context: target.context },
               connection,
@@ -573,7 +588,7 @@ export function useContextEditor<D>(
             retired: null,
             attempted: false,
             activated: false,
-          }),
+          })),
         )
         .finally(() => {
           if (opening.current?.result === result) opening.current = null;
@@ -582,10 +597,14 @@ export function useContextEditor<D>(
       return result;
     },
     close: () => {
-      if (!lane) return Promise.resolve(true);
-      const clear = () => setState((s) => (s?.lane === lane ? null : s));
+      const now = latest.current;
+      if (!now) return Promise.resolve(true);
+      const clear = () => apply(() => null);
       // A retired target has no editor left to guard.
-      if (reason) {
+      if (
+        now.retired !== null ||
+        now.lane.connection !== app.getSnapshot().activeId
+      ) {
         clear();
         return Promise.resolve(true);
       }

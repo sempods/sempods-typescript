@@ -857,6 +857,18 @@ function RowEditor({ draft = false }: { readonly draft?: boolean }) {
       >
         Open urn:a twice
       </button>
+      <button
+        onClick={() =>
+          void (async () => {
+            const opened = await edit.open(rows[0]!);
+            const switched = await edit.open(rows[1]!);
+            const closed = await edit.close();
+            setTwice(JSON.stringify([opened, switched, closed]));
+          })()
+        }
+      >
+        Open, switch and close
+      </button>
       <output data-testid="twice">{twice}</output>
       {edit.editor && (
         <ResourceEditor editor={edit.editor}>
@@ -1370,4 +1382,20 @@ it('shares one open between calls made before a re-render', async () => {
     expect(screen.getByTestId('twice').textContent).toBe('[true,true]'),
   );
   await waitFor(() => expect(title().value).toBe('A at work'));
+});
+
+it('chains open and close from one render on the latest target', async () => {
+  const f = await returned();
+  notes(f);
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await edit('Open, switch and close');
+  await waitFor(() =>
+    expect(screen.getByTestId('twice').textContent).toBe('[true,true,true]'),
+  );
+  await waitFor(() => expect(phase()).toBe('idle'));
+  expect(screen.queryByLabelText('Note title')).toBeNull();
 });
