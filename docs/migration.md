@@ -38,6 +38,11 @@ automatic conversion of legacy app data or stored credentials.
   previously selected target returns when the person selects it again. An
   `interrupted` or `expired` session shows the new `controls.signInRequired`
   message instead of `readLost`.
+- **No connection view while the first Context catalogue loads.** `AppAccess`
+  now shows only its loading status during that load, instead of the disabled
+  chooser, the pending-catalogue notice, **Update access** and **Check
+  access**. App end-to-end tests that waited for those controls in that phase
+  should wait for the chooser, the hidden surface or the failure view instead.
 - **A stale Context prompt selects nothing.** When the leave policy asks
   before `selectContext` and another connection becomes active before the
   person confirms (a completed callback, or the active one removed),

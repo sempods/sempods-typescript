@@ -115,8 +115,13 @@ disconnecting), and the widget host with retained drafts/uncertain
 writes. With one permitted Pod and Contexts on demand, a Pod with slow discovery
 shows that `AppAccess` passes only through its loading status after the callback
 and during restore before hiding, while an ended session and missing required
-scopes show their recovery views directly. These are Chromium fixture checks, not live-Pod or installed-PWA evidence. See
-[browser runtime](browser-runtime.md) for the implemented API and its limits.
+scopes show their recovery views directly. A delayed Context catalogue, in
+`'required'` mode and on demand under a mounted `TargetScreen`, passes only
+through the loading status before hiding when a preset Context settles the
+target, and ends at the Context chooser or the catalogue failure view
+otherwise. These are Chromium fixture checks, not live-Pod or installed-PWA
+evidence. See [browser runtime](browser-runtime.md) for the implemented API and
+its limits.
 
 No implementation/test command publishes packages. Both SDK packages are
 publishable; the workspace root and examples stay private. Publishing is a
