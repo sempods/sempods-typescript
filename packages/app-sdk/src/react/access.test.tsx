@@ -535,6 +535,30 @@ it('keeps the address of the one permitted Pod hidden when signing in again', as
   expect(screen.getByText(pod)).toBeTruthy();
 });
 
+it('numbers saved duplicates of the one permitted Pod instead of showing its hidden address', async () => {
+  const f = fixture();
+  await f.runtime.initialize();
+  for (let i = 0; i < 2; i++)
+    await f.runtime.beginAuthorization((await f.runtime.connect(pod)).id);
+  f.runtime.dispose();
+  await settleLease();
+  const runtime = createBrowserRuntime({ ...f.options, allowedPods: [pod] });
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Shopping" podAddress="hidden" />
+    </SempodsProvider>,
+  );
+  const picker = await screen.findByRole('combobox', { name: 'Active pod' });
+  expect(
+    within(picker)
+      .getAllByRole('option')
+      .slice(1)
+      .map((option) => option.textContent),
+  ).toEqual(['1', '2']);
+  expect(screen.queryByText(pod.replace(/^https?:\/\//, ''))).toBeNull();
+});
+
 it('preserves cancelled callback feedback and supports custom connection replacement', async () => {
   const f = fixture();
   const { authorization } = await f.begin();

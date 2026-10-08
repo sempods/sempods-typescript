@@ -82,7 +82,8 @@ the destination remains visible, and duplicate names are disambiguated.
 When the runtime permits exactly one Pod (`allowedPods` with one entry),
 `podAddress="hidden"` omits that Pod's address from signing in, including
 signing in again after an ended session. A `podNames` name remains; without one,
-no Pod line is shown. The app's configuration then fixes the destination, the
+no Pod line is shown, and the **Active pod** selector numbers saved duplicate
+connections instead. The app's configuration then fixes the destination, the
 person cannot choose another Pod, and the Pod's provider shows its own login
 page and address. With several or
 unrestricted Pods, including a preset without `allowedPods`, the address stays

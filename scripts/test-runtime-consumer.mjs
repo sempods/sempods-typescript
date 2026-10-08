@@ -1071,7 +1071,10 @@ try {
       .getByRole('button', { name: 'Check access', exact: true })
       .waitFor();
     await page.getByText('Full addresses', { exact: true }).click();
-    await address.waitFor();
+    await page
+      .locator('[data-sempods-access] details')
+      .getByText(origin + '/alice', { exact: true })
+      .waitFor();
     assert.ok(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,

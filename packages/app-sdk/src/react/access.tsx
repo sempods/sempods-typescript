@@ -38,7 +38,8 @@ export interface AppAccessProps {
   readonly podNames?: Readonly<Record<string, string>>;
   /**
    * 'hidden' omits the Pod address from sign-in, but only while the runtime
-   * permits exactly one Pod; a `podNames` name remains. Several or unrestricted
+   * permits exactly one Pod; a `podNames` name remains, otherwise saved
+   * duplicate connections are numbered. Several or unrestricted
    * Pods, management (`open`) and Full addresses always show the address.
    * A custom `components.Connections` does not receive this option.
    */
@@ -418,15 +419,27 @@ function AccessConnections({
         <option value="" disabled>
           {m.controls.choosePod}
         </option>
-        {state.connections.map((entry) => (
-          <option key={entry.id} value={entry.id}>
-            {name(entry.podUrl)}
-            {state.connections.filter((other) => other.podUrl === entry.podUrl)
-              .length > 1
-              ? ` · ${state.connections.indexOf(entry) + 1}`
-              : ''}
-          </option>
-        ))}
+        {state.connections.map((entry) => {
+          const index = state.connections.indexOf(entry) + 1;
+          // Saved duplicates of the one permitted Pod: number them rather
+          // than fall back to the hidden address.
+          if (addressHidden && !podNames?.[entry.podUrl]?.trim())
+            return (
+              <option key={entry.id} value={entry.id}>
+                {index}
+              </option>
+            );
+          return (
+            <option key={entry.id} value={entry.id}>
+              {name(entry.podUrl)}
+              {state.connections.filter(
+                (other) => other.podUrl === entry.podUrl,
+              ).length > 1
+                ? ` · ${index}`
+                : ''}
+            </option>
+          );
+        })}
       </select>
     </label>
   );
