@@ -444,8 +444,10 @@ function Notes() {
     retry.
   - `retired`: another connection became active. The target is never revived;
     `close()` clears it at once.
-- **Evidence.** The first activation needs a catalogue that lists the Context
-  as readable, also when a row is reopened. Afterwards, losing read access, a
+- **Evidence.** The first activation needs a successful catalogue that lists
+  the Context as readable, also when a row is reopened. Unlike the selected
+  view, which keeps working on retained evidence, a row opened after a failed
+  refresh reports `discovery-failed` until a listing succeeds. Afterwards, losing read access, a
   failed catalogue refresh or the session ending keep the editor with its draft
   and any unconfirmed-write review. They are never attached to another Context,
   connection, subject or generation.

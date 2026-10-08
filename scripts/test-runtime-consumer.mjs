@@ -1417,10 +1417,17 @@ try {
   // Selecting another Context keeps the explicit editor and its draft open,
   // without a prompt.
   await title.fill('Unsaved across a Context change');
-  await page
-    .getByLabel('Data context')
-    .selectOption(origin + '/overview-pod/_system/contexts/work');
-  await page.waitForTimeout(200);
+  const picker = page.getByLabel('Data context');
+  await picker.selectOption(origin + '/overview-pod/_system/contexts/work');
+  // A leave prompt would hold the selection, so the controlled picker would
+  // fall back to notes: wait for the new value instead of a fixed time.
+  await page.waitForFunction(
+    ([select, value]) => select.value === value,
+    [
+      await picker.elementHandle(),
+      origin + '/overview-pod/_system/contexts/work',
+    ],
+  );
   assert.equal(await page.getByRole('alertdialog').count(), 0);
   assert.equal(
     await page.getByLabel('Data context').inputValue(),

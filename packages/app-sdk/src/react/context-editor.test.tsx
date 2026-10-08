@@ -29,11 +29,11 @@ import {
   catalogue,
   deferred,
   fixture,
-  jwt,
   personal,
   pod,
-  restored,
-  settleLease,
+  resourceIri,
+  returnedSession,
+  twoPods,
   work,
 } from '../runtime/fixture.test.js';
 
@@ -51,40 +51,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-/** A signed-in runtime returning from its callback, with no Context selected. */
-async function returned(f = fixture({ preferences: null })) {
-  runtimes.push(f.runtime);
-  const { connection } = await f.begin();
-  f.runtime.dispose();
-  await settleLease();
-  const runtime = f.returned();
-  runtimes.push(runtime);
-  return { ...f, runtime, id: connection.id };
-}
-/** Alice (`f.id`) and Bob (`other`), with Bob active after his completed callback. */
-async function twoPods() {
-  const f = await returned(
-    fixture({ preferences: null, preset: { podUrl: pod } }),
-  );
-  await f.runtime.initialize();
-  const otherUrl = 'https://pod.example/bob';
-  const other = await f.runtime.connect(otherUrl);
-  await f.runtime.beginAuthorization(other.id);
-  f.runtime.dispose();
-  await settleLease();
-  f.setToken(async (url) =>
-    Response.json({
-      access_token: jwt({ iss: url.split('/_system')[0] }),
-      token_type: 'Bearer',
-      refresh_token: 'fresh',
-    }),
-  );
-  const runtime = f.returned();
-  runtimes.push(runtime);
-  await runtime.initialize();
-  await restored(runtime);
-  return { f, runtime, other, otherUrl };
-}
+const keep = (runtime: BrowserRuntime) => void runtimes.push(runtime);
+const returned = (f?: ReturnType<typeof fixture>) => returnedSession(keep, f);
 
 const note = fields(
   { title: text('urn:note:title', { language: null }) },
@@ -119,10 +87,7 @@ function notes(f: { setResource(fn: PodFetch): void }) {
   };
   f.setResource(async (url, init) => {
     const target = new URL(url);
-    const iri = Buffer.from(
-      target.pathname.split('/').at(-1)!,
-      'base64url',
-    ).toString();
+    const iri = resourceIri(url);
     const context = target.searchParams.get('context');
     const stored = data.get(`${context} ${iri}`);
     if ((init?.method ?? 'GET') === 'GET') {
@@ -266,6 +231,10 @@ it('edits a row in its own Context with a fresh read and If-Match, leaving the s
   const bind = vi.spyOn(f.runtime, 'bindContext');
   const select = vi.spyOn(f.runtime, 'selectContext');
   render(ui(f.runtime));
+  // The callback completes and the session restores before the row opens.
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
   await open('Edit urn:a in work');
   await waitFor(() => expect(title().value).toBe('A at work'));
   expect(phase()).toBe('ready');
@@ -499,7 +468,7 @@ it('keeps the editor and its draft through read loss, and requires evidence agai
 it.each(['before', 'after'] as const)(
   'retires on a guarded Pod switch %s activation without discovery on the new Pod',
   async (timing) => {
-    const { f, runtime, other, otherUrl } = await twoPods();
+    const { f, runtime, other, otherUrl } = await twoPods(keep);
     notes(f);
     const answer = deferred<Response>();
     f.setCatalogue(() =>
@@ -639,4 +608,70 @@ it('surfaces an unexpected binding failure instead of reporting a refusal', asyn
   expect((await screen.findByRole('alert')).textContent).toContain(
     'binding defect',
   );
+});
+
+it('keeps the editor and its draft when the session ends, and reopens the row in a fresh lane', async () => {
+  const f = await returned();
+  notes(f);
+  render(ui(f.runtime));
+  await open('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  const input = title();
+  fireEvent.change(input, { target: { value: 'Unsaved' } });
+  // The session ends: a renewal after a refused request is refused too.
+  f.setQuery(
+    async () =>
+      new Response(null, {
+        status: 401,
+        headers: { 'www-authenticate': 'Bearer' },
+      }),
+  );
+  f.setToken(async () => new Response(null, { status: 400 }));
+  await act(async () => {
+    await f.runtime
+      .bindPod(f.id)
+      .sparql.construct('CONSTRUCT {} WHERE {}')
+      .catch(() => {});
+  });
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('ended'),
+  );
+  expect(phase()).toBe('ready');
+  expect(title()).toBe(input);
+  expect(input.value).toBe('Unsaved');
+  // The binding can never become valid again: reopening the same row starts a
+  // fresh lane, and the leave policy asks about the old draft first.
+  fireEvent.click(screen.getByText('Edit urn:a in work'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+  expect(title().value).toBe('Unsaved');
+  // The declined open settles before the person clicks again.
+  await act(async () => {});
+  fireEvent.click(screen.getByText('Edit urn:a in work'));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Discard and continue' }),
+  );
+  await waitFor(() => expect(phase()).toBe('loading'));
+  expect(screen.queryByLabelText('Note title')).toBeNull();
+});
+
+it('needs a successful listing for a row opened after a failed catalogue refresh', async () => {
+  const f = await returned();
+  const { reads } = notes(f);
+  render(ui(f.runtime));
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
+  await act(() => f.runtime.loadContexts(f.id));
+  f.setCatalogue(async () => {
+    throw new TypeError('offline');
+  });
+  await act(() => f.runtime.loadContexts(f.id).catch(() => {}));
+  expect(f.runtime.getSnapshot()[0]?.catalogue.kind).toBe('failed');
+  // The retained evidence still lists work, but a newly opened row waits.
+  await open('Edit urn:a in work');
+  await waitFor(() => expect(phase()).toBe('unavailable:discovery-failed'));
+  expect(reads).toEqual([]);
+  f.setCatalogue(async () => catalogue());
+  await act(() => f.runtime.loadContexts(f.id));
+  await waitFor(() => expect(title().value).toBe('A at work'));
 });

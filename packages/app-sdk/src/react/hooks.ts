@@ -35,6 +35,7 @@ import {
 } from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
 import { startupSettled } from '../authoring/app.js';
+import { catalogueLists } from '../runtime/binding.js';
 import {
   useAppState,
   useContextDemand,
@@ -477,15 +478,14 @@ export function useContextEditor<D>(
   const catalogue = live
     ? connections.find((c) => c.id === lane!.connection)?.catalogue
     : undefined;
-  // From the catalogue rather than the binding's own access snapshot: that one
-  // also requires every required scope, and a target missing scopes would then
-  // stay loading without a problem to present.
+  // The binding's own rule for catalogue evidence, without its required-scope
+  // check: a target missing scopes would otherwise stay loading with no problem
+  // to present. A newly opened row needs a successful listing, not retained
+  // evidence from before a failed refresh.
   const readable =
     live &&
     catalogue?.kind === 'ready' &&
-    catalogue.contexts.some(
-      (c) => c.iri === lane!.target.context && c.readable,
-    );
+    catalogueLists(catalogue, lane!.target.context);
   // No Context-bound editor before startup settles (a returning sign-in may
   // still replace the active connection), as for the selected view. `pod`
   // exists while the active connection is signed in.
@@ -547,9 +547,13 @@ export function useContextEditor<D>(
   const open = useCallback(
     (target: ContextTarget) => {
       const now = latest.current;
+      const binding = now?.binding;
       if (
         liveLane(now, app.getSnapshot().activeId) &&
-        sameTarget(now!.lane.target, target)
+        sameTarget(now!.lane.target, target) &&
+        // A binding that can never become valid again (session end, another
+        // subject) is replaced by a fresh lane, after the leave policy asks.
+        !(binding && binding !== 'refused' && !binding.getSnapshot().current)
       )
         return Promise.resolve(true);
       // Repeated before a re-render (a double click): share the first call.

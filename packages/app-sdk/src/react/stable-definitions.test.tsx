@@ -10,7 +10,7 @@ import {
   type ResourceEditor as Editor,
 } from '@sempods/client-sdk/edit';
 import type { JsonLd, PodFetch } from '@sempods/client-sdk';
-import { fixture } from '../runtime/fixture.test.js';
+import { fixture, resourceIri } from '../runtime/fixture.test.js';
 import {
   SempodsProvider,
   TargetScreen,
@@ -62,10 +62,7 @@ async function setup() {
     ],
   ]);
   const resource: PodFetch = async (url, init) => {
-    const iri = Buffer.from(
-      new URL(url).pathname.split('/').at(-1)!,
-      'base64url',
-    ).toString();
+    const iri = resourceIri(url);
     if ((init?.method ?? 'GET') === 'GET')
       return rows.has(iri)
         ? Response.json(rows.get(iri), { headers: { etag: '"v1"' } })
