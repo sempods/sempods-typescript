@@ -31,6 +31,12 @@ export interface AppSnapshot {
   readonly callbackNotice: boolean;
   readonly connections: readonly Connection[];
   readonly activeId: string | null;
+  /**
+   * The selected Context's view of the active connection. `null` until startup
+   * settles (`startup` or `startupError` set): while a returning sign-in
+   * completes, saved sessions may already restore, and a draft started in that
+   * window would be lost when the returning connection becomes active.
+   */
   readonly view: BoundView | null;
   /** Reader for the active signed-in Pod; independent of selected Context and catalogue. */
   readonly pod: BoundPod | null;
@@ -121,7 +127,10 @@ export function createAppController(
         connection.session.kind === 'renewing')
     )
       pod = runtime.bindPod(connection.id);
-    if (!connection || !connection.selectedContext) view = null;
+    // No Context-bound screen before startup settles, so no draft can start on
+    // a connection that a returning sign-in is about to replace (#80).
+    const settled = startup !== undefined || startupError !== undefined;
+    if (!settled || !connection || !connection.selectedContext) view = null;
     else {
       try {
         view = runtime.bind(connection.id);

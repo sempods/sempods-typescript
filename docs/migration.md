@@ -59,6 +59,14 @@ automatic conversion of legacy app data or stored credentials.
   the inactive connection's Context. A prompt asked while no connection was
   active is unaffected. Headless hosts close their own prompt when
   `confirmingLeave` turns false.
+- **No Context view before startup settles.** `AppSnapshot.view` (and with
+  it `useView()` and `TargetScreen`) stays `null` until `startup` or
+  `startupError` is set. On a callback page, a saved session could otherwise
+  expose an editable screen while the returning sign-in was still being
+  redeemed, and a draft started there was lost when that connection became
+  active. Without a callback nothing changes in practice. Tests that act on a
+  view right after rendering should wait for startup to settle first. Pod
+  reads through `pod` stay available.
 
 New in the next release:
 

@@ -582,7 +582,12 @@ navigation action does not discard registered drafts; the current target remains
 replacement is no longer available. A prompt is about the connection that was
 active when it asked. If that connection stops being active outside a guarded
 action (a returning sign-in, or the connection removed), the controller cancels
-the prompt: the action resolves `false`, nothing runs and no draft is discarded. Local row navigation leaves editor guards
+the prompt: the action resolves `false`, nothing runs and no draft is discarded.
+Until startup settles, the controller exposes no Context view, so `TargetScreen`
+renders nothing and no Context-bound draft can start. On a callback page, saved
+sessions restore while the returning sign-in is still being redeemed, and that
+connection becomes active afterwards. Pod reads (`useAppState().pod`,
+`usePodLoad`) stay available meanwhile. Local row navigation leaves editor guards
 only: list mutations and app-owned creation drafts survive, and uncertain outcomes still require comparison and
 acknowledgement. `useDraftGuard(dirty, discard)` is target-scoped by default;
 pass a third argument `'local'` only for a draft that row navigation leaves.
@@ -762,6 +767,7 @@ with `register`. Guards default to local scope; use `scope: 'target'` for drafts
 or mutation outcomes that survive row navigation and `unconfirmed()` for pending
 write-outcome evidence. Headless hosts must prevent input while the controller's
 `changing` or `confirmingLeave` snapshot field is true, as the React provider does.
+The snapshot's `view` stays `null` until `startup` or `startupError` is set.
 Close a custom leave prompt whenever `confirmingLeave` turns false, also without
 `confirmLeave()` or `cancelLeave()`: the controller cancels a prompt whose
 connection stopped being active.
