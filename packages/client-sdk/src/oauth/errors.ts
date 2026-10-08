@@ -1,10 +1,27 @@
 import { SdkError } from '../errors.js';
 
+/**
+ * Why an OAuth step failed. An authorization callback that the provider answered
+ * with an error bound to the attempt (issuer and state checked) is classified by
+ * its error code only; the provider's free-text description is never kept.
+ */
 export type OAuthProblem =
   | 'configuration'
   | 'attempt'
+  /** Forged or malformed callback: not an answer to the attempt. */
   | 'callback'
+  /** `access_denied`. */
   | 'denied'
+  /** `login_required`: sign in at the provider first. */
+  | 'login-required'
+  /** `interaction_required`: finish a step at the provider first. */
+  | 'interaction-required'
+  /** `consent_required`: give consent at the provider first. */
+  | 'consent-required'
+  /** `temporarily_unavailable` or `server_error`. */
+  | 'provider-unavailable'
+  /** Any other error code. */
+  | 'rejected'
   | 'exchange'
   | 'invalid-client'
   | 'claims'

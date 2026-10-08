@@ -200,7 +200,9 @@ needed to store or edit data in a Pod.
 Open the exact chosen HTTPS URL in a fresh browser profile and complete
 [the app checklist](local-testing.md#walk-through-one-complete-app). Specifically
 verify that `/callback` loads the app on a direct visit, that an actual sign-in
-returns to that origin, and that create/edit/reload work in the test context.
+returns to that origin, and that create/edit/reload work in the test context;
+for an app that only reads, complete the
+[read-only checks](local-testing.md#test-an-app-that-only-reads) instead.
 A direct callback visit alone does not prove the OAuth flow. If the Pod rejects
 the client before or at consent, see
 [Pods that also require a DID document](#pods-that-also-require-a-did-document).

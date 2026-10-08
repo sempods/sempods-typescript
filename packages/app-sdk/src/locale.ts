@@ -129,6 +129,8 @@ export interface UiMessages {
   readonly checkAccess: string;
   readonly addresses: string;
   readonly signInCancelled: string;
+  /** An unfinished sign-in or an expired session; implies neither access nor a kept draft. */
+  readonly signInRequired: string;
 }
 
 export interface SdkMessages {
@@ -203,6 +205,7 @@ export const englishMessages: SdkMessages = {
     checkAccess: 'Check access',
     addresses: 'Full addresses',
     signInCancelled: 'Sign-in was cancelled.',
+    signInRequired: 'Sign in to use this pod.',
   },
   activePod: 'Active pod',
   dataContext: 'Data context',
@@ -239,10 +242,23 @@ export const englishMessages: SdkMessages = {
           ? 'The pod rejected the request.'
           : 'The result of the request is unconfirmed.',
     response: () => 'The pod’s answer could not be verified.',
-    oauth: (reason) =>
-      reason.problem === 'denied'
-        ? 'Sign-in was cancelled.'
-        : 'Sign-in failed. Try again.',
+    oauth(reason) {
+      // The provider's own description is never shown; only its error code is classified.
+      switch (reason.problem) {
+        case 'denied':
+          return 'Sign-in was cancelled.';
+        case 'login-required':
+          return 'The pod asked you to sign in at its provider first. Sign in there, then try again.';
+        case 'interaction-required':
+          return 'The pod’s provider needs you to finish a step there first. Finish it, then try again.';
+        case 'consent-required':
+          return 'The pod’s provider needs your consent first. Give it there, then try again.';
+        case 'provider-unavailable':
+          return 'Signing in to the pod is unavailable right now. Try again later.';
+        default:
+          return 'Sign-in failed. Try again.';
+      }
+    },
     unexpected: () => 'The operation failed. Try again.',
   },
 };
@@ -304,6 +320,7 @@ export const germanMessages: SdkMessages = {
     checkAccess: 'Zugriff prüfen',
     addresses: 'Vollständige Adressen',
     signInCancelled: 'Die Anmeldung wurde abgebrochen.',
+    signInRequired: 'Melde dich an, um diesen Pod zu nutzen.',
   },
   activePod: 'Aktiver Pod',
   dataContext: 'Datenkontext',
@@ -344,10 +361,22 @@ export const germanMessages: SdkMessages = {
           ? 'Der Pod hat die Anfrage abgelehnt.'
           : 'Das Ergebnis der Anfrage ist unbestätigt.',
     response: () => 'Die Antwort des Pods konnte nicht überprüft werden.',
-    oauth: (reason) =>
-      reason.problem === 'denied'
-        ? 'Die Anmeldung wurde abgebrochen.'
-        : 'Die Anmeldung ist fehlgeschlagen. Versuche es erneut.',
+    oauth(reason) {
+      switch (reason.problem) {
+        case 'denied':
+          return 'Die Anmeldung wurde abgebrochen.';
+        case 'login-required':
+          return 'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.';
+        case 'interaction-required':
+          return 'Der Anbieter des Pods verlangt zuerst einen Schritt von dir. Schließe ihn dort ab und versuche es dann erneut.';
+        case 'consent-required':
+          return 'Der Anbieter des Pods braucht zuerst deine Zustimmung. Erteile sie dort und versuche es dann erneut.';
+        case 'provider-unavailable':
+          return 'Die Anmeldung beim Pod ist gerade nicht verfügbar. Versuche es später erneut.';
+        default:
+          return 'Die Anmeldung ist fehlgeschlagen. Versuche es erneut.';
+      }
+    },
     unexpected: () => 'Die Aktion ist fehlgeschlagen. Versuche es erneut.',
   },
 };

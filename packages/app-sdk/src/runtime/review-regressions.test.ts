@@ -276,7 +276,7 @@ it('reports missing Web Locks without touching records, and a later start recove
   const unlocked = createBrowserRuntime({ ...f.options, locks: null });
   runtimes.push(unlocked);
   expect(await unlocked.initialize()).toMatchObject({
-    interaction: 'failed',
+    interaction: 'none',
     storage: 'unavailable',
     problem: 'coordination',
   });

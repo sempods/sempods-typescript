@@ -633,6 +633,18 @@ it.each(['connect', 'authorize'] as const)(
 it.each([
   ['en', 'access_denied', 'cancelled', 'Sign-in was cancelled.'],
   ['de', 'access_denied', 'cancelled', 'Die Anmeldung wurde abgebrochen.'],
+  [
+    'en',
+    'login_required',
+    'failed',
+    'The pod asked you to sign in at its provider first. Sign in there, then try again.',
+  ],
+  [
+    'de',
+    'login_required',
+    'failed',
+    'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.',
+  ],
   ['en', 'refused-exchange', 'failed', 'Sign-in failed. Try again.'],
   // An unknown attempt has no protocol cause: the generic text remains.
   ['en', 'unknown-state', 'failed', 'The operation could not be completed.'],
@@ -655,8 +667,8 @@ it.each([
     const returned = createBrowserRuntime({
       ...f.options,
       location: () =>
-        kind === 'access_denied'
-          ? `${callback}?error=access_denied&state=${state}`
+        kind === 'access_denied' || kind === 'login_required'
+          ? `${callback}?error=${kind}&state=${state}`
           : `${callback}?code=fixture-code&state=${state}`,
     });
     cleanups.push(() => returned.dispose());

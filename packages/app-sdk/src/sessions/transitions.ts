@@ -209,8 +209,9 @@ export function createSessionTransitions(
       try {
         validateAuthorizationCallback(attempt, returned);
       } catch (error) {
-        // A matching denial consumes its attempt; forged or malformed callbacks leave it intact.
-        if (!(error instanceof OAuthError) || error.problem !== 'denied')
+        // A matching error answer (denial, login required, …) consumes its
+        // attempt; forged or malformed callbacks leave it intact.
+        if (!(error instanceof OAuthError) || error.problem === 'callback')
           throw new SessionTransitionError('callback');
       }
       const result = await claim(current, 'code', binding);

@@ -72,7 +72,10 @@ clock, because Pods and devices drift: a token must be internally plausible
 `invalid-client` so hosts can drop the registration; other refusals are
 `exchange`. A `claims` failure names `field: 'sub'` for a missing or malformed
 subject and `field: 'continuity'` for a valid token that does not continue the
-session (changed subject, reused refresh token, widened scopes). Callback URLs may not carry authorization-response parameters
+session (changed subject, reused refresh token, widened scopes).
+`validateAuthorizationCallback` classifies an error answer bound to the attempt
+by its code only, as documented on `OAuthProblem`; the provider's free-text
+description is dropped. A forged or malformed callback is `callback`. Callback URLs may not carry authorization-response parameters
 (`code`, `state`, `iss`, `error`, `error_description`, `error_uri`, `response`).
 
 Alpha API change: `prepareAuthorization` now takes protocol input and optional

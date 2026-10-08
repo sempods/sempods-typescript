@@ -12,7 +12,8 @@ import {
   useWorkflowAccess,
 } from './app.js';
 import { useSdkLocale } from './locale.js';
-import { describeFailure } from '../locale.js';
+import { describeFailure, type SdkMessages } from '../locale.js';
+import type { SessionFact } from '../runtime/types.js';
 import { AppAccess } from './access.js';
 import { SdkStyles } from './styles.js';
 import { contextName, podName, distinctName } from './names.js';
@@ -132,6 +133,23 @@ export function UpdateNotice({
     </section>
   );
 }
+/**
+ * Why an ended session is unusable. An interrupted sign-in is found at startup,
+ * before any draft. Next to a sign-in action, which navigates away, an expired
+ * session keeps none either, and the protocol cause is shown when kept.
+ */
+export function endedMessage(
+  session: Extract<SessionFact, { readonly kind: 'ended' }>,
+  m: SdkMessages,
+  signingIn = false,
+) {
+  if (signingIn && session.failure)
+    return describeFailure(m.errors, session.failure);
+  return session.problem === 'interrupted' ||
+    (signingIn && session.problem === 'expired')
+    ? m.controls.signInRequired
+    : m.controls.readLost;
+}
 export function AccessNotice() {
   const access = useWorkflowAccess();
   const { preset } = useAppState();
@@ -139,7 +157,13 @@ export function AccessNotice() {
   const c = access.connection;
   if (!c) return <Notice>{m.controls.noTarget}</Notice>;
   if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
-    return <Notice>{m.controls.readLost}</Notice>;
+    return (
+      <Notice>
+        {c.session.kind === 'ended'
+          ? endedMessage(c.session, m)
+          : m.controls.readLost}
+      </Notice>
+    );
   if (c.missingRequiredScopes.length)
     return <Notice>{m.missingScopes(c.missingRequiredScopes, format)}</Notice>;
   if (c.catalogue.kind === 'failed') return <Notice>{m.catalogueError}</Notice>;
@@ -400,13 +424,15 @@ export function ConnectionControls({
 /**
  * The outcome of a returning sign-in that failed or was cancelled, with its
  * protocol cause when the runtime kept one. AppShell renders it; custom
- * layouts place it themselves. Renders nothing otherwise.
+ * layouts place it themselves. It clears once the person selects another
+ * connection, disconnects one or starts a sign-in (`callbackNotice`).
+ * Renders nothing otherwise.
  */
 export function CallbackNotice() {
   const state = useAppState();
   const { messages } = useSdkLocale();
   const interaction = state.startup?.interaction;
-  if (interaction !== 'failed' && interaction !== 'cancelled') return null;
+  if (!state.callbackNotice) return null;
   return (
     <Notice role="alert">
       {interaction === 'cancelled'

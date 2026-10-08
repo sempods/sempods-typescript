@@ -115,13 +115,17 @@ not instructions to the coding assistant.
   is requested, with `AppAccess` alongside for discovery, chooser and explicit
   retry. The default `'required'` policy preserves ordinary CRUD startup.
   `useWorkflowAccess` stays Context-only. Query rows are read-only pointers: to
-  edit an existing item, call `useContextEditor(definition).open({ subject,
-context })` with the row's `GRAPH` Context. It selects that Context, rereads the
-  item there and saves with its ETag. Render its `editor` only while `phase` is
-  `ready`, and do not reselect a `retired` target. See the
+  edit an existing item, pass the row's subject and its `GRAPH` Context to
+  `open` of `useContextEditor(definition)`. The hook selects that Context,
+  rereads the item there and saves with its ETag. Render its `editor` only while
+  `phase` is `ready`, and do not reselect a `retired` target. See the
   [overview recipe](../examples/todo/recipes/pod-overview.tsx),
   [editing an overview row](react-authoring.md#editing-an-overview-row) and the
   [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
+- For an app that only reads, such as a data explorer, settle that early and
+  record it in the app's notes. An app cannot ask the Pod for read access only:
+  consent may grant write access the app never uses. Keep write hooks and write operations out of the
+  app and follow [Test an app that only reads](local-testing.md#test-an-app-that-only-reads).
 - Define fields once using the portable `client-sdk/edit` helpers. Choose exact
   type/predicate IRIs, fixed text language or `language: null`, and enum/flag
   values. Store points in time with `dateTime` (an `xsd:dateTime` with an
@@ -156,8 +160,9 @@ Implement the quickstart's vertical slice, then adapt it. Build and typecheck
 against installed package artifacts. Test domain-specific behavior and manual
 flows that matter; mock results do not establish compatibility with a real Pod.
 Use the [testing checklist](local-testing.md) for consent, reload, CRUD, conflict,
-uncertainty, access loss and tab behavior. Do not manipulate real credentials to
-simulate failures or copy live browser storage into fixtures.
+uncertainty, access loss and tab behavior, or its read-only section for an app
+that only reads. Do not manipulate real credentials to simulate failures or copy
+live browser storage into fixtures.
 
 For deployment, prepare the reproducible build, static routing, public identity
 and callback configuration described in [deployment](deployment.md). Confirm

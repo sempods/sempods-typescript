@@ -16,6 +16,28 @@ automatic conversion of legacy app data or stored credentials.
   be this creation's own, changed by another writer. Keep the item unconfirmed,
   show what the IRI holds and let the person settle it explicitly. `useCreation`
   already follows its unconfirmed recovery and needs no change.
+- **Provider sign-in errors are classified.** A callback whose provider answers
+  with an OAuth error other than `access_denied` was `callback` and left its
+  attempt stored; it is now one of the new `OAuthProblem` values
+  `login-required`, `interaction-required`, `consent-required`,
+  `provider-unavailable` or `rejected`. The attempt is consumed and its
+  connection ends with that cause and is retired, as after a denial: it stays
+  listed until reload, then a new sign-in starts from the Pod address.
+  `OAuthProblem` documents which error code maps to which value. Exhaustive
+  switches over it need the new cases; `describeFailure` and the SDK catalogs
+  already cover them. Override the texts through `messages.errors.oauth`.
+- **No callback, no interaction outcome.** A startup without a callback now
+  reports `interaction: 'none'` when storage or coordination fails or the
+  runtime was already disposed (previously `failed`); read `storage` and
+  `problem` for that failure.
+- **Callback feedback clears.** `CallbackNotice` and `AppAccess` follow the new
+  `AppSnapshot.callbackNotice`, which clears once the person selects another
+  connection, disconnects one or starts a sign-in. After a failed callback the
+  controller activates the connection that was being signed in to
+  (`StartupReport.attemptConnectionId`), as it does after a completed one; a
+  previously selected target returns when the person selects it again. An
+  `interrupted` or `expired` session shows the new `controls.signInRequired`
+  message instead of `readLost`.
 - **New: `useContextEditor`.** It edits a Pod-overview row in the Context its
   `GRAPH` binding names. An app that copied the 0.4 overview recipe's
   `EditInContext` component can replace it with the hook: call

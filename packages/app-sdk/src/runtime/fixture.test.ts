@@ -163,13 +163,13 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
     next.selectContext(connection.id, work);
     return { runtime: next, id: connection.id, view: next.bind(connection.id) };
   }
-  function returned(auth?: URL) {
+  /** A runtime opened on the callback for an attempt; `answer` precedes its state. */
+  function returned(auth?: URL, answer = 'code=fixture-code') {
     const authorization = auth ?? new URL(navigate.mock.calls.at(-1)![0]);
     return createBrowserRuntime({
       ...options,
       location: () =>
-        callback +
-        '?code=fixture-code&state=' +
+        `${callback}?${answer}&state=` +
         authorization.searchParams.get('state'),
     });
   }

@@ -66,6 +66,13 @@ export interface StartupReport {
    * remembered choice may be reselected once the catalogue confirms it.
    */
   readonly connectionId?: string;
+  /**
+   * Present only after a failed or cancelled callback that matched a stored
+   * attempt: the connection being signed in to. It stays listed, ended with
+   * the cause when the provider answered with an error.
+   */
+  readonly attemptConnectionId?: string;
+  /** The returning sign-in's outcome; `none` without a callback, even when startup fails. */
   readonly interaction: 'none' | 'completed' | 'cancelled' | 'failed';
   readonly storage: 'durable' | 'unavailable' | 'busy';
   readonly problem?: RuntimeProblem;

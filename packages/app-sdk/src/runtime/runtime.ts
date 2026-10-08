@@ -574,6 +574,7 @@ export function createBrowserRuntime(
       unreadable: [],
     };
     let callback = false;
+    let attempted: string | undefined;
     let destination = returnTo;
     try {
       const location = new URL(
@@ -667,6 +668,7 @@ export function createBrowserRuntime(
       destination = pending.value.attempt.returnTo;
       if (!allows(sessionBinding(pending.value).pod.podUrl))
         throw new RuntimeError('configuration');
+      attempted = pending.id;
       const connectionId = await redeem(
         pending.id,
         pending.revision,
@@ -683,8 +685,17 @@ export function createBrowserRuntime(
       }
       return {
         ...report,
-        interaction: problem === 'denied' ? 'cancelled' : 'failed',
+        // Without a callback there was no sign-in to fail; storage and
+        // problem carry the startup failure.
+        interaction: !callback
+          ? 'none'
+          : problem === 'denied'
+            ? 'cancelled'
+            : 'failed',
         storage: problem === 'busy' ? 'busy' : report.storage,
+        ...(attempted && entries.has(attempted)
+          ? { attemptConnectionId: attempted }
+          : {}),
         problem,
         ...runtimeFailure(error),
       };
@@ -700,9 +711,10 @@ export function createBrowserRuntime(
     ...(preset ? { preset } : {}),
     ...(allowedPods ? { allowedPods } : {}),
     initialize() {
+      // A disposed runtime processes no callback, so there is no sign-in outcome.
       if (disposed)
         return Promise.resolve({
-          interaction: 'failed',
+          interaction: 'none',
           storage: 'unavailable',
           problem: 'disconnected',
           unreadable: [],
