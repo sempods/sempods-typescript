@@ -18,6 +18,9 @@ const identity =
   new URL(location.href).searchParams.get('identity') ?? 'preset';
 const accessUI = identity.startsWith('access-');
 const language = identity.endsWith('-de') ? 'de' : 'en';
+// A Pod whose Context catalogue answers after a delay, with a Context flow.
+const slowCatalogue = location.origin + '/slowcat';
+const catalogueUI = identity.startsWith('access-catalogue-');
 const runtime = createBrowserRuntime({
   identity: {
     kind: 'dynamic',
@@ -26,14 +29,23 @@ const runtime = createBrowserRuntime({
   },
   ...(!accessUI
     ? { preset: { podUrl, contextIri: podUrl + '/_system/contexts/work' } }
-    : {}),
+    : catalogueUI && identity !== 'access-catalogue-choice'
+      ? {
+          preset: {
+            podUrl: slowCatalogue,
+            contextIri: slowCatalogue + '/_system/contexts/work',
+          },
+        }
+      : {}),
   ...(identity === 'access-one'
     ? { allowedPods: [podUrl] }
     : identity === 'access-set'
       ? { allowedPods: [podUrl, location.origin + '/bob'] }
       : identity === 'access-delayed'
         ? { allowedPods: [location.origin + '/delayed'] }
-        : {}),
+        : identity === 'access-catalogue-choice'
+          ? { allowedPods: [slowCatalogue] }
+          : {}),
   scopes: { required: ['tasks'], optional: ['ai'] },
   development: 'loopback-http',
   returnTo: '/app?identity=' + identity,
@@ -130,7 +142,19 @@ new MutationObserver(() => {
   characterData: true,
 });
 createRoot(document.getElementById('app')!).render(
-  identity === 'access-delayed' ? (
+  catalogueUI ? (
+    <SempodsProvider
+      runtime={runtime}
+      contextSelection={
+        identity === 'access-catalogue-on-demand' ? 'on-demand' : 'required'
+      }
+    >
+      <AppAccess appName="Shopping" />
+      <TargetScreen>
+        <p>Context screen</p>
+      </TargetScreen>
+    </SempodsProvider>
+  ) : identity === 'access-delayed' ? (
     // A Pod overview fixed to one Pod, without a Context flow.
     <SempodsProvider runtime={runtime} contextSelection="on-demand">
       <AppAccess appName="Shopping" />

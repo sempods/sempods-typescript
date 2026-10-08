@@ -156,6 +156,7 @@ try {
   let overviewRefuse = false;
   let delayedOffline = false;
   let delayedScope = 'tasks';
+  let slowCatalogueFailing = false;
   // The expiring Pod issues short-lived tokens and refuses them after expiry,
   // without a challenge ('none') or with `Bearer error="invalid_token"`.
   const expiringLifetime = 4;
@@ -400,6 +401,14 @@ try {
       if (url.pathname.endsWith('/_system/contexts')) {
         assert.equal(req.headers.cookie, undefined);
         assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        if (name === 'slowcat') {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          if (slowCatalogueFailing) {
+            res.writeHead(503);
+            res.end();
+            return;
+          }
+        }
         json({
           '@id': base + '/_system/contexts',
           '@type': [
@@ -1178,6 +1187,45 @@ try {
   delayedScope = 'tasks';
   console.log(
     'Packed AppAccess, one Pod on demand: loading status only (no Full addresses) from callback and restore until the delayed Pod reader is readable, then hidden; ended session and missing required scopes show recovery directly passed.',
+  );
+  // A demanded Context catalogue that answers after a delay: with a preset
+  // Context the target settles by itself, so sign-in and restore show only the
+  // loading status before hiding. Without one the trace ends at the chooser,
+  // and a failing catalogue at its failure view.
+  for (const mode of ['required', 'on-demand']) {
+    const app = origin + '/app?identity=access-catalogue-' + mode;
+    await page.goto(app);
+    await Promise.all([
+      page.waitForURL('**/callback?**'),
+      page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+    ]);
+    await page.waitForURL(app);
+    await page.getByText('Context screen').waitFor();
+    await settled('hidden');
+    assert.deepEqual(await accessTrace(), ['loading', 'hidden'], mode);
+    await page.reload();
+    await page.getByText('Context screen').waitFor();
+    await settled('hidden');
+    assert.deepEqual(await accessTrace(), ['loading', 'hidden'], mode);
+  }
+  const choice = origin + '/app?identity=access-catalogue-choice';
+  await page.goto(choice);
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(choice);
+  await page.getByLabel('Data context', { exact: true }).waitFor();
+  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  slowCatalogueFailing = true;
+  await page.reload();
+  await page
+    .getByText('Context catalogue unavailable. Access is unknown.')
+    .waitFor();
+  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  slowCatalogueFailing = false;
+  console.log(
+    'Packed AppAccess, delayed Context catalogue (required and on-demand with TargetScreen): preset sign-in and restore pass loading -> hidden only; without a preset the chooser, and a failing catalogue its failure view, follow loading directly passed.',
   );
   // The copyable recipe, installed archives and native browser storage: a Pod
   // overview loads/restores/renews without touching Context discovery.

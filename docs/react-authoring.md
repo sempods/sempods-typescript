@@ -51,20 +51,25 @@ callback notice stays until the person selects another connection, disconnects
 one or starts a sign-in (`AppSnapshot.callbackNotice`); `callbackNotice` never
 rewrites `startup`. A connection whose sign-in never returned, or whose session
 expired, asks to sign in without claiming access or a kept draft. It hides once
-the selected target is readable,
-including read-only access; catalogue failures remain visible even if the runtime
-retains previous access facts. While the active connection restores, or is signed
-in but its Pod reader is not yet readable, it shows the loading status and, when
-they apply, the active-Pod selector for several saved connections and the sign-in
-for a configured Pod other than the active one, so a restore that does not settle
-never blocks switching Pods or signing in. A custom `components.Connections` is replaced
-by the loading status alone. The connection view (with its addresses and actions)
-appears when something needs a decision, such as an ended session or missing
-required scopes; while a demanded catalogue loads, in `'required'` mode or under a
-mounted `TargetScreen`, with its pending-catalogue notice before the Context
-choice; or when the host opens it with `open`. The context picker lists readable contexts only and says so when the
-Pod grants none. Unavailable session storage prevents startup; controls
-remain blocked with a reload notice (there is no in-memory session fallback).
+the selected target is readable, including read-only access; catalogue failures
+remain visible even if the runtime retains previous access facts. While the
+active connection restores, is signed in but its Pod reader is not yet
+readable, or loads its first demanded Context catalogue (in `'required'` mode
+or under a mounted `TargetScreen`), it shows the loading status and, when they
+apply, the active-Pod selector for several saved connections and the sign-in
+for a configured Pod other than the active one. A restore or catalogue load
+that does not settle therefore never blocks switching Pods or signing in, and a
+preset or remembered Context that settles the target never flashes the
+connection view. Nothing on that surface cancels a load that never settles;
+the host's `open` still reaches every connection action. Once a catalogue has
+settled, a reload (**Check access**, revalidation) keeps the connection view. A
+custom `components.Connections` is replaced by the loading status alone. The
+connection view (with its addresses and actions) appears when something needs a
+decision: an ended session, missing required scopes, a Context choice after the
+catalogue loaded, a failed catalogue, or when the host opens it with `open`.
+The context picker lists readable contexts only and says so when the Pod grants
+none. Unavailable session storage prevents startup; controls remain blocked
+with a reload notice (there is no in-memory session fallback).
 `AppShell`, `ConnectionControls` and fully custom layouts remain supported;
 custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 
@@ -352,8 +357,8 @@ that operation will succeed.
 Mount `TargetScreen` as soon as the Context flow is wanted, **before** a view
 exists. It demands the active eligible connection's catalogue even if it mounted
 before login completed. Concurrent/StrictMode demand shares the runtime operation.
-`AppAccess` then exposes the chooser, empty/error feedback and explicit **Check
-access** retry. Opening its `open` management also demands discovery. Ready,
+After the loading status of that first load, `AppAccess` exposes the chooser,
+empty/error feedback and explicit **Check access** retry. Opening its `open` management also demands discovery. Ready,
 empty and failed catalogues are reused, with no effect-driven retry loop.
 Custom UI uses existing `useApp().refreshContexts(id)` and guarded `selectContext`;
 it supplies its own chooser/retry presentation. No separate activation API is needed.
