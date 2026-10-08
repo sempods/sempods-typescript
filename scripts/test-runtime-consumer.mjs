@@ -172,6 +172,8 @@ try {
   };
   let overviewNoteVersion = 1;
   let overviewNoteWrites = 0;
+  // Notes created in the overview Pod's second Context, by IRI.
+  const overviewCreated = new Map();
   let writeMode = 'normal';
   let writes = 0;
   let version = 1;
@@ -429,8 +431,31 @@ try {
           ],
           ['https://schema.sempods.org/writableContext']: [
             { '@id': base + '/_system/contexts/work' },
+            ...(name === 'overview-pod'
+              ? [{ '@id': base + '/_system/contexts/notes' }]
+              : []),
           ],
         });
+        return;
+      }
+      if (
+        name === 'overview-pod' &&
+        url.pathname.includes('/_system/resources/') &&
+        url.searchParams.get('context') === base + '/_system/contexts/notes'
+      ) {
+        // Only creations land in the second Context, each exactly once.
+        assert.equal(req.headers.cookie, undefined);
+        assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        assert.equal(req.method, 'PUT');
+        assert.equal(req.headers['if-none-match'], '*');
+        const iri = Buffer.from(
+          url.pathname.split('/').at(-1),
+          'base64url',
+        ).toString();
+        assert.equal(overviewCreated.has(iri), false);
+        overviewCreated.set(iri, JSON.parse(body));
+        res.writeHead(201);
+        res.end();
         return;
       }
       if (
@@ -1354,33 +1379,68 @@ try {
     .click();
   await editRegion.waitFor({ state: 'detached' });
   assert.equal(overviewNoteWrites, 1);
-  // Editing a row in another Context while a draft exists in this one: declining
-  // the Context change keeps the draft and leaves no empty editor behind.
-  await page.getByLabel('New note').fill('Draft elsewhere');
-  await page.getByRole('button', { name: 'Edit urn:second-note' }).click();
-  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
-  await editRegion.waitFor({ state: 'detached' });
-  assert.equal(
-    await page.getByLabel('New note').inputValue(),
-    'Draft elsewhere',
-  );
-  // Choosing another Context elsewhere while a row is edited retires the editor
-  // instead of selecting its old Context again.
-  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
-  await editRegion.getByLabel('Note title').waitFor();
+  // Explicit Context editing (#82): with notes selected and an unsaved creation
+  // draft there, the work row is edited and saved without any leave prompt; the
+  // selection and the draft stay, and the draft is then created in notes.
   await page.getByRole('button', { name: 'Data access', exact: true }).click();
   await page
     .getByLabel('Data context')
     .selectOption(origin + '/overview-pod/_system/contexts/notes');
-  await page
-    .getByRole('button', { name: 'Discard and continue', exact: true })
-    .click();
-  await editRegion.waitFor({ state: 'detached' });
-  await page.waitForTimeout(200);
+  const newNote = page.getByLabel('New note');
+  await newNote.fill('Draft in notes');
+  await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
+  await title.waitFor();
+  assert.equal(await page.getByRole('alertdialog').count(), 0);
+  await title.fill('Edited beside a draft');
+  const patchedBeside = page.waitForResponse(
+    (r) =>
+      r.url().includes('/overview-pod/_system/resources/') &&
+      r.request().method() === 'PATCH',
+  );
+  await editRegion.getByRole('button', { name: 'Save', exact: true }).click();
+  assert.equal((await patchedBeside).status(), 204);
+  assert.equal(overviewNoteWrites, 2);
+  assert.equal(await page.getByRole('alertdialog').count(), 0);
   assert.equal(
     await page.getByLabel('Data context').inputValue(),
     origin + '/overview-pod/_system/contexts/notes',
   );
+  assert.equal(await newNote.inputValue(), 'Draft in notes');
+  const created = page.waitForResponse(
+    (r) =>
+      r.url().includes('/overview-pod/_system/resources/') &&
+      r.request().method() === 'PUT',
+  );
+  await page
+    .getByRole('region', { name: 'Context note' })
+    .getByRole('button', { name: 'Save', exact: true })
+    .click();
+  assert.equal((await created).status(), 201);
+  assert.deepEqual(
+    [...overviewCreated.values()].map((n) => n['urn:note:title']),
+    [[{ '@value': 'Draft in notes' }]],
+  );
+  // Selecting another Context keeps the explicit editor and its draft open,
+  // without a prompt.
+  await title.fill('Unsaved across a Context change');
+  await page
+    .getByLabel('Data context')
+    .selectOption(origin + '/overview-pod/_system/contexts/work');
+  await page.waitForTimeout(200);
+  assert.equal(await page.getByRole('alertdialog').count(), 0);
+  assert.equal(
+    await page.getByLabel('Data context').inputValue(),
+    origin + '/overview-pod/_system/contexts/work',
+  );
+  assert.equal(await title.inputValue(), 'Unsaved across a Context change');
+  await editRegion
+    .getByRole('button', { name: 'Close editor', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Discard and continue', exact: true })
+    .click();
+  await editRegion.waitFor({ state: 'detached' });
+  assert.equal(overviewNoteWrites, 2);
   // Switching Pods retires an editor that belongs to the previous connection.
   await page.getByLabel('Your Pod').fill(origin + '/second-pod');
   await Promise.all([
@@ -1413,7 +1473,7 @@ try {
     [],
   );
   console.log(
-    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and Context-bound editing of an overview row (fresh read, If-Match, guarded close, declined Context change, external Context change, Pod switch) passed.',
+    'Packed on-demand recipe: StrictMode login, catalogue-free overview/restore/401 recovery, explicit Context activation, deferred remembered selection, draft-preserving revalidation and explicit Context editing of an overview row (fresh read, If-Match, guarded close, saved beside a creation draft in another Context without a prompt, selection kept, editor kept across a Context change, Pod switch) passed.',
   );
   // Short-lived tokens: the recipe renews an expired token before dispatch, so
   // a Pod refusing it with or without a Bearer challenge never sees it (#51).
