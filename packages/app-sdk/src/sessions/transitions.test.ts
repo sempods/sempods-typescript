@@ -533,6 +533,7 @@ it.each([
   '?code=fixture',
   '?code=fixture&state=STATE&state=STATE',
   '?error=access_denied&state=forged',
+  '?error=login_required&state=forged',
   '?code=fixture&state=STATE&iss=https://other.example',
   '?state=STATE',
   '?code=fixture&state=STATE#fragment',
@@ -562,28 +563,29 @@ it.each([
   },
 );
 
-it('claims a matching denial so cancellation can durably retire its attempt', async () => {
-  const { transitions, prepare, attempt } = await setup();
-  const saved = await prepare();
-  const denied = new URL(
-    `${callback}?error=access_denied&state=${attempt.state}`,
-  );
-  const winner = claimed(
-    await transitions.claimCode(saved.id, saved.revision, attempt, denied),
-  );
-  expect(
-    committed(await transitions.disconnect(saved.id, winner.revision)).value
-      .kind,
-  ).toBe('disconnected');
-  expect(
-    await transitions.claimCode(
-      saved.id,
-      saved.revision,
-      attempt,
-      returned(attempt),
-    ),
-  ).toEqual({ kind: 'conflict' });
-});
+it.each(['access_denied', 'login_required', 'server_error', 'invalid_scope'])(
+  'claims a matching %s answer so its attempt can be durably retired',
+  async (code) => {
+    const { transitions, prepare, attempt } = await setup();
+    const saved = await prepare();
+    const denied = new URL(`${callback}?error=${code}&state=${attempt.state}`);
+    const winner = claimed(
+      await transitions.claimCode(saved.id, saved.revision, attempt, denied),
+    );
+    expect(
+      committed(await transitions.disconnect(saved.id, winner.revision)).value
+        .kind,
+    ).toBe('disconnected');
+    expect(
+      await transitions.claimCode(
+        saved.id,
+        saved.revision,
+        attempt,
+        returned(attempt),
+      ),
+    ).toEqual({ kind: 'conflict' });
+  },
+);
 
 it('uses transition errors for malformed expected bindings and expired attempts', async () => {
   const { transitions, prepare, attempt } = await setup();

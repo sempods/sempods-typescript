@@ -315,15 +315,24 @@ try {
         return;
       }
       if (url.pathname.endsWith('/authorize')) {
-        const code = 'code-' + codes.size;
-        codes.set(code, {
-          base,
-          client: url.searchParams.get('client_id'),
-          challenge: url.searchParams.get('code_challenge'),
-          redirect: url.searchParams.get('redirect_uri'),
-        });
         const redirect = new URL(url.searchParams.get('redirect_uri'));
-        redirect.searchParams.set('code', code);
+        if (name === 'refusing') {
+          // A legitimate, state-bound OAuth error with untrusted free text.
+          redirect.searchParams.set('error', 'login_required');
+          redirect.searchParams.set(
+            'error_description',
+            'You are not signed in to the app',
+          );
+        } else {
+          const code = 'code-' + codes.size;
+          codes.set(code, {
+            base,
+            client: url.searchParams.get('client_id'),
+            challenge: url.searchParams.get('code_challenge'),
+            redirect: url.searchParams.get('redirect_uri'),
+          });
+          redirect.searchParams.set('code', code);
+        }
         redirect.searchParams.set('iss', base);
         redirect.searchParams.set('state', url.searchParams.get('state'));
         res.writeHead(302, { location: redirect.href });
@@ -1058,6 +1067,71 @@ try {
   }
   console.log(
     'Packed AppAccess: one/set/free Pod UI, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+  );
+  // A Pod whose provider answers login_required: the specific cause (EN/DE),
+  // shown once and without a kept-draft claim, until the person acts.
+  await page.goto(origin + '/app?identity=access-refusing');
+  await page.getByLabel('Your Pod').fill(origin + '/alice');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL('**/app?identity=access-refusing');
+  await page
+    .getByLabel('Data context', { exact: true })
+    .selectOption(origin + '/alice/_system/contexts/work');
+  await page.getByLabel('Preset draft').waitFor();
+  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await page.getByLabel('Your Pod').fill(origin + '/refusing');
+  const beforeLoginRequired = exchanges;
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL('**/app?identity=access-refusing');
+  const refusal =
+    'The pod asked you to sign in at its provider first. Sign in there, then try again.';
+  const access = page.getByRole('region', { name: 'Data access', exact: true });
+  assert.equal(await access.getByRole('alert').textContent(), refusal);
+  assert.equal(await access.getByText(refusal).count(), 1);
+  const accessText = await access.textContent();
+  assert.ok(!accessText.includes('draft'), accessText);
+  assert.ok(!accessText.includes('not signed in to the app'), accessText);
+  assert.equal(exchanges, beforeLoginRequired);
+  const activePod = access.getByLabel('Active pod', { exact: true });
+  assert.ok(
+    (await activePod.locator('option:checked').textContent()).endsWith(
+      '/refusing',
+    ),
+  );
+  await activePod.selectOption({ label: 'Personal' });
+  await access.waitFor({ state: 'hidden' });
+  assert.equal(await page.getByRole('alert').count(), 0);
+  await page.goto(origin + '/app?identity=access-refusing-de');
+  await page.getByLabel('Dein Pod').fill(origin + '/refusing');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Anmelden', exact: true }).click(),
+  ]);
+  await page.waitForURL('**/app?identity=access-refusing-de');
+  const zugriff = page.getByRole('region', {
+    name: 'Datenzugriff',
+    exact: true,
+  });
+  assert.equal(
+    await zugriff.getByRole('alert').textContent(),
+    'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.',
+  );
+  assert.ok(!(await zugriff.textContent()).includes('Entwurf'));
+  await zugriff.getByRole('button', { name: 'Trennen', exact: true }).click();
+  await page.getByLabel('Dein Pod').waitFor();
+  assert.equal(await page.getByRole('alert').count(), 0);
+  assert.equal(
+    await page.getByLabel('Connections', { exact: true }).textContent(),
+    '0',
+  );
+  console.log(
+    'Packed AppAccess, provider login_required callback: specific EN/DE cause once on its connection, no kept-draft claim or provider text, cleared by selecting another Pod or disconnecting passed.',
   );
   // One permitted Pod, Contexts on demand: until the Pod reader is readable
   // (callback, then restore), the surface shows only its loading status and

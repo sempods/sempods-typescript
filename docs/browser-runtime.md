@@ -65,9 +65,22 @@ and restores the configured same-origin return location. The host router decides
 what to render; the runtime does not render login or recovery UI.
 
 The report separates interaction (`none`, `completed`, `cancelled`, `failed`)
-from storage (`durable`, `unavailable`, `busy`). A rejected callback can coexist
-with other restored active connections. `unreadable` identifies corrupt or
-unsupported records without deleting them or hiding other valid records.
+from storage (`durable`, `unavailable`, `busy`). Interaction describes the
+returning sign-in only: without a callback it stays `none`, also when storage
+or coordination fails or the runtime was already disposed. A rejected callback
+can coexist with other restored active connections.
+
+When the provider answers the stored attempt with an OAuth error, the runtime
+consumes that attempt, ends its connection with the classified
+[`OAuthProblem`](../packages/client-sdk/src/oauth/errors.ts) (`denied` reports
+interaction `cancelled`) and retires its record. The connection stays listed
+until the next reload, also after a transient `provider-unavailable`. A forged
+or malformed callback leaves the attempt untouched. After any failed or
+cancelled callback that matched a stored attempt, `attemptConnectionId` names
+that connection, also when discovery failed before the attempt was claimed.
+
+`unreadable` identifies corrupt or unsupported records without deleting them
+or hiding other valid records.
 Startup never waits for the discovery of saved Pods, on the callback route or
 otherwise. Saved connections report `session.kind: 'restoring'` until their own
 validated discovery succeeds or fails; subscribe to snapshots for their
