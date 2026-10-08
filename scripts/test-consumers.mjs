@@ -181,7 +181,7 @@ try {
   run(process.execPath, ['out/node.mjs'], plain);
 
   // Sparse SELECT bindings must remain optional for consumers that turn off
-  // noUncheckedIndexedAccess. Compile the portable README example verbatim too.
+  // noUncheckedIndexedAccess. Compile every portable README recipe verbatim too.
   await cp(
     join(root, 'tests/consumers/select-types.ts'),
     join(plain, 'select-types.ts'),
@@ -190,11 +190,14 @@ try {
     join(plain, 'node_modules/@sempods/client-sdk/README.md'),
     'utf8',
   );
-  const overview = clientReadme
-    .split('## Reading across the Pod')[1]
-    ?.match(/```ts\n([\s\S]*?)```/)?.[1];
-  assert.ok(overview, 'Portable Pod-read example missing');
-  await writeFile(join(plain, 'pod-overview.ts'), overview);
+  const recipes = [...clientReadme.matchAll(/```ts\n([\s\S]*?)```/g)];
+  assert.ok(recipes.length >= 5, 'Portable README examples missing');
+  const recipeFiles = [];
+  for (const [index, recipe] of recipes.entries()) {
+    const file = `client-recipe-${index}.ts`;
+    await writeFile(join(plain, file), recipe[1]);
+    recipeFiles.push(file);
+  }
   await json(join(plain, 'tsconfig.select.json'), {
     compilerOptions: {
       ...strict,
@@ -205,7 +208,7 @@ try {
       types: ['node'],
       noEmit: true,
     },
-    files: ['select-types.ts', 'pod-overview.ts'],
+    files: ['select-types.ts', ...recipeFiles],
   });
   run(
     process.execPath,
@@ -284,6 +287,20 @@ try {
     'Packed client root: no OAuth/React/app runtime imports; no requests or browser facilities on import.',
   );
 
+  // Compile the installed app README composition against the public React entry.
+  const appReadme = await readFile(
+    join(withReact, 'node_modules/@sempods/app-sdk/README.md'),
+    'utf8',
+  );
+  const appRecipes = [...appReadme.matchAll(/```tsx\n([\s\S]*?)```/g)];
+  assert.ok(appRecipes.length > 0, 'App README composition missing');
+  const appRecipeFiles = [];
+  for (const [index, recipe] of appRecipes.entries()) {
+    const file = `app-recipe-${index}.tsx`;
+    await writeFile(join(withReact, file), recipe[1]);
+    appRecipeFiles.push(file);
+  }
+
   const assets = new Map();
   for (const [path, file, react] of [
     [plain, 'browser.ts', false],
@@ -300,7 +317,7 @@ try {
         noEmit: true,
         ...(react ? { jsx: 'react-jsx' } : {}),
       },
-      files: [file],
+      files: [file, ...(react ? appRecipeFiles : [])],
     });
     run(
       process.execPath,

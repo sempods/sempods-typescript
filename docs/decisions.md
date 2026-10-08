@@ -226,7 +226,7 @@ need separate contracts and evidence.
 _Why:_ the small composition proves useful libraries with today's API while
 keeping session authority and pending work in one place. See [widgets](widgets.md).
 
-## Not in 0.1
+## Not implemented yet
 
 Preferred-language editing and multi-language maps, concurrently active tabs,
 anonymous reading, DPoP, revocation, server-side rendering, and a browser-hosted

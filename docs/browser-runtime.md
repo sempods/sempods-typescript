@@ -26,19 +26,27 @@ const runtime = createBrowserRuntime({
     redirectUri: 'https://app.example/oauth/callback',
   },
   returnTo: '/',
-  scopes: { required: ['tasks'], optional: ['ai'] },
 });
+
 const report = await runtime.initialize();
 
-if (report.storage === 'durable') {
-  // A connect button can invoke these guarded actions.
-  const connection = await runtime.connect('https://pods.example/alice');
+// Call from the host's sign-in button after startup.
+async function signIn(podUrl: string) {
+  if (report.storage !== 'durable') {
+    throw new Error(
+      'Restore browser storage or close the other active tab first.',
+    );
+  }
+
+  const connection = await runtime.connect(podUrl);
   await runtime.beginAuthorization(connection.id);
 }
 ```
 
-Scope names are illustrative: request only features supported by the chosen Pod.
-With no configured features, omit `scopes`.
+Ordinary data access uses context grants; no feature scopes are needed for this
+example. Add `scopes: { required, optional }` only for documented capabilities
+supported by your Pod. The host renders startup feedback and action failures;
+React apps can use `AppAccess` for that presentation.
 
 A deployed identity instead supplies
 `{ kind: 'did-web', clientId: 'did:web:app.example', redirectUri: '…' }`.
@@ -373,7 +381,7 @@ Neither is dispatched or silently retried on startup. Call `beginAuthorization(i
 for an explicit new attempt, or `disconnect(id)` to durably remove its secret
 material and hide the connection. Until one of those actions, a retained
 `authorizing` record still contains its verifier. There is no automatic expiry
-cleanup in this increment. Corrupt/future-version records remain untouched and
+cleanup. Corrupt/future-version records remain untouched and
 are reported separately through `StartupReport.unreadable`.
 
 The runtime renews a credential before dispatch once it is within a minute of

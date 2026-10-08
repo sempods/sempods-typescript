@@ -1,6 +1,10 @@
 # Working on the sempods TypeScript SDK
 
-This file governs the whole repository. Start with
+This file governs the whole repository: the reusable TypeScript SDK packages,
+examples and contributor documentation. New app projects normally start in
+[sempods-apps-template](https://github.com/sempods/sempods-apps-template).
+
+Start with
 [contributor rules](docs/contributing.md) and the
 [instruction map](docs/agents/ai-instructions.md). Before changing documentation,
 read the [documentation strategy](docs/agents/documentation-strategy.md).
