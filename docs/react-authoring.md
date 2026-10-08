@@ -445,7 +445,8 @@ editor, and the hook never selects its old Context again; `reason` says why:
 - `connection-changed`: another connection became active, at any point. The
   retired target never demands discovery from the new connection.
 
-Open the row again to start over. Losing read access after activation does not
+Open the row again to start over, or `close()` it, which clears a retired
+target at once. Losing read access after activation does not
 retire the editor: it keeps its draft through access loss and recovery, and
 saving follows the view's write access.
 

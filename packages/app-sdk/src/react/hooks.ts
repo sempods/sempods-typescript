@@ -355,7 +355,11 @@ export interface ContextEditor<D, U = D> {
    * it open.
    */
   open(target: ContextTarget): Promise<boolean>;
-  /** Closes the target under the leave policy; `false` if declined or blocked by a pending write. */
+  /**
+   * Closes the target under the leave policy; `false` if declined, blocked by a
+   * pending write, or if another connection became active while it asked. A
+   * retired target closes at once.
+   */
   close(): Promise<boolean>;
 }
 /** One opened target: the connection it belongs to and its single selection attempt. */
@@ -555,8 +559,24 @@ export function useContextEditor<D>(
         })
         .catch(() => false);
     },
-    close: () =>
-      lane ? app.navigate(() => setState(null)) : Promise.resolve(true),
+    close: () => {
+      if (!lane) return Promise.resolve(true);
+      const clear = () => setState((s) => (s?.lane === lane ? null : s));
+      // A retired target has no editor left to guard.
+      if (reason) {
+        clear();
+        return Promise.resolve(true);
+      }
+      const connection = lane.connection;
+      return app
+        .navigate(() => {
+          // As for open: a confirmation that outlasted the connection discards nothing.
+          if (app.getSnapshot().activeId !== connection)
+            throw new RuntimeError('disconnected');
+          clear();
+        })
+        .catch(() => false);
+    },
   };
 }
 export type MutationOutcome<D> =

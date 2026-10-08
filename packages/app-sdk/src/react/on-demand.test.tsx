@@ -1266,3 +1266,41 @@ it('selects nothing when another connection became active during the selection p
   ).toBeNull();
   expect(screen.queryByRole('alertdialog')).toBeNull();
 });
+
+it('discards nothing when a close prompt outlasts its connection', async () => {
+  const { f, runtime, other } = await twoPods(false);
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <RowEditor />
+      <LocalDraft />
+      <Switch id={f.id} />
+    </SempodsProvider>,
+  );
+  fireEvent.click(await screen.findByText('Switch Pod'));
+  await edit('Edit urn:a in work', f.id);
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  fireEvent.change(title(), { target: { value: 'Unsaved' } });
+  fireEvent.change(screen.getByLabelText('Local draft'), {
+    target: { value: 'Kept' },
+  });
+  fireEvent.click(screen.getByText('Close editor'));
+  await screen.findByRole('alertdialog');
+  await act(async () => {
+    await runtime.disconnect(f.id);
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId('active').textContent).toBe(other.id),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  await waitFor(() => expect(phase()).toBe('retired:connection-changed'));
+  expect((screen.getByLabelText('Local draft') as HTMLInputElement).value).toBe(
+    'Kept',
+  );
+  // The retired target closes without asking again.
+  fireEvent.click(screen.getByText('Close editor'));
+  await waitFor(() => expect(phase()).toBe('idle'));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect((screen.getByLabelText('Local draft') as HTMLInputElement).value).toBe(
+    'Kept',
+  );
+});
