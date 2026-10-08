@@ -57,10 +57,11 @@ const noSubscription = () => () => {};
  * existing runtime facts/actions; hides when a target is readable unless open.
  * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
  * offers Context selection only once a Context flow (`TargetScreen`, `open`) asks.
- * While the active connection restores, or its Pod reader is not yet readable,
- * it shows the loading status (plus the active-Pod selector for several saved
- * connections and the sign-in for another configured Pod) until something
- * needs a decision.
+ * While the active connection restores, its Pod reader is not yet readable, or
+ * its first demanded Context catalogue loads, it shows the loading status (plus
+ * the active-Pod selector for several saved connections and the sign-in for
+ * another configured Pod) until something needs a decision. Nothing there
+ * cancels a load that never settles; `open` still reaches every action.
  * Read-only targets remain usable. Callback failures remain visible separately
  * until the person selects another connection, disconnects one or signs in again.
  * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
@@ -97,10 +98,24 @@ export function AppAccess({
     (contextRequired &&
       (!access.read || access.connection?.catalogue.kind === 'failed'));
   const hidden = !needsAttention && !open && !state.callbackNotice;
-  // The active connection is still being validated (restoring, or signed in
-  // while its Pod reader is not yet readable) and nothing awaits a decision:
-  // show the loading status, not the connection view, until it settles.
+  // The active connection is still being validated (restoring, signed in while
+  // its Pod reader is not yet readable, or loading its first demanded Context
+  // catalogue) and nothing awaits a decision: show the loading status, not the
+  // connection view, until it settles. Once a catalogue has settled, a reload
+  // (Check access, revalidation) keeps the connection view and its focus.
   const c = access.connection;
+  const [settledCatalogue, setSettledCatalogue] = useState<string | null>(null);
+  if (
+    c &&
+    (c.catalogue.kind === 'ready' || c.catalogue.kind === 'failed') &&
+    settledCatalogue !== c.id
+  )
+    setSettledCatalogue(c.id);
+  // A reload after `ready` keeps the earlier contexts, also for an instance
+  // mounted during that reload.
+  const catalogueSettled =
+    settledCatalogue === c?.id ||
+    (c?.catalogue.kind === 'loading' && Boolean(c.catalogue.contexts));
   const validating =
     !open &&
     !state.callbackNotice &&
@@ -110,7 +125,7 @@ export function AppAccess({
     (c?.session.kind === 'restoring' ||
       ((c?.session.kind === 'active' || c?.session.kind === 'renewing') &&
         c.missingRequiredScopes.length === 0 &&
-        !podAccess.read));
+        ((contextRequired && !catalogueSettled) || !podAccess.read)));
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
     // focus only after that transition, when the host control can receive it.
