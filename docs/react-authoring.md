@@ -429,7 +429,9 @@ readable evidence first, also when its Context is already selected. It reads the
 with its ETag (`If-Match`), like `useResourceEditor`. Opening another target and
 `close()` run under the leave policy: an unsaved draft or an open review asks
 first, and a pending write blocks them (they resolve `false` without asking)
-until it settles.
+until it settles. `open()` resolves once the target is open; the Context
+selection that follows reports through `phase` and `reason`, not through that
+result.
 
 `phase` is `idle`, `activating`, `unavailable`, `ready` or `retired`.
 `unavailable` means the catalogue does not list the Context as readable, or

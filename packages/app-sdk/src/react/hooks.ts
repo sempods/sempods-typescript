@@ -348,10 +348,13 @@ export interface ContextEditor<D, U = D> {
   /** Present only while `phase` is `'ready'`; render it with `ResourceEditor`. */
   readonly editor: ResourceEditor<D, U> | null;
   /**
-   * Opens another target under the leave policy for the connection active now.
-   * `false` if declined, if a pending write blocks it, if no connection is
-   * active, or if another connection became active while it asked. Opening the
-   * same target again while that is under way shares its result.
+   * Opens another target under the leave policy for the connection active now:
+   * `true` once the target is open, `false` if leaving the current target was
+   * declined or blocked, if no connection is active, or if another connection
+   * became active while it asked. The Context selection follows afterwards and
+   * reports through `phase` and `reason` (for example `retired` with
+   * `declined`), not through this result. Opening the same target again while
+   * that is under way shares its result.
    */
   open(target: ContextTarget): Promise<boolean>;
   /**
