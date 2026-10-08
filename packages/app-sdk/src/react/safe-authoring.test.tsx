@@ -573,7 +573,7 @@ it('R3: after a definitive exists, the next explicit create uses a fresh IRI', a
     if (init?.method !== 'PUT') return f.resource(url, init);
     attempts.push(url);
     // The generated IRI is already taken on the first attempt.
-    if (attempts.length === 1) return new Response(null, { status: 412 });
+    if (attempts.length === 1) return taken(f, url);
     return f.resource(url, init);
   });
   act(() => f.api.creation.change({ title: 'Unchanged' }));
@@ -592,10 +592,50 @@ it('R3: after a definitive exists, the next explicit create uses a fresh IRI', a
   expect(f.api.creation.draft).toEqual(initial);
 });
 
+it('a creation the browser resent is not taken for a collision and gets no fresh IRI', async () => {
+  const f = await setup();
+  const attempts: string[] = [];
+  f.setResource(async (url, init) => {
+    if (init?.method !== 'PUT') return f.resource(url, init);
+    attempts.push(url);
+    // Applied, then resent below Fetch: the resend fails If-None-Match.
+    await f.resource(url, init);
+    return new Response(null, { status: 412 });
+  });
+  act(() => f.api.creation.change({ title: 'Once' }));
+  await act(async () => {
+    expect(await f.api.creation.create()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: true,
+    });
+  });
+  expect(f.api.creation.canCreate).toBe(false);
+  expect(f.api.creation.canEdit).toBe(false);
+  await act(async () => {
+    expect(await f.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => f.api.creation.notice.onAcknowledge());
+  // Present evidence settles it: no second creation under another IRI.
+  expect(f.api.creation.draft).toEqual(initial);
+  expect(attempts).toHaveLength(1);
+  expect(f.rows.size).toBe(2); // the existing row plus this one
+});
+
 type Setup = Awaited<ReturnType<typeof setup>>;
 type Init = NonNullable<Parameters<PodFetch>[1]>;
 const iriOf = (url: string) =>
   Buffer.from(new URL(url).pathname.split('/').at(-1)!, 'base64url').toString();
+/** Another resource holds the IRI, so a create-only PUT fails its condition. */
+function taken(f: Setup, url: string) {
+  const iri = iriOf(url);
+  f.rows.set(iri, {
+    '@id': iri,
+    '@type': ['urn:Task'],
+    'urn:title': [{ '@value': 'Someone else' }],
+    'urn:status': [{ '@id': 'urn:open' }],
+  });
+  return new Response(null, { status: 412 });
+}
 /** Records each creation attempt; each answer is slow enough for React to render. */
 function trackPuts(
   f: Setup,
@@ -681,6 +721,7 @@ it.each([
     outcome: { kind: 'unconfirmed' },
     held: true,
     canCreate: false,
+    rows: 4, // the lost answer's item landed
   },
   {
     stop: 'refused',
@@ -688,13 +729,15 @@ it.each([
     outcome: { kind: 'not-created', reason: 'refused' },
     held: false,
     canCreate: true,
+    rows: 3,
   },
   {
     stop: 'exists',
-    answer: async () => new Response(null, { status: 412 }),
+    answer: async (f: Setup, url: string) => taken(f, url),
     outcome: { kind: 'exists' },
     held: false,
     canCreate: true,
+    rows: 4, // the other resource holding the IRI
   },
   {
     stop: 'not sent (write access lost)',
@@ -702,10 +745,11 @@ it.each([
     outcome: null,
     held: false,
     canCreate: false,
+    rows: 3,
   },
 ])(
   'S2: stops at the first $stop item; confirmed items stay created and the rest is not sent',
-  async ({ answer, outcome, held, canCreate }) => {
+  async ({ answer, outcome, held, canCreate, rows }) => {
     const f = await setup();
     const track = trackPuts(f, async (attempt, url, init) => {
       if (attempt === 3 && answer) return answer(f, url, init);
@@ -734,7 +778,7 @@ it.each([
         expect.arrayContaining(['Bananas', 'Milk', 'One']),
       ),
     );
-    expect(f.rows.size).toBe(held ? 4 : 3); // the lost answer's item landed
+    expect(f.rows.size).toBe(rows);
     // Nothing is retried on its own, and the next batch cannot replace the
     // stopped item in the draft.
     await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
