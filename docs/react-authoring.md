@@ -550,7 +550,9 @@ Custom controls read `useAppState().preset` and call `useApp().connect()` withou
 an argument to reuse/connect the preset and request authorization. Call it only
 from a user action, disable controls until startup storage is durable and while
 `changing`/`confirmingLeave` or restoration is pending, and present action errors
-with `useSdkLocale().error`. A returned `false` means the leave policy declined.
+with `useSdkLocale().error`. A returned `false` means the leave policy declined,
+or that another connection became active outside a guarded action while the
+person was asked; the controller then cancels the prompt and discards nothing.
 The same action is available on the headless app controller. For a different Pod,
 pass an explicit URL; the preset does not enforce an allowlist. Hosts reconcile
 all feature requirements through the existing runtime-wide `scopes` option.
