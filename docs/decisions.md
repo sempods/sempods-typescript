@@ -183,7 +183,11 @@ Navigation that would replace a dirty draft or an
 unresolved outcome asks first, and the UI is inert while a transition prepares. The controller exposes no
 Context view until startup settles, so no Context screen can start a draft on a
 connection that a returning sign-in is about to replace. A pending prompt whose
-connection stops being active is cancelled without discarding anything.
+connection stops being active is cancelled without discarding anything. Guard
+scopes say which changes leave a draft: row navigation keeps `target` guards, a
+Context selection keeps `connection` guards (drafts bound to an explicit
+Context), and connection actions leave all. A pending write blocks every change,
+except that a saving `connection` guard does not block a Context selection.
 
 _Why:_ recovery should be the default behaviour of the building blocks, not
 code every app writes again.

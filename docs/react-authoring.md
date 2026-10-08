@@ -598,9 +598,20 @@ and reset that draft once one appears. Keep their inputs disabled while
 `useWorkflowAccess().write` is false, as the recipes do. Local row navigation leaves editor guards
 only: list mutations and app-owned creation drafts survive, and uncertain outcomes still require comparison and
 acknowledgement. `useDraftGuard(dirty, discard)` is target-scoped by default;
-pass a third argument `'local'` only for a draft that row navigation leaves.
-A target change leaves both scopes; its confirmation explicitly names any
-unconfirmed write and warns that discarding local recovery does not undo it.
+pass a third argument `'local'` only for a draft that row navigation leaves, or
+`'connection'` for a draft bound to an explicit Context
+([`runtime.bindContext`](browser-runtime.md#bind-an-explicit-context)) rather
+than to the selection.
+
+| Change                                                   | Leaves (asks about, then discards)        |
+| -------------------------------------------------------- | ----------------------------------------- |
+| Row navigation (`navigate`, `useSelection().select`)     | `local`, `connection` and unscoped guards |
+| Context selection (`selectContext`)                      | `local`, `target` and unscoped guards     |
+| `selectConnection`, `connect`, `authorize`, `disconnect` | every guard                               |
+
+A pending write blocks every change, except that a saving `connection`-scoped
+editor does not block a Context selection, which leaves it alone. A confirmation explicitly names any
+unconfirmed write among the guards the change leaves and warns that discarding local recovery does not undo it.
 The provider makes its content inert during confirmation and guarded action
 preparation, including discovery, registration and redirect preparation, so new
 user input cannot be lost during the transition. This policy covers navigation
@@ -772,7 +783,9 @@ never becomes valid again; obtain the next view from the runtime.
 `createAppController(runtime)` supplies the same guarded selection policy to a
 non-React UI; call `start()` and `stop()` around its lifetime. Register draft guards
 with `register`. Guards default to local scope; use `scope: 'target'` for drafts
-or mutation outcomes that survive row navigation and `unconfirmed()` for pending
+or mutation outcomes that survive row navigation, `scope: 'connection'` for
+drafts bound to an explicit Context that survive a Context selection (see the
+table above) and `unconfirmed()` for pending
 write-outcome evidence. Headless hosts must prevent input while the controller's
 `changing` or `confirmingLeave` snapshot field is true, as the React provider does.
 The snapshot's `view` stays `null` until `startup` or `startupError` is set.

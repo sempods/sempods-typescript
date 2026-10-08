@@ -310,6 +310,111 @@ it.each(['same', 'other'] as const)(
     if (returning === 'other') expect(views).not.toContain(f.view);
   },
 );
+type Scope = 'local' | 'target' | 'connection' | undefined;
+const scopes: readonly Scope[] = ['local', 'target', 'connection', undefined];
+/** One dirty guard per scope, recording which ones a change discards. */
+function scopedGuards(app: ReturnType<typeof createAppController>) {
+  const discarded: Scope[] = [];
+  for (const scope of scopes)
+    app.register({
+      ...(scope ? { scope } : {}),
+      dirty: () => !discarded.includes(scope),
+      blocked: () => false,
+      discard: () => discarded.push(scope),
+    });
+  return discarded;
+}
+it.each([
+  ['navigate', ['local', 'connection', undefined]],
+  ['selectContext', ['local', 'target', undefined]],
+  ['selectConnection', ['local', 'target', 'connection', undefined]],
+] as const)(
+  'asks about and discards only the guards that %s leaves',
+  async (change, leaving) => {
+    const f = await connected();
+    const other = await f.runtime.connect('https://pod.example/bob');
+    const app = createAppController(f.runtime);
+    app.start();
+    cleanups.push(() => app.stop());
+    await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+    const discarded = scopedGuards(app);
+    const row = vi.fn();
+    const result =
+      change === 'navigate'
+        ? app.navigate(row)
+        : change === 'selectContext'
+          ? app.selectContext(personal)
+          : app.selectConnection(other.id);
+    expect(app.getSnapshot().confirmingLeave).toBe(true);
+    await app.confirmLeave();
+    expect(await result).toBe(true);
+    expect(discarded.sort()).toEqual([...leaving].sort());
+  },
+);
+it('selects a Context without asking about a connection-scoped draft alone', async () => {
+  const f = await connected();
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const discard = vi.fn();
+  app.register({
+    scope: 'connection',
+    dirty: () => true,
+    unconfirmed: () => true,
+    blocked: () => false,
+    discard,
+  });
+  expect(await app.selectContext(personal)).toBe(true);
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(personal);
+  expect(discard).not.toHaveBeenCalled();
+  // Row navigation leaves it and names its unconfirmed write.
+  const row = vi.fn();
+  const navigation = app.navigate(row);
+  expect(app.getSnapshot()).toMatchObject({
+    confirmingLeave: true,
+    unconfirmedLeave: true,
+  });
+  app.cancelLeave();
+  expect(await navigation).toBe(false);
+  expect(row).not.toHaveBeenCalled();
+});
+it('lets a Context selection pass a saving connection-scoped editor, which still blocks the other changes', async () => {
+  const f = await connected();
+  const other = await f.runtime.connect('https://pod.example/bob');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  app.register({
+    scope: 'connection',
+    dirty: () => true,
+    blocked: () => true,
+    discard: () => {},
+  });
+  const row = vi.fn();
+  expect(await app.navigate(row)).toBe(false);
+  expect(await app.selectConnection(other.id)).toBe(false);
+  expect(row).not.toHaveBeenCalled();
+  expect(await app.selectContext(personal)).toBe(true);
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(personal);
+});
+it('keeps a saving target-scoped write blocking row navigation', async () => {
+  const f = await connected();
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  app.register({
+    scope: 'target',
+    dirty: () => false,
+    blocked: () => true,
+    discard: () => {},
+  });
+  const row = vi.fn();
+  expect(await app.navigate(row)).toBe(false);
+  expect(row).not.toHaveBeenCalled();
+});
 it('retries an invalidated custom read once, never indefinitely', async () => {
   const f = await connected();
   const read = vi.fn(async () => ({ kind: 'invalidated' }) as const);
