@@ -339,7 +339,6 @@ export interface ContextEditor<D, U = D> {
 interface ContextLane {
   readonly target: ContextTarget;
   readonly connection: string;
-  activated: boolean;
   attempted: boolean;
 }
 /**
@@ -359,7 +358,9 @@ interface ContextLane {
  *   example after AppAccess's "Check access") still activates the target. A
  *   signed-out connection recovers through AppAccess's sign-in; the phase then
  *   follows the catalogue it keeps or loads.
- * - `ready`: `editor` exists, for a view of exactly that Context.
+ * - `ready`: `editor` exists, for a view of exactly that Context. Each opened
+ *   target needs readable catalogue evidence first, also when its Context is
+ *   already selected.
  * - `retired`: the editor is gone and the hook never selects the old Context
  *   again. `reason` says why: the selection was `declined` (the person kept a
  *   draft elsewhere, another write was pending, or the runtime refused it),
@@ -393,13 +394,25 @@ export function useContextEditor<D>(
   const [state, setState] = useState<{
     readonly lane: ContextLane;
     readonly retired: ContextEditorRetirement | null;
+    /** This lane's Context was selected with readable evidence. */
+    readonly activated: boolean;
   } | null>(null);
   const lane = state?.lane ?? null;
   const retired = state?.retired ?? null;
+  const activated = state?.activated ?? false;
   const retire = useCallback(
     (lane: ContextLane, reason: ContextEditorRetirement) =>
       setState((s) =>
-        s?.lane === lane && s.retired === null ? { lane, retired: reason } : s,
+        s?.lane === lane && s.retired === null ? { ...s, retired: reason } : s,
+      ),
+    [],
+  );
+  const activate = useCallback(
+    (lane: ContextLane) =>
+      setState((s) =>
+        s?.lane === lane && s.retired === null && !s.activated
+          ? { ...s, activated: true }
+          : s,
       ),
     [],
   );
@@ -427,24 +440,34 @@ export function useContextEditor<D>(
     // The opening click itself runs as a guarded navigation; act once it settled.
     if (!lane || !live || changing || confirmingLeave) return;
     if (selected === lane.target.context) {
-      lane.activated = true;
+      // A view kept through access loss is no evidence for a newly opened target.
+      if (readable) activate(lane);
       return;
     }
     // Another Context was chosen after this one: never select the old one again.
-    if (lane.activated) return retire(lane, 'context-changed');
+    if (activated) return retire(lane, 'context-changed');
     if (!readable || lane.attempted) return;
     lane.attempted = true;
     // Guarded like any Context change: drafts elsewhere ask before leaving.
     void app.selectContext(lane.target.context).then(
-      (accepted) => {
-        if (accepted) lane.activated = true;
-        else retire(lane, 'declined');
-      },
+      // The runtime selects only a Context its catalogue lists as readable.
+      (accepted) => (accepted ? activate(lane) : retire(lane, 'declined')),
       () => retire(lane, 'declined'),
     );
-  }, [app, lane, live, changing, confirmingLeave, selected, readable, retire]);
+  }, [
+    app,
+    lane,
+    live,
+    changing,
+    confirmingLeave,
+    selected,
+    readable,
+    activated,
+    activate,
+    retire,
+  ]);
   const editor = useBoundEditor(
-    lane && live && view?.contextIri === lane.target.context
+    lane && live && activated && view?.contextIri === lane.target.context
       ? lane.target.subject
       : null,
     definition,
@@ -483,10 +506,10 @@ export function useContextEditor<D>(
           lane: {
             target: { subject: target.subject, context: target.context },
             connection,
-            activated: false,
             attempted: false,
           },
           retired: null,
+          activated: false,
         });
       });
     },

@@ -1146,3 +1146,30 @@ it('keeps the editor and its draft through read loss after activation', async ()
   expect(title().value).toBe('Unfinished');
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
 });
+
+it('requires readable evidence again when a row is reopened after read loss', async () => {
+  const f = await returned();
+  notes(f);
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await edit('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  f.setCatalogue(async () => catalogue([personal], [personal]));
+  await act(() => f.runtime.loadContexts(f.id));
+  expect(phase()).toBe('ready');
+  fireEvent.click(screen.getByText('Close editor'));
+  const leave = screen.queryByRole('button', { name: 'Discard and continue' });
+  if (leave) fireEvent.click(leave);
+  await waitFor(() => expect(phase()).toBe('idle'));
+  // The controller keeps the view, but a newly opened target needs evidence.
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
+  fireEvent.click(screen.getByText('Edit urn:a in work'));
+  await waitFor(() => expect(phase()).toBe('unavailable'));
+  expect(screen.queryByLabelText('Note title')).toBeNull();
+  f.setCatalogue(async () => catalogue());
+  await act(() => f.runtime.loadContexts(f.id));
+  await waitFor(() => expect(title().value).toBe('A at work'));
+});

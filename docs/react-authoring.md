@@ -399,7 +399,8 @@ function Notes() {
 `TargetScreen` does; the editor needs no `TargetScreen` of its own. Once the
 controller is settled and the catalogue lists the Context as readable, the hook
 calls the guarded `selectContext` once, also under StrictMode. `editor` exists
-only for a view of exactly that Context. It reads the subject fresh and saves
+only for a view of exactly that Context, and each opened target needs that
+readable evidence first, also when its Context is already selected. It reads the subject fresh and saves
 with its ETag (`If-Match`), like `useResourceEditor`. Opening another target and
 `close()` run under the leave policy, so an unsaved draft, an open review or a
 pending write asks first.
