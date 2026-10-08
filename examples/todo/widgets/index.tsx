@@ -8,7 +8,10 @@ import {
   useWorkflowAccess,
 } from '@sempods/app-sdk/react';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
+import { AccessPanel } from '../recipes/sign-in.js';
+
 const schema = 'https://schema.org/';
+
 // Same narrow Action profile as TODO, private to this library.
 const taskFields = fields(
   {
@@ -21,7 +24,6 @@ const taskFields = fields(
   { type: schema + 'Action' },
 );
 const emptyTask = { title: '', done: false };
-import { AccessPanel } from '../recipes/sign-in.js';
 
 /** Example-library API, not an SDK export. All widgets follow the host target. */
 export type WidgetFallback =

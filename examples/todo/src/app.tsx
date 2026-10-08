@@ -44,6 +44,7 @@ function TaskScreen() {
     reopen: de ? 'Wieder öffnen' : 'Reopen',
     skipped: de ? 'Nicht unterstützte Einträge' : 'Unsupported entries',
   };
+
   return (
     <section aria-label={m.tasks}>
       <form
@@ -138,10 +139,12 @@ function TaskScreen() {
     </section>
   );
 }
+
 function CustomScreen() {
   const state = useAppState();
   const { messages, error } = useSdkLocale();
   const m = messages.controls;
+
   return (
     <main className="custom">
       <h1>TODO · Custom</h1>
@@ -168,6 +171,7 @@ function CustomScreen() {
     </main>
   );
 }
+
 export function TodoApp({
   runtime,
   custom,
@@ -182,6 +186,7 @@ export function TodoApp({
   readonly legacy?: boolean;
 }) {
   const [language, setLanguage] = useState<'en' | 'de'>('en');
+
   return (
     <SempodsProvider runtime={runtime} language={language}>
       <nav aria-label="Language">
@@ -221,6 +226,7 @@ function StandardScreen() {
   const { messages } = useSdkLocale();
   const { view, connections } = useAppState();
   const access = useWorkflowAccess();
+
   return (
     <main className="standard">
       {connections.length > 0 && (

@@ -244,6 +244,7 @@ function Note({
     </AccessPanel>
   );
 }
+
 function KnownPodContent({
   podUrl,
   fallback,
@@ -274,6 +275,7 @@ function KnownPodContent({
     </>
   );
 }
+
 /** The host owns and disposes one stable runtime; this component only consumes it. */
 export function KnownPodExample({
   runtime,
