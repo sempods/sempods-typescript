@@ -330,9 +330,15 @@ remains shared across readers. A Pod `403` returns `refused` without catalogue
 revalidation, automatic renewal or inferred global session/access changes.
 Context-view `403` recovery retains its existing behavior.
 
-`createAppController(runtime).getSnapshot().pod` exposes the active eligible Pod
-reader, or `null` during unresolved/signed-out startup. Changing the active Pod
-exposes its handle; another connection's reader retains its own lifetime.
+`createAppController(runtime).getSnapshot().pod` exposes the active connection's
+Pod reader whenever its session is signed in, also while startup still settles.
+It is `null` without an active connection, or while that connection restores, is
+signed out or has ended. The snapshot's Context `view`, by contrast, stays `null`
+until `startup` or `startupError` is set: on a callback page, saved sessions
+restore while the returning sign-in is still being redeemed, and no Context
+screen may start on a connection that sign-in is about to replace. Changing the
+active Pod exposes its handle; another connection's reader retains its own
+lifetime.
 Controller startup defaults to automatic catalogues (`contextSelection: 'required'`).
 Use `createAppController(runtime, { contextSelection: 'on-demand' })` for a
 catalogue-free Pod overview. Neither startup/restore, preset/remembered Contexts
