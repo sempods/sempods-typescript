@@ -118,6 +118,10 @@ not instructions to the coding assistant.
   existing item, select/validate its explicit target and reread through that
   Context with its ETag. See the [overview recipe](../examples/todo/recipes/pod-overview.tsx)
   and [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
+- For an app that only reads, such as a data explorer, settle that early and
+  record it in the app's notes. An app cannot ask the Pod for read access only:
+  consent may grant write access the app never uses. Keep write hooks and write operations out of the
+  app and follow [Test an app that only reads](local-testing.md#test-an-app-that-only-reads).
 - Define fields once using the portable `client-sdk/edit` helpers. Choose exact
   type/predicate IRIs, fixed text language or `language: null`, and enum/flag
   values. Store points in time with `dateTime` (an `xsd:dateTime` with an
@@ -152,8 +156,9 @@ Implement the quickstart's vertical slice, then adapt it. Build and typecheck
 against installed package artifacts. Test domain-specific behavior and manual
 flows that matter; mock results do not establish compatibility with a real Pod.
 Use the [testing checklist](local-testing.md) for consent, reload, CRUD, conflict,
-uncertainty, access loss and tab behavior. Do not manipulate real credentials to
-simulate failures or copy live browser storage into fixtures.
+uncertainty, access loss and tab behavior, or its read-only section for an app
+that only reads. Do not manipulate real credentials to simulate failures or copy
+live browser storage into fixtures.
 
 For deployment, prepare the reproducible build, static routing, public identity
 and callback configuration described in [deployment](deployment.md). Confirm

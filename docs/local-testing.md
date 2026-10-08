@@ -32,8 +32,10 @@ not relax validation of a remote Pod or make the hosted Pod accept an unsupporte
 client policy. Enter its full HTTPS URL in the app's sign-in form, sign in on the Pod's page,
 grant only the test context, return to the app and explicitly select it.
 
-A successful sign-in without a writable context is not setup completion: the
-owner must create or grant one through their Pod's supported administration tools.
+A successful sign-in without a writable context is not setup completion for an
+app that writes; an [app that only reads](#test-an-app-that-only-reads) needs a
+readable one. The owner must create or grant it through their Pod's supported
+administration tools.
 Context administration is outside this SDK's current operation set. Do not fix
 missing access by inventing a scope or choosing a different context silently.
 
@@ -105,6 +107,56 @@ controlled test fixture/proxy that applies the write and withholds its response;
 simply going offline before clicking Save tests a different condition. The SDK's
 [automated browser fixtures](development.md) exercise uncertainty without real data.
 Report a manual uncertainty check as untested if you cannot reproduce it safely.
+
+## Test an app that only reads
+
+An app that only reads, such as a data explorer or a Pod overview, skips the
+create, edit and conflict checks above. It needs two other things: consent that
+grants no more than it reads, and evidence that it never writes.
+
+**Consent.** An app cannot ask a Pod for read access only. The person chooses the
+contexts on the Pod's consent screen; whether they can grant read access alone
+depends on the Pod. Grant only the contexts the app reads, read-only where the
+consent screen offers it. Leaving out write calls restricts the app's code, not
+the access it holds, and the consent screen cannot show the difference. The
+[architecture decisions](decisions.md#read-only-is-the-apps-choice-not-a-grant)
+explain why the SDK has no read-only mode.
+
+**No write path.** For an overview, `usePodLoad` with
+`contextSelection="on-demand"` receives a `BoundPod`, which offers only
+`sparql.select` and `sparql.construct`: no write operation exists on it. Context
+reads through `useLoad` or `useList` are reads too, but every `BoundView`, for
+example from `useView`, `useAppState().view` or `useLoad`'s read function, also
+carries `subjects.put`, `patch` and `delete`. Do not call those, and do not use
+`useCreation`, `useFieldUpdate`, `useResourceEditor`, `ResourceEditor`,
+`bindResourceEditor` or the `@sempods/client-sdk/edit` write helpers
+(`createResourceEditor`, `prepareCreation`, `updateFields`, `removeSnapshot`).
+A test that fails when the app's source uses one of these keeps it that way; the
+SDK does not ship one.
+
+**Lost access in an overview.** A `usePodLoad` result does not react to a lost
+Context grant: the Pod reader stays usable and the shown rows are not cleared.
+The Pod enforces the change on the next query, so give the overview an explicit
+reload.
+
+**Real data.** Run the checks below against a test context with synthetic data
+first. An explorer is often meant for a Pod with real data: connect it only after
+the network check passed, with the person's explicit agreement, and record which
+contexts it reads in the app's notes.
+
+| Check                             | Expected observation                                                                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Connect and consent               | Only the contexts the app reads are granted; an on-demand overview loads without a context choice                                       |
+| Loading, empty and failed         | Loading, an empty result and a failed read look different; a refused or failed read never shows as empty                                |
+| Read access only                  | Where the Pod lets you grant read access alone, the app works fully; `AppShell` may show its read-only notice, which is expected        |
+| Remove read access, Context reads | For `useLoad`/`useList`, displayed data is cleared after revalidation; no fallback to another context                                   |
+| Remove read access, Pod overview  | A `usePodLoad` result stays on screen; after `reload()` it no longer contains that Context's data                                       |
+| No writes                         | The browser's network panel over a full session shows no `PUT`, `PATCH` or `DELETE`; `POST` only for queries, sign-in and token renewal |
+| Reload, second tab, language      | As in the [complete walkthrough](#walk-through-one-complete-app)                                                                        |
+
+Queries are sent as `POST` to the Pod's `/_system/sparql/query`; sign-in (client
+registration, token exchange) and token renewal also use `POST`. Treat any other
+`POST` to the Pod as a possible write and find its caller.
 
 ## When a step fails
 
