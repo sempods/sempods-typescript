@@ -350,11 +350,12 @@ export interface ContextEditor<D, U = D> {
   readonly editor: ResourceEditor<D, U> | null;
   /**
    * Opens another target under the leave policy for the connection active now.
-   * `false` if declined, if no connection is active, or if another connection
-   * became active before the leave policy let it open.
+   * `false` if declined, if a pending write blocks it, if no connection is
+   * active, or if another connection became active before the leave policy let
+   * it open.
    */
   open(target: ContextTarget): Promise<boolean>;
-  /** Closes the target under the leave policy; `false` if declined. */
+  /** Closes the target under the leave policy; `false` if declined or blocked by a pending write. */
   close(): Promise<boolean>;
 }
 /** One opened target: the connection it belongs to and its single selection attempt. */
@@ -394,8 +395,9 @@ interface ContextLane {
  * Context screens it keeps its draft through access loss and recovery, and
  * saving follows the view's write access.
  *
- * `open` with a different target and `close` run under the leave policy, so an
- * unsaved draft, an open review or a pending write asks first. One target is one
+ * `open` with a different target and `close` run under the leave policy: an
+ * unsaved draft or an open review asks first, and a pending write blocks them
+ * (they resolve `false` without asking) until it settles. One target is one
  * Context: a subject with data in several Contexts appears as several overview
  * rows, and each row opens its own target.
  */

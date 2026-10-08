@@ -427,8 +427,9 @@ calls the guarded `selectContext` once, also under StrictMode. `editor` exists
 only for a view of exactly that Context, and each opened target needs that
 readable evidence first, also when its Context is already selected. It reads the subject fresh and saves
 with its ETag (`If-Match`), like `useResourceEditor`. Opening another target and
-`close()` run under the leave policy, so an unsaved draft, an open review or a
-pending write asks first.
+`close()` run under the leave policy: an unsaved draft or an open review asks
+first, and a pending write blocks them (they resolve `false` without asking)
+until it settles.
 
 `phase` is `idle`, `activating`, `unavailable`, `ready` or `retired`.
 `unavailable` means the catalogue does not list the Context as readable, or
