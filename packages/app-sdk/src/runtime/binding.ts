@@ -8,9 +8,27 @@ import type {
   Stopped,
 } from '@sempods/client-sdk';
 import type { Entry } from './connection.js';
+import type { CatalogueFact } from './types.js';
 import type { BoundView, Invalidated, ViewAccess } from './view.js';
 import { waitFor } from './wait.js';
 
+/**
+ * Whether the catalogue's confirmed evidence lists a Context as readable (or
+ * writable). Retained evidence counts while a refresh loads or fails.
+ */
+export function catalogueLists(
+  catalogue: CatalogueFact,
+  contextIri: string,
+  write = false,
+): boolean {
+  return (
+    'contexts' in catalogue &&
+    (catalogue.contexts?.some(
+      (c) => c.iri === contextIri && (write ? c.writable : c.readable),
+    ) ??
+      false)
+  );
+}
 /**
  * What a view is bound to beyond its connection, generation and subject: the
  * selected Context (valid while that selection holds) or an explicit Context.
@@ -113,11 +131,7 @@ export function bindView(
   const permission = (write: boolean) =>
     valid() &&
     e.view.missingRequiredScopes.length === 0 &&
-    'contexts' in e.view.catalogue &&
-    (e.view.catalogue.contexts?.some(
-      (c) => c.iri === contextIri && (write ? c.writable : c.readable),
-    ) ??
-      false);
+    catalogueLists(e.view.catalogue, contextIri, write);
   let snapshot: ViewAccess | undefined;
   const getSnapshot = (): ViewAccess => {
     const next = {

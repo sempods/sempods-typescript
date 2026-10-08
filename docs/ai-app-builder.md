@@ -114,10 +114,18 @@ not instructions to the coding assistant.
   one to build it. Mount `TargetScreen` before a view exists when a scoped flow
   is requested, with `AppAccess` alongside for discovery, chooser and explicit
   retry. The default `'required'` policy preserves ordinary CRUD startup.
-  `useWorkflowAccess` stays Context-only. Query rows are read-only: to edit an
-  existing item, select/validate its explicit target and reread through that
-  Context with its ETag. See the [overview recipe](../examples/todo/recipes/pod-overview.tsx)
-  and [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
+  `useWorkflowAccess` stays Context-only. Query rows are read-only pointers: to
+  edit an existing item, reread it in its explicit Context with its ETag. With
+  0.4.1, follow the installed overview recipe, which does this in app code by
+  selecting the row's Context, so other Context-bound drafts may be asked about
+  first.
+  After 0.4.1, pass the row's subject and its `GRAPH` Context to `open` of
+  `useContextEditor(definition)` instead. It binds that Context without changing
+  the selection, rereads the item there and saves with its ETag. Render its
+  `editor` while `phase` is `ready`, and present `problem` when it is
+  `unavailable`. See the [overview recipe](../examples/todo/recipes/pod-overview.tsx),
+  [editing an overview row](react-authoring.md#editing-an-overview-row) and the
+  [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
 - For an app that only reads, such as a data explorer, settle that early and
   record it in the app's notes. An app cannot ask the Pod for read access only:
   consent may grant write access the app never uses. Keep write hooks and write operations out of the
@@ -128,8 +136,9 @@ not instructions to the coding assistant.
   explicit time zone), not as text. Preserve unedited RDF, unknown properties
   and other languages. Treat incompatible mappings as unsupported, not as empty
   editable records.
-- Prefer `useList`, `useCreation`, `useFieldUpdate`, `useSelection` and
-  `useResourceEditor` with `ResourceEditor`/`UpdateNotice`. Pass original snapshots
+- Prefer `useList`, `useCreation`, `useFieldUpdate`, `useSelection`,
+  `useResourceEditor` and, after 0.4.1, `useContextEditor` with
+  `ResourceEditor`/`UpdateNotice`. Pass original snapshots
   to list actions. Use `useApp()`'s guarded actions for custom connection/context
   controls. The authoring guide gives exact signatures and lifecycle rules.
 - Render loading, unavailable access, conflicts and unconfirmed writes distinctly.

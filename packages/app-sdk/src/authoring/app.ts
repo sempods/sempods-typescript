@@ -26,6 +26,12 @@ export interface LeaveGuard {
   dirty(): boolean;
   discard(): void;
 }
+/** Whether controller startup has settled: `startup` or `startupError` is set. */
+export function startupSettled(
+  snapshot: Pick<AppSnapshot, 'startup' | 'startupError'>,
+) {
+  return snapshot.startup !== undefined || snapshot.startupError !== undefined;
+}
 /** A guarded change: row navigation, a Context selection, or a connection action. */
 type Change = 'navigate' | 'context' | 'connection';
 /** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
@@ -148,7 +154,7 @@ export function createAppController(
       pod = runtime.bindPod(connection.id);
     // No Context-bound screen before startup settles, so no draft can start on
     // a connection that a returning sign-in is about to replace (#80).
-    const settled = startup !== undefined || startupError !== undefined;
+    const settled = startupSettled({ startup, startupError });
     if (!settled || !connection || !connection.selectedContext) view = null;
     else {
       try {

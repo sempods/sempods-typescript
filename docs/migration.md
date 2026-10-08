@@ -73,6 +73,14 @@ automatic conversion of legacy app data or stored credentials.
 
 New in the next release:
 
+- `useContextEditor(definition)` edits a Pod-overview row in the Context its
+  `GRAPH` binding names, through `runtime.bindContext`, without changing the
+  selection. An app that copied the 0.4 overview recipe's `EditInContext`
+  component can replace it: call `edit.open({ subject, context })` from the row,
+  render `edit.editor` with `ResourceEditor`, and present `edit.problem` when
+  `phase` is `unavailable`. Unlike that component, the hook no longer selects
+  the row's Context, so a creation form elsewhere keeps its target. See
+  [editing an overview row](react-authoring.md#editing-an-overview-row).
 - A third leave-guard scope, `connection`, for drafts bound to an explicit
   Context: a Context selection neither asks about nor discards them, and their
   pending writes do not block it; row navigation and connection actions still

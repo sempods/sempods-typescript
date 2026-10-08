@@ -33,7 +33,9 @@ import {
   personal,
   pod,
   restored,
+  returnedSession,
   settleLease,
+  twoPods,
   work,
 } from '../runtime/fixture.test.js';
 
@@ -51,15 +53,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-async function returned(f = fixture({ preferences: null })) {
-  runtimes.push(f.runtime);
-  const { connection } = await f.begin();
-  f.runtime.dispose();
-  await settleLease();
-  const runtime = f.returned();
-  runtimes.push(runtime);
-  return { ...f, runtime, id: connection.id };
-}
+const keep = (runtime: BrowserRuntime) => void runtimes.push(runtime);
+const returned = (f?: ReturnType<typeof fixture>) => returnedSession(keep, f);
 const descriptions = (f: ReturnType<typeof fixture>) =>
   f.fetch.mock.calls.filter(([url]) =>
     /\/_system\/contexts\/[^/]+$/.test(new URL(url).pathname),
@@ -506,26 +501,7 @@ function Switch({ id }: { readonly id: string }) {
   );
 }
 it('discards a late result when the active Pod changes', async () => {
-  const f = await returned(
-    fixture({ preferences: null, preset: { podUrl: pod } }),
-  );
-  await f.runtime.initialize();
-  const otherUrl = 'https://pod.example/bob';
-  const other = await f.runtime.connect(otherUrl);
-  await f.runtime.beginAuthorization(other.id);
-  f.runtime.dispose();
-  await settleLease();
-  f.setToken(async (url) =>
-    Response.json({
-      access_token: jwt({ iss: url.split('/_system')[0] }),
-      token_type: 'Bearer',
-      refresh_token: 'fresh',
-    }),
-  );
-  const runtime = f.returned();
-  runtimes.push(runtime);
-  await runtime.initialize();
-  await restored(runtime);
+  const { f, runtime, other } = await twoPods(keep);
   const gate = deferred<Response>();
   let signal: AbortSignal | undefined;
   f.setQuery(async (url, init) => {

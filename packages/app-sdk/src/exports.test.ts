@@ -40,6 +40,7 @@ it.each([
       'useApp',
       'useAppState',
       'useConnections',
+      'useContextEditor',
       'useCreation',
       'useDraftGuard',
       'useFieldUpdate',

@@ -1,11 +1,13 @@
 import {
   useEffect,
+  useMemo,
   useState,
   useSyncExternalStore,
   useRef,
   useCallback,
 } from 'react';
 import {
+  RuntimeError,
   bindResourceEditor,
   createViewLoader,
   type BoundView,
@@ -32,8 +34,11 @@ import {
   type RemoveSnapshotOutcome,
 } from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
+import { startupSettled } from '../authoring/app.js';
+import { catalogueLists } from '../runtime/binding.js';
 import {
   useAppState,
+  useContextDemand,
   useController,
   useView,
   useWorkflowAccess,
@@ -139,7 +144,7 @@ export function usePodLoad<T>(read: PodRead<T>) {
   return useBoundLoad(
     pod,
     read,
-    startup || startupError !== undefined ? unavailable : loading,
+    startupSettled({ startup, startupError }) ? unavailable : loading,
   );
 }
 function useBoundLoad<T, H extends BoundView | BoundPod>(
@@ -258,9 +263,28 @@ export function useResourceEditor<D>(
   iri: string | null,
   definition: EditDefinition<D>,
 ) {
-  const view = useView();
+  return useBoundEditor(
+    useView(),
+    iri,
+    definition,
+    'useResourceEditor',
+    'local',
+  );
+}
+/**
+ * The editor lifetime behind `useResourceEditor` and `useContextEditor`: one
+ * editor per view, subject and definition, registered as a leave guard with
+ * `scope`. `hook` names the caller in warnings.
+ */
+function useBoundEditor<D>(
+  view: BoundView | null,
+  iri: string | null,
+  definition: EditDefinition<D>,
+  hook: string,
+  scope: 'local' | 'connection',
+) {
   const app = useController();
-  const { key, latest } = useDefinition(definition, 'useResourceEditor');
+  const { key, latest } = useDefinition(definition, hook);
   const [active, setActive] = useState<{
     view: BoundView;
     iri: string;
@@ -280,7 +304,7 @@ export function useResourceEditor<D>(
         before.editor.state.review !== null)
     )
       warn(
-        'useResourceEditor: the field definition changed for the same subject; its unsaved draft, pending write or open review was discarded.',
+        `${hook}: the field definition changed for the same subject; its unsaved draft, pending write or open review was discarded.`,
       );
     if (!view || !iri) {
       previous.current = null;
@@ -289,7 +313,7 @@ export function useResourceEditor<D>(
     }
     const editor = bindResourceEditor(view, iri, latest.current);
     const unregister = app.register({
-      scope: 'local',
+      scope,
       unconfirmed: () => editor.state.review?.kind === 'unconfirmed',
       dirty: () =>
         editor.state.phase !== 'deleted' &&
@@ -305,7 +329,8 @@ export function useResourceEditor<D>(
       editor.dispose();
     };
     // `key` stands for the definition (see useDefinition); `latest` is its ref.
-  }, [view, iri, key, app, latest]);
+    // `hook` only names the caller in a warning.
+  }, [view, iri, key, app, latest, hook, scope]);
   const editor =
     active?.view === view && active.iri === iri && active.key === key
       ? active.editor
@@ -316,6 +341,266 @@ export function useResourceEditor<D>(
     () => null,
   );
   return editor;
+}
+/** A Pod-overview row as an edit target: one subject inside the one Context its `GRAPH` binding names. */
+export interface ContextTarget {
+  readonly subject: string;
+  readonly context: string;
+}
+/** Where `useContextEditor` stands; see the hook for each phase. */
+export type ContextEditorPhase =
+  'idle' | 'loading' | 'unavailable' | 'ready' | 'retired';
+/** Why `useContextEditor` reports `unavailable`. */
+export type ContextEditorProblem =
+  /** The catalogue does not list the Context as readable. */
+  | 'unreadable'
+  /** The catalogue could not be loaded. */
+  | 'discovery-failed'
+  /** The runtime refused the binding, for example another Context than an exact preset's. */
+  | 'refused';
+/** What `useContextEditor` returns: the opened target, its phase and, while ready, its editor. */
+export interface ContextEditor<D, U = D> {
+  /** The opened target, kept while retired so the app can name it. */
+  readonly target: ContextTarget | null;
+  readonly phase: ContextEditorPhase;
+  /** Set only while `phase` is `'unavailable'`. */
+  readonly problem: ContextEditorProblem | null;
+  /** Present only while `phase` is `'ready'`; render it with `ResourceEditor`. */
+  readonly editor: ResourceEditor<D, U> | null;
+  /**
+   * Opens another target under the leave policy, for the connection active
+   * now. `true` once the target is open; whether it becomes `ready` is
+   * reported through `phase`. `false` if the person declined, a pending write
+   * blocks it, no connection is active, or another connection became active
+   * while it asked. Opening the same target again while that is under way
+   * shares its result.
+   */
+  open(target: ContextTarget): Promise<boolean>;
+  /**
+   * Closes the target under the leave policy; `false` if declined or blocked
+   * by a pending write. A retired target closes at once.
+   */
+  close(): Promise<boolean>;
+}
+/** One opened target and the connection it belongs to. */
+interface ContextLane {
+  readonly target: ContextTarget;
+  readonly connection: string;
+}
+interface ContextLaneState {
+  readonly lane: ContextLane;
+  /** The explicit binding once established, or the runtime's refusal. */
+  readonly binding: BoundView | 'refused' | null;
+  /** The catalogue listed the Context as readable once: the editor may exist. */
+  readonly activated: boolean;
+  /** Another connection became active; never revived. */
+  readonly retired: boolean;
+}
+const sameTarget = (a: ContextTarget, b: ContextTarget) =>
+  a.subject === b.subject && a.context === b.context;
+/** Whether a lane is still live: not retired and its connection active. */
+const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
+  s !== null && !s.retired && s.lane.connection === activeId;
+/**
+ * Edits one Pod-overview row in its own Context. The SELECT row is only a
+ * pointer: the editor reads the subject fresh in that Context through
+ * `runtime.bindContext` and saves with its version (If-Match). The connection's
+ * selected Context, the remembered choice and every `TargetScreen` stay as
+ * they are, so a creation form elsewhere keeps its target.
+ *
+ * `open(target)` records the active connection and demands its catalogue, as
+ * `TargetScreen` does; the editor needs no `TargetScreen`.
+ *
+ * - `idle`: nothing is open.
+ * - `loading`: startup, sign-in or the catalogue is not settled yet.
+ * - `unavailable`: the target could not be established; `problem` says why
+ *   (`unreadable`, `discovery-failed` or `refused`). A refusal is handled here:
+ *   no request is sent, and close and reopen keep working. A later catalogue
+ *   that lists the Context, for example after "Check access", still opens it.
+ * - `ready`: the binding and its resource editor exist. That does not mean the
+ *   resource exists or saving is permitted: loading, `404`, offline failures,
+ *   blocked access and review are states of that editor, with its retry.
+ * - `retired`: another connection became active. The editor is gone and the
+ *   target is never revived; close it, or open the row again.
+ *
+ * Once an editor exists, losing read access, a failed catalogue refresh or the
+ * session ending keep it with its draft and any unconfirmed-write review; it is
+ * never attached to another Context, connection, subject or generation. The
+ * editor is a `connection`-scoped leave guard: selecting another Context
+ * neither asks about it nor discards it, while `open` with another target,
+ * `close` and connection actions ask first, and its pending write blocks them.
+ * One target is one Context: a subject with data in several Contexts appears as
+ * several overview rows, and each row opens its own target.
+ */
+export function useContextEditor<
+  F extends ReturnType<typeof fields<Record<never, never>>>,
+>(
+  definition: F,
+): ContextEditor<ReturnType<F['read']>, Partial<ReturnType<F['read']>>>;
+export function useContextEditor<D>(
+  definition: EditDefinition<D>,
+): ContextEditor<D>;
+export function useContextEditor<D>(
+  definition: EditDefinition<D>,
+): ContextEditor<D> {
+  const app = useController();
+  const snapshot = useAppState();
+  const { connections, activeId, pod } = snapshot;
+  const [state, setState] = useState<ContextLaneState | null>(null);
+  // The latest lane state, ahead of rendering: open() and close() chained from
+  // one render (`await open(); await close()`) act on what is current.
+  const latest = useRef<ContextLaneState | null>(null);
+  const apply = useCallback(
+    (change: (s: ContextLaneState | null) => ContextLaneState | null) => {
+      const next = change(latest.current);
+      if (next === latest.current) return;
+      latest.current = next;
+      setState(next);
+    },
+    [],
+  );
+  const update = useCallback(
+    (lane: ContextLane, change: Partial<ContextLaneState>) =>
+      apply((s) => (s?.lane === lane && !s.retired ? { ...s, ...change } : s)),
+    [apply],
+  );
+  const opening = useRef<{
+    readonly target: ContextTarget;
+    readonly result: Promise<boolean>;
+  } | null>(null);
+  const lane = state?.lane ?? null;
+  const binding = state?.binding ?? null;
+  const bound = binding === 'refused' ? null : binding;
+  const activated = state?.activated ?? false;
+  const live = liveLane(state, activeId);
+  // Only the originating connection may demand discovery for this target, and
+  // only once the runtime accepted the binding: a refused target sends nothing.
+  useContextDemand(live && bound !== null);
+  const catalogue = live
+    ? connections.find((c) => c.id === lane!.connection)?.catalogue
+    : undefined;
+  // The binding's own rule for catalogue evidence, without its required-scope
+  // check: a target missing scopes would otherwise stay loading with no problem
+  // to present. A newly opened row needs a successful listing, not retained
+  // evidence from before a failed refresh.
+  const readable =
+    live &&
+    catalogue?.kind === 'ready' &&
+    catalogueLists(catalogue, lane!.target.context);
+  // No Context-bound editor before startup settles (a returning sign-in may
+  // still replace the active connection), as for the selected view. `pod`
+  // exists while the active connection is signed in.
+  const ready = startupSettled(snapshot) && pod !== null;
+  useEffect(() => {
+    if (!lane) return;
+    if (lane.connection !== activeId) {
+      update(lane, { retired: true });
+      return;
+    }
+    if (binding) {
+      // Readability can arrive after the binding, for example after "Check access".
+      if (bound && !activated && readable) update(lane, { activated: true });
+      return;
+    }
+    if (!ready) return;
+    try {
+      const view = app.runtime.bindContext(
+        lane.connection,
+        lane.target.context,
+      );
+      // The first activation needs fresh readable evidence; afterwards access
+      // loss keeps the editor and its draft.
+      update(lane, { binding: view, activated: readable });
+    } catch (error) {
+      if (!(error instanceof RuntimeError)) throw error;
+      // Not signed in after all: wait. A configuration refusal is the target's.
+      if (error.problem === 'configuration')
+        update(lane, { binding: 'refused' });
+      else if (error.problem !== 'disconnected') throw error;
+    }
+  }, [app, lane, activeId, binding, bound, activated, readable, ready, update]);
+  const editor = useBoundEditor(
+    live && activated ? bound : null,
+    live && activated ? lane!.target.subject : null,
+    definition,
+    'useContextEditor',
+    'connection',
+  );
+  const problem: ContextEditorProblem | null =
+    !live || editor
+      ? null
+      : binding === 'refused'
+        ? 'refused'
+        : catalogue?.kind === 'failed'
+          ? 'discovery-failed'
+          : catalogue?.kind === 'ready' && !readable
+            ? 'unreadable'
+            : null;
+  const phase: ContextEditorPhase = !lane
+    ? 'idle'
+    : !live
+      ? 'retired'
+      : editor
+        ? 'ready'
+        : problem
+          ? 'unavailable'
+          : 'loading';
+  const open = useCallback(
+    (target: ContextTarget) => {
+      const now = latest.current;
+      const binding = now?.binding;
+      if (
+        liveLane(now, app.getSnapshot().activeId) &&
+        sameTarget(now!.lane.target, target) &&
+        // A binding that can never become valid again (session end, another
+        // subject) is replaced by a fresh lane, after the leave policy asks.
+        !(binding && binding !== 'refused' && !binding.getSnapshot().current)
+      )
+        return Promise.resolve(true);
+      // Repeated before a re-render (a double click): share the first call.
+      const pending = opening.current;
+      if (pending && sameTarget(pending.target, target)) return pending.result;
+      // The row belongs to the connection active when it is opened. The
+      // controller cancels the prompt if another one becomes active meanwhile.
+      const connection = app.getSnapshot().activeId;
+      if (!connection) return Promise.resolve(false);
+      const result = app
+        .navigate(() =>
+          apply(() => ({
+            lane: {
+              target: { subject: target.subject, context: target.context },
+              connection,
+            },
+            binding: null,
+            activated: false,
+            retired: false,
+          })),
+        )
+        .finally(() => {
+          if (opening.current?.result === result) opening.current = null;
+        });
+      opening.current = { target, result };
+      return result;
+    },
+    [app, apply],
+  );
+  const close = useCallback(() => {
+    const now = latest.current;
+    if (!now) return Promise.resolve(true);
+    const clear = () => apply(() => null);
+    // A retired target has no guard left; clearing it at once also keeps an
+    // unrelated pending prompt from blocking the close.
+    if (!liveLane(now, app.getSnapshot().activeId)) {
+      clear();
+      return Promise.resolve(true);
+    }
+    return app.navigate(clear);
+  }, [app, apply]);
+  const target = lane?.target ?? null;
+  return useMemo(
+    () => ({ target, phase, problem, editor, open, close }),
+    [target, phase, problem, editor, open, close],
+  );
 }
 export type MutationOutcome<D> =
   UpdateOutcome<D> | RemoveSnapshotOutcome<D> | CreateOutcome;

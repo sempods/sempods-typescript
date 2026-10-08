@@ -99,7 +99,9 @@ retained catalogue evidence as the selected view. An exact preset `contextIri`
 also restricts explicit targets on its Pod. Handles for one Context of one
 authorization lifetime share an internal write-observation identity owned by
 the connection, so writes through either refresh the other's lists; handle
-lifetimes and `key`s stay separate.
+lifetimes and `key`s stay separate. React's `useContextEditor` edits a Pod-overview row through
+such a binding and registers its editor as a `connection`-scoped guard, so
+editing a row never retargets the app's selection or its other screens.
 
 Client-sdk and the browser runtime implement independent Pod readers.
 `BoundPod` invalidation depends on connection/session/grants, while Context

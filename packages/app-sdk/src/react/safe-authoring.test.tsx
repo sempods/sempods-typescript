@@ -24,6 +24,7 @@ import {
   deferred,
   work,
   personal,
+  resourceIri,
 } from '../runtime/fixture.test.js';
 import {
   SempodsProvider,
@@ -666,8 +667,7 @@ it('a creation the browser resent is not taken for a collision and gets no fresh
 
 type Setup = Awaited<ReturnType<typeof setup>>;
 type Init = NonNullable<Parameters<PodFetch>[1]>;
-const iriOf = (url: string) =>
-  Buffer.from(new URL(url).pathname.split('/').at(-1)!, 'base64url').toString();
+const iriOf = resourceIri;
 /** Another resource holds the IRI, so a create-only PUT fails its condition. */
 function taken(f: Setup, url: string) {
   const iri = iriOf(url);

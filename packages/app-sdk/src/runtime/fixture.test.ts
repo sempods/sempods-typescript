@@ -203,6 +203,50 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
         .length,
   };
 }
+/** The subject IRI a `/_system/resources/` URL addresses. */
+export const resourceIri = (url: string) =>
+  Buffer.from(new URL(url).pathname.split('/').at(-1)!, 'base64url').toString();
+/**
+ * A runtime returning from its sign-in callback, with no Context selected.
+ * `keep` receives every runtime created, for disposal after the test.
+ */
+export async function returnedSession(
+  keep: (runtime: BrowserRuntime) => void,
+  f = fixture({ preferences: null }),
+) {
+  keep(f.runtime);
+  const { connection } = await f.begin();
+  f.runtime.dispose();
+  await settleLease();
+  const runtime = f.returned();
+  keep(runtime);
+  return { ...f, runtime, id: connection.id };
+}
+/** Alice (`f.id`) and Bob (`other`) signed in, with Bob active after his completed callback. */
+export async function twoPods(keep: (runtime: BrowserRuntime) => void) {
+  const f = await returnedSession(
+    keep,
+    fixture({ preferences: null, preset: { podUrl: pod } }),
+  );
+  await f.runtime.initialize();
+  const otherUrl = 'https://pod.example/bob';
+  const other = await f.runtime.connect(otherUrl);
+  await f.runtime.beginAuthorization(other.id);
+  f.runtime.dispose();
+  await settleLease();
+  f.setToken(async (url) =>
+    Response.json({
+      access_token: jwt({ iss: url.split('/_system')[0] }),
+      token_type: 'Bearer',
+      refresh_token: 'fresh',
+    }),
+  );
+  const runtime = f.returned();
+  keep(runtime);
+  await runtime.initialize();
+  await restored(runtime);
+  return { f, runtime, other, otherUrl };
+}
 it('constructs a runtime without opening storage or contacting a Pod', () => {
   const f = fixture();
   expect(f.fetch).not.toHaveBeenCalled();

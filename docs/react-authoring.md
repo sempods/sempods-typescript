@@ -378,11 +378,93 @@ reads, selection or drafts. The policy does not change the complete-catalogue AP
 The [copyable overview recipe](../examples/todo/recipes/pod-overview.tsx) combines
 a Pod SELECT with provenance, a later Context-bound creation form and editing of
 an overview row. It keeps the demand boundary mounted while the form owns
-drafts/outcomes. An overview row is not an editable snapshot, only a pointer: its
-`GRAPH` binding names the Context, and the editor reads the resource fresh in
-that Context and saves with its ETag. The packed browser test runs this recipe,
-including an edit, with installed archives. Evidence on a deployed Pod and in a
-real browser is tracked in [#52](https://github.com/sempods/sempods-typescript/issues/52).
+drafts/outcomes. The packed browser test runs this recipe, including an edit
+beside a creation draft in another Context, with installed archives. Evidence on
+a deployed Pod and in a real browser is tracked in
+[#52](https://github.com/sempods/sempods-typescript/issues/52).
+
+### Editing an overview row
+
+`useContextEditor` arrives after 0.4.1. The 0.4.1 overview recipe rereads and
+conditionally saves a row in its Context in app code too, but it selects that
+Context to do so, which can prompt about or retarget other Context-bound
+drafts; keeping the selection is new with the hook.
+
+An overview row is not an editable snapshot, only a pointer: its subject and the
+Context its `GRAPH` binding names. `useContextEditor(definition)` edits one such
+target in exactly that Context, through an explicit binding
+([`runtime.bindContext`](browser-runtime.md#bind-an-explicit-context)). It never
+changes the selected Context or the remembered choice, so a creation form in
+another Context keeps its target and its draft.
+
+```tsx
+function Notes() {
+  const edit = useContextEditor(note);
+  return (
+    <>
+      <Overview onEdit={(row) => void edit.open(row)} />
+      {edit.target && edit.phase !== 'retired' && (
+        <section aria-label="Edit note">
+          {edit.problem ? (
+            <p role="alert">This note cannot be edited here.</p>
+          ) : (
+            <ResourceEditor editor={edit.editor}>
+              {(draft, change) => (
+                <input
+                  value={draft.title}
+                  onChange={(e) => change({ title: e.target.value })}
+                />
+              )}
+            </ResourceEditor>
+          )}
+          <button onClick={() => void edit.close()}>Close</button>
+        </section>
+      )}
+    </>
+  );
+}
+```
+
+`Overview` passes `{ subject, context }` from a row's IRI bindings, with the
+`GRAPH` binding as `context`.
+
+- **Opening.** `open` records the active connection and demands its catalogue,
+  as `TargetScreen` does; the editor needs no `TargetScreen`. `open()` resolves
+  `true` once the target is open. Whether it becomes `ready` is reported through
+  `phase`. Opening another target and `close()` run under the leave policy.
+- **Phases.**
+  - `loading`: startup, sign-in or the catalogue is not settled yet. No editor
+    starts before startup settles.
+  - `unavailable`: the target could not be established; `problem` is
+    `unreadable`, `discovery-failed` or `refused`. A refused binding, for example
+    another Context than an exact preset's, sends no request and changes
+    nothing. A later catalogue that lists the Context, for example after
+    **Check access**, still opens it.
+  - `ready`: the binding and its resource editor exist. That does not mean the
+    resource exists or that saving is permitted. Loading, `404`, offline
+    failures, blocked access and review are states of that editor, with its
+    retry.
+  - `retired`: another connection became active. The target is never revived;
+    `close()` clears it at once.
+- **Evidence.** The first activation needs a successful catalogue that lists
+  the Context as readable, also when a row is reopened. Unlike the selected
+  view, which keeps working on retained evidence, a row opened after a failed
+  refresh reports `discovery-failed` until a listing succeeds. Afterwards, losing read access, a
+  failed catalogue refresh or the session ending keep the editor with its draft
+  and any unconfirmed-write review. They are never attached to another Context,
+  connection, subject or generation.
+- **Leave policy.** The editor is a `connection`-scoped guard. Selecting another
+  Context neither asks about it nor discards it. Opening another row, `close()`
+  and connection actions ask first, and its pending write blocks them.
+- **Writes** through the editor refresh lists and retire success feedback on
+  the selected view of the same Context, and the other way round.
+
+One target is one Context. If a subject has data in several Contexts, the query
+returns one row per Context, and each Context holds only its own part of the
+subject. The overview offers one action per row, such as "Edit in Home" and
+"Edit in Work". Each edits and conditionally saves only that Context's part.
+Never merge the rows into one editable snapshot. Creating resources stays with
+`useCreation`.
 
 ## Lists and creation
 
