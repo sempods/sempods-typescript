@@ -790,6 +790,45 @@ it.each(['required', 'on-demand'] as const)(
   },
 );
 
+it('loads the first catalogue again after the host replaces the runtime', async () => {
+  const f = fixture({ preset: { podUrl: pod, contextIri: work } });
+  const signed = await f.login();
+  signed.runtime.dispose();
+  await settleLease();
+  const first = createBrowserRuntime(f.options);
+  const ui = (runtime: BrowserRuntime) => (
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Shopping" />
+      <TargetScreen>
+        <p>Context screen</p>
+      </TargetScreen>
+    </SempodsProvider>
+  );
+  const view = render(ui(first));
+  await screen.findByText('Context screen');
+  first.dispose();
+  await settleLease();
+  const answer = deferred<void>();
+  f.setCatalogue(async () => {
+    await answer.promise;
+    return catalogue();
+  });
+  const second = createBrowserRuntime(f.options);
+  cleanups.push(() => second.dispose());
+  const states = traceAccess();
+  view.rerender(ui(second));
+  await waitFor(() =>
+    expect(second.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
+  );
+  // The same connection ID restored by another runtime has not settled here.
+  expect(second.getSnapshot()[0]?.id).toBe(signed.id);
+  expect(second.getSnapshot()[0]?.session.kind).toBe('active');
+  expectLoadingOnly();
+  await act(async () => answer.resolve());
+  await screen.findByText('Context screen');
+  expect(states).not.toContain('connection');
+});
+
 /** Restarts [f]'s saved sessions with Pod discovery held (for [held] URLs) until the gate settles. */
 async function restoring(
   f: ReturnType<typeof fixture>,

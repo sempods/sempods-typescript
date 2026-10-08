@@ -14,6 +14,7 @@ import {
   useAppState,
   useContextDemand,
   useWorkflowAccess,
+  type AppActions,
 } from './app.js';
 import { useSdkLocale } from './locale.js';
 import {
@@ -104,17 +105,24 @@ export function AppAccess({
   // connection view, until it settles. Once a catalogue has settled, a reload
   // (Check access, revalidation) keeps the connection view and its focus.
   const c = access.connection;
-  const [settledCatalogue, setSettledCatalogue] = useState<string | null>(null);
+  // Scoped to this provider's controller: a replacement runtime restoring the
+  // same connection ID loads its first catalogue again.
+  const app = useApp();
+  const [settledCatalogue, setSettledCatalogue] = useState<{
+    readonly app: AppActions;
+    readonly id: string;
+  } | null>(null);
+  const settledHere = settledCatalogue?.app === app && settledCatalogue.id;
   if (
     c &&
     (c.catalogue.kind === 'ready' || c.catalogue.kind === 'failed') &&
-    settledCatalogue !== c.id
+    settledHere !== c.id
   )
-    setSettledCatalogue(c.id);
+    setSettledCatalogue({ app, id: c.id });
   // A reload after `ready` keeps the earlier contexts, also for an instance
   // mounted during that reload.
   const catalogueSettled =
-    settledCatalogue === c?.id ||
+    settledHere === c?.id ||
     (c?.catalogue.kind === 'loading' && Boolean(c.catalogue.contexts));
   const validating =
     !open &&
