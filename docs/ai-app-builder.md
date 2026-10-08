@@ -54,21 +54,29 @@ from npm with one explicit shared version, saved exactly
 as in the quickstart; never mix versions, and do not assume an older SDK with a
 similar name.
 
-1. [App overview](build-your-app.md): responsibility boundaries and vocabulary.
-2. For host-integrated widgets, also read [widget authoring](widgets.md): shared runtime/target, peer packages and retained recovery.
-   [Quickstart](quickstart.md), [React/headless authoring](react-authoring.md) and
-   the [actual TODO screen](../examples/todo/src/app.tsx): current working APIs.
-3. [Local testing](local-testing.md), [deployment](deployment.md) and, for existing
-   apps, [migration](migration.md).
-4. [sempods.org](https://www.sempods.org/) and
-   [how it works](https://www.sempods.org/how-it-works/): motivation and concepts.
-5. [sempods-spec](https://github.com/sempods/sempods-spec): normative protocol;
-   read `spec/core/auth.md`, `grants.md`, `contexts.md`, `lod-crud.md` and `sparql.md`
-   when reasoning about permissions or data operations. Pin the revision. The
-   specification is evolving; do not assume every optional feature is implemented.
-6. Optionally [sempods-kotlin](https://github.com/sempods/sempods-kotlin): Pod setup,
-   interoperability and implementation evidence. Read its README and auth guides
-   when diagnosing an actual Pod. It does not replace the normative specification.
+1. [App overview](build-your-app.md): responsibilities and vocabulary.
+2. [Quickstart](quickstart.md), then the relevant section of
+   [React/headless authoring](react-authoring.md). The
+   [TODO screen](../examples/todo/src/app.tsx) is a complete working example.
+3. [Local testing](local-testing.md) and [deployment](deployment.md).
+   For an upgrade, also read [migration](migration.md); for embedded components,
+   read [widget authoring](widgets.md).
+
+Use these additional sources when the task needs them:
+
+- [sempods.org](https://www.sempods.org/) and
+  [how it works](https://www.sempods.org/how-it-works/): motivation and concepts.
+- [sempods-spec](https://github.com/sempods/sempods-spec): the normative protocol.
+  For permission or wire-contract questions, read the relevant files in
+  `spec/core/` (`auth.md`, `grants.md`, `contexts.md`, `lod-crud.md`, `sparql.md`)
+  at a recorded revision. Optional protocol features are not automatically SDK APIs.
+- [sempods-kotlin](https://github.com/sempods/sempods-kotlin): Pod setup and
+  implementation evidence when diagnosing an actual Pod; it does not replace
+  the specification.
+
+Keep copied code readable: use descriptive names, separate setup from requests
+with blank lines, and handle empty results and failures explicitly. Prefer a
+small complete example using public exports to casts or copied SDK internals.
 
 For an API question, inspect package exports and their types, not a remembered
 method name. For a protocol question, use the specification. When implementation

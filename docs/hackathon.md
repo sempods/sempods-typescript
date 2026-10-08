@@ -21,7 +21,7 @@ as an installable app, add the [PWA setup](pwa.md).
 Use a dedicated test context and synthetic data; follow
 [local or hosted Pod testing](local-testing.md) for setup.
 
-## Ten API groups to keep nearby
+## APIs to keep nearby
 
 Import the named APIs from the table's entry: **app** = `@sempods/app-sdk`,
 **React** = `@sempods/app-sdk/react`, **edit** = `@sempods/client-sdk/edit`.

@@ -28,15 +28,18 @@ const note = fields(
     type: 'urn:Note',
   },
 );
+
 /** An overview row is only a pointer: the subject and the Context its GRAPH binding names. */
 interface RowTarget {
   readonly item: string;
   readonly graph: string;
 }
+
 /** The row, plus the connection that was active when editing started. */
 interface EditTarget extends RowTarget {
   readonly connection: string;
 }
+
 function Overview({
   onEdit,
 }: {
@@ -89,6 +92,7 @@ function Overview({
     </section>
   );
 }
+
 function NewNote() {
   // All writes still belong to one explicitly validated Context, independently
   // of the read-only overview. Never edit a merged SELECT row as a snapshot.
@@ -122,6 +126,7 @@ function NewNote() {
     </section>
   );
 }
+
 /**
  * Edits an overview row inside the Context its GRAPH binding names. TargetScreen demands
  * discovery; once the catalogue lists that Context as readable it is selected explicitly,
@@ -205,6 +210,7 @@ function EditInContext({
     </section>
   );
 }
+
 function NoteEditor({ item }: { readonly item: string }) {
   const editor = useResourceEditor(item, note);
   return (
@@ -221,6 +227,7 @@ function NoteEditor({ item }: { readonly item: string }) {
     </ResourceEditor>
   );
 }
+
 function Content() {
   const [manage, setManage] = useState(false);
   const [scoped, setScoped] = useState(false);
@@ -269,6 +276,7 @@ function Content() {
     </main>
   );
 }
+
 /** The host creates/disposes the stable runtime and serves this on the callback too. */
 export function PodOverviewExample({
   runtime,
