@@ -50,12 +50,13 @@ automatic conversion of legacy app data or stored credentials.
   side no longer pile up. Failures and unresolved outcomes are
   unchanged. Code that read `creation.outcome?.kind === 'created'` later, after
   another write, now sees `null`; read the result `create()` returns instead.
-- **A stale Context prompt selects nothing.** When the leave policy asks
-  before `selectContext` and another connection becomes active before the
-  person confirms (a completed callback, or the active one removed),
-  `confirmLeave()` now rejects with `disconnected`. The guarded call resolves
-  `false`, nothing is selected and no draft is discarded. Previously the
-  inactive connection's Context changed.
+- **A leave prompt ends with its connection.** When the leave policy asks
+  before a guarded action (`selectContext`, `navigate`, `selectConnection` and
+  the others) and another connection becomes active outside such an action (a
+  returning sign-in, or the active connection removed), the prompt is
+  cancelled: the action resolves `false`, nothing runs and no draft is
+  discarded. Previously confirming ran the stale action, for example changing
+  the inactive connection's Context.
 
 New in the next release:
 
@@ -69,7 +70,8 @@ New in the next release:
   `edit.open({ subject, context })` from the row and render `edit.editor` with
   `ResourceEditor`. Keep the overview outside `TargetScreen`. The hook keeps the
   recipe's rules (guarded open and close, one selection per target, retirement
-  on a declined selection, a Context change elsewhere or a connection change)
+  on a declined or blocked selection, a Context change elsewhere or a
+  connection change)
   and reports why a target was retired. See
   [editing an overview row](react-authoring.md#editing-an-overview-row).
 

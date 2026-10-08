@@ -438,8 +438,10 @@ lists the Context still activates it. A signed-out connection recovers through
 `AppAccess`'s sign-in; the phase then follows the catalogue it keeps or loads. A retired target has no
 editor, and the hook never selects its old Context again; `reason` says why:
 
-- `declined`: the guarded selection was declined (the person kept a draft
-  elsewhere), blocked by a pending write or refused by the runtime.
+- `declined`: the person declined the guarded selection (they kept a draft
+  elsewhere), or the runtime refused it.
+- `blocked`: a write elsewhere was still pending, or another guarded action was
+  under way, so the selection was refused without asking.
 - `context-changed`: another Context was selected elsewhere after activation,
   for example in `AppAccess`.
 - `connection-changed`: another connection became active, at any point. The

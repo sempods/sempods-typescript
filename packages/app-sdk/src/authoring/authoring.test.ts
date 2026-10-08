@@ -204,6 +204,29 @@ it('guards target and row changes, with busy writes unconditionally blocking', a
   expect(await app.navigate(row)).toBe(false);
   expect(row).not.toHaveBeenCalled();
 });
+it('cancels a leave prompt when another connection becomes active outside a guarded action', async () => {
+  const f = await connected();
+  const other = await f.runtime.connect('https://pod.example/bob');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().activeId).toBe(f.id));
+  const discard = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard });
+  const select = vi.spyOn(f.runtime, 'selectContext');
+  const change = app.selectContext(personal);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  // Removing the active connection activates another one without a guard.
+  await f.runtime.disconnect(f.id);
+  expect(await change).toBe(false);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: other.id,
+    confirmingLeave: false,
+  });
+  await app.confirmLeave();
+  expect(select).not.toHaveBeenCalled();
+  expect(discard).not.toHaveBeenCalled();
+});
 it('retries an invalidated custom read once, never indefinitely', async () => {
   const f = await connected();
   const read = vi.fn(async () => ({ kind: 'invalidated' }) as const);

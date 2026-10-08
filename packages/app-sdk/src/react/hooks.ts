@@ -6,7 +6,6 @@ import {
   useCallback,
 } from 'react';
 import {
-  RuntimeError,
   bindResourceEditor,
   createViewLoader,
   type BoundView,
@@ -338,7 +337,7 @@ export type ContextEditorPhase =
   'idle' | 'activating' | 'unavailable' | 'retired' | 'ready';
 /** Why `useContextEditor` retired its target. */
 export type ContextEditorRetirement =
-  'declined' | 'context-changed' | 'connection-changed';
+  'declined' | 'blocked' | 'context-changed' | 'connection-changed';
 /** What `useContextEditor` returns: the opened target, its phase and, while ready, its editor. */
 export interface ContextEditor<D, U = D> {
   /** The opened target, kept while retired so the app can name it. */
@@ -351,8 +350,8 @@ export interface ContextEditor<D, U = D> {
   /**
    * Opens another target under the leave policy for the connection active now.
    * `false` if declined, if a pending write blocks it, if no connection is
-   * active, or if another connection became active before the leave policy let
-   * it open.
+   * active, or if another connection became active while it asked. Opening the
+   * same target again while that is under way shares its result.
    */
   open(target: ContextTarget): Promise<boolean>;
   /**
@@ -362,11 +361,10 @@ export interface ContextEditor<D, U = D> {
    */
   close(): Promise<boolean>;
 }
-/** One opened target: the connection it belongs to and its single selection attempt. */
+/** One opened target and the connection it belongs to. */
 interface ContextLane {
   readonly target: ContextTarget;
   readonly connection: string;
-  attempted: boolean;
 }
 /**
  * Edits one Pod-overview row in its own Context. The SELECT row is only a
@@ -390,10 +388,11 @@ interface ContextLane {
  *   already selected.
  * - `retired`: the editor is gone and the hook never selects the old Context
  *   again. `reason` says why: the selection was `declined` (the person kept a
- *   draft elsewhere, another write was pending, or the runtime refused it),
- *   another Context was selected elsewhere after activation (`context-changed`),
- *   or another connection became active at any point (`connection-changed`).
- *   Open the target again to start over.
+ *   draft elsewhere, or the runtime refused it), `blocked` without asking (a
+ *   write elsewhere was still pending, or another guarded action was under
+ *   way), another Context was selected elsewhere after activation
+ *   (`context-changed`), or another connection became active at any point
+ *   (`connection-changed`). Open the target again to start over.
  *
  * Losing read access after activation does not retire the editor: like other
  * Context screens it keeps its draft through access loss and recovery, and
@@ -422,39 +421,39 @@ export function useContextEditor<D>(
   const [state, setState] = useState<{
     readonly lane: ContextLane;
     readonly retired: ContextEditorRetirement | null;
+    /** The single selection attempt for this lane has started. */
+    readonly attempted: boolean;
     /** This lane's Context was selected with readable evidence. */
     readonly activated: boolean;
   } | null>(null);
   const lane = state?.lane ?? null;
   const retired = state?.retired ?? null;
+  const attempted = state?.attempted ?? false;
   const activated = state?.activated ?? false;
+  /** Updates the lane's state only while it is current and not retired. */
+  const update = useCallback(
+    (
+      lane: ContextLane,
+      change: Partial<{
+        retired: ContextEditorRetirement;
+        attempted: true;
+        activated: true;
+      }>,
+    ) =>
+      setState((s) =>
+        s?.lane === lane && s.retired === null ? { ...s, ...change } : s,
+      ),
+    [],
+  );
   const retire = useCallback(
     (lane: ContextLane, reason: ContextEditorRetirement) =>
-      setState((s) =>
-        s?.lane === lane && s.retired === null ? { ...s, retired: reason } : s,
-      ),
-    [],
+      update(lane, { retired: reason }),
+    [update],
   );
-  // A refused selection after another connection became active is that change.
-  const refused = useCallback(
-    (lane: ContextLane) =>
-      retire(
-        lane,
-        app.getSnapshot().activeId === lane.connection
-          ? 'declined'
-          : 'connection-changed',
-      ),
-    [app, retire],
-  );
-  const activate = useCallback(
-    (lane: ContextLane) =>
-      setState((s) =>
-        s?.lane === lane && s.retired === null && !s.activated
-          ? { ...s, activated: true }
-          : s,
-      ),
-    [],
-  );
+  const opening = useRef<{
+    readonly target: ContextTarget;
+    readonly result: Promise<boolean>;
+  } | null>(null);
   const current = lane !== null && activeId === lane.connection;
   const live = current && retired === null;
   // Only the originating connection may demand discovery for this target.
@@ -480,18 +479,32 @@ export function useContextEditor<D>(
     if (!lane || !live || changing || confirmingLeave) return;
     if (selected === lane.target.context) {
       // A view kept through access loss is no evidence for a newly opened target.
-      if (readable) activate(lane);
+      if (readable && !activated) update(lane, { activated: true });
       return;
     }
     // Another Context was chosen after this one: never select the old one again.
     if (activated) return retire(lane, 'context-changed');
-    if (!readable || lane.attempted) return;
-    lane.attempted = true;
+    if (!readable || attempted) return;
+    update(lane, { attempted: true });
     // Guarded like any Context change: drafts elsewhere ask before leaving.
-    void app.selectContext(lane.target.context).then(
+    const selection = app.selectContext(lane.target.context);
+    // Whether the person is asked or the selection runs; otherwise a busy guard
+    // or another guarded action refused it at once.
+    const after = app.getSnapshot();
+    const started = after.confirmingLeave || after.changing;
+    const refused = () =>
+      retire(
+        lane,
+        app.getSnapshot().activeId !== lane.connection
+          ? 'connection-changed'
+          : started
+            ? 'declined'
+            : 'blocked',
+      );
+    void selection.then(
       // The runtime selects only a Context its catalogue lists as readable.
-      (accepted) => (accepted ? activate(lane) : refused(lane)),
-      () => refused(lane),
+      (accepted) => (accepted ? update(lane, { activated: true }) : refused()),
+      refused,
     );
   }, [
     app,
@@ -501,9 +514,9 @@ export function useContextEditor<D>(
     confirmingLeave,
     selected,
     readable,
+    attempted,
     activated,
-    activate,
-    refused,
+    update,
     retire,
   ]);
   const editor = useBoundEditor(
@@ -538,26 +551,35 @@ export function useContextEditor<D>(
         lane.target.context === target.context
       )
         return Promise.resolve(true);
-      // The row belongs to the connection active when it is opened.
+      // Repeated before a re-render (a double click): share the first call.
+      const pending = opening.current;
+      if (
+        pending &&
+        pending.target.subject === target.subject &&
+        pending.target.context === target.context
+      )
+        return pending.result;
+      // The row belongs to the connection active when it is opened. The
+      // controller cancels the prompt if another one becomes active meanwhile.
       const connection = app.getSnapshot().activeId;
       if (!connection) return Promise.resolve(false);
-      return app
-        .navigate(() => {
-          // Another connection became active while the leave policy asked:
-          // fail, so confirming discards no draft (as for selectContext).
-          if (app.getSnapshot().activeId !== connection)
-            throw new RuntimeError('disconnected');
+      const result = app
+        .navigate(() =>
           setState({
             lane: {
               target: { subject: target.subject, context: target.context },
               connection,
-              attempted: false,
             },
             retired: null,
+            attempted: false,
             activated: false,
-          });
-        })
-        .catch(() => false);
+          }),
+        )
+        .finally(() => {
+          if (opening.current?.result === result) opening.current = null;
+        });
+      opening.current = { target, result };
+      return result;
     },
     close: () => {
       if (!lane) return Promise.resolve(true);
@@ -567,15 +589,7 @@ export function useContextEditor<D>(
         clear();
         return Promise.resolve(true);
       }
-      const connection = lane.connection;
-      return app
-        .navigate(() => {
-          // As for open: a confirmation that outlasted the connection discards nothing.
-          if (app.getSnapshot().activeId !== connection)
-            throw new RuntimeError('disconnected');
-          clear();
-        })
-        .catch(() => false);
+      return app.navigate(clear);
     },
   };
 }

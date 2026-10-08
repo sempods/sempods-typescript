@@ -31,6 +31,7 @@ const note = fields(
 /** Why editing a row ended without the person closing it. */
 const retirement: Record<ContextEditorRetirement, string> = {
   declined: 'The note was not opened; your other changes are kept.',
+  blocked: 'The note was not opened while another change was saving.',
   'context-changed': 'Editing ended because another Context was chosen.',
   'connection-changed': 'Editing ended because another Pod was chosen.',
 };
@@ -154,7 +155,13 @@ function Content() {
           <NewNote />
         </TargetScreen>
       )}
-      {edit.reason && <p role="status">{retirement[edit.reason]}</p>}
+      {edit.reason && (
+        <p role="status">
+          {retirement[edit.reason]}{' '}
+          {/* A retired target closes at once, without asking. */}
+          <button onClick={() => void edit.close()}>Dismiss</button>
+        </p>
+      )}
       {edit.target && edit.phase !== 'retired' && (
         <section aria-label="Edit note">
           {edit.phase === 'unavailable' ? (

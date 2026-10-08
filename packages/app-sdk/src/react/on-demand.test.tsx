@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode, useState } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -26,6 +26,7 @@ import {
   useWorkflowAccess,
   type ContextTarget,
 } from './index.js';
+import { useController } from './app.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import { createAppController } from '../authoring/app.js';
 import { createViewLoader } from '../authoring/load.js';
@@ -830,6 +831,7 @@ function notes(f: { setResource(fn: PodFetch): void }) {
 }
 function RowEditor({ draft = false }: { readonly draft?: boolean }) {
   const [manage, setManage] = useState(false);
+  const [twice, setTwice] = useState('');
   const edit = useContextEditor(note);
   const { activeId } = useAppState();
   return (
@@ -846,6 +848,16 @@ function RowEditor({ draft = false }: { readonly draft?: boolean }) {
         </button>
       ))}
       <button onClick={() => void edit.close()}>Close editor</button>
+      <button
+        onClick={() =>
+          void Promise.all([edit.open(rows[0]!), edit.open(rows[0]!)]).then(
+            (r) => setTwice(JSON.stringify(r)),
+          )
+        }
+      >
+        Open urn:a twice
+      </button>
+      <output data-testid="twice">{twice}</output>
       {edit.editor && (
         <ResourceEditor editor={edit.editor}>
           {(value, change) => (
@@ -1222,7 +1234,8 @@ it('keeps an opened row on its connection when another becomes active during the
   await waitFor(() =>
     expect(screen.getByTestId('active').textContent).toBe(other.id),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  // The controller cancelled the prompt, so nothing ran and nothing was discarded.
+  expect(screen.queryByRole('alertdialog')).toBeNull();
   await waitFor(() => expect(phase()).toBe('retired:connection-changed'));
   await act(async () => {});
   expect(screen.queryByLabelText('Note title')).toBeNull();
@@ -1257,7 +1270,7 @@ it('selects nothing when another connection became active during the selection p
   await waitFor(() =>
     expect(screen.getByTestId('active').textContent).toBe(other.id),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  // The controller cancelled the prompt: nothing to confirm any more.
   await waitFor(() => expect(phase()).toBe('retired:connection-changed'));
   await act(async () => {});
   expect(select).not.toHaveBeenCalled();
@@ -1291,7 +1304,8 @@ it('discards nothing when a close prompt outlasts its connection', async () => {
   await waitFor(() =>
     expect(screen.getByTestId('active').textContent).toBe(other.id),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  // The controller cancelled the prompt, so nothing ran and nothing was discarded.
+  expect(screen.queryByRole('alertdialog')).toBeNull();
   await waitFor(() => expect(phase()).toBe('retired:connection-changed'));
   expect((screen.getByLabelText('Local draft') as HTMLInputElement).value).toBe(
     'Kept',
@@ -1303,4 +1317,57 @@ it('discards nothing when a close prompt outlasts its connection', async () => {
   expect((screen.getByLabelText('Local draft') as HTMLInputElement).value).toBe(
     'Kept',
   );
+});
+
+function Busy() {
+  const app = useController();
+  useEffect(
+    () =>
+      app.register({
+        dirty: () => false,
+        blocked: () => true,
+        discard: () => {},
+      }),
+    [app],
+  );
+  return null;
+}
+it('retires as blocked, not declined, when a pending write refuses the selection', async () => {
+  const f = await returned();
+  notes(f);
+  const select = vi.spyOn(f.runtime, 'selectContext');
+  const { rerender } = render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId('active').textContent).toBe(f.id),
+  );
+  // Opening is guarded too, so the write elsewhere starts after the click.
+  await edit('Edit urn:a in work');
+  rerender(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+      <Busy />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(phase()).toBe('retired:blocked'));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(select).not.toHaveBeenCalled();
+});
+
+it('shares one open between calls made before a re-render', async () => {
+  const f = await returned();
+  notes(f);
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await edit('Open urn:a twice');
+  await waitFor(() =>
+    expect(screen.getByTestId('twice').textContent).toBe('[true,true]'),
+  );
+  await waitFor(() => expect(title().value).toBe('A at work'));
 });

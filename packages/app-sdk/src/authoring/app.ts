@@ -71,6 +71,8 @@ export function createAppController(
         action: () => void | Promise<void>;
         scope: 'local' | 'target';
         resolve: (accepted: boolean) => void;
+        /** The connection that was active when the person was asked. */
+        activeId: string | null;
       }
     | undefined;
   let snapshot: AppSnapshot = {
@@ -96,6 +98,13 @@ export function createAppController(
           ? connections.find((c) => c.podUrl === runtime.preset!.podUrl)
           : connections[0]
         )?.id ?? null;
+    // A prompt is about the connection it was asked for. Another one becoming
+    // active without a guarded action (a returning sign-in, a removed
+    // connection) cancels it: nothing runs and no guard is discarded.
+    if (pending && pending.activeId !== activeId) {
+      pending.resolve(false);
+      pending = undefined;
+    }
     const connection = connections.find((c) => c.id === activeId);
     pod = null;
     if (
@@ -177,7 +186,7 @@ export function createAppController(
       }
     }
     return new Promise<boolean>((resolve) => {
-      pending = { action, resolve, scope };
+      pending = { action, resolve, scope, activeId };
       publish();
     });
   }
@@ -285,8 +294,6 @@ export function createAppController(
       )
         return Promise.resolve(true);
       return guard(() => {
-        // A leave confirmation can outlast the connection it was asked for.
-        if (activeId !== id) throw new RuntimeError('disconnected');
         runtime.selectContext(id, iri);
       });
     },
