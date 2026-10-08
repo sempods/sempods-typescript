@@ -1032,30 +1032,38 @@ it('retires instead of selecting its Context again after a change elsewhere', as
   await waitFor(() => expect(title().value).toBe('A at work'));
 });
 
+/** Alice (`f.id`) and Bob (`other`), with Bob active after his completed callback. */
+async function twoPods(preset = true) {
+  const f = await returned(
+    fixture({
+      preferences: null,
+      ...(preset ? { preset: { podUrl: pod } } : {}),
+    }),
+  );
+  await f.runtime.initialize();
+  const otherUrl = 'https://pod.example/bob';
+  const other = await f.runtime.connect(otherUrl);
+  await f.runtime.beginAuthorization(other.id);
+  f.runtime.dispose();
+  await settleLease();
+  f.setToken(async (url) =>
+    Response.json({
+      access_token: jwt({ iss: url.split('/_system')[0] }),
+      token_type: 'Bearer',
+      refresh_token: 'fresh',
+    }),
+  );
+  const runtime = f.returned();
+  runtimes.push(runtime);
+  await runtime.initialize();
+  await restored(runtime);
+  notes(f);
+  return { f, runtime, other, otherUrl };
+}
 it.each(['before', 'after'] as const)(
   'retires on a Pod switch %s activation without discovery on the new Pod',
   async (timing) => {
-    const f = await returned(
-      fixture({ preferences: null, preset: { podUrl: pod } }),
-    );
-    await f.runtime.initialize();
-    const otherUrl = 'https://pod.example/bob';
-    const other = await f.runtime.connect(otherUrl);
-    await f.runtime.beginAuthorization(other.id);
-    f.runtime.dispose();
-    await settleLease();
-    f.setToken(async (url) =>
-      Response.json({
-        access_token: jwt({ iss: url.split('/_system')[0] }),
-        token_type: 'Bearer',
-        refresh_token: 'fresh',
-      }),
-    );
-    const runtime = f.returned();
-    runtimes.push(runtime);
-    await runtime.initialize();
-    await restored(runtime);
-    notes(f);
+    const { f, runtime, other, otherUrl } = await twoPods();
     const answer = deferred<Response>();
     // Only Alice's catalogue is expected; Bob's would be a failed test anyway.
     f.setCatalogue(() =>
@@ -1172,4 +1180,35 @@ it('requires readable evidence again when a row is reopened after read loss', as
   f.setCatalogue(async () => catalogue());
   await act(() => f.runtime.loadContexts(f.id));
   await waitFor(() => expect(title().value).toBe('A at work'));
+});
+
+it('keeps an opened row on its connection when another becomes active during the leave prompt', async () => {
+  const { f, runtime, other, otherUrl } = await twoPods(false);
+  const bob = () =>
+    f.fetch.mock.calls.filter(([url]) => url.startsWith(otherUrl + '/'));
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <RowEditor />
+      <Switch id={f.id} />
+    </SempodsProvider>,
+  );
+  fireEvent.click(await screen.findByText('Switch Pod'));
+  await edit('Edit urn:a in work', f.id);
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  fireEvent.change(title(), { target: { value: 'Unsaved' } });
+  fireEvent.click(screen.getByText('Edit urn:b in work'));
+  await screen.findByRole('alertdialog');
+  const before = bob().length;
+  // Alice disappears while the person decides; the controller activates Bob.
+  await act(async () => {
+    await runtime.disconnect(f.id);
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId('active').textContent).toBe(other.id),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  await waitFor(() => expect(phase()).toBe('retired:connection-changed'));
+  await act(async () => {});
+  expect(screen.queryByLabelText('Note title')).toBeNull();
+  expect(bob().slice(before)).toEqual([]);
 });

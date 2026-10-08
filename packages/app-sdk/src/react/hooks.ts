@@ -330,7 +330,11 @@ export interface ContextEditor<D, U = D> {
   readonly reason: ContextEditorRetirement | null;
   /** Present only while `phase` is `'ready'`; render it with `ResourceEditor`. */
   readonly editor: ResourceEditor<D, U> | null;
-  /** Opens another target under the leave policy; `false` if declined or no connection is active. */
+  /**
+   * Opens another target under the leave policy for the connection active now.
+   * `false` if declined, if no connection is active, or if another connection
+   * became active before the leave policy let it open.
+   */
   open(target: ContextTarget): Promise<boolean>;
   /** Closes the target under the leave policy; `false` if declined. */
   close(): Promise<boolean>;
@@ -498,20 +502,26 @@ export function useContextEditor<D>(
         lane.target.context === target.context
       )
         return Promise.resolve(true);
-      if (!app.getSnapshot().activeId) return Promise.resolve(false);
-      return app.navigate(() => {
-        const connection = app.getSnapshot().activeId;
-        if (!connection) return;
-        setState({
-          lane: {
-            target: { subject: target.subject, context: target.context },
-            connection,
-            attempted: false,
-          },
-          retired: null,
-          activated: false,
-        });
-      });
+      // The row belongs to the connection active when it is opened.
+      const connection = app.getSnapshot().activeId;
+      if (!connection) return Promise.resolve(false);
+      let opened = false;
+      return app
+        .navigate(() => {
+          // Another connection became active while the leave policy asked.
+          if (app.getSnapshot().activeId !== connection) return;
+          opened = true;
+          setState({
+            lane: {
+              target: { subject: target.subject, context: target.context },
+              connection,
+              attempted: false,
+            },
+            retired: null,
+            activated: false,
+          });
+        })
+        .then((left) => left && opened);
     },
     close: () =>
       lane ? app.navigate(() => setState(null)) : Promise.resolve(true),
