@@ -174,6 +174,9 @@ try {
   let overviewNoteWrites = 0;
   // Notes created in the overview Pod's second Context, by IRI.
   const overviewCreated = new Map();
+  /** The subject IRI a `/_system/resources/` URL addresses. */
+  const resourceIri = (url) =>
+    Buffer.from(url.pathname.split('/').at(-1), 'base64url').toString();
   let writeMode = 'normal';
   let writes = 0;
   let version = 1;
@@ -448,10 +451,7 @@ try {
         assert.ok(req.headers.authorization?.startsWith('Bearer '));
         assert.equal(req.method, 'PUT');
         assert.equal(req.headers['if-none-match'], '*');
-        const iri = Buffer.from(
-          url.pathname.split('/').at(-1),
-          'base64url',
-        ).toString();
+        const iri = resourceIri(url);
         assert.equal(overviewCreated.has(iri), false);
         overviewCreated.set(iri, JSON.parse(body));
         res.writeHead(201);
@@ -468,10 +468,7 @@ try {
           url.searchParams.get('context'),
           base + '/_system/contexts/work',
         );
-        assert.equal(
-          Buffer.from(url.pathname.split('/').at(-1), 'base64url').toString(),
-          'urn:overview-note',
-        );
+        assert.equal(resourceIri(url), 'urn:overview-note');
         if (req.method === 'GET') {
           json(overviewNote, 200, { etag: `"n${overviewNoteVersion}"` });
           return;
@@ -496,10 +493,7 @@ try {
           url.searchParams.get('context'),
           base + '/_system/contexts/work',
         );
-        assert.equal(
-          Buffer.from(url.pathname.split('/').at(-1), 'base64url').toString(),
-          'urn:fixture-task',
-        );
+        assert.equal(resourceIri(url), 'urn:fixture-task');
         if (req.method === 'GET') {
           json(task, 200, { etag: `"v${version}"` });
           return;

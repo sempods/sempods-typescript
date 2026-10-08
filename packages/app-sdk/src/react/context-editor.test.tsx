@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode, useState } from 'react';
+import { Component, StrictMode, useState, type ReactNode } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -24,6 +24,7 @@ import {
   type ContextTarget,
 } from './index.js';
 import type { BrowserRuntime } from '../runtime/types.js';
+import { RuntimeError } from '../runtime/errors.js';
 import {
   catalogue,
   deferred,
@@ -583,4 +584,59 @@ it('binds and reads once under StrictMode', async () => {
   expect(new Set(bind.mock.results.map((r) => r.value)).size).toBe(1);
   expect(reads).toEqual([`${work} urn:a`]);
   expect(f.count('/_system/contexts')).toBe(1);
+});
+
+it('waits instead of refusing while the binding reports no signed-in session', async () => {
+  const f = await returned();
+  notes(f);
+  const real = f.runtime.bindContext.bind(f.runtime);
+  let attempts = 0;
+  vi.spyOn(f.runtime, 'bindContext').mockImplementation((id, iri) => {
+    if (++attempts === 1) throw new RuntimeError('disconnected');
+    return real(id, iri);
+  });
+  render(ui(f.runtime));
+  await open('Edit urn:a in work');
+  await waitFor(() => expect(attempts).toBe(1));
+  expect(phase()).toBe('loading');
+  // A later change of the connection's facts retries the binding.
+  await act(() => f.runtime.loadContexts(f.id));
+  await waitFor(() => expect(title().value).toBe('A at work'));
+});
+
+class Boundary extends Component<
+  { readonly children: ReactNode },
+  { readonly error: unknown }
+> {
+  override state = { error: undefined as unknown };
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+  override render() {
+    return this.state.error ? (
+      <p role="alert">{String(this.state.error)}</p>
+    ) : (
+      this.props.children
+    );
+  }
+}
+it('surfaces an unexpected binding failure instead of reporting a refusal', async () => {
+  const f = await returned();
+  notes(f);
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.spyOn(f.runtime, 'bindContext').mockImplementation(() => {
+    throw new TypeError('binding defect');
+  });
+  render(
+    ui(
+      f.runtime,
+      <Boundary>
+        <Harness />
+      </Boundary>,
+    ),
+  );
+  await open('Edit urn:a in work');
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'binding defect',
+  );
 });

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useState,
   useSyncExternalStore,
   useRef,
@@ -33,6 +34,7 @@ import {
   type RemoveSnapshotOutcome,
 } from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
+import { startupSettled } from '../authoring/app.js';
 import {
   useAppState,
   useContextDemand,
@@ -141,7 +143,7 @@ export function usePodLoad<T>(read: PodRead<T>) {
   return useBoundLoad(
     pod,
     read,
-    startup || startupError !== undefined ? unavailable : loading,
+    startupSettled({ startup, startupError }) ? unavailable : loading,
   );
 }
 function useBoundLoad<T, H extends BoundView | BoundPod>(
@@ -386,10 +388,8 @@ interface ContextLane {
 }
 interface ContextLaneState {
   readonly lane: ContextLane;
-  /** The explicit binding, once established. */
-  readonly view: BoundView | null;
-  /** The runtime refused the binding. */
-  readonly refused: boolean;
+  /** The explicit binding once established, or the runtime's refusal. */
+  readonly binding: BoundView | 'refused' | null;
   /** The catalogue listed the Context as readable once: the editor may exist. */
   readonly activated: boolean;
   /** Another connection became active; never revived. */
@@ -397,6 +397,9 @@ interface ContextLaneState {
 }
 const sameTarget = (a: ContextTarget, b: ContextTarget) =>
   a.subject === b.subject && a.context === b.context;
+/** Whether a lane is still live: not retired and its connection active. */
+const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
+  s !== null && !s.retired && s.lane.connection === activeId;
 /**
  * Edits one Pod-overview row in its own Context. The SELECT row is only a
  * pointer: the editor reads the subject fresh in that Context through
@@ -440,7 +443,8 @@ export function useContextEditor<D>(
   definition: EditDefinition<D>,
 ): ContextEditor<D> {
   const app = useController();
-  const { connections, activeId, startup, startupError } = useAppState();
+  const snapshot = useAppState();
+  const { connections, activeId, pod } = snapshot;
   const [state, setState] = useState<ContextLaneState | null>(null);
   // The latest lane state, ahead of rendering: open() and close() chained from
   // one render (`await open(); await close()`) act on what is current.
@@ -464,54 +468,59 @@ export function useContextEditor<D>(
     readonly result: Promise<boolean>;
   } | null>(null);
   const lane = state?.lane ?? null;
-  const bound = state?.view ?? null;
-  const refused = state?.refused ?? false;
+  const binding = state?.binding ?? null;
+  const bound = binding === 'refused' ? null : binding;
   const activated = state?.activated ?? false;
-  const current = lane !== null && activeId === lane.connection;
-  const retired = state !== null && (state.retired || !current);
-  const live = lane !== null && !retired;
+  const live = liveLane(state, activeId);
   // Only the originating connection may demand discovery for this target.
-  useContextDemand(live && !refused);
-  const connection = live
-    ? connections.find((c) => c.id === lane.connection)
+  useContextDemand(live && binding !== 'refused');
+  const catalogue = live
+    ? connections.find((c) => c.id === lane!.connection)?.catalogue
     : undefined;
-  const catalogue = connection?.catalogue;
-  const signedIn =
-    connection?.session.kind === 'active' ||
-    connection?.session.kind === 'renewing';
+  // From the catalogue rather than the binding's own access snapshot: that one
+  // also requires every required scope, and a target missing scopes would then
+  // stay loading without a problem to present.
   const readable =
     live &&
     catalogue?.kind === 'ready' &&
-    catalogue.contexts.some((c) => c.iri === lane.target.context && c.readable);
+    catalogue.contexts.some(
+      (c) => c.iri === lane!.target.context && c.readable,
+    );
   // No Context-bound editor before startup settles (a returning sign-in may
-  // still replace the active connection), as for the selected view.
-  const settled = startup !== undefined || startupError !== undefined;
+  // still replace the active connection), as for the selected view. `pod`
+  // exists while the active connection is signed in.
+  const ready = startupSettled(snapshot) && pod !== null;
   useEffect(() => {
     if (!lane) return;
-    if (!current) {
+    if (lane.connection !== activeId) {
       update(lane, { retired: true });
       return;
     }
-    if (!settled || bound || refused || !signedIn) return;
-    try {
-      update(lane, {
-        view: app.runtime.bindContext(lane.connection, lane.target.context),
-      });
-    } catch (error) {
-      // The connection is not signed in yet: wait. Anything else is a refusal.
-      if (!(error instanceof RuntimeError && error.problem === 'disconnected'))
-        update(lane, { refused: true });
+    if (binding) {
+      // Readability can arrive after the binding, for example after "Check access".
+      if (bound && !activated && readable) update(lane, { activated: true });
+      return;
     }
-  }, [app, lane, current, settled, signedIn, bound, refused, update]);
-  useEffect(() => {
-    // The first activation needs fresh readable evidence; afterwards access
-    // loss keeps the editor and its draft.
-    if (lane && live && bound && !activated && readable)
-      update(lane, { activated: true });
-  }, [lane, live, bound, activated, readable, update]);
+    if (!ready) return;
+    try {
+      const view = app.runtime.bindContext(
+        lane.connection,
+        lane.target.context,
+      );
+      // The first activation needs fresh readable evidence; afterwards access
+      // loss keeps the editor and its draft.
+      update(lane, { binding: view, activated: readable });
+    } catch (error) {
+      if (!(error instanceof RuntimeError)) throw error;
+      // Not signed in after all: wait. A configuration refusal is the target's.
+      if (error.problem === 'configuration')
+        update(lane, { binding: 'refused' });
+      else if (error.problem !== 'disconnected') throw error;
+    }
+  }, [app, lane, activeId, binding, bound, activated, readable, ready, update]);
   const editor = useBoundEditor(
     live && activated ? bound : null,
-    live && activated ? lane.target.subject : null,
+    live && activated ? lane!.target.subject : null,
     definition,
     'useContextEditor',
     'connection',
@@ -519,7 +528,7 @@ export function useContextEditor<D>(
   const problem: ContextEditorProblem | null =
     !live || editor
       ? null
-      : refused
+      : binding === 'refused'
         ? 'refused'
         : catalogue?.kind === 'failed'
           ? 'discovery-failed'
@@ -528,25 +537,19 @@ export function useContextEditor<D>(
             : null;
   const phase: ContextEditorPhase = !lane
     ? 'idle'
-    : retired
+    : !live
       ? 'retired'
       : editor
         ? 'ready'
         : problem
           ? 'unavailable'
           : 'loading';
-  return {
-    target: lane?.target ?? null,
-    phase,
-    problem,
-    editor,
-    open: (target) => {
+  const open = useCallback(
+    (target: ContextTarget) => {
       const now = latest.current;
       if (
-        now &&
-        !now.retired &&
-        now.lane.connection === app.getSnapshot().activeId &&
-        sameTarget(now.lane.target, target)
+        liveLane(now, app.getSnapshot().activeId) &&
+        sameTarget(now!.lane.target, target)
       )
         return Promise.resolve(true);
       // Repeated before a re-render (a double click): share the first call.
@@ -563,8 +566,7 @@ export function useContextEditor<D>(
               target: { subject: target.subject, context: target.context },
               connection,
             },
-            view: null,
-            refused: false,
+            binding: null,
             activated: false,
             retired: false,
           })),
@@ -575,18 +577,25 @@ export function useContextEditor<D>(
       opening.current = { target, result };
       return result;
     },
-    close: () => {
-      const now = latest.current;
-      if (!now) return Promise.resolve(true);
-      const clear = () => apply(() => null);
-      // A retired target has no editor left to guard.
-      if (now.retired || now.lane.connection !== app.getSnapshot().activeId) {
-        clear();
-        return Promise.resolve(true);
-      }
-      return app.navigate(clear);
-    },
-  };
+    [app, apply],
+  );
+  const close = useCallback(() => {
+    const now = latest.current;
+    if (!now) return Promise.resolve(true);
+    const clear = () => apply(() => null);
+    // A retired target has no guard left; clearing it at once also keeps an
+    // unrelated pending prompt from blocking the close.
+    if (!liveLane(now, app.getSnapshot().activeId)) {
+      clear();
+      return Promise.resolve(true);
+    }
+    return app.navigate(clear);
+  }, [app, apply]);
+  const target = lane?.target ?? null;
+  return useMemo(
+    () => ({ target, phase, problem, editor, open, close }),
+    [target, phase, problem, editor, open, close],
+  );
 }
 export type MutationOutcome<D> =
   UpdateOutcome<D> | RemoveSnapshotOutcome<D> | CreateOutcome;
