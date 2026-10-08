@@ -73,6 +73,12 @@ automatic conversion of legacy app data or stored credentials.
 
 New in the next release:
 
+- A third leave-guard scope, `connection`, for drafts bound to an explicit
+  Context: a Context selection neither asks about nor discards them, and their
+  pending writes do not block it; row navigation and connection actions still
+  do. `useDraftGuard` accepts it as its third argument. Existing scopes and
+  unscoped guards behave as before. Code that switches exhaustively over
+  `LeaveGuard['scope']` needs the new case.
 - `runtime.bindContext(id, contextIri)` binds a `BoundView` to an explicit
   Context without changing the selection, with its own read invalidation; see
   [bind an explicit Context](browser-runtime.md#bind-an-explicit-context).

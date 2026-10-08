@@ -1031,3 +1031,29 @@ it('shows no Context screen while a returning sign-in is still being redeemed', 
   await act(async () => startup.resolve(report));
   expect(await screen.findByLabelText('Draft')).toBeTruthy();
 });
+
+it('keeps a connection-scoped app draft through a Context selection without asking', async () => {
+  const f = await connected();
+  const discard = vi.fn();
+  function Draft() {
+    const app = useApp();
+    useDraftGuard(true, discard, 'connection');
+    return (
+      <button onClick={() => void app.selectContext(personal)}>
+        Select personal
+      </button>
+    );
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Draft />
+    </SempodsProvider>,
+  );
+  await act(async () => {});
+  fireEvent.click(screen.getByText('Select personal'));
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(personal),
+  );
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(discard).not.toHaveBeenCalled();
+});

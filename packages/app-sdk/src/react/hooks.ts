@@ -713,11 +713,15 @@ export function useCreation<D extends object>(
   };
 }
 
-/** App drafts survive row changes by default; choose local for drafts left by row navigation. */
+/**
+ * App drafts survive row changes by default; choose `local` for drafts left by
+ * row navigation, or `connection` for a draft bound to an explicit Context,
+ * which survives a Context selection (see `LeaveGuard.scope`).
+ */
 export function useDraftGuard(
   dirty: boolean,
   discard: () => void,
-  scope: 'local' | 'target' = 'target',
+  scope: 'local' | 'target' | 'connection' = 'target',
 ) {
   const app = useController();
   const latest = useRef({ dirty, discard });

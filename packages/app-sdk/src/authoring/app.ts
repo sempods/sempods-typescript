@@ -8,12 +8,31 @@ import { RuntimeError } from '../runtime/errors.js';
 import type { BoundPod, BoundView } from '../runtime/view.js';
 
 export interface LeaveGuard {
-  /** Target guards survive local row navigation; local guards are left by both. */
-  readonly scope?: 'local' | 'target';
+  /**
+   * Which guarded changes leave this guard, so ask about and discard it:
+   * - `local` (also when omitted): every change: `navigate`, `selectContext`
+   *   and the connection actions (`selectConnection`, `connect`, `authorize`,
+   *   `disconnect`).
+   * - `target`: survives `navigate` (row navigation); left by the others.
+   * - `connection`: survives `selectContext`, for a draft bound to an explicit
+   *   Context rather than the selection; left by the others.
+   *
+   * A pending write (`blocked()`) blocks every change, except that a
+   * `connection` guard does not block `selectContext`, which leaves it alone.
+   */
+  readonly scope?: 'local' | 'target' | 'connection';
   unconfirmed?(): boolean;
   blocked(): boolean;
   dirty(): boolean;
   discard(): void;
+}
+/** A guarded change: row navigation, a Context selection, or a connection action. */
+type Change = 'navigate' | 'context' | 'connection';
+/** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
+function leaves(change: Change, guard: LeaveGuard) {
+  if (change === 'navigate') return guard.scope !== 'target';
+  if (change === 'context') return guard.scope !== 'connection';
+  return true;
 }
 export interface AppSnapshot {
   /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
@@ -82,7 +101,7 @@ export function createAppController(
   let pending:
     | {
         action: () => void | Promise<void>;
-        scope: 'local' | 'target';
+        change: Change;
         resolve: (accepted: boolean) => void;
         /** The connection that was active when the person was asked. */
         activeId: string | null;
@@ -156,7 +175,7 @@ export function createAppController(
       pod,
       confirmingLeave: Boolean(pending),
       unconfirmedLeave: Boolean(
-        pending && leavingGuards(pending.scope).some((g) => g.unconfirmed?.()),
+        pending && leavingGuards(pending.change).some((g) => g.unconfirmed?.()),
       ),
       changing,
     });
@@ -180,18 +199,22 @@ export function createAppController(
         void runtime.loadContexts(connection.id).catch(() => {});
     }
   }
-  function leavingGuards(scope: 'local' | 'target') {
-    return [...guards].filter(
-      (g) => scope === 'target' || g.scope !== 'target',
+  /** The guards a change leaves: asked about first, discarded once it ran. */
+  function leavingGuards(change: Change) {
+    return [...guards].filter((g) => leaves(change, g));
+  }
+  /** Whether a pending write blocks a change: always, unless it ignores the guard. */
+  function blocked(change: Change) {
+    return [...guards].some(
+      (g) => (change !== 'context' || g.scope !== 'connection') && g.blocked(),
     );
   }
   async function guard(
     action: () => void | Promise<void>,
-    scope: 'local' | 'target' = 'target',
+    change: Change = 'connection',
   ): Promise<boolean> {
-    if (changing || pending || [...guards].some((g) => g.blocked()))
-      return false;
-    if (!leavingGuards(scope).some((g) => g.dirty())) {
+    if (changing || pending || blocked(change)) return false;
+    if (!leavingGuards(change).some((g) => g.dirty())) {
       changing = true;
       publish();
       try {
@@ -203,7 +226,7 @@ export function createAppController(
       }
     }
     return new Promise<boolean>((resolve) => {
-      pending = { action, resolve, scope, activeId };
+      pending = { action, resolve, change, activeId };
       publish();
     });
   }
@@ -260,13 +283,13 @@ export function createAppController(
      * Local navigation only; remote mutations must use the edit helpers.
      * Guarded like the actions below.
      */
-    navigate: (action: () => void | Promise<void>) => guard(action, 'local'),
+    navigate: (action: () => void | Promise<void>) => guard(action, 'navigate'),
     /** Runs the pending prompt's action, then discards the guards it leaves. */
     async confirmLeave() {
       const intent = pending;
-      if (!intent || [...guards].some((g) => g.blocked())) return;
+      if (!intent || blocked(intent.change)) return;
       pending = undefined;
-      const leaving = leavingGuards(intent.scope);
+      const leaving = leavingGuards(intent.change);
       changing = true;
       publish();
       try {
@@ -323,7 +346,7 @@ export function createAppController(
         return Promise.resolve(true);
       return guard(() => {
         runtime.selectContext(id, iri);
-      });
+      }, 'context');
     },
     /** Guarded like `selectConnection`. */
     connect(url = defaultPodUrl) {
