@@ -44,13 +44,14 @@ for deployment identity, persisted sessions and the one-active-tab contract.
 surface beside your content, with no mandatory outer frame or persistent header.
 It displays startup loading, callback failure/cancellation, unavailable storage
 and a localized second-tab notice. A returning sign-in makes its connection
-active even when it failed, so the cause appears next to its sign-in and
-disconnect actions. Provider answers such as `login_required` get their own
-EN/DE message instead of a generic failure. The callback notice stays until the
-person selects another connection, disconnects one or starts a sign-in
-(`AppSnapshot.callbackNotice`); the startup report itself is unchanged. A
-connection whose sign-in never returned, or whose session expired, asks to sign
-in without claiming access or a kept draft. It hides once the selected target is readable,
+active even when it failed, so the callback notice above it names the cause
+next to its sign-in and disconnect actions. Provider answers such as
+`login_required` get their own EN/DE message instead of a generic failure. The
+callback notice stays until the person selects another connection, disconnects
+one or starts a sign-in (`AppSnapshot.callbackNotice`); `callbackNotice` never
+rewrites `startup`. A connection whose sign-in never returned, or whose session
+expired, asks to sign in without claiming access or a kept draft. It hides once
+the selected target is readable,
 including read-only access; catalogue failures remain visible even if the runtime
 retains previous access facts. While the active connection restores, or is signed
 in but its Pod reader is not yet readable, it shows the loading status and, when
@@ -652,9 +653,9 @@ allowlist: other connections can still exist in the runtime.
 Startup/storage feedback and `CallbackNotice` remain outside the content gate.
 A failed or cancelled callback activates the connection being signed in to,
 like a completed one; another connection's target returns once the person
-selects it again. Custom layouts that read
-`startup.interaction` directly should use `callbackNotice` to decide whether
-the outcome is still current. A restoring connection waits;
+selects it again. Custom layouts that read `startup.interaction` directly
+should use `callbackNotice` to decide whether the outcome is still current. A
+restoring connection waits;
 `active` and `renewing` are authenticated facts, not interchangeable with context
 access. Select a readable context explicitly; after a reload or re-authorization
 the runtime reselects the last chosen one while it is still readable. `Check

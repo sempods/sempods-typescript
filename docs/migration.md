@@ -22,12 +22,14 @@ automatic conversion of legacy app data or stored credentials.
   `login-required`, `interaction-required`, `consent-required`,
   `provider-unavailable` or `rejected`. The attempt is consumed and its
   connection ends with that cause and is retired, as after a denial: it stays
-  listed until reload, then a new sign-in starts from the Pod address. Exhaustive switches over `OAuthProblem` need
-  the new cases; `describeFailure` and the SDK catalogs already cover them.
-  Override the texts through `messages.errors.oauth`.
+  listed until reload, then a new sign-in starts from the Pod address.
+  `OAuthProblem` documents which error code maps to which value. Exhaustive
+  switches over it need the new cases; `describeFailure` and the SDK catalogs
+  already cover them. Override the texts through `messages.errors.oauth`.
 - **No callback, no interaction outcome.** A startup without a callback now
   reports `interaction: 'none'` when storage or coordination fails or the
-  runtime was already disposed (previously `failed`); read `storage` and `problem` for that failure.
+  runtime was already disposed (previously `failed`); read `storage` and
+  `problem` for that failure.
 - **Callback feedback clears.** `CallbackNotice` and `AppAccess` follow the new
   `AppSnapshot.callbackNotice`, which clears once the person selects another
   connection, disconnects one or starts a sign-in. After a failed callback the
