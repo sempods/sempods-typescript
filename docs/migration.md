@@ -43,6 +43,13 @@ automatic conversion of legacy app data or stored credentials.
   chooser, the pending-catalogue notice, **Update access** and **Check
   access**. App end-to-end tests that waited for those controls in that phase
   should wait for the chooser, the hidden surface or the failure view instead.
+- **A success notice retires when another write starts.** `created`, `saved`
+  and `removed` from `useCreation`, `useFieldUpdate` and `ResourceEditor` now
+  clear once another of them starts a write on the same target, and are not
+  shown if one started while they were pending, so notices rendered side by
+  side no longer pile up. Failures and unresolved outcomes are
+  unchanged. Code that read `creation.outcome?.kind === 'created'` later, after
+  another write, now sees `null`; read the result `create()` returns instead.
 
 New in the next release:
 

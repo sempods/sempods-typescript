@@ -63,7 +63,7 @@ afterEach(() => {
 async function setup(
   language: 'en' | 'de' = 'en',
   // Holds the batch input above TargetScreen, so it survives target changes.
-  { hostInput = false } = {},
+  { hostInput = false, withEditor = false } = {},
 ) {
   const f = fixture();
   const session = await f.login();
@@ -162,6 +162,17 @@ async function setup(
       <>
         <UpdateNotice {...creation.notice} />
         <UpdateNotice {...mutation.notice} />
+        {withEditor && editor && (
+          <ResourceEditor editor={editor}>
+            {(draft, change) => (
+              <input
+                aria-label="Title"
+                value={draft.title}
+                onChange={(e) => change({ title: e.target.value })}
+              />
+            )}
+          </ResourceEditor>
+        )}
       </>
     );
   }
@@ -921,3 +932,180 @@ it.each([false, true])(
     );
   },
 );
+
+// Issue #72: the quickstart renders creation, row and editor feedback together.
+const shown = (text: string) =>
+  screen.queryAllByRole('status').filter((n) => n.textContent === text).length;
+async function firstRow(f: Setup) {
+  await waitFor(() => expect(f.api.list.state.kind).toBe('ready'));
+  const state = f.api.list.state;
+  if (state.kind !== 'ready') throw new Error('fixture');
+  return state.data.items.find((item) => item.iri === 'urn:one')!;
+}
+it('shows only the success of the last write on a target', async () => {
+  const f = await setup('en', { withEditor: true });
+  act(() => f.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await f.api.creation.create();
+  });
+  expect(shown('Created.')).toBe(1);
+  await act(async () => {
+    await f.api.mutation.update(await firstRow(f), { done: true });
+  });
+  expect(f.api.creation.outcome).toBeNull();
+  expect(shown('Created.')).toBe(0);
+  expect(shown('Saved.')).toBe(1);
+  await act(async () => {
+    await f.api.selection.select('urn:one');
+  });
+  await waitFor(() => expect(f.api.editor?.state.phase).toBe('ready'));
+  fireEvent.change(screen.getByLabelText('Title'), {
+    target: { value: 'Renamed' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(f.api.mutation.outcome).toBeNull());
+  await waitFor(() => expect(shown('Saved.')).toBe(1));
+  await act(async () => {
+    await f.api.mutation.update(await firstRow(f), { done: false });
+  });
+  // The row's own success; the editor's earlier one retired.
+  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(shown('Saved.')).toBe(1);
+  expect(
+    screen
+      .getByRole('button', { name: 'Save' })
+      .closest('section')!
+      .querySelector('[role="status"]'),
+  ).toBeNull();
+});
+it('a success never hides or settles an unresolved outcome on the same target', async () => {
+  const f = await setup();
+  const item = await firstRow(f);
+  f.rows.set(item.iri, {
+    ...f.rows.get(item.iri),
+    'urn:status': [{ '@id': 'urn:done' }],
+  });
+  await act(async () => {
+    await f.api.mutation.update(item, { done: true });
+  });
+  expect(f.api.mutation.outcome?.kind).toBe('changed-on-pod');
+  act(() => f.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await f.api.creation.create();
+  });
+  expect(f.api.creation.outcome?.kind).toBe('created');
+  expect(f.api.mutation.outcome?.kind).toBe('changed-on-pod');
+  expect(f.api.mutation.canMutate).toBe(false);
+  // A refused start retires nothing.
+  await act(async () => {
+    await f.api.mutation.update(item, { done: false });
+  });
+  expect(f.api.creation.outcome?.kind).toBe('created');
+  expect(
+    screen.getByRole('button', { name: 'I have checked the pod' }),
+  ).toBeTruthy();
+  // Still a dirty target guard: leaving the target asks first.
+  let leaving!: Promise<boolean>;
+  act(() => {
+    leaving = f.api.app.selectContext(personal);
+  });
+  expect(f.api.app.getSnapshot().confirmingLeave).toBe(true);
+  act(() => f.api.app.cancelLeave());
+  expect(await leaving).toBe(false);
+});
+it('an uncertain creation survives a later row success', async () => {
+  const f = await setup();
+  f.setResource(async (url, init) => {
+    const result = await f.resource(url, init);
+    return init?.method === 'PUT'
+      ? new Response(null, { status: 202 })
+      : result;
+  });
+  act(() => f.api.creation.change({ title: 'Maybe' }));
+  await act(async () => {
+    await f.api.creation.create();
+  });
+  expect(f.api.creation.outcome?.kind).toBe('unconfirmed');
+  await act(async () => {
+    await f.api.mutation.update(await firstRow(f), { done: true });
+  });
+  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.creation.outcome?.kind).toBe('unconfirmed');
+  expect(f.api.creation.canCreate).toBe(false);
+});
+it('keeps a failure and a success when no other write starts', async () => {
+  const f = await setup('en', { withEditor: true });
+  f.setResource(async (url, init) =>
+    init?.method === 'PUT'
+      ? new Response(null, { status: 403 })
+      : f.resource(url, init),
+  );
+  act(() => f.api.creation.change({ title: 'Refused' }));
+  await act(async () => {
+    await f.api.creation.create();
+  });
+  expect(f.api.creation.outcome?.kind).toBe('not-created');
+  await act(async () => {
+    await f.api.mutation.update(await firstRow(f), { done: true });
+  });
+  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  // A failure is not retired by another write.
+  expect(f.api.creation.outcome?.kind).toBe('not-created');
+  await act(async () => {
+    await f.api.selection.select('urn:one');
+  });
+  await waitFor(() => expect(f.api.editor?.state.phase).toBe('ready'));
+  // Nothing to save: the refused editor save starts no write.
+  await act(async () => {
+    await f.api.editor!.save();
+  });
+  expect(f.api.mutation.outcome?.kind).toBe('saved');
+});
+it('does not show a success when another write started while it was pending', async () => {
+  const f = await setup();
+  const item = await firstRow(f);
+  const gate = deferred<Response>();
+  f.setResource(async (url, init) => {
+    const result = await f.resource(url, init);
+    return init?.method === 'PUT' ? gate.promise : result;
+  });
+  act(() => f.api.creation.change({ title: 'Slow' }));
+  let creating!: ReturnType<typeof f.api.creation.create>;
+  act(() => {
+    creating = f.api.creation.create();
+  });
+  await waitFor(() => expect(f.api.creation.busy).toBe(true));
+  await act(async () => {
+    await f.api.mutation.update(item, { done: true });
+  });
+  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  await act(async () => {
+    gate.resolve(new Response(null, { status: 201 }));
+    expect((await creating)?.kind).toBe('created');
+  });
+  expect(f.api.creation.outcome).toBeNull();
+  expect(f.api.creation.draft).toEqual(initial);
+  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(shown('Created.')).toBe(0);
+});
+it('an editor delete retires a row success and a later creation retires it', async () => {
+  const f = await setup('en', { withEditor: true });
+  await act(async () => {
+    await f.api.mutation.update(await firstRow(f), { done: true });
+  });
+  expect(shown('Saved.')).toBe(1);
+  await act(async () => {
+    await f.api.selection.select('urn:one');
+  });
+  await waitFor(() => expect(f.api.editor?.state.phase).toBe('ready'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(shown('Deleted.')).toBe(1));
+  expect(f.api.mutation.outcome).toBeNull();
+  expect(shown('Saved.')).toBe(0);
+  act(() => f.api.creation.change({ title: 'After delete' }));
+  await act(async () => {
+    await f.api.creation.create();
+  });
+  expect(shown('Created.')).toBe(1);
+  expect(shown('Deleted.')).toBe(0);
+});

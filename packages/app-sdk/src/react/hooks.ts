@@ -38,9 +38,26 @@ import {
   useView,
   useWorkflowAccess,
 } from './app.js';
-import { changed, observeWrites } from '../authoring/changes.js';
+import {
+  changed,
+  observeStarts,
+  observeWrites,
+  startCount,
+  started,
+  succeeded,
+} from '../authoring/changes.js';
 
 const noopSubscribe = () => () => {};
+/** Internal: the number of writes started on this target, for feedback lifetime. */
+export function useStartCount(view: BoundView | null | undefined) {
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      view ? observeStarts(view, listener) : noopSubscribe(),
+    [view],
+  );
+  const read = () => (view ? startCount(view) : 0);
+  return useSyncExternalStore(subscribe, read, read);
+}
 const loading = Object.freeze({ kind: 'loading' as const });
 const unavailable = Object.freeze({ kind: 'unavailable' as const });
 /** Reported in the console: a lost draft or write guard is an app bug. */
@@ -347,6 +364,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     outcome: MutationOutcome<D> | null;
     operation: 'create' | 'update' | 'remove';
     busy: boolean;
+    /** The target's start count at this lane's own start. */
+    start: number;
   } | null>(null);
   const [evidence, setEvidence] = useState<{
     lane: typeof lane;
@@ -375,7 +394,14 @@ function useMutation<D>(definition: FieldDefinition<D>) {
       unregister();
     };
   }, [app, lane]);
+  const starts = useStartCount(view);
   const visible = state?.lane === lane ? state : null;
+  // Another write started on this target since this lane's own start retires
+  // its success; failures and unresolved outcomes stay.
+  const outcome =
+    visible && !(succeeded(visible.outcome) && visible.start !== starts)
+      ? visible.outcome
+      : null;
   const eligible = () =>
     lane.alive && current.current === lane && app.getSnapshot().view === view;
   async function execute(
@@ -397,7 +423,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     lane.pending = true;
     lane.checked = false;
     lane.iri = iri;
-    setState({ lane, operation, outcome: null, busy: true });
+    const start = started(view);
+    setState({ lane, operation, outcome: null, busy: true, start });
     let outcome: MutationOutcome<D>;
     try {
       outcome = await action(view);
@@ -414,13 +441,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     lane.unresolved =
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     lane.uncertain = outcome.kind === 'unconfirmed';
-    setState({ lane, operation, outcome, busy: false });
-    if (
-      outcome.kind === 'created' ||
-      outcome.kind === 'saved' ||
-      outcome.kind === 'removed'
-    )
-      changed(view);
+    setState({ lane, operation, outcome, busy: false, start });
+    if (succeeded(outcome)) changed(view);
     return outcome;
   }
   const acknowledge = () => {
@@ -474,10 +496,10 @@ function useMutation<D>(definition: FieldDefinition<D>) {
       !app.getSnapshot().changing &&
       !app.getSnapshot().confirmingLeave,
     ),
-    outcome: visible?.outcome ?? null,
+    outcome,
     operation: visible?.operation ?? null,
     notice: {
-      outcome: visible?.outcome ?? null,
+      outcome,
       current:
         evidence?.lane === lane &&
         evidence.version === lane.version &&
@@ -497,7 +519,15 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     absent: () => eligible() && lane.checked && lane.absent,
   };
 }
-/** Safe availability and standard recovery feedback for one-click row mutations. */
+/**
+ * Safe availability and standard recovery feedback for one-click row mutations.
+ *
+ * A success in `outcome`/`notice` retires when this hook or another creation,
+ * row mutation or bound editor starts a write on the same target, and is not
+ * shown if such a write started while it was pending. A failure
+ * stays until this hook writes again; an unresolved outcome (`unconfirmed`,
+ * `changed-on-pod`) stays until it is checked and acknowledged.
+ */
 export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   // The same instance as useList's snapshots (see canonicalOf); the lane's
   // useDefinition below reports a changing custom definition.
@@ -543,6 +573,10 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
  * next item captures a fresh IRI. The item that stopped stays in the draft, or
  * may exist if the target lifetime ended (see `create`); never resubmit it
  * from the input.
+ *
+ * `created` stays in `outcome`/`notice` until the next `change` or until another
+ * hook or bound-editor write starts on the same target (also while pending). A failure stays until the next `change` or
+ * `create`; an unconfirmed creation stays until it is checked and acknowledged.
  */
 export function useCreation<D extends object>(
   definition: FieldDefinition<D>,
