@@ -101,6 +101,34 @@ it.each([
   },
 );
 
+it('keeps the session after a challenge-less 401 on an unexpired credential, until renewal near its expiry', async () => {
+  const f = await logged();
+  const pod = expiringPod(f, false);
+  expect(await f.view.sparql.construct(query)).toMatchObject({ kind: 'ok' });
+  const exchanged = tokenRequests(f).length;
+  // A Pod that revoked or forgot the token before its advertised expiry.
+  pod.expire();
+  expect(await f.view.sparql.construct(query)).toEqual({
+    kind: 'refused',
+    status: 401,
+  });
+  expect(pod.sent).toHaveLength(2);
+  expect(tokenRequests(f)).toHaveLength(exchanged);
+  expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active');
+  advance(3600_000 - 30_000);
+  expect(await f.view.sparql.construct(query)).toMatchObject({
+    kind: 'refused',
+  });
+  await vi.waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
+  expect(tokenRequests(f)).toHaveLength(exchanged + 1);
+  expect(await f.view.sparql.construct(query)).toEqual({
+    kind: 'ok',
+    body: [],
+  });
+});
+
 it('renews within a minute of expiry and shares one refresh across reads', async () => {
   const f = await logged();
   const pod = expiringPod(f, false);

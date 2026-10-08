@@ -12,8 +12,9 @@ export interface PodAuth {
    */
   credential(request: AuthRequest): Promise<AuthCredential | null>;
   /**
-   * Called after an answered 401 that carried `refused`. Resolves `true` only
-   * when a different credential is now available (renewed here, or already
+   * Called after the Pod answered a request carrying `refused` with a 401 and a
+   * Bearer challenge; a 401 without a challenge never reaches it. Resolves `true`
+   * only when a different credential is now available (renewed here, or already
    * replaced by another request), so one resend may succeed. Never resends by
    * itself. Cancelling `challenge.signal` stops waiting for this caller only;
    * a renewal shared with other requests continues.

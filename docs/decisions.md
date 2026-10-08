@@ -145,6 +145,8 @@ Sessions are stored as validated, versioned IndexedDB records with
 compare-and-swap. One tab per app is active; a second tab shows a clear notice.
 Renewal happens on demand: before a request whose credential is about to expire,
 or after a request refused with a Bearer challenge. There is no background timer.
+A `401` without a challenge on an unexpired credential neither renews nor ends
+the session.
 A consumed refresh token is removed durably before it is sent, while a failure
 before that point keeps the session signed in. Startup never waits for a Pod's discovery. The storage namespace
 derives from the app identity, so renaming the app or changing scopes keeps
@@ -153,7 +155,10 @@ sessions.
 _Why:_ a reload or a short network failure must not log people out, and a spent
 refresh token must never be reused. The token's own lifetime justifies renewal
 without trusting a response, so a Pod that omits its challenge cannot strand a
-session; idle apps send nothing.
+session past its token's expiry; idle apps send nothing. A challenge-less `401`
+does not conform to the specification and its cause is unknown: acting on it
+could spend refresh tokens in a loop or sign people out on a Pod that uses `401`
+for other refusals.
 
 ## Bound views, guarded navigation, safe UI defaults
 
