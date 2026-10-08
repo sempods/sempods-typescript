@@ -43,10 +43,13 @@ automatic conversion of legacy app data or stored credentials.
   chooser, the pending-catalogue notice, **Update access** and **Check
   access**. App end-to-end tests that waited for those controls in that phase
   should wait for the chooser, the hidden surface or the failure view instead.
-- **Optional Pod address for one permitted Pod.** `AppAccess` accepts
-  `podAddress="hidden"` to omit the Pod address from signing in when the
-  runtime permits exactly one Pod. It defaults to `'visible'`, so existing apps
-  are unchanged; see [login composition](react-authoring.md#login-without-an-app-frame).
+
+New in the next release:
+
+- `AppAccess` accepts `podAddress="hidden"` to omit the Pod address from
+  signing in when the runtime permits exactly one Pod. It defaults to
+  `'visible'`, so existing apps are unchanged; see
+  [login composition](react-authoring.md#login-without-an-app-frame).
 
 ## From 0.3 to 0.4
 

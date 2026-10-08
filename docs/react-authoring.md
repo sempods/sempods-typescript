@@ -82,9 +82,9 @@ the destination remains visible, and duplicate names are disambiguated.
 When the runtime permits exactly one Pod (`allowedPods` with one entry),
 `podAddress="hidden"` omits that Pod's address from signing in, including
 signing in again after an ended session. A `podNames` name remains; without one,
-no Pod line is shown. The app's
-configuration then fixes the destination, the person cannot choose another Pod,
-and the Pod's own login page shows its address in the browser. With several or
+no Pod line is shown. The app's configuration then fixes the destination, the
+person cannot choose another Pod, and the Pod's provider shows its own login
+page and address. With several or
 unrestricted Pods, including a preset without `allowedPods`, the address stays
 visible, because there the person chooses or must recognize the destination.
 Management (`open`) and **Full addresses** always show it, and a custom
@@ -106,7 +106,8 @@ const label = labels?.[iri];
 Only the selected, validated Context is fetched automatically; other entries use
 the fallback immediately, including on small Pods.
 Duplicate context names include the full IRI; **Full addresses** exposes all readable
-context identities. Names never replace Pod/context identity, and displaying them
+context identities. Names never replace Pod/context identity, unless `podAddress`
+hides the address of the one permitted Pod; displaying them
 starts no additional requests. Late or refreshed labels do not change selection
 or discard drafts.
 
