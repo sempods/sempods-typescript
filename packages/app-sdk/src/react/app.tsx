@@ -145,9 +145,10 @@ export function useContextDemand(active: boolean) {
   if (!value) throw new Error('SempodsProvider is required.');
   const state = useAppState();
   const connection = state.connections.find((c) => c.id === state.activeId);
+  const { retainContext } = value;
   useEffect(
-    () => (active ? value.retainContext() : undefined),
-    [active, value.retainContext],
+    () => (active ? retainContext() : undefined),
+    [active, retainContext],
   );
   const id = connection?.id;
   const session = connection?.session.kind;
