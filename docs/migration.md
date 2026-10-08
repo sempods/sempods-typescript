@@ -44,6 +44,13 @@ automatic conversion of legacy app data or stored credentials.
   access**. App end-to-end tests that waited for those controls in that phase
   should wait for the chooser, the hidden surface or the failure view instead.
 
+New in the next release:
+
+- `AppAccess` accepts `podAddress="hidden"` to omit the Pod address from
+  signing in when the runtime permits exactly one Pod. It defaults to
+  `'visible'`, so existing apps are unchanged; see
+  [login composition](react-authoring.md#login-without-an-app-frame).
+
 ## From 0.3 to 0.4
 
 Upgrade both packages together; Node 24.15 or newer stays the requirement:

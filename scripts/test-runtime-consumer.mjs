@@ -1023,12 +1023,21 @@ try {
           'login-' + mode + '.png',
         ),
       });
+    // podAddress="hidden" applies only to the one permitted Pod.
+    const address = page.getByText(origin + '/alice', { exact: true });
     if (mode === 'one') {
       assert.equal(await page.getByRole('textbox').count(), 0);
       assert.equal(await page.getByRole('combobox').count(), 0);
+      await page.getByText('Personal', { exact: true }).waitFor();
+      assert.ok(
+        !(await page.locator('[data-sempods-access]').textContent()).includes(
+          origin.replace(/^https?:\/\//, '') + '/alice',
+        ),
+      );
     } else if (mode === 'set') {
       await page.getByLabel('Your Pod').selectOption(origin + '/alice');
       assert.equal(await page.getByRole('textbox').count(), 0);
+      await address.waitFor();
     } else await page.getByLabel('Your Pod').fill('  ' + origin + '/alice/  ');
     await page.getByRole('button', { name: 'Sign in', exact: true }).focus();
     await Promise.all([
@@ -1061,6 +1070,11 @@ try {
     await page
       .getByRole('button', { name: 'Check access', exact: true })
       .waitFor();
+    await page.getByText('Full addresses', { exact: true }).click();
+    await page
+      .locator('[data-sempods-access] details')
+      .getByText(origin + '/alice', { exact: true })
+      .waitFor();
     assert.ok(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -1075,7 +1089,7 @@ try {
       });
   }
   console.log(
-    'Packed AppAccess: one/set/free Pod UI, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+    'Packed AppAccess: one/set/free Pod UI, Pod address omitted only for one permitted Pod with podAddress="hidden" and kept in Full addresses, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
   );
   // A Pod whose provider answers login_required: the specific cause (EN/DE),
   // shown once and without a kept-draft claim, until the person acts.

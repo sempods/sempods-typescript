@@ -36,6 +36,14 @@ export interface AppAccessProps {
   readonly icon?: ReactNode;
   /** Exact Pod URL → friendly name. A name never changes the destination. */
   readonly podNames?: Readonly<Record<string, string>>;
+  /**
+   * 'hidden' omits the Pod address from sign-in, but only while the runtime
+   * permits exactly one Pod; a `podNames` name remains, otherwise saved
+   * duplicate connections are numbered. Several or unrestricted
+   * Pods, management (`open`) and Full addresses always show the address.
+   * A custom `components.Connections` does not receive this option.
+   */
+  readonly podAddress?: 'visible' | 'hidden';
   /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
   /** Focus here if a focused access control disappears after successful recovery. */
@@ -76,6 +84,7 @@ export function AppAccess({
   mode = 'multiple',
   icon,
   podNames,
+  podAddress = 'visible',
   open = false,
   focusTarget,
   components,
@@ -243,6 +252,7 @@ export function AppAccess({
                     manage={open}
                     mode={mode}
                     validating={validating}
+                    podAddress={podAddress}
                     {...(podNames ? { podNames } : {})}
                   />
                 )}
@@ -270,10 +280,12 @@ function AccessConnections({
   podNames,
   contextRequired,
   validating,
+  podAddress,
 }: {
   readonly manage: boolean;
   readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
+  readonly podAddress: 'visible' | 'hidden';
   readonly contextRequired: boolean;
   /** Only the loading status (and a switch to another saved Pod) applies. */
   readonly validating: boolean;
@@ -291,6 +303,13 @@ function AccessConnections({
   const defaultUrl =
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
+  // With exactly one permitted Pod the configuration fixes the destination, so
+  // sign-in may omit its address; management keeps it inspectable.
+  const addressHidden =
+    podAddress === 'hidden' &&
+    !manage &&
+    state.allowedPods?.length === 1 &&
+    defaultUrl === state.allowedPods[0];
   const fixedContext =
     state.preset?.podUrl === c?.podUrl ? state.preset?.contextIri : undefined;
   const readable =
@@ -352,6 +371,9 @@ function AccessConnections({
       state.allowedPods ?? state.connections.map((entry) => entry.podUrl),
       (value) => podName(value, podNames),
     );
+  // Without a podNames entry the derived name is the address itself.
+  const podLine = (target: string) =>
+    (!addressHidden || podNames?.[target]?.trim()) && <p>{name(target)}</p>;
   const labels =
     c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
   const contextLabel = (iri: string) =>
@@ -364,8 +386,8 @@ function AccessConnections({
   // these controls (and keyboard focus) mounted.
   const defaultSignIn = showDefault && defaultUrl && (
     <div key="default-sign-in">
-      <p>{name(defaultUrl)}</p>
-      {podNames?.[defaultUrl] && (
+      {podLine(defaultUrl)}
+      {!addressHidden && podNames?.[defaultUrl] && (
         <p className="sp-access-address">{defaultUrl}</p>
       )}
       <button
@@ -397,15 +419,27 @@ function AccessConnections({
         <option value="" disabled>
           {m.controls.choosePod}
         </option>
-        {state.connections.map((entry) => (
-          <option key={entry.id} value={entry.id}>
-            {name(entry.podUrl)}
-            {state.connections.filter((other) => other.podUrl === entry.podUrl)
-              .length > 1
-              ? ` · ${state.connections.indexOf(entry) + 1}`
-              : ''}
-          </option>
-        ))}
+        {state.connections.map((entry) => {
+          const index = state.connections.indexOf(entry) + 1;
+          // Saved duplicates of the one permitted Pod: number them rather
+          // than fall back to the hidden address.
+          if (addressHidden && !podNames?.[entry.podUrl]?.trim())
+            return (
+              <option key={entry.id} value={entry.id}>
+                {index}
+              </option>
+            );
+          return (
+            <option key={entry.id} value={entry.id}>
+              {name(entry.podUrl)}
+              {state.connections.filter(
+                (other) => other.podUrl === entry.podUrl,
+              ).length > 1
+                ? ` · ${index}`
+                : ''}
+            </option>
+          );
+        })}
       </select>
     </label>
   );
@@ -507,7 +541,7 @@ function AccessConnections({
       )}
       {c && !active && c.session.kind !== 'restoring' && (
         <>
-          <p>{name(c.podUrl)}</p>
+          {podLine(c.podUrl)}
           {c.session.kind === 'ended' && !shownByNotice && (
             <p role="status">{endedMessage(c.session, m, true)}</p>
           )}
