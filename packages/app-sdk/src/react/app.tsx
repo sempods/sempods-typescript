@@ -27,7 +27,11 @@ const Context = createContext<{
 export interface AppActions {
   /** Switch the active Pod connection; asks before leaving drafts or unconfirmed writes. */
   selectConnection(id: string): Promise<boolean>;
-  /** Select one readable context of the active connection; guarded the same way. */
+  /**
+   * Select one readable context of the active connection; guarded the same way.
+   * Confirming fails, selecting nothing and keeping drafts, if another
+   * connection became active while the leave policy asked.
+   */
   selectContext(iri: string): Promise<boolean>;
   /** Sign in to a Pod; omit the URL to reuse/connect the preset or sole allowed Pod. */
   connect(url?: string): Promise<boolean>;

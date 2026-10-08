@@ -1212,3 +1212,37 @@ it('keeps an opened row on its connection when another becomes active during the
   expect(screen.queryByLabelText('Note title')).toBeNull();
   expect(bob().slice(before)).toEqual([]);
 });
+
+function Unsaved() {
+  useDraftGuard(true, () => {});
+  return null;
+}
+it('selects nothing when another connection became active during the selection prompt', async () => {
+  const { f, runtime, other } = await twoPods();
+  const report = await runtime.initialize();
+  // Startup is still settling: Alice is active by preset until it completes.
+  const startup = deferred<typeof report>();
+  vi.spyOn(runtime, 'initialize').mockReturnValue(startup.promise);
+  const select = vi.spyOn(runtime, 'selectContext');
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <RowEditor />
+      <Unsaved />
+    </SempodsProvider>,
+  );
+  await edit('Edit urn:a in work', f.id);
+  await screen.findByRole('alertdialog');
+  // The completed callback activates Bob while the person decides.
+  await act(async () => startup.resolve({ ...report, connectionId: other.id }));
+  await waitFor(() =>
+    expect(screen.getByTestId('active').textContent).toBe(other.id),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  await waitFor(() => expect(phase()).toBe('retired:connection-changed'));
+  await act(async () => {});
+  expect(select).not.toHaveBeenCalled();
+  expect(
+    runtime.getSnapshot().find((c) => c.id === f.id)?.selectedContext,
+  ).toBeNull();
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+});

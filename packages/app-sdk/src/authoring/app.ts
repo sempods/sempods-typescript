@@ -285,6 +285,8 @@ export function createAppController(
       )
         return Promise.resolve(true);
       return guard(() => {
+        // A leave confirmation can outlast the connection it was asked for.
+        if (activeId !== id) throw new RuntimeError('disconnected');
         runtime.selectContext(id, iri);
       });
     },

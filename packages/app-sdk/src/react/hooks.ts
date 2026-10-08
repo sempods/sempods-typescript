@@ -411,6 +411,17 @@ export function useContextEditor<D>(
       ),
     [],
   );
+  // A refused selection after another connection became active is that change.
+  const refused = useCallback(
+    (lane: ContextLane) =>
+      retire(
+        lane,
+        app.getSnapshot().activeId === lane.connection
+          ? 'declined'
+          : 'connection-changed',
+      ),
+    [app, retire],
+  );
   const activate = useCallback(
     (lane: ContextLane) =>
       setState((s) =>
@@ -455,8 +466,8 @@ export function useContextEditor<D>(
     // Guarded like any Context change: drafts elsewhere ask before leaving.
     void app.selectContext(lane.target.context).then(
       // The runtime selects only a Context its catalogue lists as readable.
-      (accepted) => (accepted ? activate(lane) : retire(lane, 'declined')),
-      () => retire(lane, 'declined'),
+      (accepted) => (accepted ? activate(lane) : refused(lane)),
+      () => refused(lane),
     );
   }, [
     app,
@@ -468,6 +479,7 @@ export function useContextEditor<D>(
     readable,
     activated,
     activate,
+    refused,
     retire,
   ]);
   const editor = useBoundEditor(

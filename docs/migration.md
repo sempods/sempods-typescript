@@ -38,6 +38,12 @@ automatic conversion of legacy app data or stored credentials.
   previously selected target returns when the person selects it again. An
   `interrupted` or `expired` session shows the new `controls.signInRequired`
   message instead of `readLost`.
+- **A stale Context prompt selects nothing.** When the leave policy asks
+  before `selectContext` and another connection becomes active before the
+  person confirms (a completed callback, or the active one removed),
+  `confirmLeave()` now rejects with `disconnected`. The guarded call resolves
+  `false`, nothing is selected and no draft is discarded. Previously the
+  inactive connection's Context changed.
 - **New: `useContextEditor`.** It edits a Pod-overview row in the Context its
   `GRAPH` binding names. An app that copied the 0.4 overview recipe's
   `EditInContext` component can replace it with the hook: call
