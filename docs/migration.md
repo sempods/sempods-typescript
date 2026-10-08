@@ -16,6 +16,15 @@ automatic conversion of legacy app data or stored credentials.
   be this creation's own, changed by another writer. Keep the item unconfirmed,
   show what the IRI holds and let the person settle it explicitly. `useCreation`
   already follows its unconfirmed recovery and needs no change.
+- **New: `useContextEditor`.** It edits a Pod-overview row in the Context its
+  `GRAPH` binding names. An app that copied the 0.4 overview recipe's
+  `EditInContext` component can replace it with the hook: call
+  `edit.open({ subject, context })` from the row and render `edit.editor` with
+  `ResourceEditor`. Keep the overview outside `TargetScreen`. The hook keeps the
+  recipe's rules (guarded open and close, one selection per target, retirement
+  on a declined selection, a Context change elsewhere or a connection change)
+  and reports why a target was retired. See
+  [editing an overview row](react-authoring.md#editing-an-overview-row).
 
 ## From 0.3 to 0.4
 

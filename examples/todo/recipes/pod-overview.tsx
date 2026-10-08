@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
@@ -7,14 +7,13 @@ import {
   SempodsProvider,
   TargetScreen,
   UpdateNotice,
-  useApp,
-  useAppState,
+  useContextEditor,
   useCreation,
   usePodLoad,
-  useResourceEditor,
   useSdkLocale,
-  useView,
   useWorkflowAccess,
+  type ContextEditorRetirement,
+  type ContextTarget,
 } from '@sempods/app-sdk/react';
 
 // This query does not enumerate Contexts. GRAPH requests source provenance;
@@ -29,21 +28,17 @@ const note = fields(
   },
 );
 
-/** An overview row is only a pointer: the subject and the Context its GRAPH binding names. */
-interface RowTarget {
-  readonly item: string;
-  readonly graph: string;
-}
-
-/** The row, plus the connection that was active when editing started. */
-interface EditTarget extends RowTarget {
-  readonly connection: string;
-}
+/** Why editing a row ended without the person closing it. */
+const retirement: Record<ContextEditorRetirement, string> = {
+  declined: 'The note was not opened; your other changes are kept.',
+  'context-changed': 'Editing ended because another Context was chosen.',
+  'connection-changed': 'Editing ended because another Pod was chosen.',
+};
 
 function Overview({
   onEdit,
 }: {
-  readonly onEdit: (target: RowTarget) => void;
+  readonly onEdit: (target: ContextTarget) => void;
 }) {
   const { state, reload } = usePodLoad((pod, signal) =>
     pod.sparql.select(query, { signal }),
@@ -67,7 +62,7 @@ function Overview({
                     {' '}
                     <button
                       aria-label={`Edit ${item}`}
-                      onClick={() => onEdit({ item, graph })}
+                      onClick={() => onEdit({ subject: item, context: graph })}
                     >
                       Edit
                     </button>
@@ -127,117 +122,14 @@ function NewNote() {
   );
 }
 
-/**
- * Edits an overview row inside the Context its GRAPH binding names. TargetScreen demands
- * discovery; once the catalogue lists that Context as readable it is selected explicitly,
- * and the editor mounts only for a view of exactly that Context. The editor reads the
- * resource fresh there and saves with its version (If-Match), never from the SELECT row.
- */
-function EditInContext({
-  target,
-  onClose,
-}: {
-  readonly target: EditTarget;
-  readonly onClose: () => void;
-}) {
-  const app = useApp();
-  const { connections, activeId, changing, confirmingLeave } = useAppState();
-  const view = useView();
-  const connection = connections.find((c) => c.id === activeId);
-  const catalogue = connection?.catalogue;
-  const readable =
-    catalogue?.kind === 'ready' &&
-    catalogue.contexts.some((c) => c.iri === target.graph && c.readable);
-  const selected = connection?.selectedContext ?? null;
-  const close = useRef(onClose);
-  close.current = onClose;
-  // One selection attempt per Context, also across StrictMode's repeated effects.
-  const attempt = useRef<string | null>(null);
-  // Set once this editor's Context was selected; a later change came from elsewhere.
-  const activated = useRef(false);
-  const retired = useRef(false);
-  const current = activeId === target.connection;
-  useEffect(() => {
-    // The Edit click itself runs as a guarded navigation; act only once it settled.
-    if (changing || confirmingLeave) return;
-    const retire = () => {
-      if (retired.current) return;
-      retired.current = true;
-      close.current();
-    };
-    // Another Pod connection became active: this row belongs to the old one.
-    if (!current) return retire();
-    if (selected === target.graph) {
-      activated.current = true;
-      return;
-    }
-    // The person chose another Context after this one (for example in AppAccess):
-    // retire the editor rather than selecting its old Context again.
-    if (activated.current) return retire();
-    if (!readable || attempt.current === target.graph) return;
-    const graph = target.graph;
-    attempt.current = graph;
-    // Guarded like any Context change: drafts elsewhere ask before leaving. When the
-    // person keeps them, close this editor instead of leaving an empty shell open.
-    void app.selectContext(graph).then((accepted) => {
-      if (attempt.current !== graph) return;
-      attempt.current = null;
-      if (!accepted) close.current();
-    });
-  }, [
-    app,
-    current,
-    readable,
-    selected,
-    target.graph,
-    changing,
-    confirmingLeave,
-  ]);
-  return (
-    <section aria-label="Edit note">
-      {current && catalogue?.kind === 'ready' && !readable && (
-        <p role="alert">This note's Context is not available for editing.</p>
-      )}
-      {/* Only the originating connection may demand discovery for this row. */}
-      {current && (
-        <TargetScreen>
-          {view?.contextIri === target.graph && (
-            <NoteEditor key={target.item} item={target.item} />
-          )}
-        </TargetScreen>
-      )}
-      <button onClick={onClose}>Close editor</button>
-    </section>
-  );
-}
-
-function NoteEditor({ item }: { readonly item: string }) {
-  const editor = useResourceEditor(item, note);
-  return (
-    <ResourceEditor editor={editor}>
-      {(draft, change) => (
-        <label>
-          Note title
-          <input
-            value={draft.title}
-            onChange={(event) => change({ title: event.target.value })}
-          />
-        </label>
-      )}
-    </ResourceEditor>
-  );
-}
-
 function Content() {
   const [manage, setManage] = useState(false);
   const [scoped, setScoped] = useState(false);
-  const [editing, setEditing] = useState<EditTarget | null>(null);
-  // Changing or closing the edited row unmounts its editor: run it under the leave
-  // policy, so an unsaved draft or a pending write asks before it is discarded.
-  const app = useApp();
-  const { activeId } = useAppState();
-  const edit = (target: EditTarget | null) =>
-    void app.navigate(() => setEditing(target));
+  // An overview row is only a pointer: the subject and the Context its GRAPH
+  // binding names. The hook selects that Context, reads the note fresh there and
+  // saves with its version (If-Match), never from the SELECT row. Opening another
+  // row or closing runs under the leave policy.
+  const edit = useContextEditor(note);
   const menu = useRef<HTMLButtonElement>(null);
   const { messages: m } = useSdkLocale();
   return (
@@ -250,11 +142,7 @@ function Content() {
         {m.controls.dataAccess}
       </button>
       <AppAccess appName="Notes overview" open={manage} focusTarget={menu} />
-      <Overview
-        onEdit={(row) => {
-          if (activeId) edit({ ...row, connection: activeId });
-        }}
-      />
+      <Overview onEdit={(row) => void edit.open(row)} />
       <button onClick={() => setScoped(true)} disabled={scoped}>
         Create a note
       </button>
@@ -266,12 +154,28 @@ function Content() {
           <NewNote />
         </TargetScreen>
       )}
-      {editing && (
-        <EditInContext
-          key={`${editing.connection} ${editing.graph} ${editing.item}`}
-          target={editing}
-          onClose={() => edit(null)}
-        />
+      {edit.reason && <p role="status">{retirement[edit.reason]}</p>}
+      {edit.target && edit.phase !== 'retired' && (
+        <section aria-label="Edit note">
+          {edit.phase === 'unavailable' ? (
+            <p role="alert">
+              This note's Context is not available for editing.
+            </p>
+          ) : (
+            <ResourceEditor editor={edit.editor}>
+              {(draft, change) => (
+                <label>
+                  Note title
+                  <input
+                    value={draft.title}
+                    onChange={(event) => change({ title: event.target.value })}
+                  />
+                </label>
+              )}
+            </ResourceEditor>
+          )}
+          <button onClick={() => void edit.close()}>Close editor</button>
+        </section>
       )}
     </main>
   );

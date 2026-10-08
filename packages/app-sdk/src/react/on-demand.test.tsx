@@ -10,16 +10,21 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import { fields, text } from '@sempods/client-sdk/edit';
+import type { PodFetch } from '@sempods/client-sdk';
 import {
   AppAccess,
+  ResourceEditor,
   SempodsProvider,
   TargetScreen,
   useApp,
   useAppState,
+  useContextEditor,
   usePodLoad,
   useLoad,
   useDraftGuard,
   useWorkflowAccess,
+  type ContextTarget,
 } from './index.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import { createAppController } from '../authoring/app.js';
@@ -766,4 +771,370 @@ it('keeps on-demand drafts through permission loss/recovery and guards Context s
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
   expect(screen.getByLabelText('Context draft')).toBe(input);
   expect((input as HTMLInputElement).value).toBe('Unfinished');
+});
+
+// Editing an overview row in its own Context (#54).
+const note = fields(
+  { title: text('urn:note:title', { language: null }) },
+  { type: 'urn:Note' },
+);
+const rows: readonly ContextTarget[] = [
+  { subject: 'urn:a', context: work },
+  { subject: 'urn:b', context: work },
+  { subject: 'urn:a', context: personal },
+];
+const label = (t: ContextTarget) =>
+  `Edit ${t.subject} in ${t.context === work ? 'work' : 'personal'}`;
+/** One note per Context and subject; records conditional writes. */
+function notes(f: { setResource(fn: PodFetch): void }) {
+  const data = new Map([
+    [`${work} urn:a`, { title: 'A at work', version: 1 }],
+    [`${work} urn:b`, { title: 'B at work', version: 1 }],
+    [`${personal} urn:a`, { title: 'A at home', version: 1 }],
+  ]);
+  const writes: {
+    readonly context: string | null;
+    readonly iri: string;
+    readonly ifMatch: string | null;
+  }[] = [];
+  const state = { hold: null as Promise<void> | null };
+  f.setResource(async (url, init) => {
+    const target = new URL(url);
+    const iri = Buffer.from(
+      target.pathname.split('/').at(-1)!,
+      'base64url',
+    ).toString();
+    const context = target.searchParams.get('context');
+    const stored = data.get(`${context} ${iri}`);
+    if ((init?.method ?? 'GET') === 'GET')
+      return stored
+        ? Response.json(
+            {
+              '@id': iri,
+              '@type': ['urn:Note'],
+              'urn:note:title': [{ '@value': stored.title }],
+            },
+            { headers: { etag: `"n${stored.version}"` } },
+          )
+        : new Response(null, { status: 404 });
+    writes.push({
+      context,
+      iri,
+      ifMatch: new Headers(init?.headers).get('if-match'),
+    });
+    await state.hold;
+    if (stored) stored.version++;
+    return new Response(null, { status: 204 });
+  });
+  return { writes, state };
+}
+function RowEditor({ draft = false }: { readonly draft?: boolean }) {
+  const [manage, setManage] = useState(false);
+  const edit = useContextEditor(note);
+  const { activeId } = useAppState();
+  return (
+    <>
+      <AppAccess appName="Overview" open={manage} />
+      <output data-testid="active">{activeId}</output>
+      <button onClick={() => setManage(!manage)}>Manage access</button>
+      <output data-testid="phase">
+        {edit.reason ? `${edit.phase}:${edit.reason}` : edit.phase}
+      </output>
+      {rows.map((row) => (
+        <button key={label(row)} onClick={() => void edit.open(row)}>
+          {label(row)}
+        </button>
+      ))}
+      <button onClick={() => void edit.close()}>Close editor</button>
+      {edit.editor && (
+        <ResourceEditor editor={edit.editor}>
+          {(value, change) => (
+            <input
+              aria-label="Note title"
+              value={value.title}
+              onChange={(e) => change({ title: e.target.value })}
+            />
+          )}
+        </ResourceEditor>
+      )}
+      {draft && (
+        <TargetScreen>
+          <ContextDraft />
+        </TargetScreen>
+      )}
+    </>
+  );
+}
+const phase = () => screen.getByTestId('phase').textContent;
+/** Opens a row once a connection is active, as an overview only offers then. */
+async function edit(row: string, active?: string) {
+  await waitFor(() =>
+    expect(screen.getByTestId('active').textContent).toEqual(
+      active ?? expect.stringMatching(/./),
+    ),
+  );
+  fireEvent.click(screen.getByText(row));
+}
+const title = () => screen.getByLabelText('Note title') as HTMLInputElement;
+
+it('edits an overview row in its own Context with a fresh read and If-Match', async () => {
+  const f = await returned();
+  const { writes } = notes(f);
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(screen.getByTestId('active').textContent).toBe(f.id),
+  );
+  expect(f.count('/_system/contexts')).toBe(0);
+  await edit('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  expect(phase()).toBe('ready');
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
+  expect(f.count('/_system/contexts')).toBe(1);
+  fireEvent.change(title(), { target: { value: 'Edited' } });
+  fireEvent.click(screen.getByText('Save'));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({ context: work, iri: 'urn:a', ifMatch: '"n1"' });
+  expect(f.count('/_system/sparql/query')).toBe(0);
+});
+
+it('runs target changes and close under the leave policy and blocks them while saving', async () => {
+  const f = await returned();
+  const { writes, state } = notes(f);
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await edit('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  fireEvent.change(title(), { target: { value: 'Unsaved' } });
+  fireEvent.click(screen.getByText('Edit urn:b in work'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+  expect(title().value).toBe('Unsaved');
+  fireEvent.click(screen.getByText('Close editor'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+  expect(title().value).toBe('Unsaved');
+  // A pending write blocks leaving instead of retiring its outcome.
+  const gate = deferred<void>();
+  state.hold = gate.promise;
+  fireEvent.click(screen.getByText('Save'));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  fireEvent.click(screen.getByText('Close editor'));
+  fireEvent.click(screen.getByText('Edit urn:b in work'));
+  await act(async () => {});
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(phase()).toBe('ready');
+  await act(async () => gate.resolve());
+  await waitFor(() =>
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(true),
+  );
+  fireEvent.change(title(), { target: { value: 'Second draft' } });
+  fireEvent.click(screen.getByText('Edit urn:b in work'));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Discard and continue' }),
+  );
+  await waitFor(() => expect(title().value).toBe('B at work'));
+  fireEvent.click(screen.getByText('Close editor'));
+  await waitFor(() => expect(phase()).toBe('idle'));
+  expect(screen.queryByLabelText('Note title')).toBeNull();
+  expect(writes).toHaveLength(1);
+});
+
+it.each(['discovered', 'pending'] as const)(
+  'selects a %s Context once after the guarded opening settles, under StrictMode',
+  async (catalogueState) => {
+    const f = await returned();
+    notes(f);
+    const answer = deferred<Response>();
+    if (catalogueState === 'pending') f.setCatalogue(() => answer.promise);
+    const select = vi.spyOn(f.runtime, 'selectContext');
+    render(
+      <StrictMode>
+        <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+          <RowEditor />
+        </SempodsProvider>
+      </StrictMode>,
+    );
+    if (catalogueState === 'discovered') {
+      fireEvent.click(await screen.findByText('Manage access'));
+      await screen.findByRole('option', { name: 'work' });
+      fireEvent.click(screen.getByText('Manage access'));
+    }
+    await edit('Edit urn:a in work');
+    if (catalogueState === 'pending') {
+      await waitFor(() => expect(f.count('/_system/contexts')).toBe(1));
+      expect(phase()).toBe('activating');
+      await act(async () => answer.resolve(catalogue()));
+    }
+    await waitFor(() => expect(title().value).toBe('A at work'));
+    expect(select.mock.calls).toEqual([[f.id, work]]);
+    expect(f.count('/_system/contexts')).toBe(1);
+  },
+);
+
+it('retires on a declined selection and keeps the draft elsewhere', async () => {
+  const f = await returned();
+  notes(f);
+  const select = vi.spyOn(f.runtime, 'selectContext');
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor draft />
+    </SempodsProvider>,
+  );
+  await edit('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  fireEvent.change(screen.getByLabelText('Context draft'), {
+    target: { value: 'Draft elsewhere' },
+  });
+  fireEvent.click(screen.getByText('Edit urn:a in personal'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+  await waitFor(() => expect(phase()).toBe('retired:declined'));
+  // One attempt per target: keeping the draft does not ask a second time.
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.queryByLabelText('Note title')).toBeNull();
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
+  expect(
+    (screen.getByLabelText('Context draft') as HTMLInputElement).value,
+  ).toBe('Draft elsewhere');
+  await act(async () => {});
+  expect(select.mock.calls).toEqual([[f.id, work]]);
+});
+
+it('retires instead of selecting its Context again after a change elsewhere', async () => {
+  const f = await returned();
+  notes(f);
+  const select = vi.spyOn(f.runtime, 'selectContext');
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await edit('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  fireEvent.click(screen.getByText('Manage access'));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Data context' }), {
+    target: { value: personal },
+  });
+  await waitFor(() => expect(phase()).toBe('retired:context-changed'));
+  await act(async () => {});
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(personal);
+  expect(select.mock.calls).toEqual([
+    [f.id, work],
+    [f.id, personal],
+  ]);
+  expect(screen.queryByLabelText('Note title')).toBeNull();
+  // Opening the row again is a new, explicit choice.
+  fireEvent.click(screen.getByText('Edit urn:a in work'));
+  await waitFor(() => expect(title().value).toBe('A at work'));
+});
+
+it.each(['before', 'after'] as const)(
+  'retires on a Pod switch %s activation without discovery on the new Pod',
+  async (timing) => {
+    const f = await returned(
+      fixture({ preferences: null, preset: { podUrl: pod } }),
+    );
+    await f.runtime.initialize();
+    const otherUrl = 'https://pod.example/bob';
+    const other = await f.runtime.connect(otherUrl);
+    await f.runtime.beginAuthorization(other.id);
+    f.runtime.dispose();
+    await settleLease();
+    f.setToken(async (url) =>
+      Response.json({
+        access_token: jwt({ iss: url.split('/_system')[0] }),
+        token_type: 'Bearer',
+        refresh_token: 'fresh',
+      }),
+    );
+    const runtime = f.returned();
+    runtimes.push(runtime);
+    await runtime.initialize();
+    await restored(runtime);
+    notes(f);
+    const answer = deferred<Response>();
+    // Only Alice's catalogue is expected; Bob's would be a failed test anyway.
+    f.setCatalogue(() =>
+      timing === 'before' ? answer.promise : Promise.resolve(catalogue()),
+    );
+    const select = vi.spyOn(runtime, 'selectContext');
+    const bob = () =>
+      f.fetch.mock.calls.filter(([url]) =>
+        url.startsWith(otherUrl + '/_system/contexts'),
+      );
+    const ui = (id: string) => (
+      <SempodsProvider runtime={runtime} contextSelection="on-demand">
+        <RowEditor />
+        <Switch id={id} />
+      </SempodsProvider>
+    );
+    const { rerender } = render(ui(f.id));
+    // The completed callback activates Bob; edit a row of Alice's Pod.
+    fireEvent.click(await screen.findByText('Switch Pod'));
+    await edit('Edit urn:a in work', f.id);
+    if (timing === 'before')
+      await waitFor(() => expect(phase()).toBe('activating'));
+    else await waitFor(() => expect(title().value).toBe('A at work'));
+    rerender(ui(other.id));
+    fireEvent.click(screen.getByText('Switch Pod'));
+    await waitFor(() => expect(phase()).toBe('retired:connection-changed'));
+    if (timing === 'before') await act(async () => answer.resolve(catalogue()));
+    await act(async () => {});
+    expect(screen.queryByLabelText('Note title')).toBeNull();
+    expect(bob()).toEqual([]);
+    // Returning to Alice does not reactivate the retired target.
+    rerender(ui(f.id));
+    fireEvent.click(screen.getByText('Switch Pod'));
+    await act(async () => {});
+    expect(phase()).toBe('retired:connection-changed');
+    expect(select.mock.calls).toEqual(timing === 'after' ? [[f.id, work]] : []);
+  },
+);
+
+it('reports an unreadable Context as unavailable until the catalogue lists it', async () => {
+  const f = await returned();
+  notes(f);
+  f.setCatalogue(async () => catalogue([personal], [personal]));
+  const select = vi.spyOn(f.runtime, 'selectContext');
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await edit('Edit urn:a in work');
+  await waitFor(() => expect(phase()).toBe('unavailable'));
+  expect(select).not.toHaveBeenCalled();
+  // AppAccess offers the explicit retry for the demanded catalogue.
+  f.setCatalogue(async () => catalogue());
+  fireEvent.click(screen.getByRole('button', { name: 'Check access' }));
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  expect(select.mock.calls).toEqual([[f.id, work]]);
+});
+
+it('keeps the editor and its draft through read loss after activation', async () => {
+  const f = await returned();
+  notes(f);
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <RowEditor />
+    </SempodsProvider>,
+  );
+  await edit('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  const input = title();
+  fireEvent.change(input, { target: { value: 'Unfinished' } });
+  f.setCatalogue(async () => catalogue([personal], [personal]));
+  await act(() => f.runtime.loadContexts(f.id));
+  expect(phase()).toBe('ready');
+  expect(title()).toBe(input);
+  expect(input.value).toBe('Unfinished');
+  f.setCatalogue(async () => catalogue());
+  await act(() => f.runtime.loadContexts(f.id));
+  expect(phase()).toBe('ready');
+  expect(title().value).toBe('Unfinished');
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
 });

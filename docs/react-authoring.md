@@ -346,11 +346,78 @@ reads, selection or drafts. The policy does not change the complete-catalogue AP
 The [copyable overview recipe](../examples/todo/recipes/pod-overview.tsx) combines
 a Pod SELECT with provenance, a later Context-bound creation form and editing of
 an overview row. It keeps the demand boundary mounted while the form owns
-drafts/outcomes. An overview row is not an editable snapshot, only a pointer: its
-`GRAPH` binding names the Context, and the editor reads the resource fresh in
-that Context and saves with its ETag. The packed browser test runs this recipe,
-including an edit, with installed archives. Evidence on a deployed Pod and in a
-real browser is tracked in [#52](https://github.com/sempods/sempods-typescript/issues/52).
+drafts/outcomes. The packed browser test runs this recipe, including an edit,
+with installed archives. Evidence on a deployed Pod and in a real browser is
+tracked in [#52](https://github.com/sempods/sempods-typescript/issues/52).
+
+### Editing an overview row
+
+An overview row is not an editable snapshot, only a pointer: its subject and the
+Context its `GRAPH` binding names. `useContextEditor(definition)` edits one such
+target in exactly that Context:
+
+```tsx
+function Notes() {
+  const edit = useContextEditor(note);
+  return (
+    <>
+      <Overview onEdit={(row) => void edit.open(row)} />
+      {edit.target && edit.phase !== 'retired' && (
+        <section aria-label="Edit note">
+          {edit.phase === 'unavailable' ? (
+            <p role="alert">This note's Context is not available.</p>
+          ) : (
+            <ResourceEditor editor={edit.editor}>
+              {(draft, change) => (
+                <input
+                  value={draft.title}
+                  onChange={(e) => change({ title: e.target.value })}
+                />
+              )}
+            </ResourceEditor>
+          )}
+          <button onClick={() => void edit.close()}>Close</button>
+        </section>
+      )}
+    </>
+  );
+}
+```
+
+`Overview` passes `{ subject, context }` from a row's IRI bindings, with the
+`GRAPH` binding as `context`.
+
+`open` records the active connection and demands its catalogue, as
+`TargetScreen` does; the editor needs no `TargetScreen` of its own. Once the
+controller is settled and the catalogue lists the Context as readable, the hook
+calls the guarded `selectContext` once, also under StrictMode. `editor` exists
+only for a view of exactly that Context. It reads the subject fresh and saves
+with its ETag (`If-Match`), like `useResourceEditor`. Opening another target and
+`close()` run under the leave policy, so an unsaved draft, an open review or a
+pending write asks first.
+
+`phase` is `idle`, `activating`, `unavailable` (the catalogue does not list the
+Context as readable; a later catalogue that lists it, for example after **Check
+access**, still activates it), `ready` or `retired`. A retired target has no
+editor, and the hook never selects its old Context again; `reason` says why:
+
+- `declined`: the guarded selection was declined (the person kept a draft
+  elsewhere), blocked by a pending write or refused by the runtime.
+- `context-changed`: another Context was selected elsewhere after activation,
+  for example in `AppAccess`.
+- `connection-changed`: another connection became active, at any point. The
+  retired target never demands discovery from the new connection.
+
+Open the row again to start over. Losing read access after activation does not
+retire the editor: it keeps its draft through access loss and recovery, and
+saving follows the view's write access.
+
+One target is one Context. If a subject has data in several Contexts, the
+query returns one row per Context, and each Context holds only its own part of
+the subject. The overview offers one action per row, such as "Edit in Home" and
+"Edit in Work". Each edits and conditionally saves only that Context's part.
+Never merge the rows into one editable snapshot. Creating resources stays with
+`useCreation`.
 
 ## Lists and creation
 

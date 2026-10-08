@@ -102,7 +102,8 @@ still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
 
 Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
 validated Context's label is fetched; cached labels never gate selection or
-reads. See the [copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.4.1/examples/todo/recipes/pod-overview.tsx).
+reads. To edit an overview row, `useContextEditor` selects the Context its
+`GRAPH` binding names, rereads the subject there and saves with its ETag. See the [copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.4.1/examples/todo/recipes/pod-overview.tsx).
 
 ## Presentation and documentation
 

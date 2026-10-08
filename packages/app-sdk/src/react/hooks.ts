@@ -34,6 +34,7 @@ import {
 import type { JsonLd } from '@sempods/client-sdk';
 import {
   useAppState,
+  useContextDemand,
   useController,
   useView,
   useWorkflowAccess,
@@ -299,6 +300,179 @@ export function useResourceEditor<D>(
     () => null,
   );
   return editor;
+}
+/** A Pod-overview row as an edit target: one subject inside the one Context its `GRAPH` binding names. */
+export interface ContextTarget {
+  readonly subject: string;
+  readonly context: string;
+}
+/** Where `useContextEditor` stands; see the hook for each phase. */
+export type ContextEditorPhase =
+  'idle' | 'activating' | 'unavailable' | 'retired' | 'ready';
+/** Why `useContextEditor` retired its target. */
+export type ContextEditorRetirement =
+  'declined' | 'context-changed' | 'connection-changed';
+export interface ContextEditor<D, U = D> {
+  /** The opened target, kept while retired so the app can name it. */
+  readonly target: ContextTarget | null;
+  readonly phase: ContextEditorPhase;
+  /** Set only while `phase` is `'retired'`. */
+  readonly reason: ContextEditorRetirement | null;
+  /** Present only while `phase` is `'ready'`; render it with `ResourceEditor`. */
+  readonly editor: ResourceEditor<D, U> | null;
+  /** Opens another target under the leave policy; `false` if declined or no connection is active. */
+  open(target: ContextTarget): Promise<boolean>;
+  /** Closes the target under the leave policy; `false` if declined. */
+  close(): Promise<boolean>;
+}
+/** One opened target: the connection it belongs to and its single selection attempt. */
+interface ContextLane {
+  readonly target: ContextTarget;
+  readonly connection: string;
+  activated: boolean;
+  attempted: boolean;
+}
+/**
+ * Edits one Pod-overview row in its own Context. The SELECT row is only a
+ * pointer: the editor reads the subject fresh in that Context and saves with its
+ * version (If-Match), through the same machinery as `useResourceEditor`.
+ *
+ * `open(target)` records the active connection and demands its catalogue, as
+ * `TargetScreen` does, so no `TargetScreen` is needed around the editor. Once the
+ * controller is settled and the catalogue lists the Context as readable, the hook
+ * calls the guarded `selectContext` once per opened target, also under StrictMode.
+ *
+ * - `idle`: nothing is open.
+ * - `activating`: discovery or the selection is under way.
+ * - `unavailable`: the catalogue does not list the Context as readable. The demand
+ *   stays, so a later catalogue that lists it (for example after AppAccess's
+ *   "Check access") still activates the target.
+ * - `ready`: `editor` exists, for a view of exactly that Context.
+ * - `retired`: the editor is gone and the hook never selects the old Context
+ *   again. `reason` says why: the selection was `declined` (the person kept a
+ *   draft elsewhere, another write was pending, or the runtime refused it),
+ *   another Context was selected elsewhere after activation (`context-changed`),
+ *   or another connection became active at any point (`connection-changed`).
+ *   Open the target again to start over.
+ *
+ * Losing read access after activation does not retire the editor: like other
+ * Context screens it keeps its draft through access loss and recovery, and
+ * saving follows the view's write access.
+ *
+ * `open` with a different target and `close` run under the leave policy, so an
+ * unsaved draft, an open review or a pending write asks first. One target is one
+ * Context: a subject with data in several Contexts appears as several overview
+ * rows, and each row opens its own target.
+ */
+export function useContextEditor<
+  F extends ReturnType<typeof fields<Record<never, never>>>,
+>(
+  definition: F,
+): ContextEditor<ReturnType<F['read']>, Partial<ReturnType<F['read']>>>;
+export function useContextEditor<D>(
+  definition: EditDefinition<D>,
+): ContextEditor<D>;
+export function useContextEditor<D>(
+  definition: EditDefinition<D>,
+): ContextEditor<D> {
+  const app = useController();
+  const { connections, activeId, changing, confirmingLeave, view } =
+    useAppState();
+  const [state, setState] = useState<{
+    readonly lane: ContextLane;
+    readonly retired: ContextEditorRetirement | null;
+  } | null>(null);
+  const lane = state?.lane ?? null;
+  const retired = state?.retired ?? null;
+  const retire = useCallback(
+    (lane: ContextLane, reason: ContextEditorRetirement) =>
+      setState((s) =>
+        s?.lane === lane && s.retired === null ? { lane, retired: reason } : s,
+      ),
+    [],
+  );
+  const current = lane !== null && activeId === lane.connection;
+  const live = current && retired === null;
+  // Only the originating connection may demand discovery for this target.
+  useContextDemand(live);
+  const connection = connections.find((c) => c.id === activeId);
+  const catalogue = connection?.catalogue;
+  const readable =
+    lane !== null &&
+    catalogue?.kind === 'ready' &&
+    catalogue.contexts.some((c) => c.iri === lane.target.context && c.readable);
+  const selected = connection?.selectedContext ?? null;
+  // Another connection became active: the target belongs to the old one. This
+  // also holds during a guarded change and before activation.
+  useEffect(() => {
+    if (lane && !current) retire(lane, 'connection-changed');
+  }, [lane, current, retire]);
+  useEffect(() => {
+    // The opening click itself runs as a guarded navigation; act once it settled.
+    if (!lane || !live || changing || confirmingLeave) return;
+    if (selected === lane.target.context) {
+      lane.activated = true;
+      return;
+    }
+    // Another Context was chosen after this one: never select the old one again.
+    if (lane.activated) return retire(lane, 'context-changed');
+    if (!readable || lane.attempted) return;
+    lane.attempted = true;
+    // Guarded like any Context change: drafts elsewhere ask before leaving.
+    void app.selectContext(lane.target.context).then(
+      (accepted) => {
+        if (accepted) lane.activated = true;
+        else retire(lane, 'declined');
+      },
+      () => retire(lane, 'declined'),
+    );
+  }, [app, lane, live, changing, confirmingLeave, selected, readable, retire]);
+  const editor = useResourceEditor(
+    lane && live && view?.contextIri === lane.target.context
+      ? lane.target.subject
+      : null,
+    definition,
+  );
+  const phase: ContextEditorPhase = !lane
+    ? 'idle'
+    : retired
+      ? 'retired'
+      : editor
+        ? 'ready'
+        : current && catalogue?.kind === 'ready' && !readable
+          ? 'unavailable'
+          : 'activating';
+  return {
+    target: lane?.target ?? null,
+    phase,
+    reason: retired,
+    editor,
+    open: (target) => {
+      if (
+        lane &&
+        retired === null &&
+        lane.target.subject === target.subject &&
+        lane.target.context === target.context
+      )
+        return Promise.resolve(true);
+      if (!app.getSnapshot().activeId) return Promise.resolve(false);
+      return app.navigate(() => {
+        const connection = app.getSnapshot().activeId;
+        if (!connection) return;
+        setState({
+          lane: {
+            target: { subject: target.subject, context: target.context },
+            connection,
+            activated: false,
+            attempted: false,
+          },
+          retired: null,
+        });
+      });
+    },
+    close: () =>
+      lane ? app.navigate(() => setState(null)) : Promise.resolve(true),
+  };
 }
 export type MutationOutcome<D> =
   UpdateOutcome<D> | RemoveSnapshotOutcome<D> | CreateOutcome;

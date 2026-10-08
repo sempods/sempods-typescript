@@ -36,6 +36,7 @@ Full signatures and examples:
 | Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit) | Choose exact predicate/type IRIs and an explicit text language.                 |
 | Read a typed list               | `useList` (React)                                  | Render rows only for `state.kind === 'ready'`; inspect `data.skipped`.          |
 | Read across the Pod             | `usePodLoad` (React), `pod.sparql` (client)        | On-demand provider defers catalogues; writes still require a validated Context. |
+| Edit a Pod-overview row         | `useContextEditor`, `ResourceEditor` (React)       | Open the row's subject and `GRAPH` Context; the hook selects it and rereads.    |
 | Add an item                     | `useCreation` (React)                              | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`.    |
 | Update or remove a row          | `useFieldUpdate` (React)                           | Pass the original list snapshot; respect `canMutate`.                           |
 | Edit a form safely              | `useResourceEditor`, `ResourceEditor` (React)      | Hook owns the editor; component supplies save/delete/recovery UI.               |

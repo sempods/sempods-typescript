@@ -18,10 +18,17 @@ export {
   useList,
   useCreation,
   useResourceEditor,
+  useContextEditor,
   useFieldUpdate,
   useDraftGuard,
 } from './hooks.js';
-export type { MutationOutcome } from './hooks.js';
+export type {
+  ContextEditor,
+  ContextEditorPhase,
+  ContextEditorRetirement,
+  ContextTarget,
+  MutationOutcome,
+} from './hooks.js';
 export {
   AppShell,
   ConnectionControls,
