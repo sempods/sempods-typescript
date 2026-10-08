@@ -365,6 +365,9 @@ tracked in [#52](https://github.com/sempods/sempods-typescript/issues/52).
 
 ### Editing an overview row
 
+`useContextEditor` arrives after 0.4.1; the 0.4.1 overview recipe does the same
+in app code.
+
 An overview row is not an editable snapshot, only a pointer: its subject and the
 Context its `GRAPH` binding names. `useContextEditor(definition)` edits one such
 target in exactly that Context:

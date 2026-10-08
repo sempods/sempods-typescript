@@ -115,11 +115,13 @@ not instructions to the coding assistant.
   is requested, with `AppAccess` alongside for discovery, chooser and explicit
   retry. The default `'required'` policy preserves ordinary CRUD startup.
   `useWorkflowAccess` stays Context-only. Query rows are read-only pointers: to
-  edit an existing item, pass the row's subject and its `GRAPH` Context to
-  `open` of `useContextEditor(definition)`. The hook selects that Context,
-  rereads the item there and saves with its ETag. Render its `editor` only while
-  `phase` is `ready`, and do not reselect a `retired` target. See the
-  [overview recipe](../examples/todo/recipes/pod-overview.tsx),
+  edit an existing item, select/validate its explicit target and reread through
+  that Context with its ETag. With 0.4.1, follow the installed overview recipe,
+  which does this in app code. After 0.4.1, pass the row's subject and its
+  `GRAPH` Context to `open` of `useContextEditor(definition)` instead; the hook
+  selects that Context, rereads the item there and saves with its ETag. Render
+  its `editor` only while `phase` is `ready`, and do not reselect a `retired`
+  target. See the [overview recipe](../examples/todo/recipes/pod-overview.tsx),
   [editing an overview row](react-authoring.md#editing-an-overview-row) and the
   [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
 - For an app that only reads, such as a data explorer, settle that early and
@@ -133,7 +135,7 @@ not instructions to the coding assistant.
   and other languages. Treat incompatible mappings as unsupported, not as empty
   editable records.
 - Prefer `useList`, `useCreation`, `useFieldUpdate`, `useSelection`,
-  `useResourceEditor` and `useContextEditor` with `ResourceEditor`/`UpdateNotice`. Pass original snapshots
+  `useResourceEditor` and, after 0.4.1, `useContextEditor` with `ResourceEditor`/`UpdateNotice`. Pass original snapshots
   to list actions. Use `useApp()`'s guarded actions for custom connection/context
   controls. The authoring guide gives exact signatures and lifecycle rules.
 - Render loading, unavailable access, conflicts and unconfirmed writes distinctly.
