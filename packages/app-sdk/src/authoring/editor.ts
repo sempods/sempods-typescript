@@ -4,8 +4,14 @@ import {
   type EditDefinition,
   type ResourceEditor,
 } from '@sempods/client-sdk/edit';
-import { changed } from './changes.js';
+import { changed, started } from './changes.js';
 import type { BoundView } from '../runtime/view.js';
+
+const targets = new WeakMap<object, BoundView>();
+/** The bound target of an editor from `bindResourceEditor`, if any. */
+export function editorTarget(editor: object) {
+  return targets.get(editor);
+}
 
 /** One editor lifetime bound to the runtime's access facts, usable without React. */
 export function bindResourceEditor<
@@ -28,6 +34,14 @@ export function bindResourceEditor<D>(
   const editor = createResourceEditor(view, iri, definition);
   let previous = view.getSnapshot();
   editor.setAccess(previous);
+  // The editor enters `saving` synchronously when a save or delete starts; a
+  // rebased retry stays in it and is not counted again.
+  let saving = false;
+  const unwatch = editor.subscribe(() => {
+    const now = editor.state.phase === 'saving';
+    if (now && !saving) started(view);
+    saving = now;
+  });
   const unsubscribe = view.subscribe(() => {
     const next = view.getSnapshot();
     editor.setAccess(next);
@@ -43,7 +57,7 @@ export function bindResourceEditor<D>(
     }
     previous = next;
   });
-  return {
+  const bound: ResourceEditor<D> = {
     ...editor,
     get state() {
       return editor.state;
@@ -59,8 +73,11 @@ export function bindResourceEditor<D>(
       return result;
     },
     dispose() {
+      unwatch();
       unsubscribe();
       editor.dispose();
     },
   };
+  targets.set(bound, view);
+  return bound;
 }

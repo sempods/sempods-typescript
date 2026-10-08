@@ -208,7 +208,9 @@ function Tasks() {
 reflect access and pending recovery, and `canCreate` also a valid draft: a blank
 title keeps Add disabled without app code. The input also locks while creation is
 pending or uncertain. `UpdateNotice` checks the captured subject without replay
-before acknowledgement. `useList` refreshes after this target's own confirmed
+before acknowledgement. A success notice retires once another of these writes on
+the target starts, so the notices show the last action; unresolved outcomes stay until
+acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
 [TODO example](../examples/todo/src/app.tsx) adds EN/DE and a custom layout.
 

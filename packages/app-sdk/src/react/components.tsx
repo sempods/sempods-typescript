@@ -4,7 +4,7 @@ import type {
   SaveOutcome,
   RemoveOutcome,
 } from '@sempods/client-sdk/edit';
-import type { MutationOutcome } from './hooks.js';
+import { useStartCount, type MutationOutcome } from './hooks.js';
 import {
   useApp,
   useAppState,
@@ -16,6 +16,8 @@ import { describeFailure, type SdkMessages } from '../locale.js';
 import type { SessionFact } from '../runtime/types.js';
 import { AppAccess } from './access.js';
 import { SdkStyles } from './styles.js';
+import { startCount, succeeded } from '../authoring/changes.js';
+import { editorTarget } from '../authoring/editor.js';
 import { contextName, podName, distinctName } from './names.js';
 
 function Notice({
@@ -549,6 +551,8 @@ function Comparison({
   );
 }
 /** Default save/delete/review UI; children supply only domain fields.
+ * Success feedback retires with any later editor state and, for an editor from
+ * `useResourceEditor`, when another write on the same target starts.
  * Inline scoped --sempods-* styles cover controls and comparisons without changing
  * draft/review lifetime. Host app content outside this editor is not styled.
  */
@@ -569,21 +573,28 @@ export function ResourceEditor<D, U = D>({
     editor: Editor<D, U>;
     state: Editor<D>['state'];
     outcome: SaveOutcome | RemoveOutcome;
+    /** The target's start count at this operation's own start. */
+    start: number;
   } | null>(null);
+  const view = editor ? editorTarget(editor) : undefined;
+  const starts = useStartCount(view);
   if (!editor || editor.state.phase === 'loading')
     return <Notice>{m.loading}</Notice>;
   const state = editor.state;
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
-    const result = await action();
+    // A bound editor counts its own start synchronously in `action()`.
+    const pending = action();
+    const start = view ? startCount(view) : 0;
+    const result = await pending;
     // Review owns its own feedback. Success must not describe edits made
     // while saving; any later editor state also retires this feedback.
     setFeedback(
       result.kind === 'review' ||
         (result.kind === 'saved' && editor.state.dirty)
         ? null
-        : { editor, state: editor.state, outcome: result },
+        : { editor, state: editor.state, outcome: result, start },
     );
-    if (result.kind === 'saved' || result.kind === 'removed') onChanged?.();
+    if (succeeded(result)) onChanged?.();
   };
   return (
     <section data-sempods-ui="editor">
@@ -649,7 +660,10 @@ export function ResourceEditor<D, U = D>({
       {!state.review && (
         <UpdateNotice
           outcome={
-            feedback?.editor === editor && feedback.state === state
+            feedback?.editor === editor &&
+            feedback.state === state &&
+            // Another write started on the target since this one retires it.
+            !(succeeded(feedback.outcome) && feedback.start !== starts)
               ? feedback.outcome
               : null
           }

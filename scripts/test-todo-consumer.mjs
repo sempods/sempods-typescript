@@ -831,7 +831,13 @@ try {
     await newDraft.fill('  First  ');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('button', { name: 'First', exact: true }).waitFor();
+    // Only the last write's success stays visible (#72).
+    const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
+    const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
+    await created.waitFor();
     await page.getByRole('button', { name: 'Complete', exact: true }).click();
+    await saved.waitFor();
+    assert.equal(await created.count(), 0);
     await page.getByRole('button', { name: 'Reopen', exact: true }).click();
     await page.getByRole('button', { name: 'Complete', exact: true }).waitFor();
     await page.getByRole('button', { name: 'First', exact: true }).click();
@@ -839,6 +845,12 @@ try {
     await draft.fill('Renamed');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
+    await page
+      .locator('[data-sempods-ui="editor"]')
+      .getByRole('status')
+      .filter({ hasText: /^Saved\.$/ })
+      .waitFor();
+    assert.equal(await saved.count(), 1);
     await draft.fill('Draft retained');
     await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
     assert.equal(

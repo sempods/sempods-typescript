@@ -221,7 +221,8 @@ RDF terms once; it works with form editing, list actions and the Node consumer.
 renders only a draft and calls `change({ title })` for an original `fields()` definition.
 Copied or arbitrary definitions retain complete-draft replacement and typing, including unions. Feedback applies only to the
 editor state on which the operation settled; a newer dirty draft is never labelled
-saved. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
+saved. For an editor bound to its target (`useResourceEditor`), a success also
+retires when another creation, row mutation or editor write starts on that target. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
 (yes/no for flags, a dash for empty text); pass `labels={{ title: 'Task' }}` to
 name the fields instead of showing their keys.
 
@@ -422,6 +423,16 @@ a context/Pod/disconnect transition. A forced lifetime change retires old result
 Use `<UpdateNotice {...creation.notice} />` and bind input disabled state to
 `!creation.canEdit`, submit to `!creation.canCreate`.
 
+Creation, row and editor feedback on one target follow one rule, so notices
+rendered side by side describe the last write. A success (`created`, `saved`,
+`removed`) retires as soon as another `useCreation`, `useFieldUpdate` or
+`useResourceEditor` write starts on the same target, and is not shown if one
+started while it was pending. Writes through the client-sdk functions or an
+unbound editor do not take part. A failure stays until its own source acts
+again. An unresolved outcome (`unconfirmed`,
+`changed-on-pod`) stays until it is checked and acknowledged; a later success
+never hides or settles it.
+
 These hooks accept definitions created by `fields()`. Keep the collection stable
 for a form; a real definition change starts a fresh form lifetime.
 Advanced clients may also retain a portable `prepareCreation` command and
@@ -474,7 +485,8 @@ bound to `change` and disabled by `!creation.canEdit`, and Create disabled by
 `!creation.canCreate`. What each result leaves behind:
 
 - `created`: confirmed. The draft resets, lists refresh and the next item
-  captures a fresh subject IRI. `outcome` stays `created` until the next `change`.
+  captures a fresh subject IRI. `outcome` stays `created` until the next `change`
+  or until another hook or bound-editor write on the same target starts.
 - `unconfirmed`: the item may exist. Its draft and captured command stay locked
   (`canEdit` and `canCreate` are false). Settle it as described above: present
   evidence resets the draft; observed absence enables Create for the explicit
