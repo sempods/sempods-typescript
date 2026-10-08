@@ -25,8 +25,9 @@ const Context = createContext<{
 } | null>(null);
 /**
  * Guarded user actions for custom screens and replacement controls. Each
- * resolves `false`, discarding nothing, if another connection becomes active
- * outside a guarded action while the person is asked.
+ * guarded action (all except `refreshContexts`) resolves `false`, discarding
+ * nothing, if another connection becomes active outside a guarded action while
+ * the person is asked.
  */
 export interface AppActions {
   /** Switch the active Pod connection; asks before leaving drafts or unconfirmed writes. */
