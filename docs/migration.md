@@ -9,7 +9,7 @@ automatic conversion of legacy app data or stored credentials.
 Upgrade both packages together; Node 24.15 or newer stays the requirement:
 
 ```sh
-npm install --save-exact @sempods/app-sdk@0.4.0 @sempods/client-sdk@0.4.0
+npm install --save-exact @sempods/app-sdk@0.4.1 @sempods/client-sdk@0.4.1
 ```
 
 Session storage, guards and write recovery are unchanged, and the defaults keep
