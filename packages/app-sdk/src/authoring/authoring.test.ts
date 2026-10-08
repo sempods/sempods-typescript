@@ -166,6 +166,19 @@ it('reports no callback outcome when a normal startup finds the lease busy', asy
   });
   expect(app.getSnapshot().callbackNotice).toBe(false);
 });
+it('reports no callback outcome when initialized after dispose', async () => {
+  const f = fixture();
+  f.runtime.dispose();
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().startup).toBeDefined());
+  expect(app.getSnapshot().startup).toMatchObject({
+    interaction: 'none',
+    problem: 'disconnected',
+  });
+  expect(app.getSnapshot().callbackNotice).toBe(false);
+});
 it('guards target and row changes, with busy writes unconditionally blocking', async () => {
   const f = await connected();
   const app = createAppController(f.runtime);

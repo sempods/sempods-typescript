@@ -67,7 +67,7 @@ what to render; the runtime does not render login or recovery UI.
 The report separates interaction (`none`, `completed`, `cancelled`, `failed`)
 from storage (`durable`, `unavailable`, `busy`). Interaction describes the
 returning sign-in only: without a callback it stays `none`, also when storage or
-coordination fails. A rejected callback can coexist
+coordination fails or the runtime was already disposed. A rejected callback can coexist
 with other restored active connections. When the provider answers the stored
 attempt with an OAuth error, the runtime consumes that attempt, ends its
 connection with the classified cause and retires its record (it is listed until

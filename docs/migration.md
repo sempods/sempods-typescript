@@ -26,8 +26,8 @@ automatic conversion of legacy app data or stored credentials.
   the new cases; `describeFailure` and the SDK catalogs already cover them.
   Override the texts through `messages.errors.oauth`.
 - **No callback, no interaction outcome.** A startup without a callback now
-  reports `interaction: 'none'` when storage or coordination fails (previously
-  `failed`); read `storage` and `problem` for that failure.
+  reports `interaction: 'none'` when storage or coordination fails or the
+  runtime was already disposed (previously `failed`); read `storage` and `problem` for that failure.
 - **Callback feedback clears.** `CallbackNotice` and `AppAccess` follow the new
   `AppSnapshot.callbackNotice`, which clears once the person selects another
   connection, disconnects one or starts a sign-in. After a failed callback the

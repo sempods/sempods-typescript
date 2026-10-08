@@ -711,9 +711,10 @@ export function createBrowserRuntime(
     ...(preset ? { preset } : {}),
     ...(allowedPods ? { allowedPods } : {}),
     initialize() {
+      // A disposed runtime processes no callback, so there is no sign-in outcome.
       if (disposed)
         return Promise.resolve({
-          interaction: 'failed',
+          interaction: 'none',
           storage: 'unavailable',
           problem: 'disconnected',
           unreadable: [],
