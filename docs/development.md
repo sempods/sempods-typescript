@@ -119,8 +119,9 @@ scopes show their recovery views directly. A delayed Context catalogue, in
 `'required'` mode and on demand under a mounted `TargetScreen`, passes only
 through the loading status before hiding when a preset Context settles the
 target, and ends at the Context chooser or the catalogue failure view
-otherwise. These are Chromium fixture checks, not live-Pod or installed-PWA evidence. See
-[browser runtime](browser-runtime.md) for the implemented API and its limits.
+otherwise. These are Chromium fixture checks, not live-Pod or installed-PWA
+evidence. See [browser runtime](browser-runtime.md) for the implemented API and
+its limits.
 
 No implementation/test command publishes packages. Both SDK packages are
 publishable; the workspace root and examples stay private. Publishing is a

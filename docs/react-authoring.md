@@ -68,8 +68,8 @@ connection view (with its addresses and actions) appears when something needs a
 decision: an ended session, missing required scopes, a Context choice after the
 catalogue loaded, a failed catalogue, or when the host opens it with `open`.
 The context picker lists readable contexts only and says so when the Pod grants
-none. Unavailable session storage prevents startup; controls
-remain blocked with a reload notice (there is no in-memory session fallback).
+none. Unavailable session storage prevents startup; controls remain blocked
+with a reload notice (there is no in-memory session fallback).
 `AppShell`, `ConnectionControls` and fully custom layouts remain supported;
 custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 
@@ -343,8 +343,8 @@ that operation will succeed.
 Mount `TargetScreen` as soon as the Context flow is wanted, **before** a view
 exists. It demands the active eligible connection's catalogue even if it mounted
 before login completed. Concurrent/StrictMode demand shares the runtime operation.
-`AppAccess` then exposes the chooser, empty/error feedback and explicit **Check
-access** retry. Opening its `open` management also demands discovery. Ready,
+After the loading status of that first load, `AppAccess` exposes the chooser,
+empty/error feedback and explicit **Check access** retry. Opening its `open` management also demands discovery. Ready,
 empty and failed catalogues are reused, with no effect-driven retry loop.
 Custom UI uses existing `useApp().refreshContexts(id)` and guarded `selectContext`;
 it supplies its own chooser/retry presentation. No separate activation API is needed.
