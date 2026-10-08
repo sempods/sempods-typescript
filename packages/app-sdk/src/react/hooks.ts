@@ -6,6 +6,7 @@ import {
   useCallback,
 } from 'react';
 import {
+  RuntimeError,
   bindResourceEditor,
   createViewLoader,
   type BoundView,
@@ -534,12 +535,12 @@ export function useContextEditor<D>(
       // The row belongs to the connection active when it is opened.
       const connection = app.getSnapshot().activeId;
       if (!connection) return Promise.resolve(false);
-      let opened = false;
       return app
         .navigate(() => {
-          // Another connection became active while the leave policy asked.
-          if (app.getSnapshot().activeId !== connection) return;
-          opened = true;
+          // Another connection became active while the leave policy asked:
+          // fail, so confirming discards no draft (as for selectContext).
+          if (app.getSnapshot().activeId !== connection)
+            throw new RuntimeError('disconnected');
           setState({
             lane: {
               target: { subject: target.subject, context: target.context },
@@ -550,7 +551,7 @@ export function useContextEditor<D>(
             activated: false,
           });
         })
-        .then((left) => left && opened);
+        .catch(() => false);
     },
     close: () =>
       lane ? app.navigate(() => setState(null)) : Promise.resolve(true),

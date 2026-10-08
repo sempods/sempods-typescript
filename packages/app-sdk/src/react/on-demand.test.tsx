@@ -1182,6 +1182,18 @@ it('requires readable evidence again when a row is reopened after read loss', as
   await waitFor(() => expect(title().value).toBe('A at work'));
 });
 
+/** A draft that row navigation leaves (local scope) and that stays mounted. */
+function LocalDraft() {
+  const [draft, setDraft] = useState('');
+  useDraftGuard(draft !== '', () => setDraft(''), 'local');
+  return (
+    <input
+      aria-label="Local draft"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+    />
+  );
+}
 it('keeps an opened row on its connection when another becomes active during the leave prompt', async () => {
   const { f, runtime, other, otherUrl } = await twoPods(false);
   const bob = () =>
@@ -1189,6 +1201,7 @@ it('keeps an opened row on its connection when another becomes active during the
   render(
     <SempodsProvider runtime={runtime} contextSelection="on-demand">
       <RowEditor />
+      <LocalDraft />
       <Switch id={f.id} />
     </SempodsProvider>,
   );
@@ -1196,6 +1209,9 @@ it('keeps an opened row on its connection when another becomes active during the
   await edit('Edit urn:a in work', f.id);
   await waitFor(() => expect(title().value).toBe('A at work'));
   fireEvent.change(title(), { target: { value: 'Unsaved' } });
+  fireEvent.change(screen.getByLabelText('Local draft'), {
+    target: { value: 'Kept' },
+  });
   fireEvent.click(screen.getByText('Edit urn:b in work'));
   await screen.findByRole('alertdialog');
   const before = bob().length;
@@ -1211,6 +1227,10 @@ it('keeps an opened row on its connection when another becomes active during the
   await act(async () => {});
   expect(screen.queryByLabelText('Note title')).toBeNull();
   expect(bob().slice(before)).toEqual([]);
+  // Nothing opened, so confirming discarded no draft that is still mounted.
+  expect((screen.getByLabelText('Local draft') as HTMLInputElement).value).toBe(
+    'Kept',
+  );
 });
 
 function Unsaved() {
