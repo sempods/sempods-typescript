@@ -91,6 +91,13 @@ later request.
 _Why:_ overviews and cross-Context joins need one authorized query, while scoped
 reads and writes need explicit targets. Readers do not need to enumerate Contexts.
 
+The write target need not be the selected Context. `runtime.bindContext` binds
+an explicit, catalogue-checked Context without changing or remembering the
+selection. It always returns a handle of its own and keeps a read-invalidation
+domain per Context that selection changes never touch. Access follows the same
+retained catalogue evidence as the selected view. An exact preset `contextIri`
+also restricts explicit targets on its Pod.
+
 Client-sdk and the browser runtime implement independent Pod readers.
 `BoundPod` invalidation depends on connection/session/grants, while Context
 switches and catalogue/label changes affect only Context-bound flows. The

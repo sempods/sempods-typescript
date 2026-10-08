@@ -92,7 +92,9 @@ for startup outcomes, restrictions and recovery limits.
 for the signed-in connection's authorized dataset. It needs no catalogue or
 selected context. Required feature scopes gate dispatch; Context/label changes
 do not invalidate these independent reads. Writes remain on a validated
-`BoundView`.
+`BoundView`. After 0.4.1, `runtime.bindContext(connectionId, contextIri)` binds
+such a view to an explicit Context, for example a row's `GRAPH` Context, without
+changing the selection.
 
 For a React overview, use `contextSelection="on-demand"` on `SempodsProvider`
 and `usePodLoad`. Startup and read recovery then request no catalogue. Mount

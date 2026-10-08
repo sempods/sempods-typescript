@@ -683,6 +683,29 @@ try {
       .slice(beforePodReads)
       .every((request) => request.path.endsWith('/_system/sparql/query')),
   );
+  // An explicit Context binding: its own handle, scoped to that Context, and
+  // the selection stays as it was.
+  const beforeExplicit = traffic.length;
+  const explicit = await page.evaluate(async () => {
+    const runtime = window.fixture.runtime;
+    const connection = runtime.getSnapshot()[0];
+    const view = runtime.bindContext(connection.id, connection.selectedContext);
+    return {
+      contextIri: connection.selectedContext,
+      distinct: view !== runtime.bind(connection.id),
+      cached:
+        runtime.bindContext(connection.id, connection.selectedContext) === view,
+      read: view.getSnapshot().read,
+      result: (await view.sparql.construct('CONSTRUCT {} WHERE {}')).kind,
+      selection: runtime.getSnapshot()[0].selectedContext,
+    };
+  });
+  assert.equal(explicit.distinct, true);
+  assert.equal(explicit.cached, true);
+  assert.equal(explicit.read, true);
+  assert.equal(explicit.result, 'ok');
+  assert.equal(explicit.selection, explicit.contextIri);
+  assert.equal(traffic.slice(beforeExplicit).length, 1);
 
   assert.deepEqual(
     await page.evaluate(() => window.fixture.editTask('Saved')),
@@ -1460,7 +1483,7 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
   console.log(
-    'Packed runtime in Chromium: PKCE redirects, durable reload, two pods with independent callback/restore, reactive refresh, conditional editing/conflict/unknown outcome, did:web, native IndexedDB/Web Locks with two-tab lease handover and cookie omission passed (production client).',
+    'Packed runtime in Chromium: PKCE redirects, durable reload, two pods with independent callback/restore, reactive refresh, conditional editing/conflict/unknown outcome, explicit Context binding, did:web, native IndexedDB/Web Locks with two-tab lease handover and cookie omission passed (production client).',
   );
 } finally {
   await browser?.close();

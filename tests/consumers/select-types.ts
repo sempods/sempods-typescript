@@ -74,6 +74,18 @@ export function loaders(view: BoundView, pod: BoundPod) {
   return { scoped, overview };
 }
 
+// An explicit Context binding is an ordinary Context view, also React-free.
+export function explicitContext(
+  runtime: BrowserRuntime,
+  id: string,
+  contextIri: string,
+): BoundView {
+  const view: BoundView = runtime.bindContext(id, contextIri);
+  const iri: string = view.contextIri;
+  void iri;
+  return view;
+}
+
 // The installed React-free app entry exposes the reader without a write surface.
 export async function runtimeRead(
   runtime: BrowserRuntime,

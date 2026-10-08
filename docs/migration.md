@@ -59,9 +59,15 @@ automatic conversion of legacy app data or stored credentials.
   the inactive connection's Context. A prompt asked while no connection was
   active is unaffected. Headless hosts close their own prompt when
   `confirmingLeave` turns false.
+- **Custom runtimes.** `BrowserRuntime` gained the required member
+  `bindContext`. A fake runtime or test double typed as `BrowserRuntime` must
+  provide it.
 
 New in the next release:
 
+- `runtime.bindContext(id, contextIri)` binds a `BoundView` to an explicit
+  Context without changing the selection, with its own read invalidation; see
+  [bind an explicit Context](browser-runtime.md#bind-an-explicit-context).
 - `AppAccess` accepts `podAddress="hidden"` to omit the Pod address from
   signing in when the runtime permits exactly one Pod. It defaults to
   `'visible'`, so existing apps are unchanged; see
