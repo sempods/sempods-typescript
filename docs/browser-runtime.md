@@ -492,8 +492,10 @@ it reports a network error instead. The write conditions turn such a resend into
 a `412`, so nothing is applied twice, but the SDK sees the `412` instead of a lost
 answer. A creation therefore reports every failed create-only condition as
 `unconfirmed` and keeps its IRI; `desiredObserved` tells whether the IRI holds
-its body. An update or deletion reports a conflict, whose comparison shows the
-Pod already holds the change.
+its body. An update reports a conflict, whose comparison shows the Pod already
+holds the change. A resent deletion finds the resource gone: a Pod answering `412`
+yields a conflict, one answering `404` yields `not-removed` with reason
+`not-found`. Neither tells whether this deletion or another writer removed it.
 
 Supported environments: current browsers with IndexedDB and Web Locks in a
 normal browser tab; automated checks run in Chromium. Installed PWAs are
