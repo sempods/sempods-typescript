@@ -52,11 +52,13 @@ automatic conversion of legacy app data or stored credentials.
   another write, now sees `null`; read the result `create()` returns instead.
 - **A leave prompt ends with its connection.** When the leave policy asks
   before a guarded action (`selectContext`, `navigate`, `selectConnection` and
-  the others) and another connection becomes active outside such an action (a
-  returning sign-in, or the active connection removed), the prompt is
-  cancelled: the action resolves `false`, nothing runs and no draft is
+  the others) and the connection that was active then stops being active
+  outside such an action (a returning sign-in, or that connection removed), the
+  prompt is cancelled: the action resolves `false`, nothing runs and no draft is
   discarded. Previously confirming ran the stale action, for example changing
-  the inactive connection's Context.
+  the inactive connection's Context. A prompt asked while no connection was
+  active is unaffected. Headless hosts close their own prompt when
+  `confirmingLeave` turns false.
 
 New in the next release:
 

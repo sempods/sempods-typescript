@@ -34,6 +34,13 @@ export interface AppSnapshot {
   readonly view: BoundView | null;
   /** Reader for the active signed-in Pod; independent of selected Context and catalogue. */
   readonly pod: BoundPod | null;
+  /**
+   * A leave prompt is pending. It ends with `confirmLeave()` or `cancelLeave()`,
+   * or by itself when the connection that was active when it asked stops being
+   * active outside a guarded action (a returning sign-in, or that connection
+   * removed): the controller then cancels it. Close a custom prompt whenever
+   * this turns false.
+   */
   readonly confirmingLeave: boolean;
   readonly unconfirmedLeave: boolean;
   /** Hosts must prevent new user input while a guarded action is preparing. */
@@ -98,10 +105,11 @@ export function createAppController(
           ? connections.find((c) => c.podUrl === runtime.preset!.podUrl)
           : connections[0]
         )?.id ?? null;
-    // A prompt is about the connection it was asked for. Another one becoming
-    // active without a guarded action (a returning sign-in, a removed
-    // connection) cancels it: nothing runs and no guard is discarded.
-    if (pending && pending.activeId !== activeId) {
+    // A prompt is about the connection it was asked for. That connection
+    // stopping being active without a guarded action (a returning sign-in, a
+    // removed connection) cancels it: nothing runs and no guard is discarded.
+    // A prompt asked without any active connection is not about one.
+    if (pending && pending.activeId !== null && pending.activeId !== activeId) {
       pending.resolve(false);
       pending = undefined;
     }
@@ -239,8 +247,12 @@ export function createAppController(
         guards.delete(guard);
       };
     },
-    /** Local navigation only; remote mutations must use the edit helpers. */
+    /**
+     * Local navigation only; remote mutations must use the edit helpers.
+     * Guarded like the actions below.
+     */
     navigate: (action: () => void | Promise<void>) => guard(action, 'local'),
+    /** Runs the pending prompt's action, then discards the guards it leaves. */
     async confirmLeave() {
       const intent = pending;
       if (!intent || [...guards].some((g) => g.blocked())) return;
@@ -270,11 +282,17 @@ export function createAppController(
         publish();
       }
     },
+    /** Declines the pending prompt; its action resolves `false`. */
     cancelLeave() {
       pending?.resolve(false);
       pending = undefined;
       publish();
     },
+    /**
+     * Guarded actions: each asks first while a guard is dirty and resolves
+     * `false`, discarding nothing, when a guard is blocked, the person declines,
+     * or the prompt is cancelled (see `AppSnapshot.confirmingLeave`).
+     */
     selectConnection(id: string) {
       if (id === activeId) return Promise.resolve(true);
       return guard(() => {
@@ -286,6 +304,7 @@ export function createAppController(
         publish();
       });
     },
+    /** Guarded like `selectConnection`. */
     selectContext(iri: string) {
       const id = activeId;
       if (!id) return Promise.resolve(false);
@@ -297,6 +316,7 @@ export function createAppController(
         runtime.selectContext(id, iri);
       });
     },
+    /** Guarded like `selectConnection`. */
     connect(url = defaultPodUrl) {
       return guard(async () => {
         callbackNotice = false;
@@ -313,12 +333,14 @@ export function createAppController(
         publish();
       });
     },
+    /** Guarded like `selectConnection`. */
     authorize(id: string) {
       return guard(() => {
         callbackNotice = false;
         return runtime.beginAuthorization(id);
       });
     },
+    /** Guarded like `selectConnection`. */
     disconnect(id: string) {
       return guard(async () => {
         if ((await runtime.disconnect(id)).kind === 'disconnected')
