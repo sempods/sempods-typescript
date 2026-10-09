@@ -434,7 +434,9 @@ it.each([
   f.setResource(request);
   fireEvent.click(screen.getByRole('button', { name: operation }));
   const changed = 'The pod has changed. Compare before continuing.';
-  await screen.findByRole('alert');
+  // The first case runs the review path cold (about five times slower than the
+  // others locally), which exceeded the default second on loaded CI runners.
+  await screen.findByRole('alert', {}, { timeout: 5000 });
   expect(screen.getByText(changed)).toBeTruthy();
   await waitFor(() =>
     expect((screen.getByText(recovery) as HTMLButtonElement).disabled).toBe(
