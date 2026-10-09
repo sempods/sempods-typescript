@@ -175,8 +175,9 @@ export interface BrowserRuntime {
    * Access follows the last confirmed catalogue evidence for this Context, as
    * for the selected view: without it, or once a successful catalogue removes
    * the permission, requests are not dispatched. A permission change for this
-   * Context, changed grants, session end, subject change, a new authorization
-   * or disconnect invalidate its pending reads; a selection change does not.
+   * Context, changed grants, session end (also when a renewal answers for
+   * another subject), a new authorization or disconnect invalidate its pending
+   * reads; a selection change does not.
    *
    * It shares write observation with every other handle for the same Context of
    * this authorization lifetime, including the selected view: writes made

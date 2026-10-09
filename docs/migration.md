@@ -67,6 +67,12 @@ automatic conversion of legacy app data or stored credentials.
   active. Without a callback nothing changes in practice. Tests that act on a
   view right after rendering should wait for startup to settle first. Pod
   reads through `pod` stay available.
+- **Fewer re-renders.** `useView()` re-renders its component only when the
+  view changes, no longer on every app state publish such as a token renewal
+  or another connection's catalogue. A component hosting `useContextEditor`
+  re-renders only for the editor's own facts. A component that read other app
+  state outside `useAppState` and relied on those re-renders should read it
+  through `useAppState`.
 - **Custom runtimes.** `BrowserRuntime` gained the required member
   `bindContext`. A fake runtime or test double typed as `BrowserRuntime` must
   provide it.
