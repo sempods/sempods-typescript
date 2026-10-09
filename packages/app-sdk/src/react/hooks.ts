@@ -37,6 +37,8 @@ import type { JsonLd } from '@sempods/client-sdk';
 import { startupSettled } from '../authoring/app.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
+  shallowEqual,
+  useAppFacts,
   useAppState,
   useContextDemand,
   useController,
@@ -444,8 +446,6 @@ export function useContextEditor<D>(
   definition: EditDefinition<D>,
 ): ContextEditor<D> {
   const app = useController();
-  const snapshot = useAppState();
-  const { connections, activeId, pod } = snapshot;
   const [state, setState] = useState<ContextLaneState | null>(null);
   // The latest lane state, ahead of rendering: open() and close() chained from
   // one render (`await open(); await close()`) act on what is current.
@@ -469,6 +469,21 @@ export function useContextEditor<D>(
     readonly result: Promise<boolean>;
   } | null>(null);
   const lane = state?.lane ?? null;
+  // Only the facts this hook uses: a token renewal or another connection's
+  // catalogue does not re-render the host.
+  const laneConnection = lane?.connection;
+  const { activeId, ready, laneCatalogue } = useAppFacts(
+    (s) => ({
+      activeId: s.activeId,
+      // No Context-bound editor before startup settles (a returning sign-in
+      // may still replace the active connection), as for the selected view.
+      // `pod` exists while the active connection is signed in.
+      ready: startupSettled(s) && s.pod !== null,
+      laneCatalogue: s.connections.find((c) => c.id === laneConnection)
+        ?.catalogue,
+    }),
+    shallowEqual,
+  );
   const binding = state?.binding ?? null;
   const bound = binding === 'refused' ? null : binding;
   const activated = state?.activated ?? false;
@@ -476,9 +491,7 @@ export function useContextEditor<D>(
   // Only the originating connection may demand discovery for this target, and
   // only once the runtime accepted the binding: a refused target sends nothing.
   useContextDemand(live && bound !== null);
-  const catalogue = live
-    ? connections.find((c) => c.id === lane!.connection)?.catalogue
-    : undefined;
+  const catalogue = live ? laneCatalogue : undefined;
   // The binding's own rule for catalogue evidence, without its required-scope
   // check: a target missing scopes would otherwise stay loading with no problem
   // to present. A newly opened row needs a successful listing, not retained
@@ -487,10 +500,6 @@ export function useContextEditor<D>(
     live &&
     catalogue?.kind === 'ready' &&
     catalogueLists(catalogue, lane!.target.context);
-  // No Context-bound editor before startup settles (a returning sign-in may
-  // still replace the active connection), as for the selected view. `pod`
-  // exists while the active connection is signed in.
-  const ready = startupSettled(snapshot) && pod !== null;
   useEffect(() => {
     if (!lane) return;
     if (lane.connection !== activeId) {

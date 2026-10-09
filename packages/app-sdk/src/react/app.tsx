@@ -13,6 +13,7 @@ import {
 import {
   createAppController,
   type AppController,
+  type AppSnapshot,
   type BrowserRuntime,
   type LocaleOptions,
 } from '../index.js';
@@ -61,6 +62,41 @@ export function useAppState() {
   const app = useController();
   return useSyncExternalStore(app.subscribe, app.getSnapshot, app.getSnapshot);
 }
+/** Equal flat objects: the same keys with `Object.is`-equal values. */
+export function shallowEqual<T extends object>(a: T, b: T) {
+  const keys = Object.keys(a) as (keyof T)[];
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((k) => Object.hasOwn(b, k) && Object.is(a[k], b[k]))
+  );
+}
+/**
+ * Internal: the facts `select` derives from the app snapshot. The component
+ * re-renders only when they change by `equal`, not on every publish.
+ */
+export function useAppFacts<T>(
+  select: (snapshot: AppSnapshot) => T,
+  equal: (a: T, b: T) => boolean = Object.is,
+): T {
+  const app = useController();
+  const cache = useRef<{
+    readonly source: AppSnapshot;
+    readonly select: (snapshot: AppSnapshot) => T;
+    readonly value: T;
+  } | null>(null);
+  const read = () => {
+    const source = app.getSnapshot();
+    const last = cache.current;
+    if (last && last.source === source && last.select === select)
+      return last.value;
+    const next = select(source);
+    // Equal facts keep their identity, so useSyncExternalStore skips the render.
+    const value = last && equal(last.value, next) ? last.value : next;
+    cache.current = { source, select, value };
+    return value;
+  };
+  return useSyncExternalStore(app.subscribe, read, read);
+}
 /** Pass one runtime created outside render. The provider consumes its single initializer. */
 export function SempodsProvider({
   runtime,
@@ -104,9 +140,12 @@ export function SempodsProvider({
       setDemands((count) => count - 1);
     };
   }, []);
+  // Only whether any demand exists reaches consumers: another retain or
+  // release does not re-render every SDK hook.
+  const contextDemand = demands > 0;
   const value = useMemo(
-    () => ({ ...owner, contextDemand: demands > 0, retainContext }),
-    [owner, demands, retainContext],
+    () => ({ ...owner, contextDemand, retainContext }),
+    [owner, contextDemand, retainContext],
   );
   const app = owner.controller;
   useEffect(() => {
@@ -148,27 +187,35 @@ const noSubscription = () => () => {};
 export function useContextDemand(active: boolean) {
   const value = useContext(Context);
   if (!value) throw new Error('SempodsProvider is required.');
-  const state = useAppState();
-  const connection = state.connections.find((c) => c.id === state.activeId);
+  // Only the facts used here: a token renewal or another connection's
+  // catalogue does not re-render the host.
+  const { mode, id, signedIn, catalogue } = useAppFacts((s) => {
+    const connection = s.connections.find((c) => c.id === s.activeId);
+    return {
+      mode: s.contextSelection,
+      id: connection?.id,
+      signedIn:
+        connection?.session.kind === 'active' ||
+        connection?.session.kind === 'renewing',
+      catalogue: connection?.catalogue.kind,
+    };
+  }, shallowEqual);
   const { retainContext } = value;
   useEffect(
     () => (active ? retainContext() : undefined),
     [active, retainContext],
   );
-  const id = connection?.id;
-  const session = connection?.session.kind;
-  const catalogue = connection?.catalogue.kind;
   useEffect(() => {
     if (
       active &&
-      state.contextSelection === 'on-demand' &&
+      mode === 'on-demand' &&
       id &&
-      (session === 'active' || session === 'renewing') &&
+      signedIn &&
       catalogue === 'unknown'
     )
       void value.actions.refreshContexts(id).catch(() => {});
-  }, [active, state.contextSelection, id, session, catalogue, value.actions]);
-  return state.contextSelection === 'required' || active || value.contextDemand;
+  }, [active, mode, id, signedIn, catalogue, value.actions]);
+  return mode === 'required' || active || value.contextDemand;
 }
 /** Context-view access for the active connection, in both modes; Pod readers have their own snapshot. */
 export function useWorkflowAccess() {
