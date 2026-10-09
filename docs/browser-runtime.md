@@ -326,7 +326,10 @@ pending reads nor change its target.
   (changed grants, session end, a changed subject, a new authorization,
   disconnect or disposal) invalidate all of the connection's bindings, explicit
   and selected alike. Writes keep their actual result, as for every
-  `BoundView`.
+  `BoundView`. Within one runtime a renewal never changes the subject: a token
+  for another person fails refresh continuity and ends the session. A new
+  sign-in completes on the callback page, so the new identity's handles
+  belong to a new runtime and never meet the old ones.
 - **Write observation.** Handles for the same Context of one authorization
   lifetime share their write events and write-start counts. A confirmed write
   made through the SDK's editors and hooks (`bindResourceEditor` or

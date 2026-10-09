@@ -535,9 +535,7 @@ it('re-renders its host for its own facts only, not for a renewal or another con
   notes(f);
   let alice = () => catalogue();
   f.setCatalogue(async (url) =>
-    url.startsWith(otherUrl)
-      ? catalogue([], [], otherUrl)
-      : alice(),
+    url.startsWith(otherUrl) ? catalogue([], [], otherUrl) : alice(),
   );
   let renders = 0;
   function Host() {
@@ -567,12 +565,23 @@ it('re-renders its host for its own facts only, not for a renewal or another con
   function Active() {
     return <output data-testid="active">{useAppState().activeId}</output>;
   }
+  // A sibling that adds a second Context demand by mounting a TargetScreen.
+  function Sibling() {
+    const [mounted, setMounted] = useState(false);
+    return (
+      <>
+        <button onClick={() => setMounted(true)}>Mount screen</button>
+        {mounted && <TargetScreen>{null}</TargetScreen>}
+      </>
+    );
+  }
   render(
     ui(
       runtime,
       <>
         <Host />
         <Active />
+        <Sibling />
         <Switch id={f.id} />
       </>,
     ),
@@ -582,6 +591,10 @@ it('re-renders its host for its own facts only, not for a renewal or another con
   await waitFor(() => expect(title().value).toBe('A at work'));
   await act(async () => {});
   const before = renders;
+  // Another Context demand while the host already demands one.
+  fireEvent.click(screen.getByText('Mount screen'));
+  await act(async () => {});
+  expect(renders).toBe(before);
   // Another connection's catalogue refresh.
   await act(() => runtime.loadContexts(other.id));
   expect(renders).toBe(before);
