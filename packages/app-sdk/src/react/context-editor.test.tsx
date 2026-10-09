@@ -31,6 +31,7 @@ import {
   fixture,
   personal,
   pod,
+  renewal,
   resourceIri,
   returnedSession,
   twoPods,
@@ -84,6 +85,8 @@ function notes(f: { setResource(fn: PodFetch): void }) {
   const control = {
     hold: null as Promise<void> | null,
     offline: false,
+    /** `202` leaves a write unconfirmed. */
+    writeStatus: 204,
   };
   f.setResource(async (url, init) => {
     const target = new URL(url);
@@ -110,6 +113,8 @@ function notes(f: { setResource(fn: PodFetch): void }) {
       ifMatch: new Headers(init?.headers).get('if-match'),
     });
     await control.hold;
+    if (control.writeStatus !== 204)
+      return new Response(null, { status: control.writeStatus });
     if (stored) stored.version++;
     return new Response(null, { status: 204 });
   });
@@ -525,6 +530,95 @@ it.each(['before', 'after'] as const)(
   },
 );
 
+it('re-renders its host for its own facts only, not for a renewal or another connection', async () => {
+  const { f, runtime, other, otherUrl } = await twoPods(keep);
+  notes(f);
+  let alice = () => catalogue();
+  f.setCatalogue(async (url) =>
+    url.startsWith(otherUrl) ? catalogue([], [], otherUrl) : alice(),
+  );
+  let renders = 0;
+  function Host() {
+    renders++;
+    const edit = useContextEditor(note);
+    return (
+      <>
+        <output data-testid="phase">{edit.phase}</output>
+        <button onClick={() => void edit.open(rows[0]!)}>
+          {label(rows[0]!)}
+        </button>
+        {edit.editor && (
+          <ResourceEditor editor={edit.editor}>
+            {(value, change) => (
+              <input
+                aria-label="Note title"
+                value={value.title}
+                onChange={(e) => change({ title: e.target.value })}
+              />
+            )}
+          </ResourceEditor>
+        )}
+      </>
+    );
+  }
+  // Reads the whole snapshot outside the host: its renders prove a publish.
+  let published = 0;
+  function Active() {
+    published++;
+    return <output data-testid="active">{useAppState().activeId}</output>;
+  }
+  // A sibling that adds a second Context demand by mounting a TargetScreen.
+  function Sibling() {
+    const [mounted, setMounted] = useState(false);
+    return (
+      <>
+        <button onClick={() => setMounted(true)}>Mount screen</button>
+        {mounted && <TargetScreen>{null}</TargetScreen>}
+      </>
+    );
+  }
+  render(
+    ui(
+      runtime,
+      <>
+        <Host />
+        <Active />
+        <Sibling />
+        <Switch id={f.id} />
+      </>,
+    ),
+  );
+  fireEvent.click(await screen.findByText('Switch Pod'));
+  await open('Edit urn:a in work', f.id);
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  await act(async () => {});
+  const before = renders;
+  // Another Context demand while the host already demands one.
+  fireEvent.click(screen.getByText('Mount screen'));
+  await act(async () => {});
+  expect(renders).toBe(before);
+  // Another connection's catalogue refresh.
+  let publishes = published;
+  await act(() => runtime.loadContexts(other.id));
+  expect(published).toBeGreaterThan(publishes);
+  expect(renders).toBe(before);
+  // A token renewal of the host's own connection, after a refused request.
+  publishes = published;
+  const tokens = f.count('/token');
+  await act(() => renewal(f, runtime, f.id, 'rotated'));
+  expect(f.count('/token')).toBe(tokens + 1);
+  expect(published).toBeGreaterThan(publishes);
+  expect(runtime.getSnapshot().find((c) => c.id === f.id)?.session.kind).toBe(
+    'active',
+  );
+  expect(renders).toBe(before);
+  // Its own connection's catalogue is one of its facts.
+  alice = () => catalogue([work]);
+  await act(() => runtime.loadContexts(f.id));
+  expect(renders).toBeGreaterThan(before);
+  expect(phase()).toBe('ready');
+});
+
 it('binds nothing until startup settles', async () => {
   const f = await returned();
   const { reads } = notes(f);
@@ -610,48 +704,78 @@ it('surfaces an unexpected binding failure instead of reporting a refusal', asyn
   );
 });
 
-it('keeps the editor and its draft when the session ends, and reopens the row in a fresh lane', async () => {
+/**
+ * Ends the session through a renewal: refused, or answered for another person.
+ * Refresh continuity never adopts another subject within one runtime.
+ */
+async function endSession(
+  f: Awaited<ReturnType<typeof returned>>,
+  mode: 'refused' | 'subject-change',
+) {
+  await act(() => renewal(f, f.runtime, f.id, mode));
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session).toMatchObject({
+      kind: 'ended',
+      ...(mode === 'subject-change' ? { problem: 'claims' } : {}),
+    }),
+  );
+}
+
+it.each(['refused', 'subject-change'] as const)(
+  'keeps the editor and its draft when a %s renewal ends the session, and reopens the row in a fresh lane',
+  async (mode) => {
+    const f = await returned();
+    notes(f);
+    render(ui(f.runtime));
+    await open('Edit urn:a in work');
+    await waitFor(() => expect(title().value).toBe('A at work'));
+    const input = title();
+    fireEvent.change(input, { target: { value: 'Unsaved' } });
+    await endSession(f, mode);
+    expect(phase()).toBe('ready');
+    expect(title()).toBe(input);
+    expect(input.value).toBe('Unsaved');
+    // The binding can never become valid again: reopening the same row starts a
+    // fresh lane, and the leave policy asks about the old draft first.
+    fireEvent.click(screen.getByText('Edit urn:a in work'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Keep editing' }),
+    );
+    expect(title().value).toBe('Unsaved');
+    // The declined open settles before the person clicks again.
+    await act(async () => {});
+    fireEvent.click(screen.getByText('Edit urn:a in work'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Discard and continue' }),
+    );
+    await waitFor(() => expect(phase()).toBe('loading'));
+    expect(screen.queryByLabelText('Note title')).toBeNull();
+  },
+);
+
+it('keeps an unconfirmed-write review when a renewal for another person ends the session', async () => {
   const f = await returned();
-  notes(f);
+  const { writes, control } = notes(f);
   render(ui(f.runtime));
   await open('Edit urn:a in work');
   await waitFor(() => expect(title().value).toBe('A at work'));
-  const input = title();
-  fireEvent.change(input, { target: { value: 'Unsaved' } });
-  // The session ends: a renewal after a refused request is refused too.
-  f.setQuery(
-    async () =>
-      new Response(null, {
-        status: 401,
-        headers: { 'www-authenticate': 'Bearer' },
-      }),
-  );
-  f.setToken(async () => new Response(null, { status: 400 }));
-  await act(async () => {
-    await f.runtime
-      .bindPod(f.id)
-      .sparql.construct('CONSTRUCT {} WHERE {}')
-      .catch(() => {});
-  });
-  await waitFor(() =>
-    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('ended'),
-  );
+  control.writeStatus = 202;
+  fireEvent.change(title(), { target: { value: 'Sent' } });
+  fireEvent.click(screen.getByText('Save'));
+  await screen.findByText(/unconfirmed/i);
+  expect(writes).toHaveLength(1);
+  await endSession(f, 'subject-change');
   expect(phase()).toBe('ready');
-  expect(title()).toBe(input);
-  expect(input.value).toBe('Unsaved');
-  // The binding can never become valid again: reopening the same row starts a
-  // fresh lane, and the leave policy asks about the old draft first.
+  expect(screen.getByText(/unconfirmed/i)).toBeTruthy();
+  // Reopening names the unconfirmed write, and keeping it keeps the review.
   fireEvent.click(screen.getByText('Edit urn:a in work'));
-  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
-  expect(title().value).toBe('Unsaved');
-  // The declined open settles before the person clicks again.
+  const dialog = await screen.findByRole('alertdialog');
+  expect(dialog.textContent).toMatch(/write is still unconfirmed/);
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
   await act(async () => {});
-  fireEvent.click(screen.getByText('Edit urn:a in work'));
-  fireEvent.click(
-    await screen.findByRole('button', { name: 'Discard and continue' }),
-  );
-  await waitFor(() => expect(phase()).toBe('loading'));
-  expect(screen.queryByLabelText('Note title')).toBeNull();
+  expect(phase()).toBe('ready');
+  expect(screen.getByText(/unconfirmed/i)).toBeTruthy();
+  expect(writes).toHaveLength(1);
 });
 
 it('needs a successful listing for a row opened after a failed catalogue refresh', async () => {

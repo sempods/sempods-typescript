@@ -203,6 +203,60 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
         .length,
   };
 }
+/** A Pod's refusal of the current credential. */
+export const unauthorized = () =>
+  new Response(null, {
+    status: 401,
+    headers: { 'www-authenticate': 'Bearer' },
+  });
+/**
+ * Makes `runtime` renew the credential of connection `id` after one refused
+ * Pod read. The token endpoint `answer`s with a rotated token, a refusal, or a
+ * token for another person, which refresh continuity rejects.
+ */
+export async function renewal(
+  f: Pick<ReturnType<typeof fixture>, 'setQuery' | 'setToken'>,
+  runtime: BrowserRuntime,
+  id: string,
+  answer: 'rotated' | 'refused' | 'subject-change',
+) {
+  let calls = 0;
+  f.setQuery(async () => (++calls === 1 ? unauthorized() : Response.json([])));
+  f.setToken(async () =>
+    answer === 'refused'
+      ? new Response(null, { status: 400 })
+      : Response.json({
+          access_token: jwt(
+            answer === 'subject-change' ? { sub: 'urn:another-person' } : {},
+          ),
+          token_type: 'Bearer',
+          refresh_token: answer,
+        }),
+  );
+  await runtime
+    .bindPod(id)
+    .sparql.construct('CONSTRUCT {} WHERE {}')
+    .catch(() => {});
+}
+/**
+ * Signs connection `id` in again: a new authorization, then a new runtime on
+ * its callback, as after the page load, with the catalogue loaded.
+ */
+export async function signInAgain(
+  f: ReturnType<typeof fixture>,
+  runtime: BrowserRuntime,
+  id: string,
+  keep: (runtime: BrowserRuntime) => void,
+) {
+  await runtime.beginAuthorization(id);
+  runtime.dispose();
+  await settleLease();
+  const next = f.returned();
+  keep(next);
+  expect(await next.initialize()).toMatchObject({ interaction: 'completed' });
+  await next.loadContexts(id);
+  return next;
+}
 /** The subject IRI a `/_system/resources/` URL addresses. */
 export const resourceIri = (url: string) =>
   Buffer.from(new URL(url).pathname.split('/').at(-1)!, 'base64url').toString();

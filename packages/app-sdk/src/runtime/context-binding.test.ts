@@ -9,7 +9,9 @@ import {
   jwt,
   personal,
   pod,
+  renewal,
   settleLease,
+  signInAgain,
   work,
 } from './fixture.test.js';
 
@@ -217,20 +219,59 @@ it.each([
   expect(f.fetch.mock.calls).toHaveLength(before);
 });
 
-it('needs a signed-in connection and retires its handles on disconnect', async () => {
+it('needs a signed-in connection', async () => {
   const f = await signedIn();
   expect(() => f.runtime.bindContext('unknown', work)).toThrow(
     new RuntimeError('disconnected'),
   );
-  const explicit = f.runtime.bindContext(f.id, personal);
-  const reads = holdReads(f, [personal]);
-  const pending = explicit.subjects.get('urn:item').catch((error) => error);
-  await vi.waitFor(() => expect(reads.started(personal)).toBe(true));
-  await f.runtime.disconnect(f.id);
-  reads.release(personal);
-  expect(await pending).not.toMatchObject({ kind: 'ok' });
-  expect(explicit.getSnapshot().current).toBe(false);
-  expect(() => f.runtime.bindContext(f.id, personal)).toThrow(RuntimeError);
+});
+
+type Session = Awaited<ReturnType<typeof signedIn>>;
+it.each<[string, (f: Session) => Promise<unknown> | void]>([
+  ['disconnect', (f) => f.runtime.disconnect(f.id)],
+  ['dispose', (f) => f.runtime.dispose()],
+  ['authorize', (f) => f.runtime.beginAuthorization(f.id)],
+  ['expired', (f) => renewal(f, f.runtime, f.id, 'refused')],
+  [
+    'subject-change',
+    async (f) => {
+      await renewal(f, f.runtime, f.id, 'subject-change');
+      // Refresh continuity: another subject is never adopted.
+      expect(f.runtime.getSnapshot()[0]?.session).toMatchObject({
+        kind: 'ended',
+        problem: 'claims',
+      });
+    },
+  ],
+])(
+  'invalidates pending reads and retires its handles on %s',
+  async (_mode, end) => {
+    const f = await signedIn();
+    const explicit = f.runtime.bindContext(f.id, personal);
+    const reads = holdReads(f, [personal]);
+    const pending = explicit.subjects.get('urn:item').catch((error) => error);
+    await vi.waitFor(() => expect(reads.started(personal)).toBe(true));
+    await end(f);
+    reads.release(personal);
+    expect(await pending).not.toMatchObject({ kind: 'ok' });
+    expect(explicit.getSnapshot()).toMatchObject({
+      current: false,
+      read: false,
+    });
+    expect(() => f.runtime.bindContext(f.id, personal)).toThrow(RuntimeError);
+  },
+);
+
+it('does not revive an old handle after reauthorization in the same connection', async () => {
+  const f = await signedIn();
+  const old = f.runtime.bindContext(f.id, personal);
+  const next = await signInAgain(f, f.runtime, f.id, (r) => runtimes.push(r));
+  const view = next.bindContext(f.id, personal);
+  expect(view).not.toBe(old);
+  expect(view.key).not.toBe(old.key);
+  expect(old.getSnapshot().current).toBe(false);
+  expect(await view.subjects.get('urn:item')).toMatchObject({ kind: 'ok' });
+  expect(await old.subjects.get('urn:item')).not.toMatchObject({ kind: 'ok' });
 });
 
 it('invalidates its pending reads and access revision when grants change', async () => {
