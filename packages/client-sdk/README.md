@@ -152,12 +152,12 @@ This surface is portable client-sdk functionality. app-sdk supplies independent
 `BoundPod` readers and `usePodLoad`; provider/controller `contextSelection: 'on-demand'`
 defers catalogue discovery until a Context flow is requested. The compatibility
 default is `'required'`. See
-[React Pod overviews](https://github.com/sempods/sempods-typescript/blob/v0.4.1/docs/react-authoring.md#pod-overviews-with-contexts-on-demand).
+[React Pod overviews](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md#pod-overviews-with-contexts-on-demand).
 
 ## Reading and writing one context
 
 A host supplies the context view and authentication; the
-[Node example](https://github.com/sempods/sempods-typescript/blob/v0.4.1/examples/node-script/README.md)
+[Node example](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/node-script/README.md)
 shows that setup. This helper replaces all `schema:name` values with one
 untagged string at the version it reads. JSON Merge Patch replaces an array
 wholesale, so names in other languages or with other datatypes are removed too.
@@ -193,7 +193,7 @@ Handle the returned outcome: `precondition-failed` means the resource changed
 between read and write; reread and decide. `uncertain` means the answer does not
 establish whether the write happened. For form editing, use the helpers below.
 
-Supported operations in 0.4 (Pod-wide `select` and `construct` are new in 0.4.0):
+Supported operations in 0.5 (Pod-wide `select` and `construct` are new in 0.4.0):
 
 | Operation                                     | Request                                                                                             | Results                                                                                                                          |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -497,6 +497,6 @@ here remain browser/Node portable. Licensed under Apache-2.0 (see LICENSE and
 NOTICE).
 
 Supported: Node 24.15 or newer (ESM only) and current browsers. See
-[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.4.1/README.md#supported-environments).
+[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.5.0/README.md#supported-environments).
 
 [Provenance](PROVENANCE.md) records the source revision and adaptations.

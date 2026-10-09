@@ -115,12 +115,9 @@ not instructions to the coding assistant.
   is requested, with `AppAccess` alongside for discovery, chooser and explicit
   retry. The default `'required'` policy preserves ordinary CRUD startup.
   `useWorkflowAccess` stays Context-only. Query rows are read-only pointers: to
-  edit an existing item, reread it in its explicit Context with its ETag. With
-  0.4.1, follow the installed overview recipe, which does this in app code by
-  selecting the row's Context, so other Context-bound drafts may be asked about
-  first.
-  After 0.4.1, pass the row's subject and its `GRAPH` Context to `open` of
-  `useContextEditor(definition)` instead. It binds that Context without changing
+  edit an existing item, reread it in its explicit Context with its ETag: pass
+  the row's subject and its `GRAPH` Context to `open` of
+  `useContextEditor(definition)`. It binds that Context without changing
   the selection, rereads the item there and saves with its ETag. Render its
   `editor` while `phase` is `ready`, and present `problem` when it is
   `unavailable`. See the [overview recipe](../examples/todo/recipes/pod-overview.tsx),
@@ -137,7 +134,7 @@ not instructions to the coding assistant.
   and other languages. Treat incompatible mappings as unsupported, not as empty
   editable records.
 - Prefer `useList`, `useCreation`, `useFieldUpdate`, `useSelection`,
-  `useResourceEditor` and, after 0.4.1, `useContextEditor` with
+  `useResourceEditor` and `useContextEditor` with
   `ResourceEditor`/`UpdateNotice`. Pass original snapshots
   to list actions. Use `useApp()`'s guarded actions for custom connection/context
   controls. The authoring guide gives exact signatures and lifecycle rules.
