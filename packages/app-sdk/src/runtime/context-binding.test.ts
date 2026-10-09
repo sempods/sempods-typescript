@@ -217,20 +217,85 @@ it.each([
   expect(f.fetch.mock.calls).toHaveLength(before);
 });
 
-it('needs a signed-in connection and retires its handles on disconnect', async () => {
+it('needs a signed-in connection', async () => {
   const f = await signedIn();
   expect(() => f.runtime.bindContext('unknown', work)).toThrow(
     new RuntimeError('disconnected'),
   );
-  const explicit = f.runtime.bindContext(f.id, personal);
-  const reads = holdReads(f, [personal]);
-  const pending = explicit.subjects.get('urn:item').catch((error) => error);
-  await vi.waitFor(() => expect(reads.started(personal)).toBe(true));
-  await f.runtime.disconnect(f.id);
-  reads.release(personal);
-  expect(await pending).not.toMatchObject({ kind: 'ok' });
-  expect(explicit.getSnapshot().current).toBe(false);
-  expect(() => f.runtime.bindContext(f.id, personal)).toThrow(RuntimeError);
+});
+
+it.each([
+  'disconnect',
+  'dispose',
+  'authorize',
+  'expired',
+  'subject-change',
+] as const)(
+  'invalidates pending reads and retires its handles on %s',
+  async (mode) => {
+    const f = await signedIn();
+    const explicit = f.runtime.bindContext(f.id, personal);
+    const reads = holdReads(f, [personal]);
+    const pending = explicit.subjects.get('urn:item').catch((error) => error);
+    await vi.waitFor(() => expect(reads.started(personal)).toBe(true));
+    if (mode === 'disconnect') await f.runtime.disconnect(f.id);
+    else if (mode === 'dispose') f.runtime.dispose();
+    else if (mode === 'authorize') await f.runtime.beginAuthorization(f.id);
+    else {
+      // A refused request makes the runtime renew; the answer ends the session.
+      f.setQuery(
+        async () =>
+          new Response(null, {
+            status: 401,
+            headers: { 'www-authenticate': 'Bearer' },
+          }),
+      );
+      f.setToken(async () =>
+        mode === 'expired'
+          ? new Response(null, { status: 400 })
+          : Response.json({
+              access_token: jwt({ sub: 'urn:another-person' }),
+              token_type: 'Bearer',
+              refresh_token: 'changed',
+            }),
+      );
+      await f.runtime
+        .bindPod(f.id)
+        .sparql.construct('CONSTRUCT {} WHERE {}')
+        .catch(() => {});
+      // Refresh continuity: another subject is never adopted.
+      if (mode === 'subject-change')
+        expect(f.runtime.getSnapshot()[0]?.session).toMatchObject({
+          kind: 'ended',
+          problem: 'claims',
+        });
+    }
+    reads.release(personal);
+    expect(await pending).not.toMatchObject({ kind: 'ok' });
+    expect(explicit.getSnapshot()).toMatchObject({
+      current: false,
+      read: false,
+    });
+    expect(() => f.runtime.bindContext(f.id, personal)).toThrow(RuntimeError);
+  },
+);
+
+it('does not revive an old handle after reauthorization in the same connection', async () => {
+  const f = await signedIn();
+  const old = f.runtime.bindContext(f.id, personal);
+  await f.runtime.beginAuthorization(f.id);
+  f.runtime.dispose();
+  await settleLease();
+  const next = f.returned();
+  runtimes.push(next);
+  expect(await next.initialize()).toMatchObject({ interaction: 'completed' });
+  await next.loadContexts(f.id);
+  const view = next.bindContext(f.id, personal);
+  expect(view).not.toBe(old);
+  expect(view.key).not.toBe(old.key);
+  expect(old.getSnapshot().current).toBe(false);
+  expect(await view.subjects.get('urn:item')).toMatchObject({ kind: 'ok' });
+  expect(await old.subjects.get('urn:item')).not.toMatchObject({ kind: 'ok' });
 });
 
 it('invalidates its pending reads and access revision when grants change', async () => {

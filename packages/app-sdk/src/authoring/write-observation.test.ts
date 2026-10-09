@@ -1,7 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { BrowserRuntime } from '../runtime/types.js';
 import type { BoundView } from '../runtime/view.js';
-import { fixture, personal, work } from '../runtime/fixture.test.js';
+import {
+  fixture,
+  personal,
+  settleLease,
+  work,
+} from '../runtime/fixture.test.js';
 import {
   changed,
   observeStarts,
@@ -80,6 +85,32 @@ it('never joins targets of different connections, even with the same Context IRI
   started(viewA);
   expect(onB).not.toHaveBeenCalled();
   expect(startCount(viewB)).toBe(0);
+});
+
+it('never joins an old handle with the handles of a new sign-in to the same connection', async () => {
+  const f = await signedIn();
+  const old = f.runtime.bindContext(f.id, work);
+  const oldSelected = f.runtime.bind(f.id);
+  await f.runtime.beginAuthorization(f.id);
+  f.runtime.dispose();
+  await settleLease();
+  const next = f.returned();
+  runtimes.push(next);
+  await next.initialize();
+  await next.loadContexts(f.id);
+  next.selectContext(f.id, work);
+  const selected = next.bind(f.id);
+  const explicit = next.bindContext(f.id, work);
+  const onSelected = vi.fn();
+  observeWrites(selected, onSelected);
+  changed(old);
+  changed(oldSelected);
+  started(old);
+  expect(onSelected).not.toHaveBeenCalled();
+  expect(startCount(selected)).toBe(0);
+  // The new identity's own handles still share one observation.
+  changed(explicit);
+  expect(onSelected).toHaveBeenCalledOnce();
 });
 
 it('keeps a view created outside the runtime as its own target', () => {
