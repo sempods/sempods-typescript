@@ -4,7 +4,15 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
-## From 0.4 to the next release
+## From 0.4 to 0.5
+
+Upgrade both packages together; Node 24.15 or newer stays the requirement:
+
+```sh
+npm install --save-exact @sempods/app-sdk@0.5.0 @sempods/client-sdk@0.5.0
+```
+
+Check these points:
 
 - **A taken IRI is no longer `exists`.** `prepareCreation(...).run()` reports
   every failed create-only condition (`412`) as `unconfirmed`, because a
@@ -77,7 +85,7 @@ automatic conversion of legacy app data or stored credentials.
   `bindContext`. A fake runtime or test double typed as `BrowserRuntime` must
   provide it.
 
-New in the next release:
+New in 0.5:
 
 - `useContextEditor(definition)` edits a Pod-overview row in the Context its
   `GRAPH` binding names, through `runtime.bindContext`, without changing the

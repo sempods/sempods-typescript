@@ -13,7 +13,7 @@ Choose the entry that fits your UI:
 
 The package depends on `@sempods/client-sdk` and uses its production client.
 For portable Node scripts or protocol operations without browser sessions, use
-[client-sdk](https://github.com/sempods/sempods-typescript/blob/v0.4.1/packages/client-sdk/README.md).
+[client-sdk](https://github.com/sempods/sempods-typescript/blob/v0.5.0/packages/client-sdk/README.md).
 Both entries provide ESM and TypeScript declarations. Importing the package or
 constructing a runtime starts no requests, navigation or storage.
 
@@ -54,7 +54,7 @@ Replace the identity with your own deployment and serve this app on the callback
 route too. The provider initializes the runtime; the host disposes it when the
 application lifetime ends. For local development, field definitions, a task
 screen and access-management controls, follow the complete
-[quickstart](https://github.com/sempods/sempods-typescript/blob/v0.4.1/docs/quickstart.md).
+[quickstart](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/quickstart.md).
 
 `AppAccess` provides login, context choice and recovery without a mandatory app
 frame. It hides when access is usable, including read-only access. The app owns
@@ -62,8 +62,8 @@ its layout and a way to reopen data-access management. Optional `AppShell` adds 
 title and management control. Use `useList`, `useCreation`, `useFieldUpdate` and
 `useResourceEditor` for data screens, with `ResourceEditor` and `UpdateNotice`
 for editing feedback. See
-[React/headless authoring](https://github.com/sempods/sempods-typescript/blob/v0.4.1/docs/react-authoring.md)
-and the runnable [TODO example](https://github.com/sempods/sempods-typescript/blob/v0.4.1/examples/todo/README.md).
+[React/headless authoring](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md)
+and the runnable [TODO example](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/README.md).
 
 ## Connection and target choices
 
@@ -83,7 +83,7 @@ and the runnable [TODO example](https://github.com/sempods/sempods-typescript/bl
 The runtime supports dynamic/did:web Code + PKCE login, IndexedDB sessions,
 sequential multi-Pod connections and shared renewal before expiry or after a
 refused request. Screens receive bound views/readers without credentials.
-See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.4.1/docs/browser-runtime.md)
+See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/browser-runtime.md)
 for startup outcomes, restrictions and recovery limits.
 
 ## Pod reads without a context choice
@@ -92,7 +92,7 @@ for startup outcomes, restrictions and recovery limits.
 for the signed-in connection's authorized dataset. It needs no catalogue or
 selected context. Required feature scopes gate dispatch; Context/label changes
 do not invalidate these independent reads. Writes remain on a validated
-`BoundView`. After 0.4.1, `runtime.bindContext(connectionId, contextIri)` binds
+`BoundView`. `runtime.bindContext(connectionId, contextIri)` binds
 such a view to an explicit Context, for example a row's `GRAPH` Context, without
 changing the selection.
 
@@ -104,18 +104,17 @@ still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
 
 Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
 validated Context's label is fetched; cached labels never gate selection or
-reads. After 0.4.1, `useContextEditor` edits an overview row in the Context its
-`GRAPH` binding names, without changing the selection. The [copyable 0.4.1 Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.4.1/examples/todo/recipes/pod-overview.tsx)
-rereads and conditionally saves the row in its Context in app code, but selects
-that Context to do so, which can prompt about or retarget other Context-bound
-drafts; editing without changing the selection is new with the hook.
+reads. `useContextEditor` edits an overview row in the Context its `GRAPH`
+binding names, without changing the selection; the
+[copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/recipes/pod-overview.tsx)
+shows it.
 
 ## Presentation and documentation
 
 UI language, regional formatting, time zone and RDF text language are separate
 choices. `SempodsProvider` accepts locale/message options; SDK controls share
 inherited `--sempods-*` styling tokens. Translating or theming the screen preserves
-its drafts. The [authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.4.1/docs/react-authoring.md)
+its drafts. The [authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md)
 shows message overrides, custom controls and non-React composition.
 
 Override individual failure texts with `messages.errors[code]` as well as UI
@@ -129,14 +128,14 @@ This package ships its app-author reference at the same version as the code.
 Point your coding assistant to
 `node_modules/@sempods/app-sdk/docs/ai-app-builder.md`; it links the guides and
 examples installed with the SDK. The same entry is
-[online](https://github.com/sempods/sempods-typescript/blob/v0.4.1/docs/ai-app-builder.md).
+[online](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/ai-app-builder.md).
 
 Use Node 24.15 or newer for tooling. The runtime needs browser IndexedDB and Web
 Locks; plain consumers need neither React nor its types. React consumers install
 React 19 themselves. Automated browser checks run in Chromium. Installed PWAs
 are experimental; iOS/iPadOS home-screen login is unverified. See
-[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.4.1/README.md#supported-environments)
-and [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.4.1/docs/development.md).
+[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.5.0/README.md#supported-environments)
+and [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/development.md).
 
 Code is Apache-2.0; documentation is CC BY 4.0, as stated in `NOTICE`.
 [Provenance](PROVENANCE.md) records the adaptations and their evidence.

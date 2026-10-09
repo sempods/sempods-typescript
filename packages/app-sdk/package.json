@@ -1,6 +1,6 @@
 {
   "name": "@sempods/app-sdk",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Browser runtime for sempods apps: Pod login, durable sessions, guarded context selection, safe editing feedback and optional React bindings.",
   "keywords": [
     "sempods",

@@ -63,7 +63,7 @@ see [development checks](docs/development.md).
 
 ## Supported environments
 
-| Environment                  | Status in 0.4                                                                                                                                                                      |
+| Environment                  | Status in 0.5                                                                                                                                                                      |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Node                         | 24.15 or newer (Node 24 LTS), ESM only (`engines` in both packages).                                                                                                               |
 | Browser tab                  | Current browsers with IndexedDB and Web Locks. Automated browser checks run in Chromium.                                                                                           |

@@ -385,11 +385,6 @@ a deployed Pod and in a real browser is tracked in
 
 ### Editing an overview row
 
-`useContextEditor` arrives after 0.4.1. The 0.4.1 overview recipe rereads and
-conditionally saves a row in its Context in app code too, but it selects that
-Context to do so, which can prompt about or retarget other Context-bound
-drafts; keeping the selection is new with the hook.
-
 An overview row is not an editable snapshot, only a pointer: its subject and the
 Context its `GRAPH` binding names. `useContextEditor(definition)` edits one such
 target in exactly that Context, through an explicit binding
