@@ -459,9 +459,10 @@ try {
       res.writeHead(404);
       res.end();
     } catch (error) {
+      // The run fails on serverErrors; the body carries no error details.
       serverErrors.push(error);
       res.writeHead(500);
-      res.end(String(error));
+      res.end();
     }
   });
   server.listen(0, '127.0.0.1');
