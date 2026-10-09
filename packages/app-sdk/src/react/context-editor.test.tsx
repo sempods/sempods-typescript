@@ -29,9 +29,9 @@ import {
   catalogue,
   deferred,
   fixture,
-  jwt,
   personal,
   pod,
+  renewal,
   resourceIri,
   returnedSession,
   twoPods,
@@ -561,8 +561,10 @@ it('re-renders its host for its own facts only, not for a renewal or another con
       </>
     );
   }
-  // The active connection is shown outside the host, which must not read it all.
+  // Reads the whole snapshot outside the host: its renders prove a publish.
+  let published = 0;
   function Active() {
+    published++;
     return <output data-testid="active">{useAppState().activeId}</output>;
   }
   // A sibling that adds a second Context demand by mounting a TargetScreen.
@@ -596,30 +598,16 @@ it('re-renders its host for its own facts only, not for a renewal or another con
   await act(async () => {});
   expect(renders).toBe(before);
   // Another connection's catalogue refresh.
+  let publishes = published;
   await act(() => runtime.loadContexts(other.id));
+  expect(published).toBeGreaterThan(publishes);
   expect(renders).toBe(before);
   // A token renewal of the host's own connection, after a refused request.
-  let calls = 0;
-  f.setQuery(async () =>
-    ++calls === 1
-      ? new Response(null, {
-          status: 401,
-          headers: { 'www-authenticate': 'Bearer' },
-        })
-      : Response.json([]),
-  );
-  f.setToken(async () =>
-    Response.json({
-      access_token: jwt(),
-      token_type: 'Bearer',
-      refresh_token: 'rotated',
-    }),
-  );
+  publishes = published;
   const tokens = f.count('/token');
-  await act(async () => {
-    await runtime.bindPod(f.id).sparql.construct('CONSTRUCT {} WHERE {}');
-  });
+  await act(() => renewal(f, runtime, f.id, 'rotated'));
   expect(f.count('/token')).toBe(tokens + 1);
+  expect(published).toBeGreaterThan(publishes);
   expect(runtime.getSnapshot().find((c) => c.id === f.id)?.session.kind).toBe(
     'active',
   );
@@ -724,28 +712,7 @@ async function endSession(
   f: Awaited<ReturnType<typeof returned>>,
   mode: 'refused' | 'subject-change',
 ) {
-  f.setQuery(
-    async () =>
-      new Response(null, {
-        status: 401,
-        headers: { 'www-authenticate': 'Bearer' },
-      }),
-  );
-  f.setToken(async () =>
-    mode === 'refused'
-      ? new Response(null, { status: 400 })
-      : Response.json({
-          access_token: jwt({ sub: 'urn:another-person' }),
-          token_type: 'Bearer',
-          refresh_token: 'changed',
-        }),
-  );
-  await act(async () => {
-    await f.runtime
-      .bindPod(f.id)
-      .sparql.construct('CONSTRUCT {} WHERE {}')
-      .catch(() => {});
-  });
+  await act(() => renewal(f, f.runtime, f.id, mode));
   await waitFor(() =>
     expect(f.runtime.getSnapshot()[0]?.session).toMatchObject({
       kind: 'ended',

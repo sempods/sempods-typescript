@@ -471,16 +471,19 @@ export function useContextEditor<D>(
   const lane = state?.lane ?? null;
   // Only the facts this hook uses: a token renewal or another connection's
   // catalogue does not re-render the host.
-  const laneConnection = lane?.connection;
-  const { activeId, ready, laneCatalogue } = useAppFacts(
+  const laneConnection = state && !state.retired ? state.lane.connection : null;
+  const { activeId, ready, catalogue } = useAppFacts(
     (s) => ({
       activeId: s.activeId,
       // No Context-bound editor before startup settles (a returning sign-in
       // may still replace the active connection), as for the selected view.
       // `pod` exists while the active connection is signed in.
       ready: startupSettled(s) && s.pod !== null,
-      laneCatalogue: s.connections.find((c) => c.id === laneConnection)
-        ?.catalogue,
+      // The live lane's catalogue only: its connection is the active one.
+      catalogue:
+        laneConnection !== null && laneConnection === s.activeId
+          ? s.connections.find((c) => c.id === laneConnection)?.catalogue
+          : undefined,
     }),
     shallowEqual,
   );
@@ -491,7 +494,6 @@ export function useContextEditor<D>(
   // Only the originating connection may demand discovery for this target, and
   // only once the runtime accepted the binding: a refused target sends nothing.
   useContextDemand(live && bound !== null);
-  const catalogue = live ? laneCatalogue : undefined;
   // The binding's own rule for catalogue evidence, without its required-scope
   // check: a target missing scopes would otherwise stay loading with no problem
   // to present. A newly opened row needs a successful listing, not retained

@@ -62,13 +62,9 @@ export function useAppState() {
   const app = useController();
   return useSyncExternalStore(app.subscribe, app.getSnapshot, app.getSnapshot);
 }
-/** Equal flat objects: the same keys with `Object.is`-equal values. */
+/** Equal facts of one selector: the same fields, `Object.is`-equal. */
 export function shallowEqual<T extends object>(a: T, b: T) {
-  const keys = Object.keys(a) as (keyof T)[];
-  return (
-    keys.length === Object.keys(b).length &&
-    keys.every((k) => Object.hasOwn(b, k) && Object.is(a[k], b[k]))
-  );
+  return (Object.keys(a) as (keyof T)[]).every((k) => Object.is(a[k], b[k]));
 }
 /**
  * Internal: the facts `select` derives from the app snapshot. The component
@@ -79,21 +75,14 @@ export function useAppFacts<T>(
   equal: (a: T, b: T) => boolean = Object.is,
 ): T {
   const app = useController();
-  const cache = useRef<{
-    readonly source: AppSnapshot;
-    readonly select: (snapshot: AppSnapshot) => T;
-    readonly value: T;
-  } | null>(null);
+  const last = useRef<{ readonly value: T } | null>(null);
   const read = () => {
-    const source = app.getSnapshot();
-    const last = cache.current;
-    if (last && last.source === source && last.select === select)
-      return last.value;
-    const next = select(source);
+    const next = select(app.getSnapshot());
     // Equal facts keep their identity, so useSyncExternalStore skips the render.
-    const value = last && equal(last.value, next) ? last.value : next;
-    cache.current = { source, select, value };
-    return value;
+    if (last.current && equal(last.current.value, next))
+      return last.current.value;
+    last.current = { value: next };
+    return next;
   };
   return useSyncExternalStore(app.subscribe, read, read);
 }
@@ -172,8 +161,10 @@ function GuardedContent({ children }: { readonly children: ReactNode }) {
 export function useConnections() {
   return useAppState().connections;
 }
+const selectView = (s: AppSnapshot) => s.view;
+/** The selected Context's view; re-renders only when the view changes. */
 export function useView() {
-  return useAppState().view;
+  return useAppFacts(selectView);
 }
 const none = Object.freeze({
   current: false,
@@ -189,15 +180,16 @@ export function useContextDemand(active: boolean) {
   if (!value) throw new Error('SempodsProvider is required.');
   // Only the facts used here: a token renewal or another connection's
   // catalogue does not re-render the host.
-  const { mode, id, signedIn, catalogue } = useAppFacts((s) => {
+  const { mode, id, undiscovered } = useAppFacts((s) => {
     const connection = s.connections.find((c) => c.id === s.activeId);
     return {
       mode: s.contextSelection,
-      id: connection?.id,
-      signedIn:
-        connection?.session.kind === 'active' ||
-        connection?.session.kind === 'renewing',
-      catalogue: connection?.catalogue.kind,
+      id: s.activeId,
+      // Signed in (also while renewing) with no catalogue requested yet.
+      undiscovered:
+        (connection?.session.kind === 'active' ||
+          connection?.session.kind === 'renewing') &&
+        connection.catalogue.kind === 'unknown',
     };
   }, shallowEqual);
   const { retainContext } = value;
@@ -206,15 +198,9 @@ export function useContextDemand(active: boolean) {
     [active, retainContext],
   );
   useEffect(() => {
-    if (
-      active &&
-      mode === 'on-demand' &&
-      id &&
-      signedIn &&
-      catalogue === 'unknown'
-    )
+    if (active && mode === 'on-demand' && id && undiscovered)
       void value.actions.refreshContexts(id).catch(() => {});
-  }, [active, mode, id, signedIn, catalogue, value.actions]);
+  }, [active, mode, id, undiscovered, value.actions]);
   return mode === 'required' || active || value.contextDemand;
 }
 /** Context-view access for the active connection, in both modes; Pod readers have their own snapshot. */

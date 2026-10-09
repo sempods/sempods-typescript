@@ -4,7 +4,7 @@ import type { BoundView } from '../runtime/view.js';
 import {
   fixture,
   personal,
-  settleLease,
+  signInAgain,
   work,
 } from '../runtime/fixture.test.js';
 import {
@@ -91,13 +91,7 @@ it('never joins an old handle with the handles of a new sign-in to the same conn
   const f = await signedIn();
   const old = f.runtime.bindContext(f.id, work);
   const oldSelected = f.runtime.bind(f.id);
-  await f.runtime.beginAuthorization(f.id);
-  f.runtime.dispose();
-  await settleLease();
-  const next = f.returned();
-  runtimes.push(next);
-  await next.initialize();
-  await next.loadContexts(f.id);
+  const next = await signInAgain(f, f.runtime, f.id, (r) => runtimes.push(r));
   next.selectContext(f.id, work);
   const selected = next.bind(f.id);
   const explicit = next.bindContext(f.id, work);
