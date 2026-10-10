@@ -187,6 +187,20 @@ describe('did:web client identity', () => {
       }),
     ).resolves.toMatchObject({ clientId: 'did:web:127.0.0.1%3A3210' });
     await expect(
+      registry.resolve(pod, {
+        kind: 'did-web',
+        clientId: 'did:web:%5B%3A%3A1%5D%3A3210',
+        redirectUri: 'http://[::1]:3210/callback',
+      }),
+    ).resolves.toMatchObject({ clientId: 'did:web:%5B%3A%3A1%5D%3A3210' });
+    await expect(
+      registry.resolve(pod, {
+        kind: 'did-web',
+        clientId: 'did:web:a.localhost%3A3210',
+        redirectUri: 'https://a.localhost:3210/callback',
+      }),
+    ).rejects.toMatchObject(invalidConfig('clientId'));
+    await expect(
       createClientRegistry().resolve(pod, {
         kind: 'did-web',
         clientId: 'did:web:localhost',
