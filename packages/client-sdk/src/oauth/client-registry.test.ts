@@ -110,6 +110,10 @@ describe('did:web client identity', () => {
     ],
     ['did:web:apps.home.arpa', 'https://apps.home.arpa/callback'],
     ['did:web:app.local', 'https://app.local/callback'],
+    [
+      `did:web:${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}`,
+      `https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}/`,
+    ],
   ])('accepts %s covering %s', async (clientId, redirectUri) => {
     await expect(
       createClientRegistry().resolve(pod, {
@@ -137,6 +141,11 @@ describe('did:web client identity', () => {
     ['did:web:intranet.', 'https://intranet./'],
     ['did:web:foo.localhost', 'https://foo.localhost/'],
     ['did:web:app.invalid', 'https://app.invalid/'],
+    [`did:web:${'a'.repeat(64)}.example`, `https://${'a'.repeat(64)}.example/`],
+    [
+      `did:web:${`${'a'.repeat(63)}.`.repeat(4)}example`,
+      `https://${`${'a'.repeat(63)}.`.repeat(4)}example/`,
+    ],
   ])(
     'rejects %s against %s without fallback',
     async (clientId, redirectUri) => {

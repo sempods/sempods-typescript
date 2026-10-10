@@ -57,8 +57,8 @@ export function callbackUrl(value: string, development: boolean): URL {
 /**
  * Structural did:web check only. Never dereference a DID document.
  * Pass a redirect from `callbackUrl`, which admits loopback only in development.
- * Any other host must be a domain name with a dot: the did:web method forbids IP
- * literals, and `*.localhost` names resolve to loopback.
+ * Any other host must be a DNS name (RFC 1035 lengths) with a dot: the did:web
+ * method forbids IP literals, and `*.localhost` names resolve to loopback.
  */
 export function checkDidWeb(clientId: string, redirect: URL): void {
   try {
@@ -78,6 +78,8 @@ export function checkDidWeb(clientId: string, redirect: URL): void {
       (target.hostname.startsWith('[') ||
         /^\d+(?:\.\d+){3}$/.test(target.hostname) ||
         labels.length < 2 ||
+        labels.some((label) => label.length > 63) ||
+        labels.join('.').length > 253 ||
         ['localhost', 'invalid'].includes(labels.at(-1)!))
     )
       throw new Error('Expected a did:web domain name.');
