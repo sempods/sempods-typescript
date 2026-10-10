@@ -32,6 +32,12 @@ auth configuration. These are three valid examples; choose one:
 | `https://tasks.example.org/`      | `did:web:tasks.example.org`      | `https://tasks.example.org/callback`      |
 | `https://apps.example.org/tasks/` | `did:web:apps.example.org:tasks` | `https://apps.example.org/tasks/callback` |
 
+The host must be a domain name with at least one dot, as the
+[did:web method](https://w3c-ccg.github.io/did-method-web/#method-specific-identifier)
+requires. The SDK rejects an IP address, a single-label host and `*.localhost` or
+`*.invalid` names with `invalid-config` on `clientId`; only local development
+accepts a loopback identity.
+
 Replace the local runtime configuration with this production configuration,
 using **your** domain:
 
