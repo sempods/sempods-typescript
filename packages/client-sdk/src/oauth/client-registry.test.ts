@@ -108,6 +108,12 @@ describe('did:web client identity', () => {
       'did:web:app.example%3A8443:todo',
       'https://app.example:8443/todo/callback',
     ],
+    ['did:web:apps.home.arpa', 'https://apps.home.arpa/callback'],
+    ['did:web:app.local', 'https://app.local/callback'],
+    [
+      `did:web:${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}`,
+      `https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}/`,
+    ],
   ])('accepts %s covering %s', async (clientId, redirectUri) => {
     await expect(
       createClientRegistry().resolve(pod, {
@@ -129,6 +135,17 @@ describe('did:web client identity', () => {
     ['did:web:app.example:..', dynamic.redirectUri],
     ['did:web:app.example:todo%2F..', dynamic.redirectUri],
     ['did:web:app.example:%XX', dynamic.redirectUri],
+    ['did:web:192.0.2.1', 'https://192.0.2.1/'],
+    ['did:web:%5B2001%3Adb8%3A%3A2%5D', 'https://[2001:db8::2]/'],
+    ['did:web:intranet', 'https://intranet/'],
+    ['did:web:intranet.', 'https://intranet./'],
+    ['did:web:foo.localhost', 'https://foo.localhost/'],
+    ['did:web:app.invalid', 'https://app.invalid/'],
+    [`did:web:${'a'.repeat(64)}.example`, `https://${'a'.repeat(64)}.example/`],
+    [
+      `did:web:${`${'a'.repeat(63)}.`.repeat(4)}example`,
+      `https://${`${'a'.repeat(63)}.`.repeat(4)}example/`,
+    ],
   ])(
     'rejects %s against %s without fallback',
     async (clientId, redirectUri) => {
@@ -171,6 +188,27 @@ describe('did:web client identity', () => {
         redirectUri: 'http://remote.example:3210/todo/callback',
       }),
     ).rejects.toMatchObject(invalidConfig('redirectUri'));
+    await expect(
+      registry.resolve(pod, {
+        kind: 'did-web',
+        clientId: 'did:web:127.0.0.1%3A3210',
+        redirectUri: 'http://127.0.0.1:3210/callback',
+      }),
+    ).resolves.toMatchObject({ clientId: 'did:web:127.0.0.1%3A3210' });
+    await expect(
+      registry.resolve(pod, {
+        kind: 'did-web',
+        clientId: 'did:web:%5B%3A%3A1%5D%3A3210',
+        redirectUri: 'http://[::1]:3210/callback',
+      }),
+    ).resolves.toMatchObject({ clientId: 'did:web:%5B%3A%3A1%5D%3A3210' });
+    await expect(
+      registry.resolve(pod, {
+        kind: 'did-web',
+        clientId: 'did:web:a.localhost%3A3210',
+        redirectUri: 'https://a.localhost:3210/callback',
+      }),
+    ).rejects.toMatchObject(invalidConfig('clientId'));
     await expect(
       createClientRegistry().resolve(pod, {
         kind: 'did-web',

@@ -54,7 +54,12 @@ export function callbackUrl(value: string, development: boolean): URL {
   }
 }
 
-/** Structural did:web check only. Never dereference a DID document. */
+/**
+ * Structural did:web check only. Never dereference a DID document.
+ * Pass a redirect from `callbackUrl`, which admits loopback only in development.
+ * Any other host must be a DNS name (RFC 1035 lengths) with a dot: the did:web
+ * method forbids IP literals, and `*.localhost` names resolve to loopback.
+ */
 export function checkDidWeb(clientId: string, redirect: URL): void {
   try {
     if (!clientId.startsWith('did:web:')) throw new Error('Expected did:web.');
@@ -66,6 +71,18 @@ export function checkDidWeb(clientId: string, redirect: URL): void {
     // Match the canonical form produced by Kotlin DidWeb.clientId. Reject ambiguous identities.
     if (host !== target.host || target.username || target.password)
       throw new Error('Invalid DID authority.');
+    // Loopback stays possible: callbackUrl admits it only in development (SPS-AUTH-006).
+    const labels = target.hostname.replace(/\.$/, '').split('.');
+    if (
+      !loopbackHosts.has(target.hostname) &&
+      (target.hostname.startsWith('[') ||
+        /^\d+(?:\.\d+){3}$/.test(target.hostname) ||
+        labels.length < 2 ||
+        labels.some((label) => label.length > 63) ||
+        labels.join('.').length > 253 ||
+        ['localhost', 'invalid'].includes(labels.at(-1)!))
+    )
+      throw new Error('Expected a did:web domain name.');
     const path = encodedPath.map((part) => decodeURIComponent(part));
     if (
       path.some(
