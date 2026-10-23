@@ -1,4 +1,10 @@
-import { useRef, useState, type ComponentType, type ReactNode } from 'react';
+import {
+  useId,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
@@ -197,6 +203,7 @@ export function ConnectionControls({
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
   const controls = m.controls;
+  const disconnectId = useId();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -386,6 +393,9 @@ export function ConnectionControls({
               )}
               <button
                 disabled={busy}
+                aria-describedby={
+                  controls.disconnectHint ? disconnectId : undefined
+                }
                 onClick={() => void action(() => app.disconnect(connection.id))}
               >
                 {controls.disconnect}
@@ -393,6 +403,9 @@ export function ConnectionControls({
             </>
           )}
         </div>
+      )}
+      {connection && controls.disconnectHint && (
+        <p id={disconnectId}>{controls.disconnectHint}</p>
       )}
       {(connection || state.preset) && (
         <details>

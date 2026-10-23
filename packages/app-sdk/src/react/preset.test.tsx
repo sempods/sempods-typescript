@@ -99,7 +99,7 @@ it('shows configured-context absence without offering another context, and recov
   );
   expect(screen.queryByLabelText('Data context')).toBeNull();
   expect(runtime.getSnapshot()[0]!.selectedContext).toBeNull();
-  expect(screen.getByRole('button', { name: 'Update access' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Change sharing' })).toBeTruthy();
   f.setCatalogue(async () => catalogue([missing], []));
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check access' }));
@@ -151,7 +151,7 @@ it('retains explicit context choice for a preset without an exact context', asyn
   await waitFor(() =>
     expect(session.runtime.getSnapshot()[0]?.selectedContext).toBe(work),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
   const select = await screen.findByLabelText('Data context');
   fireEvent.change(select, { target: { value: personal } });
   await waitFor(() =>

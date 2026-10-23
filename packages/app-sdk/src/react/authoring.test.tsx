@@ -134,7 +134,7 @@ it('replacement picker uses guarded actions and confirmation restores focus on c
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Unfinished' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
   const picker = screen.getByText('Custom picker');
   picker.focus();
   fireEvent.click(picker);
@@ -705,10 +705,10 @@ it('names why connecting failed instead of a generic failure', async () => {
   );
   await screen.findByText('Tasks mounted');
   f.fetch.mockRejectedValue(new TypeError('offline'));
-  fireEvent.change(screen.getByLabelText('Your Pod'), {
+  fireEvent.change(screen.getByLabelText('Pod address'), {
     target: { value: 'https://pod.example/carol' },
   });
-  fireEvent.submit(screen.getByLabelText('Your Pod').closest('form')!);
+  fireEvent.submit(screen.getByLabelText('Pod address').closest('form')!);
   expect((await screen.findByRole('alert')).textContent).toBe(
     'The pod’s connection information could not be loaded. Try again.',
   );
@@ -839,11 +839,21 @@ it('shows the no-contexts message when the Pod grants no readable context', asyn
 });
 
 it.each([
-  ['en', 'Update access'],
-  ['de', 'Zugriff ändern'],
+  [
+    'en',
+    'Change sharing',
+    'Sign out',
+    'Signing out only applies to this device.',
+  ],
+  [
+    'de',
+    'Freigabe ändern',
+    'Abmelden',
+    'Die Abmeldung gilt nur für dieses Gerät.',
+  ],
 ] as const)(
   'an active connection offers to update access rather than to sign in (%s)',
-  async (language, label) => {
+  async (language, label, signOut, note) => {
     const f = fixture();
     const session = await f.login();
     cleanups.push(() => session.runtime.dispose());
@@ -858,6 +868,11 @@ it.each([
         name: language === 'en' ? 'Sign in' : 'Anmelden',
       }),
     ).toBeNull();
+    const local = screen.getByRole('button', { name: signOut });
+    expect(
+      document.getElementById(local.getAttribute('aria-describedby')!)
+        ?.textContent,
+    ).toBe(note);
     // It still re-authorizes the same connection.
     await act(async () => button.click());
     await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
@@ -878,16 +893,16 @@ it('AppShell preserves title/style/content and hides management until explicitly
     screen.getByRole('heading', { level: 1, name: 'My notebook' }),
   ).toBeTruthy();
   expect(screen.getByRole('main').style.maxWidth).toBe('480px');
-  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
   const field = screen.getByLabelText('Title');
   fireEvent.change(field, { target: { value: 'Mounted draft' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
   expect(
-    screen.getByRole('heading', { level: 2, name: 'Data access' }),
+    screen.getByRole('heading', { level: 2, name: 'Pods & sharing' }),
   ).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Check access' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
-  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
   expect(screen.getByLabelText('Title')).toBe(field);
   expect((field as HTMLInputElement).value).toBe('Mounted draft');
 });
