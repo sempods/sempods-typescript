@@ -16,6 +16,21 @@ Check these points:
   `locale` or `language` alone keeps its previous meaning; `createLocale` and
   `resolveLocale` are unchanged and read no browser globals.
 
+## From 0.5.1 to 0.6.0
+
+The minor changes defaults and adds options; upgrade both packages together.
+Check these points:
+
+- **Lists can keep their rows while reloading.** `useList`, `useLoad` and
+  `usePodLoad` accept `{ retain: true }`; `createViewLoader` takes the same
+  option as a third argument. With it, `LoadState`'s `loading` and `failed`
+  carry the last data as `previous`. Without it nothing changes. Code that
+  builds `LoadState` values itself still compiles; exhaustive checks over
+  `kind` are unchanged.
+- **Quiet success.** `UpdateNotice` and `ResourceEditor` accept `quiet` to show
+  nothing for a confirmed save, creation or deletion; problems and unconfirmed
+  outcomes still show.
+
 ## From 0.5.0 to 0.5.1
 
 The patch keeps public APIs, message keys and result shapes. Check these points:

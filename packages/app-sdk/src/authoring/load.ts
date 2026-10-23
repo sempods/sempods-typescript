@@ -13,9 +13,32 @@ import type { BoundPod, BoundRead, BoundView } from '../runtime/view.js';
  * data.
  */
 export type LoadState<T> =
-  | { readonly kind: 'loading' | 'cancelled' | 'unavailable' }
+  | {
+      readonly kind: 'loading';
+      /** Retained data (`retain`) shown while the same target reloads. */
+      readonly previous?: T;
+    }
+  | { readonly kind: 'cancelled' | 'unavailable' }
   | { readonly kind: 'ready'; readonly data: T }
-  | { readonly kind: 'failed'; readonly error: unknown };
+  | {
+      readonly kind: 'failed';
+      readonly error: unknown;
+      /**
+       * Retained data (`retain`) from before this failed refresh: still
+       * readable, but not confirmed by it. Show it as such, with a retry.
+       */
+      readonly previous?: T;
+    };
+/**
+ * `retain` keeps the last ready data of a loader as `previous` while the same
+ * target reloads and after a refresh that failed. It is read at each
+ * (re)load. Retained data is dropped when read access is lost, the loader is
+ * cancelled, a Pod loader's grants change, or a new handle (connection,
+ * authorization, target) replaces the loader; a late result never replaces it.
+ */
+export interface LoaderOptions {
+  readonly retain?: boolean;
+}
 export type ViewRead<T> = (
   view: BoundView,
   signal: AbortSignal,
@@ -28,7 +51,8 @@ export type PodRead<T> = (
 interface ViewLoader<T> {
   getSnapshot(): LoadState<T>;
   subscribe(listener: () => void): () => void;
-  reload(): Promise<void>;
+  /** `fresh` drops retained data first, for a read whose inputs changed. */
+  reload(options?: { readonly fresh?: boolean }): Promise<void>;
   cancel(): void;
   dispose(): void;
 }
@@ -45,20 +69,38 @@ interface ViewLoader<T> {
 export function createViewLoader<T>(
   view: BoundView,
   read: ViewRead<T>,
+  options?: LoaderOptions,
 ): ViewLoader<T>;
 export function createViewLoader<T>(
   pod: BoundPod,
   read: PodRead<T>,
+  options?: LoaderOptions,
 ): ViewLoader<T>;
 export function createViewLoader<T, H extends BoundView | BoundPod = BoundView>(
   view: H,
   read: (handle: H, signal: AbortSignal) => Promise<BoundRead<QueryResult<T>>>,
+  options?: LoaderOptions,
 ): ViewLoader<T>;
 export function createViewLoader<T, H extends BoundView | BoundPod>(
   view: H,
   read: (handle: H, signal: AbortSignal) => Promise<BoundRead<QueryResult<T>>>,
+  options: LoaderOptions = {},
 ) {
   let state: LoadState<T> = { kind: 'loading' };
+  /** The last ready data and the access revision it was read under. */
+  let kept: { readonly data: T; readonly revision: number } | undefined;
+  const pod = !('contextIri' in view);
+  /** Retained data for a read under `revision`, if it still applies. */
+  function retained(revision: number) {
+    if (!options.retain || !kept) return {};
+    // A Pod result belongs to its grants; a Context's revision also moves
+    // for write-only changes, which keep its displayed data.
+    if (pod && kept.revision !== revision) {
+      kept = undefined;
+      return {};
+    }
+    return { previous: kept.data };
+  }
   const listeners = new Set<() => void>();
   let abort = new AbortController();
   let serial = 0;
@@ -85,6 +127,7 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
     const access = view.getSnapshot();
     if (!access.current || !access.read) {
       waiting = access.current;
+      kept = undefined;
       emit({ kind: 'unavailable' });
       return;
     }
@@ -93,6 +136,7 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
       abort.abort();
       running = false;
       waiting = false;
+      kept = undefined;
       emit({ kind: 'unavailable' });
       return;
     }
@@ -102,7 +146,7 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
     const ticket = ++serial;
     waiting = false;
     running = true;
-    emit({ kind: 'loading' });
+    emit({ kind: 'loading', ...retained(access.revision) });
     try {
       const result = await read(view, signal);
       if (disposed || cancelled || ticket !== serial || signal.aborted) return;
@@ -114,17 +158,21 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
         now.revision !== access.revision
       ) {
         waiting = now.current;
+        kept = undefined;
         emit({ kind: 'unavailable' });
         if (now.current && now.read) await run(true);
-      } else if (result.kind === 'ok')
+      } else if (result.kind === 'ok') {
+        kept = { data: result.body, revision: access.revision };
         emit({ kind: 'ready', data: result.body });
-      else if (result.kind === 'cancelled') {
+      } else if (result.kind === 'cancelled') {
         cancelled = true;
+        kept = undefined;
         emit({ kind: 'cancelled' });
-      } else emit({ kind: 'failed', error: result });
+      } else
+        emit({ kind: 'failed', error: result, ...retained(access.revision) });
     } catch (error) {
       if (!disposed && !cancelled && ticket === serial && !signal.aborted)
-        emit({ kind: 'failed', error });
+        emit({ kind: 'failed', error, ...retained(access.revision) });
     } finally {
       if (ticket === serial) running = false;
     }
@@ -137,6 +185,7 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
       abort.abort();
       running = false;
       waiting = next.current && !cancelled;
+      kept = undefined;
       emit({ kind: cancelled ? 'cancelled' : 'unavailable' });
     } else if (
       !cancelled &&
@@ -159,9 +208,10 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
         listeners.delete(listener);
       };
     },
-    reload() {
+    reload({ fresh = false }: { readonly fresh?: boolean } = {}) {
       cancelled = false;
       retries = 0;
+      if (fresh) kept = undefined;
       return run(false);
     },
     cancel() {
@@ -169,6 +219,7 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
       waiting = false;
       serial++;
       abort.abort();
+      kept = undefined;
       emit({ kind: 'cancelled' });
     },
     dispose() {
