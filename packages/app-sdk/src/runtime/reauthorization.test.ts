@@ -4,7 +4,7 @@
  * outcome ends the connection, and a successful grant replaces the old one.
  */
 import { afterEach, expect, it, vi } from 'vitest';
-import { IDBObjectStore } from 'fake-indexeddb';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { createBrowserRuntime } from './runtime.js';
 import { openSessionStore } from '../sessions/store.js';
 import type { BrowserRuntime } from './types.js';
@@ -528,6 +528,48 @@ it('restarts a catalogue read the leaving page aborted when it resumes', async (
       contexts: [{ iri: work }],
     }),
   );
+});
+
+it('retires a resumed record when sign-out runs during the resume commit', async () => {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  const factory = new IDBFactory();
+  const held: { gate?: ReturnType<typeof deferred<void>>; reached?: boolean } =
+    {};
+  const f = fixture({
+    async openStore(name) {
+      const store = await openSessionStore(name, factory);
+      return {
+        read: (id) => store.read(id),
+        list: () => store.list(),
+        close: () => store.close(),
+        async commit(id, revision, value) {
+          if (held.gate) {
+            held.reached = true;
+            await held.gate.promise;
+          }
+          return store.commit(id, revision, value);
+        },
+      };
+    },
+  });
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  await runtime.beginAuthorization(id);
+  held.gate = deferred<void>();
+  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  await vi.waitFor(() => expect(held.reached).toBe(true));
+  const signOut = runtime.disconnect(id);
+  const gate = held.gate;
+  delete held.gate;
+  gate.resolve();
+  expect(await signOut).toEqual({ kind: 'disconnected' });
+  const store = await openSessionStore(namespace, factory);
+  expect((await store.read(id))?.value).toMatchObject({ kind: 'disconnected' });
+  store.close();
+  expect(runtime.getSnapshot()).toEqual([]);
 });
 
 it('publishes nothing from a resume that settles after dispose', async () => {

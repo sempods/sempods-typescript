@@ -549,8 +549,9 @@ export function createBrowserRuntime(
     const change = await serial(e, async () => {
       current(e, generation);
       if (!sessions || !e.revision) throw new RuntimeError('storage');
+      let result: SessionChange;
       try {
-        return await sessions.resume(e.view.id, e.revision, pod, callback);
+        result = await sessions.resume(e.view.id, e.revision, pod, callback);
       } catch (error) {
         if (
           error instanceof SessionTransitionError &&
@@ -559,10 +560,14 @@ export function createBrowserRuntime(
           return undefined;
         throw error;
       }
+      // Recorded first, so a disconnect queued during the commit retires
+      // the resumed record rather than conflicting with it.
+      accepted(e, result);
+      current(e, generation);
+      return result;
     });
     if (!change) return false;
     current(e, generation);
-    accepted(e, change);
     if (change.kind !== 'committed' || change.record.value.kind !== 'ready')
       throw new RuntimeError('state');
     const { binding: resumed, credentials } = change.record.value;
