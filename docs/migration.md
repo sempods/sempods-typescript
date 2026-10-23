@@ -4,6 +4,18 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.5.1 to 0.6.0
+
+The minor changes defaults and adds options; upgrade both packages together.
+Check these points:
+
+- **UI language follows the browser.** `SempodsProvider` and `SdkLocaleProvider`
+  without `language` and `locale` now use the browser's languages (read once per
+  provider) instead of English: a German browser gets German messages and
+  `de-DE` formatting. Pin the old result with `language="en" locale="en"`. A
+  `locale` or `language` alone keeps its previous meaning; `createLocale` and
+  `resolveLocale` are unchanged and read no browser globals.
+
 ## From 0.5.0 to 0.5.1
 
 The patch keeps public APIs, message keys and result shapes. Check these points:

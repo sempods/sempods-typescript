@@ -112,7 +112,8 @@ shows it.
 ## Presentation and documentation
 
 UI language, regional formatting, time zone and RDF text language are separate
-choices. `SempodsProvider` accepts locale/message options; SDK controls share
+choices. `SempodsProvider` follows the browser's language unless given locale
+options, and accepts message overrides; SDK controls share
 inherited `--sempods-*` styling tokens. Translating or theming the screen preserves
 its drafts. The [authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md)
 shows message overrides, custom controls and non-React composition.
