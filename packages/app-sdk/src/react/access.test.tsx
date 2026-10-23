@@ -1294,3 +1294,62 @@ it.each(['missing scopes', 'ended session'] as const)(
     expect(screen.queryByText('Loading…')).toBeNull();
   },
 );
+
+it('shows a display-only description under the app name, not in management', async () => {
+  const f = fixture({ allowedPods: [pod] });
+  cleanups.push(() => f.runtime.dispose());
+  const view = render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Shopping" description="Shopping made easy" />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('button', { name: 'Sign in' });
+  const heading = screen.getByRole('heading', { name: 'Shopping', level: 1 });
+  expect(heading.nextElementSibling?.textContent).toBe('Shopping made easy');
+  view.rerender(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Shopping" description="Shopping made easy" open />
+    </SempodsProvider>,
+  );
+  expect(
+    screen.getByRole('heading', { name: 'Pods & sharing', level: 2 }),
+  ).toBeTruthy();
+  expect(screen.queryByText('Shopping made easy')).toBeNull();
+  expect(f.fetch).not.toHaveBeenCalled();
+});
+
+it('asks to leave in a native modal dialog that a close request cancels', async () => {
+  const f = fixture();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  function Share() {
+    const app = useApp();
+    const { activeId } = useAppState();
+    return <button onClick={() => void app.authorize(activeId!)}>Share</button>;
+  }
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <Host />
+      <Share />
+    </SempodsProvider>,
+  );
+  const draft = await screen.findByLabelText('Draft');
+  fireEvent.change(draft, { target: { value: 'Keep this' } });
+  const share = screen.getByRole('button', { name: 'Share' });
+  share.focus();
+  for (const close of ['escape', 'cancel'] as const) {
+    fireEvent.click(share);
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(dialog.hasAttribute('open')).toBe(true);
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Keep editing' }),
+    );
+    if (close === 'escape') fireEvent.keyDown(dialog, { key: 'Escape' });
+    else fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(document.activeElement).toBe(share);
+    expect((draft as HTMLInputElement).value).toBe('Keep this');
+  }
+  expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('active');
+});

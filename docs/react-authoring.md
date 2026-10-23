@@ -78,8 +78,12 @@ custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 ## Login without an app frame
 
 An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
-No icon is required. `podNames` maps exact canonical Pod URLs to display names;
-the destination remains visible, and duplicate names are disambiguated.
+No icon is required. An optional `description` (for example
+`description="Shopping made easy"`) appears under the app name on the sign-in
+screen, not in management. It is display text only: it is never sent to the Pod
+and is not a consent purpose or a scope. `podNames` maps exact canonical Pod
+URLs to display names; the destination remains visible, and duplicate names are
+disambiguated.
 
 When the runtime permits exactly one Pod (`allowedPods` with one entry),
 `podAddress="hidden"` omits that Pod's address from signing in, including
@@ -755,8 +759,16 @@ and an already structured `SdkFailure`. Both helpers are exported from
 `@sempods/app-sdk`; they present messages without showing diagnostic details.
 
 The default confirmation has keyboard focus, Escape cancellation and focus
-restoration. TODO inputs/buttons use visible focus and mobile touch targets.
-Applications retain responsibility for labels and accessibility of custom fields.
+restoration. It is a native modal `<dialog>` (role `alertdialog`) in the
+browser's top layer, so it stays visible and operable above an app's own dialog
+opened with `showModal()`, while that dialog and the rest of the guarded content
+are inert. Management (`AppAccess` with `open`) and editors can therefore live
+inside an app modal under the same `SempodsProvider`; the dialog itself, its
+close policy and its styling stay with the app (the apps template provides a
+recipe). Keep the app dialog mounted while a confirmation is pending; it cannot
+be closed from behind the confirmation. TODO inputs/buttons use visible focus
+and mobile touch targets. Applications retain responsibility for labels and
+accessibility of custom fields.
 
 ## A known Pod and replaceable access UI
 

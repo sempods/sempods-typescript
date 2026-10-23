@@ -4,6 +4,20 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.5.1 to 0.6.0
+
+The minor changes defaults and adds options; upgrade both packages together.
+Check these points:
+
+- **Leave confirmation in the top layer.** The provider's "Discard unsaved
+  changes?" prompt is now a native modal `<dialog>` (still role
+  `alertdialog`, same texts and buttons) instead of a fixed `div` with
+  `z-index: 1000`. It shows above app dialogs opened with `showModal()`.
+  Remove any z-index workaround for it; tests that find it by role keep
+  working. Without top-layer support (for example jsdom) it renders in place.
+- **`AppAccess` description.** The new optional `description` prop shows a
+  short line under the app name on the sign-in screen; it is display only.
+
 ## From 0.5.0 to 0.5.1
 
 The patch keeps public APIs, message keys and result shapes. Check these points:
