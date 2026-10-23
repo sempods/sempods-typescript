@@ -676,7 +676,7 @@ export function ResourceEditor<D, U = D>({
             keep();
           }}
         >
-          <p id={question}>{m.confirmRemove}</p>
+          <p id={question}>{m.confirmRemove ?? m.remove}</p>
           <div className="sp-sdk-actions">
             <button
               onClick={() => {
