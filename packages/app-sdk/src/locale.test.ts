@@ -6,6 +6,7 @@ import {
   englishMessages,
   germanMessages,
   resolveLocale,
+  type SdkMessages,
 } from './index.js';
 
 it('resolves explicit, browser and unsupported language preferences deterministically', () => {
@@ -129,3 +130,21 @@ it.each(['en', 'de'] as const)(
     );
   },
 );
+
+it('keeps a complete 0.5.0 catalog source-compatible and fills keys added since', () => {
+  // A catalog written against 0.5.0 lacks keys added in a patch; it must still
+  // type-check as the public SdkMessages and get the language default.
+  const controls050 = Object.fromEntries(
+    Object.entries(germanMessages.controls).filter(
+      ([key]) => key !== 'disconnectHint',
+    ),
+  ) as Omit<SdkMessages['controls'], 'disconnectHint'>;
+  const complete: SdkMessages = { ...germanMessages, controls: controls050 };
+  const locale = createLocale({
+    language: 'de',
+    messages: { ...complete, controls: complete.controls },
+  });
+  expect(locale.messages.controls.disconnectHint).toBe(
+    germanMessages.controls.disconnectHint,
+  );
+});

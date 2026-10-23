@@ -18,6 +18,8 @@ The patch keeps public APIs, message keys and result shapes. Check these points:
   shape but default to empty, which shows no hint line. App end-to-end tests
   that find controls by the old texts need the new ones; to keep a text, pass
   it through `messages.controls`.
+- **Complete catalogs still compile.** `controls.disconnectHint` is optional
+  in `UiMessages`; `createLocale` fills it from the language defaults.
 
 ## From 0.4 to 0.5
 

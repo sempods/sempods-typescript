@@ -88,8 +88,12 @@ export interface UiMessages {
   readonly presetContextUnavailable: string;
   /** Forgets the connection on this device; neither revokes sharing nor deletes data. */
   readonly disconnect: string;
-  /** Shown with `disconnect`; an empty string shows no note. */
-  readonly disconnectHint: string;
+  /**
+   * Shown with `disconnect`; an empty string shows no note. Optional in the
+   * type (added in 0.5.1) so a complete catalog written for 0.5.0 still
+   * compiles; `createLocale` fills it from the language defaults.
+   */
+  readonly disconnectHint?: string;
   readonly refresh: string;
   readonly busy: string;
   readonly storage: string;
