@@ -1105,10 +1105,8 @@ try {
     await page
       .getByRole('button', { name: 'I have checked the pod', exact: true })
       .click();
-    await page
-      .getByRole('button', { name: 'Check again', exact: true })
-      .last()
-      .click();
+    // The list reloads with the app's own label, not the SDK's.
+    await page.getByRole('button', { name: 'Reload', exact: true }).click();
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await add('After unknown deletion');
     // Creation drafts use the same keyboard-accessible leave confirmation.
