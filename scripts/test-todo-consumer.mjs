@@ -563,7 +563,8 @@ try {
       await initialSignIn.evaluate(
         (button) => getComputedStyle(button).backgroundColor,
       ),
-      'rgb(34, 96, 68)',
+      // The neutral default accent, not a brand colour.
+      'rgb(31, 41, 51)',
     );
     // A dark OS preference alone must not create dark SDK islands on a light page.
     for (const surface of await page.locator('[data-sempods-ui]').all()) {
@@ -639,7 +640,7 @@ try {
     }
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
-      'rgb(32, 41, 35)',
+      'rgb(31, 41, 51)',
     );
     // This is the entire host opt-in; no SDK stylesheet import is needed.
     await page.addStyleTag({ content: ':root { color-scheme: light dark; }' });
@@ -673,7 +674,7 @@ try {
       appearance === 'light' ? 'rgb(255, 255, 255)' : 'rgb(18, 18, 18)',
     );
     const expectedText =
-      appearance === 'light' ? 'rgb(32, 41, 35)' : 'rgb(232, 238, 233)';
+      appearance === 'light' ? 'rgb(31, 41, 51)' : 'rgb(229, 231, 235)';
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
       expectedText,
@@ -684,7 +685,7 @@ try {
     });
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
-      'rgb(32, 41, 35)',
+      'rgb(31, 41, 51)',
     );
     await page.evaluate(() => {
       document.documentElement.style.removeProperty('color-scheme');

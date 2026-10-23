@@ -18,6 +18,12 @@ The patch keeps public APIs, message keys and result shapes. Check these points:
   shape but default to empty, which shows no hint line. App end-to-end tests
   that find controls by the old texts need the new ones; to keep a text, pass
   it through `messages.controls`.
+- **Neutral default colours.** Without `--sempods-*` tokens the SDK surfaces
+  use a neutral grey palette instead of the green accent: accent and text
+  `#1f2933` / `#e5e7eb` (light/dark), muted `#6b7280` / `#9ca3af`, lines
+  `#e5e7eb` / `#2d3138`, background `#fff` / `#111315`. An app that relied on
+  the green default sets `--sempods-accent: light-dark(#226044, #8acda6)` and
+  `--sempods-on-accent: light-dark(#fff, #14251b)` on an ancestor to keep it.
 - **Complete catalogs still compile.** `controls.disconnectHint` is optional
   in `UiMessages`; `createLocale` fills it from the language defaults.
 

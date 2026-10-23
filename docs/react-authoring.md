@@ -203,6 +203,8 @@ Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
 `style`/`className` where supported. They inherit across SDK components. Existing
 `--sempods-access-*` names remain fallback aliases; the shared names take priority.
+Without them the SDK uses a calm neutral grey palette (since 0.5.1; before, a
+green accent); set `--sempods-accent` to give controls your brand colour.
 React 19 hoists and deduplicates the static scoped sheets using its
 [`style` resource support](https://react.dev/reference/react-dom/components/style).
 Inline scoped styles still require a compatible CSP. Hosts that prohibit them can
