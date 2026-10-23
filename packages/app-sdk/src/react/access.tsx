@@ -277,12 +277,14 @@ export function AppAccess({
                   className="sp-access-primary"
                   disabled={state.changing || state.confirmingLeave}
                   onClick={() => {
-                    setRetryFailure(null);
-                    void app
-                      .authorize(retry)
-                      .catch((cause: unknown) =>
-                        setRetryFailure({ id: retry, cause }),
-                      );
+                    // Kept until an attempt proceeds: a declined leave prompt
+                    // or a blocking write resolves false and changes nothing.
+                    void app.authorize(retry).then(
+                      (started) => {
+                        if (started) setRetryFailure(null);
+                      },
+                      (cause: unknown) => setRetryFailure({ id: retry, cause }),
+                    );
                   }}
                 >
                   {m.controls.updateAccess}

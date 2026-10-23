@@ -4,6 +4,7 @@ import { webcrypto } from 'node:crypto';
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -13,7 +14,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { callback, fixture, settleLease } from '../runtime/fixture.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import type { BrowserRuntime } from '../runtime/types.js';
-import { AppAccess, SempodsProvider, TargetScreen } from './index.js';
+import { useState } from 'react';
+import {
+  AppAccess,
+  SempodsProvider,
+  TargetScreen,
+  useDraftGuard,
+} from './index.js';
 
 const runtimes: BrowserRuntime[] = [];
 beforeEach(async () => {
@@ -215,4 +222,54 @@ it('keeps Change sharing and shows the failure when preparing it again fails', a
   await waitFor(() =>
     expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
   );
+});
+
+it('keeps the failed retry and its action when the leave prompt is declined', async () => {
+  const t = text.en;
+  const { f, runtime } = await returning('again', 'error=access_denied');
+  function Draft() {
+    const [draft, setDraft] = useState('');
+    useDraftGuard(draft !== '', () => setDraft(''));
+    return (
+      <input
+        aria-label="Draft"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime} language="en">
+      <AppAccess appName="Shopping" />
+      <TargetScreen>
+        <Draft />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  const region = await screen.findByRole('region', { name: t.region });
+  await waitFor(() =>
+    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
+  );
+  const change = () => within(region).getByRole('button', { name: t.change });
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url, init) => {
+    if (url.includes('/.well-known/')) throw new TypeError('offline');
+    return original(url, init);
+  });
+  await act(async () => change().click());
+  await waitFor(() => expect(within(region).getByRole('alert')).toBeTruthy());
+  f.fetch.mockImplementation(original);
+  const draft = await screen.findByLabelText('Draft');
+  fireEvent.change(draft, { target: { value: 'Unsaved' } });
+  const navigations = f.navigate.mock.calls.length;
+  await act(async () => change().click());
+  await act(async () =>
+    screen.getByRole('button', { name: 'Keep editing' }).click(),
+  );
+  // Nothing happened: the failure and the one action are still offered.
+  expect(region.hidden).toBe(false);
+  expect(within(region).getByRole('alert')).toBeTruthy();
+  expect(change()).toBeTruthy();
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  expect((draft as HTMLInputElement).value).toBe('Unsaved');
 });
