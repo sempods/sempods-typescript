@@ -485,7 +485,7 @@ function deletions(f: Awaited<ReturnType<typeof connected>>) {
     answer: (next: () => Promise<Response>) => void (answer = next),
   };
 }
-let shownEditor: ReturnType<typeof useResourceEditor<{ title: string }>>;
+let shownEditor: { refresh(): Promise<void> } | null = null;
 function SubjectForm({ subject }: { readonly subject: string }) {
   const editor = useResourceEditor(subject, definition);
   shownEditor = editor;
