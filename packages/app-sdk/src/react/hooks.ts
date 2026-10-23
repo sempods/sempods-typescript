@@ -40,7 +40,7 @@ import {
   shallowEqual,
   useAppFacts,
   useAppState,
-  useContextDemand,
+  useContextDiscovery,
   useController,
   useView,
   useWorkflowAccess,
@@ -410,8 +410,10 @@ const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
  * selected Context, the remembered choice and every `TargetScreen` stay as
  * they are, so a creation form elsewhere keeps its target.
  *
- * `open(target)` records the active connection and demands its catalogue, as
- * `TargetScreen` does; the editor needs no `TargetScreen`.
+ * `open(target)` records the active connection and demands its catalogue; the
+ * editor needs no `TargetScreen`. Unlike a `TargetScreen` it asks for no
+ * selected Context, so `AppAccess` shows no Context chooser for it; a failed
+ * catalogue still appears there with "Check access".
  *
  * - `idle`: nothing is open.
  * - `loading`: startup, sign-in or the catalogue is not settled yet.
@@ -493,7 +495,9 @@ export function useContextEditor<D>(
   const live = liveLane(state, activeId);
   // Only the originating connection may demand discovery for this target, and
   // only once the runtime accepted the binding: a refused target sends nothing.
-  useContextDemand(live && bound !== null);
+  // Discovery only: an explicit target needs no selected Context, so AppAccess
+  // offers no chooser for it.
+  useContextDiscovery(live && bound !== null);
   // The binding's own rule for catalogue evidence, without its required-scope
   // check: a target missing scopes would otherwise stay loading with no problem
   // to present. A newly opened row needs a successful listing, not retained

@@ -13,6 +13,7 @@ import {
   useApp,
   useAppState,
   useContextDemand,
+  useDiscoveryDemand,
   useWorkflowAccess,
   type AppActions,
 } from './app.js';
@@ -94,6 +95,9 @@ export function AppAccess({
   const state = useAppState();
   const access = useWorkflowAccess();
   const contextRequired = useContextDemand(open);
+  // An explicit target (useContextEditor) needs the catalogue, not a selection.
+  const discoveryDemand = useDiscoveryDemand();
+  const discovery = contextRequired || discoveryDemand;
   const podAccess = useSyncExternalStore(
     state.pod?.subscribe ?? noSubscription,
     state.pod?.getSnapshot ?? (() => unavailablePod),
@@ -103,10 +107,11 @@ export function AppAccess({
     state.contextSelection === 'on-demand' ? podAccess.read : access.read;
   const { messages: m, direction, error } = useSdkLocale();
   const heldFocus = useRef(false);
+  const catalogueFailed = access.connection?.catalogue.kind === 'failed';
   const needsAttention =
     !readable ||
-    (contextRequired &&
-      (!access.read || access.connection?.catalogue.kind === 'failed'));
+    (contextRequired && !access.read) ||
+    (discovery && catalogueFailed);
   const hidden = !needsAttention && !open && !state.callbackNotice;
   // The active connection is still being validated (restoring, signed in while
   // its Pod reader is not yet readable, or loading its first demanded Context
@@ -177,6 +182,7 @@ export function AppAccess({
     active &&
     available &&
     (missingScopes ||
+      (discovery && catalogueFailed) ||
       (contextRequired &&
         Boolean(
           access.connection?.selectedContext ||
@@ -249,6 +255,7 @@ export function AppAccess({
                 ) : (
                   <AccessConnections
                     contextRequired={contextRequired}
+                    discovery={discovery}
                     manage={open}
                     mode={mode}
                     validating={validating}
@@ -279,6 +286,7 @@ function AccessConnections({
   mode,
   podNames,
   contextRequired,
+  discovery,
   validating,
   podAddress,
 }: {
@@ -287,6 +295,8 @@ function AccessConnections({
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
   readonly contextRequired: boolean;
+  /** Catalogue discovery is demanded, with or without a selection. */
+  readonly discovery: boolean;
   /** Only the loading status (and a switch to another saved Pod) applies. */
   readonly validating: boolean;
 }) {
@@ -621,7 +631,7 @@ function AccessConnections({
               >
                 {m.controls.updateAccess}
               </button>
-              {contextRequired && (
+              {discovery && (
                 <button
                   disabled={unavailable}
                   onClick={() => void act(() => app.refreshContexts(c.id))}

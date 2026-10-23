@@ -35,6 +35,12 @@ The patch keeps public APIs, message keys and result shapes. Check these points:
 - **Compact checkboxes.** Checkboxes and radios inside SDK surfaces are 24px
   instead of 44px; a wrapping `<label>` keeps the 44px target. Wrap a bare
   checkbox in its label to keep a large target.
+- **No chooser for an explicit target.** `useContextEditor` still loads the
+  catalogue but no longer asks `AppAccess` for a selected Context. With
+  `contextSelection: 'on-demand'`, `AppAccess` stays hidden while such an
+  editor loads and offers no Context chooser for it; a failed catalogue still
+  shows with **Check access**. An app that called `selectContext` before
+  opening a row only to avoid the chooser can drop that call.
 
 ## From 0.4 to 0.5
 

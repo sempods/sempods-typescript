@@ -377,13 +377,65 @@ it.each(['unreadable', 'refused', 'offline'] as const)(
       ),
     );
     expect(reads).toEqual([]);
+    // An explicit target asks for no selection: never a Context chooser.
+    expect(screen.queryByLabelText('Data context')).toBeNull();
+    if (mode === 'unreadable') {
+      // A listed catalogue needs no attention; management keeps the retry.
+      expect(
+        screen.queryByRole('region', { name: 'Pods & sharing' }),
+      ).toBeNull();
+      fireEvent.click(screen.getByText('Manage access'));
+    } else
+      // A failed catalogue appears by itself, with its retry.
+      expect(
+        screen.getByText('Context catalogue unavailable. Access is unknown.'),
+      ).toBeTruthy();
     f.setCatalogue(async () => catalogue());
     fireEvent.click(
       await screen.findByRole('button', { name: 'Check access' }),
     );
     await waitFor(() => expect(title().value).toBe('A at work'));
+    expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
   },
 );
+
+it('opens an explicit target with no Context selected and without the chooser', async () => {
+  const f = await returned();
+  notes(f);
+  const listing = deferred<Response>();
+  f.setCatalogue(() => listing.promise);
+  render(ui(f.runtime));
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
+  await open('Edit urn:a in work');
+  await waitFor(() => expect(f.count('/_system/contexts')).toBe(1));
+  // While the catalogue loads, the editor reports it; AppAccess stays away.
+  expect(phase()).toBe('loading');
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
+  expect(screen.queryByLabelText('Data context')).toBeNull();
+  await act(async () => listing.resolve(await catalogue()));
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
+  expect(screen.queryByLabelText('Data context')).toBeNull();
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
+  expect(f.count('/_system/contexts')).toBe(1);
+});
+
+it('keeps the chooser for a TargetScreen beside an explicit target, with one catalogue request', async () => {
+  const f = await returned();
+  notes(f);
+  render(ui(f.runtime, <Harness selected />));
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
+  );
+  await open('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  // The selected-target screen still asks for a Context; the editor stays.
+  expect(await screen.findByLabelText('Data context')).toBeTruthy();
+  expect(title().value).toBe('A at work');
+  expect(f.count('/_system/contexts')).toBe(1);
+});
 
 it.each([
   ['an exact preset for another Context', 'Edit urn:a in work'],
