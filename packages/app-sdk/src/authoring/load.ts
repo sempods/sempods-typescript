@@ -198,6 +198,13 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
       if (state.kind === 'ready') retries = 0;
       void run(true);
     }
+    // Retained Pod data belongs to its grants, also while a failed refresh
+    // waits for an explicit retry.
+    if (pod && kept && next.revision !== kept.revision) {
+      kept = undefined;
+      if (state.kind === 'failed' && 'previous' in state)
+        emit({ kind: 'failed', error: state.error });
+    }
     previous = next;
   });
   return {

@@ -165,3 +165,24 @@ it('reads retain at each reload', async () => {
   expect(loader.getSnapshot()).toEqual({ kind: 'loading', previous: 'rows' });
   loader.dispose();
 });
+
+it('drops a failed Pod refresh’s retained data when the grants change', async () => {
+  const { view, change } = handle('pod');
+  const { read, answers } = reads();
+  const loader = createViewLoader(view, read, { retain: true });
+  const first = loader.reload();
+  answers[0]!.resolve({ kind: 'ok', body: 'rows' });
+  await first;
+  const second = loader.reload();
+  answers[1]!.resolve({ kind: 'refused', status: 403 });
+  await second;
+  expect(loader.getSnapshot()).toMatchObject({ previous: 'rows' });
+  change({ revision: 2 });
+  // Still failed, waiting for an explicit retry, but without the old data.
+  expect(loader.getSnapshot()).toEqual({
+    kind: 'failed',
+    error: { kind: 'refused', status: 403 },
+  });
+  expect(read).toHaveBeenCalledTimes(2);
+  loader.dispose();
+});
