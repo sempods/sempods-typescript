@@ -9,6 +9,12 @@ automatic conversion of legacy app data or stored credentials.
 The minor changes defaults and adds options; upgrade both packages together.
 Check these points:
 
+- **UI language follows the browser.** `SempodsProvider` and `SdkLocaleProvider`
+  without `language` and `locale` now use the browser's languages (read once per
+  provider) instead of English: a German browser gets German messages and
+  `de-DE` formatting. Pin the old result with `language="en" locale="en"`. A
+  `locale` or `language` alone keeps its previous meaning; `createLocale` and
+  `resolveLocale` are unchanged and read no browser globals.
 - **Leave confirmation in the top layer.** The provider's "Discard unsaved
   changes?" prompt is now a native modal `<dialog>` (still role
   `alertdialog`, same texts and buttons) instead of a fixed `div` with
