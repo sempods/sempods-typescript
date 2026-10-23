@@ -4,6 +4,17 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.5.0 to 0.5.1
+
+The patch keeps public APIs, message keys and result shapes. Check these points:
+
+- **No chooser for an explicit target.** `useContextEditor` still loads the
+  catalogue but no longer asks `AppAccess` for a selected Context. With
+  `contextSelection: 'on-demand'`, `AppAccess` stays hidden while such an
+  editor loads and offers no Context chooser for it; a failed catalogue still
+  shows with **Check access**. An app that called `selectContext` before
+  opening a row only to avoid the chooser can drop that call.
+
 ## From 0.4 to 0.5
 
 Upgrade both packages together; Node 24.15 or newer stays the requirement:
