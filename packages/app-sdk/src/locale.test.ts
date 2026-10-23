@@ -136,9 +136,9 @@ it('keeps a complete 0.5.0 catalog source-compatible and fills keys added since'
   // type-check as the public SdkMessages and get the language default.
   const controls050 = Object.fromEntries(
     Object.entries(germanMessages.controls).filter(
-      ([key]) => key !== 'confirmRemove',
+      ([key]) => key !== 'confirmRemove' && key !== 'disconnectHint',
     ),
-  ) as Omit<SdkMessages['controls'], 'confirmRemove'>;
+  ) as Omit<SdkMessages['controls'], 'confirmRemove' | 'disconnectHint'>;
   const complete: SdkMessages = { ...germanMessages, controls: controls050 };
   const locale = createLocale({
     language: 'de',
@@ -146,5 +146,8 @@ it('keeps a complete 0.5.0 catalog source-compatible and fills keys added since'
   });
   expect(locale.messages.controls.confirmRemove).toBe(
     germanMessages.controls.confirmRemove,
+  );
+  expect(locale.messages.controls.disconnectHint).toBe(
+    germanMessages.controls.disconnectHint,
   );
 });

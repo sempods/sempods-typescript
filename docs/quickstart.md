@@ -259,7 +259,7 @@ expected, and the editor shows the comparison.
 
 After a reload the session stays signed in and the app returns to the context
 you chose last, as long as the Pod still lets you read it; otherwise you choose
-again. To grant the app another context later, use **Update access** and choose
+again. To grant the app another context later, use **Change sharing** and choose
 the new context after returning. A second ordinary tab of the same app shows that
 the app is open in another tab; one tab holds the session at a time. Use a private
 window or another browser profile to act as a second person.

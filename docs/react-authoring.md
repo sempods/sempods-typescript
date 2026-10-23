@@ -118,7 +118,9 @@ One `allowedPods` entry or a preset needs no URL input. Several permitted Pods
 get a finite picker; selecting an option does not start sign-in. When a connection
 already exists, adding another Pod is a secondary action; signing into the current
 connection remains prominent when needed. Unrestricted
-apps show **Your Pod** with a short hint. The input may omit `https://`; presentation
+apps show a **Pod address** field: the person's own Pod or one that shares a
+context with them. `controls.podHint` and `controls.loginHint` are empty by
+default, so no hint lines appear; an app may set them. The input may omit `https://`; presentation
 adds it, trims surrounding whitespace and removes one trailing slash before
 calling the runtime. Other noncanonical input remains rejected; configured Pod
 URLs still require the strict canonical form.
@@ -128,7 +130,7 @@ auth or automatic redirect. Login/consent on the Pod retains the Pod's own UI.
 The initial login uses an `h1`; recovery with an existing target and explicitly
 opened management use an `h2`, below the app’s own main heading.
 
-The app may put a **Data access** button in its own menu or header. `open` shows
+The app may put a **Pods & sharing** button (`controls.dataAccess`) in its own menu or header. `open` shows
 management. In on-demand mode, opening it also demands Context discovery. Pod/context changes still run
 through the same leave guards. Supply `focusTarget` for focus recovery when a
 focused access control disappears. For example, inside the provider:
@@ -201,6 +203,8 @@ Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
 `style`/`className` where supported. They inherit across SDK components. Existing
 `--sempods-access-*` names remain fallback aliases; the shared names take priority.
+Without them the SDK uses a calm neutral grey palette (since 0.5.1; before, a
+green accent); set `--sempods-accent` to give controls your brand colour.
 React 19 hoists and deduplicates the static scoped sheets using its
 [`style` resource support](https://react.dev/reference/react-dom/components/style).
 Inline scoped styles still require a compatible CSP. Hosts that prohibit them can
@@ -626,7 +630,7 @@ const runtime = createBrowserRuntime({
 
 `Tasks` is your existing app screen. The first visit offers **Sign in** without a
 Pod URL input; after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
-**Data access** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
+**Pods & sharing** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
 connections remain available for selection. Add the optional
 `contextIri` inside `preset` to declare an exact context instead. The SDK waits for
 fresh readable catalogue evidence, displays that fixed context instead of a
@@ -719,7 +723,7 @@ is inferred from an absent grant. Each server operation remains authoritative.
 
 `AppShell` accepts `title`, `style` and `components={{ Connections: MyPicker }}`.
 It composes a title/management header, `AppAccess`, and the content. Usable access
-hides administration; **Data access** opens it, including replacement controls.
+hides administration; **Pods & sharing** opens it, including replacement controls.
 Startup still gates content until durable storage is ready; later access loss or
 management toggles retain mounted content and its drafts. Read-only feedback stays
 visible. See [0.3 migration](migration.md#from-02-to-03) for the changed presentation.
@@ -803,7 +807,7 @@ restoring connection waits;
 access. Select a readable context explicitly; after a reload or re-authorization
 the runtime reselects the last chosen one while it is still readable. `Check
 again` refreshes that connection's catalogue, while the sign-in button requests
-authorization (labelled `Update access` while signed in); neither retries a
+authorization (labelled `Change sharing` while signed in); neither retries a
 write. A busy/unavailable startup offers the SDK's reload guidance, not a call to
 the memoized initializer pretending to restart it. Saved-record warnings do not
 hide healthy connections. Sign-in cancellation by the leave guard is not an error.
