@@ -16,6 +16,25 @@ Check these points:
   `locale` or `language` alone keeps its previous meaning; `createLocale` and
   `resolveLocale` are unchanged and read no browser globals.
 
+## From 0.5.1 to 0.6.0
+
+The minor changes defaults and adds options; upgrade both packages together.
+Check these points:
+
+- **Management shows the connected Pod first.** With `open`, `AppAccess` lists
+  the connected Pod, its readable Contexts with **This app can read** / **This
+  app can read and change**, then the actions and **Full addresses**; signing in
+  to another Pod moved to a collapsed **Connect another Pod** at the end.
+  End-to-end tests that fill **Pod address** in management first expand that
+  section. New message keys `controls.contextAccess`, `canRead`, `canChange`
+  and `connectAnother` are optional in `UiMessages`.
+- **On-demand management no longer asks for a selection.** In
+  `contextSelection: 'on-demand'`, opening management still loads the
+  catalogue but shows the **Data context** chooser only while a Context flow
+  (`TargetScreen`) needs a selected Context. An app that let people pick its
+  Context there mounts its Context flow, or offers its own guarded
+  `selectContext` control.
+
 ## From 0.5.0 to 0.5.1
 
 The patch keeps public APIs, message keys and result shapes. Check these points:
