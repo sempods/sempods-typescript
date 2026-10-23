@@ -433,8 +433,11 @@ function Notes() {
 `Overview` passes `{ subject, context }` from a row's IRI bindings, with the
 `GRAPH` binding as `context`.
 
-- **Opening.** `open` records the active connection and demands its catalogue,
-  as `TargetScreen` does; the editor needs no `TargetScreen`. `open()` resolves
+- **Opening.** `open` records the active connection and demands its catalogue;
+  the editor needs no `TargetScreen`. Unlike a `TargetScreen` it asks for no
+  selected Context: `AppAccess` offers no Context chooser for it and stays
+  hidden while the catalogue loads. A failed catalogue still shows there with
+  **Check access**; for an `unreadable` target, management (`open`) offers it. `open()` resolves
   `true` once the target is open. Whether it becomes `ready` is reported through
   `phase`. Opening another target and `close()` run under the leave policy.
 - **Phases.**
