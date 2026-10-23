@@ -19,6 +19,8 @@ import {
   AppAccess,
   SempodsProvider,
   TargetScreen,
+  useApp,
+  useAppState,
   useDraftGuard,
 } from './index.js';
 
@@ -329,4 +331,50 @@ it('keeps Change sharing when preparation fails after the leave prompt was confi
   await waitFor(() =>
     expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
   );
+});
+
+it('drops the offer and its failure once another connection was active', async () => {
+  const t = text.en;
+  const { f, runtime } = await returning('again', 'error=access_denied');
+  let app!: ReturnType<typeof useApp>;
+  let activeId: string | null = null;
+  function Probe() {
+    app = useApp();
+    activeId = useAppState().activeId;
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={runtime} language="en">
+      <AppAccess appName="Shopping" />
+      <Probe />
+      <TargetScreen>
+        <p>My list</p>
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  const region = await screen.findByRole('region', { name: t.region });
+  await waitFor(() =>
+    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
+  );
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url, init) => {
+    if (url.includes('/.well-known/')) throw new TypeError('offline');
+    return original(url, init);
+  });
+  await act(async () =>
+    within(region).getByRole('button', { name: t.change }).click(),
+  );
+  await waitFor(() => expect(within(region).getByRole('alert')).toBeTruthy());
+  f.fetch.mockImplementation(original);
+  const first = activeId!;
+  const other = await act(() => runtime.connect('https://pod.example/bob'));
+  await act(async () => {
+    await app.selectConnection(other.id);
+  });
+  await act(async () => {
+    await app.selectConnection(first);
+  });
+  await waitFor(() => expect(region.hidden).toBe(true));
+  expect(within(region).queryByRole('button', { name: t.change })).toBeNull();
+  expect(within(region).queryByRole('alert')).toBeNull();
 });

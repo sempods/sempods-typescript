@@ -140,8 +140,11 @@ export function AppAccess({
       ? kept.id
       : null;
   if (noticed && offered !== noticed) setOffered(noticed);
-  // Leaving (or losing the session) ends the offer.
-  if (offered && kept?.id === offered && !keptActive) setOffered(null);
+  // Leaving, losing the session or another active connection ends the offer
+  // and its failure: returning to the connection does not bring them back.
+  if (offered && (kept?.id !== offered || !keptActive)) setOffered(null);
+  if (retryFailure && (kept?.id !== retryFailure.id || !keptActive))
+    setRetryFailure(null);
   const retry = noticed ?? (keptActive && offered === kept.id ? kept.id : null);
   const failedRetry = retry && retryFailure?.id === retry ? retryFailure : null;
   const hidden = !needsAttention && !open && !state.callbackNotice && !retry;
