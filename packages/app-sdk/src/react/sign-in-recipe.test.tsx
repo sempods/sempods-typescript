@@ -181,7 +181,7 @@ it('keeps an unconfirmed creation notice outside hidden content and guards sign-
   await act(() => f.runtime.loadContexts(f.id));
   const notice = screen.getByText(/The result is unconfirmed/);
   expect(notice.closest('[hidden]')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Update access' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change sharing' }));
   await screen.findByText(/A write is still unconfirmed/);
   fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
   expect((screen.getByLabelText('Note') as HTMLInputElement).value).toBe(
@@ -265,7 +265,7 @@ it('keeps the target mounted during renewal and retains its draft when the sessi
   );
   expect(input.closest('[hidden]')).toBeNull();
   const navigations = f.navigate.mock.calls.length;
-  fireEvent.click(screen.getByRole('button', { name: 'Update access' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change sharing' }));
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
   await act(async () =>
     token.resolve(Response.json({ error: 'invalid_grant' }, { status: 400 })),

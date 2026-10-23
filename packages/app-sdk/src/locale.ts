@@ -83,10 +83,13 @@ export interface UiMessages {
   readonly connect: string;
   readonly podUrl: string;
   readonly signIn: string;
-  /** Re-authorizes an active connection, for example to grant another context. */
+  /** Re-authorizes an active connection, for example to share another context. */
   readonly updateAccess: string;
   readonly presetContextUnavailable: string;
+  /** Forgets the connection on this device; neither revokes sharing nor deletes data. */
   readonly disconnect: string;
+  /** Shown with `disconnect`; an empty string shows no note. */
+  readonly disconnectHint: string;
   readonly refresh: string;
   readonly busy: string;
   readonly storage: string;
@@ -123,8 +126,11 @@ export interface UiMessages {
   readonly mine: string;
   readonly alongside: string;
   readonly dataAccess: string;
+  /** Label of the Pod address field; also a Pod that shares a context with the person. */
   readonly yourPod: string;
+  /** Optional hint under the Pod address field; empty (the default) shows none. */
   readonly podHint: string;
+  /** Optional hint before the first sign-in; empty (the default) shows none. */
   readonly loginHint: string;
   readonly checkAccess: string;
   readonly addresses: string;
@@ -155,10 +161,11 @@ export const englishMessages: SdkMessages = {
     connect: 'Connect',
     podUrl: 'Pod URL',
     signIn: 'Sign in',
-    updateAccess: 'Update access',
+    updateAccess: 'Change sharing',
     presetContextUnavailable:
       'The configured context is not readable on this Pod.',
-    disconnect: 'Disconnect',
+    disconnect: 'Sign out',
+    disconnectHint: 'Signing out only applies to this device.',
     refresh: 'Check again',
     busy: 'Open in another tab. Close that tab and reload here.',
     storage:
@@ -198,10 +205,10 @@ export const englishMessages: SdkMessages = {
     no: 'No',
     mine: 'Your draft',
     alongside: 'Saved alongside changes to other fields.',
-    dataAccess: 'Data access',
-    yourPod: 'Your Pod',
-    podHint: 'Paste the link to your Pod.',
-    loginHint: 'Continue to sign in on your Pod.',
+    dataAccess: 'Pods & sharing',
+    yourPod: 'Pod address',
+    podHint: '',
+    loginHint: '',
     checkAccess: 'Check access',
     addresses: 'Full addresses',
     signInCancelled: 'Sign-in was cancelled.',
@@ -269,10 +276,11 @@ export const germanMessages: SdkMessages = {
     connect: 'Verbinden',
     podUrl: 'Pod-URL',
     signIn: 'Anmelden',
-    updateAccess: 'Zugriff ändern',
+    updateAccess: 'Freigabe ändern',
     presetContextUnavailable:
       'Der konfigurierte Kontext ist auf diesem Pod nicht lesbar.',
-    disconnect: 'Trennen',
+    disconnect: 'Abmelden',
+    disconnectHint: 'Die Abmeldung gilt nur für dieses Gerät.',
     refresh: 'Erneut prüfen',
     busy: 'In einem anderen Tab geöffnet. Schließe diesen Tab und lade hier neu.',
     storage:
@@ -313,10 +321,10 @@ export const germanMessages: SdkMessages = {
     no: 'Nein',
     mine: 'Dein Entwurf',
     alongside: 'Zusammen mit Änderungen an anderen Feldern gespeichert.',
-    dataAccess: 'Datenzugriff',
-    yourPod: 'Dein Pod',
-    podHint: 'Füge den Link zu deinem Pod ein.',
-    loginHint: 'Weiter zur Anmeldung auf deinem Pod.',
+    dataAccess: 'Pods & Freigaben',
+    yourPod: 'Pod-Adresse',
+    podHint: '',
+    loginHint: '',
     checkAccess: 'Zugriff prüfen',
     addresses: 'Vollständige Adressen',
     signInCancelled: 'Die Anmeldung wurde abgebrochen.',

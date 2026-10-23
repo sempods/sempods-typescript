@@ -4,6 +4,21 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.5.0 to 0.5.1
+
+The patch keeps public APIs, message keys and result shapes. Check these points:
+
+- **AppAccess wording.** The default EN/DE texts name one action once:
+  **Pod address** / **Pod-Adresse** (`controls.yourPod`), **Pods & sharing** /
+  **Pods & Freigaben** (`controls.dataAccess`), **Change sharing** /
+  **Freigabe ändern** (`controls.updateAccess`) and **Sign out** /
+  **Abmelden** (`controls.disconnect`). Signing out still only forgets the
+  connection on this device; the new `controls.disconnectHint` says so beside
+  the button. `controls.podHint` and `controls.loginHint` stay in the message
+  shape but default to empty, which shows no hint line. App end-to-end tests
+  that find controls by the old texts need the new ones; to keep a text, pass
+  it through `messages.controls`.
+
 ## From 0.4 to 0.5
 
 Upgrade both packages together; Node 24.15 or newer stays the requirement:
