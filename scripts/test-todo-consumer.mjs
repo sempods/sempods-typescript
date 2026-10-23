@@ -21,6 +21,15 @@ import { chromium } from 'playwright';
 const root = process.cwd();
 const temp = await mkdtemp(join(tmpdir(), 'sempods-todo-'));
 const execute = promisify(execFile);
+const confirmText = 'Delete this from the pod? This cannot be undone.';
+/** The editor asks before deleting; only its confirmation sends the DELETE. */
+async function confirmDelete(page) {
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page
+    .getByRole('group', { name: confirmText, exact: true })
+    .getByRole('button', { name: 'Delete', exact: true })
+    .click();
+}
 let server;
 let browser;
 try {
@@ -629,6 +638,14 @@ try {
         (button) => getComputedStyle(button).outlineStyle !== 'none',
       ),
     );
+    // A compact checkbox; its label is the 44px target.
+    const done = editor.getByRole('checkbox');
+    const doneBox = await done.boundingBox();
+    assert.ok(doneBox.width <= 24 && doneBox.height <= 24);
+    const doneLabel = await editor
+      .locator('label:has(input[type=checkbox])')
+      .boundingBox();
+    assert.ok(doneLabel.height >= 44 && doneLabel.width >= 44);
     for (const control of [
       save,
       field,
@@ -913,8 +930,23 @@ try {
     await page
       .getByRole('button', { name: 'Discard changes', exact: true })
       .click();
+    // The first Delete only asks; Escape keeps the task, confirming sends one DELETE.
+    const beforeAsk = writes;
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    const ask = page.getByRole('group', { name: confirmText, exact: true });
+    await ask.waitFor();
+    assert.equal(
+      await ask
+        .getByRole('button', { name: 'Cancel', exact: true })
+        .evaluate((button) => button === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('Escape');
+    await ask.waitFor({ state: 'detached' });
+    assert.equal(writes, beforeAsk);
+    await confirmDelete(page);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
+    assert.equal(writes, beforeAsk + 1);
     await add('Existing row');
     // C1: observing absence preserves the draft for an explicit same-IRI retry.
     const createAttempts = [];
@@ -958,7 +990,7 @@ try {
       .getByRole('button', { name: 'Retry captured task', exact: true })
       .click();
     await page.getByLabel('Task', { exact: true }).nth(1).waitFor();
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await confirmDelete(page);
     await page
       .getByRole('button', { name: 'Retry captured task', exact: true })
       .waitFor({ state: 'detached' });
@@ -1010,7 +1042,7 @@ try {
     await page
       .getByRole('button', { name: 'I have checked the pod', exact: true })
       .click();
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await confirmDelete(page);
     await page
       .getByRole('button', { name: 'Existing row', exact: true })
       .waitFor({ state: 'detached' });
@@ -1062,7 +1094,7 @@ try {
     loseMethod = 'DELETE';
     await page.route('**/_system/resources/**', loseAnswer);
     const beforeDelete = writes;
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await confirmDelete(page);
     await page.getByRole('alert').filter({ hasText: 'unconfirmed' }).waitFor();
     assert.equal(writes, beforeDelete + 1);
     await page.unroute('**/_system/resources/**', loseAnswer);
