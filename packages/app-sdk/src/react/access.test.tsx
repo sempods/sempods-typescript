@@ -689,7 +689,9 @@ it('preserves cancelled callback feedback and supports custom connection replace
       <AppAccess appName="Shopping" components={{ Connections: Replacement }} />
     </SempodsProvider>,
   );
-  const alert = await screen.findByText('Sign-in was cancelled.');
+  const alert = await screen.findByText(
+    'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
+  );
   expect(screen.getByText('Custom 1')).toBeTruthy();
   // Centred access text gets a full outline, not a lone start border.
   const style = getComputedStyle(alert);

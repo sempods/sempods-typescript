@@ -178,6 +178,17 @@ export function AppAccess({
   const Heading =
     (headingLevel ?? (open || state.view ? 2 : 1)) === 2 ? 'h2' : 'h1';
   const Connections = components?.Connections;
+  // A declined re-authorization kept this active connection's session.
+  const retry =
+    state.callbackNotice &&
+    state.startup?.resumed &&
+    state.startup.attemptConnectionId === c?.id &&
+    (c?.session.kind === 'active' || c?.session.kind === 'renewing')
+      ? c.id
+      : null;
+  const [retryFailure, setRetryFailure] = useState<{
+    readonly cause: unknown;
+  } | null>(null);
   const available = state.startup?.storage === 'durable' && !state.startupError;
   const active =
     access.connection?.session.kind === 'active' ||
@@ -248,6 +259,27 @@ export function AppAccess({
         ) : (
           <>
             <CallbackNotice />
+            {retry && !needsAttention && !open && (
+              // The one next step after an unchanged re-authorization: the
+              // connection view (and its actions) is not shown here.
+              <div className="sp-access-actions">
+                <button
+                  className="sp-access-primary"
+                  disabled={state.changing || state.confirmingLeave}
+                  onClick={() => {
+                    setRetryFailure(null);
+                    void app
+                      .authorize(retry)
+                      .catch((cause: unknown) => setRetryFailure({ cause }));
+                  }}
+                >
+                  {m.controls.updateAccess}
+                </button>
+              </div>
+            )}
+            {retryFailure && !needsAttention && !open && (
+              <p role="alert">{error(retryFailure.cause)}</p>
+            )}
             {(needsAttention || open) && (
               <>
                 {Connections ? (

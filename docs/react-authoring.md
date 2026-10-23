@@ -809,7 +809,15 @@ restoring connection waits, and a `leaving` one (the page is navigating to the
 Pod's sign-in) keeps its screen inert and offers no sign-in;
 `active` and `renewing` are authenticated facts, not interchangeable with context
 access. A cancelled re-authorization keeps the signed-in session
-(`startup.resumed`). Select a readable context explicitly; after a reload or re-authorization
+(`startup.resumed`).
+
+A provider's `access_denied` answer does not say whether the person cancelled
+or declined, and its free-text `error_description` is never shown or
+interpreted. After a first sign-in the callback notice therefore says that no
+access was granted, next to the connection's one **Sign in**. After a declined
+re-authorization that kept the session, it says that sharing was not changed and
+`AppAccess` offers **Change sharing** as the one next step. Any other provider
+answer names its cause and also leads to **Sign in**. Select a readable context explicitly; after a reload or re-authorization
 the runtime reselects the last chosen one while it is still readable. `Check
 again` refreshes that connection's catalogue, while the sign-in button requests
 authorization (labelled `Change sharing` while signed in); neither retries a

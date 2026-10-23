@@ -861,8 +861,18 @@ it.each(['connect', 'authorize'] as const)(
 );
 
 it.each([
-  ['en', 'access_denied', 'cancelled', 'Sign-in was cancelled.'],
-  ['de', 'access_denied', 'cancelled', 'Die Anmeldung wurde abgebrochen.'],
+  [
+    'en',
+    'access_denied',
+    'cancelled',
+    'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
+  ],
+  [
+    'de',
+    'access_denied',
+    'cancelled',
+    'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
+  ],
   [
     'en',
     'login_required',
@@ -938,8 +948,14 @@ it('names why connecting failed instead of a generic failure', async () => {
 });
 
 it.each([
-  ['en', 'Sign-in was cancelled.'],
-  ['de', 'Die Anmeldung wurde abgebrochen.'],
+  [
+    'en',
+    'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
+  ],
+  [
+    'de',
+    'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
+  ],
 ] as const)(
   'a custom layout places CallbackNotice next to working recovery controls (%s)',
   async (language, text) => {

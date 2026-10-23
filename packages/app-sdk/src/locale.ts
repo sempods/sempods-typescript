@@ -149,7 +149,17 @@ export interface UiMessages {
   readonly loginHint: string;
   readonly checkAccess: string;
   readonly addresses: string;
+  /**
+   * A first sign-in the provider answered with `access_denied`: neutral, as
+   * the answer does not say whether the person cancelled or declined.
+   */
   readonly signInCancelled: string;
+  /**
+   * A re-authorization answered with `access_denied` that kept the earlier
+   * session (`startup.resumed`). Optional in the type (added in 0.6.0);
+   * `createLocale` fills it from the language defaults.
+   */
+  readonly sharingUnchanged?: string;
   /** An unfinished sign-in or an expired session; implies neither access nor a kept draft. */
   readonly signInRequired: string;
 }
@@ -228,7 +238,10 @@ export const englishMessages: SdkMessages = {
     loginHint: '',
     checkAccess: 'Check access',
     addresses: 'Full addresses',
-    signInCancelled: 'Sign-in was cancelled.',
+    signInCancelled:
+      'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
+    sharingUnchanged:
+      'Sharing was not changed: the consent was cancelled or declined at the Pod. This app keeps the access it had.',
     signInRequired: 'Sign in to use this pod.',
   },
   activePod: 'Active pod',
@@ -270,7 +283,7 @@ export const englishMessages: SdkMessages = {
       // The provider's own description is never shown; only its error code is classified.
       switch (reason.problem) {
         case 'denied':
-          return 'Sign-in was cancelled.';
+          return 'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.';
         case 'login-required':
           return 'The pod asked you to sign in at its provider first. Sign in there, then try again.';
         case 'interaction-required':
@@ -346,7 +359,10 @@ export const germanMessages: SdkMessages = {
     loginHint: '',
     checkAccess: 'Zugriff prüfen',
     addresses: 'Vollständige Adressen',
-    signInCancelled: 'Die Anmeldung wurde abgebrochen.',
+    signInCancelled:
+      'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
+    sharingUnchanged:
+      'Die Freigabe wurde nicht geändert: Die Zustimmung wurde beim Pod abgebrochen oder abgelehnt. Diese App behält ihren bisherigen Zugriff.',
     signInRequired: 'Melde dich an, um diesen Pod zu nutzen.',
   },
   activePod: 'Aktiver Pod',
@@ -391,7 +407,7 @@ export const germanMessages: SdkMessages = {
     oauth(reason) {
       switch (reason.problem) {
         case 'denied':
-          return 'Die Anmeldung wurde abgebrochen.';
+          return 'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.';
         case 'login-required':
           return 'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.';
         case 'interaction-required':
