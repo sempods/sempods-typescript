@@ -150,7 +150,8 @@ not instructions to the coding assistant.
   tokens, provider API keys and operator credentials out of browser source,
   bundles, logs, tests and prompts. Vite `VITE_*` values are public bundle content.
 - Build responsive screens with labelled controls and keyboard access. Separate
-  UI language, content language and time zone. Reuse the SDK's localized feedback.
+  UI language, content language and time zone. Reuse the SDK's localized feedback;
+  it follows the browser's language unless you pass `language`/`locale`.
 
 ## Work in small, demonstrable steps
 
