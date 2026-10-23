@@ -10,6 +10,7 @@ import { openSessionStore } from '../sessions/store.js';
 import type { BrowserRuntime } from './types.js';
 import {
   callback,
+  catalogue,
   deferred,
   fixture,
   jwt,
@@ -501,6 +502,32 @@ it('keeps the earlier facts while leaving and resumes from the back/forward cach
   // The handle of the earlier lifetime stays retired.
   expect(await view.subjects.get('urn:item')).toEqual({ kind: 'invalidated' });
   expect(await stored(f, id)).toMatchObject({ kind: 'ready' });
+});
+
+it('restarts a catalogue read the leaving page aborted when it resumes', async () => {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  const f = fixture();
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  f.setCatalogue(() => new Promise<Response>(() => {}));
+  void runtime.loadContexts(id).catch(() => {});
+  expect(runtime.getSnapshot()[0]?.catalogue).toMatchObject({
+    kind: 'loading',
+    contexts: [{ iri: work }, expect.anything()],
+  });
+  await runtime.beginAuthorization(id);
+  f.setCatalogue(async () => catalogue([work], [work]));
+  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  await restored(runtime);
+  await vi.waitFor(() =>
+    expect(runtime.getSnapshot()[0]?.catalogue).toMatchObject({
+      kind: 'ready',
+      contexts: [{ iri: work }],
+    }),
+  );
 });
 
 it('publishes nothing from a resume that settles after dispose', async () => {

@@ -570,6 +570,10 @@ export function createBrowserRuntime(
     e.client = resumed.client;
     e.view = { ...e.view, requestedScopes: resumed.scopes };
     install(e, credentials);
+    // A catalogue read the leaving page aborted starts again, keeping the
+    // contexts it already confirmed.
+    if (e.view.catalogue.kind === 'loading' && !e.catalogue)
+      void load(e).catch(() => {});
     return true;
   }
   /**
