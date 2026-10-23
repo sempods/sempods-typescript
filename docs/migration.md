@@ -4,6 +4,38 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.5.0 to 0.5.1
+
+The patch keeps public APIs, message keys and result shapes. Check these points:
+
+- **AppAccess wording.** The default EN/DE texts name one action once:
+  **Pod address** / **Pod-Adresse** (`controls.yourPod`), **Pods & sharing** /
+  **Pods & Freigaben** (`controls.dataAccess`), **Change sharing** /
+  **Freigabe ändern** (`controls.updateAccess`) and **Sign out** /
+  **Abmelden** (`controls.disconnect`). Signing out still only forgets the
+  connection on this device; the new `controls.disconnectHint` says so beside
+  the button. `controls.podHint` and `controls.loginHint` stay in the message
+  shape but default to empty, which shows no hint line. App end-to-end tests
+  that find controls by the old texts need the new ones; to keep a text, pass
+  it through `messages.controls`.
+- **Neutral default colours.** Without `--sempods-*` tokens the SDK surfaces
+  use a neutral grey palette instead of the green accent: accent and text
+  `#1f2933` / `#e5e7eb` (light/dark), muted `#6b7280` / `#9ca3af`, lines
+  `#e5e7eb` / `#2d3138`, background `#fff` / `#111315`. An app that relied on
+  the green default sets `--sempods-accent: light-dark(#226044, #8acda6)` and
+  `--sempods-on-accent: light-dark(#fff, #14251b)` on an ancestor to keep it.
+- **Complete catalogs still compile.** `controls.disconnectHint` and
+  `controls.confirmRemove` are optional in `UiMessages`; `createLocale` fills
+  them from the language defaults.
+- **Delete asks first.** `ResourceEditor`'s **Delete** now shows an in-editor
+  question (`controls.confirmRemove`) with **Delete** and **Cancel**; only the
+  confirmation sends the `DELETE`. End-to-end tests press **Delete** twice, the
+  second time inside the group named by that question. `editor.remove()`,
+  `useFieldUpdate` and custom delete buttons are unchanged.
+- **Compact checkboxes.** Checkboxes and radios inside SDK surfaces are 24px
+  instead of 44px; a wrapping `<label>` keeps the 44px target. Wrap a bare
+  checkbox in its label to keep a large target.
+
 ## From 0.4 to 0.5
 
 Upgrade both packages together; Node 24.15 or newer stays the requirement:

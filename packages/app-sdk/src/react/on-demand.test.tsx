@@ -330,7 +330,7 @@ it.each(['scope-loss', 'ended', 'refused'] as const)(
       );
     else if (mode === 'ended')
       await screen.findByRole('button', { name: 'Sign in' });
-    else await screen.findByRole('button', { name: 'Update access' });
+    else await screen.findByRole('button', { name: 'Change sharing' });
     expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
     expect(f.count('/_system/contexts')).toBe(0);
     expect(descriptions(f)).toHaveLength(0);

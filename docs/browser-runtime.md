@@ -476,7 +476,7 @@ as it honours the advertised token lifetime. If it refuses an unexpired token
 without a challenge, for example after revocation or a restart that lost its
 tokens, the session stays active and requests return `refused 401` until the
 renewal near the credential's own expiry, or until the session ends as
-`expired` without a refresh token. `beginAuthorization(id)` (**Update access**
+`expired` without a refresh token. `beginAuthorization(id)` (**Change sharing**
 in the SDK components) recovers sooner. Pods should answer an expired token
 with `401` and `WWW-Authenticate: Bearer error="invalid_token"`, and expose that
 header to cross-origin apps.
@@ -522,7 +522,10 @@ same-origin script access is not a separate trust boundary.
 `disconnect()` blocks locally immediately and writes a durable tombstone.
 It returns `blocked-locally` if that write fails; offer explicit retry instead of
 claiming logout survived a reload. A late exchange cannot resurrect the disconnected
-connection. `dispose()` releases memory/locks while retaining durable sessions.
+connection. The SDK components label it **Sign out** and note that it applies
+only to this device: it neither revokes sharing on the Pod, deletes Pod data nor
+signs out at the Pod's provider. `dispose()` releases memory/locks while
+retaining durable sessions.
 
 ## Protocol and session ownership
 
