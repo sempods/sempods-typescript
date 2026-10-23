@@ -273,3 +273,60 @@ it('keeps the failed retry and its action when the leave prompt is declined', as
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
   expect((draft as HTMLInputElement).value).toBe('Unsaved');
 });
+
+it('keeps Change sharing when preparation fails after the leave prompt was confirmed', async () => {
+  const t = text.en;
+  const { f, runtime } = await returning('again', 'error=access_denied');
+  function Draft() {
+    const [draft, setDraft] = useState('');
+    useDraftGuard(draft !== '', () => setDraft(''));
+    return (
+      <input
+        aria-label="Draft"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime} language="en">
+      <AppAccess appName="Shopping" />
+      <TargetScreen>
+        <Draft />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  const region = await screen.findByRole('region', { name: t.region });
+  await waitFor(() =>
+    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
+  );
+  const change = () => within(region).getByRole('button', { name: t.change });
+  fireEvent.change(await screen.findByLabelText('Draft'), {
+    target: { value: 'Unsaved' },
+  });
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url, init) => {
+    if (url.includes('/.well-known/')) throw new TypeError('offline');
+    return original(url, init);
+  });
+  const navigations = f.navigate.mock.calls.length;
+  await act(async () => change().click());
+  await act(async () =>
+    screen.getByRole('button', { name: 'Discard and continue' }).click(),
+  );
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  expect(region.hidden).toBe(false);
+  // The draft was kept, as nothing left: the retry asks again.
+  expect((screen.getByLabelText('Draft') as HTMLInputElement).value).toBe(
+    'Unsaved',
+  );
+  f.fetch.mockImplementation(original);
+  await act(async () => change().click());
+  await act(async () =>
+    screen.getByRole('button', { name: 'Discard and continue' }).click(),
+  );
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+});

@@ -119,9 +119,12 @@ export function AppAccess({
       : !readable ||
         (contextRequired && !access.read) ||
         (discovery && catalogueFailed);
-  // A declined re-authorization kept this active connection's session: its
-  // one next step stays offered, also after preparing it again failed (which
-  // clears the callback notice but keeps the session).
+  // A declined re-authorization kept this active connection's session. Its
+  // one next step stays offered until an attempt actually leaves for the
+  // Pod: starting one clears the callback notice, and a declined leave prompt,
+  // a blocking write or a failed preparation (direct or after the prompt)
+  // keeps the session usable.
+  const [offered, setOffered] = useState<string | null>(null);
   const [retryFailure, setRetryFailure] = useState<{
     readonly id: string;
     readonly cause: unknown;
@@ -129,18 +132,19 @@ export function AppAccess({
   const kept = access.connection;
   const keptActive =
     kept?.session.kind === 'active' || kept?.session.kind === 'renewing';
-  const failedRetry =
-    keptActive && retryFailure?.id === kept.id ? retryFailure : null;
-  const retry =
+  const noticed =
     keptActive &&
-    ((state.callbackNotice &&
-      state.startup?.resumed &&
-      state.startup.attemptConnectionId === kept.id) ||
-      failedRetry)
+    state.callbackNotice &&
+    state.startup?.resumed &&
+    state.startup.attemptConnectionId === kept.id
       ? kept.id
       : null;
-  const hidden =
-    !needsAttention && !open && !state.callbackNotice && !failedRetry;
+  if (noticed && offered !== noticed) setOffered(noticed);
+  // Leaving (or losing the session) ends the offer.
+  if (offered && kept?.id === offered && !keptActive) setOffered(null);
+  const retry = noticed ?? (keptActive && offered === kept.id ? kept.id : null);
+  const failedRetry = retry && retryFailure?.id === retry ? retryFailure : null;
+  const hidden = !needsAttention && !open && !state.callbackNotice && !retry;
   // The active connection is still being validated (restoring, signed in while
   // its Pod reader is not yet readable, or loading its first demanded Context
   // catalogue) and nothing awaits a decision: show the loading status, not the
@@ -277,8 +281,8 @@ export function AppAccess({
                   className="sp-access-primary"
                   disabled={state.changing || state.confirmingLeave}
                   onClick={() => {
-                    // Kept until an attempt proceeds: a declined leave prompt
-                    // or a blocking write resolves false and changes nothing.
+                    // A failure stays until an attempt proceeds: a declined
+                    // leave prompt or a blocking write resolves false.
                     void app.authorize(retry).then(
                       (started) => {
                         if (started) setRetryFailure(null);
