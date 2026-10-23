@@ -24,8 +24,17 @@ The patch keeps public APIs, message keys and result shapes. Check these points:
   `#e5e7eb` / `#2d3138`, background `#fff` / `#111315`. An app that relied on
   the green default sets `--sempods-accent: light-dark(#226044, #8acda6)` and
   `--sempods-on-accent: light-dark(#fff, #14251b)` on an ancestor to keep it.
-- **Complete catalogs still compile.** `controls.disconnectHint` is optional
-  in `UiMessages`; `createLocale` fills it from the language defaults.
+- **Complete catalogs still compile.** `controls.disconnectHint` and
+  `controls.confirmRemove` are optional in `UiMessages`; `createLocale` fills
+  them from the language defaults.
+- **Delete asks first.** `ResourceEditor`'s **Delete** now shows an in-editor
+  question (`controls.confirmRemove`) with **Delete** and **Cancel**; only the
+  confirmation sends the `DELETE`. End-to-end tests press **Delete** twice, the
+  second time inside the group named by that question. `editor.remove()`,
+  `useFieldUpdate` and custom delete buttons are unchanged.
+- **Compact checkboxes.** Checkboxes and radios inside SDK surfaces are 24px
+  instead of 44px; a wrapping `<label>` keeps the 44px target. Wrap a bare
+  checkbox in its label to keep a large target.
 
 ## From 0.4 to 0.5
 

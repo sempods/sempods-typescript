@@ -26,8 +26,8 @@ ${surfaces} :where(button,input,select,textarea), :where([data-sempods-button]) 
 ${surfaces} :where(button), :where([data-sempods-button]) { font-weight:500; border:1px solid var(--sp-line); border-radius:5px; color:var(--sp-accent); background:var(--sp-bg); padding:10px 14px; cursor:pointer; }
 ${surfaces} :where(input,select,textarea) { color:var(--sp-text); background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:4px; padding:10px; }
 ${surfaces} :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { display:block; width:100%; margin-block:6px 14px; }
-${surfaces} :where(input[type=checkbox],input[type=radio]) { width:44px; height:44px; min-height:44px; vertical-align:middle; margin:0 8px 0 0; accent-color:var(--sp-accent); }
-${surfaces} :where(label):has(input[type=checkbox],input[type=radio]) { display:inline-flex; align-items:center; min-height:44px; }
+${surfaces} :where(input[type=checkbox],input[type=radio]) { width:24px; height:24px; min-height:24px; flex:none; vertical-align:middle; margin:0; margin-inline-end:10px; accent-color:var(--sp-accent); }
+${surfaces} :where(label):has(input[type=checkbox],input[type=radio]) { display:inline-flex; align-items:center; min-height:44px; min-width:44px; cursor:pointer; }
 ${surfaces} :where(:disabled), :where([data-sempods-button]:disabled) { opacity:.55; cursor:default; }
 ${surfaces} :where(:focus-visible), :where([data-sempods-button]:focus-visible) { outline:2px solid var(--sp-accent); outline-offset:3px; }
 ${surfaces} :where(p) { margin-block:12px; }
