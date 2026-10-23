@@ -15,7 +15,7 @@ then make one small idea real with the [quickstart](quickstart.md).
 Your static app: screens + data vocabulary + app identity
        ↓ app-sdk: connection, consent flow, selection, editing feedback
        ↓ client-sdk: protocol requests and conditional writes
-The person's Pod: stored data + authoritative permission checks
+The Pod: stored data + authoritative permission checks
 ```
 
 A **Pod** is a data service where people keep data. A **context** is a named
@@ -28,7 +28,7 @@ identity and from the Pod URL.
 The person signs in at the Pod they want to use: their own, or one whose owner
 shares a context with them, such as a family's shared list. They grant the app
 selected contexts there; that Pod decides which of its contexts the person and
-the app may use. Word the app for both: "Pod address", not "your Pod". The app-sdk
+the app may use. The app-sdk
 connects that flow to your screen without handing the screen tokens.
 Ordinary data access needs context grants, not a made-up OAuth scope such as
 `tasks:write`. A Pod still decides every request, even if your UI thinks a button
