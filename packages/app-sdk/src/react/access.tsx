@@ -119,7 +119,28 @@ export function AppAccess({
       : !readable ||
         (contextRequired && !access.read) ||
         (discovery && catalogueFailed);
-  const hidden = !needsAttention && !open && !state.callbackNotice;
+  // A declined re-authorization kept this active connection's session: its
+  // one next step stays offered, also after preparing it again failed (which
+  // clears the callback notice but keeps the session).
+  const [retryFailure, setRetryFailure] = useState<{
+    readonly id: string;
+    readonly cause: unknown;
+  } | null>(null);
+  const kept = access.connection;
+  const keptActive =
+    kept?.session.kind === 'active' || kept?.session.kind === 'renewing';
+  const failedRetry =
+    keptActive && retryFailure?.id === kept.id ? retryFailure : null;
+  const retry =
+    keptActive &&
+    ((state.callbackNotice &&
+      state.startup?.resumed &&
+      state.startup.attemptConnectionId === kept.id) ||
+      failedRetry)
+      ? kept.id
+      : null;
+  const hidden =
+    !needsAttention && !open && !state.callbackNotice && !failedRetry;
   // The active connection is still being validated (restoring, signed in while
   // its Pod reader is not yet readable, or loading its first demanded Context
   // catalogue) and nothing awaits a decision: show the loading status, not the
@@ -178,17 +199,6 @@ export function AppAccess({
   const Heading =
     (headingLevel ?? (open || state.view ? 2 : 1)) === 2 ? 'h2' : 'h1';
   const Connections = components?.Connections;
-  // A declined re-authorization kept this active connection's session.
-  const retry =
-    state.callbackNotice &&
-    state.startup?.resumed &&
-    state.startup.attemptConnectionId === c?.id &&
-    (c?.session.kind === 'active' || c?.session.kind === 'renewing')
-      ? c.id
-      : null;
-  const [retryFailure, setRetryFailure] = useState<{
-    readonly cause: unknown;
-  } | null>(null);
   const available = state.startup?.storage === 'durable' && !state.startupError;
   const active =
     access.connection?.session.kind === 'active' ||
@@ -270,15 +280,17 @@ export function AppAccess({
                     setRetryFailure(null);
                     void app
                       .authorize(retry)
-                      .catch((cause: unknown) => setRetryFailure({ cause }));
+                      .catch((cause: unknown) =>
+                        setRetryFailure({ id: retry, cause }),
+                      );
                   }}
                 >
                   {m.controls.updateAccess}
                 </button>
               </div>
             )}
-            {retryFailure && !needsAttention && !open && (
-              <p role="alert">{error(retryFailure.cause)}</p>
+            {failedRetry && !needsAttention && !open && (
+              <p role="alert">{error(failedRetry.cause)}</p>
             )}
             {(needsAttention || open) && (
               <>

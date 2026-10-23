@@ -185,3 +185,34 @@ it.each(['en', 'de'] as const)(
     expect(document.body.textContent).not.toContain('You are not signed in');
   },
 );
+
+it('keeps Change sharing and shows the failure when preparing it again fails', async () => {
+  const t = text.en;
+  const { f, runtime } = await returning('again', 'error=access_denied');
+  show(runtime, 'en');
+  const region = await screen.findByRole('region', { name: t.region });
+  await waitFor(() =>
+    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
+  );
+  await screen.findByText('My list');
+  const change = () => within(region).getByRole('button', { name: t.change });
+  const navigations = f.navigate.mock.calls.length;
+  // Discovery for the new attempt fails, as when offline.
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url, init) => {
+    if (url.includes('/.well-known/')) throw new TypeError('offline');
+    return original(url, init);
+  });
+  await act(async () => change().click());
+  await waitFor(() => expect(within(region).getByRole('alert')).toBeTruthy());
+  expect(region.hidden).toBe(false);
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  f.fetch.mockImplementation(original);
+  // The session still works; the same one action tries again.
+  await act(async () =>
+    within(region).getByRole('button', { name: t.change }).click(),
+  );
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+});
