@@ -1,4 +1,11 @@
-import { useRef, useState, type ComponentType, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
@@ -551,6 +558,9 @@ function Comparison({
   );
 }
 /** Default save/delete/review UI; children supply only domain fields.
+ * Delete asks in place first: only the confirmation sends one conditional
+ * DELETE of the version shown. Any later editor state (an edit, a read, another
+ * subject) withdraws the question; cancel or Escape keeps draft and target.
  * Success feedback retires with any later editor state and, for an editor from
  * `useResourceEditor`, when another write on the same target starts.
  * Inline scoped --sempods-* styles cover controls and comparisons without changing
@@ -576,11 +586,30 @@ export function ResourceEditor<D, U = D>({
     /** The target's start count at this operation's own start. */
     start: number;
   } | null>(null);
+  // The editor state the person was asked about; any newer state withdraws it.
+  const [confirming, setConfirming] = useState<Editor<D>['state'] | null>(null);
+  const question = useId();
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
   const view = editor ? editorTarget(editor) : undefined;
   const starts = useStartCount(view);
+  const asking =
+    confirming !== null && confirming === editor?.state && confirming.canRemove;
+  useEffect(() => {
+    if (asking) cancelButton.current?.focus();
+    else if (returnFocus.current) {
+      returnFocus.current = false;
+      removeButton.current?.focus();
+    }
+  }, [asking]);
   if (!editor || editor.state.phase === 'loading')
     return <Notice>{m.loading}</Notice>;
   const state = editor.state;
+  const keep = () => {
+    returnFocus.current = true;
+    setConfirming(null);
+  };
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
     // A bound editor counts its own start synchronously in `action()`.
     const pending = action();
@@ -637,26 +666,56 @@ export function ResourceEditor<D, U = D>({
           </button>
         </section>
       )}
-      <div className="sp-sdk-actions">
-        <button
-          disabled={!state.canSave}
-          onClick={() => void act(() => editor.save())}
+      {asking ? (
+        <div
+          role="group"
+          aria-labelledby={question}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            keep();
+          }}
         >
-          {m.save}
-        </button>
-        <button
-          disabled={!state.canRemove}
-          onClick={() => void act(() => editor.remove())}
-        >
-          {m.remove}
-        </button>
-        <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
-          {m.discard}
-        </button>
-        {state.phase === 'blocked' && (
-          <button onClick={() => void editor.refresh()}>{m.refresh}</button>
-        )}
-      </div>
+          <p id={question}>{m.confirmRemove}</p>
+          <div className="sp-sdk-actions">
+            <button
+              onClick={() => {
+                // Withdrawn first: a second press cannot send another DELETE.
+                setConfirming(null);
+                if (editor.state === confirming)
+                  void act(() => editor.remove());
+              }}
+            >
+              {m.remove}
+            </button>
+            <button ref={cancelButton} onClick={keep}>
+              {m.cancel}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="sp-sdk-actions">
+          <button
+            disabled={!state.canSave}
+            onClick={() => void act(() => editor.save())}
+          >
+            {m.save}
+          </button>
+          <button
+            ref={removeButton}
+            disabled={!state.canRemove}
+            onClick={() => setConfirming(state)}
+          >
+            {m.remove}
+          </button>
+          <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
+            {m.discard}
+          </button>
+          {state.phase === 'blocked' && (
+            <button onClick={() => void editor.refresh()}>{m.refresh}</button>
+          )}
+        </div>
+      )}
       {!state.review && (
         <UpdateNotice
           outcome={

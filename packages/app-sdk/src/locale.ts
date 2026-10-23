@@ -96,6 +96,8 @@ export interface UiMessages {
   readonly readLost: string;
   readonly save: string;
   readonly remove: string;
+  /** Asked in the editor before `remove` sends anything. */
+  readonly confirmRemove: string;
   readonly discard: string;
   readonly continueMine: string;
   readonly compare: string;
@@ -169,6 +171,7 @@ export const englishMessages: SdkMessages = {
     readLost: 'Access is unavailable. Your draft is kept.',
     save: 'Save',
     remove: 'Delete',
+    confirmRemove: 'Delete this from the pod? This cannot be undone.',
     discard: 'Discard changes',
     continueMine: 'Continue with my changes',
     compare: 'Check current version',
@@ -283,6 +286,7 @@ export const germanMessages: SdkMessages = {
     readLost: 'Der Zugriff ist nicht verfügbar. Dein Entwurf bleibt erhalten.',
     save: 'Speichern',
     remove: 'Löschen',
+    confirmRemove: 'Vom Pod löschen? Das lässt sich nicht rückgängig machen.',
     discard: 'Änderungen verwerfen',
     continueMine: 'Mit meinen Änderungen fortfahren',
     compare: 'Aktuellen Stand prüfen',

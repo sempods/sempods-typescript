@@ -7,6 +7,7 @@ import {
   waitFor,
   screen,
   fireEvent,
+  within,
 } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -1100,6 +1101,13 @@ it('an editor delete retires a row success and a later creation retires it', asy
   });
   await waitFor(() => expect(f.api.editor?.state.phase).toBe('ready'));
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  fireEvent.click(
+    within(
+      screen.getByRole('group', {
+        name: 'Delete this from the pod? This cannot be undone.',
+      }),
+    ).getByRole('button', { name: 'Delete' }),
+  );
   await waitFor(() => expect(shown('Deleted.')).toBe(1));
   expect(f.api.mutation.outcome).toBeNull();
   expect(shown('Saved.')).toBe(0);
