@@ -158,6 +158,38 @@ it('leaves the attempt intact for a forged callback; the real denial still resum
   expect(await real.initialize()).toMatchObject({ resumed: true });
 });
 
+it.each(['wrong', 'missing', 'duplicated'] as const)(
+  'leaves a pending re-authorization for a callback with a %s state',
+  async (problem) => {
+    const { f, id, authorization } = await reauthorizing();
+    const state = authorization.searchParams.get('state')!;
+    const answer = {
+      wrong: `code=fixture-code&state=${'x'.repeat(43)}`,
+      missing: 'code=fixture-code',
+      duplicated: `code=fixture-code&state=${state}&state=${state}`,
+    }[problem];
+    const stray = keep(
+      createBrowserRuntime({
+        ...f.options,
+        location: () => `${callback}?${answer}`,
+      }),
+    );
+    expect(await stray.initialize()).toMatchObject({
+      interaction: 'failed',
+      problem: 'attempt',
+    });
+    expect(await stored(f, id)).toMatchObject({ kind: 'authorizing' });
+    stray.dispose();
+    await settleLease();
+    // The real callback still redeems its code.
+    const real = keep(f.returned(authorization));
+    expect(await real.initialize()).toMatchObject({
+      interaction: 'completed',
+      connectionId: id,
+    });
+  },
+);
+
 it('keeps a first sign-in denial signed out', async () => {
   const f = fixture();
   keep(f.runtime);

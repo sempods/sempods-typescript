@@ -747,14 +747,17 @@ export function createBrowserRuntime(
             : 'interrupted';
         // A re-authorization the person left without a callback (back
         // navigation, an abandoned attempt) resumes the session it started
-        // from; a denial on the callback route does so below.
+        // from; a denial on the callback route does so below. On the callback
+        // route no other attempt is touched: a callback with a missing or
+        // wrong state must not consume one whose real callback may follow.
         const resumes =
           saved.value.kind === 'authorizing' &&
           saved.value.previous !== undefined &&
-          (pending !== saved ||
-            (location.searchParams.has('error') &&
+          (!callback ||
+            (pending === saved &&
+              location.searchParams.has('error') &&
               !location.searchParams.has('code')));
-        if (resumes && pending !== saved) abandoned.push({ e, problem });
+        if (resumes && !callback) abandoned.push({ e, problem });
         e.view = {
           ...e.view,
           requestedScopes: b.scopes,
