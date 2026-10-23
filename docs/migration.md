@@ -15,12 +15,6 @@ Check these points:
   `de-DE` formatting. Pin the old result with `language="en" locale="en"`. A
   `locale` or `language` alone keeps its previous meaning; `createLocale` and
   `resolveLocale` are unchanged and read no browser globals.
-
-## From 0.5.1 to 0.6.0
-
-The minor changes defaults and adds options; upgrade both packages together.
-Check these points:
-
 - **Management shows the connected Pod first.** With `open`, `AppAccess` lists
   the connected Pod, its readable Contexts with **This app can read** / **This
   app can read and change**, then the actions and **Full addresses**; signing in
