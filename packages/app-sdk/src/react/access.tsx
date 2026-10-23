@@ -108,10 +108,17 @@ export function AppAccess({
   const { messages: m, direction, error } = useSdkLocale();
   const heldFocus = useRef(false);
   const catalogueFailed = access.connection?.catalogue.kind === 'failed';
+  const session = access.connection?.session;
+  const leaving = session?.kind === 'leaving';
+  // While the page leaves for a re-authorization the earlier access stays on
+  // screen: hidden as it was unless something already needed attention.
   const needsAttention =
-    !readable ||
-    (contextRequired && !access.read) ||
-    (discovery && catalogueFailed);
+    session?.kind === 'leaving'
+      ? !session.subject ||
+        Boolean(access.connection?.missingRequiredScopes.length)
+      : !readable ||
+        (contextRequired && !access.read) ||
+        (discovery && catalogueFailed);
   const hidden = !needsAttention && !open && !state.callbackNotice;
   // The active connection is still being validated (restoring, signed in while
   // its Pod reader is not yet readable, or loading its first demanded Context
@@ -244,7 +251,11 @@ export function AppAccess({
             {(needsAttention || open) && (
               <>
                 {Connections ? (
-                  validating ? (
+                  leaving ? (
+                    <p role="status">
+                      {m.controls.leaving ?? m.controls.loading}
+                    </p>
+                  ) : validating ? (
                     <p role="status">{m.controls.loading}</p>
                   ) : (
                     <Connections
@@ -454,6 +465,9 @@ function AccessConnections({
       </select>
     </label>
   );
+  // The page is navigating to the Pod's sign-in: no action applies any more.
+  if (c?.session.kind === 'leaving')
+    return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
   // A restore that never settles must not hide signing in to the configured
   // Pod or switching to another saved one.
   if (validating)

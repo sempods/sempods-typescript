@@ -95,9 +95,13 @@ it('keeps the current session working while a new authorization is being prepare
   expect(await view.subjects.get('urn:item')).toMatchObject({ kind: 'ok' });
   hold.resolve();
   await navigation;
+  // Leaving for the sign-in: the earlier facts stay shown, nothing dispatches.
   expect(runtime.getSnapshot()[0]).toMatchObject({
-    session: { kind: 'signed-out' },
-    selectedContext: null,
+    session: { kind: 'leaving', subject: 'https://person.example/#me' },
+    selectedContext: work,
+  });
+  expect(await view.subjects.get('urn:item')).toEqual({
+    kind: 'invalidated',
   });
   expect(f.navigate).toHaveBeenCalled();
 });
@@ -262,7 +266,7 @@ it.each(['consumed-refresh', 'permanent-pre-claim'] as const)(
     expect(new URL(f.navigate.mock.calls[0]![0]).pathname).toBe(
       '/alice/_system/auth/authorize',
     );
-    expect(runtime.getSnapshot()[0]?.session.kind).toBe('signed-out');
+    expect(runtime.getSnapshot()[0]?.session).toEqual({ kind: 'leaving' });
   },
 );
 

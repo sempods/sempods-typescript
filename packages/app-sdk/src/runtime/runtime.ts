@@ -29,6 +29,7 @@ import {
 } from '../sessions/transitions.js';
 import {
   sessionBinding,
+  SessionTransitionError,
   type SessionRecord,
   type SessionSnapshot,
 } from '../sessions/records.js';
@@ -41,6 +42,7 @@ import type {
 import {
   RuntimeError,
   runtimeProblem,
+  type RuntimeProblem,
   runtimeFailure,
   transientBeforeClaim,
 } from './errors.js';
@@ -533,6 +535,97 @@ export function createBrowserRuntime(
       }
     }
   }
+  /**
+   * Resumes the session a denied (`callback`) or abandoned re-authorization
+   * started from, and publishes it. Returns false, changing nothing, when the
+   * stored attempt is not eligible (see the `resume` transition).
+   */
+  async function resume(e: Entry, callback?: URL): Promise<boolean> {
+    const generation = e.generation;
+    const pod = await discoverPod(e.pod.podUrl, {
+      ...protocol,
+      signal: e.lifetime.signal,
+    });
+    const change = await serial(e, async () => {
+      current(e, generation);
+      if (!sessions || !e.revision) throw new RuntimeError('storage');
+      try {
+        return await sessions.resume(e.view.id, e.revision, pod, callback);
+      } catch (error) {
+        if (
+          error instanceof SessionTransitionError &&
+          error.problem === 'state'
+        )
+          return undefined;
+        throw error;
+      }
+    });
+    if (!change) return false;
+    current(e, generation);
+    accepted(e, change);
+    if (change.kind !== 'committed' || change.record.value.kind !== 'ready')
+      throw new RuntimeError('state');
+    const { binding: resumed, credentials } = change.record.value;
+    e.pod = pod;
+    e.client = resumed.client;
+    e.view = { ...e.view, requestedScopes: resumed.scopes };
+    install(e, credentials);
+    return true;
+  }
+  /**
+   * A page restored from the back/forward cache comes back without a startup:
+   * an abandoned re-authorization resumes its earlier session there too, and a
+   * first sign-in shows its interruption.
+   */
+  function watchReturn(e: Entry, generation: string) {
+    const page = globalThis as {
+      addEventListener?: (
+        type: string,
+        listener: (event: Event) => void,
+      ) => void;
+      removeEventListener?: (
+        type: string,
+        listener: (event: Event) => void,
+      ) => void;
+    };
+    if (!page.addEventListener || !page.removeEventListener) return;
+    const stop = () => page.removeEventListener!('pageshow', shown);
+    function shown(event: Event) {
+      if (!(event as Event & { persisted?: boolean }).persisted) return;
+      stop();
+      if (eligible(e, generation) && e.view.session.kind === 'leaving') {
+        e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+        publish();
+        void resumeAbandoned(e, 'interrupted');
+      }
+    }
+    page.addEventListener('pageshow', shown);
+    e.lifetime.signal.addEventListener('abort', stop, { once: true });
+  }
+  /** Resumes an abandoned re-authorization at startup; publishes its own outcome. */
+  async function resumeAbandoned(e: Entry, ineligible: RuntimeProblem) {
+    const generation = e.generation;
+    let problem: RuntimeProblem = ineligible;
+    let cause: unknown;
+    try {
+      if (await resume(e)) return;
+    } catch (error) {
+      problem = runtimeProblem(error);
+      cause = error;
+    }
+    if (eligible(e, generation)) setEnded(e, problem, cause);
+  }
+  function setEnded(e: Entry, problem: RuntimeProblem, cause?: unknown) {
+    e.view = {
+      ...e.view,
+      session: Object.freeze({
+        kind: 'ended',
+        problem,
+        ...runtimeFailure(cause),
+      }),
+    };
+    publish();
+  }
   /** Redeems the callback's code once for its stored attempt; returns the connection. */
   async function redeem(
     id: string,
@@ -629,6 +722,7 @@ export function createBrowserRuntime(
       };
       if (disposed) throw new RuntimeError('disconnected');
       let pending: SessionSnapshot | undefined;
+      const abandoned: { e: Entry; problem: RuntimeProblem }[] = [];
       for (const saved of listing.records) {
         if (saved.value.kind === 'disconnected') continue;
         const b = sessionBinding(saved.value);
@@ -646,22 +740,30 @@ export function createBrowserRuntime(
         if (!allows(b.pod.podUrl)) continue;
         const e = createEntry(b.pod, b.client, saved.id, b.generation);
         e.revision = saved.revision;
+        const problem =
+          saved.value.kind === 'authorizing' &&
+          saved.value.attempt.expiresAt <= Date.now()
+            ? 'expired'
+            : 'interrupted';
+        // A re-authorization the person left without a callback (back
+        // navigation, an abandoned attempt) resumes the session it started
+        // from; a denial on the callback route does so below.
+        const resumes =
+          saved.value.kind === 'authorizing' &&
+          saved.value.previous !== undefined &&
+          (pending !== saved ||
+            (location.searchParams.has('error') &&
+              !location.searchParams.has('code')));
+        if (resumes && pending !== saved) abandoned.push({ e, problem });
         e.view = {
           ...e.view,
           requestedScopes: b.scopes,
           requiredScopes: required,
           optionalScopes: optional,
           session: Object.freeze(
-            saved.value.kind === 'ready'
+            saved.value.kind === 'ready' || resumes
               ? { kind: 'restoring' }
-              : {
-                  kind: 'ended',
-                  problem:
-                    saved.value.kind === 'authorizing' &&
-                    saved.value.attempt.expiresAt <= Date.now()
-                      ? 'expired'
-                      : 'interrupted',
-                },
+              : { kind: 'ended', problem },
           ),
         };
         entries.set(saved.id, e);
@@ -675,6 +777,7 @@ export function createBrowserRuntime(
             : undefined;
         }),
       );
+      for (const { e, problem } of abandoned) void resumeAbandoned(e, problem);
       // Restoration publishes per connection (`restoring` → `active`/`ended`).
       // Neither the startup report nor a callback waits for another Pod, so
       // one Pod whose discovery never settles cannot hold the app open.
@@ -688,6 +791,29 @@ export function createBrowserRuntime(
       if (!allows(sessionBinding(pending.value).pod.podUrl))
         throw new RuntimeError('configuration');
       attempted = pending.id;
+      const returning = entries.get(pending.id);
+      if (returning?.view.session.kind === 'restoring') {
+        let resumed = false;
+        try {
+          resumed = await resume(returning, location);
+        } finally {
+          if (!resumed && eligible(returning))
+            setEnded(returning, 'interrupted');
+        }
+        if (resumed) {
+          const denial = new OAuthError('denied');
+          return {
+            ...report,
+            interaction: 'cancelled',
+            attemptConnectionId: pending.id,
+            resumed: true,
+            problem: runtimeProblem(denial),
+            ...runtimeFailure(denial),
+          };
+        }
+        // Not eligible (another answer, an expired earlier session, a changed
+        // binding): the callback ends the connection as for a first sign-in.
+      }
       const connectionId = await redeem(
         pending.id,
         pending.revision,
@@ -826,7 +952,16 @@ export function createBrowserRuntime(
         // commit retires the new attempt; this lifetime must not continue.
         current(e, before);
         // Committed durably: switch to the new lifetime in the same step, so no
-        // queued refresh of the old one can act on the replaced record.
+        // queued refresh of the old one can act on the replaced record. The
+        // facts stay for display until the page leaves; only the session says
+        // that nothing of the earlier one dispatches any more.
+        const shown = e.view;
+        const subject =
+          shown.session.kind === 'active' ||
+          shown.session.kind === 'renewing' ||
+          shown.session.kind === 'leaving'
+            ? shown.session.subject
+            : undefined;
         e.lifetime.abort();
         e.lifetime = new AbortController();
         e.generation = generation;
@@ -847,19 +982,17 @@ export function createBrowserRuntime(
         resetLabels(e);
         e.selectedVersion++;
         e.view = {
-          ...e.view,
-          session: Object.freeze({ kind: 'signed-out' }),
-          catalogue: Object.freeze({ kind: 'unknown' }),
-          selectedContext: null,
-          grantedScopes: Object.freeze([]),
-          missingRequiredScopes: required,
-          requestedScopes: requested,
-          requiredScopes: required,
-          optionalScopes: optional,
+          ...shown,
+          session: Object.freeze(
+            subject === undefined
+              ? { kind: 'leaving' }
+              : { kind: 'leaving', subject },
+          ),
         };
         publish();
       });
       current(e, generation);
+      watchReturn(e, generation);
       (options.navigate ?? ((url) => window.location.assign(url)))(url);
     },
     disconnect(id) {

@@ -735,18 +735,28 @@ it.each([
     }
     if (mode === 'authorize') {
       await operation;
-      // Only the stored attempt resets the session, and then completely.
+      // Only the stored attempt ends the session; while the page leaves, the
+      // earlier grants stay shown, consistently, and nothing dispatches.
       expect(snapshots.length).toBeGreaterThan(0);
+      for (const snapshot of snapshots)
+        expect(snapshot[0]).toMatchObject({
+          session: { kind: 'leaving' },
+          grantedScopes: ['tasks', 'ai'],
+          missingRequiredScopes: [],
+        });
+      expect(await login.view.sparql.construct(query)).toEqual({
+        kind: 'invalidated',
+      });
+      return;
     } else if (mode.startsWith('disconnect')) {
       await expect(operation).resolves.toEqual({
         kind: mode === 'disconnect' ? 'disconnected' : 'blocked-locally',
       });
     }
-    if (mode !== 'authorize')
-      expect(immediate).toMatchObject({
-        grantedScopes: [],
-        missingRequiredScopes: ['tasks'],
-      });
+    expect(immediate).toMatchObject({
+      grantedScopes: [],
+      missingRequiredScopes: ['tasks'],
+    });
     for (const snapshot of snapshots) {
       for (const connection of snapshot) {
         expect(connection.grantedScopes).toEqual([]);

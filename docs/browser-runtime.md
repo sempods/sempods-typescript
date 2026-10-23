@@ -79,6 +79,27 @@ or malformed callback leaves the attempt untouched. After any failed or
 cancelled callback that matched a stored attempt, `attemptConnectionId` names
 that connection, also when discovery failed before the attempt was claimed.
 
+A re-authorization of a signed-in connection keeps the earlier session beside
+its stored attempt. Two outcomes resume it, if its credential is still usable
+(unexpired, or renewable with its refresh token) and fresh discovery confirms
+its binding:
+
+| Outcome of the re-authorization                                             | Result                                                                    |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| The provider answers `access_denied` for this attempt                       | Earlier session resumes; report `cancelled` with `resumed: true`          |
+| The person returns without a callback (back navigation, abandoned attempt)  | Earlier session resumes (`restoring` → `active`); interaction `none`      |
+| Any other provider error, a lost token answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                  |
+| An expired earlier credential without a refresh token, or a disconnect      | Connection ends; nothing resumes                                          |
+| A successful answer                                                         | The new grant replaces the earlier one, also when narrower; never a merge |
+
+Resuming sends no token request and consumes the attempt: a replayed callback
+then fails with `attempt` while the session stays. A first sign-in's denial
+stays signed out. A resume that cannot be stored keeps the attempt, and the next
+start resumes it. A refresh claimed before the re-authorization began is not
+kept, so its refresh token is never sent twice. Records written by SDK 0.5 have
+no earlier session and end as before; records written by 0.6 are not supported
+by older SDKs.
+
 `unreadable` identifies corrupt or unsupported records without deleting them
 or hiding other valid records.
 Startup never waits for the discovery of saved Pods, on the callback route or
@@ -501,9 +522,17 @@ restores to the same end. Once claimed, an unsuccessful exchange retires the
 consumed session.
 
 `beginAuthorization()` prepares first (discovery, client resolution, the stored
-attempt) while the current session keeps working. Only after the attempt is
-stored does it reset the connection and navigate; a failed preparation leaves
-the connection exactly as it was. After the session ended (for example a failed
+attempt) while the current session keeps working; the app controller reports
+`changing` meanwhile. Only after the attempt is stored does it retire the
+connection's handles and navigate; a failed preparation leaves the connection
+exactly as it was. Between the stored attempt and the page unloading, the
+connection reports `session.kind: 'leaving'` (with the earlier `subject` for a
+re-authorization) and keeps its catalogue, selection and grants for display:
+no request of the earlier session is dispatched, `bind` and `bindPod` throw
+`disconnected`, and the SDK components show a status instead of a sign-in. A
+page restored from the back/forward cache with its runtime still alive resumes
+the earlier session as above; a host that disposes the runtime on `pagehide`
+recreates it, and its startup resumes it. After the session ended (for example a failed
 refresh), it prepares under a fresh lifetime in the same runtime, which a
 disconnect or dispose during preparation still cancels without navigating. A
 Pod that advertises no registration endpoint (optional, RFC 8414) still serves
