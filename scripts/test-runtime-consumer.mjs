@@ -1010,10 +1010,12 @@ try {
     await page.getByLabel('Data context', { exact: true }).count(),
     0,
   );
-  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Pods & sharing', exact: true })
+    .click();
   await presetDraft.fill('Keep this draft');
   await page
-    .getByRole('button', { name: 'Update access', exact: true })
+    .getByRole('button', { name: 'Change sharing', exact: true })
     .click();
   await page.getByRole('alertdialog').waitFor();
   await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
@@ -1022,7 +1024,7 @@ try {
   await presetDraft.fill('');
   await Promise.all([
     page.waitForURL('**/callback?**'),
-    page.getByRole('button', { name: 'Update access', exact: true }).click(),
+    page.getByRole('button', { name: 'Change sharing', exact: true }).click(),
   ]);
   await page.waitForURL('**/app?identity=preset');
   await presetDraft.waitFor();
@@ -1078,10 +1080,11 @@ try {
         ),
       );
     } else if (mode === 'set') {
-      await page.getByLabel('Your Pod').selectOption(origin + '/alice');
+      await page.getByLabel('Pod address').selectOption(origin + '/alice');
       assert.equal(await page.getByRole('textbox').count(), 0);
       await address.waitFor();
-    } else await page.getByLabel('Your Pod').fill('  ' + origin + '/alice/  ');
+    } else
+      await page.getByLabel('Pod address').fill('  ' + origin + '/alice/  ');
     await page.getByRole('button', { name: 'Sign in', exact: true }).focus();
     await Promise.all([
       page.waitForURL('**/callback?**'),
@@ -1098,17 +1101,17 @@ try {
     await picker.selectOption(origin + '/alice/_system/contexts/work');
     await page.getByLabel('Preset draft').waitFor();
     await page
-      .getByRole('region', { name: 'Data access', exact: true })
+      .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
     assert.equal(
       await page.evaluate(() => document.activeElement?.textContent),
-      'Data access',
+      'Pods & sharing',
     );
     await page
-      .getByRole('button', { name: 'Data access', exact: true })
+      .getByRole('button', { name: 'Pods & sharing', exact: true })
       .click();
     await page
-      .getByRole('heading', { name: 'Data access', level: 2 })
+      .getByRole('heading', { name: 'Pods & sharing', level: 2 })
       .waitFor();
     await page
       .getByRole('button', { name: 'Check access', exact: true })
@@ -1137,7 +1140,7 @@ try {
   // A Pod whose provider answers login_required: the specific cause (EN/DE),
   // shown once and without a kept-draft claim, until the person acts.
   await page.goto(origin + '/app?identity=access-refusing');
-  await page.getByLabel('Your Pod').fill(origin + '/alice');
+  await page.getByLabel('Pod address').fill(origin + '/alice');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Sign in', exact: true }).click(),
@@ -1147,8 +1150,10 @@ try {
     .getByLabel('Data context', { exact: true })
     .selectOption(origin + '/alice/_system/contexts/work');
   await page.getByLabel('Preset draft').waitFor();
-  await page.getByRole('button', { name: 'Data access', exact: true }).click();
-  await page.getByLabel('Your Pod').fill(origin + '/refusing');
+  await page
+    .getByRole('button', { name: 'Pods & sharing', exact: true })
+    .click();
+  await page.getByLabel('Pod address').fill(origin + '/refusing');
   const beforeLoginRequired = exchanges;
   await Promise.all([
     page.waitForURL('**/callback?**'),
@@ -1157,7 +1162,10 @@ try {
   await page.waitForURL('**/app?identity=access-refusing');
   const refusal =
     'The pod asked you to sign in at its provider first. Sign in there, then try again.';
-  const access = page.getByRole('region', { name: 'Data access', exact: true });
+  const access = page.getByRole('region', {
+    name: 'Pods & sharing',
+    exact: true,
+  });
   assert.equal(await access.getByRole('alert').textContent(), refusal);
   assert.equal(await access.getByText(refusal).count(), 1);
   const accessText = await access.textContent();
@@ -1174,14 +1182,14 @@ try {
   await access.waitFor({ state: 'hidden' });
   assert.equal(await page.getByRole('alert').count(), 0);
   await page.goto(origin + '/app?identity=access-refusing-de');
-  await page.getByLabel('Dein Pod').fill(origin + '/refusing');
+  await page.getByLabel('Pod-Adresse').fill(origin + '/refusing');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Anmelden', exact: true }).click(),
   ]);
   await page.waitForURL('**/app?identity=access-refusing-de');
   const zugriff = page.getByRole('region', {
-    name: 'Datenzugriff',
+    name: 'Pods & Freigaben',
     exact: true,
   });
   assert.equal(
@@ -1189,8 +1197,8 @@ try {
     'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.',
   );
   assert.ok(!(await zugriff.textContent()).includes('Entwurf'));
-  await zugriff.getByRole('button', { name: 'Trennen', exact: true }).click();
-  await page.getByLabel('Dein Pod').waitFor();
+  await zugriff.getByRole('button', { name: 'Abmelden', exact: true }).click();
+  await page.getByLabel('Pod-Adresse').waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
   assert.equal(
     await page.getByLabel('Connections', { exact: true }).textContent(),
@@ -1316,7 +1324,9 @@ try {
     1,
   );
   assert.equal(podQueries(), beforeScoped);
-  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Pods & sharing', exact: true })
+    .click();
   const revalidated = page.waitForResponse((r) =>
     r.url().endsWith('/_system/contexts'),
   );
@@ -1377,7 +1387,9 @@ try {
   // Explicit Context editing (#82): with notes selected and an unsaved creation
   // draft there, the work row is edited and saved without any leave prompt; the
   // selection and the draft stay, and the draft is then created in notes.
-  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Pods & sharing', exact: true })
+    .click();
   await page
     .getByLabel('Data context')
     .selectOption(origin + '/overview-pod/_system/contexts/notes');
@@ -1444,7 +1456,7 @@ try {
   await editRegion.waitFor({ state: 'detached' });
   assert.equal(overviewNoteWrites, 2);
   // Switching Pods retires an editor that belongs to the previous connection.
-  await page.getByLabel('Your Pod').fill(origin + '/second-pod');
+  await page.getByLabel('Pod address').fill(origin + '/second-pod');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Sign in', exact: true }).click(),
@@ -1460,7 +1472,9 @@ try {
     assert.ok(value, 'pod option ' + name);
     await pods.selectOption(value);
   };
-  await page.getByRole('button', { name: 'Data access', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Pods & sharing', exact: true })
+    .click();
   await choosePod('overview-pod');
   await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
   await editRegion.getByLabel('Note title').waitFor();

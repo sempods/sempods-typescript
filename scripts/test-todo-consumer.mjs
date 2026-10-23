@@ -484,7 +484,9 @@ try {
     if (language === 'de')
       await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
     await page
-      .getByLabel(language === 'de' ? 'Dein Pod' : 'Your Pod', { exact: true })
+      .getByLabel(language === 'de' ? 'Pod-Adresse' : 'Pod address', {
+        exact: true,
+      })
       .fill(pod);
     await page
       .getByRole('button', {
@@ -501,14 +503,14 @@ try {
       .getByRole('button', { name: 'Shell-free task', exact: true })
       .waitFor();
     await page
-      .getByRole('region', { name: 'Data access', exact: true })
+      .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
     await input.fill('Keep this draft');
     await page
-      .getByRole('button', { name: 'Data access', exact: true })
+      .getByRole('button', { name: 'Pods & sharing', exact: true })
       .click();
     await page
-      .getByRole('button', { name: 'Update access', exact: true })
+      .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
     await page.getByRole('alertdialog').waitFor();
     await page
@@ -552,7 +554,7 @@ try {
     });
     await page.goto(origin + '/baseline');
     assert.equal(await page.locator('link[rel=stylesheet]').count(), 0);
-    await page.getByLabel('Your Pod').waitFor();
+    await page.getByLabel('Pod address').waitFor();
     const initialSignIn = page.getByRole('button', {
       name: 'Sign in',
       exact: true,
@@ -561,7 +563,8 @@ try {
       await initialSignIn.evaluate(
         (button) => getComputedStyle(button).backgroundColor,
       ),
-      'rgb(34, 96, 68)',
+      // The neutral default accent, not a brand colour.
+      'rgb(31, 41, 51)',
     );
     // A dark OS preference alone must not create dark SDK islands on a light page.
     for (const surface of await page.locator('[data-sempods-ui]').all()) {
@@ -582,7 +585,7 @@ try {
           : 'rgba(0, 0, 0, 0)',
       );
     }
-    await page.getByLabel('Your Pod').fill(pod);
+    await page.getByLabel('Pod address').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page
       .getByRole('option', { name: 'work', exact: true })
@@ -592,7 +595,7 @@ try {
       .waitFor({ state: 'attached' });
     await page.getByLabel('Data context', { exact: true }).selectOption(work);
     await page
-      .getByRole('region', { name: 'Data access', exact: true })
+      .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
     await page.getByLabel('Task', { exact: true }).first().fill('SDK baseline');
     assert.deepEqual(labelRequests, [work]);
@@ -630,14 +633,14 @@ try {
       save,
       field,
       page.getByRole('button', { name: 'Check current version', exact: true }),
-      page.getByRole('button', { name: 'Data access', exact: true }),
+      page.getByRole('button', { name: 'Pods & sharing', exact: true }),
     ]) {
       const box = await control.boundingBox();
       assert.ok(box.height >= 44);
     }
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
-      'rgb(32, 41, 35)',
+      'rgb(31, 41, 51)',
     );
     // This is the entire host opt-in; no SDK stylesheet import is needed.
     await page.addStyleTag({ content: ':root { color-scheme: light dark; }' });
@@ -671,7 +674,7 @@ try {
       appearance === 'light' ? 'rgb(255, 255, 255)' : 'rgb(18, 18, 18)',
     );
     const expectedText =
-      appearance === 'light' ? 'rgb(32, 41, 35)' : 'rgb(232, 238, 233)';
+      appearance === 'light' ? 'rgb(31, 41, 51)' : 'rgb(229, 231, 235)';
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
       expectedText,
@@ -682,7 +685,7 @@ try {
     });
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
-      'rgb(32, 41, 35)',
+      'rgb(31, 41, 51)',
     );
     await page.evaluate(() => {
       document.documentElement.style.removeProperty('color-scheme');
@@ -698,7 +701,7 @@ try {
     );
     assert.equal(
       await page
-        .getByRole('button', { name: 'Data access', exact: true })
+        .getByRole('button', { name: 'Pods & sharing', exact: true })
         .evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
@@ -716,7 +719,7 @@ try {
       'rgb(101, 67, 33)',
     );
     await page
-      .getByRole('button', { name: 'Data access', exact: true })
+      .getByRole('button', { name: 'Pods & sharing', exact: true })
       .click();
     const addPod = page.getByRole('button', { name: 'Sign in', exact: true });
     assert.equal(
@@ -726,7 +729,7 @@ try {
       'rgba(0, 0, 0, 0)',
     );
     await page
-      .getByRole('button', { name: 'Update access', exact: true })
+      .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Escape');
@@ -773,7 +776,7 @@ try {
         : route.abort(),
     );
     await page.goto(origin + (custom ? '/custom' : '/legacy'));
-    await page.getByLabel(custom ? 'Pod URL' : 'Your Pod').fill(pod);
+    await page.getByLabel(custom ? 'Pod URL' : 'Pod address').fill(pod);
     await page
       .getByRole('button', {
         name: custom ? 'Connect' : 'Sign in',
@@ -784,7 +787,7 @@ try {
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     if (!custom)
       await page
-        .getByRole('button', { name: 'Data access', exact: true })
+        .getByRole('button', { name: 'Pods & sharing', exact: true })
         .click();
     // New drafts cannot start while connect awaits discovery/registration.
     let releaseDiscovery;
@@ -797,7 +800,7 @@ try {
       releaseDiscovery();
     };
     await page.route('**/.well-known/oauth-protected-resource', holdDiscovery);
-    await page.getByLabel(custom ? 'Pod URL' : 'Your Pod').fill(pod);
+    await page.getByLabel(custom ? 'Pod URL' : 'Pod address').fill(pod);
     await page
       .getByRole('button', {
         name: custom ? 'Connect' : 'Sign in',
@@ -1122,7 +1125,7 @@ try {
       .waitFor();
     await page.goto(origin + '/customized');
     await page
-      .getByRole('button', { name: 'Data access', exact: true })
+      .getByRole('button', { name: 'Pods & sharing', exact: true })
       .click();
     await page.getByRole('button', { name: 'Use work', exact: true }).click();
     await page.getByLabel('Custom draft').fill('Untouched');
@@ -1191,7 +1194,7 @@ try {
       0,
     );
     await page
-      .getByRole('button', { name: 'Update access', exact: true })
+      .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Escape');
@@ -1252,7 +1255,7 @@ try {
       '1',
     );
     await page
-      .getByRole('button', { name: 'Update access', exact: true })
+      .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
     // Re-authorization returns to the remembered, still readable context.
     await page
@@ -1332,7 +1335,7 @@ try {
       '/,standalone,./,./,2',
     );
     seen.length = 0;
-    await page.getByLabel('Your Pod').fill(pod);
+    await page.getByLabel('Pod address').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
@@ -1395,7 +1398,10 @@ try {
     await page.reload();
     await page.getByRole('heading', { name: 'TODO', level: 1 }).waitFor();
     await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
-    assert.equal(await page.getByLabel('Your Pod', { exact: true }).count(), 0);
+    assert.equal(
+      await page.getByLabel('Pod address', { exact: true }).count(),
+      0,
+    );
     assert.equal(
       await page
         .getByText('Full addresses')
@@ -1480,7 +1486,7 @@ try {
       [...shell('/', 'v2'), ...shell('/second/', 'v1')].sort(),
     );
     await next
-      .getByRole('region', { name: 'Data access', exact: true })
+      .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
     await next
       .getByRole('button', { name: 'Installed', exact: true })

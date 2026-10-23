@@ -1,4 +1,5 @@
-/** Internal shared baseline. Public tokens inherit from the host; no style registry. */
+/** Internal shared baseline. Public tokens inherit from the host; no style registry.
+ * Without them, the fallbacks are a calm neutral grey palette. */
 export function SdkStyles() {
   return (
     <style href="sempods-sdk" precedence="sempods">
@@ -10,12 +11,12 @@ const surfaces =
   ':where([data-sempods-ui="access"], [data-sempods-ui="connections"], [data-sempods-ui="editor"], [data-sempods-ui="notice"])';
 const styles = `
 :where([data-sempods-ui]) {
-  --sp-bg:var(--sempods-bg,var(--sempods-access-bg,light-dark(#fff,#191b1a)));
-  --sp-text:var(--sempods-text,var(--sempods-access-text,light-dark(#202923,#e8eee9)));
-  --sp-muted:var(--sempods-muted,var(--sempods-access-muted,light-dark(#606c64,#acb9b0)));
-  --sp-line:var(--sempods-line,var(--sempods-access-line,light-dark(#dce3dd,#39453d)));
-  --sp-accent:var(--sempods-accent,var(--sempods-access-accent,light-dark(#226044,#8acda6)));
-  --sp-on-accent:var(--sempods-on-accent,var(--sempods-access-on-accent,light-dark(#fff,#14251b)));
+  --sp-bg:var(--sempods-bg,var(--sempods-access-bg,light-dark(#fff,#111315)));
+  --sp-text:var(--sempods-text,var(--sempods-access-text,light-dark(#1f2933,#e5e7eb)));
+  --sp-muted:var(--sempods-muted,var(--sempods-access-muted,light-dark(#6b7280,#9ca3af)));
+  --sp-line:var(--sempods-line,var(--sempods-access-line,light-dark(#e5e7eb,#2d3138)));
+  --sp-accent:var(--sempods-accent,var(--sempods-access-accent,light-dark(#1f2933,#e5e7eb)));
+  --sp-on-accent:var(--sempods-on-accent,var(--sempods-access-on-accent,light-dark(#fff,#111315)));
   color:var(--sp-text); font:400 1rem/1.5 system-ui,sans-serif; overflow-wrap:anywhere;
 }
 :where([data-sempods-ui="shell"], [data-sempods-ui="access"]) { background:var(--sp-bg); }

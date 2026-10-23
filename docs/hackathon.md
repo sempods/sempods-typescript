@@ -49,7 +49,7 @@ Full signatures and examples:
   Empty selection never means “all”; the Pod authorizes each operation.
 - **One tab per app.** A second tab of the same app shows that it is open
   elsewhere; use a private window for a second person. A reload keeps the session
-  and the last chosen context while it is readable. **Update access** grants
+  and the last chosen context while it is readable. **Change sharing** grants
   another context.
 - **Unconfirmed is not failed.** A lost answer may hide a completed write.
   Use the SDK's comparison and acknowledgement UI; do not auto-retry or invent

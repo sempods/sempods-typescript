@@ -304,6 +304,7 @@ function AccessConnections({
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
   const id = useId();
+  const disconnectId = useId();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -525,15 +526,17 @@ function AccessConnections({
               spellCheck={false}
               required
               value={url}
-              aria-describedby={id}
+              aria-describedby={m.controls.podHint ? id : undefined}
               placeholder="sempods.org/alice"
               disabled={unavailable}
               onChange={(event) => setUrl(event.target.value)}
             />
           </label>
-          <p id={id} className="sp-access-hint">
-            {m.controls.podHint}
-          </p>
+          {m.controls.podHint && (
+            <p id={id} className="sp-access-hint">
+              {m.controls.podHint}
+            </p>
+          )}
           <button
             className={c ? undefined : 'sp-access-primary'}
             disabled={unavailable}
@@ -542,7 +545,7 @@ function AccessConnections({
           </button>
         </form>
       ) : null}
-      {!active && !c && (
+      {!active && !c && m.controls.loginHint && (
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
@@ -641,6 +644,9 @@ function AccessConnections({
           {(manage || c.session.kind === 'ended') && (
             <button
               disabled={unavailable}
+              aria-describedby={
+                m.controls.disconnectHint ? disconnectId : undefined
+              }
               onClick={() => void act(() => app.disconnect(c.id))}
             >
               {m.controls.disconnect}
@@ -648,6 +654,13 @@ function AccessConnections({
           )}
         </div>
       )}
+      {c &&
+        (manage || c.session.kind === 'ended') &&
+        m.controls.disconnectHint && (
+          <p id={disconnectId} className="sp-access-hint">
+            {m.controls.disconnectHint}
+          </p>
+        )}
       {failure && <p role="alert">{error(failure.cause)}</p>}
     </>
   );
@@ -675,5 +688,6 @@ const styles = `
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-actions { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:16px; }
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
+[data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:5px; padding:10px 12px; }
 [data-sempods-access] summary { min-height:44px; padding:10px; cursor:pointer; }
 `;

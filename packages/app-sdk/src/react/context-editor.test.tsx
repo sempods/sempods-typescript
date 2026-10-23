@@ -381,7 +381,9 @@ it.each(['unreadable', 'refused', 'offline'] as const)(
     expect(screen.queryByLabelText('Data context')).toBeNull();
     if (mode === 'unreadable') {
       // A listed catalogue needs no attention; management keeps the retry.
-      expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+      expect(
+        screen.queryByRole('region', { name: 'Pods & sharing' }),
+      ).toBeNull();
       fireEvent.click(screen.getByText('Manage access'));
     } else
       // A failed catalogue appears by itself, with its retry.
@@ -410,11 +412,11 @@ it('opens an explicit target with no Context selected and without the chooser', 
   await waitFor(() => expect(f.count('/_system/contexts')).toBe(1));
   // While the catalogue loads, the editor reports it; AppAccess stays away.
   expect(phase()).toBe('loading');
-  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
   expect(screen.queryByLabelText('Data context')).toBeNull();
   await act(async () => listing.resolve(await catalogue()));
   await waitFor(() => expect(title().value).toBe('A at work'));
-  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
   expect(screen.queryByLabelText('Data context')).toBeNull();
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
   expect(f.count('/_system/contexts')).toBe(1);
