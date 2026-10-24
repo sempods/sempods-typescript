@@ -315,9 +315,11 @@ export async function checkWidgets(page, origin, data) {
     .getByRole('listitem')
     .filter({ hasText: 'From the add widget' })
     .waitFor();
-  await page.getByRole('button', { name: 'Data access', exact: true }).click();
   await page
-    .getByRole('button', { name: 'Update access', exact: true })
+    .getByRole('button', { name: 'Pods & sharing', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Change sharing', exact: true })
     .click();
   await page.getByRole('alertdialog').waitFor();
   await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
@@ -330,7 +332,11 @@ export async function checkWidgets(page, origin, data) {
     () => document.querySelector('input')?.disabled === true,
   );
   assert.equal(await input.inputValue(), 'Keep this draft');
-  assert.equal(await page.getByRole('listitem').count(), 1);
+  // The widget's rows; open management lists Contexts too.
+  assert.equal(
+    await page.locator('li:not([data-sempods-access] li)').count(),
+    1,
+  );
   data.access(false, false);
   await refresh();
   await input.waitFor({ state: 'hidden' });
@@ -353,7 +359,7 @@ export async function checkWidgets(page, origin, data) {
   const heldWrite = await dispatched;
   // Programmatic click deliberately bypasses inert hit testing; the action must guard too.
   await page
-    .getByRole('button', { name: 'Update access', exact: true })
+    .getByRole('button', { name: 'Change sharing', exact: true })
     .evaluate((button) => button.click());
   assert.equal(await page.getByRole('alertdialog').count(), 0);
   assert.equal(new URL(page.url()).pathname, '/app');
@@ -385,7 +391,7 @@ export async function checkWidgets(page, origin, data) {
     .waitFor();
   await page.unroute('**/widgets-pod/_system/resources/**', lost);
   await page
-    .getByRole('button', { name: 'Update access', exact: true })
+    .getByRole('button', { name: 'Change sharing', exact: true })
     .click();
   await page.getByRole('alertdialog').waitFor();
   await page.getByRole('button', { name: 'Keep editing', exact: true }).click();

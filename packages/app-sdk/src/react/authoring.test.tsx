@@ -9,6 +9,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
@@ -134,7 +135,7 @@ it('replacement picker uses guarded actions and confirmation restores focus on c
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Unfinished' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
   const picker = screen.getByText('Custom picker');
   picker.focus();
   fireEvent.click(picker);
@@ -433,6 +434,9 @@ it.each([
   });
   f.setResource(request);
   fireEvent.click(screen.getByRole('button', { name: operation }));
+  // Delete asks first; the confirmation replaces the action row.
+  if (operation === 'Delete')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
   const changed = 'The pod has changed. Compare before continuing.';
   // The first case runs the review path cold (about five times slower than the
   // others locally), which exceeded the default second on loaded CI runners.
@@ -457,6 +461,225 @@ it.each([
     ),
   ).toHaveLength(1);
 });
+
+const asked = { name: 'Delete this from the pod? This cannot be undone.' };
+/** Records conditional DELETEs; reads answer the current version. */
+function deletions(f: Awaited<ReturnType<typeof connected>>) {
+  const pod = { value: 'Original', version: 1 };
+  const deletes: (string | null)[] = [];
+  let answer: () => Promise<Response> = async () =>
+    new Response(null, { status: 204 });
+  f.setResource(async (_url, init) => {
+    if (init?.method === 'DELETE') {
+      deletes.push(new Headers(init.headers).get('if-match'));
+      return answer();
+    }
+    return Response.json(
+      { '@id': 'urn:item', 'urn:name': [{ '@value': pod.value }] },
+      { headers: { etag: `"v${pod.version}"` } },
+    );
+  });
+  return {
+    pod,
+    deletes,
+    answer: (next: () => Promise<Response>) => void (answer = next),
+  };
+}
+let shownEditor: { refresh(): Promise<void> } | null = null;
+function SubjectForm({ subject }: { readonly subject: string }) {
+  const editor = useResourceEditor(subject, definition);
+  shownEditor = editor;
+  return (
+    <ResourceEditor editor={editor}>
+      {(draft, change) => (
+        <input
+          aria-label="Title"
+          value={draft.title}
+          onChange={(e) => change({ title: e.target.value })}
+        />
+      )}
+    </ResourceEditor>
+  );
+}
+
+it.each([
+  [
+    'en',
+    {
+      remove: 'Delete',
+      cancel: 'Cancel',
+      ask: 'Delete this from the pod? This cannot be undone.',
+      removed: 'Deleted.',
+    },
+  ],
+  [
+    'de',
+    {
+      remove: 'Löschen',
+      cancel: 'Abbrechen',
+      ask: 'Vom Pod löschen? Das lässt sich nicht rückgängig machen.',
+      removed: 'Gelöscht.',
+    },
+  ],
+] as const)(
+  'asks in the editor before deleting; cancel and Escape keep the draft (%s)',
+  async (language, text) => {
+    const f = await connected();
+    const { deletes } = deletions(f);
+    render(
+      <SempodsProvider runtime={f.runtime} language={language}>
+        <Form />
+      </SempodsProvider>,
+    );
+    await screen.findByDisplayValue('Original');
+    const remove = screen.getByRole('button', { name: text.remove });
+    fireEvent.click(remove);
+    const ask = screen.getByRole('group', { name: text.ask });
+    const cancel = within(ask).getByRole('button', { name: text.cancel });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.click(cancel);
+    expect(screen.queryByRole('group', { name: text.ask })).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: text.remove }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: text.remove }));
+    fireEvent.keyDown(screen.getByRole('group', { name: text.ask }), {
+      key: 'Escape',
+    });
+    expect(screen.queryByRole('group', { name: text.ask })).toBeNull();
+    expect(screen.getByDisplayValue('Original')).toBeTruthy();
+    await act(async () => {});
+    expect(deletes).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: text.remove }));
+    const confirm = within(
+      screen.getByRole('group', { name: text.ask }),
+    ).getByRole('button', { name: text.remove });
+    fireEvent.click(confirm);
+    // A second press reaches no confirmation and sends nothing more.
+    fireEvent.click(confirm);
+    await screen.findByText(text.removed);
+    expect(deletes).toEqual(['"v1"']);
+  },
+);
+
+it('withdraws the delete question for an edit, a newer version and lost write access', async () => {
+  const f = await connected();
+  const { pod, deletes } = deletions(f);
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <SubjectForm subject="urn:item" />
+    </SempodsProvider>,
+  );
+  await screen.findByDisplayValue('Original');
+  const ask = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  // An edit while asked: the question is about the shown state only.
+  ask();
+  fireEvent.change(screen.getByLabelText('Title'), {
+    target: { value: 'Typed' },
+  });
+  expect(screen.queryByRole('group', asked)).toBeNull();
+  fireEvent.click(screen.getByText('Discard changes'));
+  // A newer version adopted while asked withdraws the question; the next
+  // confirmation deletes that version.
+  ask();
+  pod.value = 'Newer';
+  pod.version = 2;
+  await act(() => shownEditor!.refresh());
+  await screen.findByDisplayValue('Newer');
+  expect(screen.queryByRole('group', asked)).toBeNull();
+  // Lost write access withdraws it and disables Delete.
+  ask();
+  f.setCatalogue(async () => catalogue([work], []));
+  await act(() => f.runtime.loadContexts(f.id));
+  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(
+    (screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(deletes).toEqual([]);
+  f.setCatalogue(async () => catalogue());
+  await act(() => f.runtime.loadContexts(f.id));
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  ask();
+  fireEvent.click(
+    within(screen.getByRole('group', asked)).getByRole('button', {
+      name: 'Delete',
+    }),
+  );
+  await screen.findByText('Deleted.');
+  expect(deletes).toEqual(['"v2"']);
+});
+
+it('withdraws the delete question when the editor moves to another subject', async () => {
+  const f = await connected();
+  const { deletes } = deletions(f);
+  const ui = (subject: string) => (
+    <SempodsProvider runtime={f.runtime}>
+      <SubjectForm subject={subject} />
+    </SempodsProvider>
+  );
+  const mounted = render(ui('urn:item'));
+  await screen.findByDisplayValue('Original');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  expect(screen.getByRole('group', asked)).toBeTruthy();
+  mounted.rerender(ui('urn:other'));
+  await screen.findByDisplayValue('Original');
+  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(deletes).toEqual([]);
+});
+
+it.each([
+  [
+    'changed on the pod (412)',
+    412,
+    'The pod has changed. Compare before continuing.',
+  ],
+  ['missing (404)', 404, null],
+  [
+    'lost',
+    'lost',
+    'The result is unconfirmed. Check the pod before deciding; nothing is retried automatically.',
+  ],
+] as const)(
+  'a confirmed delete that is %s is neither reported as deleted nor retried',
+  async (_case, status, alert) => {
+    const f = await connected();
+    const { deletes, answer } = deletions(f);
+    answer(async () => {
+      if (status === 'lost') throw new TypeError('connection lost');
+      return new Response(null, { status });
+    });
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        <Form />
+      </SempodsProvider>,
+    );
+    await screen.findByDisplayValue('Original');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(
+      within(screen.getByRole('group', asked)).getByRole('button', {
+        name: 'Delete',
+      }),
+    );
+    await waitFor(() => expect(deletes).toEqual(['"v1"']));
+    if (alert) expect(await screen.findByText(alert)).toBeTruthy();
+    else
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Check again' }),
+        ).toBeTruthy(),
+      );
+    await act(async () => {});
+    expect(screen.queryByText('Deleted.')).toBeNull();
+    expect(deletes).toEqual(['"v1"']);
+  },
+);
 
 it('retires saved feedback through a newer draft, access recovery and review', async () => {
   const f = await connected();
@@ -638,8 +861,18 @@ it.each(['connect', 'authorize'] as const)(
 );
 
 it.each([
-  ['en', 'access_denied', 'cancelled', 'Sign-in was cancelled.'],
-  ['de', 'access_denied', 'cancelled', 'Die Anmeldung wurde abgebrochen.'],
+  [
+    'en',
+    'access_denied',
+    'cancelled',
+    'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
+  ],
+  [
+    'de',
+    'access_denied',
+    'cancelled',
+    'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
+  ],
   [
     'en',
     'login_required',
@@ -705,18 +938,24 @@ it('names why connecting failed instead of a generic failure', async () => {
   );
   await screen.findByText('Tasks mounted');
   f.fetch.mockRejectedValue(new TypeError('offline'));
-  fireEvent.change(screen.getByLabelText('Your Pod'), {
+  fireEvent.change(screen.getByLabelText('Pod address'), {
     target: { value: 'https://pod.example/carol' },
   });
-  fireEvent.submit(screen.getByLabelText('Your Pod').closest('form')!);
+  fireEvent.submit(screen.getByLabelText('Pod address').closest('form')!);
   expect((await screen.findByRole('alert')).textContent).toBe(
     'The pod’s connection information could not be loaded. Try again.',
   );
 });
 
 it.each([
-  ['en', 'Sign-in was cancelled.'],
-  ['de', 'Die Anmeldung wurde abgebrochen.'],
+  [
+    'en',
+    'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
+  ],
+  [
+    'de',
+    'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
+  ],
 ] as const)(
   'a custom layout places CallbackNotice next to working recovery controls (%s)',
   async (language, text) => {
@@ -839,11 +1078,21 @@ it('shows the no-contexts message when the Pod grants no readable context', asyn
 });
 
 it.each([
-  ['en', 'Update access'],
-  ['de', 'Zugriff ändern'],
+  [
+    'en',
+    'Change sharing',
+    'Sign out',
+    'Signing out only applies to this device.',
+  ],
+  [
+    'de',
+    'Freigabe ändern',
+    'Abmelden',
+    'Die Abmeldung gilt nur für dieses Gerät.',
+  ],
 ] as const)(
   'an active connection offers to update access rather than to sign in (%s)',
-  async (language, label) => {
+  async (language, label, signOut, note) => {
     const f = fixture();
     const session = await f.login();
     cleanups.push(() => session.runtime.dispose());
@@ -858,6 +1107,11 @@ it.each([
         name: language === 'en' ? 'Sign in' : 'Anmelden',
       }),
     ).toBeNull();
+    const local = screen.getByRole('button', { name: signOut });
+    expect(
+      document.getElementById(local.getAttribute('aria-describedby')!)
+        ?.textContent,
+    ).toBe(note);
     // It still re-authorizes the same connection.
     await act(async () => button.click());
     await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
@@ -878,16 +1132,16 @@ it('AppShell preserves title/style/content and hides management until explicitly
     screen.getByRole('heading', { level: 1, name: 'My notebook' }),
   ).toBeTruthy();
   expect(screen.getByRole('main').style.maxWidth).toBe('480px');
-  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
   const field = screen.getByLabelText('Title');
   fireEvent.change(field, { target: { value: 'Mounted draft' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
   expect(
-    screen.getByRole('heading', { level: 2, name: 'Data access' }),
+    screen.getByRole('heading', { level: 2, name: 'Pods & sharing' }),
   ).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Check access' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Data access' }));
-  expect(screen.queryByRole('region', { name: 'Data access' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
   expect(screen.getByLabelText('Title')).toBe(field);
   expect((field as HTMLInputElement).value).toBe('Mounted draft');
 });

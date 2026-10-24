@@ -5,11 +5,13 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AppShell,
   AppAccess,
+  ResourceEditor,
   SempodsProvider,
   TargetScreen,
   UpdateNotice,
   useAppState,
   useCreation,
+  useResourceEditor,
   useWorkflowAccess,
 } from '@sempods/app-sdk/react';
 
@@ -17,6 +19,8 @@ const podUrl = location.origin + '/alice';
 const identity =
   new URL(location.href).searchParams.get('identity') ?? 'preset';
 const accessUI = identity.startsWith('access-');
+// Management and an editor inside the app's own modal dialog.
+const modal = identity === 'access-modal';
 const language = identity.endsWith('-de') ? 'de' : 'en';
 // A Pod whose Context catalogue answers after a delay, with a Context flow.
 const slowCatalogue = location.origin + '/slowcat';
@@ -27,7 +31,7 @@ const runtime = createBrowserRuntime({
     name: 'Preset consumer',
     redirectUri: location.origin + '/callback?identity=' + identity,
   },
-  ...(!accessUI
+  ...(!accessUI || modal
     ? { preset: { podUrl, contextIri: podUrl + '/_system/contexts/work' } }
     : catalogueUI && identity !== 'access-catalogue-choice'
       ? {
@@ -72,6 +76,42 @@ function Draft() {
     </>
   );
 }
+const named = fields({
+  title: text('https://schema.org/name', { language: 'en' }),
+});
+function ModalEvidence() {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
+  const editor = useResourceEditor(open ? 'urn:fixture-task' : null, named);
+  return (
+    <>
+      <AppAccess appName="Shopping" description="Shopping made easy" />
+      <TargetScreen>
+        <button
+          onClick={() => {
+            setOpen(true);
+            dialog.current?.showModal();
+          }}
+        >
+          Manage
+        </button>
+      </TargetScreen>
+      <dialog ref={dialog} aria-label="Manage" onClose={() => setOpen(false)}>
+        <AppAccess appName="Shopping" open={open} headingLevel={2} />
+        <ResourceEditor editor={editor}>
+          {(draft, change) => (
+            <input
+              aria-label="Task title"
+              value={draft.title ?? ''}
+              onChange={(e) => change({ title: e.target.value })}
+            />
+          )}
+        </ResourceEditor>
+        <button onClick={() => dialog.current?.close()}>Close</button>
+      </dialog>
+    </>
+  );
+}
 function Evidence() {
   const state = useAppState();
   const [open, setOpen] = useState(false);
@@ -84,7 +124,9 @@ function Evidence() {
           {state.view?.contextIri ?? ''}
         </output>
       </div>
-      {accessUI ? (
+      {modal ? (
+        <ModalEvidence />
+      ) : accessUI ? (
         <>
           {state.connections.length > 0 && (
             <button
@@ -92,7 +134,7 @@ function Evidence() {
               aria-expanded={open}
               onClick={() => setOpen(!open)}
             >
-              Data access
+              Pods & sharing
             </button>
           )}
           <AppAccess

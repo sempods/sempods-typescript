@@ -17,6 +17,15 @@ export type FeatureScopes = {
 export type SessionFact =
   | { readonly kind: 'signed-out' | 'restoring' }
   | { readonly kind: 'active' | 'renewing'; readonly subject: string }
+  /**
+   * The sign-in attempt is stored and the page is navigating to the Pod's
+   * provider. No request of the earlier session is dispatched any more; the
+   * connection's other facts (catalogue, selection, grants) stay as they were
+   * for display until the page unloads. `subject` names the session a
+   * re-authorization started from. Coming back without a callback, or with a
+   * denial, resumes that session when it is still valid.
+   */
+  | { readonly kind: 'leaving'; readonly subject?: string }
   | {
       readonly kind: 'ended';
       readonly problem: RuntimeProblem;
@@ -72,6 +81,12 @@ export interface StartupReport {
    * the cause when the provider answered with an error.
    */
   readonly attemptConnectionId?: string;
+  /**
+   * The cancelled re-authorization (`interaction: 'cancelled'`) of
+   * `attemptConnectionId` resumed that connection's previous session: its
+   * access is unchanged. Absent when the connection ended instead.
+   */
+  readonly resumed?: true;
   /** The returning sign-in's outcome; `none` without a callback, even when startup fails. */
   readonly interaction: 'none' | 'completed' | 'cancelled' | 'failed';
   readonly storage: 'durable' | 'unavailable' | 'busy';

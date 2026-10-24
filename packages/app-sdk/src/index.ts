@@ -50,4 +50,9 @@ export type {
   LeaveGuard,
 } from './authoring/app.js';
 export { createViewLoader } from './authoring/load.js';
-export type { LoadState, ViewRead, PodRead } from './authoring/load.js';
+export type {
+  LoadState,
+  LoaderOptions,
+  ViewRead,
+  PodRead,
+} from './authoring/load.js';

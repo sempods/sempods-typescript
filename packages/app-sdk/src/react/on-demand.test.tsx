@@ -9,6 +9,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import {
   AppAccess,
@@ -162,7 +163,18 @@ it('starts a Pod overview with no catalogue, labels or Context access, and opens
   expect(f.count('/_system/contexts')).toBe(0);
   expect(descriptions(f)).toHaveLength(0);
   fireEvent.click(screen.getByText('Manage access'));
-  await screen.findByRole('option', { name: 'work' });
+  // Management lists what this app may do in each readable Context; without
+  // a Context flow it asks for no selection.
+  const access = await screen.findByRole('region', {
+    name: 'Available to this app',
+  });
+  expect(
+    within(access)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent),
+  ).toEqual(['workThis app can read and change', 'personalThis app can read']);
+  expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
   expect(f.count('/_system/contexts')).toBe(1);
   expect(descriptions(f)).toHaveLength(0);
   expect(screen.getByTestId('overview').textContent).toContain('urn:item');
@@ -330,7 +342,7 @@ it.each(['scope-loss', 'ended', 'refused'] as const)(
       );
     else if (mode === 'ended')
       await screen.findByRole('button', { name: 'Sign in' });
-    else await screen.findByRole('button', { name: 'Update access' });
+    else await screen.findByRole('button', { name: 'Change sharing' });
     expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
     expect(f.count('/_system/contexts')).toBe(0);
     expect(descriptions(f)).toHaveLength(0);
