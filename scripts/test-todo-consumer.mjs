@@ -856,13 +856,14 @@ try {
     await newDraft.fill('  First  ');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('button', { name: 'First', exact: true }).waitFor();
-    // Only the last write's success stays visible (#72).
+    // The row is the confirmation: creation and row changes stay quiet (#107);
+    // only the editor's own save announces success, once (#72).
     const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
     const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
-    await created.waitFor();
-    await page.getByRole('button', { name: 'Complete', exact: true }).click();
-    await saved.waitFor();
     assert.equal(await created.count(), 0);
+    await page.getByRole('button', { name: 'Complete', exact: true }).click();
+    await page.getByRole('button', { name: 'Reopen', exact: true }).waitFor();
+    assert.equal(await saved.count(), 0);
     await page.getByRole('button', { name: 'Reopen', exact: true }).click();
     await page.getByRole('button', { name: 'Complete', exact: true }).waitFor();
     await page.getByRole('button', { name: 'First', exact: true }).click();

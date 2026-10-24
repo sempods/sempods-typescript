@@ -413,54 +413,60 @@ it.each([
   ['Save', 'Continue with my changes'],
   ['Delete', 'Discard changes'],
   ['Delete', 'Continue with my changes'],
-])('clears %s review feedback after %s', async (operation, recovery) => {
-  const f = await connected();
-  render(
-    <SempodsProvider runtime={f.runtime}>
-      <Form />
-    </SempodsProvider>,
-  );
-  await screen.findByDisplayValue('Original');
-  fireEvent.change(screen.getByLabelText('Title'), {
-    target: { value: 'Mine' },
-  });
-  const request = vi.fn(async (_url: string, init?: RequestInit) => {
-    if (init?.method === 'PATCH' || init?.method === 'DELETE')
-      return new Response(null, { status: 412 });
-    return Response.json(
-      { '@id': 'urn:item', 'urn:name': [{ '@value': 'Theirs' }] },
-      { headers: { etag: '"v2"' } },
+])(
+  'clears %s review feedback after %s',
+  async (operation, recovery) => {
+    const f = await connected();
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        <Form />
+      </SempodsProvider>,
     );
-  });
-  f.setResource(request);
-  fireEvent.click(screen.getByRole('button', { name: operation }));
-  // Delete asks first; the confirmation replaces the action row.
-  if (operation === 'Delete')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-  const changed = 'The pod has changed. Compare before continuing.';
-  // The first case runs the review path cold (about five times slower than the
-  // others locally), which exceeded the default second on loaded CI runners.
-  await screen.findByRole('alert', {}, { timeout: 5000 });
-  expect(screen.getByText(changed)).toBeTruthy();
-  await waitFor(() =>
-    expect((screen.getByText(recovery) as HTMLButtonElement).disabled).toBe(
-      false,
-    ),
-  );
-  fireEvent.click(screen.getByText(recovery));
-  expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.queryByText(changed)).toBeNull();
-  expect(
-    screen.getByDisplayValue(
-      recovery === 'Discard changes' ? 'Theirs' : 'Mine',
-    ),
-  ).toBeTruthy();
-  expect(
-    request.mock.calls.filter(
-      ([, init]) => init?.method === 'PATCH' || init?.method === 'DELETE',
-    ),
-  ).toHaveLength(1);
-});
+    await screen.findByDisplayValue('Original');
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Mine' },
+    });
+    const request = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH' || init?.method === 'DELETE')
+        return new Response(null, { status: 412 });
+      return Response.json(
+        { '@id': 'urn:item', 'urn:name': [{ '@value': 'Theirs' }] },
+        { headers: { etag: '"v2"' } },
+      );
+    });
+    f.setResource(request);
+    fireEvent.click(screen.getByRole('button', { name: operation }));
+    // Delete asks first; the confirmation replaces the action row.
+    if (operation === 'Delete')
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const changed = 'The pod has changed. Compare before continuing.';
+    // The first case runs the review path cold (about five times slower than the
+    // others locally), which exceeded the default second on loaded CI runners.
+    await screen.findByRole('alert', {}, { timeout: 5000 });
+    expect(screen.getByText(changed)).toBeTruthy();
+    await waitFor(() =>
+      expect((screen.getByText(recovery) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByText(recovery));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(changed)).toBeNull();
+    expect(
+      screen.getByDisplayValue(
+        recovery === 'Discard changes' ? 'Theirs' : 'Mine',
+      ),
+    ).toBeTruthy();
+    expect(
+      request.mock.calls.filter(
+        ([, init]) => init?.method === 'PATCH' || init?.method === 'DELETE',
+      ),
+    ).toHaveLength(1);
+    // The alert wait above may take up to five seconds; the test needs room
+    // beyond it, or a loaded runner hits the default test timeout first.
+  },
+  15_000,
+);
 
 const asked = { name: 'Delete this from the pod? This cannot be undone.' };
 /** Records conditional DELETEs; reads answer the current version. */
