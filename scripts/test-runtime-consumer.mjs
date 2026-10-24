@@ -1388,6 +1388,89 @@ try {
   console.log(
     'Packed AppAccess: one/set/free Pod UI, Pod address omitted only for one permitted Pod with podAddress="hidden" and kept in Full addresses, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
   );
+  // A declined re-authorization leaves a usable session and one retry. Native
+  // inert removes focus while that retry prepares; a preparation failure must
+  // not send focus to the host while the retry and its error remain visible.
+  for (const language of ['en', 'de']) {
+    const identity = 'access-focus-' + language;
+    const de = language === 'de';
+    await page.goto(origin + '/app?identity=' + identity);
+    await Promise.all([
+      page.waitForURL('**/callback?**'),
+      page
+        .getByRole('button', { name: de ? 'Anmelden' : 'Sign in', exact: true })
+        .click(),
+    ]);
+    await page.waitForURL('**/app?identity=' + identity);
+    const picker = page.getByLabel(de ? 'Datenkontext' : 'Data context', {
+      exact: true,
+    });
+    await picker.focus();
+    await picker.selectOption(origin + '/alice/_system/contexts/work');
+    await page.getByLabel('Preset draft').waitFor();
+    const region = page.getByRole('region', {
+      name: de ? 'Pods & Freigaben' : 'Pods & sharing',
+      exact: true,
+    });
+    await region.waitFor({ state: 'hidden' });
+    const host = page.getByRole('button', {
+      name: 'Pods & sharing',
+      exact: true,
+    });
+    assert.equal(
+      await host.evaluate((el) => el === document.activeElement),
+      true,
+    );
+    await host.click();
+    const retry = region.getByRole('button', {
+      name: de ? 'Freigabe ändern' : 'Change sharing',
+      exact: true,
+    });
+    consent = 'deny';
+    await Promise.all([page.waitForURL('**/callback?**'), retry.click()]);
+    await page.waitForURL('**/app?identity=' + identity);
+    await retry.waitFor();
+    await page.getByLabel('Preset draft').waitFor();
+    await host.evaluate((el) => {
+      window.hostFocusCount = 0;
+      el.addEventListener('focus', () => window.hostFocusCount++);
+    });
+    let failPreparation;
+    const preparing = new Promise((resolve) => {
+      failPreparation = resolve;
+    });
+    await page.route(aliceMetadata, async (route) => {
+      await preparing;
+      await route.fulfill({ status: 503, body: 'Discovery unavailable' });
+    });
+    await retry.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-sempods-access]')?.closest('[inert]'),
+    );
+    await page.waitForFunction(() => document.activeElement === document.body);
+    failPreparation();
+    await region.getByRole('alert').waitFor();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('[data-sempods-access]')?.closest('[inert]'),
+    );
+    assert.equal(await region.isVisible(), true);
+    assert.equal(await retry.isEnabled(), true);
+    assert.equal(
+      await page.evaluate(() => window.hostFocusCount),
+      0,
+      'A visible retry failure must not focus the host (' + language + ')',
+    );
+    assert.equal(
+      await host.evaluate((el) => el === document.activeElement),
+      false,
+    );
+    await page.unroute(aliceMetadata);
+  }
+  console.log(
+    'Packed AppAccess focus (EN/DE): hidden recovery returns to the host; native inert during a failed re-authorization retry does not focus the host while retry/error stay visible.',
+  );
   // A Pod whose provider answers login_required: the specific cause (EN/DE),
   // shown once and without a kept-draft claim, until the person acts.
   await page.goto(origin + '/app?identity=access-refusing');
