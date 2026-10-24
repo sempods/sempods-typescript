@@ -1164,6 +1164,7 @@ try {
       const notice = page.getByRole('alert');
       await notice.waitFor();
       assert.equal(await notice.textContent(), message);
+      assert.equal(await page.getByText(message, { exact: true }).count(), 1);
       assert.equal(
         await page
           .getByLabel('Sign-out failure', { exact: true })
@@ -1199,7 +1200,7 @@ try {
     }
   }
   console.log(
-    'Packed sign-out: AppAccess and ConnectionControls EN/DE show failed IndexedDB writes, allow explicit retry and stay signed out after reload.',
+    'Packed sign-out: AppAccess and ConnectionControls with AccessNotice show failed IndexedDB writes once in EN/DE, allow explicit retry and stay signed out after reload.',
   );
   // The SDK's leave confirmation over an app's own modal dialog (#102): a
   // native top-layer dialog, visible and operable above it, for a dirty editor

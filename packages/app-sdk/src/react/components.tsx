@@ -175,8 +175,6 @@ export function endedMessage(
   m: SdkMessages,
   signingIn = false,
 ) {
-  if (session.saved === false)
-    return m.controls.disconnectFailed ?? m.controls.retry;
   if (signingIn && session.failure)
     return describeFailure(m.errors, session.failure);
   return session.problem === 'interrupted' ||
@@ -184,6 +182,10 @@ export function endedMessage(
     ? m.controls.signInRequired
     : m.controls.readLost;
 }
+/**
+ * Explains current access limitations. Failed sign-out retry advice belongs
+ * beside the action in ConnectionControls or custom controls.
+ */
 export function AccessNotice() {
   const access = useWorkflowAccess();
   const { preset } = useAppState();

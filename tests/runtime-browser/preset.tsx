@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
+  AccessNotice,
   AppShell,
   AppAccess,
   ConnectionControls,
@@ -135,7 +136,10 @@ function Evidence() {
       </div>
       {signOutUI ? (
         identity.includes('-controls-') ? (
-          <ConnectionControls />
+          <>
+            <ConnectionControls />
+            <AccessNotice />
+          </>
         ) : (
           <AppAccess
             appName="Sign-out fixture"

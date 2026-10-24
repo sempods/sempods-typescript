@@ -726,9 +726,11 @@ in `useAppState().connections` retains an ended session with
 `problem: 'disconnected', saved: false`. `AppAccess` and `ConnectionControls`
 show `controls.disconnectFailed` beside the existing **Sign out** button, also
 after a provider remount over the same runtime. Custom controls should offer
-the same explicit retry. The fact stays while retrying; success removes the
-connection and its message. Do not suggest reloading: the saved session may
-still restore until a retry succeeds.
+the same explicit retry. `AccessNotice` keeps the general access-loss message,
+so composing it with `ConnectionControls` does not repeat the retry advice.
+The fact stays while retrying; success removes the connection and its message.
+Do not suggest reloading: the saved session may still restore until a retry
+succeeds.
 
 `useApp()` returns the guarded actions only: `selectConnection`, `selectContext`,
 `connect`, `authorize`, `disconnect`, `refreshContexts(id)` and `navigate(action)`

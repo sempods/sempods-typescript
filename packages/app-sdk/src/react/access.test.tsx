@@ -14,6 +14,7 @@ import {
 } from '@testing-library/react';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
+  AccessNotice,
   AppAccess,
   ConnectionControls,
   SempodsProvider,
@@ -55,6 +56,8 @@ it.each([
   ['access', 'de'],
   ['controls', 'en'],
   ['controls', 'de'],
+  ['controls-with-notice', 'en'],
+  ['controls-with-notice', 'de'],
 ] as const)(
   'retains failed sign-out feedback across a provider remount and retries (%s, %s)',
   async (surface, language) => {
@@ -76,7 +79,10 @@ it.each([
           {surface === 'access' ? (
             <AppAccess appName="Tasks" open />
           ) : (
-            <ConnectionControls />
+            <>
+              <ConnectionControls />
+              {surface === 'controls-with-notice' && <AccessNotice />}
+            </>
           )}
         </SempodsProvider>
       </StrictMode>
@@ -91,6 +97,13 @@ it.each([
     await act(async () => button.click());
     const notice = await screen.findByRole('alert');
     expect(notice.textContent).toBe(text);
+    expect(screen.getAllByText(text)).toHaveLength(1);
+    if (surface === 'controls-with-notice')
+      expect(screen.getByRole('status').textContent).toBe(
+        language === 'en'
+          ? 'Access is unavailable. Your draft is kept.'
+          : 'Der Zugriff ist nicht verfügbar. Dein Entwurf bleibt erhalten.',
+      );
     expect(button.getAttribute('aria-describedby')).toBe(notice.id);
     expect(document.body.textContent).not.toMatch(
       /reload|neu laden|private fixture/i,
@@ -104,6 +117,7 @@ it.each([
     first.unmount();
     render(ui);
     expect((await screen.findByRole('alert')).textContent).toBe(text);
+    expect(screen.getAllByText(text)).toHaveLength(1);
     const retry = screen.getByRole('button', { name: label });
     await waitFor(() =>
       expect((retry as HTMLButtonElement).disabled).toBe(false),
@@ -113,6 +127,7 @@ it.each([
       expect((retry as HTMLButtonElement).disabled).toBe(false),
     );
     expect((await screen.findByRole('alert')).textContent).toBe(text);
+    expect(screen.getAllByText(text)).toHaveLength(1);
     expect(runtime.getSnapshot().some((c) => c.id === id)).toBe(true);
     write.mockRestore();
     await act(async () => retry.click());
