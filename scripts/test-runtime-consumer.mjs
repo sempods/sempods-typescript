@@ -152,6 +152,8 @@ try {
   const serverErrors = [];
   let registrations = 0;
   let exchanges = 0;
+  /** The next consent answer: denied, or left open (no redirect back). */
+  let consent;
   let refreshes = 0;
   let overviewRefuse = false;
   let delayedOffline = false;
@@ -322,7 +324,17 @@ try {
       }
       if (url.pathname.endsWith('/authorize')) {
         const redirect = new URL(url.searchParams.get('redirect_uri'));
-        if (name === 'refusing') {
+        const answer = consent;
+        consent = undefined;
+        if (answer === 'open') {
+          res.writeHead(200, { 'content-type': 'text/html' });
+          res.end('<p>Consent</p>');
+          return;
+        }
+        if (answer === 'deny') {
+          redirect.searchParams.set('error', 'access_denied');
+          redirect.searchParams.set('error_description', 'cancelled');
+        } else if (name === 'refusing') {
           // A legitimate, state-bound OAuth error with untrusted free text.
           redirect.searchParams.set('error', 'login_required');
           redirect.searchParams.set(
@@ -951,6 +963,73 @@ try {
   await page.evaluate(() => sessionStorage.removeItem('fixture-policy'));
   console.log(
     'Packed Pod policy: one/set/free configuration, exact default reuse, excluded restore/bind/connect, widening and rejected callback passed.',
+  );
+  // A cancelled re-authorization (#98) keeps the working session: no
+  // signed-out state before the page leaves, no token request, and the same
+  // after coming back without a callback.
+  await page.reload();
+  await ready();
+  await restored();
+  const beforeCancel = { exchanges, refreshes };
+  const reauthorize = async () => {
+    await page.evaluate(() => {
+      const r = window.fixture.runtime;
+      sessionStorage.setItem('fixture-kinds', '[]');
+      r.subscribe(() => {
+        // The pagehide disposal publishes no connection.
+        const kind = r.getSnapshot()[0]?.session.kind;
+        if (!kind) return;
+        const kinds = JSON.parse(sessionStorage.getItem('fixture-kinds'));
+        kinds.push(kind);
+        sessionStorage.setItem('fixture-kinds', JSON.stringify(kinds));
+      });
+      void r.beginAuthorization(r.getSnapshot()[0].id);
+    });
+  };
+  consent = 'deny';
+  await Promise.all([page.waitForURL('**/callback?**'), reauthorize()]);
+  await page.waitForURL('**/app?identity=dynamic');
+  await ready();
+  const cancelled = await page.evaluate(() => ({
+    report: window.fixture.report,
+    session: window.fixture.runtime.getSnapshot()[0].session.kind,
+    kinds: JSON.parse(sessionStorage.getItem('fixture-kinds')),
+  }));
+  assert.equal(cancelled.report.interaction, 'cancelled');
+  assert.equal(cancelled.report.resumed, true);
+  assert.equal(cancelled.session, 'active');
+  assert.deepEqual(cancelled.kinds, ['leaving']);
+  consent = 'open';
+  await Promise.all([page.waitForURL('**/authorize?**'), reauthorize()]);
+  assert.deepEqual(
+    await page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem('fixture-kinds')),
+    ),
+    ['leaving'],
+  );
+  await page.goBack();
+  await page.waitForURL('**/app?identity=dynamic');
+  await ready();
+  await restored();
+  assert.equal(
+    await page.evaluate(
+      () => window.fixture.runtime.getSnapshot()[0].session.kind,
+    ),
+    'active',
+  );
+  await page.reload();
+  await ready();
+  await restored();
+  assert.equal(
+    await page.evaluate(
+      () => window.fixture.runtime.getSnapshot()[0].session.kind,
+    ),
+    'active',
+  );
+  assert.deepEqual({ exchanges, refreshes }, beforeCancel);
+  await page.evaluate(() => sessionStorage.removeItem('fixture-kinds'));
+  console.log(
+    'Packed re-authorization in Chromium: a denied consent and a back navigation keep the session without a signed-out state or token request passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');

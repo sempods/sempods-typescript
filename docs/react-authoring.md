@@ -827,9 +827,11 @@ A failed or cancelled callback activates the connection being signed in to,
 like a completed one; another connection's target returns once the person
 selects it again. Custom layouts that read `startup.interaction` directly
 should use `callbackNotice` to decide whether the outcome is still current. A
-restoring connection waits;
+restoring connection waits, and a `leaving` one (the page is navigating to the
+Pod's sign-in) keeps its screen inert and offers no sign-in;
 `active` and `renewing` are authenticated facts, not interchangeable with context
-access. Select a readable context explicitly; after a reload or re-authorization
+access. A cancelled re-authorization keeps the signed-in session
+(`startup.resumed`). Select a readable context explicitly; after a reload or re-authorization
 the runtime reselects the last chosen one while it is still readable. `Check
 again` refreshes that connection's catalogue, while the sign-in button requests
 authorization (labelled `Change sharing` while signed in); neither retries a

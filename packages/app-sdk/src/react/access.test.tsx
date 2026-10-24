@@ -1418,3 +1418,59 @@ it.each(['empty', 'loading'] as const)(
     ).toBeNull();
   },
 );
+
+it.each(['app', 'management'] as const)(
+  'shows no signed-out state while the page leaves for a re-authorization (%s)',
+  async (from) => {
+    const f = fixture();
+    const logged = await f.login();
+    cleanups.push(() => logged.runtime.dispose());
+    function Share() {
+      const app = useApp();
+      const { activeId } = useAppState();
+      return (
+        <button onClick={() => void app.authorize(activeId!)}>Share</button>
+      );
+    }
+    render(
+      <SempodsProvider runtime={logged.runtime}>
+        <Host />
+        <Share />
+      </SempodsProvider>,
+    );
+    await screen.findByLabelText('Draft');
+    const signIns: number[] = [];
+    logged.runtime.subscribe(() =>
+      queueMicrotask(() =>
+        signIns.push(
+          screen.queryAllByRole('button', { name: 'Sign in' }).length,
+        ),
+      ),
+    );
+    const navigations = f.navigate.mock.calls.length;
+    if (from === 'management') {
+      fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Change sharing' }));
+    } else fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+    await waitFor(() =>
+      expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+    );
+    await act(async () => {});
+    expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('leaving');
+    expect(signIns.every((count) => count === 0)).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+    // The content stays as it was, but takes no input.
+    expect(screen.getByRole('heading', { name: 'My tasks' })).toBeTruthy();
+    expect(screen.getByLabelText('Draft').closest('[inert]')).toBeTruthy();
+    if (from === 'management')
+      expect(
+        within(
+          screen.getByRole('region', { name: 'Pods & sharing' }),
+        ).getByRole('status').textContent,
+      ).toBe('Opening your Pod’s sign-in…');
+    else
+      expect(
+        screen.queryByRole('region', { name: 'Pods & sharing' }),
+      ).toBeNull();
+  },
+);

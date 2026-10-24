@@ -94,6 +94,12 @@ export interface UiMessages {
    * compiles; `createLocale` fills it from the language defaults.
    */
   readonly disconnectHint?: string;
+  /**
+   * Status while the page navigates to the Pod's sign-in. Optional in the type
+   * (added in 0.6.0); `createLocale` fills it from the language defaults.
+   */
+  readonly leaving?: string;
+
   /*
    * Management (added in 0.6.0; optional in the type, `createLocale` fills
    * them): the heading of the readable Contexts, what this app may do in
@@ -185,6 +191,8 @@ export const englishMessages: SdkMessages = {
       'The configured context is not readable on this Pod.',
     disconnect: 'Sign out',
     disconnectHint: 'Signing out only applies to this device.',
+    leaving: 'Opening your Pod’s sign-in…',
+
     contextAccess: 'Available to this app',
     canRead: 'This app can read',
     canChange: 'This app can read and change',
@@ -305,6 +313,8 @@ export const germanMessages: SdkMessages = {
       'Der konfigurierte Kontext ist auf diesem Pod nicht lesbar.',
     disconnect: 'Abmelden',
     disconnectHint: 'Die Abmeldung gilt nur für dieses Gerät.',
+    leaving: 'Die Anmeldung deines Pods wird geöffnet…',
+
     contextAccess: 'Für diese App verfügbar',
     canRead: 'Diese App kann lesen',
     canChange: 'Diese App kann lesen und ändern',
