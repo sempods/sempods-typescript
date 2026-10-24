@@ -142,6 +142,39 @@ describe('lists without SPARQL (F3)', () => {
     expect(pod.body(id)).toBeUndefined();
   });
 
+  it.each([
+    { '@type': [TASK, '_:b'] },
+    {
+      'http://www.w3.org/1999/02/22-rdf-syntax-ns#type': [
+        { '@id': TASK },
+        { '@id': '_:b' },
+      ],
+    },
+  ])('does not delete matching blank-node types: %j', async (types) => {
+    const pod = memoryContext();
+    const id = `${POD}/tasks/1`;
+    const node = {
+      '@id': id,
+      ...types,
+      [`${S}name`]: [{ '@value': 'Buy milk' }],
+      [`${S}actionStatus`]: [{ '@id': OPEN }],
+    };
+    pod.put(node);
+    pod.answerNextQuery(async () => ({ kind: 'ok', body: [node] }));
+    const listed = await listSubjects(pod.source, task);
+    if (listed.kind !== 'ok') throw new Error(listed.kind);
+    const remove = vi.spyOn(pod.source.subjects, 'delete');
+
+    expect(
+      await removeSnapshot(pod.source, listed.body.items[0]!, task),
+    ).toMatchObject({
+      kind: 'changed-on-pod',
+      current: { iri: id, data: { title: 'Buy milk', done: false } },
+    });
+    expect(remove).not.toHaveBeenCalled();
+    expect(pod.body(id)).toEqual(node);
+  });
+
   it('lists the subjects of the definition type as editable snapshots', async () => {
     const pod = memoryContext();
     pod.put({

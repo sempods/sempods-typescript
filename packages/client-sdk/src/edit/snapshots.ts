@@ -365,7 +365,8 @@ export async function updateFields<D>(
  * equal the seen one (not only the mapped fields), and the delete is
  * conditional on the version just read. Type IRIs may use GET's `@type`
  * strings or CONSTRUCT's `rdf:type` IRI objects. Conflicting aliases and
- * unsupported type terms cannot establish equality.
+ * unsupported type terms cannot establish equality. Types must be absolute
+ * IRIs: even matching blank-node labels such as `_:b` cannot authorize deletion.
  */
 export async function removeSnapshot<D>(
   source: ResourceSource,

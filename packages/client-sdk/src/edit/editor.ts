@@ -109,6 +109,9 @@ export interface ResourceEditor<D, U = D> {
    * Conditional save against the draft's base version. Access and lifetime
    * are checked again after notifying subscribers; a stopped first request
    * returns not-ready. A dispatched write retains its actual outcome.
+   * A stopped rebase after a 412 returns review. If another writer already
+   * stored the submitted field values, their changed terms also require review;
+   * matching values do not establish that this save succeeded.
    */
   save(): Promise<SaveOutcome>;
   /** Conditional deletion with the same dispatch/lifetime rules as save(). */

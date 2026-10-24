@@ -475,6 +475,8 @@ export async function renameWithEditor(
   fresh snapshot to confirm. Snapshots and commands are private copies.
   Graph comparison accepts equivalent `@type` strings and full `rdf:type`
   IRI objects; conflicting aliases or unsupported type terms stay conservative.
+  Type values must be absolute IRIs; matching blank-node labels such as `_:b`
+  cannot authorize snapshot deletion.
   Every unknown predicate and language value still participates.
 - `listSubjects(view, definition)` lists all subjects of the definition's type
   in the view's context as snapshots (the query's own outcomes pass through;

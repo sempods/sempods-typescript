@@ -904,6 +904,35 @@ describe('resource editor scenarios', () => {
     ]);
   });
 
+  it('reviews a 412 even when another writer already stored the submitted values', async () => {
+    const pod = memoryPod();
+    const editor = await opened(createResourceEditor(pod.source, TASK, task));
+    editor.change({ title: 'Mine' });
+    pod.write({ [NAME]: [{ '@value': 'Mine', '@language': 'en' }] });
+
+    // Changed owned terms prevent rebasing, even if the new patch would be empty.
+    expect(task.patch(pod.body()!, editor.state.draft!)).toEqual({});
+    expect(await editor.save()).toEqual({ kind: 'review' });
+    expect(editor.state).toMatchObject({
+      phase: 'review',
+      dirty: true,
+      canSave: false,
+      draft: { title: 'Mine', done: false },
+      review: {
+        kind: 'changed-on-pod',
+        intent: 'save',
+        mine: { title: 'Mine', done: false },
+        current: { title: 'Mine', done: false },
+      },
+    });
+    expect(pod.count('patch')).toBe(1);
+
+    editor.continueFromCurrent();
+    expect(editor.state).toMatchObject({ phase: 'ready', dirty: false });
+    expect(pod.count('patch')).toBe(1);
+    editor.dispose();
+  });
+
   it('discards to the compared version in review', async () => {
     const pod = memoryPod();
     const editor = await opened(createResourceEditor(pod.source, TASK, task));
