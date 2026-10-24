@@ -354,7 +354,9 @@ export async function updateFields<D>(
 /**
  * Deletes the version the person saw: the whole current description must
  * equal the seen one (not only the mapped fields), and the delete is
- * conditional on the version just read.
+ * conditional on the version just read. Type IRIs may use GET's `@type`
+ * strings or CONSTRUCT's `rdf:type` IRI objects. Conflicting aliases and
+ * unsupported type terms cannot establish equality.
  */
 export async function removeSnapshot<D>(
   source: ResourceSource,

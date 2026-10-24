@@ -466,6 +466,9 @@ export async function renameWithEditor(
   from a list that needs the subject's whole description (for example
   `CONSTRUCT { ?s ?p ?o }`), otherwise the result is `changed-on-pod` with a
   fresh snapshot to confirm. Snapshots and commands are private copies.
+  Graph comparison accepts equivalent `@type` strings and full `rdf:type`
+  IRI objects; conflicting aliases or unsupported type terms stay conservative.
+  Every unknown predicate and language value still participates.
 - `listSubjects(view, definition)` lists all subjects of the definition's type
   in the view's context as snapshots (the query's own outcomes pass through;
   unfitting subjects and blank nodes, which cannot be addressed later, are
