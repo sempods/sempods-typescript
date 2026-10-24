@@ -305,3 +305,18 @@ it.each(['hidden', 'disabled', 'custom'] as const)(
     expect(f.fetch).not.toHaveBeenCalled();
   },
 );
+it('keeps the screen without a sign-in while the page leaves for the consent', async () => {
+  const f = await connected();
+  render(<KnownPodExample runtime={f.runtime} podUrl={pod} />);
+  await liveNote();
+  const navigations = f.navigate.mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: 'Change sharing' }));
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+  await act(async () => {});
+  expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('leaving');
+  expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+  expect(screen.getByText('Opening your Pod’s sign-in…')).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/Access is unavailable/);
+});

@@ -1624,3 +1624,65 @@ it.each(['app', 'management'] as const)(
       ).toBeNull();
   },
 );
+
+it.each(['en', 'de'] as const)(
+  'keeps custom controls quiet while the page leaves for a re-authorization (%s)',
+  async (language) => {
+    const f = fixture();
+    const logged = await f.login();
+    cleanups.push(() => logged.runtime.dispose());
+    function Share() {
+      const app = useApp();
+      const { activeId } = useAppState();
+      return (
+        <button onClick={() => void app.authorize(activeId!)}>Share</button>
+      );
+    }
+    render(
+      <SempodsProvider runtime={logged.runtime} language={language}>
+        <ConnectionControls />
+        <AccessNotice />
+        <Share />
+      </SempodsProvider>,
+    );
+    const signOut = language === 'en' ? 'Sign out' : 'Abmelden';
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: signOut }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    const navigations = f.navigate.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+    await waitFor(() =>
+      expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+    );
+    await act(async () => {});
+    expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('leaving');
+    // Nothing was lost: no access-loss notice, one leaving status.
+    expect(document.body.textContent).not.toMatch(
+      /Access is unavailable|Der Zugriff ist nicht verfügbar/,
+    );
+    expect(
+      screen.getAllByRole('status').map((status) => status.textContent),
+    ).toEqual([
+      language === 'en'
+        ? 'Opening your Pod’s sign-in…'
+        : 'Die Anmeldung deines Pods wird geöffnet…',
+    ]);
+    expect(
+      screen.queryByRole('button', {
+        name: language === 'en' ? 'Sign in' : 'Anmelden',
+      }),
+    ).toBeNull();
+    for (const control of [
+      ...screen.getAllByRole('combobox'),
+      ...screen
+        .getAllByRole('button')
+        .filter((button) => button.textContent !== 'Share'),
+    ])
+      expect((control as HTMLButtonElement | HTMLSelectElement).disabled).toBe(
+        true,
+      );
+  },
+);

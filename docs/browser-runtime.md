@@ -162,7 +162,7 @@ Disposing the runtime while a connect waits makes it reject with
 `RuntimeError('disconnected')`, without starting new discovery. An explicit
 `connect(preset.podUrl)` has the same reuse behavior. This action alone does not sign in. After startup is
 durable and restoration of the connection has finished, use
-`beginAuthorization(connection.id)` to sign in or update access. React and
+`beginAuthorization(connection.id)` to sign in or change sharing. React and
 headless authoring consumers use the guarded `app.connect()` action, which does
 both and prefers an already active matching connection. With neither a preset nor
 a sole allowed Pod, omitting the URL is a configuration error. Failed preparation leaves a reusable connection, so a

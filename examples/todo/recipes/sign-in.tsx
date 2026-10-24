@@ -30,6 +30,8 @@ export function KnownPodControls({ podUrl }: { readonly podUrl: string }) {
   const authenticated =
     connection?.session.kind === 'active' ||
     connection?.session.kind === 'renewing';
+  // The page is leaving for the Pod's sign-in: keep this screen, offer no sign-in.
+  const leaving = connection?.session.kind === 'leaving';
   const [pending, setPending] = useState(false);
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
@@ -58,7 +60,10 @@ export function KnownPodControls({ podUrl }: { readonly podUrl: string }) {
     }
   }
   const disabled =
-    unavailable || pending || connection?.session.kind === 'restoring';
+    unavailable ||
+    pending ||
+    leaving ||
+    connection?.session.kind === 'restoring';
   return (
     <section
       aria-label={m.controls.choosePod}
@@ -84,16 +89,20 @@ export function KnownPodControls({ podUrl }: { readonly podUrl: string }) {
             : 'Some saved connections could not be loaded.'}
         </p>
       )}
-      <button
-        disabled={disabled}
-        onClick={() =>
-          void act(() =>
-            connection ? app.authorize(connection.id) : app.connect(podUrl),
-          )
-        }
-      >
-        {authenticated ? m.controls.updateAccess : m.controls.signIn}
-      </button>
+      {leaving ? (
+        <p role="status">{m.controls.leaving ?? m.controls.loading}</p>
+      ) : (
+        <button
+          disabled={disabled}
+          onClick={() =>
+            void act(() =>
+              connection ? app.authorize(connection.id) : app.connect(podUrl),
+            )
+          }
+        >
+          {authenticated ? m.controls.updateAccess : m.controls.signIn}
+        </button>
+      )}
       {connection?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}

@@ -184,7 +184,8 @@ export function endedMessage(
 }
 /**
  * Explains current access limitations. Failed sign-out retry advice belongs
- * beside the action in ConnectionControls or custom controls.
+ * beside the action in ConnectionControls or custom controls. While the page
+ * leaves for a sign-in (`leaving`) nothing was lost, so it shows nothing.
  */
 export function AccessNotice() {
   const access = useWorkflowAccess();
@@ -192,6 +193,7 @@ export function AccessNotice() {
   const { messages: m, format } = useSdkLocale();
   const c = access.connection;
   if (!c) return <Notice>{m.controls.noTarget}</Notice>;
+  if (c.session.kind === 'leaving') return null;
   if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
     return (
       <Notice>
@@ -351,7 +353,7 @@ export function ConnectionControls({
             <select
               aria-label={m.activePod}
               value={state.activeId ?? ''}
-              disabled={busy}
+              disabled={busy || leaving}
               onChange={(e) =>
                 void action(() => app.selectConnection(e.target.value))
               }
@@ -411,14 +413,18 @@ export function ConnectionControls({
           )}
           {connection && (
             <>
-              <button
-                disabled={
-                  unavailable || connection.session.kind === 'restoring'
-                }
-                onClick={() => void action(() => app.authorize(connection.id))}
-              >
-                {active ? controls.updateAccess : controls.signIn}
-              </button>
+              {!leaving && (
+                <button
+                  disabled={
+                    unavailable || connection.session.kind === 'restoring'
+                  }
+                  onClick={() =>
+                    void action(() => app.authorize(connection.id))
+                  }
+                >
+                  {active ? controls.updateAccess : controls.signIn}
+                </button>
+              )}
               {active && (
                 <button
                   disabled={busy}
@@ -430,7 +436,7 @@ export function ConnectionControls({
                 </button>
               )}
               <button
-                disabled={busy}
+                disabled={busy || leaving}
                 aria-describedby={disconnectHint ? disconnectId : undefined}
                 onClick={() => void action(() => app.disconnect(connection.id))}
               >
