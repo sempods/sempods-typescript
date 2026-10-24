@@ -261,10 +261,13 @@ export function createBrowserRuntime(
       grantedScopes: Object.freeze([]),
       missingRequiredScopes: required,
     };
+    const ended = e.view.session;
     publish();
     if (!retireRecord) return;
     void retire(e).catch(() => {
-      if (entries.get(e.view.id) === e) {
+      // A subscriber may already have started sign-out or another sign-in.
+      // Cleanup of this ended session must not replace the newer fact.
+      if (entries.get(e.view.id) === e && e.view.session === ended) {
         e.view = {
           ...e.view,
           session: Object.freeze({ kind: 'ended', problem: 'storage' }),
@@ -1022,7 +1025,20 @@ export function createBrowserRuntime(
             publish();
             return { kind: 'disconnected' as const };
           },
-          () => ({ kind: 'blocked-locally' as const }),
+          () => {
+            if (!disposed && entries.get(id) === e) {
+              e.view = {
+                ...e.view,
+                session: Object.freeze({
+                  kind: 'ended',
+                  problem: 'disconnected',
+                  saved: false,
+                }),
+              };
+              publish();
+            }
+            return { kind: 'blocked-locally' as const };
+          },
         )
         .finally(() => disconnects.delete(id));
       disconnects.set(id, operation);
@@ -1038,7 +1054,14 @@ export function createBrowserRuntime(
       delete e.observations;
       e.view = {
         ...e.view,
-        session: Object.freeze({ kind: 'ended', problem: 'disconnected' }),
+        session: Object.freeze({
+          kind: 'ended',
+          problem: 'disconnected',
+          // A retry has not yet removed the saved session or its failure fact.
+          ...(e.view.session.kind === 'ended' && e.view.session.saved === false
+            ? { saved: false as const }
+            : {}),
+        }),
         catalogue: Object.freeze({ kind: 'unknown' }),
         selectedContext: null,
         grantedScopes: Object.freeze([]),

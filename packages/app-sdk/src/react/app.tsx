@@ -46,7 +46,11 @@ export interface AppActions {
   connect(url?: string): Promise<boolean>;
   /** Sign in again for an existing connection. */
   authorize(id: string): Promise<boolean>;
-  /** Forget a connection locally; does not revoke grants or delete Pod data. */
+  /**
+   * Forget a connection locally; does not revoke grants or delete Pod data.
+   * `true` means the guarded action ran. If durable sign-out failed, the
+   * connection retains an ended session with `saved: false`; offer a retry.
+   */
   disconnect(id: string): Promise<boolean>;
   /** Reload a connection's context catalogue (access facts). */
   refreshContexts(id: string): Promise<unknown>;

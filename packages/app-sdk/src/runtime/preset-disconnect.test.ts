@@ -100,13 +100,26 @@ it('reports a failed retirement to waiting connects and retains explicit disconn
   expect(await explicit).toEqual(new RuntimeError('storage'));
   expect(f.fetch.mock.calls).toHaveLength(requests);
   expect(f.runtime.getSnapshot()).toMatchObject([
-    { id: f.id, session: { kind: 'ended', problem: 'disconnected' } },
+    {
+      id: f.id,
+      session: { kind: 'ended', problem: 'disconnected', saved: false },
+    },
   ]);
   expect(await f.view.subjects.get('urn:item')).toEqual({
     kind: 'invalidated',
   });
   expect(await f.runtime.disconnect(f.id)).toEqual({ kind: 'disconnected' });
   expect((await f.runtime.connect()).id).not.toBe(f.id);
+});
+
+it('does not publish a late sign-out failure after disposal', async () => {
+  const f = await heldDisconnect();
+  const disconnecting = f.runtime.disconnect(f.id);
+  await f.entered.promise;
+  f.runtime.dispose();
+  f.release.reject(new Error('late storage failure'));
+  expect(await disconnecting).toEqual({ kind: 'blocked-locally' });
+  expect(f.runtime.getSnapshot()).toEqual([]);
 });
 
 it('does not discover or recreate a preset connection after disposal while waiting', async () => {

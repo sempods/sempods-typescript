@@ -388,6 +388,11 @@ function AccessConnections({
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
   const c = state.connections.find((entry) => entry.id === state.activeId);
+  const disconnectFailed =
+    c?.session.kind === 'ended' && c.session.saved === false;
+  const disconnectHint = disconnectFailed
+    ? m.controls.disconnectFailed
+    : m.controls.disconnectHint;
   const active = c?.session.kind === 'active' || c?.session.kind === 'renewing';
   const defaultUrl =
     state.preset?.podUrl ??
@@ -560,9 +565,7 @@ function AccessConnections({
           {(manage || c.session.kind === 'ended') && (
             <button
               disabled={unavailable}
-              aria-describedby={
-                m.controls.disconnectHint ? disconnectId : undefined
-              }
+              aria-describedby={disconnectHint ? disconnectId : undefined}
               onClick={() => void act(() => app.disconnect(c.id))}
             >
               {m.controls.disconnect}
@@ -570,13 +573,15 @@ function AccessConnections({
           )}
         </div>
       )}
-      {c &&
-        (manage || c.session.kind === 'ended') &&
-        m.controls.disconnectHint && (
-          <p id={disconnectId} className="sp-access-hint">
-            {m.controls.disconnectHint}
-          </p>
-        )}
+      {c && (manage || c.session.kind === 'ended') && disconnectHint && (
+        <p
+          id={disconnectId}
+          role={disconnectFailed ? 'alert' : undefined}
+          className="sp-access-hint"
+        >
+          {disconnectHint}
+        </p>
+      )}
     </>
   );
   const addPod =
@@ -687,9 +692,11 @@ function AccessConnections({
       {c && !active && c.session.kind !== 'restoring' && (
         <>
           {podLine(c.podUrl)}
-          {c.session.kind === 'ended' && !shownByNotice && (
-            <p role="status">{endedMessage(c.session, m, true)}</p>
-          )}
+          {c.session.kind === 'ended' &&
+            !disconnectFailed &&
+            !shownByNotice && (
+              <p role="status">{endedMessage(c.session, m, true)}</p>
+            )}
           <button
             className="sp-access-primary"
             disabled={unavailable}

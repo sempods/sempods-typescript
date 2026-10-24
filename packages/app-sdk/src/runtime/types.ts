@@ -30,6 +30,13 @@ export type SessionFact =
       readonly kind: 'ended';
       readonly problem: RuntimeProblem;
       readonly failure?: SdkFailure;
+      /**
+       * `false` after an explicit disconnect could not persist its tombstone
+       * (`problem: 'disconnected'`). The connection is blocked locally; retry
+       * disconnect explicitly. Retained across UI remounts and pending retries,
+       * not persisted across reloads. Absence makes no claim about persistence.
+       */
+      readonly saved?: false;
     };
 /**
  * Registry labels (`rdfs:label`, SPS-CTX-032) keyed by exact context IRI, read
@@ -172,6 +179,12 @@ export interface BrowserRuntime {
    */
   connect(url?: string): Promise<Connection>;
   beginAuthorization(id: string): Promise<void>;
+  /**
+   * Blocks this connection locally, then removes its saved session. A failed
+   * durable write returns `blocked-locally` and publishes an ended session with
+   * `problem: 'disconnected', saved: false`. Retry explicitly; success removes
+   * the connection. Neither outcome revokes sharing or deletes Pod data.
+   */
   disconnect(id: string): Promise<DisconnectResult>;
   loadContexts(
     id: string,

@@ -182,6 +182,10 @@ export function endedMessage(
     ? m.controls.signInRequired
     : m.controls.readLost;
 }
+/**
+ * Explains current access limitations. Failed sign-out retry advice belongs
+ * beside the action in ConnectionControls or custom controls.
+ */
 export function AccessNotice() {
   const access = useWorkflowAccess();
   const { preset } = useAppState();
@@ -236,6 +240,11 @@ export function ConnectionControls({
     null,
   );
   const connection = state.connections.find((c) => c.id === state.activeId);
+  const disconnectFailed =
+    connection?.session.kind === 'ended' && connection.session.saved === false;
+  const disconnectHint = disconnectFailed
+    ? controls.disconnectFailed
+    : controls.disconnectHint;
   const action = async (task: () => Promise<unknown>) => {
     if (inFlight.current || state.changing || state.confirmingLeave) return;
     inFlight.current = true;
@@ -422,9 +431,7 @@ export function ConnectionControls({
               )}
               <button
                 disabled={busy}
-                aria-describedby={
-                  controls.disconnectHint ? disconnectId : undefined
-                }
+                aria-describedby={disconnectHint ? disconnectId : undefined}
                 onClick={() => void action(() => app.disconnect(connection.id))}
               >
                 {controls.disconnect}
@@ -433,8 +440,10 @@ export function ConnectionControls({
           )}
         </div>
       )}
-      {connection && controls.disconnectHint && (
-        <p id={disconnectId}>{controls.disconnectHint}</p>
+      {connection && disconnectHint && (
+        <p id={disconnectId} role={disconnectFailed ? 'alert' : undefined}>
+          {disconnectHint}
+        </p>
       )}
       {(connection || state.preset) && (
         <details>
