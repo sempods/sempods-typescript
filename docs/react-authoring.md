@@ -742,6 +742,15 @@ EN/DE messages, `locale`/`timeZone` control formatting, and `direction` controls
 direction. RDF text language is selected explicitly in domain field definitions;
 a UI-language change never changes the RDF slot being edited.
 
+Without `language` and `locale`, the provider follows the browser: it reads
+`navigator.languages` once when it mounts and passes the first German or English
+preference (else the first valid one, else `en`) to `resolveLocale`, so messages
+and formatting follow the person. An explicit option keeps its own precedence: a
+`locale` alone also chooses the messages, and a `language` alone keeps English
+formatting. Pin English with `language="en" locale="en"`. Outside a browser, and
+for `createLocale`/`resolveLocale`, nothing reads browser globals; pass
+preferences to `resolveLocale(undefined, languages)` there.
+
 Failure text is overridden per code with `messages.errors`, independently of
 `messages.controls`. For example, `messages={{ errors: { catalogue: () =>
 'The context list could not be loaded.' } }}` replaces only that failure's text;
