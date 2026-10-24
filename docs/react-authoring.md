@@ -529,6 +529,16 @@ subject. The overview offers one action per row, such as "Edit in Home" and
 Never merge the rows into one editable snapshot. Creating resources stays with
 `useCreation`.
 
+A one-click change on a row, such as ticking a task, uses the same hook without
+showing the editor: `open` the row, wait for its `editor.loaded`, `change` the
+field and `save` once; close it after `saved` and reload the overview. A
+refusal, a conflict or an unconfirmed answer keeps the editor open with its
+recovery controls, and nothing is resent or shown as changed before the Pod
+confirms it. The
+[copyable one-click recipe](../examples/todo/recipes/overview-toggle.tsx) does
+this with `usePodLoad(read, { retain: true })`, so the rows stay visible while
+the overview reloads. There is no separate one-click hook for overview rows.
+
 ## Lists and creation
 
 `useList(definition, { type? })` is the ordinary typed-list path. It uses

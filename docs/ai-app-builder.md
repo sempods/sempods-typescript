@@ -120,7 +120,10 @@ not instructions to the coding assistant.
   `useContextEditor(definition)`. It binds that Context without changing
   the selection, rereads the item there and saves with its ETag. Render its
   `editor` while `phase` is `ready`, and present `problem` when it is
-  `unavailable`. See the [overview recipe](../examples/todo/recipes/pod-overview.tsx),
+  `unavailable`. For a one-click change such as ticking a task, drive the same
+  editor (`change`, then one `save`) as the
+  [one-click recipe](../examples/todo/recipes/overview-toggle.tsx) does. See the
+  [overview recipe](../examples/todo/recipes/pod-overview.tsx),
   [editing an overview row](react-authoring.md#editing-an-overview-row) and the
   [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
 - For an app that only reads, such as a data explorer, settle that early and
