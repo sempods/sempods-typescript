@@ -131,7 +131,35 @@ export function AppAccess({
       : !readable ||
         (contextRequired && !access.read) ||
         (discovery && catalogueFailed);
-  const hidden = !needsAttention && !open && !state.callbackNotice;
+  // A declined re-authorization kept this active connection's session. Its
+  // one next step stays offered until an attempt actually leaves for the
+  // Pod: starting one clears the callback notice, and a declined leave prompt,
+  // a blocking write or a failed preparation (direct or after the prompt)
+  // keeps the session usable.
+  const [offered, setOffered] = useState<string | null>(null);
+  const [retryFailure, setRetryFailure] = useState<{
+    readonly id: string;
+    readonly cause: unknown;
+  } | null>(null);
+  const kept = access.connection;
+  const keptActive =
+    kept?.session.kind === 'active' || kept?.session.kind === 'renewing';
+  const noticed =
+    keptActive &&
+    state.callbackNotice &&
+    state.startup?.resumed &&
+    state.startup.attemptConnectionId === kept.id
+      ? kept.id
+      : null;
+  if (noticed && offered !== noticed) setOffered(noticed);
+  // Leaving, losing the session or another active connection ends the offer
+  // and its failure: returning to the connection does not bring them back.
+  if (offered && (kept?.id !== offered || !keptActive)) setOffered(null);
+  if (retryFailure && (kept?.id !== retryFailure.id || !keptActive))
+    setRetryFailure(null);
+  const retry = noticed ?? (keptActive && offered === kept.id ? kept.id : null);
+  const failedRetry = retry && retryFailure?.id === retry ? retryFailure : null;
+  const hidden = !needsAttention && !open && !state.callbackNotice && !retry;
   // The active connection is still being validated (restoring, signed in while
   // its Pod reader is not yet readable, or loading its first demanded Context
   // catalogue) and nothing awaits a decision: show the loading status, not the
@@ -262,6 +290,31 @@ export function AppAccess({
         ) : (
           <>
             <CallbackNotice />
+            {retry && !needsAttention && !open && (
+              // The one next step after an unchanged re-authorization: the
+              // connection view (and its actions) is not shown here.
+              <div className="sp-access-actions">
+                <button
+                  className="sp-access-primary"
+                  disabled={state.changing || state.confirmingLeave}
+                  onClick={() => {
+                    // A failure stays until an attempt proceeds: a declined
+                    // leave prompt or a blocking write resolves false.
+                    void app.authorize(retry).then(
+                      (started) => {
+                        if (started) setRetryFailure(null);
+                      },
+                      (cause: unknown) => setRetryFailure({ id: retry, cause }),
+                    );
+                  }}
+                >
+                  {m.controls.updateAccess}
+                </button>
+              </div>
+            )}
+            {failedRetry && !needsAttention && !open && (
+              <p role="alert">{error(failedRetry.cause)}</p>
+            )}
             {(needsAttention || open) && (
               <>
                 {Connections ? (

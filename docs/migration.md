@@ -29,6 +29,15 @@ Check these points:
   grants. Its handles no longer dispatch. Switches over `session.kind` add a
   `leaving` case: keep the current screen and offer no sign-in. The SDK
   components show `controls.leaving` (optional in `UiMessages`).
+- **Neutral denial wording.** A provider's `access_denied` does not say whether
+  the person cancelled or declined, so `controls.signInCancelled` and
+  `errors.oauth` for `denied` now say that no access was granted and suggest
+  signing in again to choose what to share. A declined re-authorization that
+  kept the session shows the new `controls.sharingUnchanged` (optional in
+  `UiMessages`) as a status, with **Change sharing** as its one action. The
+  provider's `error_description` is still never shown or interpreted. Tests
+  that match the old texts need the new ones; pass `messages.controls` to keep
+  your own.
 - **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
   0.6 holds the earlier session; downgrading to 0.5 is not supported.
 - **Leave confirmation in the top layer.** The provider's "Discard unsaved

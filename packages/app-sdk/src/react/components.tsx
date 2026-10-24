@@ -470,6 +470,14 @@ export function CallbackNotice() {
   const { messages } = useSdkLocale();
   const interaction = state.startup?.interaction;
   if (!state.callbackNotice) return null;
+  // A declined re-authorization changed nothing: a status, not an error.
+  if (interaction === 'cancelled' && state.startup?.resumed)
+    return (
+      <Notice>
+        {messages.controls.sharingUnchanged ??
+          messages.controls.signInCancelled}
+      </Notice>
+    );
   return (
     <Notice role="alert">
       {interaction === 'cancelled'
