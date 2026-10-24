@@ -64,6 +64,15 @@ function useDoneToggle(onSaved: () => void) {
   latest.current = edit;
   const editor = edit.editor;
   const target = edit.target;
+  // Confirmed (here or through the recovery editor): close and reload.
+  const finish = useRef(async () => {});
+  finish.current = async () => {
+    if (await latest.current.close()) {
+      setIntent(null);
+      setStuck(false);
+      onSaved();
+    }
+  };
   useEffect(() => {
     if (!intent || !editor || started.current === intent) return;
     if (
@@ -85,16 +94,16 @@ function useDoneToggle(onSaved: () => void) {
         setStuck(true);
         return;
       }
-      if (await latest.current.close()) {
-        setIntent(null);
-        onSaved();
-      }
+      await finish.current();
     })();
-  }, [intent, editor, target, onSaved]);
+  }, [intent, editor, target]);
+  // Unavailable, or retired because another Pod was chosen: never silent.
+  const blocked = edit.problem !== null || edit.phase === 'retired';
   return {
     edit,
-    pending: intent && !stuck ? intent.target : null,
-    stuck: Boolean(intent) && (stuck || edit.problem !== null),
+    pending: intent && !stuck && !blocked ? intent.target : null,
+    stuck: Boolean(intent) && (stuck || blocked),
+    finish: () => void finish.current(),
     async toggle(row: ContextTarget, done: boolean) {
       if (intent) return;
       setStuck(false);
@@ -110,7 +119,8 @@ function useDoneToggle(onSaved: () => void) {
   };
 }
 
-function Overview() {
+/** Place inside a `SempodsProvider`, for example with `contextSelection="on-demand"`. */
+export function TasksOverview() {
   // retain: the rows stay visible while the overview reloads after a change.
   const { state, reload } = usePodLoad(
     (pod, signal) => pod.sparql.select(query, { signal }),
@@ -208,10 +218,18 @@ function Overview() {
       </button>
       {toggle.stuck && toggle.edit.target && (
         <section aria-label="Finish the change">
-          {toggle.edit.problem ? (
+          {toggle.edit.phase === 'retired' ? (
+            <p role="status">
+              Another Pod was chosen; this task was not changed.
+            </p>
+          ) : toggle.edit.problem ? (
             <p role="alert">{unavailable[toggle.edit.problem]}</p>
           ) : (
-            <ResourceEditor editor={toggle.edit.editor} quiet>
+            <ResourceEditor
+              editor={toggle.edit.editor}
+              quiet
+              onChanged={toggle.finish}
+            >
               {(draft, change) => (
                 <label>
                   <input
@@ -259,7 +277,7 @@ function OverviewToggleContent({
         {m.controls.dataAccess}
       </button>
       <AppAccess appName="Tasks overview" open={manage} />
-      <Overview />
+      <TasksOverview />
     </main>
   );
 }

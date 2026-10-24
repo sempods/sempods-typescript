@@ -9,13 +9,18 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { OverviewToggleExample } from '../../../../examples/todo/recipes/overview-toggle.js';
+import {
+  OverviewToggleExample,
+  TasksOverview,
+} from '../../../../examples/todo/recipes/overview-toggle.js';
+import { SempodsProvider, useApp } from '@sempods/app-sdk/react';
 import type { BrowserRuntime } from '../runtime/types.js';
 import {
   deferred,
   personal,
   resourceIri,
   returnedSession,
+  twoPods,
   work,
 } from '../runtime/fixture.test.js';
 
@@ -187,4 +192,100 @@ it('asks before closing an unconfirmed change and keeps it on Keep editing', asy
     screen.getByRole('region', { name: 'Finish the change' }),
   ).toBeTruthy();
   expect(f.writes).toHaveLength(1);
+});
+
+it('finishes the change after a successful save in the recovery editor', async () => {
+  const f = await overview();
+  f.control.status = 412;
+  fireEvent.click(f.milk());
+  const finish = await screen.findByRole('region', {
+    name: 'Finish the change',
+  });
+  f.control.status = 204;
+  fireEvent.click(
+    within(finish).getByRole('button', { name: 'Continue with my changes' }),
+  );
+  fireEvent.click(within(finish).getByRole('button', { name: 'Save' }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('region', { name: 'Finish the change' }),
+    ).toBeNull(),
+  );
+  await waitFor(() => expect(f.milk().checked).toBe(true));
+  expect(f.milk().disabled).toBe(false);
+  expect(f.count('/_system/sparql/query')).toBe(2);
+});
+
+it('offers Close when the row retires because another Pod was chosen', async () => {
+  const { f, runtime, other } = await twoPods((r) => void runtimes.push(r));
+  const read = deferred<Response>();
+  f.setQuery(
+    async () =>
+      new Response(
+        JSON.stringify({
+          head: { vars: ['item', 'graph', 'title', 'status'] },
+          results: {
+            bindings: [
+              {
+                item: { type: 'uri', value: 'urn:a' },
+                graph: { type: 'uri', value: work },
+                title: { type: 'literal', value: 'Buy milk' },
+                status: { type: 'uri', value: open },
+              },
+            ],
+          },
+        }),
+        { headers: { 'content-type': 'application/sparql-results+json' } },
+      ),
+  );
+  const puts: string[] = [];
+  f.setResource(async (url, init) => {
+    if ((init?.method ?? 'GET') !== 'GET') puts.push(url);
+    return read.promise;
+  });
+  function Switch({
+    id,
+    name,
+  }: {
+    readonly id: string;
+    readonly name: string;
+  }) {
+    const app = useApp();
+    return (
+      <button onClick={() => void app.selectConnection(id)}>{name}</button>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Switch id={f.id} name="Alice" />
+      <Switch id={other.id} name="Bob" />
+      <TasksOverview />
+    </SempodsProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Alice' }));
+  const milk = () =>
+    within(screen.getByRole('list')).getByRole('checkbox', {
+      name: 'Buy milk',
+    }) as HTMLInputElement;
+  await waitFor(() => expect(milk().disabled).toBe(false));
+  fireEvent.click(milk());
+  await waitFor(() =>
+    expect(
+      f.fetch.mock.calls.some(([url]) => url.includes('/_system/resources/')),
+    ).toBe(true),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Bob' }));
+  const finish = await screen.findByRole('region', {
+    name: 'Finish the change',
+  });
+  expect(within(finish).getByRole('status').textContent).toBe(
+    'Another Pod was chosen; this task was not changed.',
+  );
+  fireEvent.click(within(finish).getByRole('button', { name: 'Close' }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('region', { name: 'Finish the change' }),
+    ).toBeNull(),
+  );
+  expect(puts).toEqual([]);
 });
