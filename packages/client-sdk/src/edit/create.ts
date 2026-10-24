@@ -36,7 +36,13 @@ export type CreateOutcome =
    */
   | { readonly kind: 'unconfirmed'; readonly desiredObserved?: boolean }
   /** The Pod refused it before acting, or it was not sent; nothing was written. */
-  | { readonly kind: 'not-created'; readonly reason: EditProblem['kind'] };
+  | {
+      readonly kind: 'not-created';
+      /** Stable category, always equal to problem.kind. */
+      readonly reason: EditProblem['kind'];
+      /** Structured detail for recovery and presentation; diagnostics are not UI text. */
+      readonly problem: EditProblem;
+    };
 
 /** One captured creation: a fixed IRI and body; running it again is always safe. */
 export interface Creation {
@@ -101,7 +107,8 @@ export function prepareCreation<D>(
     } catch (error) {
       // A failed retry cannot disprove an earlier dispatched creation.
       if (lost) return { kind: 'unconfirmed' };
-      return { kind: 'not-created', reason: problemOf(error).kind };
+      const problem = problemOf(error);
+      return { kind: 'not-created', reason: problem.kind, problem };
     }
     switch (result.kind) {
       case 'applied':
@@ -122,9 +129,11 @@ export function prepareCreation<D>(
             current.kind === 'ok' && sameNode(resource, current.body),
         };
       }
-      default:
+      default: {
         if (lost) return { kind: 'unconfirmed' };
-        return { kind: 'not-created', reason: writeProblem(result).kind };
+        const problem = writeProblem(result);
+        return { kind: 'not-created', reason: problem.kind, problem };
+      }
     }
   }
 

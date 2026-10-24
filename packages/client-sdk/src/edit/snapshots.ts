@@ -111,7 +111,12 @@ export function snapshots<D>(
   return Object.freeze({ items: Object.freeze(items), skipped });
 }
 
-type Failed = { readonly reason: EditProblem['kind'] };
+type Failed = {
+  /** Stable category, always equal to problem.kind. */
+  readonly reason: EditProblem['kind'];
+  /** Structured detail for recovery and presentation; diagnostics are not UI text. */
+  readonly problem: EditProblem;
+};
 export type UpdateOutcome<D> =
   | { readonly kind: 'saved' }
   /**
@@ -224,7 +229,7 @@ async function conditional<D, O>(
   desired: (now: Current<D>) => boolean,
   outcome: {
     readonly done: O;
-    readonly failed: (reason: EditProblem['kind']) => O;
+    readonly failed: (problem: EditProblem) => O;
     readonly changed: (current: Snapshot<D> | null | undefined) => O;
     readonly unconfirmed: (
       current: Snapshot<D> | null | undefined,
@@ -235,7 +240,7 @@ async function conditional<D, O>(
 ): Promise<O> {
   const proof = verified(source, snapshot, definition);
   let now = await current(source, snapshot.iri, definition, options.signal);
-  if (now.kind === 'problem') return outcome.failed(now.problem.kind);
+  if (now.kind === 'problem') return outcome.failed(now.problem);
   if (now.kind === 'absent') return outcome.changed(null);
   if (!unchanged(proof, now.body)) return outcome.changed(now.snapshot);
   let result: WriteResult;
@@ -243,7 +248,7 @@ async function conditional<D, O>(
     try {
       result = await write(now);
     } catch (error) {
-      return outcome.failed(problemOf(error).kind);
+      return outcome.failed(problemOf(error));
     }
     if (result.kind !== 'precondition-failed') break;
     // Reconciliation reads stay cancellable; a cancelled one is unknown.
@@ -279,7 +284,7 @@ async function conditional<D, O>(
       );
     }
     default:
-      return outcome.failed(writeProblem(result).kind);
+      return outcome.failed(writeProblem(result));
   }
 }
 
@@ -339,7 +344,11 @@ export async function updateFields<D>(
       ),
     {
       done: { kind: 'saved' },
-      failed: (reason) => ({ kind: 'not-saved', reason }),
+      failed: (problem) => ({
+        kind: 'not-saved',
+        reason: problem.kind,
+        problem,
+      }),
       changed: (current) => ({ kind: 'changed-on-pod', current }),
       unconfirmed: (current, desiredObserved) => ({
         kind: 'unconfirmed',
@@ -354,7 +363,10 @@ export async function updateFields<D>(
 /**
  * Deletes the version the person saw: the whole current description must
  * equal the seen one (not only the mapped fields), and the delete is
- * conditional on the version just read.
+ * conditional on the version just read. Type IRIs may use GET's `@type`
+ * strings or CONSTRUCT's `rdf:type` IRI objects. Conflicting aliases and
+ * unsupported type terms cannot establish equality. Types must be absolute
+ * IRIs: even matching blank-node labels such as `_:b` cannot authorize deletion.
  */
 export async function removeSnapshot<D>(
   source: ResourceSource,
@@ -373,7 +385,11 @@ export async function removeSnapshot<D>(
     (now) => now.kind === 'absent',
     {
       done: { kind: 'removed' },
-      failed: (reason) => ({ kind: 'not-removed', reason }),
+      failed: (problem) => ({
+        kind: 'not-removed',
+        reason: problem.kind,
+        problem,
+      }),
       changed: (current) => ({ kind: 'changed-on-pod', current }),
       unconfirmed: (current, desiredObserved) => ({
         kind: 'unconfirmed',

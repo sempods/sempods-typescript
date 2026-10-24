@@ -105,9 +105,16 @@ export interface ResourceEditor<D, U = D> {
    * other definition replaces the whole draft.
    */
   change(update: U): void;
-  /** Conditional save of the current draft against the version it was based on. */
+  /**
+   * Conditional save against the draft's base version. Access and lifetime
+   * are checked again after notifying subscribers; a stopped first request
+   * returns not-ready. A dispatched write retains its actual outcome.
+   * A stopped rebase after a 412 returns review. If another writer already
+   * stored the submitted field values, their changed terms also require review;
+   * matching values do not establish that this save succeeded.
+   */
   save(): Promise<SaveOutcome>;
-  /** Conditional deletion of the version that was read. */
+  /** Conditional deletion with the same dispatch/lifetime rules as save(). */
   remove(): Promise<RemoveOutcome>;
   /** Back to the server version: the compared one in review, else the base. */
   discard(): void;
@@ -245,20 +252,22 @@ export function createResourceEditor<D>(
     action: (guard: Guard) => Promise<T>,
   ): Promise<T> {
     if (disposed || busy) return Promise.resolve(idle);
+    const started = epoch;
     busy = kind;
     emit();
-    const started = epoch;
     const alive = () => !disposed;
     const guard = { alive, fresh: () => alive() && epoch === started };
-    return action(guard).finally(() => {
-      busy = null;
-      emit();
-      if (again) {
-        const waiting = again;
-        again = null;
-        void refresh().finally(waiting.resolve);
-      }
-    });
+    return (guard.fresh() ? action(guard) : Promise.resolve(idle)).finally(
+      () => {
+        busy = null;
+        emit();
+        if (again) {
+          const waiting = again;
+          again = null;
+          void refresh().finally(waiting.resolve);
+        }
+      },
+    );
   }
   function read(): Promise<Fetched> {
     return fetchResource(source, iri, reads.signal);
@@ -482,18 +491,18 @@ export function createResourceEditor<D>(
           try {
             for (;;) {
               change = definition.patch(onto.body, mine);
+              // Host callbacks can revoke access even before the first request.
+              // A stopped retry retains its known 412; a stopped first write
+              // has no result to settle and is simply not ready.
+              if (!guard.fresh() || !access.read || !access.write) {
+                if (!alongside)
+                  return { kind: 'not-saved', reason: 'not-ready' };
+                break;
+              }
               if (Object.keys(change).length === 0) {
                 base = { version: onto, data: mine };
                 return saved();
               }
-              // A rebased retry is a new request: subscribers notified about the
-              // rebase may have revoked access or disposed the editor meanwhile.
-              // The known 412 then stands and goes to review; nothing is sent.
-              if (
-                alongside &&
-                (!guard.fresh() || !access.read || !access.write)
-              )
-                break;
               result = await source.subjects.patch(iri, change, {
                 ifMatch: onto.etag,
               });
@@ -609,6 +618,8 @@ export function createResourceEditor<D>(
         'write',
         { kind: 'not-removed', reason: 'not-ready' },
         async (guard) => {
+          if (!guard.fresh() || !access.read || !access.write)
+            return { kind: 'not-removed', reason: 'not-ready' };
           let result: WriteResult;
           try {
             result = await source.subjects.delete(iri, { ifMatch: at.etag });

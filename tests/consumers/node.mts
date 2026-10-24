@@ -19,6 +19,7 @@ const {
   fields,
   listSubjects,
   newSubjectIri,
+  prepareCreation,
   text,
 } = await import('@sempods/client-sdk/edit');
 const { createLocale } = await import('@sempods/app-sdk');
@@ -198,6 +199,16 @@ try {
   assert.equal(described.body.label, 'Aufgaben');
   assert.equal(described.body.public, false);
   const tasks = tasksPod.context(`${pod}/_system/contexts/tasks`);
+  // Invalid input is rejected before dispatch; installed edit outcomes keep
+  // the structured failure without requiring browser types or React.
+  const invalidCreation = await prepareCreation(tasks, 'relative', {}).run();
+  assert.equal(invalidCreation.kind, 'not-created');
+  assert.ok(invalidCreation.kind === 'not-created');
+  assert.equal(invalidCreation.reason, invalidCreation.problem.kind);
+  assert.deepEqual(invalidCreation.problem, {
+    kind: 'failure',
+    failure: { code: 'invalid-argument', argument: 'iri' },
+  });
   const read = await tasks.subjects.get(`${pod}/tasks/1`);
   assert.ok(read.kind === 'ok');
   assert.equal(read.etag, '"v1"');

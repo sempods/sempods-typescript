@@ -9,6 +9,10 @@ automatic conversion of legacy app data or stored credentials.
 The minor changes defaults and adds options; upgrade both packages together.
 Check these points:
 
+- **Edit failure details.** Hand-built `UpdateOutcome`, `RemoveSnapshotOutcome`
+  and `CreateOutcome` failures now need `problem`, for example
+  `{ kind: 'not-saved', reason: 'refused', problem: { kind: 'refused', status: 403 } }`.
+  Existing checks of `reason` keep working; it equals `problem.kind`.
 - **UI language follows the browser.** `SempodsProvider` and `SdkLocaleProvider`
   without `language` and `locale` now use the browser's languages (read once per
   provider) instead of English: a German browser gets German messages and

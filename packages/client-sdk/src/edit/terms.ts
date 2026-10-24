@@ -1,10 +1,12 @@
 import type { JsonLd } from '../results.js';
+import { EMBEDDABLE_IRI } from '../iri.js';
 
 /** One value object of the canonical shape (SPS-CRUD-023): `{"@id"}` or `{"@value"}`. */
 export type Term = { readonly [key: string]: unknown };
 
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
 export const XSD_DATE_TIME = 'http://www.w3.org/2001/XMLSchema#dateTime';
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
 /** The resource or snapshot cannot be mapped to the definition; nothing is guessed. */
 export class MappingError extends Error {
@@ -104,26 +106,57 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/** The same RDF description: every predicate's values and the types, as sets. */
+/**
+ * The same RDF description, including every unmapped predicate. CONSTRUCT's
+ * rdf:type IRI objects and GET's @type strings denote the same type set.
+ * Unsupported type terms or conflicting aliases are never deletion evidence.
+ */
 export function sameNode(a: JsonLd, b: JsonLd): boolean {
   try {
+    if (!sameTypes(nodeTypes(a), nodeTypes(b))) return false;
     const keys = new Set(
-      [...Object.keys(a), ...Object.keys(b)].filter((key) => key !== '@id'),
+      [...Object.keys(a), ...Object.keys(b)].filter(
+        (key) => key !== '@id' && key !== '@type' && key !== RDF_TYPE,
+      ),
     );
     return [...keys].every((key) =>
-      key === '@type'
-        ? sameTypes(a[key], b[key])
-        : sameTerms(termsOf(a, key), termsOf(b, key)),
+      sameTerms(termsOf(a, key), termsOf(b, key)),
     );
   } catch {
     return false;
   }
 }
-export function sameTypes(a: unknown, b: unknown): boolean {
-  const list = (v: unknown) =>
-    (Array.isArray(v) ? v : v === undefined ? [] : [v]).map(String).sort();
-  const [x, y] = [list(a), list(b)];
-  return x.length === y.length && x.every((t, i) => t === y[i]);
+function sameTypes(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((type, i) => type === b[i]);
+}
+function nodeTypes(node: JsonLd): readonly string[] {
+  const compact = node['@type'];
+  const strings =
+    compact === undefined ? [] : Array.isArray(compact) ? compact : [compact];
+  const expanded = termsOf(node, RDF_TYPE).map((term) => {
+    if (Object.keys(term).length !== 1 || !('@id' in term))
+      throw new MappingError(RDF_TYPE, 'expected only an IRI');
+    return term['@id'];
+  });
+  const types = (values: readonly unknown[]): readonly string[] => {
+    if (
+      !values.every(
+        (value): value is string =>
+          typeof value === 'string' && EMBEDDABLE_IRI.test(value),
+      )
+    )
+      throw new MappingError(RDF_TYPE, 'expected absolute type IRIs');
+    return [...new Set(values)].sort();
+  };
+  const left = types(strings);
+  const right = types(expanded);
+  if (
+    compact !== undefined &&
+    node[RDF_TYPE] !== undefined &&
+    !sameTypes(left, right)
+  )
+    throw new MappingError(RDF_TYPE, 'conflicting type representations');
+  return compact === undefined ? right : left;
 }
 
 /** The description a merge-patch produces (RFC 7396 as SPS-CRUD-035/038 apply it). */

@@ -455,10 +455,17 @@ export async function renameWithEditor(
   `unconfirmed` (`desiredObserved` is not proof). Nothing is ever resent:
   `continueFromCurrent()` keeps the draft on the compared version, `discard()`
   takes it.
+- Failed snapshot updates/deletions and creations expose `problem: EditProblem`
+  alongside `reason === problem.kind`: refusals retain their 401/403 status,
+  mapping failures their predicate, and SDK failures their structured code.
+  Editor save/delete outcomes keep their details in `editor.state.problem`.
 - Typing continues while saving; only the submitted draft counts as saved.
   Losing read access (`setAccess`) clears server data but keeps the draft and
   any open review of a write; after it returns, `refresh()` adopts the current
-  version silently when the draft is unchanged. A `refresh()` requested while a
+  version silently when the draft is unchanged. Revoking access or disposing the
+  editor from its initial saving notification stops the first save/delete with
+  `not-ready`; after dispatch, the actual write outcome is retained.
+  A `refresh()` requested while a
   read or write is in flight runs once afterwards, so it is never lost. Reads
   that are cancelled, stopped or invalidated by
   the runtime are `problem: { kind: 'unavailable', reason }`, never absence.
@@ -466,6 +473,11 @@ export async function renameWithEditor(
   from a list that needs the subject's whole description (for example
   `CONSTRUCT { ?s ?p ?o }`), otherwise the result is `changed-on-pod` with a
   fresh snapshot to confirm. Snapshots and commands are private copies.
+  Graph comparison accepts equivalent `@type` strings and full `rdf:type`
+  IRI objects; conflicting aliases or unsupported type terms stay conservative.
+  Type values must be absolute IRIs; matching blank-node labels such as `_:b`
+  cannot authorize snapshot deletion.
+  Every unknown predicate and language value still participates.
 - `listSubjects(view, definition)` lists all subjects of the definition's type
   in the view's context as snapshots (the query's own outcomes pass through;
   unfitting subjects and blank nodes, which cannot be addressed later, are

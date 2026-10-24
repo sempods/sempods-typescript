@@ -516,6 +516,83 @@ describe('dateTime fields', () => {
 });
 
 describe('resource editor scenarios', () => {
+  it.each(['save', 'remove'] as const)(
+    'stops the first %s after synchronous host invalidation (#120)',
+    async (operation) => {
+      const stops = {
+        'write loss': (e: ResourceEditor<unknown>) =>
+          e.setAccess({ read: true, write: false }),
+        'read loss': (e: ResourceEditor<unknown>) =>
+          e.setAccess({ read: false, write: false }),
+        'read loss and recovery': (e: ResourceEditor<unknown>) => {
+          e.setAccess({ read: false, write: false });
+          e.setAccess({ read: true, write: true });
+        },
+        disposal: (e: ResourceEditor<unknown>) => e.dispose(),
+      };
+      for (const [name, stop] of Object.entries(stops)) {
+        const pod = memoryPod();
+        const editor = await opened(
+          createResourceEditor(pod.source, TASK, task),
+        );
+        editor.change({ title: 'Mine' });
+        let stopped = false;
+        let refreshed: Promise<void> | undefined;
+        editor.subscribe(() => {
+          if (editor.state.phase !== 'saving' || stopped) return;
+          stopped = true;
+          refreshed = editor.refresh();
+          stop(editor);
+        });
+        expect(await editor[operation](), name).toEqual({
+          kind: operation === 'save' ? 'not-saved' : 'not-removed',
+          reason: 'not-ready',
+        });
+        await refreshed;
+        expect(pod.count('patch'), name).toBe(0);
+        expect(pod.count('delete'), name).toBe(0);
+        expect(editor.state.draft?.title, name).toBe('Mine');
+        editor.dispose();
+      }
+    },
+  );
+
+  it.each(['save', 'remove'] as const)(
+    'keeps the dispatched %s outcome through read loss or disposal (#120)',
+    async (operation) => {
+      for (const dispose of [false, true]) {
+        for (const uncertain of [false, true]) {
+          const pod = memoryPod();
+          const editor = await opened(
+            createResourceEditor(pod.source, TASK, task),
+          );
+          editor.change({ title: 'Mine' });
+          const method = operation === 'save' ? 'patch' : 'delete';
+          pod.once(method, async (real) => {
+            const applied = await real();
+            if (dispose) editor.dispose();
+            else editor.setAccess({ read: false, write: false });
+            return uncertain ? lost : applied;
+          });
+          expect(await editor[operation]()).toEqual({
+            kind: uncertain
+              ? 'review'
+              : operation === 'save'
+                ? 'saved'
+                : 'removed',
+          });
+          expect(pod.count(method)).toBe(1);
+          if (!dispose && uncertain)
+            expect(editor.state.review).toMatchObject({
+              kind: 'unconfirmed',
+              current: undefined,
+            });
+          editor.dispose();
+        }
+      }
+    },
+  );
+
   it('saves conditionally and clears dirty only for the submitted draft', async () => {
     const pod = memoryPod();
     const editor = await opened(createResourceEditor(pod.source, TASK, task));
@@ -825,6 +902,35 @@ describe('resource editor scenarios', () => {
     expect(titleOf(pod.body())).toEqual([
       { '@value': 'Mine', '@language': 'en' },
     ]);
+  });
+
+  it('reviews a 412 even when another writer already stored the submitted values', async () => {
+    const pod = memoryPod();
+    const editor = await opened(createResourceEditor(pod.source, TASK, task));
+    editor.change({ title: 'Mine' });
+    pod.write({ [NAME]: [{ '@value': 'Mine', '@language': 'en' }] });
+
+    // Changed owned terms prevent rebasing, even if the new patch would be empty.
+    expect(task.patch(pod.body()!, editor.state.draft!)).toEqual({});
+    expect(await editor.save()).toEqual({ kind: 'review' });
+    expect(editor.state).toMatchObject({
+      phase: 'review',
+      dirty: true,
+      canSave: false,
+      draft: { title: 'Mine', done: false },
+      review: {
+        kind: 'changed-on-pod',
+        intent: 'save',
+        mine: { title: 'Mine', done: false },
+        current: { title: 'Mine', done: false },
+      },
+    });
+    expect(pod.count('patch')).toBe(1);
+
+    editor.continueFromCurrent();
+    expect(editor.state).toMatchObject({ phase: 'ready', dirty: false });
+    expect(pod.count('patch')).toBe(1);
+    editor.dispose();
   });
 
   it('discards to the compared version in review', async () => {
@@ -1527,6 +1633,7 @@ describe('creation', () => {
     expect(await prepareCreation(fresh.source, NEW, body).run()).toEqual({
       kind: 'not-created',
       reason: 'refused',
+      problem: { kind: 'refused', status: 403 },
     });
   });
 

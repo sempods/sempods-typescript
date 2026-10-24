@@ -13,6 +13,7 @@ import {
 import { bindResourceEditor } from './editor.js';
 import { createAppController } from './app.js';
 import { createViewLoader } from './load.js';
+import { observeStarts } from './changes.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -27,6 +28,27 @@ async function connected() {
 }
 const title = fields({ title: text('urn:name', { language: null }) });
 const body = { '@id': 'urn:item', 'urn:name': [{ '@value': 'Original' }] };
+it.each(['save', 'remove'] as const)(
+  'a write-start observer can dispose a bound editor before its first %s (#120)',
+  async (operation) => {
+    const f = await connected();
+    const requests: string[] = [];
+    f.setResource(async (_url, init) => {
+      requests.push(init?.method ?? 'GET');
+      return Response.json(body, { headers: { etag: '"v1"' } });
+    });
+    const editor = bindResourceEditor(f.view, 'urn:item', title);
+    cleanups.push(() => editor.dispose());
+    await editor.loaded;
+    editor.change({ title: 'Mine' });
+    cleanups.push(observeStarts(f.view, () => editor.dispose()));
+    expect(await editor[operation]()).toEqual({
+      kind: operation === 'save' ? 'not-saved' : 'not-removed',
+      reason: 'not-ready',
+    });
+    expect(requests).toEqual(['GET']);
+  },
+);
 it('view subscriptions retain lifetime across refresh and expose only accepted access', async () => {
   const f = await connected();
   const original = f.view.getSnapshot();

@@ -2,7 +2,7 @@
  * Conveniences for ordinary apps (lists without SPARQL, creation from a
  * definition, subject IRIs, partial edits), and the app code they shorten.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { JsonLd, WriteResult } from '../index.js';
 import {
   createResourceEditor,
@@ -108,6 +108,73 @@ function memoryContext() {
 }
 
 describe('lists without SPARQL (F3)', () => {
+  it('deletes an unchanged CONSTRUCT description using the fresh GET ETag (#119)', async () => {
+    const pod = memoryContext();
+    const id = `${POD}/tasks/1`;
+    const node = {
+      '@id': id,
+      '@type': [TASK],
+      [`${S}name`]: [{ '@value': 'Buy milk' }],
+      [`${S}actionStatus`]: [{ '@id': OPEN }],
+    };
+    pod.put(node);
+    const { '@type': types, ...rest } = node;
+    pod.answerNextQuery(async () => ({
+      kind: 'ok',
+      body: [
+        {
+          ...rest,
+          'http://www.w3.org/1999/02/22-rdf-syntax-ns#type': types.map(
+            (type) => ({ '@id': type }),
+          ),
+        },
+      ],
+    }));
+    const listed = await listSubjects(pod.source, task);
+    if (listed.kind !== 'ok') throw new Error(listed.kind);
+    // Same description with a newer strong version than the list observed.
+    pod.put(node);
+    const remove = vi.spyOn(pod.source.subjects, 'delete');
+    expect(
+      await removeSnapshot(pod.source, listed.body.items[0]!, task),
+    ).toEqual({ kind: 'removed' });
+    expect(remove).toHaveBeenCalledExactlyOnceWith(id, { ifMatch: '"v2"' }, {});
+    expect(pod.body(id)).toBeUndefined();
+  });
+
+  it.each([
+    { '@type': [TASK, '_:b'] },
+    {
+      'http://www.w3.org/1999/02/22-rdf-syntax-ns#type': [
+        { '@id': TASK },
+        { '@id': '_:b' },
+      ],
+    },
+  ])('does not delete matching blank-node types: %j', async (types) => {
+    const pod = memoryContext();
+    const id = `${POD}/tasks/1`;
+    const node = {
+      '@id': id,
+      ...types,
+      [`${S}name`]: [{ '@value': 'Buy milk' }],
+      [`${S}actionStatus`]: [{ '@id': OPEN }],
+    };
+    pod.put(node);
+    pod.answerNextQuery(async () => ({ kind: 'ok', body: [node] }));
+    const listed = await listSubjects(pod.source, task);
+    if (listed.kind !== 'ok') throw new Error(listed.kind);
+    const remove = vi.spyOn(pod.source.subjects, 'delete');
+
+    expect(
+      await removeSnapshot(pod.source, listed.body.items[0]!, task),
+    ).toMatchObject({
+      kind: 'changed-on-pod',
+      current: { iri: id, data: { title: 'Buy milk', done: false } },
+    });
+    expect(remove).not.toHaveBeenCalled();
+    expect(pod.body(id)).toEqual(node);
+  });
+
   it('lists the subjects of the definition type as editable snapshots', async () => {
     const pod = memoryContext();
     pod.put({
@@ -240,6 +307,24 @@ describe('IRIs embedded by edit helpers reject C0 controls (#47)', () => {
 });
 
 describe('creation from a definition (F4) with a subject IRI (F5)', () => {
+  it('recognizes equivalent raw-body types without confirming an earlier creation (#119)', async () => {
+    const pod = memoryContext();
+    const id = `${POD}/tasks/1`;
+    pod.put({
+      '@id': id,
+      '@type': [TASK],
+      [`${S}name`]: [{ '@value': 'Existing' }],
+    });
+    const creation = prepareCreation(pod.source, id, {
+      'http://www.w3.org/1999/02/22-rdf-syntax-ns#type': [{ '@id': TASK }],
+      [`${S}name`]: [{ '@value': 'Existing' }],
+    });
+    expect(await creation.run()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: true,
+    });
+  });
+
   it('derives the body from the draft, type included', async () => {
     const pod = memoryContext();
     const iri = newSubjectIri(pod.source, 'tasks');

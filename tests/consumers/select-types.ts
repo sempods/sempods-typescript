@@ -16,6 +16,29 @@ import type {
   SparqlTerm,
   JsonLd,
 } from '@sempods/client-sdk';
+import type {
+  CreateOutcome,
+  UpdateOutcome,
+  RemoveSnapshotOutcome,
+  EditProblem,
+} from '@sempods/client-sdk/edit';
+
+// Failure details are required through all three installed edit contracts.
+export function editProblem(
+  outcome:
+    CreateOutcome | UpdateOutcome<unknown> | RemoveSnapshotOutcome<unknown>,
+): EditProblem | undefined {
+  if (
+    outcome.kind === 'not-created' ||
+    outcome.kind === 'not-saved' ||
+    outcome.kind === 'not-removed'
+  )
+    return outcome.problem;
+  return undefined;
+}
+// @ts-expect-error Hand-built failures now need the structured problem too.
+const incomplete: CreateOutcome = { kind: 'not-created', reason: 'refused' };
+void incomplete;
 
 // Compiled against installed declarations with noUncheckedIndexedAccess: false.
 export async function read(pod: Pod) {
