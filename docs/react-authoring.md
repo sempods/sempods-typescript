@@ -687,14 +687,14 @@ const runtime = createBrowserRuntime({
 ```
 
 `Tasks` is your existing app screen. The first visit offers **Sign in** without a
-Pod URL input; after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
+**Pod address** field; after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
 **Pods & sharing** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
 connections remain available for selection. Add the optional
 `contextIri` inside `preset` to declare an exact context instead. The SDK waits for
 fresh readable catalogue evidence, displays that fixed context instead of a
 picker, and never falls back to another. Missing feature scopes, failed catalogue
-loads and an unreadable configured context retain distinct feedback. **Update
-access** requests consent again through the same guarded action.
+loads and an unreadable configured context retain distinct feedback. **Change
+sharing** requests consent again through the same guarded action.
 
 Custom controls read `useAppState().preset` and call `useApp().connect()` without
 an argument to reuse/connect the preset and request authorization. Call it only

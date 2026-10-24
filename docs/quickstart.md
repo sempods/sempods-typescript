@@ -250,7 +250,7 @@ input[type='checkbox'] {
 npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open `http://127.0.0.1:5173/`, enter your Pod URL and sign in on the Pod. Grant
+Open `http://127.0.0.1:5173/`, enter the Pod address and sign in on the Pod. Grant
 a context, choose it, then add, complete and rename tasks. Open the app on a
 second device or in a private window: when both rename the same task, the editor
 shows both versions; when one renames and the other completes, both changes stay.

@@ -32,7 +32,8 @@ Check these points:
   `signed-out` until the page unloads, and keeps its catalogue, selection and
   grants. Its handles no longer dispatch. Switches over `session.kind` add a
   `leaving` case: keep the current screen and offer no sign-in. The SDK
-  components show `controls.leaving` (optional in `UiMessages`).
+  components show `controls.leaving` (optional in `UiMessages`) instead of a
+  sign-in action, and `AccessNotice` shows nothing: no access was lost.
 - **Neutral denial wording.** A provider's `access_denied` does not say whether
   the person cancelled or declined, so `controls.signInCancelled` and
   `errors.oauth` for `denied` now say that no access was granted and suggest
@@ -77,7 +78,7 @@ Check these points:
 
 ## From 0.5.0 to 0.5.1
 
-The patch keeps public APIs, message keys and result shapes. Check these points:
+The patch keeps public APIs, existing message keys and result shapes. Check these points:
 
 - **AppAccess wording.** The default EN/DE texts name one action once:
   **Pod address** / **Pod-Adresse** (`controls.yourPod`), **Pods & sharing** /
@@ -416,7 +417,7 @@ notes so recovery can be deliberate.
 | Unreadable record                                 | Record only its safe reported status and SDK version; investigate compatibility before clearing anything    |
 | Unconfirmed data write                            | Use the editor/update recovery on the original resource; session reconnection is not proof the write failed |
 
-Use guarded Disconnect to remove a readable connection and its stored secret
+Use guarded **Sign out** (`disconnect`) to remove a readable connection and its stored secret
 material; it does not revoke server grants or delete Pod data. If unreadable state
 makes a full browser site-data reset necessary, first preserve unsaved work and
 obtain the person's agreement: clearing site data can remove every app's local
