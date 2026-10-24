@@ -19,8 +19,21 @@ export interface SessionConfiguration {
   readonly development?: DiscoveryOptions['development'];
 }
 
+/** The session a re-authorization started from, kept until the attempt settles. */
+export interface PreviousSession {
+  readonly binding: SessionBinding;
+  readonly credentials: ExchangeResult;
+}
 export type SessionRecord = { readonly version: 1 } & (
-  | { readonly kind: 'authorizing'; readonly attempt: SessionAttempt }
+  | {
+      readonly kind: 'authorizing';
+      readonly attempt: SessionAttempt;
+      /**
+       * Absent for a first sign-in and in records of SDK 0.5 and earlier. A
+       * denied or abandoned attempt may resume it; any other outcome drops it.
+       */
+      readonly previous?: PreviousSession;
+    }
   | {
       readonly kind: 'ready';
       readonly binding: SessionBinding;
@@ -81,7 +94,15 @@ export function parseSessionRecord(
           config.redirectUri,
           config.development,
         ),
+        ...(value.previous === undefined
+          ? {}
+          : { previous: parsePrevious(value.previous, config) }),
       };
+      if (
+        parsed.previous &&
+        parsed.previous.binding.connectionId !== parsed.attempt.connectionId
+      )
+        throw new Error();
     } else {
       // Only a code claim still depends on its exact redirect.
       const holdsAttempt =
@@ -135,4 +156,23 @@ export function parseSessionRecord(
   } catch {
     throw new SessionTransitionError('corrupt');
   }
+}
+
+function parsePrevious(
+  value: unknown,
+  config: SessionConfiguration,
+): PreviousSession {
+  if (!record(value)) throw new Error();
+  // Like a ready record, it holds no outstanding authorization of its own.
+  const binding = parseSessionBinding(
+    value.binding,
+    config.configKey,
+    config.redirectUri,
+    config.development,
+    'follow',
+  );
+  return {
+    binding,
+    credentials: parseStoredCredentials(value.credentials, binding),
+  };
 }
