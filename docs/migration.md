@@ -15,6 +15,22 @@ Check these points:
   `de-DE` formatting. Pin the old result with `language="en" locale="en"`. A
   `locale` or `language` alone keeps its previous meaning; `createLocale` and
   `resolveLocale` are unchanged and read no browser globals.
+- **Cancelling a re-authorization keeps the session.** When the provider
+  answers a signed-in connection's re-authorization with `access_denied`, or
+  the person comes back without a callback, the earlier session resumes while
+  it is still valid: the report says `interaction: 'cancelled'` and
+  `resumed: true`, and the connection stays `active`. Every other failure
+  still ends it; a successful narrower grant replaces the earlier one. Code
+  that treated a cancelled callback as "signed out" checks the connection's
+  session instead.
+- **New session kind `leaving`.** After `beginAuthorization()` stored its
+  attempt, the connection reports `{ kind: 'leaving', subject? }` instead of
+  `signed-out` until the page unloads, and keeps its catalogue, selection and
+  grants. Its handles no longer dispatch. Switches over `session.kind` add a
+  `leaving` case: keep the current screen and offer no sign-in. The SDK
+  components show `controls.leaving` (optional in `UiMessages`).
+- **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
+  0.6 holds the earlier session; downgrading to 0.5 is not supported.
 - **Leave confirmation in the top layer.** The provider's "Discard unsaved
   changes?" prompt is now a native modal `<dialog>` (still role
   `alertdialog`, same texts and buttons) instead of a fixed `div` with

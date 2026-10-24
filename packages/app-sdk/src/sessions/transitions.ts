@@ -186,10 +186,74 @@ export function createSessionTransitions(
         sessionBinding(current.value).generation === snapshot.generation
       )
         throw new SessionTransitionError('state');
+      // A working session is kept beside the attempt (also across a replaced
+      // attempt), so a denied or abandoned re-authorization can resume it. A
+      // claimed or retired one is not.
       return commit(snapshot.connectionId, expectedRevision, {
         version: 1,
         kind: 'authorizing',
         attempt: snapshot,
+        ...(current?.value.kind === 'ready'
+          ? {
+              previous: {
+                binding: current.value.binding,
+                credentials: current.value.credentials,
+              },
+            }
+          : current?.value.kind === 'authorizing' && current.value.previous
+            ? { previous: current.value.previous }
+            : {}),
+      });
+    },
+    /**
+     * Resumes the session a re-authorization started from, under the attempt's
+     * generation, and consumes the attempt; `pod` is the coordinator's fresh
+     * discovery. Only for a callback the provider
+     * answered with `access_denied` for this attempt, or, without a callback, an
+     * abandoned attempt. Throws `state` when it is not eligible: a first
+     * sign-in, another answer, a previous credential that expired without a
+     * refresh token, or a binding the coordinator's discovery no longer
+     * confirms. A forged or malformed callback throws `callback`; neither
+     * changes the record.
+     */
+    async resume(
+      id: string,
+      revision: string,
+      pod: SessionBinding['pod'],
+      callback?: URL,
+    ): Promise<SessionChange> {
+      const returned =
+        callback && validate('configuration', () => new URL(callback.href));
+      const current = await observed(id, revision);
+      if (!current) return conflict;
+      if (current.value.kind !== 'authorizing' || !current.value.previous)
+        throw new SessionTransitionError('state');
+      const { attempt, previous } = current.value;
+      if (returned) {
+        let answer: unknown;
+        try {
+          validateAuthorizationCallback(attempt, returned);
+        } catch (error) {
+          answer = error;
+        }
+        if (!(answer instanceof OAuthError) || answer.problem === 'callback')
+          throw new SessionTransitionError(answer ? 'callback' : 'state');
+        if (answer.problem !== 'denied')
+          throw new SessionTransitionError('state');
+      }
+      const { credentials } = previous;
+      if (!credentials.refreshToken && credentials.expiresAt <= Date.now())
+        throw new SessionTransitionError('state');
+      // The earlier client and scopes under the attempt's lifetime, confirmed
+      // by the coordinator's fresh discovery.
+      const resumed = { ...previous.binding, generation: attempt.generation };
+      const binding = expectedBinding({ ...resumed, pod });
+      assertSessionBinding(resumed, binding);
+      return commit(id, revision, {
+        version: 1,
+        kind: 'ready',
+        binding,
+        credentials,
       });
     },
     async claimCode(

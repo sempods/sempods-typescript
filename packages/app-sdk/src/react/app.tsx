@@ -159,9 +159,23 @@ export function SempodsProvider({
   );
 }
 function GuardedContent({ children }: { readonly children: ReactNode }) {
-  const { changing, confirmingLeave } = useAppState();
+  const { changing, confirmingLeave, leaving } = useAppFacts(
+    (s) => ({
+      changing: s.changing,
+      confirmingLeave: s.confirmingLeave,
+      // The page is navigating to a sign-in: the content stays as it was, but
+      // its earlier session no longer dispatches.
+      leaving:
+        s.connections.find((c) => c.id === s.activeId)?.session.kind ===
+        'leaving',
+    }),
+    shallowEqual,
+  );
   return (
-    <div inert={changing || confirmingLeave} style={{ display: 'contents' }}>
+    <div
+      inert={changing || confirmingLeave || leaving}
+      style={{ display: 'contents' }}
+    >
       {children}
     </div>
   );
