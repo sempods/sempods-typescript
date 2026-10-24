@@ -35,6 +35,12 @@ export interface AppAccessProps {
   readonly mode?: 'single' | 'multiple';
   /** App-owned decorative icon, for example <img src="/icon.png" alt="" />. */
   readonly icon?: ReactNode;
+  /**
+   * A short line about the app under its name on the sign-in screen, for
+   * example "Shopping made easy". Display only: it is never sent to the Pod
+   * and is not a consent purpose or a scope.
+   */
+  readonly description?: ReactNode;
   /** Exact Pod URL → friendly name. A name never changes the destination. */
   readonly podNames?: Readonly<Record<string, string>>;
   /**
@@ -84,6 +90,7 @@ export function AppAccess({
   headingLevel,
   mode = 'multiple',
   icon,
+  description,
   podNames,
   podAddress = 'visible',
   open = false,
@@ -177,6 +184,9 @@ export function AppAccess({
   ]);
   const Heading =
     (headingLevel ?? (open || state.view ? 2 : 1)) === 2 ? 'h2' : 'h1';
+  // The app's own name (and description) heads sign-in; management and
+  // recovery under a host title are about Pods & sharing.
+  const namesApp = !(open || state.view || headingLevel === 2);
   const Connections = components?.Connections;
   const available = state.startup?.storage === 'durable' && !state.startupError;
   const active =
@@ -230,11 +240,10 @@ export function AppAccess({
                 {icon}
               </div>
             )}
-            <Heading>
-              {open || state.view || headingLevel === 2
-                ? m.controls.dataAccess
-                : appName}
-            </Heading>
+            <Heading>{namesApp ? appName : m.controls.dataAccess}</Heading>
+            {namesApp && description && (
+              <p className="sp-access-description">{description}</p>
+            )}
           </header>
         )}
         {state.startupError ? (
@@ -700,6 +709,7 @@ const styles = `
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
 [data-sempods-access] :focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
+[data-sempods-access] .sp-access-description { margin:8px 0 0; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-actions { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:16px; }
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
 [data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:5px; padding:10px 12px; }

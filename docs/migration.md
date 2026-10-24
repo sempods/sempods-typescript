@@ -31,6 +31,14 @@ Check these points:
   components show `controls.leaving` (optional in `UiMessages`).
 - **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
   0.6 holds the earlier session; downgrading to 0.5 is not supported.
+- **Leave confirmation in the top layer.** The provider's "Discard unsaved
+  changes?" prompt is now a native modal `<dialog>` (still role
+  `alertdialog`, same texts and buttons) instead of a fixed `div` with
+  `z-index: 1000`. It shows above app dialogs opened with `showModal()`.
+  Remove any z-index workaround for it; tests that find it by role keep
+  working. Without top-layer support (for example jsdom) it renders in place.
+- **`AppAccess` description.** The new optional `description` prop shows a
+  short line under the app name on the sign-in screen; it is display only.
 
 ## From 0.5.0 to 0.5.1
 
