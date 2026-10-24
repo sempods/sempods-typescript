@@ -28,7 +28,11 @@ is duplicated. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 
-Create, list, rename, complete, reopen and delete tasks. EN/DE switches retranslate
+Create, list, rename, complete, reopen and delete tasks. The list keeps its rows
+while it reloads (`useList(…, { retain: true })`) and after a failed refresh,
+with a note that they may be out of date. A new or changed row is its own
+confirmation (`UpdateNotice quiet`); refusals, conflicts and unconfirmed
+outcomes still show. EN/DE switches retranslate
 controls without changing an open draft. Row/context/Pod switches confirm dirty
 drafts. Conflict and lost-answer feedback requires comparison before continuing;
 no write is automatically replayed. The new-task input is cleared only after

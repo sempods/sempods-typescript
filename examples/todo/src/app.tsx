@@ -24,9 +24,15 @@ import { emptyTask, supportedTasks, taskFields } from './domain.js';
 function TaskScreen() {
   const { language, messages, error } = useSdkLocale();
   const de = language === 'de';
-  const list = useList(taskFields);
-  const tasks =
-    list.state.kind === 'ready' ? supportedTasks(list.state.data) : null;
+  // retain: the rows stay while the list reloads, also after a confirmed write.
+  const list = useList(taskFields, { retain: true });
+  const shown =
+    list.state.kind === 'ready'
+      ? list.state.data
+      : 'previous' in list.state
+        ? list.state.previous
+        : undefined;
+  const tasks = shown ? supportedTasks(shown) : null;
   const mutate = useFieldUpdate(taskFields);
   const creation = useCreation(taskFields, {
     initial: emptyTask,
@@ -48,6 +54,9 @@ function TaskScreen() {
     unavailable: de
       ? 'Die Aufgaben können gerade nicht gelesen werden.'
       : 'The tasks cannot be read right now.',
+    stale: de
+      ? 'Die Liste unten ist vielleicht nicht aktuell.'
+      : 'The list below may be out of date.',
   };
 
   return (
@@ -70,14 +79,18 @@ function TaskScreen() {
         </label>{' '}
         <button disabled={!creation.canCreate}>{m.add}</button>
       </form>
-      <UpdateNotice {...creation.notice} />
-      <UpdateNotice {...mutate.notice} />
+      {/* The new or changed row is the confirmation; problems still show. */}
+      <UpdateNotice {...creation.notice} quiet />
+      <UpdateNotice {...mutate.notice} quiet />
       {/* Each read state says what happened; none promises a draft. */}
-      {list.state.kind === 'loading' && (
+      {list.state.kind === 'loading' && !tasks && (
         <p role="status">{messages.controls.loading}</p>
       )}
       {list.state.kind === 'failed' && (
-        <p role="alert">{error(list.state.error)}</p>
+        <p role="alert">
+          {error(list.state.error)}
+          {tasks ? ` ${m.stale}` : ''}
+        </p>
       )}
       {list.state.kind === 'cancelled' && <p role="status">{m.cancelled}</p>}
       {list.state.kind === 'unavailable' && (
@@ -231,7 +244,7 @@ function TodoLayout({
 function StandardScreen() {
   const [open, setOpen] = useState(false);
   const focusTarget = useRef<HTMLButtonElement>(null);
-  const { messages } = useSdkLocale();
+  const { messages, language } = useSdkLocale();
   const { view, connections } = useAppState();
   const access = useWorkflowAccess();
 
@@ -249,7 +262,16 @@ function StandardScreen() {
           </button>
         </header>
       )}
-      <AppAccess appName="TODO" open={open} focusTarget={focusTarget} />
+      <AppAccess
+        appName="TODO"
+        description={
+          language === 'de'
+            ? 'Aufgaben, gespeichert in einem Pod.'
+            : 'Tasks, stored in a Pod.'
+        }
+        open={open}
+        focusTarget={focusTarget}
+      />
       {view && access.read && !access.write && <AccessNotice />}
       <TargetScreen>
         <TaskScreen />

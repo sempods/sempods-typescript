@@ -10,7 +10,7 @@ import {
 } from '@testing-library/react';
 import { TodoApp } from '../../../../examples/todo/src/app.js';
 import type { PodFetch } from '@sempods/client-sdk';
-import { catalogue, fixture, work } from '../runtime/fixture.test.js';
+import { catalogue, deferred, fixture, work } from '../runtime/fixture.test.js';
 
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
@@ -33,6 +33,8 @@ const text = {
     failed: 'The pod reported an error. Try again later.',
     unavailable: 'The tasks cannot be read right now.',
     empty: 'No tasks yet.',
+    stale: 'The list below may be out of date.',
+    description: 'Tasks, stored in a Pod.',
   },
   de: {
     language: 'Deutsch',
@@ -40,6 +42,8 @@ const text = {
     failed: 'Der Pod hat einen Fehler gemeldet. Versuche es später erneut.',
     unavailable: 'Die Aufgaben können gerade nicht gelesen werden.',
     empty: 'Noch keine Aufgaben.',
+    stale: 'Die Liste unten ist vielleicht nicht aktuell.',
+    description: 'Aufgaben, gespeichert in einem Pod.',
   },
 } as const;
 /** No list state message of the example may promise a draft that might not exist. */
@@ -93,5 +97,49 @@ it.each(['en', 'de'] as const)(
     f.setCatalogue(async () => catalogue([work]));
     await act(() => f.runtime.loadContexts(f.id));
     expect(await screen.findByText(t.empty)).toBeTruthy();
+  },
+);
+
+const schema = 'https://schema.org/';
+const milk = {
+  '@id': 'urn:task:milk',
+  '@type': [schema + 'Action'],
+  [schema + 'name']: [{ '@value': 'Buy milk' }],
+  [schema + 'actionStatus']: [{ '@id': schema + 'PotentialActionStatus' }],
+};
+
+it.each(['en', 'de'] as const)(
+  'the TODO list keeps its rows while reloading and after a failed refresh (%s)',
+  async (language) => {
+    const t = text[language];
+    const f = await signedIn(language, async () => Response.json([milk]));
+    expect(await screen.findByText('Buy milk')).toBeTruthy();
+    const held = deferred<Response>();
+    f.setQuery(() => held.promise);
+    await act(async () =>
+      screen.getByRole('button', { name: t.reload }).click(),
+    );
+    // No empty frame: the row stays and no loading status replaces it.
+    expect(screen.getByText('Buy milk')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+    await act(async () => held.resolve(new Response(null, { status: 500 })));
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      `${t.failed} ${t.stale}`,
+    );
+    expect(screen.getByText('Buy milk')).toBeTruthy();
+    expect(promisesDraft(language)).toBe(false);
+  },
+);
+
+it.each(['en', 'de'] as const)(
+  'the TODO sign-in describes the app (%s)',
+  async (language) => {
+    const f = fixture();
+    cleanups.push(() => f.runtime.dispose());
+    render(<TodoApp runtime={f.runtime} />);
+    fireEvent.click(
+      screen.getByRole('button', { name: text[language].language }),
+    );
+    expect(await screen.findByText(text[language].description)).toBeTruthy();
   },
 );
