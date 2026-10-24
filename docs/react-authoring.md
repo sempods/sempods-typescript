@@ -251,7 +251,12 @@ editor is a compact control; its wrapping `<label>` is the 44px target.
 Copied or arbitrary definitions retain complete-draft replacement and typing, including unions. Feedback applies only to the
 editor state on which the operation settled; a newer dirty draft is never labelled
 saved. For an editor bound to its target (`useResourceEditor`), a success also
-retires when another creation, row mutation or editor write starts on that target. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
+retires when another creation, row mutation or editor write starts on that target.
+Pass `quiet` to `UpdateNotice` or `ResourceEditor` when the changed row is the
+confirmation: a confirmed `saved`, `created` or `removed` then shows nothing,
+while refusals, conflicts, a save beside another change and unconfirmed
+outcomes still show with their controls. The SDK applies no optimistic changes;
+an unconfirmed write stays visible and is never replayed. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
 (yes/no for flags, a dash for empty text); pass `labels={{ title: 'Task' }}` to
 name the fields instead of showing their keys.
 
@@ -502,6 +507,27 @@ explicit one from `runtime.bindContext`). Explicitly cancelled lists stay
 cancelled until `reload()`.
 It does not poll, subscribe to other clients' writes or invalidate other Pods.
 An equal inline definition or `type` does not restart it; a real change reads again.
+
+By default each reload shows `loading` without data. Pass `retain: true` to
+`useList`, `useLoad` or `usePodLoad` to keep the last result on screen: while
+the same target reloads, `state` is `{ kind: 'loading', previous }`, and after a
+refresh that failed it is `{ kind: 'failed', error, previous }`. That data is
+still readable but was not confirmed by the failed read, so show a notice and a
+retry beside it. Retained data is only what a read returned; it is dropped for
+another connection, authorization, Context or definition, after lost read
+access or changed Pod grants, and after `cancel()`. A late answer never
+replaces it.
+
+```tsx
+const list = useList(taskFields, { retain: true });
+const rows =
+  list.state.kind === 'ready'
+    ? list.state.data
+    : 'previous' in list.state
+      ? list.state.previous
+      : undefined;
+// …render rows; for list.state.kind === 'failed' add a notice and a retry.
+```
 
 `useFieldUpdate(definition)` exposes `canMutate` (write access, pending and both
 unresolved outcomes together), `update`, `remove` and `notice`. Render
