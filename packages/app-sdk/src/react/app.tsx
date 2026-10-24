@@ -3,6 +3,7 @@ import {
   Fragment,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useSyncExternalStore,
   useState,
@@ -21,9 +22,15 @@ import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 const Context = createContext<{
   readonly controller: AppController;
   readonly actions: AppActions;
-  readonly contextDemand: boolean;
   readonly retainContext: () => () => void;
+  /** Catalogue discovery for an explicit target; asks for no selection. */
+  readonly retainDiscovery: () => () => void;
 } | null>(null);
+/**
+ * Whether any Context demand exists, apart from the stable owner above: a
+ * demand change re-renders only the hooks that read it, not every editor host.
+ */
+const Demand = createContext({ selection: false, discovery: false });
 /**
  * Guarded user actions for custom screens and replacement controls. Each
  * guarded action (all except `refreshContexts`) resolves `false`, discarding
@@ -120,21 +127,20 @@ export function SempodsProvider({
     return { controller, actions };
   }, [runtime, contextSelection]);
   const [demands, setDemands] = useState(0);
-  const retainContext = useCallback(() => {
-    setDemands((count) => count + 1);
-    let current = true;
-    return () => {
-      if (!current) return;
-      current = false;
-      setDemands((count) => count - 1);
-    };
-  }, []);
+  const retainContext = useRetain(setDemands);
+  const [discoveries, setDiscoveries] = useState(0);
+  const retainDiscovery = useRetain(setDiscoveries);
   // Only whether any demand exists reaches consumers: another retain or
   // release does not re-render every SDK hook.
-  const contextDemand = demands > 0;
+  const selection = demands > 0;
+  const discovery = discoveries > 0;
   const value = useMemo(
-    () => ({ ...owner, contextDemand, retainContext }),
-    [owner, contextDemand, retainContext],
+    () => ({ ...owner, retainContext, retainDiscovery }),
+    [owner, retainContext, retainDiscovery],
+  );
+  const demand = useMemo(
+    () => ({ selection, discovery }),
+    [selection, discovery],
   );
   const app = owner.controller;
   useEffect(() => {
@@ -144,16 +150,32 @@ export function SempodsProvider({
   return (
     <SdkLocaleProvider {...locale}>
       <Context.Provider value={value}>
-        <GuardedContent>{children}</GuardedContent>
-        <LeaveConfirmation />
+        <Demand.Provider value={demand}>
+          <GuardedContent>{children}</GuardedContent>
+          <LeaveConfirmation />
+        </Demand.Provider>
       </Context.Provider>
     </SdkLocaleProvider>
   );
 }
 function GuardedContent({ children }: { readonly children: ReactNode }) {
-  const { changing, confirmingLeave } = useAppState();
+  const { changing, confirmingLeave, leaving } = useAppFacts(
+    (s) => ({
+      changing: s.changing,
+      confirmingLeave: s.confirmingLeave,
+      // The page is navigating to a sign-in: the content stays as it was, but
+      // its earlier session no longer dispatches.
+      leaving:
+        s.connections.find((c) => c.id === s.activeId)?.session.kind ===
+        'leaving',
+    }),
+    shallowEqual,
+  );
   return (
-    <div inert={changing || confirmingLeave} style={{ display: 'contents' }}>
+    <div
+      inert={changing || confirmingLeave || leaving}
+      style={{ display: 'contents' }}
+    >
       {children}
     </div>
   );
@@ -174,8 +196,41 @@ const none = Object.freeze({
   revision: 0,
 });
 const noSubscription = () => () => {};
-/** Internal Context demand, independent of whether a BoundView already exists. */
+/** A counted demand: retaining returns its own idempotent release. */
+function useRetain(set: (change: (count: number) => number) => void) {
+  return useCallback(() => {
+    set((count) => count + 1);
+    let current = true;
+    return () => {
+      if (!current) return;
+      current = false;
+      set((count) => count - 1);
+    };
+  }, [set]);
+}
+/**
+ * Internal Context demand, independent of whether a BoundView already exists.
+ * TargetScreen asks AppAccess for a selected Context; open management only
+ * for discovery (`useContextDiscovery`).
+ */
 export function useContextDemand(active: boolean) {
+  const value = useDemand(active, 'selection');
+  const demand = useContext(Demand);
+  return value.mode === 'required' || active || demand.selection;
+}
+/**
+ * Internal catalogue discovery for an explicit target (`useContextEditor`):
+ * it asks for no selected Context, so AppAccess offers no chooser for it, yet
+ * still shows a failed catalogue with its retry.
+ */
+export function useContextDiscovery(active: boolean) {
+  useDemand(active, 'discovery');
+}
+/** Internal: whether an explicit target currently demands catalogue discovery. */
+export function useDiscoveryDemand() {
+  return useContext(Demand).discovery;
+}
+function useDemand(active: boolean, kind: 'selection' | 'discovery') {
   const value = useContext(Context);
   if (!value) throw new Error('SempodsProvider is required.');
   // Only the facts used here: a token renewal or another connection's
@@ -192,16 +247,14 @@ export function useContextDemand(active: boolean) {
         connection.catalogue.kind === 'unknown',
     };
   }, shallowEqual);
-  const { retainContext } = value;
-  useEffect(
-    () => (active ? retainContext() : undefined),
-    [active, retainContext],
-  );
+  const retain =
+    kind === 'selection' ? value.retainContext : value.retainDiscovery;
+  useEffect(() => (active ? retain() : undefined), [active, retain]);
   useEffect(() => {
     if (active && mode === 'on-demand' && id && undiscovered)
       void value.actions.refreshContexts(id).catch(() => {});
   }, [active, mode, id, undiscovered, value.actions]);
-  return mode === 'required' || active || value.contextDemand;
+  return { mode };
 }
 /** Context-view access for the active connection, in both modes; Pod readers have their own snapshot. */
 export function useWorkflowAccess() {
@@ -229,36 +282,60 @@ export function useWorkflowAccess() {
       })) ?? [],
   };
 }
+/**
+ * A native modal dialog in the browser's top layer: it stays visible and
+ * operable above an app's own `showModal()` dialog, while the guarded content
+ * (including that dialog) is inert.
+ */
 function LeaveConfirmation() {
   const app = useController();
   const { confirmingLeave, unconfirmedLeave } = useAppState();
   const m = useSdkLocale().messages.controls;
+  const dialog = useRef<HTMLDialogElement>(null);
   const stay = useRef<HTMLButtonElement>(null);
   const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (confirmingLeave) {
-      setFailed(false);
-      const previous = document.activeElement as HTMLElement | null;
-      stay.current?.focus();
-      return () => previous?.focus();
-    }
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    if (!confirmingLeave || !element) return;
+    setFailed(false);
+    const previous = element.ownerDocument.activeElement as HTMLElement | null;
+    // Environments without top-layer support (jsdom) still show it in place.
+    if (typeof element.showModal === 'function') {
+      if (!element.open) element.showModal();
+    } else element.setAttribute('open', '');
+    stay.current?.focus();
+    return () => {
+      if (typeof element.close === 'function') element.close();
+      else element.removeAttribute('open');
+      previous?.focus();
+    };
   }, [confirmingLeave]);
   if (!confirmingLeave) return failed ? <p role="alert">{m.failure}</p> : null;
   return (
-    <div
+    <dialog
+      ref={dialog}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="sempods-leave-title"
+      data-sempods-ui="leave"
       style={{
-        position: 'fixed',
-        inset: 0,
-        background: '#0009',
-        display: 'grid',
-        placeItems: 'center',
-        zIndex: 1000,
+        background: 'white',
+        color: '#172b32',
+        border: 0,
+        padding: 24,
+        maxWidth: 'min(420px, calc(100vw - 32px))',
+        borderRadius: 12,
+      }}
+      onCancel={(e) => {
+        // Escape and other close requests keep the draft, as Stay does.
+        e.preventDefault();
+        app.cancelLeave();
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') app.cancelLeave();
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          app.cancelLeave();
+        }
         if (e.key === 'Tab') {
           e.preventDefault();
           const buttons = e.currentTarget.querySelectorAll('button');
@@ -267,31 +344,23 @@ function LeaveConfirmation() {
         }
       }}
     >
-      <section
-        style={{
-          background: 'white',
-          color: '#172b32',
-          padding: 24,
-          maxWidth: 420,
-          margin: 16,
-          borderRadius: 12,
+      <style href="sempods-leave" precedence="sempods">
+        {'[data-sempods-ui="leave"]::backdrop { background:#0009; }'}
+      </style>
+      <h2 id="sempods-leave-title">{m.leaveTitle}</h2>
+      <p>{unconfirmedLeave ? m.leaveUnconfirmed : m.leaveBody}</p>
+      {failed && <p role="alert">{m.failure}</p>}
+      <button ref={stay} onClick={() => app.cancelLeave()}>
+        {m.stay}
+      </button>{' '}
+      <button
+        onClick={() => {
+          void app.confirmLeave().catch(() => setFailed(true));
         }}
       >
-        <h2 id="sempods-leave-title">{m.leaveTitle}</h2>
-        <p>{unconfirmedLeave ? m.leaveUnconfirmed : m.leaveBody}</p>
-        {failed && <p role="alert">{m.failure}</p>}
-        <button ref={stay} onClick={() => app.cancelLeave()}>
-          {m.stay}
-        </button>{' '}
-        <button
-          onClick={() => {
-            void app.confirmLeave().catch(() => setFailed(true));
-          }}
-        >
-          {m.leave}
-        </button>
-      </section>
-    </div>
+        {m.leave}
+      </button>
+    </dialog>
   );
 }
 

@@ -83,10 +83,32 @@ export interface UiMessages {
   readonly connect: string;
   readonly podUrl: string;
   readonly signIn: string;
-  /** Re-authorizes an active connection, for example to grant another context. */
+  /** Re-authorizes an active connection, for example to share another context. */
   readonly updateAccess: string;
   readonly presetContextUnavailable: string;
+  /** Forgets the connection on this device; neither revokes sharing nor deletes data. */
   readonly disconnect: string;
+  /**
+   * Shown with `disconnect`; an empty string shows no note. Optional in the
+   * type (added in 0.5.1) so a complete catalog written for 0.5.0 still
+   * compiles; `createLocale` fills it from the language defaults.
+   */
+  readonly disconnectHint?: string;
+  /**
+   * Status while the page navigates to the Pod's sign-in. Optional in the type
+   * (added in 0.6.0); `createLocale` fills it from the language defaults.
+   */
+  readonly leaving?: string;
+
+  /*
+   * Management (added in 0.6.0; optional in the type, `createLocale` fills
+   * them): the heading of the readable Contexts, what this app may do in
+   * each (`canRead`, `canChange`), and the collapsed sign-in to another Pod.
+   */
+  readonly contextAccess?: string;
+  readonly canRead?: string;
+  readonly canChange?: string;
+  readonly connectAnother?: string;
   readonly refresh: string;
   readonly busy: string;
   readonly storage: string;
@@ -96,6 +118,12 @@ export interface UiMessages {
   readonly readLost: string;
   readonly save: string;
   readonly remove: string;
+  /**
+   * Asked in the editor before `remove` sends anything. Optional in the type
+   * (added in 0.5.1) so a complete catalog written for 0.5.0 still compiles;
+   * `createLocale` fills it from the language defaults.
+   */
+  readonly confirmRemove?: string;
   readonly discard: string;
   readonly continueMine: string;
   readonly compare: string;
@@ -123,12 +151,25 @@ export interface UiMessages {
   readonly mine: string;
   readonly alongside: string;
   readonly dataAccess: string;
+  /** Label of the Pod address field; also a Pod that shares a context with the person. */
   readonly yourPod: string;
+  /** Optional hint under the Pod address field; empty (the default) shows none. */
   readonly podHint: string;
+  /** Optional hint before the first sign-in; empty (the default) shows none. */
   readonly loginHint: string;
   readonly checkAccess: string;
   readonly addresses: string;
+  /**
+   * A first sign-in the provider answered with `access_denied`: neutral, as
+   * the answer does not say whether the person cancelled or declined.
+   */
   readonly signInCancelled: string;
+  /**
+   * A re-authorization answered with `access_denied` that kept the earlier
+   * session (`startup.resumed`). Optional in the type (added in 0.6.0);
+   * `createLocale` fills it from the language defaults.
+   */
+  readonly sharingUnchanged?: string;
   /** An unfinished sign-in or an expired session; implies neither access nor a kept draft. */
   readonly signInRequired: string;
 }
@@ -155,10 +196,17 @@ export const englishMessages: SdkMessages = {
     connect: 'Connect',
     podUrl: 'Pod URL',
     signIn: 'Sign in',
-    updateAccess: 'Update access',
+    updateAccess: 'Change sharing',
     presetContextUnavailable:
       'The configured context is not readable on this Pod.',
-    disconnect: 'Disconnect',
+    disconnect: 'Sign out',
+    disconnectHint: 'Signing out only applies to this device.',
+    leaving: 'Opening your Pod’s sign-in…',
+
+    contextAccess: 'Available to this app',
+    canRead: 'This app can read',
+    canChange: 'This app can read and change',
+    connectAnother: 'Connect another Pod',
     refresh: 'Check again',
     busy: 'Open in another tab. Close that tab and reload here.',
     storage:
@@ -169,6 +217,7 @@ export const englishMessages: SdkMessages = {
     readLost: 'Access is unavailable. Your draft is kept.',
     save: 'Save',
     remove: 'Delete',
+    confirmRemove: 'Delete this from the pod? This cannot be undone.',
     discard: 'Discard changes',
     continueMine: 'Continue with my changes',
     compare: 'Check current version',
@@ -198,13 +247,16 @@ export const englishMessages: SdkMessages = {
     no: 'No',
     mine: 'Your draft',
     alongside: 'Saved alongside changes to other fields.',
-    dataAccess: 'Data access',
-    yourPod: 'Your Pod',
-    podHint: 'Paste the link to your Pod.',
-    loginHint: 'Continue to sign in on your Pod.',
+    dataAccess: 'Pods & sharing',
+    yourPod: 'Pod address',
+    podHint: '',
+    loginHint: '',
     checkAccess: 'Check access',
     addresses: 'Full addresses',
-    signInCancelled: 'Sign-in was cancelled.',
+    signInCancelled:
+      'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
+    sharingUnchanged:
+      'Sharing was not changed: the consent was cancelled or declined at the Pod. This app keeps the access it had.',
     signInRequired: 'Sign in to use this pod.',
   },
   activePod: 'Active pod',
@@ -246,7 +298,7 @@ export const englishMessages: SdkMessages = {
       // The provider's own description is never shown; only its error code is classified.
       switch (reason.problem) {
         case 'denied':
-          return 'Sign-in was cancelled.';
+          return 'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.';
         case 'login-required':
           return 'The pod asked you to sign in at its provider first. Sign in there, then try again.';
         case 'interaction-required':
@@ -269,10 +321,17 @@ export const germanMessages: SdkMessages = {
     connect: 'Verbinden',
     podUrl: 'Pod-URL',
     signIn: 'Anmelden',
-    updateAccess: 'Zugriff ändern',
+    updateAccess: 'Freigabe ändern',
     presetContextUnavailable:
       'Der konfigurierte Kontext ist auf diesem Pod nicht lesbar.',
-    disconnect: 'Trennen',
+    disconnect: 'Abmelden',
+    disconnectHint: 'Die Abmeldung gilt nur für dieses Gerät.',
+    leaving: 'Die Anmeldung deines Pods wird geöffnet…',
+
+    contextAccess: 'Für diese App verfügbar',
+    canRead: 'Diese App kann lesen',
+    canChange: 'Diese App kann lesen und ändern',
+    connectAnother: 'Weiteren Pod verbinden',
     refresh: 'Erneut prüfen',
     busy: 'In einem anderen Tab geöffnet. Schließe diesen Tab und lade hier neu.',
     storage:
@@ -283,6 +342,7 @@ export const germanMessages: SdkMessages = {
     readLost: 'Der Zugriff ist nicht verfügbar. Dein Entwurf bleibt erhalten.',
     save: 'Speichern',
     remove: 'Löschen',
+    confirmRemove: 'Vom Pod löschen? Das lässt sich nicht rückgängig machen.',
     discard: 'Änderungen verwerfen',
     continueMine: 'Mit meinen Änderungen fortfahren',
     compare: 'Aktuellen Stand prüfen',
@@ -313,13 +373,16 @@ export const germanMessages: SdkMessages = {
     no: 'Nein',
     mine: 'Dein Entwurf',
     alongside: 'Zusammen mit Änderungen an anderen Feldern gespeichert.',
-    dataAccess: 'Datenzugriff',
-    yourPod: 'Dein Pod',
-    podHint: 'Füge den Link zu deinem Pod ein.',
-    loginHint: 'Weiter zur Anmeldung auf deinem Pod.',
+    dataAccess: 'Pods & Freigaben',
+    yourPod: 'Pod-Adresse',
+    podHint: '',
+    loginHint: '',
     checkAccess: 'Zugriff prüfen',
     addresses: 'Vollständige Adressen',
-    signInCancelled: 'Die Anmeldung wurde abgebrochen.',
+    signInCancelled:
+      'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
+    sharingUnchanged:
+      'Die Freigabe wurde nicht geändert: Die Zustimmung wurde beim Pod abgebrochen oder abgelehnt. Diese App behält ihren bisherigen Zugriff.',
     signInRequired: 'Melde dich an, um diesen Pod zu nutzen.',
   },
   activePod: 'Aktiver Pod',
@@ -364,7 +427,7 @@ export const germanMessages: SdkMessages = {
     oauth(reason) {
       switch (reason.problem) {
         case 'denied':
-          return 'Die Anmeldung wurde abgebrochen.';
+          return 'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.';
         case 'login-required':
           return 'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.';
         case 'interaction-required':

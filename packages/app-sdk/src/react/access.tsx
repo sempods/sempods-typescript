@@ -13,6 +13,8 @@ import {
   useApp,
   useAppState,
   useContextDemand,
+  useContextDiscovery,
+  useDiscoveryDemand,
   useWorkflowAccess,
   type AppActions,
 } from './app.js';
@@ -34,6 +36,12 @@ export interface AppAccessProps {
   readonly mode?: 'single' | 'multiple';
   /** App-owned decorative icon, for example <img src="/icon.png" alt="" />. */
   readonly icon?: ReactNode;
+  /**
+   * A short line about the app under its name on the sign-in screen, for
+   * example "Shopping made easy". Display only: it is never sent to the Pod
+   * and is not a consent purpose or a scope.
+   */
+  readonly description?: ReactNode;
   /** Exact Pod URL → friendly name. A name never changes the destination. */
   readonly podNames?: Readonly<Record<string, string>>;
   /**
@@ -65,7 +73,8 @@ const noSubscription = () => () => {};
  * Centered login/recovery UI beside, never around, app content. Uses the host's
  * existing runtime facts/actions; hides when a target is readable unless open.
  * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
- * offers Context selection only once a Context flow (`TargetScreen`, `open`) asks.
+ * offers Context selection only once a Context flow (`TargetScreen`) asks;
+ * management (`open`) lists the connected Pod's Contexts and their access first.
  * While the active connection restores, its Pod reader is not yet readable, or
  * its first demanded Context catalogue loads, it shows the loading status (plus
  * the active-Pod selector for several saved connections and the sign-in for
@@ -83,6 +92,7 @@ export function AppAccess({
   headingLevel,
   mode = 'multiple',
   icon,
+  description,
   podNames,
   podAddress = 'visible',
   open = false,
@@ -93,7 +103,13 @@ export function AppAccess({
 }: AppAccessProps) {
   const state = useAppState();
   const access = useWorkflowAccess();
-  const contextRequired = useContextDemand(open);
+  // Management lists the Contexts (discovery); only a Context flow, or the
+  // required mode, asks for a selected one.
+  const contextRequired = useContextDemand(false);
+  useContextDiscovery(open);
+  // An explicit target (useContextEditor) needs the catalogue, not a selection.
+  const discoveryDemand = useDiscoveryDemand();
+  const discovery = contextRequired || discoveryDemand;
   const podAccess = useSyncExternalStore(
     state.pod?.subscribe ?? noSubscription,
     state.pod?.getSnapshot ?? (() => unavailablePod),
@@ -103,11 +119,47 @@ export function AppAccess({
     state.contextSelection === 'on-demand' ? podAccess.read : access.read;
   const { messages: m, direction, error } = useSdkLocale();
   const heldFocus = useRef(false);
+  const catalogueFailed = access.connection?.catalogue.kind === 'failed';
+  const session = access.connection?.session;
+  const leaving = session?.kind === 'leaving';
+  // While the page leaves for a re-authorization the earlier access stays on
+  // screen: hidden as it was unless something already needed attention.
   const needsAttention =
-    !readable ||
-    (contextRequired &&
-      (!access.read || access.connection?.catalogue.kind === 'failed'));
-  const hidden = !needsAttention && !open && !state.callbackNotice;
+    session?.kind === 'leaving'
+      ? !session.subject ||
+        Boolean(access.connection?.missingRequiredScopes.length)
+      : !readable ||
+        (contextRequired && !access.read) ||
+        (discovery && catalogueFailed);
+  // A declined re-authorization kept this active connection's session. Its
+  // one next step stays offered until an attempt actually leaves for the
+  // Pod: starting one clears the callback notice, and a declined leave prompt,
+  // a blocking write or a failed preparation (direct or after the prompt)
+  // keeps the session usable.
+  const [offered, setOffered] = useState<string | null>(null);
+  const [retryFailure, setRetryFailure] = useState<{
+    readonly id: string;
+    readonly cause: unknown;
+  } | null>(null);
+  const kept = access.connection;
+  const keptActive =
+    kept?.session.kind === 'active' || kept?.session.kind === 'renewing';
+  const noticed =
+    keptActive &&
+    state.callbackNotice &&
+    state.startup?.resumed &&
+    state.startup.attemptConnectionId === kept.id
+      ? kept.id
+      : null;
+  if (noticed && offered !== noticed) setOffered(noticed);
+  // Leaving, losing the session or another active connection ends the offer
+  // and its failure: returning to the connection does not bring them back.
+  if (offered && (kept?.id !== offered || !keptActive)) setOffered(null);
+  if (retryFailure && (kept?.id !== retryFailure.id || !keptActive))
+    setRetryFailure(null);
+  const retry = noticed ?? (keptActive && offered === kept.id ? kept.id : null);
+  const failedRetry = retry && retryFailure?.id === retry ? retryFailure : null;
+  const hidden = !needsAttention && !open && !state.callbackNotice && !retry;
   // The active connection is still being validated (restoring, signed in while
   // its Pod reader is not yet readable, or loading its first demanded Context
   // catalogue) and nothing awaits a decision: show the loading status, not the
@@ -165,6 +217,9 @@ export function AppAccess({
   ]);
   const Heading =
     (headingLevel ?? (open || state.view ? 2 : 1)) === 2 ? 'h2' : 'h1';
+  // The app's own name (and description) heads sign-in; management and
+  // recovery under a host title are about Pods & sharing.
+  const namesApp = !(open || state.view || headingLevel === 2);
   const Connections = components?.Connections;
   const available = state.startup?.storage === 'durable' && !state.startupError;
   const active =
@@ -177,6 +232,7 @@ export function AppAccess({
     active &&
     available &&
     (missingScopes ||
+      (discovery && catalogueFailed) ||
       (contextRequired &&
         Boolean(
           access.connection?.selectedContext ||
@@ -217,11 +273,10 @@ export function AppAccess({
                 {icon}
               </div>
             )}
-            <Heading>
-              {open || state.view || headingLevel === 2
-                ? m.controls.dataAccess
-                : appName}
-            </Heading>
+            <Heading>{namesApp ? appName : m.controls.dataAccess}</Heading>
+            {namesApp && description && (
+              <p className="sp-access-description">{description}</p>
+            )}
           </header>
         )}
         {state.startupError ? (
@@ -235,10 +290,39 @@ export function AppAccess({
         ) : (
           <>
             <CallbackNotice />
+            {retry && !needsAttention && !open && (
+              // The one next step after an unchanged re-authorization: the
+              // connection view (and its actions) is not shown here.
+              <div className="sp-access-actions">
+                <button
+                  className="sp-access-primary"
+                  disabled={state.changing || state.confirmingLeave}
+                  onClick={() => {
+                    // A failure stays until an attempt proceeds: a declined
+                    // leave prompt or a blocking write resolves false.
+                    void app.authorize(retry).then(
+                      (started) => {
+                        if (started) setRetryFailure(null);
+                      },
+                      (cause: unknown) => setRetryFailure({ id: retry, cause }),
+                    );
+                  }}
+                >
+                  {m.controls.updateAccess}
+                </button>
+              </div>
+            )}
+            {failedRetry && !needsAttention && !open && (
+              <p role="alert">{error(failedRetry.cause)}</p>
+            )}
             {(needsAttention || open) && (
               <>
                 {Connections ? (
-                  validating ? (
+                  leaving ? (
+                    <p role="status">
+                      {m.controls.leaving ?? m.controls.loading}
+                    </p>
+                  ) : validating ? (
                     <p role="status">{m.controls.loading}</p>
                   ) : (
                     <Connections
@@ -249,6 +333,7 @@ export function AppAccess({
                 ) : (
                   <AccessConnections
                     contextRequired={contextRequired}
+                    discovery={discovery}
                     manage={open}
                     mode={mode}
                     validating={validating}
@@ -279,6 +364,7 @@ function AccessConnections({
   mode,
   podNames,
   contextRequired,
+  discovery,
   validating,
   podAddress,
 }: {
@@ -287,6 +373,8 @@ function AccessConnections({
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
   readonly contextRequired: boolean;
+  /** Catalogue discovery is demanded, with or without a selection. */
+  readonly discovery: boolean;
   /** Only the loading status (and a switch to another saved Pod) applies. */
   readonly validating: boolean;
 }) {
@@ -294,6 +382,7 @@ function AccessConnections({
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
   const id = useId();
+  const disconnectId = useId();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -443,6 +532,136 @@ function AccessConnections({
       </select>
     </label>
   );
+  // Signing in to a new Pod. In management of a connection it is a secondary,
+  // collapsed action after the connected Pod.
+  const another = manage && Boolean(c);
+  const actions = (
+    <>
+      {c && (
+        <div className="sp-access-actions">
+          {active && (
+            <>
+              <button
+                disabled={unavailable}
+                onClick={() => void act(() => app.authorize(c.id))}
+              >
+                {m.controls.updateAccess}
+              </button>
+              {discovery && (
+                <button
+                  disabled={unavailable}
+                  onClick={() => void act(() => app.refreshContexts(c.id))}
+                >
+                  {m.controls.checkAccess}
+                </button>
+              )}
+            </>
+          )}
+          {(manage || c.session.kind === 'ended') && (
+            <button
+              disabled={unavailable}
+              aria-describedby={
+                m.controls.disconnectHint ? disconnectId : undefined
+              }
+              onClick={() => void act(() => app.disconnect(c.id))}
+            >
+              {m.controls.disconnect}
+            </button>
+          )}
+        </div>
+      )}
+      {c &&
+        (manage || c.session.kind === 'ended') &&
+        m.controls.disconnectHint && (
+          <p id={disconnectId} className="sp-access-hint">
+            {m.controls.disconnectHint}
+          </p>
+        )}
+    </>
+  );
+  const addPod =
+    showNew && state.allowedPods && state.allowedPods.length > 1 ? (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (choice) void act(() => connect(choice));
+        }}
+      >
+        <label>
+          {m.controls.yourPod}
+          <select
+            aria-label={m.controls.yourPod}
+            required
+            value={choice}
+            disabled={unavailable}
+            onChange={(event) => setUrl(event.target.value)}
+          >
+            <option value="" disabled>
+              {m.controls.choosePod}
+            </option>
+            {state.allowedPods.map((target) => (
+              <option key={target} value={target}>
+                {name(target)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {choice && <p className="sp-access-address">{choice}</p>}
+        <button
+          className={c ? undefined : 'sp-access-primary'}
+          disabled={
+            unavailable ||
+            !choice ||
+            state.connections.some(
+              (entry) =>
+                entry.podUrl === choice && entry.session.kind === 'restoring',
+            )
+          }
+        >
+          {m.controls.signIn}
+        </button>
+      </form>
+    ) : defaultSignIn ? (
+      defaultSignIn
+    ) : showNew && !state.allowedPods && (!state.preset || manage) ? (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void act(() => connect(enteredPod(url)));
+        }}
+      >
+        <label>
+          {m.controls.yourPod}
+          <input
+            type="text"
+            inputMode="url"
+            autoCapitalize="none"
+            spellCheck={false}
+            required
+            value={url}
+            aria-describedby={m.controls.podHint ? id : undefined}
+            placeholder="sempods.org/alice"
+            disabled={unavailable}
+            onChange={(event) => setUrl(event.target.value)}
+          />
+        </label>
+        {m.controls.podHint && (
+          <p id={id} className="sp-access-hint">
+            {m.controls.podHint}
+          </p>
+        )}
+        <button
+          className={c ? undefined : 'sp-access-primary'}
+          disabled={unavailable}
+        >
+          {m.controls.signIn}
+        </button>
+      </form>
+    ) : null;
+
+  // The page is navigating to the Pod's sign-in: no action applies any more.
+  if (c?.session.kind === 'leaving')
+    return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
   // A restore that never settles must not hide signing in to the configured
   // Pod or switching to another saved one.
   if (validating)
@@ -456,86 +675,12 @@ function AccessConnections({
     );
   return (
     <>
-      {showNew && state.allowedPods && state.allowedPods.length > 1 ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (choice) void act(() => connect(choice));
-          }}
-        >
-          <label>
-            {m.controls.yourPod}
-            <select
-              aria-label={m.controls.yourPod}
-              required
-              value={choice}
-              disabled={unavailable}
-              onChange={(event) => setUrl(event.target.value)}
-            >
-              <option value="" disabled>
-                {m.controls.choosePod}
-              </option>
-              {state.allowedPods.map((target) => (
-                <option key={target} value={target}>
-                  {name(target)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {choice && <p className="sp-access-address">{choice}</p>}
-          <button
-            className={c ? undefined : 'sp-access-primary'}
-            disabled={
-              unavailable ||
-              !choice ||
-              state.connections.some(
-                (entry) =>
-                  entry.podUrl === choice && entry.session.kind === 'restoring',
-              )
-            }
-          >
-            {m.controls.signIn}
-          </button>
-        </form>
-      ) : defaultSignIn ? (
-        defaultSignIn
-      ) : showNew && !state.allowedPods && (!state.preset || manage) ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void act(() => connect(enteredPod(url)));
-          }}
-        >
-          <label>
-            {m.controls.yourPod}
-            <input
-              type="text"
-              inputMode="url"
-              autoCapitalize="none"
-              spellCheck={false}
-              required
-              value={url}
-              aria-describedby={id}
-              placeholder="sempods.org/alice"
-              disabled={unavailable}
-              onChange={(event) => setUrl(event.target.value)}
-            />
-          </label>
-          <p id={id} className="sp-access-hint">
-            {m.controls.podHint}
-          </p>
-          <button
-            className={c ? undefined : 'sp-access-primary'}
-            disabled={unavailable}
-          >
-            {m.controls.signIn}
-          </button>
-        </form>
-      ) : null}
-      {!active && !c && (
+      {!another && addPod}
+      {!active && !c && m.controls.loginHint && (
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
+      {manage && active && state.connections.length < 2 && podLine(c!.podUrl)}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
@@ -586,10 +731,32 @@ function AccessConnections({
         </p>
       )}
       {active &&
-        contextRequired &&
+        (contextRequired || manage) &&
         !fixedContext &&
         c?.catalogue.kind === 'ready' &&
         readable.length === 0 && <p role="status">{m.noContexts}</p>}
+      {manage &&
+        active &&
+        c?.catalogue.kind === 'loading' &&
+        !c.catalogue.contexts && <p role="status">{m.cataloguePending}</p>}
+      {manage && active && readable.length > 0 && (
+        // What the catalogue says this app may do in each readable Context:
+        // caller-relative rights, not which grant or public access gave them.
+        <section aria-label={m.controls.contextAccess}>
+          <p className="sp-access-label">{m.controls.contextAccess}</p>
+          <ul className="sp-access-contexts">
+            {readable.map((entry) => (
+              <li key={entry.iri}>
+                <span>{contextLabel(entry.iri)}</span>
+                <span className="sp-access-fact">
+                  {entry.writable ? m.controls.canChange : m.controls.canRead}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {manage && actions}
       {c && (
         <details>
           <summary>{m.controls.addresses}</summary>
@@ -608,35 +775,12 @@ function AccessConnections({
           </dl>
         </details>
       )}
-      {c && (
-        <div className="sp-access-actions">
-          {active && (
-            <>
-              <button
-                disabled={unavailable}
-                onClick={() => void act(() => app.authorize(c.id))}
-              >
-                {m.controls.updateAccess}
-              </button>
-              {contextRequired && (
-                <button
-                  disabled={unavailable}
-                  onClick={() => void act(() => app.refreshContexts(c.id))}
-                >
-                  {m.controls.checkAccess}
-                </button>
-              )}
-            </>
-          )}
-          {(manage || c.session.kind === 'ended') && (
-            <button
-              disabled={unavailable}
-              onClick={() => void act(() => app.disconnect(c.id))}
-            >
-              {m.controls.disconnect}
-            </button>
-          )}
-        </div>
+      {!manage && actions}
+      {another && addPod && (
+        <details className="sp-access-another">
+          <summary>{m.controls.connectAnother}</summary>
+          {addPod}
+        </details>
       )}
       {failure && <p role="alert">{error(failure.cause)}</p>}
     </>
@@ -663,7 +807,15 @@ const styles = `
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
 [data-sempods-access] :focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
+[data-sempods-access] .sp-access-contexts { list-style:none; margin:8px 0 16px; padding:0; text-align:start; }
+[data-sempods-access] .sp-access-contexts li { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; padding:8px 0; border-block-end:1px solid var(--sp-line); }
+[data-sempods-access] .sp-access-label, [data-sempods-access] .sp-access-fact { font-size:.875rem; color:var(--sp-muted); }
+[data-sempods-access] .sp-access-label { text-align:start; margin:16px 0 0; }
+[data-sempods-access] .sp-access-another { margin-top:16px; }
+
+[data-sempods-access] .sp-access-description { margin:8px 0 0; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-actions { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:16px; }
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
+[data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:5px; padding:10px 12px; }
 [data-sempods-access] summary { min-height:44px; padding:10px; cursor:pointer; }
 `;

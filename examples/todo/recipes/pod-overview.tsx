@@ -78,7 +78,9 @@ function Overview({
             ? error(state.error)
             : state.kind === 'loading'
               ? m.controls.loading
-              : m.controls.readLost}
+              : state.kind === 'cancelled'
+                ? 'Loading the overview was cancelled.'
+                : 'The overview cannot be read right now.'}
         </p>
       )}
       <button onClick={() => void reload()} disabled={state.kind === 'loading'}>

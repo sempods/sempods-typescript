@@ -4,6 +4,111 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.5.1 to 0.6.0
+
+The minor changes defaults and adds options; upgrade both packages together.
+Check these points:
+
+- **UI language follows the browser.** `SempodsProvider` and `SdkLocaleProvider`
+  without `language` and `locale` now use the browser's languages (read once per
+  provider) instead of English: a German browser gets German messages and
+  `de-DE` formatting. Pin the old result with `language="en" locale="en"`. A
+  `locale` or `language` alone keeps its previous meaning; `createLocale` and
+  `resolveLocale` are unchanged and read no browser globals.
+- **Cancelling a re-authorization keeps the session.** When the provider
+  answers a signed-in connection's re-authorization with `access_denied`, or
+  the person comes back without a callback, the earlier session resumes while
+  it is still valid: the report says `interaction: 'cancelled'` and
+  `resumed: true`, and the connection stays `active`. Every other failure
+  still ends it; a successful narrower grant replaces the earlier one. Code
+  that treated a cancelled callback as "signed out" checks the connection's
+  session instead.
+- **New session kind `leaving`.** After `beginAuthorization()` stored its
+  attempt, the connection reports `{ kind: 'leaving', subject? }` instead of
+  `signed-out` until the page unloads, and keeps its catalogue, selection and
+  grants. Its handles no longer dispatch. Switches over `session.kind` add a
+  `leaving` case: keep the current screen and offer no sign-in. The SDK
+  components show `controls.leaving` (optional in `UiMessages`).
+- **Neutral denial wording.** A provider's `access_denied` does not say whether
+  the person cancelled or declined, so `controls.signInCancelled` and
+  `errors.oauth` for `denied` now say that no access was granted and suggest
+  signing in again to choose what to share. A declined re-authorization that
+  kept the session shows the new `controls.sharingUnchanged` (optional in
+  `UiMessages`) as a status, with **Change sharing** as its one action. The
+  provider's `error_description` is still never shown or interpreted. Tests
+  that match the old texts need the new ones; pass `messages.controls` to keep
+  your own.
+- **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
+  0.6 holds the earlier session; downgrading to 0.5 is not supported.
+- **Leave confirmation in the top layer.** The provider's "Discard unsaved
+  changes?" prompt is now a native modal `<dialog>` (still role
+  `alertdialog`, same texts and buttons) instead of a fixed `div` with
+  `z-index: 1000`. It shows above app dialogs opened with `showModal()`.
+  Remove any z-index workaround for it; tests that find it by role keep
+  working. Without top-layer support (for example jsdom) it renders in place.
+- **`AppAccess` description.** The new optional `description` prop shows a
+  short line under the app name on the sign-in screen; it is display only.
+- **Lists can keep their rows while reloading.** `useList`, `useLoad` and
+  `usePodLoad` accept `{ retain: true }`; `createViewLoader` takes the same
+  option as a third argument. With it, `LoadState`'s `loading` and `failed`
+  carry the last data as `previous`. Without it nothing changes. Code that
+  builds `LoadState` values itself still compiles; exhaustive checks over
+  `kind` are unchanged.
+- **Quiet success.** `UpdateNotice` and `ResourceEditor` accept `quiet` to show
+  nothing for a confirmed save, creation or deletion; problems and unconfirmed
+  outcomes still show.
+- **Management shows the connected Pod first.** With `open`, `AppAccess` lists
+  the connected Pod, its readable Contexts with **This app can read** / **This
+  app can read and change**, then the actions and **Full addresses**; signing in
+  to another Pod moved to a collapsed **Connect another Pod** at the end.
+  End-to-end tests that fill **Pod address** in management first expand that
+  section. New message keys `controls.contextAccess`, `canRead`, `canChange`
+  and `connectAnother` are optional in `UiMessages`.
+- **On-demand management no longer asks for a selection.** In
+  `contextSelection: 'on-demand'`, opening management still loads the
+  catalogue but shows the **Data context** chooser only while a Context flow
+  (`TargetScreen`) needs a selected Context. An app that let people pick its
+  Context there mounts its Context flow, or offers its own guarded
+  `selectContext` control.
+
+## From 0.5.0 to 0.5.1
+
+The patch keeps public APIs, message keys and result shapes. Check these points:
+
+- **AppAccess wording.** The default EN/DE texts name one action once:
+  **Pod address** / **Pod-Adresse** (`controls.yourPod`), **Pods & sharing** /
+  **Pods & Freigaben** (`controls.dataAccess`), **Change sharing** /
+  **Freigabe ändern** (`controls.updateAccess`) and **Sign out** /
+  **Abmelden** (`controls.disconnect`). Signing out still only forgets the
+  connection on this device; the new `controls.disconnectHint` says so beside
+  the button. `controls.podHint` and `controls.loginHint` stay in the message
+  shape but default to empty, which shows no hint line. App end-to-end tests
+  that find controls by the old texts need the new ones; to keep a text, pass
+  it through `messages.controls`.
+- **Neutral default colours.** Without `--sempods-*` tokens the SDK surfaces
+  use a neutral grey palette instead of the green accent: accent and text
+  `#1f2933` / `#e5e7eb` (light/dark), muted `#6b7280` / `#9ca3af`, lines
+  `#e5e7eb` / `#2d3138`, background `#fff` / `#111315`. An app that relied on
+  the green default sets `--sempods-accent: light-dark(#226044, #8acda6)` and
+  `--sempods-on-accent: light-dark(#fff, #14251b)` on an ancestor to keep it.
+- **Complete catalogs still compile.** `controls.disconnectHint` and
+  `controls.confirmRemove` are optional in `UiMessages`; `createLocale` fills
+  them from the language defaults.
+- **Delete asks first.** `ResourceEditor`'s **Delete** now shows an in-editor
+  question (`controls.confirmRemove`) with **Delete** and **Cancel**; only the
+  confirmation sends the `DELETE`. End-to-end tests press **Delete** twice, the
+  second time inside the group named by that question. `editor.remove()`,
+  `useFieldUpdate` and custom delete buttons are unchanged.
+- **Compact checkboxes.** Checkboxes and radios inside SDK surfaces are 24px
+  instead of 44px; a wrapping `<label>` keeps the 44px target. Wrap a bare
+  checkbox in its label to keep a large target.
+- **No chooser for an explicit target.** `useContextEditor` still loads the
+  catalogue but no longer asks `AppAccess` for a selected Context. With
+  `contextSelection: 'on-demand'`, `AppAccess` stays hidden while such an
+  editor loads and offers no Context chooser for it; a failed catalogue still
+  shows with **Check access**. An app that called `selectContext` before
+  opening a row only to avoid the chooser can drop that call.
+
 ## From 0.4 to 0.5
 
 Upgrade both packages together; Node 24.15 or newer stays the requirement:

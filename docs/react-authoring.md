@@ -78,8 +78,12 @@ custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
 ## Login without an app frame
 
 An optional `icon` is app-owned JSX, usually `<img src="/icon.png" alt="" />`.
-No icon is required. `podNames` maps exact canonical Pod URLs to display names;
-the destination remains visible, and duplicate names are disambiguated.
+No icon is required. An optional `description` (for example
+`description="Shopping made easy"`) appears under the app name on the sign-in
+screen, not in management. It is display text only: it is never sent to the Pod
+and is not a consent purpose or a scope. `podNames` maps exact canonical Pod
+URLs to display names; the destination remains visible, and duplicate names are
+disambiguated.
 
 When the runtime permits exactly one Pod (`allowedPods` with one entry),
 `podAddress="hidden"` omits that Pod's address from signing in, including
@@ -118,7 +122,9 @@ One `allowedPods` entry or a preset needs no URL input. Several permitted Pods
 get a finite picker; selecting an option does not start sign-in. When a connection
 already exists, adding another Pod is a secondary action; signing into the current
 connection remains prominent when needed. Unrestricted
-apps show **Your Pod** with a short hint. The input may omit `https://`; presentation
+apps show a **Pod address** field: the person's own Pod or one that shares a
+context with them. `controls.podHint` and `controls.loginHint` are empty by
+default, so no hint lines appear; an app may set them. The input may omit `https://`; presentation
 adds it, trims surrounding whitespace and removes one trailing slash before
 calling the runtime. Other noncanonical input remains rejected; configured Pod
 URLs still require the strict canonical form.
@@ -128,9 +134,22 @@ auth or automatic redirect. Login/consent on the Pod retains the Pod's own UI.
 The initial login uses an `h1`; recovery with an existing target and explicitly
 opened management use an `h2`, below the app’s own main heading.
 
-The app may put a **Data access** button in its own menu or header. `open` shows
+The app may put a **Pods & sharing** button (`controls.dataAccess`) in its own menu or header. `open` shows
 management. In on-demand mode, opening it also demands Context discovery. Pod/context changes still run
-through the same leave guards. Supply `focusTarget` for focus recovery when a
+through the same leave guards.
+
+Management shows the connected Pod first: its name, then **Available to this
+app** with each readable Context and what this app may do there (**This app can
+read** or **This app can read and change**), then **Change sharing**, **Sign out**
+and the collapsed **Full addresses**. Signing in to another Pod comes last, as a
+collapsed **Connect another Pod** (`mode="multiple"` only). The access facts are
+the catalogue's rights for this app's session: they do not say whether a Context
+was shared in this consent or is public, and changing them is the Pod's consent
+step behind **Change sharing**, not an edit in the app. Management lists the
+Contexts without asking for a selection: the **Data context** chooser appears only
+in `'required'` mode or while a Context flow such as `TargetScreen` needs a
+selected Context. It sends one catalogue request and reads no per-Context labels
+beyond the selected one. Supply `focusTarget` for focus recovery when a
 focused access control disappears. For example, inside the provider:
 
 ```tsx
@@ -201,6 +220,8 @@ Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
 `style`/`className` where supported. They inherit across SDK components. Existing
 `--sempods-access-*` names remain fallback aliases; the shared names take priority.
+Without them the SDK uses a calm neutral grey palette (since 0.5.1; before, a
+green accent); set `--sempods-accent` to give controls your brand colour.
 React 19 hoists and deduplicates the static scoped sheets using its
 [`style` resource support](https://react.dev/reference/react-dom/components/style).
 Inline scoped styles still require a compatible CSP. Hosts that prohibit them can
@@ -221,10 +242,21 @@ RDF terms once; it works with form editing, list actions and the Node consumer.
 `useResourceEditor(iri, definition)` manages subscription, access and disposal.
 `ResourceEditor` supplies save/delete/discard and comparison controls; its child
 renders only a draft and calls `change({ title })` for an original `fields()` definition.
+**Delete** asks in place first (`controls.confirmRemove`); only the confirmation
+sends one conditional `DELETE` of the version shown. Cancel or Escape keeps the
+draft and the target, and any newer editor state (an edit, a read that adopts a
+newer version, lost write access, another subject) withdraws the question.
+The headless `editor.remove()` stays direct. A checkbox or radio inside the
+editor is a compact control; its wrapping `<label>` is the 44px target.
 Copied or arbitrary definitions retain complete-draft replacement and typing, including unions. Feedback applies only to the
 editor state on which the operation settled; a newer dirty draft is never labelled
 saved. For an editor bound to its target (`useResourceEditor`), a success also
-retires when another creation, row mutation or editor write starts on that target. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
+retires when another creation, row mutation or editor write starts on that target.
+Pass `quiet` to `UpdateNotice` or `ResourceEditor` when the changed row is the
+confirmation: a confirmed `saved`, `created` or `removed` then shows nothing,
+while refusals, conflicts, a save beside another change and unconfirmed
+outcomes still show with their controls. The SDK applies no optimistic changes;
+an unconfirmed write stays visible and is never replayed. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
 (yes/no for flags, a dash for empty text); pass `labels={{ title: 'Task' }}` to
 name the fields instead of showing their keys.
 
@@ -363,7 +395,7 @@ Mount `TargetScreen` as soon as the Context flow is wanted, **before** a view
 exists. It demands the active eligible connection's catalogue even if it mounted
 before login completed. Concurrent/StrictMode demand shares the runtime operation.
 After the loading status of that first load, `AppAccess` exposes the chooser,
-empty/error feedback and explicit **Check access** retry. Opening its `open` management also demands discovery. Ready,
+empty/error feedback and explicit **Check access** retry. Opening its `open` management also demands discovery, but no selection: without a Context flow it lists the Contexts and their access instead of a chooser. Ready,
 empty and failed catalogues are reused, with no effect-driven retry loop.
 Custom UI uses existing `useApp().refreshContexts(id)` and guarded `selectContext`;
 it supplies its own chooser/retry presentation. No separate activation API is needed.
@@ -423,8 +455,11 @@ function Notes() {
 `Overview` passes `{ subject, context }` from a row's IRI bindings, with the
 `GRAPH` binding as `context`.
 
-- **Opening.** `open` records the active connection and demands its catalogue,
-  as `TargetScreen` does; the editor needs no `TargetScreen`. `open()` resolves
+- **Opening.** `open` records the active connection and demands its catalogue;
+  the editor needs no `TargetScreen`. Unlike a `TargetScreen` it asks for no
+  selected Context: `AppAccess` offers no Context chooser for it and stays
+  hidden while the catalogue loads. A failed catalogue still shows there with
+  **Check access**; for an `unreadable` target, management (`open`) offers it. `open()` resolves
   `true` once the target is open. Whether it becomes `ready` is reported through
   `phase`. Opening another target and `close()` run under the leave policy.
 - **Phases.**
@@ -472,6 +507,27 @@ explicit one from `runtime.bindContext`). Explicitly cancelled lists stay
 cancelled until `reload()`.
 It does not poll, subscribe to other clients' writes or invalidate other Pods.
 An equal inline definition or `type` does not restart it; a real change reads again.
+
+By default each reload shows `loading` without data. Pass `retain: true` to
+`useList`, `useLoad` or `usePodLoad` to keep the last result on screen: while
+the same target reloads, `state` is `{ kind: 'loading', previous }`, and after a
+refresh that failed it is `{ kind: 'failed', error, previous }`. That data is
+still readable but was not confirmed by the failed read, so show a notice and a
+retry beside it. Retained data is only what a read returned; it is dropped for
+another connection, authorization, Context or definition, after lost read
+access or changed Pod grants, and after `cancel()`. A late answer never
+replaces it.
+
+```tsx
+const list = useList(taskFields, { retain: true });
+const rows =
+  list.state.kind === 'ready'
+    ? list.state.data
+    : 'previous' in list.state
+      ? list.state.previous
+      : undefined;
+// …render rows; for list.state.kind === 'failed' add a notice and a retry.
+```
 
 `useFieldUpdate(definition)` exposes `canMutate` (write access, pending and both
 unresolved outcomes together), `update`, `remove` and `notice`. Render
@@ -620,7 +676,7 @@ const runtime = createBrowserRuntime({
 
 `Tasks` is your existing app screen. The first visit offers **Sign in** without a
 Pod URL input; after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
-**Data access** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
+**Pods & sharing** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
 connections remain available for selection. Add the optional
 `contextIri` inside `preset` to declare an exact context instead. The SDK waits for
 fresh readable catalogue evidence, displays that fixed context instead of a
@@ -713,7 +769,7 @@ is inferred from an absent grant. Each server operation remains authoritative.
 
 `AppShell` accepts `title`, `style` and `components={{ Connections: MyPicker }}`.
 It composes a title/management header, `AppAccess`, and the content. Usable access
-hides administration; **Data access** opens it, including replacement controls.
+hides administration; **Pods & sharing** opens it, including replacement controls.
 Startup still gates content until durable storage is ready; later access loss or
 management toggles retain mounted content and its drafts. Read-only feedback stays
 visible. See [0.3 migration](migration.md#from-02-to-03) for the changed presentation.
@@ -729,6 +785,15 @@ EN/DE messages, `locale`/`timeZone` control formatting, and `direction` controls
 direction. RDF text language is selected explicitly in domain field definitions;
 a UI-language change never changes the RDF slot being edited.
 
+Without `language` and `locale`, the provider follows the browser: it reads
+`navigator.languages` once when it mounts and passes the first German or English
+preference (else the first valid one, else `en`) to `resolveLocale`, so messages
+and formatting follow the person. An explicit option keeps its own precedence: a
+`locale` alone also chooses the messages, and a `language` alone keeps English
+formatting. Pin English with `language="en" locale="en"`. Outside a browser, and
+for `createLocale`/`resolveLocale`, nothing reads browser globals; pass
+preferences to `resolveLocale(undefined, languages)` there.
+
 Failure text is overridden per code with `messages.errors`, independently of
 `messages.controls`. For example, `messages={{ errors: { catalogue: () =>
 'The context list could not be loaded.' } }}` replaces only that failure's text;
@@ -742,8 +807,16 @@ and an already structured `SdkFailure`. Both helpers are exported from
 `@sempods/app-sdk`; they present messages without showing diagnostic details.
 
 The default confirmation has keyboard focus, Escape cancellation and focus
-restoration. TODO inputs/buttons use visible focus and mobile touch targets.
-Applications retain responsibility for labels and accessibility of custom fields.
+restoration. It is a native modal `<dialog>` (role `alertdialog`) in the
+browser's top layer, so it stays visible and operable above an app's own dialog
+opened with `showModal()`, while that dialog and the rest of the guarded content
+are inert. Management (`AppAccess` with `open`) and editors can therefore live
+inside an app modal under the same `SempodsProvider`; the dialog itself, its
+close policy and its styling stay with the app (the apps template provides a
+recipe). Keep the app dialog mounted while a confirmation is pending; it cannot
+be closed from behind the confirmation. TODO inputs/buttons use visible focus
+and mobile touch targets. Applications retain responsibility for labels and
+accessibility of custom fields.
 
 ## A known Pod and replaceable access UI
 
@@ -792,12 +865,22 @@ A failed or cancelled callback activates the connection being signed in to,
 like a completed one; another connection's target returns once the person
 selects it again. Custom layouts that read `startup.interaction` directly
 should use `callbackNotice` to decide whether the outcome is still current. A
-restoring connection waits;
+restoring connection waits, and a `leaving` one (the page is navigating to the
+Pod's sign-in) keeps its screen inert and offers no sign-in;
 `active` and `renewing` are authenticated facts, not interchangeable with context
-access. Select a readable context explicitly; after a reload or re-authorization
+access. A cancelled re-authorization keeps the signed-in session
+(`startup.resumed`).
+
+A provider's `access_denied` answer does not say whether the person cancelled
+or declined, and its free-text `error_description` is never shown or
+interpreted. After a first sign-in the callback notice therefore says that no
+access was granted, next to the connection's one **Sign in**. After a declined
+re-authorization that kept the session, it says that sharing was not changed and
+`AppAccess` offers **Change sharing** as the one next step. Any other provider
+answer names its cause and also leads to **Sign in**. Select a readable context explicitly; after a reload or re-authorization
 the runtime reselects the last chosen one while it is still readable. `Check
 again` refreshes that connection's catalogue, while the sign-in button requests
-authorization (labelled `Update access` while signed in); neither retries a
+authorization (labelled `Change sharing` while signed in); neither retries a
 write. A busy/unavailable startup offers the SDK's reload guidance, not a call to
 the memoized initializer pretending to restart it. Saved-record warnings do not
 hide healthy connections. Sign-in cancellation by the leave guard is not an error.

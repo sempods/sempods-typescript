@@ -1,4 +1,11 @@
-import { useRef, useState, type ComponentType, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
@@ -44,7 +51,15 @@ export function UpdateNotice({
   current,
   unreadable,
   labels,
+  quiet = false,
 }: {
+  /**
+   * Shows nothing for a confirmed success (`saved`, `created`, `removed`),
+   * for example when the changed row is the confirmation. Refusals,
+   * conflicts, a save beside another change and unconfirmed outcomes still
+   * show with their controls.
+   */
+  readonly quiet?: boolean;
   /** Successfully read domain data, null for observed absence; undefined until compared. */
   readonly current?: unknown;
   /** Compared: the resource is present, but the definition cannot read it. */
@@ -67,6 +82,14 @@ export function UpdateNotice({
   const checked = comparison.outcome === outcome && comparison.checked;
   const checking = comparison.outcome === outcome && comparison.checking;
   if (!outcome) return null;
+  if (
+    quiet &&
+    (outcome.kind === 'created' ||
+      outcome.kind === 'removed' ||
+      (outcome.kind === 'saved' &&
+        !('alongside' in outcome && outcome.alongside)))
+  )
+    return null;
   const text =
     outcome.kind === 'saved'
       ? 'alongside' in outcome && outcome.alongside
@@ -197,6 +220,7 @@ export function ConnectionControls({
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
   const controls = m.controls;
+  const disconnectId = useId();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -227,8 +251,10 @@ export function ConnectionControls({
       ? state.preset?.contextIri
       : undefined;
   const displayedContext = connection?.selectedContext ?? fixedContext;
+  const leaving = connection?.session.kind === 'leaving';
   const unavailable =
     busy ||
+    leaving ||
     !state.startup ||
     state.startup.storage !== 'durable' ||
     Boolean(state.startupError) ||
@@ -364,6 +390,9 @@ export function ConnectionControls({
             !fixedContext &&
             connection?.catalogue.kind === 'ready' &&
             readable.length === 0 && <p role="status">{m.noContexts}</p>}
+          {leaving && (
+            <p role="status">{controls.leaving ?? controls.loading}</p>
+          )}
           {connection && (
             <>
               <button
@@ -386,6 +415,9 @@ export function ConnectionControls({
               )}
               <button
                 disabled={busy}
+                aria-describedby={
+                  controls.disconnectHint ? disconnectId : undefined
+                }
                 onClick={() => void action(() => app.disconnect(connection.id))}
               >
                 {controls.disconnect}
@@ -393,6 +425,9 @@ export function ConnectionControls({
             </>
           )}
         </div>
+      )}
+      {connection && controls.disconnectHint && (
+        <p id={disconnectId}>{controls.disconnectHint}</p>
       )}
       {(connection || state.preset) && (
         <details>
@@ -435,6 +470,14 @@ export function CallbackNotice() {
   const { messages } = useSdkLocale();
   const interaction = state.startup?.interaction;
   if (!state.callbackNotice) return null;
+  // A declined re-authorization changed nothing: a status, not an error.
+  if (interaction === 'cancelled' && state.startup?.resumed)
+    return (
+      <Notice>
+        {messages.controls.sharingUnchanged ??
+          messages.controls.signInCancelled}
+      </Notice>
+    );
   return (
     <Notice role="alert">
       {interaction === 'cancelled'
@@ -551,6 +594,9 @@ function Comparison({
   );
 }
 /** Default save/delete/review UI; children supply only domain fields.
+ * Delete asks in place first: only the confirmation sends one conditional
+ * DELETE of the version shown. Any later editor state (an edit, a read, another
+ * subject) withdraws the question; cancel or Escape keeps draft and target.
  * Success feedback retires with any later editor state and, for an editor from
  * `useResourceEditor`, when another write on the same target starts.
  * Inline scoped --sempods-* styles cover controls and comparisons without changing
@@ -561,7 +607,10 @@ export function ResourceEditor<D, U = D>({
   children,
   onChanged,
   labels,
+  quiet = false,
 }: {
+  /** As for `UpdateNotice`: no message for a confirmed save or delete. */
+  readonly quiet?: boolean;
   readonly editor: Editor<D, U> | null;
   readonly children: (draft: D, change: (draft: U) => void) => ReactNode;
   readonly onChanged?: () => void;
@@ -576,11 +625,30 @@ export function ResourceEditor<D, U = D>({
     /** The target's start count at this operation's own start. */
     start: number;
   } | null>(null);
+  // The editor state the person was asked about; any newer state withdraws it.
+  const [confirming, setConfirming] = useState<Editor<D>['state'] | null>(null);
+  const question = useId();
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
   const view = editor ? editorTarget(editor) : undefined;
   const starts = useStartCount(view);
+  const asking =
+    confirming !== null && confirming === editor?.state && confirming.canRemove;
+  useEffect(() => {
+    if (asking) cancelButton.current?.focus();
+    else if (returnFocus.current) {
+      returnFocus.current = false;
+      removeButton.current?.focus();
+    }
+  }, [asking]);
   if (!editor || editor.state.phase === 'loading')
     return <Notice>{m.loading}</Notice>;
   const state = editor.state;
+  const keep = () => {
+    returnFocus.current = true;
+    setConfirming(null);
+  };
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
     // A bound editor counts its own start synchronously in `action()`.
     const pending = action();
@@ -637,28 +705,59 @@ export function ResourceEditor<D, U = D>({
           </button>
         </section>
       )}
-      <div className="sp-sdk-actions">
-        <button
-          disabled={!state.canSave}
-          onClick={() => void act(() => editor.save())}
+      {asking ? (
+        <div
+          role="group"
+          aria-labelledby={question}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            keep();
+          }}
         >
-          {m.save}
-        </button>
-        <button
-          disabled={!state.canRemove}
-          onClick={() => void act(() => editor.remove())}
-        >
-          {m.remove}
-        </button>
-        <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
-          {m.discard}
-        </button>
-        {state.phase === 'blocked' && (
-          <button onClick={() => void editor.refresh()}>{m.refresh}</button>
-        )}
-      </div>
+          <p id={question}>{m.confirmRemove ?? m.remove}</p>
+          <div className="sp-sdk-actions">
+            <button
+              onClick={() => {
+                // Withdrawn first: a second press cannot send another DELETE.
+                setConfirming(null);
+                if (editor.state === confirming)
+                  void act(() => editor.remove());
+              }}
+            >
+              {m.remove}
+            </button>
+            <button ref={cancelButton} onClick={keep}>
+              {m.cancel}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="sp-sdk-actions">
+          <button
+            disabled={!state.canSave}
+            onClick={() => void act(() => editor.save())}
+          >
+            {m.save}
+          </button>
+          <button
+            ref={removeButton}
+            disabled={!state.canRemove}
+            onClick={() => setConfirming(state)}
+          >
+            {m.remove}
+          </button>
+          <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
+            {m.discard}
+          </button>
+          {state.phase === 'blocked' && (
+            <button onClick={() => void editor.refresh()}>{m.refresh}</button>
+          )}
+        </div>
+      )}
       {!state.review && (
         <UpdateNotice
+          quiet={quiet}
           outcome={
             feedback?.editor === editor &&
             feedback.state === state &&

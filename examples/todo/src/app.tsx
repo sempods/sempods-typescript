@@ -22,7 +22,7 @@ import type { BrowserRuntime } from '@sempods/app-sdk';
 import { emptyTask, supportedTasks, taskFields } from './domain.js';
 
 function TaskScreen() {
-  const { language, messages } = useSdkLocale();
+  const { language, messages, error } = useSdkLocale();
   const de = language === 'de';
   const list = useList(taskFields);
   const tasks =
@@ -43,6 +43,11 @@ function TaskScreen() {
     complete: de ? 'Erledigen' : 'Complete',
     reopen: de ? 'Wieder öffnen' : 'Reopen',
     skipped: de ? 'Nicht unterstützte Einträge' : 'Unsupported entries',
+    reload: de ? 'Neu laden' : 'Reload',
+    cancelled: de ? 'Das Laden wurde abgebrochen.' : 'Loading was cancelled.',
+    unavailable: de
+      ? 'Die Aufgaben können gerade nicht gelesen werden.'
+      : 'The tasks cannot be read right now.',
   };
 
   return (
@@ -67,15 +72,18 @@ function TaskScreen() {
       </form>
       <UpdateNotice {...creation.notice} />
       <UpdateNotice {...mutate.notice} />
+      {/* Each read state says what happened; none promises a draft. */}
       {list.state.kind === 'loading' && (
         <p role="status">{messages.controls.loading}</p>
       )}
-      {list.state.kind !== 'ready' && list.state.kind !== 'loading' && (
-        <p role="status">{messages.controls.readLost}</p>
+      {list.state.kind === 'failed' && (
+        <p role="alert">{error(list.state.error)}</p>
       )}
-      <button onClick={() => void list.reload()}>
-        {messages.controls.refresh}
-      </button>
+      {list.state.kind === 'cancelled' && <p role="status">{m.cancelled}</p>}
+      {list.state.kind === 'unavailable' && (
+        <p role="status">{m.unavailable}</p>
+      )}
+      <button onClick={() => void list.reload()}>{m.reload}</button>
       {tasks && (
         <>
           {tasks.skipped > 0 && (
