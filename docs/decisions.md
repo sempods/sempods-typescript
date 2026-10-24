@@ -109,7 +109,10 @@ switches and catalogue/label changes affect only Context-bound flows. The
 headless controller exposes the active reader in `AppSnapshot.pod`.
 Automatic labels load only for the selected, validated Context for every catalogue
 size, with fallback names and cache lifetime tied to access authority, so a Pod
-with thousands of Contexts never costs one description request per entry.
+with thousands of Contexts never costs one description request per entry. An app
+that shows more names, such as a list menu, asks for them explicitly with
+`loadContextLabels`: at most 20 named, readable Contexts per call, sharing the
+same cache and invalidation. Its size, never the catalogue's, sets the cost.
 
 Controller/provider `contextSelection: 'required' | 'on-demand'` defaults to
 `required`, preserving automatic catalogues and Context-based access UI.

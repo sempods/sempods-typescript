@@ -54,7 +54,12 @@ import {
   selectedTarget,
 } from './binding.js';
 import { bindPod } from './pod-binding.js';
-import { loadCatalogue, loadSelectedLabel, resetLabels } from './catalogue.js';
+import {
+  loadCatalogue,
+  loadContextLabels,
+  loadSelectedLabel,
+  resetLabels,
+} from './catalogue.js';
 import { browserPreferences, createContextMemory } from './context-memory.js';
 
 import { assertCredentialRecipient, type Entry } from './connection.js';
@@ -1084,6 +1089,11 @@ export function createBrowserRuntime(
         if (!eligible(e, generation)) return { kind: 'invalidated' };
         throw error;
       }
+    },
+    async loadContextLabels(id, iris) {
+      const e = get(id);
+      ready(e);
+      return loadContextLabels(e, { eligible, publish }, iris);
     },
     selectContext(id, iri) {
       const e = get(id);

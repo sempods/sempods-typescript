@@ -274,7 +274,10 @@ The runtime reads a registry description only for the currently selected,
 validated Context, including an explicitly selected, preset or remembered target.
 It publishes `catalogue.labels`: exact IRI → `rdfs:label` (SPS-CTX-032).
 Other picker entries use immediate IRI/derived-name fallbacks, even with a small
-catalogue. No catalogue size triggers a description sweep. Labels are display
+catalogue. No catalogue size triggers a description sweep. An app that names
+other Contexts, such as a list menu, calls `loadContextLabels(id, iris)` for at
+most 20 readable Contexts per call; those reads share the cache rules below,
+four at a time, and a selection change does not abort them. Labels are display
 text only, never identities or grants, and never block selection or data reads.
 Pending attempts coalesce; completed successes, absence and failures are cached
 within the connection/access lifetime. Unchanged catalogue reloads and

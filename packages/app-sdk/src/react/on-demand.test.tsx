@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode, useState } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -754,4 +754,68 @@ it('keeps on-demand drafts through permission loss/recovery and guards Context s
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(work);
   expect(screen.getByLabelText('Context draft')).toBe(input);
   expect((input as HTMLInputElement).value).toBe('Unfinished');
+});
+
+it('reads labels for an app-owned list menu on explicit demand, once per Context', async () => {
+  const f = await returned();
+  f.setDescriptions(async (url) =>
+    Response.json({
+      '@id': url,
+      '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+      'http://www.w3.org/ns/sparql-service-description#name': [{ '@id': url }],
+      'https://schema.sempods.org/public': [{ '@value': false }],
+      'http://www.w3.org/2000/01/rdf-schema#label': [
+        { '@value': url === work ? 'Groceries' : 'Hardware store' },
+      ],
+    }),
+  );
+  function ListMenu() {
+    const app = useApp();
+    const { connections, activeId } = useAppState();
+    const connection = connections.find((c) => c.id === activeId);
+    const fact = connection?.catalogue;
+    const shown =
+      fact?.kind === 'ready' ? fact.contexts.filter((c) => c.readable) : [];
+    const key = shown.map((c) => c.iri).join(' ');
+    const discover =
+      connection?.session.kind === 'active' && fact?.kind === 'unknown'
+        ? connection.id
+        : null;
+    const id = connection?.id;
+    useEffect(() => {
+      if (discover) void app.refreshContexts(discover);
+    }, [app, discover]);
+    useEffect(() => {
+      if (id && key) app.loadContextLabels(id, key.split(' ')).catch(() => {});
+    }, [app, id, key]);
+    const labels = fact && fact.kind !== 'unknown' ? fact.labels : undefined;
+    return (
+      <ul aria-label="Lists">
+        {shown.map((c) => (
+          <li key={c.iri}>{labels?.[c.iri] ?? c.iri.split('/').pop()}</li>
+        ))}
+      </ul>
+    );
+  }
+  render(
+    <StrictMode>
+      <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+        <ListMenu />
+      </SempodsProvider>
+    </StrictMode>,
+  );
+  const list = await screen.findByRole('list', { name: 'Lists' });
+  await waitFor(() =>
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Groceries', 'Hardware store']),
+  );
+  expect(
+    descriptions(f)
+      .map(([url]) => url)
+      .sort(),
+  ).toEqual([personal, work].sort());
+  expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
 });
