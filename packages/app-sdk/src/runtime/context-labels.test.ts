@@ -595,3 +595,26 @@ it('keeps a selected read that an explicit demand joined across a selection chan
   );
   expect(descriptions(f).map(([url]) => url)).toEqual([work, personal]);
 });
+
+it('settles a joined demand at once when its queued read is dropped', async () => {
+  const f = fixture({ preferences: null });
+  const iris = many(5);
+  f.setCatalogue(async () => catalogue(iris, []));
+  const stalled = deferred<Response>();
+  f.setDescriptions(() => stalled.promise);
+  const { runtime, id } = await listed(f);
+  const first = runtime.loadContextLabels(id, iris);
+  await vi.waitFor(() => expect(descriptions(f)).toHaveLength(4));
+  let joined = false;
+  const second = runtime
+    .loadContextLabels(id, [iris[4]!])
+    .then(() => (joined = true));
+  // The refresh revokes only the queued fifth Context.
+  f.setCatalogue(async () => catalogue(iris.slice(0, 4), []));
+  await runtime.loadContexts(id);
+  await second;
+  expect(joined).toBe(true);
+  expect(descriptions(f)).toHaveLength(4);
+  stalled.resolve(new Response(null, { status: 404 }));
+  await first;
+});

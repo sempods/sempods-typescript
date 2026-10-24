@@ -129,6 +129,11 @@ function labelRead(): LabelRead {
   const done = new Promise<void>((resolve) => (settle = resolve));
   return { controller: new AbortController(), done, settle };
 }
+/** Dropped reads settle at once: a joined demand must not wait for others. */
+function drop(read: LabelRead) {
+  read.controller.abort();
+  read.settle();
+}
 
 /** Completed attempts are cached, including absent/failed labels, for this access lifetime. */
 const labelStates = new WeakMap<
@@ -153,8 +158,8 @@ function labelState(e: Entry) {
 /** Session/generation/grant changes must not reuse old descriptive authority. */
 export function resetLabels(e: Entry) {
   const state = labelStates.get(e);
-  state?.pending?.read.controller.abort();
-  for (const read of state?.requested.values() ?? []) read.controller.abort();
+  if (state?.pending) drop(state.pending.read);
+  for (const read of state?.requested.values() ?? []) drop(read);
   labelStates.delete(e);
   if ('labels' in e.view.catalogue) {
     const fact = { ...e.view.catalogue };
@@ -183,12 +188,12 @@ function pruneLabels(
   for (const iri of state.cache.keys())
     if (changed(iri)) state.cache.delete(iri);
   if (state.pending && changed(state.pending.iri)) {
-    state.pending.read.controller.abort();
+    drop(state.pending.read);
     delete state.pending;
   }
   for (const [iri, read] of state.requested)
     if (changed(iri)) {
-      read.controller.abort();
+      drop(read);
       state.requested.delete(iri);
     }
 }
@@ -257,7 +262,7 @@ export function loadSelectedLabel(
     // An explicit demand that joined this read keeps it; only the
     // selection's own interest ends.
     if (state.requested.get(previous.iri) !== previous.read)
-      previous.read.controller.abort();
+      drop(previous.read);
     delete state.pending;
   }
   if (!iri || !startable(e, iri) || !owner.eligible(e)) return;
