@@ -1324,6 +1324,8 @@ try {
   await page
     .getByRole('button', { name: 'Pods & sharing', exact: true })
     .click();
+  // In management, signing in to another Pod is a collapsed section.
+  await page.getByText('Connect another Pod', { exact: true }).click();
   await page.getByLabel('Pod address').fill(origin + '/refusing');
   const beforeLoginRequired = exchanges;
   await Promise.all([
@@ -1627,6 +1629,8 @@ try {
   await editRegion.waitFor({ state: 'detached' });
   assert.equal(overviewNoteWrites, 2);
   // Switching Pods retires an editor that belongs to the previous connection.
+  // In management, signing in to another Pod is a collapsed section.
+  await page.getByText('Connect another Pod', { exact: true }).click();
   await page.getByLabel('Pod address').fill(origin + '/second-pod');
   await Promise.all([
     page.waitForURL('**/callback?**'),

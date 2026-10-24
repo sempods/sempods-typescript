@@ -13,6 +13,7 @@ import {
   useApp,
   useAppState,
   useContextDemand,
+  useContextDiscovery,
   useDiscoveryDemand,
   useWorkflowAccess,
   type AppActions,
@@ -72,7 +73,8 @@ const noSubscription = () => () => {};
  * Centered login/recovery UI beside, never around, app content. Uses the host's
  * existing runtime facts/actions; hides when a target is readable unless open.
  * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
- * offers Context selection only once a Context flow (`TargetScreen`, `open`) asks.
+ * offers Context selection only once a Context flow (`TargetScreen`) asks;
+ * management (`open`) lists the connected Pod's Contexts and their access first.
  * While the active connection restores, its Pod reader is not yet readable, or
  * its first demanded Context catalogue loads, it shows the loading status (plus
  * the active-Pod selector for several saved connections and the sign-in for
@@ -101,7 +103,10 @@ export function AppAccess({
 }: AppAccessProps) {
   const state = useAppState();
   const access = useWorkflowAccess();
-  const contextRequired = useContextDemand(open);
+  // Management lists the Contexts (discovery); only a Context flow, or the
+  // required mode, asks for a selected one.
+  const contextRequired = useContextDemand(false);
+  useContextDiscovery(open);
   // An explicit target (useContextEditor) needs the catalogue, not a selection.
   const discoveryDemand = useDiscoveryDemand();
   const discovery = contextRequired || discoveryDemand;
@@ -474,6 +479,133 @@ function AccessConnections({
       </select>
     </label>
   );
+  // Signing in to a new Pod. In management of a connection it is a secondary,
+  // collapsed action after the connected Pod.
+  const another = manage && Boolean(c);
+  const actions = (
+    <>
+      {c && (
+        <div className="sp-access-actions">
+          {active && (
+            <>
+              <button
+                disabled={unavailable}
+                onClick={() => void act(() => app.authorize(c.id))}
+              >
+                {m.controls.updateAccess}
+              </button>
+              {discovery && (
+                <button
+                  disabled={unavailable}
+                  onClick={() => void act(() => app.refreshContexts(c.id))}
+                >
+                  {m.controls.checkAccess}
+                </button>
+              )}
+            </>
+          )}
+          {(manage || c.session.kind === 'ended') && (
+            <button
+              disabled={unavailable}
+              aria-describedby={
+                m.controls.disconnectHint ? disconnectId : undefined
+              }
+              onClick={() => void act(() => app.disconnect(c.id))}
+            >
+              {m.controls.disconnect}
+            </button>
+          )}
+        </div>
+      )}
+      {c &&
+        (manage || c.session.kind === 'ended') &&
+        m.controls.disconnectHint && (
+          <p id={disconnectId} className="sp-access-hint">
+            {m.controls.disconnectHint}
+          </p>
+        )}
+    </>
+  );
+  const addPod =
+    showNew && state.allowedPods && state.allowedPods.length > 1 ? (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (choice) void act(() => connect(choice));
+        }}
+      >
+        <label>
+          {m.controls.yourPod}
+          <select
+            aria-label={m.controls.yourPod}
+            required
+            value={choice}
+            disabled={unavailable}
+            onChange={(event) => setUrl(event.target.value)}
+          >
+            <option value="" disabled>
+              {m.controls.choosePod}
+            </option>
+            {state.allowedPods.map((target) => (
+              <option key={target} value={target}>
+                {name(target)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {choice && <p className="sp-access-address">{choice}</p>}
+        <button
+          className={c ? undefined : 'sp-access-primary'}
+          disabled={
+            unavailable ||
+            !choice ||
+            state.connections.some(
+              (entry) =>
+                entry.podUrl === choice && entry.session.kind === 'restoring',
+            )
+          }
+        >
+          {m.controls.signIn}
+        </button>
+      </form>
+    ) : defaultSignIn ? (
+      defaultSignIn
+    ) : showNew && !state.allowedPods && (!state.preset || manage) ? (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void act(() => connect(enteredPod(url)));
+        }}
+      >
+        <label>
+          {m.controls.yourPod}
+          <input
+            type="text"
+            inputMode="url"
+            autoCapitalize="none"
+            spellCheck={false}
+            required
+            value={url}
+            aria-describedby={m.controls.podHint ? id : undefined}
+            placeholder="sempods.org/alice"
+            disabled={unavailable}
+            onChange={(event) => setUrl(event.target.value)}
+          />
+        </label>
+        {m.controls.podHint && (
+          <p id={id} className="sp-access-hint">
+            {m.controls.podHint}
+          </p>
+        )}
+        <button
+          className={c ? undefined : 'sp-access-primary'}
+          disabled={unavailable}
+        >
+          {m.controls.signIn}
+        </button>
+      </form>
+    ) : null;
+
   // The page is navigating to the Pod's sign-in: no action applies any more.
   if (c?.session.kind === 'leaving')
     return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
@@ -490,88 +622,12 @@ function AccessConnections({
     );
   return (
     <>
-      {showNew && state.allowedPods && state.allowedPods.length > 1 ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (choice) void act(() => connect(choice));
-          }}
-        >
-          <label>
-            {m.controls.yourPod}
-            <select
-              aria-label={m.controls.yourPod}
-              required
-              value={choice}
-              disabled={unavailable}
-              onChange={(event) => setUrl(event.target.value)}
-            >
-              <option value="" disabled>
-                {m.controls.choosePod}
-              </option>
-              {state.allowedPods.map((target) => (
-                <option key={target} value={target}>
-                  {name(target)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {choice && <p className="sp-access-address">{choice}</p>}
-          <button
-            className={c ? undefined : 'sp-access-primary'}
-            disabled={
-              unavailable ||
-              !choice ||
-              state.connections.some(
-                (entry) =>
-                  entry.podUrl === choice && entry.session.kind === 'restoring',
-              )
-            }
-          >
-            {m.controls.signIn}
-          </button>
-        </form>
-      ) : defaultSignIn ? (
-        defaultSignIn
-      ) : showNew && !state.allowedPods && (!state.preset || manage) ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void act(() => connect(enteredPod(url)));
-          }}
-        >
-          <label>
-            {m.controls.yourPod}
-            <input
-              type="text"
-              inputMode="url"
-              autoCapitalize="none"
-              spellCheck={false}
-              required
-              value={url}
-              aria-describedby={m.controls.podHint ? id : undefined}
-              placeholder="sempods.org/alice"
-              disabled={unavailable}
-              onChange={(event) => setUrl(event.target.value)}
-            />
-          </label>
-          {m.controls.podHint && (
-            <p id={id} className="sp-access-hint">
-              {m.controls.podHint}
-            </p>
-          )}
-          <button
-            className={c ? undefined : 'sp-access-primary'}
-            disabled={unavailable}
-          >
-            {m.controls.signIn}
-          </button>
-        </form>
-      ) : null}
+      {!another && addPod}
       {!active && !c && m.controls.loginHint && (
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
+      {manage && active && state.connections.length < 2 && podLine(c!.podUrl)}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
@@ -622,10 +678,32 @@ function AccessConnections({
         </p>
       )}
       {active &&
-        contextRequired &&
+        (contextRequired || manage) &&
         !fixedContext &&
         c?.catalogue.kind === 'ready' &&
         readable.length === 0 && <p role="status">{m.noContexts}</p>}
+      {manage &&
+        active &&
+        c?.catalogue.kind === 'loading' &&
+        !c.catalogue.contexts && <p role="status">{m.cataloguePending}</p>}
+      {manage && active && readable.length > 0 && (
+        // What the catalogue says this app may do in each readable Context:
+        // caller-relative rights, not which grant or public access gave them.
+        <section aria-label={m.controls.contextAccess}>
+          <p className="sp-access-label">{m.controls.contextAccess}</p>
+          <ul className="sp-access-contexts">
+            {readable.map((entry) => (
+              <li key={entry.iri}>
+                <span>{contextLabel(entry.iri)}</span>
+                <span className="sp-access-fact">
+                  {entry.writable ? m.controls.canChange : m.controls.canRead}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {manage && actions}
       {c && (
         <details>
           <summary>{m.controls.addresses}</summary>
@@ -644,46 +722,13 @@ function AccessConnections({
           </dl>
         </details>
       )}
-      {c && (
-        <div className="sp-access-actions">
-          {active && (
-            <>
-              <button
-                disabled={unavailable}
-                onClick={() => void act(() => app.authorize(c.id))}
-              >
-                {m.controls.updateAccess}
-              </button>
-              {discovery && (
-                <button
-                  disabled={unavailable}
-                  onClick={() => void act(() => app.refreshContexts(c.id))}
-                >
-                  {m.controls.checkAccess}
-                </button>
-              )}
-            </>
-          )}
-          {(manage || c.session.kind === 'ended') && (
-            <button
-              disabled={unavailable}
-              aria-describedby={
-                m.controls.disconnectHint ? disconnectId : undefined
-              }
-              onClick={() => void act(() => app.disconnect(c.id))}
-            >
-              {m.controls.disconnect}
-            </button>
-          )}
-        </div>
+      {!manage && actions}
+      {another && addPod && (
+        <details className="sp-access-another">
+          <summary>{m.controls.connectAnother}</summary>
+          {addPod}
+        </details>
       )}
-      {c &&
-        (manage || c.session.kind === 'ended') &&
-        m.controls.disconnectHint && (
-          <p id={disconnectId} className="sp-access-hint">
-            {m.controls.disconnectHint}
-          </p>
-        )}
       {failure && <p role="alert">{error(failure.cause)}</p>}
     </>
   );
@@ -709,6 +754,12 @@ const styles = `
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
 [data-sempods-access] :focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
+[data-sempods-access] .sp-access-contexts { list-style:none; margin:8px 0 16px; padding:0; text-align:start; }
+[data-sempods-access] .sp-access-contexts li { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; padding:8px 0; border-block-end:1px solid var(--sp-line); }
+[data-sempods-access] .sp-access-label, [data-sempods-access] .sp-access-fact { font-size:.875rem; color:var(--sp-muted); }
+[data-sempods-access] .sp-access-label { text-align:start; margin:16px 0 0; }
+[data-sempods-access] .sp-access-another { margin-top:16px; }
+
 [data-sempods-access] .sp-access-description { margin:8px 0 0; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-actions { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:16px; }
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }

@@ -136,7 +136,20 @@ opened management use an `h2`, below the app’s own main heading.
 
 The app may put a **Pods & sharing** button (`controls.dataAccess`) in its own menu or header. `open` shows
 management. In on-demand mode, opening it also demands Context discovery. Pod/context changes still run
-through the same leave guards. Supply `focusTarget` for focus recovery when a
+through the same leave guards.
+
+Management shows the connected Pod first: its name, then **Available to this
+app** with each readable Context and what this app may do there (**This app can
+read** or **This app can read and change**), then **Change sharing**, **Sign out**
+and the collapsed **Full addresses**. Signing in to another Pod comes last, as a
+collapsed **Connect another Pod** (`mode="multiple"` only). The access facts are
+the catalogue's rights for this app's session: they do not say whether a Context
+was shared in this consent or is public, and changing them is the Pod's consent
+step behind **Change sharing**, not an edit in the app. Management lists the
+Contexts without asking for a selection: the **Data context** chooser appears only
+in `'required'` mode or while a Context flow such as `TargetScreen` needs a
+selected Context. It sends one catalogue request and reads no per-Context labels
+beyond the selected one. Supply `focusTarget` for focus recovery when a
 focused access control disappears. For example, inside the provider:
 
 ```tsx
@@ -382,7 +395,7 @@ Mount `TargetScreen` as soon as the Context flow is wanted, **before** a view
 exists. It demands the active eligible connection's catalogue even if it mounted
 before login completed. Concurrent/StrictMode demand shares the runtime operation.
 After the loading status of that first load, `AppAccess` exposes the chooser,
-empty/error feedback and explicit **Check access** retry. Opening its `open` management also demands discovery. Ready,
+empty/error feedback and explicit **Check access** retry. Opening its `open` management also demands discovery, but no selection: without a Context flow it lists the Contexts and their access instead of a chooser. Ready,
 empty and failed catalogues are reused, with no effect-driven retry loop.
 Custom UI uses existing `useApp().refreshContexts(id)` and guarded `selectContext`;
 it supplies its own chooser/retry presentation. No separate activation API is needed.

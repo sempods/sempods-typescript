@@ -210,7 +210,8 @@ function useRetain(set: (change: (count: number) => number) => void) {
 }
 /**
  * Internal Context demand, independent of whether a BoundView already exists.
- * TargetScreen and open management ask AppAccess for a selected Context.
+ * TargetScreen asks AppAccess for a selected Context; open management only
+ * for discovery (`useContextDiscovery`).
  */
 export function useContextDemand(active: boolean) {
   const value = useDemand(active, 'selection');
