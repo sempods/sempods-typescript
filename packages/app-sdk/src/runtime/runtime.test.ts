@@ -418,17 +418,85 @@ it('retains an applied write result after a target switch', async () => {
 });
 it('reports blocked-locally on failed disconnect and permits explicit retry', async () => {
   const f = await logged();
+  const observed: unknown[] = [];
+  const off = f.runtime.subscribe(() => {
+    observed.push(f.runtime.getSnapshot()[0]?.session);
+  });
   const spy = vi
     .spyOn(IDBObjectStore.prototype, 'put')
     .mockImplementation(() => {
       throw new Error('write failed');
     });
-  expect(await f.runtime.disconnect(f.id)).toEqual({ kind: 'blocked-locally' });
+  const first = f.runtime.disconnect(f.id);
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual({
+    kind: 'ended',
+    problem: 'disconnected',
+  });
+  expect(await first).toEqual({ kind: 'blocked-locally' });
+  const failed = { kind: 'ended', problem: 'disconnected', saved: false };
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual(failed);
+  expect(observed.at(-1)).toEqual(failed);
+  const retry = f.runtime.disconnect(f.id);
+  expect(f.runtime.disconnect(f.id)).toBe(retry);
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual(failed);
+  expect(await retry).toEqual({ kind: 'blocked-locally' });
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual(failed);
   expect(
     await f.view.subjects.patch('urn:item', {}, { ifMatch: '"v1"' }),
   ).toEqual({ kind: 'not-sent', reason: 'stopped' });
   spy.mockRestore();
-  expect(await f.runtime.disconnect(f.id)).toEqual({ kind: 'disconnected' });
+  const saved = f.runtime.disconnect(f.id);
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual(failed);
+  expect(await saved).toEqual({ kind: 'disconnected' });
+  expect(f.runtime.getSnapshot()).toEqual([]);
+  expect(observed.at(-1)).toBeUndefined();
+  off();
+  f.runtime.dispose();
+  await settleLease();
+  const reloaded = createBrowserRuntime(f.options);
+  runtimes.push(reloaded);
+  await reloaded.initialize();
+  expect(reloaded.getSnapshot()).toEqual([]);
+});
+
+it('retains explicit sign-out failure when session-end cleanup also fails', async () => {
+  const f = await logged();
+  let signOut: ReturnType<BrowserRuntime['disconnect']> | undefined;
+  let requested = false;
+  const off = f.runtime.subscribe(() => {
+    if (f.runtime.getSnapshot()[0]?.session.kind === 'ended' && !requested) {
+      requested = true;
+      signOut = f.runtime.disconnect(f.id);
+    }
+  });
+  f.setQuery(
+    async () =>
+      new Response(null, {
+        status: 401,
+        headers: { 'www-authenticate': 'Bearer' },
+      }),
+  );
+  f.setToken(async () => {
+    // Renewal already claimed its token. Both subsequent retirements fail.
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+      throw new Error('write failed');
+    });
+    return new Response(null, { status: 400 });
+  });
+  await f.view.sparql.construct(query);
+  await vi.waitFor(() => expect(signOut).toBeDefined());
+  expect(await signOut).toEqual({ kind: 'blocked-locally' });
+  await vi.waitFor(() =>
+    expect(IDBObjectStore.prototype.put).toHaveBeenCalledTimes(2),
+  );
+  // Let the later automatic retirement publish its rejection handler too.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
+  off();
 });
 
 // Recovery cases belong to the coordinator, independent of the executor's own tests.

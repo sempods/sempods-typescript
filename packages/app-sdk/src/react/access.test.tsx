@@ -2,6 +2,7 @@
 import { StrictMode, useRef, useState } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { IDBObjectStore } from 'fake-indexeddb';
 import {
   act,
   cleanup,
@@ -14,6 +15,7 @@ import {
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AppAccess,
+  ConnectionControls,
   SempodsProvider,
   TargetScreen,
   useApp,
@@ -47,6 +49,78 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+it.each([
+  ['access', 'en'],
+  ['access', 'de'],
+  ['controls', 'en'],
+  ['controls', 'de'],
+] as const)(
+  'retains failed sign-out feedback across a provider remount and retries (%s, %s)',
+  async (surface, language) => {
+    const f = fixture();
+    const { runtime, id } = await f.login();
+    cleanups.push(() => runtime.dispose());
+    const text =
+      language === 'en'
+        ? 'Sign-out was not saved on this device. Try signing out again.'
+        : 'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.';
+    const label = language === 'en' ? 'Sign out' : 'Abmelden';
+    const ui = (
+      <StrictMode>
+        <SempodsProvider
+          runtime={runtime}
+          language={language}
+          messages={{ controls: { disconnectHint: '' } }}
+        >
+          {surface === 'access' ? (
+            <AppAccess appName="Tasks" open />
+          ) : (
+            <ConnectionControls />
+          )}
+        </SempodsProvider>
+      </StrictMode>
+    );
+    const first = render(ui);
+    const button = await screen.findByRole('button', { name: label });
+    const write = vi
+      .spyOn(IDBObjectStore.prototype, 'put')
+      .mockImplementation(() => {
+        throw new Error('private fixture storage detail');
+      });
+    await act(async () => button.click());
+    const notice = await screen.findByRole('alert');
+    expect(notice.textContent).toBe(text);
+    expect(button.getAttribute('aria-describedby')).toBe(notice.id);
+    expect(document.body.textContent).not.toMatch(
+      /reload|neu laden|private fixture/i,
+    );
+    expect(runtime.getSnapshot()[0]?.session).toEqual({
+      kind: 'ended',
+      problem: 'disconnected',
+      saved: false,
+    });
+
+    first.unmount();
+    render(ui);
+    expect((await screen.findByRole('alert')).textContent).toBe(text);
+    const retry = screen.getByRole('button', { name: label });
+    await waitFor(() =>
+      expect((retry as HTMLButtonElement).disabled).toBe(false),
+    );
+    await act(async () => retry.click());
+    await waitFor(() =>
+      expect((retry as HTMLButtonElement).disabled).toBe(false),
+    );
+    expect((await screen.findByRole('alert')).textContent).toBe(text);
+    expect(runtime.getSnapshot().some((c) => c.id === id)).toBe(true);
+    write.mockRestore();
+    await act(async () => retry.click());
+    await waitFor(() => expect(runtime.getSnapshot()).toEqual([]));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: label })).toBeNull();
+  },
+);
 
 it.each(['en', 'de'] as const)(
   'one permitted Pod needs only explicit sign-in, supports an optional icon and retries (%s)',

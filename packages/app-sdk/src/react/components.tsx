@@ -175,6 +175,8 @@ export function endedMessage(
   m: SdkMessages,
   signingIn = false,
 ) {
+  if (session.saved === false)
+    return m.controls.disconnectFailed ?? m.controls.retry;
   if (signingIn && session.failure)
     return describeFailure(m.errors, session.failure);
   return session.problem === 'interrupted' ||
@@ -236,6 +238,11 @@ export function ConnectionControls({
     null,
   );
   const connection = state.connections.find((c) => c.id === state.activeId);
+  const disconnectFailed =
+    connection?.session.kind === 'ended' && connection.session.saved === false;
+  const disconnectHint = disconnectFailed
+    ? controls.disconnectFailed
+    : controls.disconnectHint;
   const action = async (task: () => Promise<unknown>) => {
     if (inFlight.current || state.changing || state.confirmingLeave) return;
     inFlight.current = true;
@@ -422,9 +429,7 @@ export function ConnectionControls({
               )}
               <button
                 disabled={busy}
-                aria-describedby={
-                  controls.disconnectHint ? disconnectId : undefined
-                }
+                aria-describedby={disconnectHint ? disconnectId : undefined}
                 onClick={() => void action(() => app.disconnect(connection.id))}
               >
                 {controls.disconnect}
@@ -433,8 +438,10 @@ export function ConnectionControls({
           )}
         </div>
       )}
-      {connection && controls.disconnectHint && (
-        <p id={disconnectId}>{controls.disconnectHint}</p>
+      {connection && disconnectHint && (
+        <p id={disconnectId} role={disconnectFailed ? 'alert' : undefined}>
+          {disconnectHint}
+        </p>
       )}
       {(connection || state.preset) && (
         <details>

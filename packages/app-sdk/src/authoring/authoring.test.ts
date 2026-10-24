@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { IDBObjectStore } from 'fake-indexeddb';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   fixture,
@@ -28,6 +29,46 @@ async function connected() {
 }
 const title = fields({ title: text('urn:name', { language: null }) });
 const body = { '@id': 'urn:item', 'urn:name': [{ '@value': 'Original' }] };
+it('keeps guarded disconnect Boolean semantics and retains its failure across controller remounts (#122)', async () => {
+  const f = await connected();
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().activeId).toBe(f.id));
+  const write = vi
+    .spyOn(IDBObjectStore.prototype, 'put')
+    .mockImplementation(() => {
+      throw new Error('fixture storage failure');
+    });
+  const disconnect = vi.spyOn(f.runtime, 'disconnect');
+  const unregister = app.register({
+    dirty: () => false,
+    blocked: () => true,
+    discard: vi.fn(),
+  });
+  expect(await app.disconnect(f.id)).toBe(false);
+  expect(disconnect).not.toHaveBeenCalled();
+  unregister();
+  expect(await app.disconnect(f.id)).toBe(true);
+  expect(app.getSnapshot().connections[0]?.session).toEqual({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
+  app.stop();
+  const remounted = createAppController(f.runtime);
+  remounted.start();
+  cleanups.push(() => remounted.stop());
+  await vi.waitFor(() => expect(remounted.getSnapshot().activeId).toBe(f.id));
+  expect(remounted.getSnapshot().connections[0]?.session).toEqual({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
+  write.mockRestore();
+  expect(await remounted.disconnect(f.id)).toBe(true);
+  expect(remounted.getSnapshot().connections).toEqual([]);
+});
 it.each(['save', 'remove'] as const)(
   'a write-start observer can dispose a bound editor before its first %s (#120)',
   async (operation) => {

@@ -5,6 +5,7 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AppShell,
   AppAccess,
+  ConnectionControls,
   ResourceEditor,
   SempodsProvider,
   TargetScreen,
@@ -19,6 +20,7 @@ const podUrl = location.origin + '/alice';
 const identity =
   new URL(location.href).searchParams.get('identity') ?? 'preset';
 const accessUI = identity.startsWith('access-');
+const signOutUI = identity.startsWith('signout-');
 // Management and an editor inside the app's own modal dialog.
 const modal = identity === 'access-modal';
 const language = identity.endsWith('-de') ? 'de' : 'en';
@@ -123,8 +125,24 @@ function Evidence() {
         <output aria-label="Selected context">
           {state.view?.contextIri ?? ''}
         </output>
+        <output aria-label="Sign-out failure">
+          {state.connections.some(
+            (c) => c.session.kind === 'ended' && c.session.saved === false,
+          )
+            ? 'failed'
+            : ''}
+        </output>
       </div>
-      {modal ? (
+      {signOutUI ? (
+        identity.includes('-controls-') ? (
+          <ConnectionControls />
+        ) : (
+          <AppAccess
+            appName="Sign-out fixture"
+            open={state.connections.length > 0}
+          />
+        )
+      ) : modal ? (
         <ModalEvidence />
       ) : accessUI ? (
         <>

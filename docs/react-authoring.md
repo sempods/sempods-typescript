@@ -720,6 +720,16 @@ using this standard preset. Both paths share the same runtime and leave guards.
 
 ## Selection and draft lifetime
 
+`disconnect(id)` keeps its guarded `Promise<boolean>` contract: `true` means
+the action ran, not that sign-out was saved. If persistence fails, the connection
+in `useAppState().connections` retains an ended session with
+`problem: 'disconnected', saved: false`. `AppAccess` and `ConnectionControls`
+show `controls.disconnectFailed` beside the existing **Sign out** button, also
+after a provider remount over the same runtime. Custom controls should offer
+the same explicit retry. The fact stays while retrying; success removes the
+connection and its message. Do not suggest reloading: the saved session may
+still restore until a retry succeeds.
+
 `useApp()` returns the guarded actions only: `selectConnection`, `selectContext`,
 `connect`, `authorize`, `disconnect`, `refreshContexts(id)` and `navigate(action)`
 for row/page changes under the same policy. Read state with `useAppState`,
@@ -924,9 +934,9 @@ The host owns one provider/runtime and one leave-guard registry. For an existing
 provider, compose `KnownPodControls` and the recipe's content there instead of
 nesting `KnownPodExample`, which creates a provider. Dispose the host runtime at
 shutdown; provider unmount alone does not dispose it. Direct browser reload/close
-is outside the SDK navigation guard. The recipe has no logout control: the current
-facade does not expose the runtime's `blocked-locally` disconnect outcome, so it
-cannot promise durable logout from its returned boolean.
+is outside the SDK navigation guard. The recipe has no logout control. A host can
+add `ConnectionControls`, or use the guarded `disconnect` action and its retained
+session failure fact as described in [Selection and draft lifetime](#selection-and-draft-lifetime).
 
 The packed browser check runs this exact recipe against installed SDK archives:
 PKCE callback, explicit context, reauthorization back to the remembered context,

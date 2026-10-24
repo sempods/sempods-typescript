@@ -1,4 +1,4 @@
-/* global document, window, URLSearchParams, sessionStorage */
+/* global document, window, URLSearchParams, sessionStorage, IDBObjectStore, DOMException */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
@@ -252,7 +252,8 @@ try {
         }
         if (
           url.searchParams.get('identity') === 'preset' ||
-          url.searchParams.get('identity')?.startsWith('access-')
+          url.searchParams.get('identity')?.startsWith('access-') ||
+          url.searchParams.get('identity')?.startsWith('signout-')
         ) {
           res.end(
             '<html style="color-scheme: light dark"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/preset.js"></script></html>',
@@ -1121,6 +1122,84 @@ try {
   assert.equal(exchanges, beforePreset + 2);
   console.log(
     'Packed preset React app: one-click PKCE, exact context, guarded reauthorization, connection reuse and durable reload passed.',
+  );
+  for (const surface of ['access', 'controls']) {
+    for (const language of ['en', 'de']) {
+      const appUrl =
+        origin + '/app?identity=signout-' + surface + '-' + language;
+      const signIn = language === 'en' ? 'Sign in' : 'Anmelden';
+      const signOut = language === 'en' ? 'Sign out' : 'Abmelden';
+      const message =
+        language === 'en'
+          ? 'Sign-out was not saved on this device. Try signing out again.'
+          : 'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.';
+      await page.goto(appUrl);
+      await Promise.all([
+        page.waitForURL('**/callback?**'),
+        page.getByRole('button', { name: signIn, exact: true }).click(),
+      ]);
+      await page.waitForURL(appUrl);
+      await page.waitForFunction(() =>
+        document
+          .querySelector('[aria-label="Selected context"]')
+          ?.textContent?.endsWith('/work'),
+      );
+      // Fail the browser storage operation, not the runtime result or UI fact.
+      await page.evaluate(() => {
+        const put = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = () => {
+          throw new DOMException(
+            'fixture storage failure',
+            'QuotaExceededError',
+          );
+        };
+        Object.assign(window, {
+          restoreSignOutStorage: () => {
+            IDBObjectStore.prototype.put = put;
+          },
+        });
+      });
+      const retry = page.getByRole('button', { name: signOut, exact: true });
+      await retry.click();
+      const notice = page.getByRole('alert');
+      await notice.waitFor();
+      assert.equal(await notice.textContent(), message);
+      assert.equal(
+        await page
+          .getByLabel('Sign-out failure', { exact: true })
+          .textContent(),
+        'failed',
+      );
+      assert.equal(
+        await retry.getAttribute('aria-describedby'),
+        await notice.getAttribute('id'),
+      );
+      assert.doesNotMatch(
+        await page.locator('body').innerText(),
+        /reload|neu laden|fixture storage/i,
+      );
+      assert.equal(
+        await page.getByLabel('Connections', { exact: true }).textContent(),
+        '1',
+      );
+      await page.evaluate(() => window.restoreSignOutStorage());
+      await retry.click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector('[aria-label="Connections"]')?.textContent ===
+          '0',
+      );
+      assert.equal(await notice.count(), 0);
+      await page.reload();
+      await page.getByRole('button', { name: signIn, exact: true }).waitFor();
+      assert.equal(
+        await page.getByLabel('Connections', { exact: true }).textContent(),
+        '0',
+      );
+    }
+  }
+  console.log(
+    'Packed sign-out: AppAccess and ConnectionControls EN/DE show failed IndexedDB writes, allow explicit retry and stay signed out after reload.',
   );
   // The SDK's leave confirmation over an app's own modal dialog (#102): a
   // native top-layer dialog, visible and operable above it, for a dirty editor

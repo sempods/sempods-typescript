@@ -86,6 +86,12 @@ refused request. Screens receive bound views/readers without credentials.
 See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/browser-runtime.md)
 for startup outcomes, restrictions and recovery limits.
 
+If **Sign out** cannot be saved on this device, the connection stays locally
+blocked and exposes an ended session with `saved: false`. `AppAccess` and
+`ConnectionControls` explain the failure and offer signing out again. The
+guarded action's Boolean says whether it ran; the retained fact tells custom
+controls that a retry is needed. Successful retry removes the connection.
+
 ## Pod reads without a context choice
 
 `runtime.bindPod(connectionId)` supplies read-only `select`/`construct` methods

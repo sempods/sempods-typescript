@@ -549,9 +549,14 @@ token endpoint and TLS. Reloaded data is structurally checked and rediscovered;
 same-origin script access is not a separate trust boundary.
 
 `disconnect()` blocks locally immediately and writes a durable tombstone.
-It returns `blocked-locally` if that write fails; offer explicit retry instead of
-claiming logout survived a reload. A late exchange cannot resurrect the disconnected
-connection. The SDK components label it **Sign out** and note that it applies
+If that write fails, it returns `blocked-locally` and retains
+`session: { kind: 'ended', problem: 'disconnected', saved: false }` on the
+connection. The fact survives UI remounts and remains during explicit retries;
+a successful retry removes the connection. It is not persisted across reloads:
+the saved session may still restore. Offer **Sign out** again, not a reload.
+A late exchange cannot resurrect the locally blocked connection.
+`AppAccess` and `ConnectionControls` show this failure next to **Sign out** in
+EN/DE (`controls.disconnectFailed`). The ordinary hint notes that sign-out applies
 only to this device: it neither revokes sharing on the Pod, deletes Pod data nor
 signs out at the Pod's provider. `dispose()` releases memory/locks while
 retaining durable sessions.

@@ -378,7 +378,11 @@ export function createAppController(
         return runtime.beginAuthorization(id);
       });
     },
-    /** Guarded like `selectConnection`. */
+    /**
+     * Guarded like `selectConnection`. `true` means the action ran, not that
+     * sign-out was saved. On failure the connection's ended session retains
+     * `saved: false`; a successful retry removes the connection.
+     */
     disconnect(id: string) {
       return guard(async () => {
         if ((await runtime.disconnect(id)).kind === 'disconnected')
