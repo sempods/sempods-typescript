@@ -458,7 +458,10 @@ export async function renameWithEditor(
 - Typing continues while saving; only the submitted draft counts as saved.
   Losing read access (`setAccess`) clears server data but keeps the draft and
   any open review of a write; after it returns, `refresh()` adopts the current
-  version silently when the draft is unchanged. A `refresh()` requested while a
+  version silently when the draft is unchanged. Revoking access or disposing the
+  editor from its initial saving notification stops the first save/delete with
+  `not-ready`; after dispatch, the actual write outcome is retained.
+  A `refresh()` requested while a
   read or write is in flight runs once afterwards, so it is never lost. Reads
   that are cancelled, stopped or invalidated by
   the runtime are `problem: { kind: 'unavailable', reason }`, never absence.
