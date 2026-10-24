@@ -27,6 +27,7 @@ import {
 } from './components.js';
 import { SdkStyles } from './styles.js';
 import { contextName, podName, distinctName } from './names.js';
+import { presentAccess, type ConnectionBody } from './access-presentation.js';
 
 export interface AppAccessProps {
   readonly appName: string;
@@ -54,7 +55,10 @@ export interface AppAccessProps {
   readonly podAddress?: 'visible' | 'hidden';
   /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
-  /** Focus here if a focused access control disappears after successful recovery. */
+  /**
+   * Return focus here once the focused access surface hides and its guarded
+   * transition ends. Visible retry or error feedback does not trigger this.
+   */
   readonly focusTarget?: RefObject<HTMLElement | null>;
   readonly components?: {
     readonly Connections?: ComponentType<ConnectionControlsProps>;
@@ -115,22 +119,8 @@ export function AppAccess({
     state.pod?.getSnapshot ?? (() => unavailablePod),
     state.pod?.getSnapshot ?? (() => unavailablePod),
   );
-  const readable =
-    state.contextSelection === 'on-demand' ? podAccess.read : access.read;
   const { messages: m, direction, error } = useSdkLocale();
   const heldFocus = useRef(false);
-  const catalogueFailed = access.connection?.catalogue.kind === 'failed';
-  const session = access.connection?.session;
-  const leaving = session?.kind === 'leaving';
-  // While the page leaves for a re-authorization the earlier access stays on
-  // screen: hidden as it was unless something already needed attention.
-  const needsAttention =
-    session?.kind === 'leaving'
-      ? !session.subject ||
-        Boolean(access.connection?.missingRequiredScopes.length)
-      : !readable ||
-        (contextRequired && !access.read) ||
-        (discovery && catalogueFailed);
   // A declined re-authorization kept this active connection's session. Its
   // one next step stays offered until an attempt actually leaves for the
   // Pod: starting one clears the callback notice, and a declined leave prompt,
@@ -159,7 +149,6 @@ export function AppAccess({
     setRetryFailure(null);
   const retry = noticed ?? (keptActive && offered === kept.id ? kept.id : null);
   const failedRetry = retry && retryFailure?.id === retry ? retryFailure : null;
-  const hidden = !needsAttention && !open && !state.callbackNotice && !retry;
   // The active connection is still being validated (restoring, signed in while
   // its Pod reader is not yet readable, or loading its first demanded Context
   // catalogue) and nothing awaits a decision: show the loading status, not the
@@ -185,22 +174,29 @@ export function AppAccess({
   const catalogueSettled =
     settledHere === c?.id ||
     (c?.catalogue.kind === 'loading' && Boolean(c.catalogue.contexts));
-  const validating =
-    !open &&
-    !state.callbackNotice &&
-    Boolean(c) &&
-    c?.catalogue.kind !== 'failed' &&
-    !(contextRequired && c?.catalogue.kind === 'ready') &&
-    (c?.session.kind === 'restoring' ||
-      ((c?.session.kind === 'active' || c?.session.kind === 'renewing') &&
-        c.missingRequiredScopes.length === 0 &&
-        ((contextRequired && !catalogueSettled) || !podAccess.read)));
+  const presentation = presentAccess({
+    state,
+    connection: c,
+    podReadable: podAccess.read,
+    viewReadable: access.read,
+    hasView: Boolean(state.view),
+    demand: contextRequired
+      ? 'selection'
+      : discoveryDemand
+        ? 'discovery'
+        : 'none',
+    manage: open,
+    catalogueSettled,
+    retry: Boolean(retry),
+    ...(headingLevel === undefined ? {} : { headingLevel }),
+  });
+  const { body, notice, heading: Heading, namesApp } = presentation;
+  const hidden = !presentation.visible;
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
-    // focus only after that transition, when the host control can receive it.
+    // focus only after that transition and once access feedback has hidden.
     if (
-      !needsAttention &&
-      !open &&
+      hidden &&
       !state.changing &&
       !state.confirmingLeave &&
       heldFocus.current
@@ -208,37 +204,8 @@ export function AppAccess({
       heldFocus.current = false;
       focusTarget?.current?.focus();
     }
-  }, [
-    needsAttention,
-    open,
-    focusTarget,
-    state.changing,
-    state.confirmingLeave,
-  ]);
-  const Heading =
-    (headingLevel ?? (open || state.view ? 2 : 1)) === 2 ? 'h2' : 'h1';
-  // The app's own name (and description) heads sign-in; management and
-  // recovery under a host title are about Pods & sharing.
-  const namesApp = !(open || state.view || headingLevel === 2);
+  }, [hidden, focusTarget, state.changing, state.confirmingLeave]);
   const Connections = components?.Connections;
-  const available = state.startup?.storage === 'durable' && !state.startupError;
-  const active =
-    access.connection?.session.kind === 'active' ||
-    access.connection?.session.kind === 'renewing';
-  const missingScopes = Boolean(
-    access.connection?.missingRequiredScopes.length,
-  );
-  const showNotice =
-    active &&
-    available &&
-    (missingScopes ||
-      (discovery && catalogueFailed) ||
-      (contextRequired &&
-        Boolean(
-          access.connection?.selectedContext ||
-          access.connection?.catalogue.kind !== 'ready' ||
-          state.preset?.contextIri,
-        )));
   return (
     <section
       onFocusCapture={() => {
@@ -255,7 +222,7 @@ export function AppAccess({
       hidden={hidden}
       data-sempods-access=""
       data-sempods-ui="access"
-      data-initial={!state.view && !open ? '' : undefined}
+      data-initial={presentation.initial ? '' : undefined}
       aria-label={m.controls.dataAccess}
       dir={direction}
       className={className}
@@ -266,7 +233,7 @@ export function AppAccess({
         {styles}
       </style>
       <div className="sp-access-content">
-        {(needsAttention || open) && (
+        {(presentation.attention || open) && (
           <header>
             {icon && (
               <div className="sp-access-icon" aria-hidden="true">
@@ -279,18 +246,18 @@ export function AppAccess({
             )}
           </header>
         )}
-        {state.startupError ? (
+        {body === 'startup-error' ? (
           <p role="alert">{error(state.startupError)}</p>
-        ) : !state.startup ? (
+        ) : body === 'starting' ? (
           <p role="status">{m.controls.loading}</p>
-        ) : state.startup.storage === 'busy' ? (
+        ) : body === 'busy' ? (
           <p role="alert">{m.controls.busy}</p>
-        ) : state.startup.storage === 'unavailable' ? (
+        ) : body === 'unavailable' ? (
           <p role="alert">{m.controls.storage}</p>
         ) : (
           <>
             <CallbackNotice />
-            {retry && !needsAttention && !open && (
+            {body === 'retry' && retry && (
               // The one next step after an unchanged re-authorization: the
               // connection view (and its actions) is not shown here.
               <div className="sp-access-actions">
@@ -312,17 +279,19 @@ export function AppAccess({
                 </button>
               </div>
             )}
-            {failedRetry && !needsAttention && !open && (
+            {body === 'retry' && failedRetry && (
               <p role="alert">{error(failedRetry.cause)}</p>
             )}
-            {(needsAttention || open) && (
+            {(body === 'leaving' ||
+              body === 'loading' ||
+              body === 'connections') && (
               <>
                 {Connections ? (
-                  leaving ? (
+                  body === 'leaving' ? (
                     <p role="status">
                       {m.controls.leaving ?? m.controls.loading}
                     </p>
-                  ) : validating ? (
+                  ) : body === 'loading' ? (
                     <p role="status">{m.controls.loading}</p>
                   ) : (
                     <Connections
@@ -336,12 +305,12 @@ export function AppAccess({
                     discovery={discovery}
                     manage={open}
                     mode={mode}
-                    validating={validating}
+                    body={body}
                     podAddress={podAddress}
                     {...(podNames ? { podNames } : {})}
                   />
                 )}
-                {showNotice && !validating && <AccessNotice />}
+                {notice && <AccessNotice />}
               </>
             )}
           </>
@@ -365,7 +334,7 @@ function AccessConnections({
   podNames,
   contextRequired,
   discovery,
-  validating,
+  body,
   podAddress,
 }: {
   readonly manage: boolean;
@@ -375,8 +344,7 @@ function AccessConnections({
   readonly contextRequired: boolean;
   /** Catalogue discovery is demanded, with or without a selection. */
   readonly discovery: boolean;
-  /** Only the loading status (and a switch to another saved Pod) applies. */
-  readonly validating: boolean;
+  readonly body: ConnectionBody;
 }) {
   const app = useApp();
   const state = useAppState();
@@ -665,11 +633,11 @@ function AccessConnections({
     ) : null;
 
   // The page is navigating to the Pod's sign-in: no action applies any more.
-  if (c?.session.kind === 'leaving')
+  if (body === 'leaving')
     return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
   // A restore that never settles must not hide signing in to the configured
   // Pod or switching to another saved one.
-  if (validating)
+  if (body === 'loading')
     return (
       <>
         {defaultSignIn}

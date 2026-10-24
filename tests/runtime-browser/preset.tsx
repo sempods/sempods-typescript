@@ -44,7 +44,7 @@ const runtime = createBrowserRuntime({
           },
         }
       : {}),
-  ...(identity === 'access-one'
+  ...(identity === 'access-one' || identity.startsWith('access-focus-')
     ? { allowedPods: [podUrl] }
     : identity === 'access-set'
       ? { allowedPods: [podUrl, location.origin + '/bob'] }

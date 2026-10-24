@@ -149,8 +149,9 @@ step behind **Change sharing**, not an edit in the app. Management lists the
 Contexts without asking for a selection: the **Data context** chooser appears only
 in `'required'` mode or while a Context flow such as `TargetScreen` needs a
 selected Context. It sends one catalogue request and reads no per-Context labels
-beyond the selected one. Supply `focusTarget` for focus recovery when a
-focused access control disappears. For example, inside the provider:
+beyond the selected one. Supply `focusTarget` to return focus once the focused
+access surface hides and its guarded transition ends. Visible retry or error
+feedback does not trigger this focus return. For example, inside the provider:
 
 ```tsx
 function AppContent() {
