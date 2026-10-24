@@ -618,3 +618,18 @@ it('settles a joined demand at once when its queued read is dropped', async () =
   stalled.resolve(new Response(null, { status: 404 }));
   await first;
 });
+
+it('resolves the originating demand when its reads are dropped, even if the transport ignores abort', async () => {
+  const f = fixture({ preferences: null });
+  const never = new Promise<Response>(() => {});
+  f.setDescriptions(() => never);
+  const { runtime, id } = await listed(f);
+  let done = false;
+  const demand = runtime
+    .loadContextLabels(id, [work, personal])
+    .then(() => (done = true));
+  await vi.waitFor(() => expect(descriptions(f)).toHaveLength(2));
+  await runtime.disconnect(id);
+  await demand;
+  expect(done).toBe(true);
+});

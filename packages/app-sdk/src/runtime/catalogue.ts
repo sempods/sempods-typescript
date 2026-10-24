@@ -369,8 +369,11 @@ export async function loadContextLabels(
       }
     }
   };
-  await Promise.all([
-    ...Array.from({ length: Math.min(LABEL_CONCURRENCY, queue.length) }, work),
-    ...joined,
-  ]);
+  // The caller waits for its reads, not the workers: a dropped read settles at
+  // once even while a transport that ignores abort still holds its worker.
+  const started = queue.map(([, read]) => read.done);
+  void Promise.all(
+    Array.from({ length: Math.min(LABEL_CONCURRENCY, queue.length) }, work),
+  );
+  await Promise.all([...started, ...joined]);
 }
