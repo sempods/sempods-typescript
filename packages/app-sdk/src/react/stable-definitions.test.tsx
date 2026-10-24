@@ -8,6 +8,7 @@ import {
   flag,
   text,
   type ResourceEditor as Editor,
+  type Snapshot,
 } from '@sempods/client-sdk/edit';
 import type { JsonLd, PodFetch } from '@sempods/client-sdk';
 import { fixture, resourceIri } from '../runtime/fixture.test.js';
@@ -20,6 +21,7 @@ import {
   useList,
   useLoad,
   useResourceEditor,
+  useView,
 } from './index.js';
 
 const cleanups: (() => void)[] = [];
@@ -347,6 +349,116 @@ it('R1: an inline definition shared by useList and useFieldUpdate updates and re
   expect(outcome).toMatchObject({ kind: 'removed' });
   expect(writes).toEqual(['PATCH', 'DELETE']);
 });
+
+it.each([
+  ['update', 'list unmount'],
+  ['remove', 'list unmount'],
+  ['update', 'provider remount'],
+  ['remove', 'provider remount'],
+] as const)(
+  'keeps a snapshot usable for %s after %s',
+  async (operation, lifetime) => {
+    const f = await setup();
+    let retained: Snapshot<Task> | undefined;
+    let source: ReturnType<typeof useView> | undefined;
+    let listUnmounted = false;
+    let mutation: ReturnType<typeof useFieldUpdate<Task>> | undefined;
+    let mutationSource: ReturnType<typeof useView> | undefined;
+    function List() {
+      const list = useList(inline());
+      const view = useView();
+      useLayoutEffect(() => {
+        if (list.state.kind === 'ready') {
+          retained = list.state.data.items[0];
+          source = view;
+        }
+      }, [list.state, view]);
+      useLayoutEffect(
+        () => () => {
+          listUnmounted = true;
+        },
+        [],
+      );
+      return null;
+    }
+    function Mutation() {
+      // Constructed separately, after the list is gone; no shared definition prop.
+      mutation = useFieldUpdate(
+        fields(
+          {
+            done: flag('urn:status', { on: 'urn:done', off: 'urn:open' }),
+            title: text('urn:title', { language: null }),
+          },
+          { type: 'urn:Task' },
+        ),
+      );
+      mutationSource = useView();
+      return null;
+    }
+    function Host({
+      phase,
+    }: {
+      readonly phase: 'list' | 'empty' | 'mutation';
+    }) {
+      return (
+        <SempodsProvider runtime={f.runtime}>
+          <TargetScreen>
+            {phase === 'list' ? (
+              <List />
+            ) : phase === 'mutation' ? (
+              <Mutation />
+            ) : null}
+          </TargetScreen>
+        </SempodsProvider>
+      );
+    }
+    const mounted = render(<Host phase="list" />);
+    await waitFor(() => expect(retained).toBeDefined());
+    const snapshot = retained!;
+    expect(snapshot.data).toEqual({ title: 'One', done: false });
+    expect(source).toBeTruthy();
+    const queries = count(f, '/_system/sparql/query');
+    if (lifetime === 'provider remount') mounted.unmount();
+    else mounted.rerender(<Host phase="empty" />);
+    expect(listUnmounted).toBe(true);
+    expect(mutation).toBeUndefined();
+    if (lifetime === 'provider remount') render(<Host phase="mutation" />);
+    else mounted.rerender(<Host phase="mutation" />);
+    await waitFor(() => expect(mutation?.canMutate).toBe(true));
+    expect(mutationSource).toBe(source);
+
+    const requests: { method: string; iri: string; ifMatch: string | null }[] =
+      [];
+    f.setResource(async (url, init) => {
+      requests.push({
+        method: init?.method ?? 'GET',
+        iri: resourceIri(url),
+        ifMatch: new Headers(init?.headers).get('if-match'),
+      });
+      return f.resource(url, init);
+    });
+    let outcome: unknown;
+    await act(async () => {
+      outcome =
+        operation === 'update'
+          ? await mutation!.update(snapshot, { done: true })
+          : await mutation!.remove(snapshot);
+    });
+    expect(outcome).toEqual({
+      kind: operation === 'update' ? 'saved' : 'removed',
+    });
+    expect(requests).toEqual([
+      { method: 'GET', iri: snapshot.iri, ifMatch: null },
+      {
+        method: operation === 'update' ? 'PATCH' : 'DELETE',
+        iri: snapshot.iri,
+        ifMatch: '"v1"',
+      },
+    ]);
+    // The operation uses the retained row, without a newly mounted list/query.
+    expect(count(f, '/_system/sparql/query')).toBe(queries);
+  },
+);
 
 it('R2: warns when a real field change replaces an editor with a pending removal', async () => {
   const f = await setup();
