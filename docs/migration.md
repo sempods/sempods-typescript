@@ -59,6 +59,11 @@ Check these points:
   carry the last data as `previous`. Without it nothing changes. Code that
   builds `LoadState` values itself still compiles; exhaustive checks over
   `kind` are unchanged.
+- **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
+  `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,
+  readable Contexts into `catalogue.labels`, for example for a list menu.
+  Nothing changes without the call: only the selected Context's label loads
+  automatically. Test doubles that implement `BrowserRuntime` add the method.
 - **Quiet success.** `UpdateNotice` and `ResourceEditor` accept `quiet` to show
   nothing for a confirmed save, creation or deletion; problems and unconfirmed
   outcomes still show.
