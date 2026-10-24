@@ -405,8 +405,40 @@ it supplies its own chooser/retry presentation. No separate activation API is ne
 validated view, even when the Pod overview is ready. Fresh catalogue evidence
 validates preset/remembered targets only on demand; an unreadable exact preset
 never falls back to another Context. Selection immediately uses fallback names;
-only the selected Context's label loads, and a pending/failed label never gates
-reads, selection or drafts. The policy does not change the complete-catalogue API.
+only the selected Context's label loads automatically, and a pending/failed
+label never gates reads, selection or drafts. The policy does not change the
+complete-catalogue API.
+
+A custom menu that names other Contexts asks for their labels explicitly with
+`useApp().loadContextLabels(id, iris)`: at most 20 IRIs per call, only readable
+Contexts of the ready catalogue, display text only. Results arrive in
+`catalogue.labels` and share the selected label's cache; a failed or absent
+label keeps the fallback name without retry.
+
+```tsx
+function ListMenu({ connection }: { readonly connection: Connection }) {
+  const app = useApp();
+  const fact = connection.catalogue;
+  const shown =
+    fact.kind === 'ready'
+      ? fact.contexts.filter((c) => c.readable).slice(0, 20)
+      : [];
+  const key = shown.map((c) => c.iri).join(' ');
+  useEffect(() => {
+    // Display text only: a connection that ended meanwhile rejects; keep the fallback.
+    if (key)
+      app.loadContextLabels(connection.id, key.split(' ')).catch(() => {});
+  }, [app, connection.id, key]);
+  const labels = fact.kind !== 'unknown' ? fact.labels : undefined;
+  return (
+    <ul>
+      {shown.map((c) => (
+        <li key={c.iri}>{labels?.[c.iri] ?? c.iri.split('/').pop()}</li>
+      ))}
+    </ul>
+  );
+}
+```
 
 The [copyable overview recipe](../examples/todo/recipes/pod-overview.tsx) combines
 a Pod SELECT with provenance, a later Context-bound creation form and editing of
@@ -734,8 +766,9 @@ Do not suggest reloading: the saved session may still restore until a retry
 succeeds.
 
 `useApp()` returns the guarded actions only: `selectConnection`, `selectContext`,
-`connect`, `authorize`, `disconnect`, `refreshContexts(id)` and `navigate(action)`
-for row/page changes under the same policy. Read state with `useAppState`,
+`connect`, `authorize`, `disconnect` and `navigate(action)` for row/page changes
+under the same policy, plus the unguarded reads `refreshContexts(id)` and
+`loadContextLabels(id, iris)`. Read state with `useAppState`,
 `useConnections` and `useView`; the runtime and leave-dialog internals are not
 part of it. `useSelection<T>()` provides a guarded `select(value)` and
 `selected` value for the common row case. Place app-local screen state inside

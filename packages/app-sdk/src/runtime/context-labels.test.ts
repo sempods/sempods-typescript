@@ -418,3 +418,119 @@ it.each(['ready', 'refused', 'offline'] as const)(
     else expect(labels(runtime)).toBeUndefined();
   },
 );
+
+const many = (n: number) =>
+  Array.from({ length: n }, (_, i) => `${pod}/_system/contexts/c${i}`);
+async function listed(f = fixture({ preferences: null })) {
+  const result = await signedIn(f);
+  await result.runtime.loadContexts(result.id);
+  return { ...f, ...result };
+}
+
+it('reads labels for explicitly named readable Contexts only, four at a time, without a selection', async () => {
+  const f = fixture({ preferences: null });
+  const iris = many(12);
+  f.setCatalogue(async () => catalogue(iris, []));
+  let open = 0;
+  let peak = 0;
+  f.setDescriptions(async (url) => {
+    peak = Math.max(peak, ++open);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    open--;
+    return description(url, `Label ${url.split('/').pop()}`);
+  });
+  const { runtime, id } = await listed(f);
+  const unlisted = `${pod}/_system/contexts/elsewhere`;
+  await runtime.loadContextLabels(id, [
+    ...iris.slice(0, 9),
+    unlisted,
+    iris[0]!,
+  ]);
+  expect(peak).toBe(4);
+  expect(descriptions(f).map(([url]) => url)).toEqual(iris.slice(0, 9));
+  expect(labels(runtime)).toEqual(
+    Object.fromEntries(
+      iris.slice(0, 9).map((iri) => [iri, `Label ${iri.split('/').pop()}`]),
+    ),
+  );
+  expect(runtime.getSnapshot()[0]!.selectedContext).toBeNull();
+});
+
+it('rejects more than 20 Contexts before any request and accepts exactly 20', async () => {
+  const f = fixture({ preferences: null });
+  f.setCatalogue(async () => catalogue(many(21), []));
+  f.setDescriptions(async (url) => description(url, 'Label'));
+  const { runtime, id } = await listed(f);
+  await expect(runtime.loadContextLabels(id, many(21))).rejects.toMatchObject({
+    name: 'RuntimeError',
+    problem: 'configuration',
+  });
+  expect(descriptions(f)).toHaveLength(0);
+  await runtime.loadContextLabels(id, many(20));
+  expect(descriptions(f)).toHaveLength(20);
+});
+
+it('coalesces explicit demands, shares the selected label cache and never retries a failure', async () => {
+  const f = fixture({ preferences: null });
+  const gate = deferred<Response>();
+  f.setDescriptions((url) =>
+    url === work
+      ? gate.promise
+      : Promise.resolve(new Response(null, { status: 403 })),
+  );
+  const { runtime, id } = await listed(f);
+  const first = runtime.loadContextLabels(id, [work, personal]);
+  const second = runtime.loadContextLabels(id, [work]);
+  runtime.selectContext(id, work);
+  await second;
+  gate.resolve(description(work, 'Work'));
+  await first;
+  expect(labels(runtime)).toEqual({ [work]: 'Work' });
+  await runtime.loadContextLabels(id, [work, personal]);
+  runtime.selectContext(id, personal);
+  await runtime.loadContexts(id);
+  expect(descriptions(f).map(([url]) => url)).toEqual([work, personal]);
+  expect(labels(runtime)).toEqual({ [work]: 'Work' });
+});
+
+it('keeps explicit reads across a selection change and drops them on revoked rights or disconnect', async () => {
+  const f = fixture({ preferences: null });
+  const gates = new Map<string, ReturnType<typeof deferred<Response>>>();
+  const signals = new Map<string, AbortSignal | undefined>();
+  f.setDescriptions((url, init) => {
+    const gate = deferred<Response>();
+    gates.set(url, gate);
+    signals.set(url, init?.signal ?? undefined);
+    return gate.promise;
+  });
+  const { runtime, id } = await listed(f);
+  const demand = runtime.loadContextLabels(id, [work, personal]);
+  await vi.waitFor(() => expect(gates.size).toBe(2));
+  runtime.selectContext(id, work);
+  expect(signals.get(personal)?.aborted).toBe(false);
+  f.setCatalogue(async () => catalogue([work], [work]));
+  await runtime.loadContexts(id);
+  expect(signals.get(personal)?.aborted).toBe(true);
+  gates.get(personal)!.resolve(description(personal, 'Revoked'));
+  gates.get(work)!.resolve(description(work, 'Work'));
+  await demand;
+  expect(labels(runtime)).toEqual({ [work]: 'Work' });
+
+  f.setCatalogue(async () => catalogue());
+  await runtime.loadContexts(id);
+  gates.clear();
+  const later = runtime.loadContextLabels(id, [personal]);
+  await vi.waitFor(() => expect(gates.size).toBe(1));
+  await runtime.disconnect(id);
+  expect(signals.get(personal)?.aborted).toBe(true);
+  gates.get(personal)!.resolve(description(personal, 'Stale'));
+  await later;
+  expect(runtime.getSnapshot()).toHaveLength(0);
+});
+
+it('rejects an explicit demand for a connection that is not signed in', async () => {
+  const f = fixture({ preferences: null });
+  const { runtime, id } = await listed(f);
+  await runtime.disconnect(id);
+  await expect(runtime.loadContextLabels(id, [work])).rejects.toThrow();
+});

@@ -190,6 +190,22 @@ export interface BrowserRuntime {
     id: string,
     options?: { readonly signal?: AbortSignal },
   ): Promise<BoundRead<CatalogueResult>>;
+  /**
+   * Reads registry labels for Contexts the app names explicitly, for example
+   * the entries of its own list menu, and publishes them in `catalogue.labels`.
+   * Without this call only the selected Context's label is read.
+   *
+   * At most 20 IRIs per call (more reject with RuntimeError (configuration)
+   * before any request). Only Contexts the ready catalogue lists as readable
+   * are read; others are ignored. Labels are display text, never identities or
+   * grants, and never block selection or reads. Cached, coalesced and
+   * invalidated like the selected label: a failure or absent label keeps the
+   * IRI/name fallback without automatic retry, and changed rights, grants,
+   * session end or a new authorization drop them. A selection change does not
+   * abort them. Resolves once every started read settled or was dropped; the
+   * labels arrive through the snapshot.
+   */
+  loadContextLabels(id: string, iris: readonly string[]): Promise<void>;
   selectContext(id: string, iri: string): void;
   bind(id: string): BoundView;
   /**

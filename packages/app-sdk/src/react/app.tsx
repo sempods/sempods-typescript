@@ -33,7 +33,7 @@ const Context = createContext<{
 const Demand = createContext({ selection: false, discovery: false });
 /**
  * Guarded user actions for custom screens and replacement controls. Each
- * guarded action (all except `refreshContexts`) resolves `false`, discarding
+ * guarded action (all except `refreshContexts` and `loadContextLabels`) resolves `false`, discarding
  * nothing, if the connection that was active when the person was asked stops
  * being active outside a guarded action.
  */
@@ -54,6 +54,12 @@ export interface AppActions {
   disconnect(id: string): Promise<boolean>;
   /** Reload a connection's context catalogue (access facts). */
   refreshContexts(id: string): Promise<unknown>;
+  /**
+   * Read the labels of at most 20 explicitly named readable Contexts into
+   * `catalogue.labels`, for example for a list menu; see
+   * `BrowserRuntime.loadContextLabels`. Display text only; not guarded.
+   */
+  loadContextLabels(id: string, iris: readonly string[]): Promise<void>;
   /** Run local row/page navigation under the same leave policy. */
   navigate(action: () => void | Promise<void>): Promise<boolean>;
 }
@@ -125,6 +131,8 @@ export function SempodsProvider({
       authorize: (id: string) => controller.authorize(id),
       disconnect: (id: string) => controller.disconnect(id),
       refreshContexts: (id: string) => runtime.loadContexts(id),
+      loadContextLabels: (id: string, iris: readonly string[]) =>
+        runtime.loadContextLabels(id, iris),
       navigate: (action: () => void | Promise<void>) =>
         controller.navigate(action),
     });
