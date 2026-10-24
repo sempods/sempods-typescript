@@ -40,6 +40,36 @@ Check these points:
   your own.
 - **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
   0.6 holds the earlier session; downgrading to 0.5 is not supported.
+- **Leave confirmation in the top layer.** The provider's "Discard unsaved
+  changes?" prompt is now a native modal `<dialog>` (still role
+  `alertdialog`, same texts and buttons) instead of a fixed `div` with
+  `z-index: 1000`. It shows above app dialogs opened with `showModal()`.
+  Remove any z-index workaround for it; tests that find it by role keep
+  working. Without top-layer support (for example jsdom) it renders in place.
+- **`AppAccess` description.** The new optional `description` prop shows a
+  short line under the app name on the sign-in screen; it is display only.
+- **Lists can keep their rows while reloading.** `useList`, `useLoad` and
+  `usePodLoad` accept `{ retain: true }`; `createViewLoader` takes the same
+  option as a third argument. With it, `LoadState`'s `loading` and `failed`
+  carry the last data as `previous`. Without it nothing changes. Code that
+  builds `LoadState` values itself still compiles; exhaustive checks over
+  `kind` are unchanged.
+- **Quiet success.** `UpdateNotice` and `ResourceEditor` accept `quiet` to show
+  nothing for a confirmed save, creation or deletion; problems and unconfirmed
+  outcomes still show.
+- **Management shows the connected Pod first.** With `open`, `AppAccess` lists
+  the connected Pod, its readable Contexts with **This app can read** / **This
+  app can read and change**, then the actions and **Full addresses**; signing in
+  to another Pod moved to a collapsed **Connect another Pod** at the end.
+  End-to-end tests that fill **Pod address** in management first expand that
+  section. New message keys `controls.contextAccess`, `canRead`, `canChange`
+  and `connectAnother` are optional in `UiMessages`.
+- **On-demand management no longer asks for a selection.** In
+  `contextSelection: 'on-demand'`, opening management still loads the
+  catalogue but shows the **Data context** chooser only while a Context flow
+  (`TargetScreen`) needs a selected Context. An app that let people pick its
+  Context there mounts its Context flow, or offers its own guarded
+  `selectContext` control.
 
 ## From 0.5.0 to 0.5.1
 

@@ -51,7 +51,15 @@ export function UpdateNotice({
   current,
   unreadable,
   labels,
+  quiet = false,
 }: {
+  /**
+   * Shows nothing for a confirmed success (`saved`, `created`, `removed`),
+   * for example when the changed row is the confirmation. Refusals,
+   * conflicts, a save beside another change and unconfirmed outcomes still
+   * show with their controls.
+   */
+  readonly quiet?: boolean;
   /** Successfully read domain data, null for observed absence; undefined until compared. */
   readonly current?: unknown;
   /** Compared: the resource is present, but the definition cannot read it. */
@@ -74,6 +82,14 @@ export function UpdateNotice({
   const checked = comparison.outcome === outcome && comparison.checked;
   const checking = comparison.outcome === outcome && comparison.checking;
   if (!outcome) return null;
+  if (
+    quiet &&
+    (outcome.kind === 'created' ||
+      outcome.kind === 'removed' ||
+      (outcome.kind === 'saved' &&
+        !('alongside' in outcome && outcome.alongside)))
+  )
+    return null;
   const text =
     outcome.kind === 'saved'
       ? 'alongside' in outcome && outcome.alongside
@@ -591,7 +607,10 @@ export function ResourceEditor<D, U = D>({
   children,
   onChanged,
   labels,
+  quiet = false,
 }: {
+  /** As for `UpdateNotice`: no message for a confirmed save or delete. */
+  readonly quiet?: boolean;
   readonly editor: Editor<D, U> | null;
   readonly children: (draft: D, change: (draft: U) => void) => ReactNode;
   readonly onChanged?: () => void;
@@ -738,6 +757,7 @@ export function ResourceEditor<D, U = D>({
       )}
       {!state.review && (
         <UpdateNotice
+          quiet={quiet}
           outcome={
             feedback?.editor === editor &&
             feedback.state === state &&

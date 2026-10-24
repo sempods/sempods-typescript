@@ -1297,6 +1297,189 @@ it.each(['missing scopes', 'ended session'] as const)(
   },
 );
 
+it.each(['en', 'de'] as const)(
+  'manages the connected Pod first, with Context access, and adds another Pod collapsed (%s)',
+  async (language) => {
+    const de = language === 'de';
+    const f = fixture();
+    const logged = await f.login();
+    cleanups.push(() => logged.runtime.dispose());
+    render(
+      <SempodsProvider runtime={logged.runtime} language={language}>
+        <AppAccess appName="Shopping" open />
+      </SempodsProvider>,
+    );
+    const region = await screen.findByRole('region', {
+      name: de ? 'Pods & Freigaben' : 'Pods & sharing',
+    });
+    const list = await within(region).findByRole('region', {
+      name: de ? 'Für diese App verfügbar' : 'Available to this app',
+    });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(
+      de
+        ? [
+            'workDiese App kann lesen und ändern',
+            'personalDiese App kann lesen',
+          ]
+        : ['workThis app can read and change', 'personalThis app can read'],
+    );
+    const change = within(region).getByRole('button', {
+      name: de ? 'Freigabe ändern' : 'Change sharing',
+    });
+    const addresses = within(region).getByText(
+      de ? 'Vollständige Adressen' : 'Full addresses',
+    );
+    const another = within(region).getByText(
+      de ? 'Weiteren Pod verbinden' : 'Connect another Pod',
+    );
+    const order = (a: Element, b: Element) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
+    // Pod line, Contexts, the action, technical addresses, then another Pod.
+    expect(
+      order(within(region).getByText('pod.example/alice'), list),
+    ).toBeTruthy();
+    expect(order(list, change)).toBeTruthy();
+    expect(order(change, addresses)).toBeTruthy();
+    expect(order(addresses, another)).toBeTruthy();
+    const details = another.closest('details')!;
+    expect(details.open).toBe(false);
+    expect(
+      within(details).getByLabelText(de ? 'Pod-Adresse' : 'Pod address'),
+    ).toBeTruthy();
+    // Only the first catalogue, and no request for any Context but the
+    // selected one's label.
+    expect(f.count('/_system/contexts')).toBe(1);
+    expect(
+      f.fetch.mock.calls
+        .map(([url]) => url)
+        .filter((url) => url.includes('/_system/contexts/'))
+        .every((url) => url.startsWith(work)),
+    ).toBe(true);
+  },
+);
+
+it('keeps sign-in to a new Pod first and open without a connection, and omits it for one Pod', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  const view = render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Shopping" open />
+    </SempodsProvider>,
+  );
+  const input = await screen.findByLabelText('Pod address');
+  expect(input.closest('details')).toBeNull();
+  expect(screen.queryByText('Connect another Pod')).toBeNull();
+  view.unmount();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <AppAccess appName="Shopping" mode="single" open />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('button', { name: 'Change sharing' });
+  expect(screen.queryByText('Connect another Pod')).toBeNull();
+  expect(screen.queryByLabelText('Pod address')).toBeNull();
+});
+
+it.each(['empty', 'loading'] as const)(
+  'says so when management finds %s Context access',
+  async (mode) => {
+    const f = fixture({ preferences: null });
+    cleanups.push(() => f.runtime.dispose());
+    const { authorization } = await f.begin();
+    f.runtime.dispose();
+    await settleLease();
+    const returned = f.returned(authorization);
+    cleanups.push(() => returned.dispose());
+    if (mode === 'empty') f.setCatalogue(async () => catalogue([], []));
+    else f.setCatalogue(() => new Promise<Response>(() => {}));
+    render(
+      <SempodsProvider runtime={returned} contextSelection="on-demand">
+        <AppAccess appName="Shopping" open />
+      </SempodsProvider>,
+    );
+    if (mode === 'empty')
+      expect(
+        await screen.findByText(
+          'No readable contexts. Review access on this pod.',
+        ),
+      ).toBeTruthy();
+    else
+      expect(
+        await screen.findByText(
+          'Loading context catalogue… Access is unknown.',
+        ),
+      ).toBeTruthy();
+    expect(
+      screen.queryByRole('region', { name: 'Available to this app' }),
+    ).toBeNull();
+  },
+);
+
+it('shows a display-only description under the app name, not in management', async () => {
+  const f = fixture({ allowedPods: [pod] });
+  cleanups.push(() => f.runtime.dispose());
+  const view = render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Shopping" description="Shopping made easy" />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('button', { name: 'Sign in' });
+  const heading = screen.getByRole('heading', { name: 'Shopping', level: 1 });
+  expect(heading.nextElementSibling?.textContent).toBe('Shopping made easy');
+  view.rerender(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Shopping" description="Shopping made easy" open />
+    </SempodsProvider>,
+  );
+  expect(
+    screen.getByRole('heading', { name: 'Pods & sharing', level: 2 }),
+  ).toBeTruthy();
+  expect(screen.queryByText('Shopping made easy')).toBeNull();
+  expect(f.fetch).not.toHaveBeenCalled();
+});
+
+it('asks to leave in a native modal dialog that a close request cancels', async () => {
+  const f = fixture();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  function Share() {
+    const app = useApp();
+    const { activeId } = useAppState();
+    return <button onClick={() => void app.authorize(activeId!)}>Share</button>;
+  }
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <Host />
+      <Share />
+    </SempodsProvider>,
+  );
+  const draft = await screen.findByLabelText('Draft');
+  fireEvent.change(draft, { target: { value: 'Keep this' } });
+  const share = screen.getByRole('button', { name: 'Share' });
+  share.focus();
+  for (const close of ['escape', 'cancel'] as const) {
+    fireEvent.click(share);
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(dialog.hasAttribute('open')).toBe(true);
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Keep editing' }),
+    );
+    if (close === 'escape') fireEvent.keyDown(dialog, { key: 'Escape' });
+    else fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(document.activeElement).toBe(share);
+    expect((draft as HTMLInputElement).value).toBe('Keep this');
+  }
+  expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('active');
+});
+
 it.each(['app', 'management'] as const)(
   'shows no signed-out state while the page leaves for a re-authorization (%s)',
   async (from) => {

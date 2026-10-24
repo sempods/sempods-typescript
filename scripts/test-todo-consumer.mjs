@@ -738,6 +738,8 @@ try {
     await page
       .getByRole('button', { name: 'Pods & sharing', exact: true })
       .click();
+    // Signing in to another Pod is the collapsed secondary section.
+    await page.getByText('Connect another Pod', { exact: true }).click();
     const addPod = page.getByRole('button', { name: 'Sign in', exact: true });
     assert.equal(
       await addPod.evaluate(
@@ -802,10 +804,12 @@ try {
       .click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
-    if (!custom)
+    if (!custom) {
       await page
         .getByRole('button', { name: 'Pods & sharing', exact: true })
         .click();
+      await page.getByText('Connect another Pod', { exact: true }).click();
+    }
     // New drafts cannot start while connect awaits discovery/registration.
     let releaseDiscovery;
     const discoveryStarted = new Promise((resolve) => {
