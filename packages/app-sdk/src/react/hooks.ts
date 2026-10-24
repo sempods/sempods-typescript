@@ -131,8 +131,25 @@ function useDefinition<T>(input: T, hook: string) {
  * latest `read` is used on each (re)load, so an inline function never loops.
  * Call `reload()` after changing what `read` returns.
  */
-export function useLoad<T>(read: ViewRead<T>) {
-  return useBoundLoad(useView(), read);
+export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
+  const { state, reload, cancel } = useBoundLoad(
+    useView(),
+    read,
+    loading,
+    options,
+  );
+  return { state, reload, cancel };
+}
+/**
+ * `retain`: a reload of the same target keeps the last data visible as
+ * `state.previous` while `loading`, and after a failed refresh as
+ * `previous` of `failed`, which still needs a notice and a retry. A new
+ * connection, authorization, target or definition, lost read access and
+ * changed Pod grants start without it. It is never optimistic: only data a
+ * read returned is kept. It may change between renders.
+ */
+export interface LoadOptions {
+  readonly retain?: boolean;
 }
 /**
  * Loads the active BoundPod using the same cancellable/bounded loader as useLoad.
@@ -141,21 +158,27 @@ export function useLoad<T>(read: ViewRead<T>) {
  * No reader means unavailable after startup completes or fails. Inline callbacks do not loop:
  * call reload after changing the query or other read inputs.
  */
-export function usePodLoad<T>(read: PodRead<T>) {
+export function usePodLoad<T>(read: PodRead<T>, options: LoadOptions = {}) {
   const { pod, startup, startupError } = useAppState();
-  return useBoundLoad(
+  const { state, reload, cancel } = useBoundLoad(
     pod,
     read,
     startupSettled({ startup, startupError }) ? unavailable : loading,
+    options,
   );
+  return { state, reload, cancel };
 }
 function useBoundLoad<T, H extends BoundView | BoundPod>(
   view: H | null,
   read: (handle: H, signal: AbortSignal) => ReturnType<ViewRead<T>>,
   empty: LoadState<T> = loading,
+  { retain = false }: LoadOptions = {},
 ) {
   const latest = useRef(read);
   latest.current = read;
+  // The loader reads it at each (re)load.
+  const loaderOptions = useRef({ retain });
+  loaderOptions.current.retain = retain;
   const [active, setActive] = useState<{
     view: H;
     loader: ReturnType<typeof createViewLoader<T, H>>;
@@ -165,8 +188,10 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
       setActive(null);
       return;
     }
-    const loader = createViewLoader<T, H>(view, (target, signal) =>
-      latest.current(target, signal),
+    const loader = createViewLoader<T, H>(
+      view,
+      (target, signal) => latest.current(target, signal),
+      loaderOptions.current,
     );
     setActive({ view, loader });
     void loader.reload();
@@ -182,16 +207,26 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     await loader?.reload();
     return loader?.getSnapshot();
   }, [loader]);
+  /** A reload for changed read inputs: retained data belongs to the old ones. */
+  const restart = useCallback(async () => {
+    await loader?.reload({ fresh: true });
+    return loader?.getSnapshot();
+  }, [loader]);
   return {
     state,
     reload,
+    restart,
     cancel: () => loader?.cancel(),
   };
 }
-/** A typed list, refreshed after this bound target's own confirmed mutations. */
+/**
+ * A typed list, refreshed after this bound target's own confirmed mutations.
+ * With `retain` (see `LoadOptions`) those refreshes and `reload()` keep the
+ * rows visible as `state.previous`.
+ */
 export function useList<D>(
   definition: FieldDefinition<D>,
-  options: { readonly type?: string } = {},
+  options: { readonly type?: string } & LoadOptions = {},
 ) {
   const view = useView();
   const type = options.type;
@@ -211,22 +246,26 @@ export function useList<D>(
     // `latest` is a ref and keeps its identity.
     [listKey, latest, type],
   );
-  const load = useLoad(read);
+  const load = useBoundLoad(view, read, loading, {
+    retain: options.retain ?? false,
+  });
   // Until the read for a changed definition or type has started, the rows on
   // screen belong to the previous definition and cannot be mutated with the
-  // current one: report loading instead of offering them.
+  // current one: report loading instead of offering them, also as retained data.
   const state: typeof load.state =
-    load.state.kind === 'ready' && started.current !== listKey
+    started.current !== listKey &&
+    (load.state.kind === 'ready' || 'previous' in load.state)
       ? loading
       : load.state;
-  const { reload } = load;
-  // A real definition or type change reads again (the first read is the load's).
+  const { reload, restart } = load;
+  // A real definition or type change reads again (the first read is the
+  // load's), without the rows of the old one.
   const shown = useRef(read);
   useEffect(() => {
     if (shown.current === read) return;
     shown.current = read;
-    void reload();
-  }, [read, reload]);
+    void restart();
+  }, [read, restart]);
   const current = useRef({ view, read, cancelled: false });
   if (current.current.view !== view || current.current.read !== read)
     current.current = { view, read, cancelled: false };
@@ -238,7 +277,6 @@ export function useList<D>(
     });
   }, [view, reload, scope]);
   return {
-    ...load,
     state,
     reload: () => {
       scope.cancelled = false;

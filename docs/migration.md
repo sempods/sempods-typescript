@@ -39,6 +39,15 @@ Check these points:
   working. Without top-layer support (for example jsdom) it renders in place.
 - **`AppAccess` description.** The new optional `description` prop shows a
   short line under the app name on the sign-in screen; it is display only.
+- **Lists can keep their rows while reloading.** `useList`, `useLoad` and
+  `usePodLoad` accept `{ retain: true }`; `createViewLoader` takes the same
+  option as a third argument. With it, `LoadState`'s `loading` and `failed`
+  carry the last data as `previous`. Without it nothing changes. Code that
+  builds `LoadState` values itself still compiles; exhaustive checks over
+  `kind` are unchanged.
+- **Quiet success.** `UpdateNotice` and `ResourceEditor` accept `quiet` to show
+  nothing for a confirmed save, creation or deletion; problems and unconfirmed
+  outcomes still show.
 
 ## From 0.5.0 to 0.5.1
 
