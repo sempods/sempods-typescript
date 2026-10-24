@@ -657,6 +657,19 @@ export function useContextEditor<D>(
 }
 export type MutationOutcome<D> =
   UpdateOutcome<D> | RemoveSnapshotOutcome<D> | CreateOutcome;
+
+/** Keep the write outcome while dropping observations made under lost read access. */
+function withoutComparison<D>(
+  outcome: MutationOutcome<D> | null,
+): MutationOutcome<D> | null {
+  if (outcome?.kind === 'changed-on-pod')
+    return { ...outcome, current: undefined };
+  if (outcome?.kind === 'unconfirmed')
+    return 'current' in outcome
+      ? { ...outcome, current: undefined, desiredObserved: false }
+      : { kind: 'unconfirmed' };
+  return outcome;
+}
 /** One mutation lane. Captures target/subject; stale completions never update a new lane. */
 function useMutation<D>(definition: FieldDefinition<D>) {
   const view = useView();
@@ -714,6 +727,24 @@ function useMutation<D>(definition: FieldDefinition<D>) {
   } | null>(null);
   useEffect(() => {
     lane.alive = true;
+    let readable = true;
+    const followAccess = () => {
+      const next = view?.getSnapshot().read ?? false;
+      if (readable && !next) {
+        lane.version++;
+        lane.checked = false;
+        lane.absent = false;
+        setEvidence((before) => (before?.lane === lane ? null : before));
+        setState((before) =>
+          before?.lane === lane
+            ? { ...before, outcome: withoutComparison(before.outcome) }
+            : before,
+        );
+      }
+      readable = next;
+    };
+    const unsubscribe = view?.subscribe(followAccess);
+    followAccess();
     const unregister = app.register({
       scope: 'target',
       unconfirmed: () => lane.uncertain,
@@ -729,9 +760,13 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     });
     return () => {
       lane.alive = false;
+      lane.version++;
+      lane.checked = false;
+      lane.absent = false;
+      unsubscribe?.();
       unregister();
     };
-  }, [app, lane]);
+  }, [app, lane, view]);
   const starts = useStartCount(view);
   const visible = state?.lane === lane ? state : null;
   // Another write started on this target since this lane's own start retires
@@ -742,6 +777,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
       : null;
   const eligible = () =>
     lane.alive && current.current === lane && app.getSnapshot().view === view;
+  const readable = () => eligible() && Boolean(view?.getSnapshot().read);
+  const checked = () => readable() && lane.checked;
   async function execute(
     operation: 'create' | 'update' | 'remove',
     iri: string,
@@ -757,9 +794,10 @@ function useMutation<D>(definition: FieldDefinition<D>) {
       app.getSnapshot().confirmingLeave
     )
       return;
-    lane.version++;
+    const version = ++lane.version;
     lane.pending = true;
     lane.checked = false;
+    lane.absent = false;
     lane.iri = iri;
     const start = started(view);
     setState({ lane, operation, outcome: null, busy: true, start });
@@ -776,6 +814,9 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     }
     lane.pending = false;
     if (!eligible()) return;
+    // A result may contain a read made before access was lost and regained.
+    if (lane.version !== version || !readable())
+      outcome = withoutComparison(outcome)!;
     lane.unresolved =
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     lane.uncertain = outcome.kind === 'unconfirmed';
@@ -789,16 +830,18 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     lane.uncertain = false;
     lane.version++;
     lane.checked = false;
+    lane.absent = false;
     setState(null);
   };
   const check = async () => {
-    if (!view || !eligible() || !lane.unresolved) return false;
+    if (!view || !readable() || !lane.unresolved) return false;
     lane.checked = false;
+    lane.absent = false;
     setEvidence(null);
     const version = ++lane.version;
     try {
       const read = await view.subjects.get(lane.iri);
-      if (!eligible() || !lane.unresolved || lane.version !== version)
+      if (!readable() || !lane.unresolved || lane.version !== version)
         return false;
       if (read.kind !== 'ok' && read.kind !== 'not-found') return false;
       let value: D | null = null;
@@ -810,11 +853,13 @@ function useMutation<D>(definition: FieldDefinition<D>) {
           // Still evidence of presence: settling must not depend on mapping it.
           unreadable = true;
         }
+      if (!readable() || !lane.unresolved || lane.version !== version)
+        return false;
       setEvidence({ lane, version, value, unreadable });
       lane.absent = read.kind === 'not-found';
       lane.checked = true;
       changed(view);
-      return true;
+      return checked();
     } catch {
       return false;
     }
@@ -838,23 +883,27 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     operation: visible?.operation ?? null,
     notice: {
       outcome,
+      /** A successful comparison under uninterrupted read access to this lane. */
+      checked: checked(),
       current:
+        checked() &&
         evidence?.lane === lane &&
         evidence.version === lane.version &&
         !evidence.unreadable
           ? evidence.value
           : undefined,
       unreadable:
+        checked() &&
         evidence?.lane === lane &&
         evidence.version === lane.version &&
         evidence.unreadable,
       onCheck: check,
       onAcknowledge: () => {
-        if (lane.checked) acknowledge();
+        if (checked()) acknowledge();
       },
     },
-    checked: () => eligible() && lane.checked,
-    absent: () => eligible() && lane.checked && lane.absent,
+    checked,
+    absent: () => checked() && lane.absent,
   };
 }
 /**
@@ -865,6 +914,9 @@ function useMutation<D>(definition: FieldDefinition<D>) {
  * shown if such a write started while it was pending. A failure
  * stays until this hook writes again; an unresolved outcome (`unconfirmed`,
  * `changed-on-pod`) stays until it is checked and acknowledged.
+ * Losing read access clears comparison values (including `outcome.current`
+ * and `desiredObserved`) and `notice.checked`. Regaining access needs a fresh
+ * check. Write-only loss retains comparison evidence; neither loss replays a write.
  */
 export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   // The same instance as useList's snapshots (see canonicalOf); the lane's
@@ -915,6 +967,8 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
  * `created` stays in `outcome`/`notice` until the next `change` or until another
  * hook or bound-editor write starts on the same target (also while pending). A failure stays until the next `change` or
  * `create`; an unconfirmed creation stays until it is checked and acknowledged.
+ * Comparison evidence follows the read-access lifetime described by
+ * `useFieldUpdate`; read loss keeps the locked draft and captured command.
  */
 export function useCreation<D extends object>(
   definition: FieldDefinition<D>,

@@ -538,6 +538,14 @@ does not enable acknowledgement. A present resource the definition cannot read i
 evidence too: the notice sets `unreadable` instead of `current`, shows no field
 comparison and enables acknowledgement. List reload success is not required
 because the exact-subject evidence is displayed in the notice itself.
+Both mutation and creation notices expose `checked` as the authority for their
+acknowledgement button; pass it through to a custom recovery UI. Losing read access
+clears comparison values, absence/unreadable flags and `checked`, including
+read-derived `outcome.current` and the `desiredObserved` observation. Access recovery
+requires another successful check. Losing only write access keeps readable evidence.
+The unresolved outcome, locked creation draft, captured IRI and leave guard remain.
+`UpdateNotice` accepts an optional `checked` prop; without it, custom callers keep
+the local acknowledgement state established by their `onCheck` callback.
 The raw `create(iri, body)` remains available; its typed overload is
 `create(iri, definition, draft)`. Ordinary forms use the creation hook instead.
 

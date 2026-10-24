@@ -9,7 +9,7 @@ import {
   fireEvent,
   within,
 } from '@testing-library/react';
-import { useState } from 'react';
+import { Fragment, StrictMode, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   fields,
@@ -40,6 +40,7 @@ import {
 } from './index.js';
 import { useController } from './app.js';
 import { bindResourceEditor } from '../authoring/editor.js';
+import { observeWrites } from '../authoring/changes.js';
 const definition = fields(
   {
     title: text('urn:title', { language: null }),
@@ -66,7 +67,7 @@ afterEach(() => {
 async function setup(
   language: 'en' | 'de' = 'en',
   // Holds the batch input above TargetScreen, so it survives target changes.
-  { hostInput = false, withEditor = false } = {},
+  { hostInput = false, withEditor = false, strict = false } = {},
 ) {
   const f = fixture();
   const session = await f.login();
@@ -187,10 +188,13 @@ async function setup(
       </TargetScreen>
     );
   }
-  render(
-    <SempodsProvider runtime={session.runtime} language={language}>
-      <Host />
-    </SempodsProvider>,
+  const Mode = strict ? StrictMode : Fragment;
+  const rendered = render(
+    <Mode>
+      <SempodsProvider runtime={session.runtime} language={language}>
+        <Host />
+      </SempodsProvider>
+    </Mode>,
   );
   await waitFor(() => expect(api.list.state.kind).toBe('ready'));
   return {
@@ -199,11 +203,279 @@ async function setup(
     rows,
     writes,
     resource,
+    unmount: rendered.unmount,
     get api() {
       return api;
     },
   };
 }
+
+it.each(['unconfirmed', 'changed-on-pod'] as const)(
+  '#121: read loss invalidates checked row evidence and outcome snapshots (%s, StrictMode)',
+  async (kind) => {
+    const f = await setup('en', { strict: true });
+    const state = f.api.list.state;
+    if (state.kind !== 'ready') throw new Error('fixture');
+    const item = state.data.items[0]!;
+    if (kind === 'changed-on-pod')
+      f.rows.set(item.iri, {
+        ...f.rows.get(item.iri),
+        'urn:title': [{ '@value': 'Theirs' }],
+      });
+    f.setResource(async (url, init) => {
+      const response = await f.resource(url, init);
+      return init?.method === 'PATCH'
+        ? new Response(null, { status: 202 })
+        : response;
+    });
+    await act(() => f.api.mutation.update(item, { title: 'Mine' }));
+    expect(f.api.mutation.outcome).toMatchObject({
+      kind,
+      current: { iri: item.iri },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Check current version' }),
+    );
+    const button = () =>
+      screen.getByRole('button', {
+        name: 'I have checked the pod',
+      }) as HTMLButtonElement;
+    await waitFor(() => expect(button().disabled).toBe(false));
+    const compared = f.api.mutation.notice.current;
+    const oldNotice = f.api.mutation.notice;
+
+    f.setCatalogue(async () => catalogue([work, personal], []));
+    await act(() => f.runtime.loadContexts(f.id));
+    expect(f.api.mutation.notice.checked).toBe(true);
+    expect(f.api.mutation.notice.current).toEqual(compared);
+    expect(button().disabled).toBe(false);
+
+    f.setCatalogue(async () => catalogue([personal], []));
+    await act(() => f.runtime.loadContexts(f.id));
+    expect(f.runtime.bind(f.id)).toBe(f.view);
+    expect(f.api.mutation.notice).toMatchObject({
+      checked: false,
+      current: undefined,
+      unreadable: false,
+    });
+    expect(f.api.mutation.outcome).toMatchObject({ kind, current: undefined });
+    if (kind === 'unconfirmed')
+      expect(f.api.mutation.outcome).toMatchObject({ desiredObserved: false });
+    expect(button().disabled).toBe(true);
+    expect(
+      screen.queryByRole('region', { name: 'Current on the pod' }),
+    ).toBeNull();
+    const get = vi.fn(f.resource);
+    f.setResource(get);
+    await act(async () =>
+      expect(await f.api.mutation.notice.onCheck()).toBe(false),
+    );
+    expect(get).not.toHaveBeenCalled();
+    act(() => oldNotice.onAcknowledge());
+    expect(f.api.mutation.outcome?.kind).toBe(kind);
+    await act(async () => {
+      const leaving = f.api.app.selectContext(personal);
+      expect(f.api.app.getSnapshot().confirmingLeave).toBe(true);
+      f.api.app.cancelLeave();
+      expect(await leaving).toBe(false);
+    });
+
+    f.setCatalogue(async () => catalogue());
+    await act(() => f.runtime.loadContexts(f.id));
+    expect(f.api.mutation.notice.checked).toBe(false);
+    expect(f.api.mutation.notice.current).toBeUndefined();
+    act(() => f.api.mutation.notice.onAcknowledge());
+    expect(f.api.mutation.outcome?.kind).toBe(kind);
+    await act(async () =>
+      expect(await f.api.mutation.notice.onCheck()).toBe(true),
+    );
+    act(() => f.api.mutation.notice.onAcknowledge());
+    expect(f.api.mutation.outcome).toBeNull();
+  },
+);
+
+it.each(['present', 'absent', 'unreadable'] as const)(
+  '#121: creation keeps its draft and captured command after losing %s evidence (StrictMode)',
+  async (observation) => {
+    const f = await setup('en', { strict: true });
+    const attempts: {
+      url: string;
+      init: NonNullable<Parameters<PodFetch>[1]>;
+    }[] = [];
+    f.setResource(async (url, init) => {
+      if (init?.method !== 'PUT') return f.resource(url, init);
+      attempts.push({ url, init });
+      if (attempts.length > 1) return f.resource(url, init);
+      if (observation !== 'absent') {
+        await f.resource(url, init);
+        if (observation === 'unreadable') {
+          const id = (JSON.parse(init.body as string) as JsonLd)[
+            '@id'
+          ] as string;
+          f.rows.set(id, {
+            '@id': id,
+            'urn:unknown': [{ '@value': 'opaque' }],
+          });
+        }
+      }
+      return new Response(null, { status: 202 });
+    });
+    act(() => f.api.creation.change({ title: 'Keep me' }));
+    await act(() => f.api.creation.create());
+    await act(async () =>
+      expect(await f.api.creation.notice.onCheck()).toBe(true),
+    );
+    const before = f.api.creation.notice;
+    expect(before.checked).toBe(true);
+    expect(before.unreadable).toBe(observation === 'unreadable');
+    if (observation === 'absent') expect(before.current).toBeNull();
+    f.setCatalogue(async () => catalogue([personal], []));
+    await act(() => f.runtime.loadContexts(f.id));
+    expect(f.api.creation.notice).toMatchObject({
+      checked: false,
+      current: undefined,
+      unreadable: false,
+    });
+    act(() => before.onAcknowledge());
+    expect(f.api.creation.outcome?.kind).toBe('unconfirmed');
+    expect(f.api.creation.canEdit).toBe(false);
+    expect(f.api.creation.draft.title).toBe('Keep me');
+    expect(attempts).toHaveLength(1);
+
+    f.setCatalogue(async () => catalogue());
+    await act(() => f.runtime.loadContexts(f.id));
+    expect(f.api.creation.notice.checked).toBe(false);
+    act(() => f.api.creation.notice.onAcknowledge());
+    expect(f.api.creation.canCreate).toBe(false);
+    expect(f.api.creation.draft.title).toBe('Keep me');
+    await act(async () =>
+      expect(await f.api.creation.notice.onCheck()).toBe(true),
+    );
+    act(() => f.api.creation.notice.onAcknowledge());
+    if (observation === 'absent') {
+      await act(() => f.api.creation.create());
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1]).toMatchObject({
+        url: attempts[0]!.url,
+        init: { body: attempts[0]!.init.body },
+      });
+    } else expect(attempts).toHaveLength(1);
+    expect(f.api.creation.draft).toEqual(initial);
+  },
+);
+
+it.each(['read-loss', 'target', 'connection', 'unmount', 'new-check'] as const)(
+  '#121: a pending comparison cannot outlive %s',
+  async (change) => {
+    const f = await setup('en', { strict: true });
+    f.setResource(async (url, init) =>
+      init?.method === 'PUT'
+        ? new Response(null, { status: 202 })
+        : f.resource(url, init),
+    );
+    act(() => f.api.creation.change({ title: 'Keep me' }));
+    await act(() => f.api.creation.create());
+    const gate = deferred<Response>();
+    const entered = deferred<void>();
+    f.setResource(() => {
+      entered.resolve();
+      return gate.promise;
+    });
+    const captured = f.api.creation.notice;
+    let pending!: Promise<boolean>;
+    await act(async () => {
+      pending = captured.onCheck();
+      await entered.promise;
+    });
+    f.setResource(f.resource);
+    await act(async () => {
+      if (change === 'read-loss') {
+        f.setCatalogue(async () => catalogue([personal], []));
+        await f.runtime.loadContexts(f.id);
+        f.setCatalogue(async () => catalogue());
+        await f.runtime.loadContexts(f.id);
+      } else if (change === 'target') f.runtime.selectContext(f.id, personal);
+      else if (change === 'connection') await f.runtime.disconnect(f.id);
+      else if (change === 'unmount') f.unmount();
+      else expect(await f.api.creation.notice.onCheck()).toBe(true);
+    });
+    await act(async () => {
+      gate.resolve(
+        Response.json(
+          { '@id': 'urn:late', 'urn:title': [{ '@value': 'Late' }] },
+          { headers: { etag: '"late"' } },
+        ),
+      );
+      expect(await pending).toBe(false);
+    });
+    if (change === 'read-loss') {
+      act(() => captured.onAcknowledge());
+      expect(f.api.creation.notice.checked).toBe(false);
+      expect(f.api.creation.draft.title).toBe('Keep me');
+      expect(f.api.creation.outcome?.kind).toBe('unconfirmed');
+    } else if (change === 'new-check') {
+      expect(f.api.creation.notice.checked).toBe(true);
+      expect(f.api.creation.notice.current).toBeNull();
+    }
+  },
+);
+
+it('#121: a write settling after read loss retains uncertainty without comparison data', async () => {
+  const f = await setup('en', { strict: true });
+  const state = f.api.list.state;
+  if (state.kind !== 'ready') throw new Error('fixture');
+  const entered = deferred<void>();
+  const gate = deferred<Response>();
+  f.setResource(async (url, init) => {
+    const response = await f.resource(url, init);
+    if (init?.method !== 'PATCH') return response;
+    entered.resolve();
+    return gate.promise;
+  });
+  let pending!: ReturnType<typeof f.api.mutation.update>;
+  await act(async () => {
+    pending = f.api.mutation.update(state.data.items[0]!, { title: 'Mine' });
+    await entered.promise;
+  });
+  f.setCatalogue(async () => catalogue([personal], []));
+  await act(() => f.runtime.loadContexts(f.id));
+  f.setCatalogue(async () => catalogue());
+  await act(() => f.runtime.loadContexts(f.id));
+  await act(async () => {
+    gate.resolve(new Response(null, { status: 202 }));
+    expect(await pending).toMatchObject({
+      kind: 'unconfirmed',
+      current: undefined,
+      desiredObserved: false,
+    });
+  });
+  expect(f.api.mutation.notice.checked).toBe(false);
+  expect(f.api.mutation.outcome).toMatchObject({
+    kind: 'unconfirmed',
+    current: undefined,
+  });
+  expect(f.writes).toHaveLength(1);
+});
+
+it('#121: a reentrant comparison observer cannot confirm evidence for a retired target', async () => {
+  const f = await setup();
+  f.setResource(async (url, init) =>
+    init?.method === 'PUT'
+      ? new Response(null, { status: 202 })
+      : f.resource(url, init),
+  );
+  act(() => f.api.creation.change({ title: 'Maybe' }));
+  await act(() => f.api.creation.create());
+  cleanups.push(
+    observeWrites(f.view, () => f.runtime.selectContext(f.id, personal)),
+  );
+  await act(async () =>
+    expect(await f.api.creation.notice.onCheck()).toBe(false),
+  );
+  expect(f.api.creation.notice.checked).toBe(false);
+  expect(f.api.creation.outcome).toBeNull();
+});
+
 it('locks the captured creation before rerender, saves typed data and refreshes lists automatically', async () => {
   const f = await setup();
   const gate = deferred<Response>();

@@ -50,6 +50,7 @@ export function UpdateNotice({
   onAcknowledge,
   current,
   unreadable,
+  checked: suppliedChecked,
   labels,
   quiet = false,
 }: {
@@ -64,6 +65,11 @@ export function UpdateNotice({
   readonly current?: unknown;
   /** Compared: the resource is present, but the definition cannot read it. */
   readonly unreadable?: boolean;
+  /**
+   * Authoritative acknowledgement eligibility, supplied by mutation/creation
+   * notices. When omitted, a successful local onCheck enables acknowledgement.
+   */
+  readonly checked?: boolean;
   /** Field display names for the comparison. */
   readonly labels?: FieldLabels;
   readonly onCheck?: () => Promise<boolean>;
@@ -79,7 +85,8 @@ export function UpdateNotice({
   });
   if (comparison.outcome !== outcome)
     setComparison({ outcome, checked: false, checking: false });
-  const checked = comparison.outcome === outcome && comparison.checked;
+  const checked =
+    suppliedChecked ?? (comparison.outcome === outcome && comparison.checked);
   const checking = comparison.outcome === outcome && comparison.checking;
   if (!outcome) return null;
   if (
