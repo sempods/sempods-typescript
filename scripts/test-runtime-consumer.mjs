@@ -1122,6 +1122,98 @@ try {
   console.log(
     'Packed preset React app: one-click PKCE, exact context, guarded reauthorization, connection reuse and durable reload passed.',
   );
+  // The SDK's leave confirmation over an app's own modal dialog (#102): a
+  // native top-layer dialog, visible and operable above it, for a dirty editor
+  // and for an unconfirmed write; nothing behind it acts.
+  await page.goto(origin + '/app?identity=access-modal');
+  await page.getByText('Shopping made easy', { exact: true }).waitFor();
+  const modalExchanges = exchanges;
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL('**/app?identity=access-modal');
+  await page.getByRole('button', { name: 'Manage', exact: true }).click();
+  const appDialog = page.getByRole('dialog', { name: 'Manage' });
+  const taskTitle = appDialog.getByLabel('Task title');
+  await taskTitle.waitFor();
+  const modalWrites = writes;
+  const confirmation = page.getByRole('alertdialog');
+  const keep = confirmation.getByRole('button', { name: 'Keep editing' });
+  const discard = confirmation.getByRole('button', {
+    name: 'Discard and continue',
+  });
+  const topmost = (locator) =>
+    locator.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return (
+        document.elementFromPoint(
+          box.left + box.width / 2,
+          box.top + box.height / 2,
+        ) === button && button.closest('dialog').matches(':modal')
+      );
+    });
+  const changeSharing = appDialog.getByRole('button', {
+    name: 'Change sharing',
+    exact: true,
+  });
+  await taskTitle.fill('Unsaved title');
+  await changeSharing.click();
+  await confirmation.waitFor();
+  assert.equal(await topmost(keep), true);
+  assert.equal(await topmost(discard), true);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    'Keep editing',
+  );
+  await page.keyboard.press('Tab');
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    'Discard and continue',
+  );
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    'Keep editing',
+  );
+  // A click on the app dialog's Close button behind it does nothing.
+  const close = await appDialog
+    .getByRole('button', { name: 'Close', exact: true })
+    .boundingBox();
+  await page.mouse.click(close.x + close.width / 2, close.y + close.height / 2);
+  await page.keyboard.press('Escape');
+  await confirmation.waitFor({ state: 'detached' });
+  assert.equal(await appDialog.evaluate((d) => d.open), true);
+  assert.equal(await taskTitle.inputValue(), 'Unsaved title');
+  await changeSharing.click();
+  await keep.click();
+  await confirmation.waitFor({ state: 'detached' });
+  assert.equal(await appDialog.evaluate((d) => d.open), true);
+  assert.equal(await taskTitle.inputValue(), 'Unsaved title');
+  // An unconfirmed write: the answer is lost without reaching the Pod.
+  const dropWrite = (route) =>
+    route.request().method() === 'PATCH'
+      ? route.abort('failed')
+      : route.continue();
+  await page.route('**/_system/resources/**', dropWrite);
+  await appDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await appDialog.getByText(/The result is unconfirmed/).waitFor();
+  await page.unroute('**/_system/resources/**', dropWrite);
+  await changeSharing.click();
+  await confirmation
+    .getByText(/A write is still unconfirmed and may already have changed/)
+    .waitFor();
+  assert.equal(await topmost(discard), true);
+  assert.equal(exchanges, modalExchanges + 1);
+  assert.equal(writes, modalWrites);
+  await Promise.all([page.waitForURL('**/callback?**'), discard.click()]);
+  await page.waitForURL('**/app?identity=access-modal');
+  await page.getByRole('button', { name: 'Manage', exact: true }).waitFor();
+  assert.equal(exchanges, modalExchanges + 2);
+  assert.equal(writes, modalWrites);
+  console.log(
+    'Packed leave confirmation over an app modal dialog: top-layer, focus, Tab/Shift-Tab, Escape, no background action, dirty editor and unconfirmed write at 375px passed.',
+  );
   assert.ok(
     traffic
       .filter(
