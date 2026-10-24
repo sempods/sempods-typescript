@@ -455,6 +455,10 @@ export async function renameWithEditor(
   `unconfirmed` (`desiredObserved` is not proof). Nothing is ever resent:
   `continueFromCurrent()` keeps the draft on the compared version, `discard()`
   takes it.
+- Failed snapshot updates/deletions and creations expose `problem: EditProblem`
+  alongside `reason === problem.kind`: refusals retain their 401/403 status,
+  mapping failures their predicate, and SDK failures their structured code.
+  Editor save/delete outcomes keep their details in `editor.state.problem`.
 - Typing continues while saving; only the submitted draft counts as saved.
   Losing read access (`setAccess`) clears server data but keeps the draft and
   any open review of a write; after it returns, `refresh()` adopts the current

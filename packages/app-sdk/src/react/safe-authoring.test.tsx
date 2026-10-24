@@ -18,7 +18,7 @@ import {
   type EditDefinition,
   type ResourceEditor as Editor,
 } from '@sempods/client-sdk/edit';
-import { type JsonLd, type PodFetch } from '@sempods/client-sdk';
+import { SdkError, type JsonLd, type PodFetch } from '@sempods/client-sdk';
 import {
   fixture,
   catalogue,
@@ -474,6 +474,66 @@ it('#121: a reentrant comparison observer cannot confirm evidence for a retired 
   );
   expect(f.api.creation.notice.checked).toBe(false);
   expect(f.api.creation.outcome).toBeNull();
+});
+
+it.each([401, 403] as const)(
+  '#122: mutation and creation hooks keep refusal status %s',
+  async (status) => {
+    const f = await setup();
+    const state = f.api.list.state;
+    if (state.kind !== 'ready') throw new Error('fixture');
+    f.setResource(async (url, init) =>
+      init?.method === 'PATCH' || init?.method === 'PUT'
+        ? new Response(null, { status })
+        : f.resource(url, init),
+    );
+    await act(async () => {
+      expect(
+        await f.api.mutation.update(state.data.items[0]!, { title: 'Mine' }),
+      ).toEqual({
+        kind: 'not-saved',
+        reason: 'refused',
+        problem: { kind: 'refused', status },
+      });
+    });
+    expect(f.api.mutation.notice.outcome).toMatchObject({
+      problem: { kind: 'refused', status },
+    });
+    act(() => f.api.creation.change({ title: 'New' }));
+    await act(async () => {
+      expect(await f.api.creation.create()).toEqual({
+        kind: 'not-created',
+        reason: 'refused',
+        problem: { kind: 'refused', status },
+      });
+    });
+    expect(f.api.creation.notice.outcome).toMatchObject({
+      problem: { kind: 'refused', status },
+    });
+  },
+);
+
+it('#122: the hook retains a structured exception while capturing a command before dispatch', async () => {
+  const f = await setup();
+  const body: JsonLd = {
+    get '@id'() {
+      throw new SdkError(
+        { code: 'invalid-argument', argument: 'iri' },
+        'capture failed',
+      );
+    },
+  };
+  await act(async () => {
+    expect(await f.api.mutation.create('urn:new', body)).toEqual({
+      kind: 'not-created',
+      reason: 'failure',
+      problem: {
+        kind: 'failure',
+        failure: { code: 'invalid-argument', argument: 'iri' },
+      },
+    });
+  });
+  expect(f.writes).toHaveLength(0);
 });
 
 it('locks the captured creation before rerender, saves typed data and refreshes lists automatically', async () => {
@@ -1042,7 +1102,11 @@ it.each([
   {
     stop: 'refused',
     answer: async () => new Response(null, { status: 403 }),
-    outcome: { kind: 'not-created', reason: 'refused' },
+    outcome: {
+      kind: 'not-created',
+      reason: 'refused',
+      problem: { kind: 'refused', status: 403 },
+    },
     held: false,
     canCreate: true,
     rows: 3,

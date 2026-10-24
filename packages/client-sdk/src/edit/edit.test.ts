@@ -1604,6 +1604,7 @@ describe('creation', () => {
     expect(await prepareCreation(fresh.source, NEW, body).run()).toEqual({
       kind: 'not-created',
       reason: 'refused',
+      problem: { kind: 'refused', status: 403 },
     });
   });
 

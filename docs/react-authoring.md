@@ -548,6 +548,10 @@ The unresolved outcome, locked creation draft, captured IRI and leave guard rema
 the local acknowledgement state established by their `onCheck` callback.
 The raw `create(iri, body)` remains available; its typed overload is
 `create(iri, definition, draft)`. Ordinary forms use the creation hook instead.
+Failed mutations retain `reason` and expose structured `problem` details.
+For a refusal, inspect `problem.status`; for `problem.kind === 'failure'`,
+pass a present `problem.failure` to `describeFailure`. Unconfirmed writes
+remain unconfirmed and carry no failure that would imply they were not sent.
 
 `useCreation(definition, { initial, collection })` owns a typed draft, partial
 `change`, `create`, `canCreate`, `canEdit` and `notice`. The initial draft should

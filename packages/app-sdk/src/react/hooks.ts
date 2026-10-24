@@ -33,7 +33,7 @@ import {
   type UpdateOutcome,
   type RemoveSnapshotOutcome,
 } from '@sempods/client-sdk/edit';
-import type { JsonLd } from '@sempods/client-sdk';
+import { sdkFailure, type JsonLd } from '@sempods/client-sdk';
 import { startupSettled } from '../authoring/app.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
@@ -804,13 +804,14 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     let outcome: MutationOutcome<D>;
     try {
       outcome = await action(view);
-    } catch {
+    } catch (error) {
+      const problem = { kind: 'failure' as const, failure: sdkFailure(error) };
       outcome =
         operation === 'create'
-          ? { kind: 'not-created', reason: 'failure' }
+          ? { kind: 'not-created', reason: 'failure', problem }
           : operation === 'remove'
-            ? { kind: 'not-removed', reason: 'failure' }
-            : { kind: 'not-saved', reason: 'failure' };
+            ? { kind: 'not-removed', reason: 'failure', problem }
+            : { kind: 'not-saved', reason: 'failure', problem };
     }
     lane.pending = false;
     if (!eligible()) return;
@@ -917,6 +918,10 @@ function useMutation<D>(definition: FieldDefinition<D>) {
  * Losing read access clears comparison values (including `outcome.current`
  * and `desiredObserved`) and `notice.checked`. Regaining access needs a fresh
  * check. Write-only loss retains comparison evidence; neither loss replays a write.
+ *
+ * All mutation methods return `undefined` both when nothing was sent and when
+ * the target lifetime ended before completion. It is not proof that no write
+ * happened; stop a batch instead of resending its item on another target.
  */
 export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   // The same instance as useList's snapshots (see canonicalOf); the lane's
