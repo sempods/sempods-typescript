@@ -112,7 +112,9 @@ stylesheet at 320/375px in EN/DE and light/dark, including host-controlled color
 sign-in and focus recovery, a provider answering `login_required` (specific EN/DE
 cause without the provider's text, cleared by selecting another Pod or
 disconnecting), and the widget host with retained drafts/uncertain
-writes. With one permitted Pod and Contexts on demand, a Pod with slow discovery
+writes. EN/DE retry cases check native `inert`: failed re-authorization preparation
+keeps retry/error feedback visible without moving focus to the host control.
+With one permitted Pod and Contexts on demand, a Pod with slow discovery
 shows that `AppAccess` passes only through its loading status after the callback
 and during restore before hiding, while an ended session and missing required
 scopes show their recovery views directly. A delayed Context catalogue, in

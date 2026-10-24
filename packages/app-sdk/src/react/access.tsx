@@ -55,7 +55,10 @@ export interface AppAccessProps {
   readonly podAddress?: 'visible' | 'hidden';
   /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
-  /** Focus here if a focused access control disappears after successful recovery. */
+  /**
+   * Return focus here once the focused access surface hides and its guarded
+   * transition ends. Visible retry or error feedback does not trigger this.
+   */
   readonly focusTarget?: RefObject<HTMLElement | null>;
   readonly components?: {
     readonly Connections?: ComponentType<ConnectionControlsProps>;
@@ -187,20 +190,13 @@ export function AppAccess({
     retry: Boolean(retry),
     ...(headingLevel === undefined ? {} : { headingLevel }),
   });
-  const {
-    attention: needsAttention,
-    body,
-    notice,
-    heading: Heading,
-    namesApp,
-  } = presentation;
+  const { body, notice, heading: Heading, namesApp } = presentation;
   const hidden = !presentation.visible;
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
-    // focus only after that transition, when the host control can receive it.
+    // focus only after that transition and once access feedback has hidden.
     if (
-      !needsAttention &&
-      !open &&
+      hidden &&
       !state.changing &&
       !state.confirmingLeave &&
       heldFocus.current
@@ -208,13 +204,7 @@ export function AppAccess({
       heldFocus.current = false;
       focusTarget?.current?.focus();
     }
-  }, [
-    needsAttention,
-    open,
-    focusTarget,
-    state.changing,
-    state.confirmingLeave,
-  ]);
+  }, [hidden, focusTarget, state.changing, state.confirmingLeave]);
   const Connections = components?.Connections;
   return (
     <section
@@ -243,7 +233,7 @@ export function AppAccess({
         {styles}
       </style>
       <div className="sp-access-content">
-        {(needsAttention || open) && (
+        {(presentation.attention || open) && (
           <header>
             {icon && (
               <div className="sp-access-icon" aria-hidden="true">
