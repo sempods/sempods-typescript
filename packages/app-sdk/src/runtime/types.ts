@@ -202,8 +202,9 @@ export interface BrowserRuntime {
    * invalidated like the selected label: a failure or absent label keeps the
    * IRI/name fallback without automatic retry, and changed rights, grants,
    * session end or a new authorization drop them. A selection change does not
-   * abort them. Resolves once every started read settled or was dropped; the
-   * labels arrive through the snapshot.
+   * abort them, also when the call joined the selected Context's read in
+   * flight. Resolves once every read it started or joined settled or was
+   * dropped; the labels arrive through the snapshot.
    */
   loadContextLabels(id: string, iris: readonly string[]): Promise<void>;
   selectContext(id: string, iri: string): void;

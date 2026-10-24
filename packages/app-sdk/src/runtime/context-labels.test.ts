@@ -482,9 +482,8 @@ it('coalesces explicit demands, shares the selected label cache and never retrie
   const first = runtime.loadContextLabels(id, [work, personal]);
   const second = runtime.loadContextLabels(id, [work]);
   runtime.selectContext(id, work);
-  await second;
   gate.resolve(description(work, 'Work'));
-  await first;
+  await Promise.all([first, second]);
   expect(labels(runtime)).toEqual({ [work]: 'Work' });
   await runtime.loadContextLabels(id, [work, personal]);
   runtime.selectContext(id, personal);
@@ -533,4 +532,66 @@ it('rejects an explicit demand for a connection that is not signed in', async ()
   const { runtime, id } = await listed(f);
   await runtime.disconnect(id);
   await expect(runtime.loadContextLabels(id, [work])).rejects.toThrow();
+});
+
+it('keeps a selected label that answers while an unchanged catalogue refreshes', async () => {
+  const f = fixture({ preferences: null });
+  const label = deferred<Response>();
+  f.setDescriptions(() => label.promise);
+  const { runtime, id } = await selected(f);
+  await vi.waitFor(() => expect(descriptions(f)).toHaveLength(1));
+  const listing = deferred<Response>();
+  f.setCatalogue(() => listing.promise);
+  const refresh = runtime.loadContexts(id);
+  expect(runtime.getSnapshot()[0]!.catalogue.kind).toBe('loading');
+  label.resolve(description(work, 'Work'));
+  await vi.waitFor(() => expect(labels(runtime)?.[work]).toBe('Work'));
+  listing.resolve(catalogue());
+  await refresh;
+  expect(labels(runtime)).toEqual({ [work]: 'Work' });
+  expect(descriptions(f)).toHaveLength(1);
+});
+
+it('starts the selected label again after its answer was dropped during a refresh', async () => {
+  const f = fixture({ preferences: null });
+  const first = deferred<Response>();
+  let calls = 0;
+  f.setDescriptions(async (url) =>
+    ++calls === 1 ? first.promise : description(url, 'Again'),
+  );
+  const { runtime, id } = await selected(f);
+  await vi.waitFor(() => expect(calls).toBe(1));
+  // The refresh drops work's readable right while its label is in flight...
+  f.setCatalogue(async () => catalogue([personal], []));
+  await runtime.loadContexts(id);
+  first.resolve(description(work, 'Dropped'));
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(labels(runtime)).toBeUndefined();
+  // ...and a later listing restores it: the label is read again.
+  f.setCatalogue(async () => catalogue());
+  await runtime.loadContexts(id);
+  await vi.waitFor(() => expect(labels(runtime)?.[work]).toBe('Again'));
+  expect(calls).toBe(2);
+});
+
+it('keeps a selected read that an explicit demand joined across a selection change', async () => {
+  const f = fixture({ preferences: null });
+  const gate = deferred<Response>();
+  let signal: AbortSignal | undefined;
+  f.setDescriptions(async (url, init) => {
+    if (url !== work) return description(url, 'Personal');
+    signal = init?.signal ?? undefined;
+    return gate.promise;
+  });
+  const { runtime, id } = await selected(f);
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  const demand = runtime.loadContextLabels(id, [work]);
+  runtime.selectContext(id, personal);
+  expect(signal?.aborted).toBe(false);
+  gate.resolve(description(work, 'Work'));
+  await demand;
+  await vi.waitFor(() =>
+    expect(labels(runtime)).toEqual({ [work]: 'Work', [personal]: 'Personal' }),
+  );
+  expect(descriptions(f).map(([url]) => url)).toEqual([work, personal]);
 });

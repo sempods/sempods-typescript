@@ -118,14 +118,29 @@ export function loadCatalogue(
   return operation;
 }
 
+/** One description read; `done` settles once it finished or was dropped. */
+interface LabelRead {
+  readonly controller: AbortController;
+  readonly done: Promise<void>;
+  readonly settle: () => void;
+}
+function labelRead(): LabelRead {
+  let settle!: () => void;
+  const done = new Promise<void>((resolve) => (settle = resolve));
+  return { controller: new AbortController(), done, settle };
+}
+
 /** Completed attempts are cached, including absent/failed labels, for this access lifetime. */
 const labelStates = new WeakMap<
   Entry,
   {
     cache: Map<string, string | undefined>;
-    pending?: { iri: string; selection: number; controller: AbortController };
-    /** Explicitly demanded labels (`loadContextLabels`); a selection change keeps them. */
-    requested: Map<string, AbortController>;
+    pending?: { iri: string; selection: number; read: LabelRead };
+    /**
+     * Explicitly demanded labels (`loadContextLabels`), including a selected
+     * read they joined; a selection change keeps them.
+     */
+    requested: Map<string, LabelRead>;
   }
 >();
 function labelState(e: Entry) {
@@ -138,8 +153,8 @@ function labelState(e: Entry) {
 /** Session/generation/grant changes must not reuse old descriptive authority. */
 export function resetLabels(e: Entry) {
   const state = labelStates.get(e);
-  state?.pending?.controller.abort();
-  for (const controller of state?.requested.values() ?? []) controller.abort();
+  state?.pending?.read.controller.abort();
+  for (const read of state?.requested.values() ?? []) read.controller.abort();
   labelStates.delete(e);
   if ('labels' in e.view.catalogue) {
     const fact = { ...e.view.catalogue };
@@ -168,22 +183,27 @@ function pruneLabels(
   for (const iri of state.cache.keys())
     if (changed(iri)) state.cache.delete(iri);
   if (state.pending && changed(state.pending.iri)) {
-    state.pending.controller.abort();
+    state.pending.read.controller.abort();
     delete state.pending;
   }
-  for (const [iri, controller] of state.requested)
+  for (const [iri, read] of state.requested)
     if (changed(iri)) {
-      controller.abort();
+      read.controller.abort();
       state.requested.delete(iri);
     }
 }
 
-function listedReadable(e: Entry, iri: string) {
+/** Listed as readable, also by the contexts a refreshing catalogue retains. */
+function listed(e: Entry, iri: string) {
   const fact = e.view.catalogue;
   return (
-    fact.kind === 'ready' &&
-    fact.contexts.some((c) => c.iri === iri && c.readable)
+    'contexts' in fact &&
+    Boolean(fact.contexts?.some((c) => c.iri === iri && c.readable))
   );
+}
+/** A new read starts only from a ready catalogue. */
+function startable(e: Entry, iri: string) {
+  return e.view.catalogue.kind === 'ready' && listed(e, iri);
 }
 
 function publishLabel(
@@ -229,40 +249,52 @@ export function loadSelectedLabel(
 ): void {
   const state = labelState(e);
   const iri = e.view.selectedContext;
+  const previous = state.pending;
   if (
-    state.pending &&
-    (state.pending.iri !== iri || state.pending.selection !== e.selectedVersion)
+    previous &&
+    (previous.iri !== iri || previous.selection !== e.selectedVersion)
   ) {
-    state.pending.controller.abort();
+    // An explicit demand that joined this read keeps it; only the
+    // selection's own interest ends.
+    if (state.requested.get(previous.iri) !== previous.read)
+      previous.read.controller.abort();
     delete state.pending;
   }
-  if (!iri || !listedReadable(e, iri) || !owner.eligible(e)) return;
+  if (!iri || !startable(e, iri) || !owner.eligible(e)) return;
   if (state.cache.has(iri)) {
     publishLabel(e, owner, iri, state.cache.get(iri));
     return;
   }
   // An explicit demand for the same Context publishes it when it settles.
   if (state.pending || state.requested.has(iri)) return;
-  const pending = {
-    iri,
-    selection: e.selectedVersion,
-    controller: new AbortController(),
-  };
+  const read = labelRead();
+  const pending = { iri, selection: e.selectedVersion, read };
   state.pending = pending;
   const generation = e.generation;
-  const current = () =>
-    owner.eligible(e, generation) &&
-    labelStates.get(e) === state &&
-    state.pending === pending &&
-    e.selectedVersion === pending.selection &&
-    e.view.selectedContext === iri &&
-    listedReadable(e, iri);
   void (async () => {
-    const label = await readLabel(e, iri, pending.controller.signal);
-    if (!current()) return;
-    state.cache.set(iri, label);
-    delete state.pending;
-    publishLabel(e, owner, iri, label);
+    try {
+      const label = await readLabel(e, iri, read.controller.signal);
+      const selected =
+        state.pending === pending &&
+        e.selectedVersion === pending.selection &&
+        e.view.selectedContext === iri;
+      const demanded = state.requested.get(iri) === read;
+      // Never leave a settled read behind: the next selection may start anew.
+      if (state.pending === pending) delete state.pending;
+      if (demanded) state.requested.delete(iri);
+      if (
+        !owner.eligible(e, generation) ||
+        labelStates.get(e) !== state ||
+        read.controller.signal.aborted ||
+        !(selected || demanded) ||
+        !listed(e, iri)
+      )
+        return;
+      state.cache.set(iri, label);
+      publishLabel(e, owner, iri, label);
+    } finally {
+      read.settle();
+    }
   })();
 }
 
@@ -275,7 +307,9 @@ const LABEL_CONCURRENCY = 4;
  * Reads the labels of at most `CONTEXT_LABEL_LIMIT` explicitly named Contexts
  * that the ready catalogue lists as readable; others are ignored. Shares the
  * selected label's cache, coalescing and invalidation; never retries a failure.
- * Resolves once every started read settled or was dropped.
+ * Joins a read already in flight for a named Context, which then survives a
+ * selection change. Resolves once every read it started or joined settled or
+ * was dropped.
  */
 export async function loadContextLabels(
   e: Entry,
@@ -287,37 +321,51 @@ export async function loadContextLabels(
   if (!owner.eligible(e)) return;
   const state = labelState(e);
   const generation = e.generation;
-  const queue: [string, AbortController][] = [];
+  const queue: [string, LabelRead][] = [];
+  const joined: Promise<void>[] = [];
   for (const iri of new Set(iris)) {
-    if (!listedReadable(e, iri)) continue;
-    if (state.cache.has(iri)) publishLabel(e, owner, iri, state.cache.get(iri));
-    else if (state.pending?.iri !== iri && !state.requested.has(iri)) {
-      const controller = new AbortController();
-      state.requested.set(iri, controller);
-      queue.push([iri, controller]);
+    if (!startable(e, iri)) continue;
+    if (state.cache.has(iri)) {
+      publishLabel(e, owner, iri, state.cache.get(iri));
+      continue;
     }
+    const inflight =
+      state.requested.get(iri) ??
+      (state.pending?.iri === iri ? state.pending.read : undefined);
+    if (inflight) {
+      state.requested.set(iri, inflight);
+      joined.push(inflight.done);
+      continue;
+    }
+    const read = labelRead();
+    state.requested.set(iri, read);
+    queue.push([iri, read]);
   }
-  const alive = () =>
-    owner.eligible(e, generation) && labelStates.get(e) === state;
+  const current = (iri: string, read: LabelRead) =>
+    owner.eligible(e, generation) &&
+    labelStates.get(e) === state &&
+    state.requested.get(iri) === read &&
+    !read.controller.signal.aborted &&
+    listed(e, iri);
   const work = async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {
-      const [iri, controller] = next;
-      const current = () =>
-        alive() &&
-        state.requested.get(iri) === controller &&
-        !controller.signal.aborted &&
-        listedReadable(e, iri);
-      const label = current()
-        ? await readLabel(e, iri, controller.signal)
-        : undefined;
-      const settled = current();
-      if (state.requested.get(iri) === controller) state.requested.delete(iri);
-      if (!settled) continue;
-      state.cache.set(iri, label);
-      publishLabel(e, owner, iri, label);
+      const [iri, read] = next;
+      try {
+        const label = current(iri, read)
+          ? await readLabel(e, iri, read.controller.signal)
+          : undefined;
+        const settled = current(iri, read);
+        if (state.requested.get(iri) === read) state.requested.delete(iri);
+        if (!settled) continue;
+        state.cache.set(iri, label);
+        publishLabel(e, owner, iri, label);
+      } finally {
+        read.settle();
+      }
     }
   };
-  await Promise.all(
-    Array.from({ length: Math.min(LABEL_CONCURRENCY, queue.length) }, work),
-  );
+  await Promise.all([
+    ...Array.from({ length: Math.min(LABEL_CONCURRENCY, queue.length) }, work),
+    ...joined,
+  ]);
 }

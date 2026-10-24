@@ -777,14 +777,17 @@ it('reads labels for an app-owned list menu on explicit demand, once per Context
     const shown =
       fact?.kind === 'ready' ? fact.contexts.filter((c) => c.readable) : [];
     const key = shown.map((c) => c.iri).join(' ');
+    const discover =
+      connection?.session.kind === 'active' && fact?.kind === 'unknown'
+        ? connection.id
+        : null;
+    const id = connection?.id;
     useEffect(() => {
-      if (connection?.session.kind === 'active' && fact?.kind === 'unknown')
-        void app.refreshContexts(connection.id);
-    }, [app, connection, fact?.kind]);
+      if (discover) void app.refreshContexts(discover);
+    }, [app, discover]);
     useEffect(() => {
-      if (connection && key)
-        app.loadContextLabels(connection.id, key.split(' ')).catch(() => {});
-    }, [app, connection?.id, key]);
+      if (id && key) app.loadContextLabels(id, key.split(' ')).catch(() => {});
+    }, [app, id, key]);
     const labels = fact && fact.kind !== 'unknown' ? fact.labels : undefined;
     return (
       <ul aria-label="Lists">

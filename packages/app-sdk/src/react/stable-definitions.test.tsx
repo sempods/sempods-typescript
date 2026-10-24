@@ -106,6 +106,7 @@ it('useApp exposes only the guarded actions, as one stable object', async () => 
     'authorize',
     'connect',
     'disconnect',
+    'loadContextLabels',
     'navigate',
     'refreshContexts',
     'selectConnection',
