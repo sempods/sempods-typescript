@@ -235,8 +235,10 @@ export function ConnectionControls({
       ? state.preset?.contextIri
       : undefined;
   const displayedContext = connection?.selectedContext ?? fixedContext;
+  const leaving = connection?.session.kind === 'leaving';
   const unavailable =
     busy ||
+    leaving ||
     !state.startup ||
     state.startup.storage !== 'durable' ||
     Boolean(state.startupError) ||
@@ -372,6 +374,9 @@ export function ConnectionControls({
             !fixedContext &&
             connection?.catalogue.kind === 'ready' &&
             readable.length === 0 && <p role="status">{m.noContexts}</p>}
+          {leaving && (
+            <p role="status">{controls.leaving ?? controls.loading}</p>
+          )}
           {connection && (
             <>
               <button

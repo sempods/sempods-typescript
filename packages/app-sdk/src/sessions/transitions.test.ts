@@ -763,3 +763,158 @@ it('checks stored absolute expiry against JWT exp when the endpoint omitted expi
     problem: 'corrupt',
   });
 });
+
+describe('re-authorization keeps and resumes the earlier session', () => {
+  async function reauthorizing() {
+    const s = await setup();
+    const ready = await s.ready();
+    const { attempt: next } = await prepareSessionAuthorization({
+      ...s.attempt,
+      generation: 'generation-two',
+      returnTo: '/',
+    });
+    const pending = committed(
+      await s.transitions.prepare(next, ready.revision),
+    );
+    return { ...s, ready, next, pending };
+  }
+  const denied = (attempt: SessionAttempt, error = 'access_denied') =>
+    new URL(`${callback}?error=${error}&state=${attempt.state}`);
+
+  it('stores the ready session beside the attempt and reads 0.5 records without it', async () => {
+    const { pending, ready, store, transitions } = await reauthorizing();
+    expect(pending.value).toMatchObject({
+      kind: 'authorizing',
+      previous: {
+        binding: { generation: 'generation-one' },
+        credentials: { refreshToken: 'refresh-one' },
+      },
+    });
+    if (ready.value.kind !== 'ready') throw new Error('Expected ready');
+    // A record written by 0.5 has no `previous`.
+    const { previous: _previous, ...older } = pending.value as Record<
+      string,
+      unknown
+    >;
+    void _previous;
+    const written = await store.commit(pending.id, pending.revision, older);
+    expect(written.kind).toBe('committed');
+    expect((await transitions.read(pending.id))?.value).not.toHaveProperty(
+      'previous',
+    );
+  });
+
+  it('treats a malformed or foreign earlier session as corrupt', async () => {
+    const { pending, store, transitions } = await reauthorizing();
+    if (pending.value.kind !== 'authorizing' || !pending.value.previous)
+      throw new Error('Expected an earlier session');
+    const value = pending.value;
+    const earlier = pending.value.previous;
+    for (const previous of [
+      { binding: earlier.binding },
+      { ...earlier, binding: { ...earlier.binding, connectionId: 'other' } },
+    ]) {
+      const current = await store.read(pending.id);
+      await store.commit(pending.id, current!.revision, { ...value, previous });
+      await expect(transitions.read(pending.id)).rejects.toMatchObject({
+        problem: 'corrupt',
+      });
+    }
+  });
+
+  it('resumes after a matched denial or without a callback, under the attempt generation', async () => {
+    for (const answer of [true, false]) {
+      const { pending, next, transitions, attempt } = await reauthorizing();
+      const resumed = committed(
+        await transitions.resume(
+          pending.id,
+          pending.revision,
+          attempt.pod,
+          answer ? denied(next) : undefined,
+        ),
+      );
+      expect(resumed.value).toMatchObject({
+        kind: 'ready',
+        binding: { generation: 'generation-two' },
+        credentials: { refreshToken: 'refresh-one' },
+      });
+      // The attempt is consumed: no second resume or code claim.
+      await expect(
+        transitions.resume(pending.id, resumed.revision, attempt.pod),
+      ).rejects.toMatchObject({ problem: 'state' });
+    }
+  });
+
+  it('refuses ineligible answers and leaves forged callbacks untouched', async () => {
+    const { pending, next, transitions, attempt } = await reauthorizing();
+    const resume = (url?: URL) =>
+      transitions.resume(pending.id, pending.revision, attempt.pod, url);
+    await expect(resume(returned(next))).rejects.toMatchObject({
+      problem: 'state',
+    });
+    await expect(resume(denied(next, 'login_required'))).rejects.toMatchObject({
+      problem: 'state',
+    });
+    await expect(
+      resume(new URL(`${denied(next).href}&iss=https%3A%2F%2Fevil`)),
+    ).rejects.toMatchObject({ problem: 'callback' });
+    await expect(
+      transitions.resume(
+        pending.id,
+        pending.revision,
+        {
+          ...attempt.pod,
+          endpoints: {
+            ...attempt.pod.endpoints,
+            token: `${pod}/_system/auth/token-v2`,
+          },
+        },
+        denied(next),
+      ),
+    ).rejects.toMatchObject({ problem: 'state' });
+    expect((await transitions.read(pending.id))?.revision).toBe(
+      pending.revision,
+    );
+    expect(
+      (await transitions.resume(pending.id, 'stale', attempt.pod)).kind,
+    ).toBe('conflict');
+  });
+
+  it('does not resume an expired earlier session without a refresh token', async () => {
+    const s = await setup();
+    const { refreshToken: _unused, ...withoutRefresh } = credentials();
+    void _unused;
+    const saved = await s.prepare();
+    const ready = committed(
+      await claimed(
+        await s.transitions.claimCode(
+          saved.id,
+          saved.revision,
+          s.attempt,
+          returned(s.attempt),
+        ),
+      ).complete(withoutRefresh),
+    );
+    const { attempt: next } = await prepareSessionAuthorization({
+      ...s.attempt,
+      generation: 'generation-two',
+      returnTo: '/',
+    });
+    const pending = committed(
+      await s.transitions.prepare(next, ready.revision),
+    );
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 2 * 3600_000);
+    await expect(
+      s.transitions.resume(pending.id, pending.revision, s.attempt.pod),
+    ).rejects.toMatchObject({ problem: 'state' });
+  });
+
+  it('keeps no earlier session for a first sign-in', async () => {
+    const s = await setup();
+    const first = await s.prepare();
+    expect(first.value).not.toHaveProperty('previous');
+    await expect(
+      s.transitions.resume(first.id, first.revision, s.attempt.pod),
+    ).rejects.toMatchObject({ problem: 'state' });
+  });
+});
