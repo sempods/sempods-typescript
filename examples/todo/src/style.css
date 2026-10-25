@@ -1,9 +1,22 @@
+/*
+ * The app's own elements in the SDK's neutral look. The tokens below are the
+ * SDK's defaults, set once on the page: the SDK surfaces (AppAccess, editor,
+ * notices) and this app's header, form and list read the same values. Change a
+ * token here to brand both together.
+ */
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  color: light-dark(#173740, #e8eee9);
-  background: light-dark(#f3f6f7, #191b1a);
-  font-size: 16px;
+  --sempods-bg: light-dark(#fff, #111315);
+  --sempods-text: light-dark(#1f2933, #e5e7eb);
+  --sempods-muted: light-dark(#6b7280, #9ca3af);
+  --sempods-line: light-dark(#e5e7eb, #2d3138);
+  --sempods-accent: light-dark(#1f2933, #e5e7eb);
+  --sempods-on-accent: light-dark(#fff, #111315);
+  font:
+    400 1rem/1.5 system-ui,
+    sans-serif;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
 }
 * {
   box-sizing: border-box;
@@ -11,62 +24,55 @@
 body {
   margin: 0;
 }
-main {
-  background: light-dark(white, #191b1a);
-  min-height: 100vh;
-}
+
+/* Controls match the SDK's: 44px targets, thin lines, the accent for text. */
 input,
 select,
 button {
   font: inherit;
   max-width: 100%;
   min-height: 44px;
-  border: 1px solid #77909a;
-  border-radius: 6px;
-  padding: 8px 12px;
+}
+button {
+  font-weight: 500;
+  border: 1px solid var(--sempods-line);
+  border-radius: 5px;
+  color: var(--sempods-accent);
+  background: var(--sempods-bg);
+  padding: 10px 14px;
+  cursor: pointer;
 }
 input,
 select {
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
+  border: 1px solid var(--sempods-line);
+  border-radius: 4px;
+  padding: 10px;
+}
+input:not([type='checkbox']),
+select {
   display: block;
   width: 100%;
-}
-input[type='checkbox'] {
-  display: inline;
-  width: auto;
-  margin-right: 8px;
-  vertical-align: middle;
-}
-label {
-  display: block;
-  max-width: 100%;
-}
-button {
-  cursor: pointer;
-  background: light-dark(#ecf3f4, #252d27);
-  color: light-dark(#103d48, #e8eee9);
 }
 button:disabled {
   opacity: 0.55;
   cursor: default;
 }
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 3px solid #ad5400;
-  outline-offset: 2px;
+:focus-visible {
+  outline: 2px solid var(--sempods-accent);
+  outline-offset: 3px;
 }
+label {
+  display: block;
+  max-width: 100%;
+}
+
+/* Layout and spacing. */
 nav {
-  padding: 8px;
   display: flex;
   gap: 8px;
-}
-form,
-section {
-  margin-block: 16px;
-}
-ul {
-  padding-left: 0;
-  list-style: none;
+  padding: 8px;
 }
 .standard {
   max-width: 760px;
@@ -79,8 +85,20 @@ ul {
   align-items: center;
   gap: 12px;
 }
-@media (min-width: 700px) {
-  input {
-    min-width: 180px;
-  }
+.app-heading h1 {
+  font-size: 1.75rem;
+  font-weight: 500;
+  line-height: 1.25;
+  margin: 0;
+}
+form,
+section {
+  margin-block: 16px;
+}
+ul {
+  padding-left: 0;
+  list-style: none;
+}
+li + li {
+  border-top: 1px solid var(--sempods-line);
 }
