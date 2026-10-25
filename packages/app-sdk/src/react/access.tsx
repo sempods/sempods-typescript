@@ -540,6 +540,11 @@ function AccessConnections({
   // Without a podNames entry the derived name is the address itself.
   const podLine = (target: string) =>
     (!addressHidden || podNames?.[target]?.trim()) && <p>{name(target)}</p>;
+  // Management names the Pod its actions target; a display name never
+  // replaces that Pod's address, also beside several saved connections.
+  const namedAddress = c && podNames?.[c.podUrl]?.trim() && (
+    <p className="sp-access-address">{c.podUrl}</p>
+  );
   const labels =
     c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
   const selectedEntry = readable.find(
@@ -763,21 +768,15 @@ function AccessConnections({
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
-      {manage && active && state.connections.length < 2 && (
-        <>
-          {podLine(c!.podUrl)}
-          {/* A display name never replaces the Pod's identity. */}
-          {podNames?.[c!.podUrl]?.trim() && (
-            <p className="sp-access-address">{c!.podUrl}</p>
-          )}
-        </>
-      )}
+      {manage && active && state.connections.length < 2 && podLine(c!.podUrl)}
+      {manage && active && namedAddress}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
       {c && !active && c.session.kind !== 'restoring' && (
         <>
           {podLine(c.podUrl)}
+          {manage && namedAddress}
           {c.session.kind === 'ended' &&
             !disconnectFailed &&
             !shownByNotice && (

@@ -1797,3 +1797,27 @@ it('keeps the known Context while the management dialog checks access again', as
   expect(screen.getByText('This app can read')).toBeTruthy();
   expect(screen.queryByRole('combobox')).toBeNull();
 });
+
+it('keeps the active Pod address beside several named connections in management', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ allowedPods: [pod, other], preferences: null });
+  const both = await bothSignedIn(f, other);
+  cleanups.push(() => both.runtime.dispose());
+  render(
+    <SempodsProvider runtime={both.runtime}>
+      <AppAccess
+        appName="Shopping"
+        open
+        onClose={() => {}}
+        podNames={{ [pod]: 'Personal', [other]: 'Work' }}
+      />
+    </SempodsProvider>,
+  );
+  const dialog = await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  const picker = within(dialog).getByRole('combobox', { name: 'Active pod' });
+  const active = both.runtime
+    .getSnapshot()
+    .find((entry) => entry.id === (picker as HTMLSelectElement).value)!;
+  // The selector shows names; the Pod the actions target keeps its address.
+  expect(within(dialog).getByText(active.podUrl)).toBeTruthy();
+});
