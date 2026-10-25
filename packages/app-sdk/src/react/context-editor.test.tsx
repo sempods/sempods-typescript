@@ -211,6 +211,12 @@ function Switch({ id }: { readonly id: string }) {
     <button onClick={() => void app.selectConnection(id)}>Switch Pod</button>
   );
 }
+/** Saves once Save is enabled: a background refresh briefly disables it. */
+async function save() {
+  const button = screen.getByText('Save') as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  fireEvent.click(button);
+}
 const phase = () => screen.getByTestId('phase').textContent;
 const title = () => screen.getByLabelText('Note title') as HTMLInputElement;
 /** Opens a row once a connection is active, as an overview only offers then. */
@@ -247,7 +253,7 @@ it('edits a row in its own Context with a fresh read and If-Match, leaving the s
   expect(select).not.toHaveBeenCalled();
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
   fireEvent.change(title(), { target: { value: 'Edited' } });
-  fireEvent.click(screen.getByText('Save'));
+  await save();
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({ context: work, iri: 'urn:a', ifMatch: '"n1"' });
   expect(f.count('/_system/sparql/query')).toBe(0);
@@ -271,7 +277,7 @@ it('keeps a draft in the selected Context while a row of another Context is edit
   await waitFor(() => expect(title().value).toBe('A at work'));
   expect(screen.queryByRole('alertdialog')).toBeNull();
   fireEvent.change(title(), { target: { value: 'Saved at work' } });
-  fireEvent.click(screen.getByText('Save'));
+  await save();
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]?.context).toBe(work);
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(personal);
@@ -309,7 +315,7 @@ it('runs target changes and close under the leave policy and blocks them while s
   expect(title().value).toBe('Unsaved');
   const gate = deferred<void>();
   control.hold = gate.promise;
-  fireEvent.click(screen.getByText('Save'));
+  await save();
   await waitFor(() => expect(writes).toHaveLength(1));
   fireEvent.click(screen.getByText('Close editor'));
   fireEvent.click(screen.getByText('Edit urn:b in work'));
@@ -813,7 +819,7 @@ it('keeps an unconfirmed-write review when a renewal for another person ends the
   await waitFor(() => expect(title().value).toBe('A at work'));
   control.writeStatus = 202;
   fireEvent.change(title(), { target: { value: 'Sent' } });
-  fireEvent.click(screen.getByText('Save'));
+  await save();
   await screen.findByText(/unconfirmed/i);
   expect(writes).toHaveLength(1);
   await endSession(f, 'subject-change');
