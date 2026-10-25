@@ -435,10 +435,34 @@ it.each([
       );
     });
     f.setResource(request);
-    fireEvent.click(screen.getByRole('button', { name: operation }));
+    // A background refresh briefly disables saving and deleting (the editor
+    // is reading); act only once the control is enabled.
+    const enabled = async (button: HTMLElement) => {
+      await waitFor(() =>
+        expect((button as HTMLButtonElement).disabled).toBe(false),
+      );
+      return button;
+    };
+    fireEvent.click(
+      await enabled(screen.getByRole('button', { name: operation })),
+    );
     // Delete asks first; the confirmation replaces the action row.
     if (operation === 'Delete')
-      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+      fireEvent.click(
+        await enabled(
+          within(screen.getByRole('group', asked)).getByRole('button', {
+            name: 'Delete',
+          }),
+        ),
+      );
+    // The write left: a lost click would otherwise surface only as a missing alert.
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([, init]) => init?.method === 'PATCH' || init?.method === 'DELETE',
+        ),
+      ).toBe(true),
+    );
     const changed = 'The pod has changed. Compare before continuing.';
     // The first case runs the review path cold (about five times slower than the
     // others locally); loaded CI runners have needed more than five seconds.

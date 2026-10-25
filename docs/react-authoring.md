@@ -22,7 +22,8 @@ const runtime = createBrowserRuntime({
     name: 'My tasks',
     redirectUri: location.origin + '/callback',
   },
-  returnTo: '/',
+  // Return to the page the person was on when signing in (deep links).
+  returnTo: () => location.pathname + location.search + location.hash,
   development: 'loopback-http', // only for local HTTP development
 });
 

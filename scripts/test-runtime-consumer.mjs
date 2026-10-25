@@ -1155,10 +1155,25 @@ try {
   await presetSignIn.waitFor();
   assert.equal(await page.getByLabel('Pod URL').count(), 0);
   const beforePreset = exchanges;
+  // In-app navigation to a deep link before signing in: `returnTo` as a
+  // function brings the person back there after the callback.
+  await page.evaluate(() =>
+    window.history.pushState(null, '', '/app?identity=preset&view=add#new'),
+  );
   await Promise.all([page.waitForURL('**/callback?**'), presetSignIn.click()]);
-  await page.waitForURL('**/app?identity=preset');
+  await page.waitForURL(
+    (url) =>
+      url.pathname === '/app' &&
+      url.search === '?identity=preset&view=add' &&
+      url.hash === '#new',
+  );
   const presetDraft = page.getByLabel('Preset draft');
   await presetDraft.waitFor();
+  // Back to the plain page once startup has settled (it sets the address
+  // again when it finishes), so the re-authorization below returns there.
+  await page.evaluate(() =>
+    window.history.replaceState(null, '', '/app?identity=preset'),
+  );
   assert.equal(exchanges, beforePreset + 1);
   assert.ok(
     await page.evaluate(
@@ -1204,7 +1219,7 @@ try {
   );
   assert.equal(exchanges, beforePreset + 2);
   console.log(
-    'Packed preset React app: one-click PKCE, exact context, guarded reauthorization, connection reuse and durable reload passed.',
+    'Packed preset React app: one-click PKCE returning to an in-app deep link (returnTo function), exact context, guarded reauthorization, connection reuse and durable reload passed.',
   );
   for (const surface of ['access', 'controls']) {
     for (const language of ['en', 'de']) {

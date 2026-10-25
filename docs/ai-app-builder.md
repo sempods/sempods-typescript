@@ -98,6 +98,9 @@ not instructions to the coding assistant.
   `SempodsProvider`, which initializes it, including on the callback route. Keep
   `TargetScreen` around target-specific screens. Dispose a runtime when its actual
   application lifetime ends; do not replace it on every render or locale change.
+  When the app has routes, pass
+  `returnTo: () => location.pathname + location.search + location.hash` so a
+  deep link such as `/items/add` survives the sign-in.
 - Configure dynamic identity and explicit `development: 'loopback-http'` for the
   local example. Use an explicitly configured HTTPS `did:web` identity for a
   stable deployment. Do not silently substitute identities or fall back to dynamic

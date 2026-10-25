@@ -54,6 +54,11 @@ Check these points:
   session by itself. Custom controls check `session.restorable` and call
   `runtime.retryRestore(id)` or `useApp().retryRestore(id)`. Test doubles that
   implement `BrowserRuntime` add the method.
+- **Deep links through sign-in.** `returnTo` also accepts a function, called
+  when each sign-in or re-authorization starts, so a person who navigated to
+  `/items/add` inside the app returns there after the callback. A string keeps
+  its meaning. The result is checked like a string; an unsafe address rejects
+  the sign-in with a `configuration` error.
 - **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
   0.6 holds the earlier session; downgrading to 0.5 is not supported.
 - **Leave confirmation in the top layer.** The provider's "Discard unsaved
