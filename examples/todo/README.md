@@ -20,12 +20,13 @@ overview with on-demand Contexts, plus creating and editing in an explicit
 Context) and `recipes/overview-toggle.tsx` (ticking a task on an overview row in
 its own Context with one click) are further copyable screens.
 
-Open `http://127.0.0.1:5173/` for the centered `AppAccess` login and app-owned
-layout. Use **Pods & sharing** to open management after connecting. `/legacy` retains
-AppShell composition with the same access UI, and `/custom` shows a fully custom layout. Enter the Pod address, sign in
-on the Pod, then explicitly select a context.
-The screens share `src/domain.ts` and `TaskScreen`; no protocol or session logic
-is duplicated. The callback route is served by the development server. Configure
+Open `http://127.0.0.1:5173/`. The app uses only the SDK's standard UI:
+`AppAccess` for sign-in and recovery beside the app's own header and task
+screen, `ResourceEditor` and `UpdateNotice` for editing and outcomes. Use
+**Pods & sharing** to open management after connecting. Enter the Pod address,
+sign in on the Pod, then explicitly select a context. The UI follows the
+browser's language until EN/DE is picked. No protocol or session logic lives in
+the app. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 

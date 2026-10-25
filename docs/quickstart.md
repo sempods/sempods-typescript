@@ -209,7 +209,7 @@ check the Pod's current version before acknowledging; nothing is resent. A succe
 the target starts, so the notices show the last action; unresolved outcomes stay until
 acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
-[TODO example](../examples/todo/src/app.tsx) adds EN/DE and a custom layout.
+[TODO example](../examples/todo/src/app.tsx) adds an EN/DE switch.
 
 Replace Vite's demo styles in `src/index.css` with a simple baseline for your
 app content. AppAccess supplies its own scoped login/recovery styles:
@@ -301,5 +301,4 @@ session across reloads and renews it. The editor saves conditionally and keeps
 your draft during conflicts. List updates check that what you clicked is still
 current. An answer lost on the network is shown as "not confirmed" and never sent
 again silently. See [React authoring](react-authoring.md) and the full
-[TODO example](../examples/todo/src/app.tsx) for custom layouts, messages and
-recovery details.
+[TODO example](../examples/todo/src/app.tsx) for messages and recovery details.

@@ -9,11 +9,7 @@ const runtime = createBrowserRuntime({
     name: 'sempods TODO',
     redirectUri: location.origin + '/callback',
   },
-  // Called when a sign-in starts: return to the screen the person is on.
-  returnTo: () =>
-    ['/custom', '/legacy'].includes(location.pathname)
-      ? location.pathname
-      : '/',
+  returnTo: '/',
   development: 'loopback-http',
 });
 createRoot(document.getElementById('root')!).render(

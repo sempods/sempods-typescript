@@ -112,12 +112,12 @@ and page traffic stay on loopback. Chromium is the automated browser target; see
 The runnable TODO/Node examples and React authoring layer are described in
 [React/headless authoring](react-authoring.md).
 
-`test:todo` installs packed SDKs and compiles the actual examples. The shell-free
-TODO covers EN/DE sign-in, 320px light/dark presentation, explicit context choice,
-creation and guarded management with a retained draft. The unchanged AppShell entry and
-custom layouts retain the full CRUD, conflict/unknown-outcome, guard,
-keyboard/mobile and second-tab checks, plus the shared Node domain/edit path.
-`test:todo` also checks AppShell, editor and recovery controls without an app
+`test:todo` installs packed SDKs and compiles the actual examples. The TODO's
+standard screen covers EN/DE sign-in, 320px light/dark presentation, explicit
+context choice, creation and guarded management with a retained draft, and the
+full CRUD, conflict/unknown-outcome, guard, keyboard/mobile and second-tab
+checks, plus the shared Node domain/edit path.
+`test:todo` also checks the standard screen, editor and recovery controls without an app
 stylesheet at 320/375px in EN/DE and light/dark, including host-controlled color schemes, transparent embedded surfaces, inherited token overrides,
 44px targets, keyboard focus, and isolation from app-owned list styling.
 `test:runtime` also covers packed `AppAccess` one/set/free Pod choices, keyboard
