@@ -46,6 +46,14 @@ Check these points:
   provider's `error_description` is still never shown or interpreted. Tests
   that match the old texts need the new ones; pass `messages.controls` to keep
   your own.
+- **Offline start keeps the session.** When restoring a saved session cannot
+  reach its Pod (offline, `5xx`, `408`, `429`), the connection ends with
+  `restorable: true` instead of looking signed out. `AppAccess` and
+  `ConnectionControls` show `controls.unreachable` (optional in `UiMessages`)
+  with **Try again** instead of **Sign in**; coming back online restores the
+  session by itself. Custom controls check `session.restorable` and call
+  `runtime.retryRestore(id)` or `useApp().retryRestore(id)`. Test doubles that
+  implement `BrowserRuntime` add the method.
 - **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
   0.6 holds the earlier session; downgrading to 0.5 is not supported.
 - **Leave confirmation in the top layer.** The provider's "Discard unsaved

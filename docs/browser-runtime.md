@@ -109,9 +109,14 @@ outcomes. They cannot dispatch data while restoring. A slow or offline Pod
 therefore cannot delay the startup report, another Pod's restoration, or a
 callback's code claim and exchange, nor keep callback parameters in the address
 bar. Disconnect/dispose still prevent late restoration from publishing
-credentials. A failed restoration (for example offline) ends that session for
-this page with its problem; the saved record is kept, so the next start restores
-it.
+credentials.
+
+A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` during
+discovery) is not a sign-out: the connection ends with that problem and
+`restorable: true`, and the saved session is kept. The runtime restores it again
+when the browser fires `online`, and `retryRestore(id)` tries at once; both go
+through `restoring` to `active` without a token request or a new sign-in. Any
+other restoration failure, such as a changed binding, ends the session.
 
 Configured callback URLs may retain application query parameters, but may not
 contain authorization-response keys (`code`, `state`, `iss`, `error`,

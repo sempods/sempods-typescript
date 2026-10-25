@@ -37,6 +37,14 @@ export type SessionFact =
        * not persisted across reloads. Absence makes no claim about persistence.
        */
       readonly saved?: false;
+      /**
+       * The saved session is kept: restoring it failed only because its Pod
+       * could not be reached (offline, `5xx`, `408`, `429`). The runtime
+       * restores it again when the browser comes back online, or on
+       * `retryRestore(id)`. This is not a sign-out; offer a retry, not a
+       * sign-in.
+       */
+      readonly restorable?: true;
     };
 /**
  * Registry labels (`rdfs:label`, SPS-CTX-032) keyed by exact context IRI, read
@@ -208,6 +216,13 @@ export interface BrowserRuntime {
    * dropped; the labels arrive through the snapshot.
    */
   loadContextLabels(id: string, iris: readonly string[]): Promise<void>;
+  /**
+   * Tries again to restore a saved session whose restoration could not reach
+   * its Pod (`session.restorable`), as coming back online does automatically.
+   * The connection reports `restoring`, then `active` or `ended` again. Does
+   * nothing for any other session; never starts a sign-in.
+   */
+  retryRestore(id: string): Promise<void>;
   selectContext(id: string, iri: string): void;
   bind(id: string): BoundView;
   /**

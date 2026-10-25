@@ -1351,7 +1351,7 @@ it.each(['missing scopes', 'ended session'] as const)(
       await callback.initialize();
       callback.dispose();
       await settleLease();
-      // Restoring the saved session fails, which ends it.
+      // Restoring the saved session cannot reach the Pod, which ends it as restorable.
       runtime = createBrowserRuntime({
         ...f.options,
         fetch: async (url, init) => {
@@ -1380,7 +1380,9 @@ it.each(['missing scopes', 'ended session'] as const)(
       await waitFor(() =>
         expect(runtime.getSnapshot()[0]?.session.kind).toBe('ended'),
       );
-      expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+      // An unreachable Pod keeps the saved session: retry, not a new sign-in.
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
     }
     expect(screen.queryByText('Loading…')).toBeNull();
   },

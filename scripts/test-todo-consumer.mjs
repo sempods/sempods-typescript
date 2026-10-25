@@ -1551,12 +1551,20 @@ try {
       await cached(),
       [...shell('/', 'v1'), ...shell('/second/', 'v1')].sort(),
     );
-    // Offline restoration reports its network failure but retains the stored session.
-    // Coming back online below restores it without another authorization.
+    // An offline start keeps the saved session: the Pod is reported unreachable
+    // with Try again instead of Sign in, and coming back online restores it
+    // without a reload or another authorization.
     await context.setOffline(true);
     await page.reload();
     await page.getByRole('heading', { name: 'TODO', level: 1 }).waitFor();
-    await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+    await page
+      .getByRole('button', { name: 'Try again', exact: true })
+      .waitFor();
+    await page.getByText('The Pod cannot be reached right now.').waitFor();
+    assert.equal(
+      await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
+      0,
+    );
     assert.equal(
       await page.getByLabel('Pod address', { exact: true }).count(),
       0,
@@ -1569,11 +1577,21 @@ try {
         .then((text) => text.includes(pod)),
       true,
     );
+    const afterOffline = { loads: 0, auth: 0 };
+    const countLoad = () => afterOffline.loads++;
+    const countAuth = (request) => {
+      if (/\/(authorize|token)(\?|$)/.test(new URL(request.url()).pathname))
+        afterOffline.auth++;
+    };
+    page.on('load', countLoad);
+    page.on('request', countAuth);
     await context.setOffline(false);
-    await page.reload();
     await page
       .getByRole('button', { name: 'Installed', exact: true })
       .waitFor();
+    page.off('load', countLoad);
+    page.off('request', countAuth);
+    assert.deepEqual(afterOffline, { loads: 0, auth: 0 });
     // An update is announced but never reloads over a draft.
     await page
       .getByLabel('Task', { exact: true })

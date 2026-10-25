@@ -68,7 +68,10 @@ It shows:
   the catalogue loaded, a failed catalogue) or when the host passes `open`. Once
   a catalogue has settled, a reload (**Check access**, revalidation) keeps it. A
   connection whose sign-in never returned, or whose session expired, asks to
-  sign in without claiming access or a kept draft. The context picker lists
+  sign in without claiming access or a kept draft. A saved session whose Pod
+  could not be reached at startup instead says so (`controls.unreachable`) and
+  offers **Try again** (`useApp().retryRestore(id)`), not a sign-in; it also
+  restores by itself once the browser is back online. The context picker lists
   readable contexts only and says so when the Pod grants none.
 
 It hides once the selected target is readable, including read-only access;

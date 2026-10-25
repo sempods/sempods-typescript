@@ -10,6 +10,7 @@ import type {
   OAuthClient,
   ExchangeResult,
 } from '@sempods/client-sdk/oauth';
+import type { SessionRecord } from '../sessions/records.js';
 import type { Connection } from './types.js';
 import type { BoundPod, BoundView } from './view.js';
 
@@ -43,6 +44,8 @@ export interface Entry {
   /** The refresh started ahead of expiry, which a still-valid credential need not wait for. */
   ahead?: Promise<boolean>;
   clientPod: Pod;
+  /** The saved session a restoration could not reach yet; tried again on demand. */
+  restorable?: Extract<SessionRecord, { kind: 'ready' }>;
 }
 
 /** Credentials never follow a subject IRI or another pod's route. */

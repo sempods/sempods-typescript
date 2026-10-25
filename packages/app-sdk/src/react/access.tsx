@@ -665,13 +665,24 @@ function AccessConnections({
             !shownByNotice && (
               <p role="status">{endedMessage(c.session, m, true)}</p>
             )}
-          <button
-            className="sp-access-primary"
-            disabled={unavailable}
-            onClick={() => void act(() => app.authorize(c.id))}
-          >
-            {m.controls.signIn}
-          </button>
+          {c.session.kind === 'ended' && c.session.restorable ? (
+            // The Pod was unreachable, not the session lost: no new sign-in.
+            <button
+              className="sp-access-primary"
+              disabled={unavailable}
+              onClick={() => void act(() => app.retryRestore(c.id))}
+            >
+              {m.controls.retry}
+            </button>
+          ) : (
+            <button
+              className="sp-access-primary"
+              disabled={unavailable}
+              onClick={() => void act(() => app.authorize(c.id))}
+            >
+              {m.controls.signIn}
+            </button>
+          )}
         </>
       )}
       {active && contextRequired && !fixedContext && (

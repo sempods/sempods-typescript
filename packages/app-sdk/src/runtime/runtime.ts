@@ -514,12 +514,15 @@ export function createBrowserRuntime(
     return e.revalidation;
   }
 
+  /** Counts the browser's `online` events, so a restoration knows it missed one. */
+  let onlineEvents = 0;
   /** Restores one saved signed-in Pod; publishes its own outcome (`active`/`ended`). */
   async function restore(
     e: Entry,
     saved: Extract<SessionRecord, { kind: 'ready' }>,
   ) {
     const generation = e.generation;
+    const events = onlineEvents;
     try {
       const pod = await discoverPod(e.pod.podUrl, {
         ...protocol,
@@ -531,18 +534,46 @@ export function createBrowserRuntime(
       install(e, saved.credentials);
     } catch (error) {
       if (eligible(e, generation)) {
+        // An unreachable or failing Pod is not a logout: the saved session
+        // stays and is restored again, also once the browser is back online.
+        const restorable = transientBeforeClaim(error);
+        if (restorable) e.restorable = saved;
         e.view = {
           ...e.view,
           session: Object.freeze({
             kind: 'ended',
             problem: runtimeProblem(error),
             ...runtimeFailure(error),
+            ...(restorable ? { restorable: true as const } : {}),
           }),
         };
         publish();
+        // The browser came back online while this attempt was under way: its
+        // retry found the session still restoring, so try once more now.
+        if (restorable && onlineEvents !== events) void retryRestore(e);
       }
     }
   }
+  /** Restores a session whose restoration found its Pod unreachable; no-op otherwise. */
+  async function retryRestore(e: Entry) {
+    const saved = e.restorable;
+    const session = e.view.session;
+    if (!saved || session.kind !== 'ended' || !session.restorable) return;
+    delete e.restorable;
+    e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+    publish();
+    await restore(e, saved);
+  }
+  // Coming back online restores every session that could not reach its Pod.
+  const page = globalThis as {
+    addEventListener?: (type: string, listener: () => void) => void;
+    removeEventListener?: (type: string, listener: () => void) => void;
+  };
+  const online = () => {
+    onlineEvents++;
+    for (const e of entries.values()) void retryRestore(e);
+  };
+  page.addEventListener?.('online', online);
   /**
    * Resumes the session a denied (`callback`) or abandoned re-authorization
    * started from, and publishes it. Returns false, changing nothing, when the
@@ -1182,9 +1213,13 @@ export function createBrowserRuntime(
         );
       return view;
     },
+    async retryRestore(id) {
+      await retryRestore(get(id));
+    },
     dispose() {
       disposed = true;
       initialized = false;
+      page.removeEventListener?.('online', online);
       for (const e of entries.values()) {
         delete e.credentials;
         delete e.credential;

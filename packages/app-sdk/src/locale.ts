@@ -101,6 +101,12 @@ export interface UiMessages {
    * (added in 0.6.0); `createLocale` fills it from the language defaults.
    */
   readonly leaving?: string;
+  /**
+   * A saved session whose Pod could not be reached at startup (offline): it is
+   * kept and restored again once back online; `retry` tries at once. Optional
+   * in the type (added in 0.6.0); `createLocale` fills it.
+   */
+  readonly unreachable?: string;
 
   /*
    * Management (added in 0.6.0; optional in the type, `createLocale` fills
@@ -206,6 +212,8 @@ export const englishMessages: SdkMessages = {
     disconnectFailed:
       'Sign-out was not saved on this device. Try signing out again.',
     leaving: 'Opening your Pod’s sign-in…',
+    unreachable:
+      'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
 
     contextAccess: 'Available to this app',
     canRead: 'This app can read',
@@ -333,6 +341,8 @@ export const germanMessages: SdkMessages = {
     disconnectFailed:
       'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.',
     leaving: 'Die Anmeldung deines Pods wird geöffnet…',
+    unreachable:
+      'Der Pod ist gerade nicht erreichbar. Du bleibst angemeldet; die App verbindet sich wieder, sobald das Netz zurück ist.',
 
     contextAccess: 'Für diese App verfügbar',
     canRead: 'Diese App kann lesen',
