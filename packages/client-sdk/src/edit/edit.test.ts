@@ -1382,6 +1382,19 @@ describe('snapshots and one-click updates', () => {
     expect(list.items.map((s) => s.iri)).toEqual([TASK]);
     expect(list.skipped).toBe(1);
   });
+  it('reports a row another writer made invalid as changed, with its values', async () => {
+    const pod = memoryPod();
+    const [seen] = snapshots(pod.source, [initial()], task).items;
+    // Another writer clears the title this update changes too. The list
+    // skips such rows, but the conflict still shows the current values.
+    pod.write({ [NAME]: [{ '@value': '', '@language': 'en' }] });
+    expect(
+      await updateFields(pod.source, seen!, task, { title: 'Buy oat milk' }),
+    ).toMatchObject({
+      kind: 'changed-on-pod',
+      current: { iri: TASK, data: { title: '', done: false } },
+    });
+  });
   it('updates one field from a list while keeping a concurrent change to another', async () => {
     const pod = memoryPod();
     const list = snapshots(

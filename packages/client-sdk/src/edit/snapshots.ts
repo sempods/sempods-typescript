@@ -70,10 +70,6 @@ function capture<D>(
     throw new TypeError('A subject needs an absolute IRI.');
   const copy = frozenCopy(node);
   const data = frozenCopy(definition.read(copy));
-  // A row the definition does not accept (for example an empty required
-  // text) could not be written back by any update: skip it like an unreadable one.
-  if (definition.valid && !definition.valid(data))
-    throw new TypeError('The values are not valid.');
   const snapshot = Object.freeze({ iri: id, data });
   evidence.set(snapshot, {
     source,
@@ -106,6 +102,11 @@ export function snapshots<D>(
   for (const node of nodes) {
     try {
       const snapshot = capture(source, definition, node);
+      // A row the definition does not accept (for example an empty required
+      // text) could not be written back by any update: skip it like an
+      // unreadable one. Conflict reads keep such values to compare them.
+      if (definition.valid && !definition.valid(snapshot.data))
+        throw new TypeError('The values are not valid.');
       if (ids.has(snapshot.iri)) throw new TypeError('Duplicate subject.');
       ids.add(snapshot.iri);
       items.push(snapshot);
