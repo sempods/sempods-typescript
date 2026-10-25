@@ -119,13 +119,18 @@ function AppContent() {
       {connections.length > 0 && (
         <button
           ref={focusTarget}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
+          aria-haspopup="dialog"
+          onClick={() => setOpen(true)}
         >
           {messages.controls.dataAccess}
         </button>
       )}
-      <AppAccess appName="My tasks" open={open} focusTarget={focusTarget} />
+      <AppAccess
+        appName="My tasks"
+        open={open}
+        onClose={() => setOpen(false)}
+        focusTarget={focusTarget}
+      />
       <TargetScreen>
         <Tasks />
       </TargetScreen>

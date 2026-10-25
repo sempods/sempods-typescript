@@ -57,6 +57,13 @@ export interface AppAccessProps {
   /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
   /**
+   * Shows management (`open`) as a modal dialog with a title and a close
+   * button; Escape, the close button and a click beside it call this, which
+   * should set `open` to false. Sign-in and recovery stay inline. Without it,
+   * management renders in place.
+   */
+  readonly onClose?: () => void;
+  /**
    * Return focus here once the focused access surface hides and its guarded
    * transition ends. Visible retry or error feedback does not trigger this.
    */
@@ -101,6 +108,7 @@ export function AppAccess({
   podNames,
   podAddress = 'visible',
   open = false,
+  onClose,
   focusTarget,
   components,
   className,
@@ -193,6 +201,14 @@ export function AppAccess({
   });
   const { body, notice, heading: Heading, namesApp } = presentation;
   const hidden = !presentation.visible;
+  const asDialog = open && Boolean(onClose);
+  // Opening the management dialog checks the access again, so it needs no
+  // separate button.
+  const activeId = keptActive ? kept.id : null;
+  const refreshContexts = app.refreshContexts;
+  useLayoutEffect(() => {
+    if (asDialog && activeId) void refreshContexts(activeId).catch(() => {});
+  }, [asDialog, activeId, refreshContexts]);
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
     // focus only after that transition and once access feedback has hidden.
@@ -207,7 +223,7 @@ export function AppAccess({
     }
   }, [hidden, focusTarget, state.changing, state.confirmingLeave]);
   const Connections = components?.Connections;
-  return (
+  const section = (
     <section
       onFocusCapture={() => {
         heldFocus.current = true;
@@ -234,9 +250,9 @@ export function AppAccess({
         {styles}
       </style>
       <div className="sp-access-content">
-        {(presentation.attention || open) && (
+        {(presentation.attention || open) && !asDialog && (
           <header>
-            {icon && (
+            {icon && namesApp && (
               <div className="sp-access-icon" aria-hidden="true">
                 {icon}
               </div>
@@ -305,6 +321,7 @@ export function AppAccess({
                     contextRequired={contextRequired}
                     discovery={discovery}
                     manage={open}
+                    dialog={asDialog}
                     mode={mode}
                     body={body}
                     podAddress={podAddress}
@@ -319,6 +336,87 @@ export function AppAccess({
       </div>
     </section>
   );
+  return asDialog ? (
+    <ManagementDialog
+      title={m.controls.dataAccess}
+      onClose={onClose!}
+      {...(focusTarget ? { returnFocus: focusTarget } : {})}
+    >
+      {section}
+    </ManagementDialog>
+  ) : (
+    section
+  );
+}
+
+/**
+ * Management as a native modal dialog in the top layer: the app behind it is
+ * inert, and a leave confirmation still opens above it.
+ */
+function ManagementDialog({
+  title,
+  onClose,
+  returnFocus,
+  children,
+}: {
+  readonly title: string;
+  readonly onClose: () => void;
+  /** Focus after closing (`focusTarget`); otherwise the element focused before. */
+  readonly returnFocus?: RefObject<HTMLElement | null>;
+  readonly children: ReactNode;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const label = useId();
+  const { messages: m, direction } = useSdkLocale();
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    const back =
+      returnFocus?.current ??
+      (element.ownerDocument.activeElement as HTMLElement | null);
+    // Environments without top-layer support (jsdom) still show it in place.
+    if (typeof element.showModal === 'function') {
+      if (!element.open) element.showModal();
+    } else element.setAttribute('open', '');
+    return () => {
+      if (typeof element.close === 'function') element.close();
+      else element.removeAttribute('open');
+      back?.focus();
+    };
+  }, [returnFocus]);
+  return (
+    <dialog
+      ref={dialog}
+      aria-labelledby={label}
+      data-sempods-ui="management"
+      className="sp-access-dialog"
+      dir={direction}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        // A click on the backdrop reaches the dialog element itself.
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <SdkStyles />
+      <header className="sp-access-dialog-header">
+        <h2 id={label}>{title}</h2>
+        <button
+          className="sp-access-close"
+          aria-label={m.controls.close}
+          title={m.controls.close}
+          onClick={onClose}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </header>
+      {children}
+    </dialog>
+  );
 }
 
 /** Presentation-only convenience. Canonical URL/security validation stays in the runtime. */
@@ -331,6 +429,7 @@ function enteredPod(value: string) {
 
 function AccessConnections({
   manage,
+  dialog,
   mode,
   podNames,
   contextRequired,
@@ -339,6 +438,8 @@ function AccessConnections({
   podAddress,
 }: {
   readonly manage: boolean;
+  /** Management in its dialog, which checks the access again on opening. */
+  readonly dialog: boolean;
   readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
@@ -439,6 +540,12 @@ function AccessConnections({
     (!addressHidden || podNames?.[target]?.trim()) && <p>{name(target)}</p>;
   const labels =
     c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
+  const selectedEntry = readable.find(
+    (entry) => entry.iri === c?.selectedContext,
+  );
+  // One readable Context, already selected: a choice adds nothing.
+  const onlyContext =
+    readable.length === 1 && selectedEntry ? selectedEntry : undefined;
   const contextLabel = (iri: string) =>
     distinctName(
       iri,
@@ -521,7 +628,7 @@ function AccessConnections({
               >
                 {m.controls.updateAccess}
               </button>
-              {discovery && (
+              {discovery && !dialog && (
                 <button
                   disabled={unavailable}
                   onClick={() => void act(() => app.refreshContexts(c.id))}
@@ -654,7 +761,15 @@ function AccessConnections({
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
-      {manage && active && state.connections.length < 2 && podLine(c!.podUrl)}
+      {manage && active && state.connections.length < 2 && (
+        <>
+          {podLine(c!.podUrl)}
+          {/* A display name never replaces the Pod's identity. */}
+          {podNames?.[c!.podUrl]?.trim() && (
+            <p className="sp-access-address">{c!.podUrl}</p>
+          )}
+        </>
+      )}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
@@ -686,7 +801,16 @@ function AccessConnections({
           )}
         </>
       )}
-      {active && contextRequired && !fixedContext && (
+      {active && contextRequired && !fixedContext && onlyContext && (
+        <p>
+          {contextLabel(onlyContext.iri)}
+          {' · '}
+          <span className="sp-access-fact">
+            {onlyContext.writable ? m.controls.canChange : m.controls.canRead}
+          </span>
+        </p>
+      )}
+      {active && contextRequired && !fixedContext && !onlyContext && (
         <label>
           {m.dataContext}
           <select
@@ -710,6 +834,13 @@ function AccessConnections({
               </option>
             ))}
           </select>
+          {selectedEntry && (
+            <span className="sp-access-fact">
+              {selectedEntry.writable
+                ? m.controls.canChange
+                : m.controls.canRead}
+            </span>
+          )}
         </label>
       )}
       {active && contextRequired && fixedContext && (
@@ -726,7 +857,7 @@ function AccessConnections({
         active &&
         c?.catalogue.kind === 'loading' &&
         !c.catalogue.contexts && <p role="status">{m.cataloguePending}</p>}
-      {manage && active && readable.length > 0 && (
+      {manage && active && !contextRequired && readable.length > 0 && (
         // What the catalogue says this app may do in each readable Context:
         // caller-relative rights, not which grant or public access gave them.
         <section aria-label={m.controls.contextAccess}>
@@ -744,7 +875,8 @@ function AccessConnections({
         </section>
       )}
       {manage && actions}
-      {c && (
+      {/* Management already shows the Pod address. */}
+      {c && !manage && (
         <details>
           <summary>{m.controls.addresses}</summary>
           <p>{c.podUrl}</p>
@@ -805,4 +937,15 @@ const styles = `
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
 [data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:5px; padding:10px 12px; }
 [data-sempods-access] summary { min-height:44px; padding:10px; cursor:pointer; }
+.sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-height:calc(100dvh - 32px); padding:0; border:0; border-radius:12px; background:var(--sp-bg); color:var(--sp-text); box-shadow:0 12px 32px rgb(0 0 0 / .2); }
+.sp-access-dialog::backdrop { background:rgb(0 0 0 / .45); }
+.sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
+.sp-access-dialog-header h2 { flex:1; margin:0; font-size:1.25rem; font-weight:600; }
+.sp-access-close { width:44px; height:44px; display:grid; place-items:center; padding:0; border:0; border-radius:8px; color:var(--sp-text); background:transparent; cursor:pointer; }
+.sp-access-close:hover { background:color-mix(in srgb,var(--sp-accent) 8%,transparent); }
+.sp-access-close:focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
+.sp-access-close svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
+.sp-access-dialog [data-sempods-access] { padding:8px 24px 24px; text-align:start; }
+.sp-access-dialog [data-sempods-access] .sp-access-content { max-width:none; }
+.sp-access-dialog [data-sempods-access] .sp-access-actions { justify-content:flex-start; margin-inline-start:-14px; }
 `;

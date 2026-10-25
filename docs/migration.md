@@ -101,6 +101,16 @@ Check these points:
   `{ retain: true }`; `createViewLoader` takes the same option as a third
   argument. Code that builds `LoadState` values itself still compiles;
   exhaustive checks over `kind` are unchanged.
+- **Management as a dialog, with fewer details.** `AppAccess` takes
+  `onClose`: with `open` it shows management as a native modal dialog (title,
+  **Close**, Escape, a click beside it) that checks the access again when it
+  opens, so it has no **Check access**. Replace an app-owned dialog around
+  `AppAccess` with `open={open} onClose={() => setOpen(false)}`. Management in
+  general no longer shows the app icon or **Full addresses**, names one
+  readable, selected Context instead of offering a choice, and shows the chosen
+  Context's access instead of the **Available to this app** list, which remains
+  only where there is no selection (on-demand management). Tests that looked
+  for those elements in management need updating.
 - **`LoadNotice`.** `<LoadNotice {...list} />` renders a read's loading,
   failure, cancelled and unavailable states with a retry, a note for kept rows
   after a failed refresh, and the count of entries it cannot show, in the SDK's

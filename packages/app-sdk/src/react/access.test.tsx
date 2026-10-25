@@ -886,9 +886,9 @@ it.each(['on-demand', 'required'] as const)(
     await screen.findByText('started');
     expect(runtime.getSnapshot()[0]?.session.kind).toBe('restoring');
     expectLoadingOnly();
-    // Explicit management still shows the connection, including its addresses.
+    // Explicit management still shows the connection and its actions.
     fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
-    expect(screen.getByText('Full addresses')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
     expectLoadingOnly();
     await act(async () => discovery.resolve());
@@ -1388,7 +1388,7 @@ it.each(['missing scopes', 'ended session'] as const)(
 );
 
 it.each(['en', 'de'] as const)(
-  'manages the connected Pod first, with Context access, and adds another Pod collapsed (%s)',
+  'manages the connected Pod first, with the chosen Context access, and adds another Pod collapsed (%s)',
   async (language) => {
     const de = language === 'de';
     const f = fixture();
@@ -1402,43 +1402,53 @@ it.each(['en', 'de'] as const)(
     const region = await screen.findByRole('region', {
       name: de ? 'Pods & Freigaben' : 'Pods & sharing',
     });
-    const list = await within(region).findByRole('region', {
-      name: de ? 'Für diese App verfügbar' : 'Available to this app',
-    });
+    // A choice of the readable Contexts; what the app may do in the chosen one
+    // shows beside it. No list repeats them, and no technical addresses.
+    const select = (await within(region).findByRole('combobox', {
+      name: de ? 'Datenkontext' : 'Data context',
+    })) as HTMLSelectElement;
     expect(
-      within(list)
-        .getAllByRole('listitem')
-        .map((item) => item.textContent),
-    ).toEqual(
-      de
-        ? [
-            'workDiese App kann lesen und ändern',
-            'personalDiese App kann lesen',
-          ]
-        : ['workThis app can read and change', 'personalThis app can read'],
-    );
+      within(select)
+        .getAllByRole('option')
+        .slice(1)
+        .map((option) => option.textContent),
+    ).toEqual(['work', 'personal']);
+    expect(
+      within(region).queryByRole('region', {
+        name: de ? 'Für diese App verfügbar' : 'Available to this app',
+      }),
+    ).toBeNull();
+    expect(
+      within(region).queryByText(
+        de ? 'Vollständige Adressen' : 'Full addresses',
+      ),
+    ).toBeNull();
     const change = within(region).getByRole('button', {
       name: de ? 'Freigabe ändern' : 'Change sharing',
     });
-    const addresses = within(region).getByText(
-      de ? 'Vollständige Adressen' : 'Full addresses',
-    );
     const another = within(region).getByText(
       de ? 'Weiteren Pod verbinden' : 'Connect another Pod',
     );
     const order = (a: Element, b: Element) =>
       a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
-    // Pod line, Contexts, the action, technical addresses, then another Pod.
+    // Pod line, the Context, the action, then another Pod.
     expect(
-      order(within(region).getByText('pod.example/alice'), list),
+      order(within(region).getByText('pod.example/alice'), select),
     ).toBeTruthy();
-    expect(order(list, change)).toBeTruthy();
-    expect(order(change, addresses)).toBeTruthy();
-    expect(order(addresses, another)).toBeTruthy();
+    expect(order(select, change)).toBeTruthy();
+    expect(order(change, another)).toBeTruthy();
     const details = another.closest('details')!;
     expect(details.open).toBe(false);
     expect(
       within(details).getByLabelText(de ? 'Pod-Adresse' : 'Pod address'),
+    ).toBeTruthy();
+    await act(async () => {
+      fireEvent.change(select, { target: { value: work } });
+    });
+    expect(
+      await within(region).findByText(
+        de ? 'Diese App kann lesen und ändern' : 'This app can read and change',
+      ),
     ).toBeTruthy();
     // Only the first catalogue, and no request for any Context but the
     // selected one's label.
@@ -1662,3 +1672,101 @@ it.each(['en', 'de'] as const)(
     expect(screen.queryByRole('status')).toBeNull();
   },
 );
+
+it('shows management as a modal dialog that closes and checks access on opening', async () => {
+  const f = fixture();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  const onClose = vi.fn();
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <AppAccess
+        appName="Shopping"
+        icon={<span>icon</span>}
+        open
+        onClose={onClose}
+      />
+    </SempodsProvider>,
+  );
+  const dialog = await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  // The dialog title names it; no app icon or second heading inside.
+  expect(within(dialog).queryByText('icon')).toBeNull();
+  expect(within(dialog).getAllByRole('heading')).toHaveLength(1);
+  expect(within(dialog).getByText('pod.example/alice')).toBeTruthy();
+  // Opening it reads the catalogue again; Check access is not needed.
+  await waitFor(() => expect(f.count('/_system/contexts')).toBe(2));
+  expect(
+    within(dialog).queryByRole('button', { name: 'Check access' }),
+  ).toBeNull();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  expect(onClose).toHaveBeenCalledTimes(2);
+});
+
+it('names one readable, selected Context with its access instead of a choice', async () => {
+  const f = fixture();
+  f.setCatalogue(async () => catalogue([work], []));
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <AppAccess appName="Shopping" open />
+    </SempodsProvider>,
+  );
+  await act(async () => logged.runtime.selectContext(logged.id, work));
+  expect(await screen.findByText('This app can read')).toBeTruthy();
+  expect(screen.getByText('work', { exact: false })).toBeTruthy();
+  expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
+});
+
+it('keeps the Pod address under a display name in management', async () => {
+  const f = fixture();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <AppAccess appName="Shopping" open podNames={{ [pod]: 'Personal' }} />
+    </SempodsProvider>,
+  );
+  expect(await screen.findByText('Personal')).toBeTruthy();
+  expect(screen.getByText(pod)).toBeTruthy();
+});
+
+it('returns focus to the focus target when the management dialog closes', async () => {
+  const f = fixture();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  function Shell() {
+    const [open, setOpen] = useState(false);
+    const target = useRef<HTMLButtonElement>(null);
+    return (
+      <>
+        <button ref={target} onClick={() => setOpen(true)}>
+          Menu
+        </button>
+        <AppAccess
+          appName="Shopping"
+          open={open}
+          onClose={() => setOpen(false)}
+          focusTarget={target}
+        />
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <Shell />
+    </SempodsProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Menu' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  within(dialog).getByRole('button', { name: 'Close' }).focus();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Pods & sharing' })).toBeNull(),
+  );
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Menu' }),
+  );
+});

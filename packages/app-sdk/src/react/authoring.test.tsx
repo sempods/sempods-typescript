@@ -1169,9 +1169,6 @@ it.each(['access', 'connections'] as const)(
     ).toBe(work);
     expect(screen.getByLabelText('Title')).toBe(field);
     expect((field as HTMLInputElement).value).toBe('Unsaved');
-    const details = screen.getByText('Full addresses').closest('details')!;
-    expect(details.textContent).toContain(work);
-    expect(details.textContent).toContain(personal);
     labels = { [work]: 'Arbeit' };
     await act(() => f.runtime.loadContexts(f.id));
     // Unchanged catalogue authority reuses the selected label; no sweep or refresh.
