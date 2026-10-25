@@ -1114,6 +1114,130 @@ try {
     await page.getByRole('button', { name: 'Reload', exact: true }).click();
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await add('After unknown deletion');
+    // #136: a retained list keeps its rows in every frame while it reloads,
+    // after a confirmed change and after a refused refresh; lost read access
+    // still removes them.
+    const kept = 'After unknown deletion';
+    const keptRow = () => page.getByRole('button', { name: kept, exact: true });
+    const listQuery = (url) => url.pathname.endsWith('/_system/sparql/query');
+    const listRequest = () =>
+      page.waitForRequest((request) => listQuery(new URL(request.url())));
+    await page.evaluate((name) => {
+      const has = () =>
+        [...document.querySelectorAll('button')].some(
+          (button) => button.textContent === name,
+        );
+      window.__emptyFrames = 0;
+      window.__rowObserver = new window.MutationObserver(() => {
+        if (!has()) window.__emptyFrames++;
+      });
+      window.__rowObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    }, kept);
+    const holdList = async () => {
+      let release;
+      const held = new Promise((resolve) => (release = resolve));
+      await page.route(listQuery, async (route) => {
+        await held;
+        await route.continue();
+      });
+      return async () => {
+        const answered = page.waitForResponse((response) =>
+          listQuery(new URL(response.url())),
+        );
+        release();
+        await answered;
+        await page.unroute(listQuery);
+      };
+    };
+    const loadingStatus = page
+      .getByRole('status')
+      .filter({ hasText: /^Loading/ });
+    let release = await holdList();
+    let requested = listRequest();
+    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await requested;
+    assert.equal(await keptRow().count(), 1);
+    assert.equal(await loadingStatus.count(), 0);
+    await release();
+    release = await holdList();
+    requested = listRequest();
+    await page.getByRole('button', { name: 'Complete', exact: true }).click();
+    await requested;
+    assert.equal(await keptRow().count(), 1);
+    assert.equal(await loadingStatus.count(), 0);
+    await release();
+    await page.getByRole('button', { name: 'Reopen', exact: true }).waitFor();
+    await page.route(listQuery, (route) =>
+      route.fulfill({ status: 403, body: '' }),
+    );
+    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    const stale = page
+      .getByRole('alert')
+      .filter({ hasText: 'The list below may be out of date.' });
+    await stale.waitFor();
+    assert.equal(await keptRow().count(), 1);
+    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await page
+      .getByRole('alert')
+      .filter({ hasText: 'Die Liste unten ist vielleicht nicht aktuell.' })
+      .waitFor();
+    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await page.unroute(listQuery);
+    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await stale.waitFor({ state: 'detached' });
+    assert.equal(
+      await page.evaluate(() => {
+        window.__rowObserver.disconnect();
+        return window.__emptyFrames;
+      }),
+      0,
+    );
+    await page.getByRole('button', { name: 'Reopen', exact: true }).click();
+    await page.getByRole('button', { name: 'Complete', exact: true }).waitFor();
+    await page.route('**/alice/_system/contexts', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body['https://schema.sempods.org/readableContext'] = [];
+      body['https://schema.sempods.org/writableContext'] = [];
+      body['http://www.w3.org/ns/sparql-service-description#namedGraph'] = [];
+      await route.fulfill({ response, json: body });
+    });
+    // Custom controls recheck with Check again; AppShell's AppAccess offers
+    // Check access in its management.
+    const management = page.getByRole('button', {
+      name: 'Pods & sharing',
+      exact: true,
+    });
+    let opened = false;
+    const recheck = async () => {
+      if (custom) {
+        await page
+          .getByRole('button', { name: 'Check again', exact: true })
+          .click();
+        return;
+      }
+      const check = page.getByRole('button', {
+        name: 'Check access',
+        exact: true,
+      });
+      if ((await check.count()) === 0) {
+        await management.click();
+        opened = true;
+      }
+      await check.click();
+    };
+    await recheck();
+    await keptRow().waitFor({ state: 'detached' });
+    await page.unroute('**/alice/_system/contexts');
+    await recheck();
+    await keptRow().waitFor();
+    // Leave the shell as it was for the steps below.
+    if (opened && (await management.getAttribute('aria-expanded')) === 'true')
+      await management.click();
     // Creation drafts use the same keyboard-accessible leave confirmation.
     await page.getByLabel('Task', { exact: true }).first().fill('Uncreated');
     await page
