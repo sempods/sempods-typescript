@@ -206,13 +206,15 @@ export function TodoApp({
   /** Legacy AppShell remains available for existing applications. */
   readonly legacy?: boolean;
 }) {
-  const [language, setLanguage] = useState<'en' | 'de'>('en');
+  // Until the person picks one, the provider follows the browser's language.
+  // A picked locale sets messages and formatting together.
+  const [locale, setLocale] = useState<'en' | 'de'>();
 
   return (
-    <SempodsProvider runtime={runtime} language={language}>
+    <SempodsProvider runtime={runtime} {...(locale ? { locale } : {})}>
       <nav aria-label="Language">
-        <button onClick={() => setLanguage('en')}>English</button>
-        <button onClick={() => setLanguage('de')}>Deutsch</button>
+        <button onClick={() => setLocale('en')}>English</button>
+        <button onClick={() => setLocale('de')}>Deutsch</button>
       </nav>
       {children}
       <TodoLayout custom={custom} legacy={legacy} />

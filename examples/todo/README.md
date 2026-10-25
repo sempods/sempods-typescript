@@ -33,7 +33,8 @@ Create, list, rename, complete, reopen and delete tasks. The list keeps its rows
 while it reloads (`useList(…, { retain: true })`) and after a failed refresh,
 with a note that they may be out of date. A new or changed row is its own
 confirmation (`UpdateNotice quiet`); refusals, conflicts and unconfirmed
-outcomes still show. EN/DE switches retranslate
+outcomes still show. The UI starts in the browser's language (German or
+English, else English); the EN/DE switches then pick one and retranslate
 controls without changing an open draft. Row/context/Pod switches confirm dirty
 drafts. Conflict and lost-answer feedback requires comparison before continuing;
 no write is automatically replayed. The new-task input is cleared only after
