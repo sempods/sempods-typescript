@@ -112,7 +112,8 @@ size, with fallback names and cache lifetime tied to access authority, so a Pod
 with thousands of Contexts never costs one description request per entry. An app
 that shows more names, such as a list menu, asks for them explicitly with
 `loadContextLabels`: at most 20 named, readable Contexts per call, sharing the
-same cache and invalidation. Its size, never the catalogue's, sets the cost.
+same cache and invalidation. The cost depends on how many Contexts are
+requested, not on the catalogue size.
 
 Controller/provider `contextSelection: 'required' | 'on-demand'` defaults to
 `required`, preserving automatic catalogues and Context-based access UI.
@@ -217,10 +218,9 @@ contracts. The separate `allowedPods` option restricts exact canonical Pod URLs
 without turning existing presets into authorization or changing stored identity.
 Foreign records stay durable but cannot restore, become targets or exchange a
 callback code under the restriction. The list is immutable for the runtime's
-lifetime; omission preserves unrestricted behavior. Runtime and
-React export-name budgets remain unchanged; the client exposes the existing
-canonical context predicate as `isContextIri` so configuration and catalogue
-validation do not drift.
+lifetime; omission preserves unrestricted behavior. The client exports
+`isContextIri`, so configuration and catalogue validation share one canonical
+predicate.
 
 ## PWA through guidance, not SDK tooling
 
@@ -241,16 +241,16 @@ needs a page-level leave check first.
 Widget libraries consume the host's provider; the host owns identity, preset,
 scopes, initialization, callback, disposal and worker registration. React and
 both imported SDKs remain external peers of the widget library. A packed
-list/quick-add consumer demonstrates this without new SDK exports.
+list/quick-add consumer demonstrates this.
 
-The first composition shares one selected target. Multiple providers over a
+Widgets share one selected target. Multiple providers over a
 runtime would split guard registries, not establish safe independent targets.
 A mutating widget stays mounted through access changes, with recovery outside
 hidden content. Arbitrary unmount/reload is not guarded by the local navigation
 action. Independent targets, general removal guards and isolated iframe login
 need separate contracts and evidence.
 
-_Why:_ the small composition proves useful libraries with today's API while
+_Why:_ the small composition supports useful widget libraries with the current API while
 keeping session authority and pending work in one place. See [widgets](widgets.md).
 
 ## Read-only is the app's choice, not a grant

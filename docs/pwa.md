@@ -14,7 +14,7 @@ What “PWA-ready” means here:
   no queue of changes: a write that may have reached the Pod is never sent again
   automatically, so the SDK's “not confirmed” recovery stays the only path.
 
-Installed apps are experimental in 0.5 (see
+Installed apps are experimental (see
 [supported environments](../README.md#supported-environments)): sign-in returns
 to the app in the same window, and that return must land in the storage that
 holds the sign-in attempt. Check your target devices with the list at the end.
@@ -265,8 +265,8 @@ finding. Do not work around it by moving tokens or sign-in state between apps.
 ## Not covered yet
 
 An immediate “reload to update” button is deliberately missing. It needs a
-page-level leave check: `useApp().navigate()` asks only about local drafts, while
-a creation draft or an unconfirmed creation belongs to the target and would be
-lost by a reload. Background
+page-level leave check: `useApp().navigate()` does not ask about target-scoped
+drafts, such as a creation draft or an unconfirmed creation, which a reload would
+lose. Background
 sync, push notifications and offline write queues are out of scope; the last
 would conflict with “never resend an uncertain write”.

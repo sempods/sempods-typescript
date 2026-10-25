@@ -42,41 +42,43 @@ appear only once startup settles; see
 exposes `connectionId` for headless hosts. Screens never handle callbacks,
 credentials, ETags or authentication recovery. See [browser runtime](browser-runtime.md)
 for deployment identity, persisted sessions and the one-active-tab contract.
-`AppAccess` is the default composition for new apps: a centered login/recovery
-surface beside your content, with no mandatory outer frame or persistent header.
-It displays startup loading, callback failure/cancellation, unavailable storage
-and a localized second-tab notice. A returning sign-in makes its connection
-active even when it failed, so the callback notice above it names the cause
-next to its sign-in and disconnect actions. Provider answers such as
-`login_required` get their own EN/DE message instead of a generic failure. The
-callback notice stays until the person selects another connection, disconnects
-one or starts a sign-in (`AppSnapshot.callbackNotice`); `callbackNotice` never
-rewrites `startup`. A connection whose sign-in never returned, or whose session
-expired, asks to sign in without claiming access or a kept draft. A saved
-session whose Pod could not be reached at startup instead says so
-(`controls.unreachable`) and offers **Try again** (`useApp().retryRestore(id)`),
-not a sign-in; it also restores by itself once the browser is back online. It hides once
-the selected target is readable, including read-only access; catalogue failures
-remain visible even if the runtime retains previous access facts. While the
-active connection restores, is signed in but its Pod reader is not yet
-readable, or loads its first demanded Context catalogue (in `'required'` mode
-or under a mounted `TargetScreen`), it shows the loading status and, when they
-apply, the active-Pod selector for several saved connections and the sign-in
-for a configured Pod other than the active one. A restore or catalogue load
-that does not settle therefore never blocks switching Pods or signing in, and a
-preset or remembered Context that settles the target never flashes the
-connection view. Nothing on that surface cancels a load that never settles;
-the host's `open` still reaches every connection action. Once a catalogue has
-settled, a reload (**Check access**, revalidation) keeps the connection view. A
-custom `components.Connections` is replaced by the loading status alone. The
-connection view (with its addresses and actions) appears when something needs a
-decision: an ended session, missing required scopes, a Context choice after the
-catalogue loaded, a failed catalogue, or when the host opens it with `open`.
-The context picker lists readable contexts only and says so when the Pod grants
-none. Unavailable session storage prevents startup; controls remain blocked
-with a reload notice (there is no in-memory session fallback).
-`AppShell`, `ConnectionControls` and fully custom layouts remain supported;
-custom layouts that omit `AppAccess` place `CallbackNotice` themselves.
+`AppAccess` is the default composition for new apps: a centered sign-in and
+recovery surface beside your content, with no outer frame or persistent header.
+It shows:
+
+- startup loading, unavailable session storage (controls stay blocked with a
+  reload notice; there is no in-memory session fallback) and a localized
+  second-tab notice;
+- the callback notice after a returning sign-in. Its connection becomes active
+  even when the sign-in failed or was cancelled, so the notice names the cause
+  next to its **Sign in** and **Sign out** buttons; provider answers such as
+  `login_required` get their own EN/DE message. It stays until the person selects
+  another connection, signs out of one or starts a sign-in
+  (`AppSnapshot.callbackNotice`; `startup` is never rewritten);
+- a loading status while the active connection restores, waits for its Pod
+  reader or loads its first demanded Context catalogue (in `'required'` mode or
+  under a mounted `TargetScreen`). Where they apply, the active-Pod selector and
+  the sign-in for a configured Pod stay beside it, so a load that never settles
+  cannot block switching Pods or signing in, and a preset or remembered Context
+  that settles the target never flashes the connection view. Nothing there
+  cancels such a load; the host's `open` still reaches every connection action.
+  A custom `components.Connections` is replaced by the loading status alone;
+- the connection view, with addresses and actions, when something needs a
+  decision (an ended session, missing required scopes, a Context choice after
+  the catalogue loaded, a failed catalogue) or when the host passes `open`. Once
+  a catalogue has settled, a reload (**Check access**, revalidation) keeps it. A
+  connection whose sign-in never returned, or whose session expired, asks to
+  sign in without claiming access or a kept draft. A saved session whose Pod
+  could not be reached at startup instead says so (`controls.unreachable`) and
+  offers **Try again** (`useApp().retryRestore(id)`), not a sign-in; it also
+  restores by itself once the browser is back online. The context picker lists
+  readable contexts only and says so when the Pod grants none.
+
+It hides once the selected target is readable, including read-only access;
+catalogue failures stay visible even if the runtime retains previous access
+facts. `AppShell`, `ConnectionControls` and fully custom layouts remain
+supported; custom layouts that omit `AppAccess` place `CallbackNotice`
+themselves.
 
 ## Login without an app frame
 
@@ -114,7 +116,8 @@ const label = labels?.[iri];
 ```
 
 Only the selected, validated Context is fetched automatically; other entries use
-the fallback immediately, including on small Pods.
+the fallback immediately, including on small Pods. An app reads more labels
+explicitly with [`loadContextLabels`](#pod-overviews-with-contexts-on-demand).
 Duplicate context names include the full IRI; **Full addresses** exposes all readable
 context identities. Names never replace Pod/context identity, unless `podAddress`
 hides the address of the one permitted Pod; displaying them
@@ -144,7 +147,9 @@ through the same leave guards.
 Management shows the connected Pod first: its name, then **Available to this
 app** with each readable Context and what this app may do there (**This app can
 read** or **This app can read and change**), then **Change sharing**, **Sign out**
-and the collapsed **Full addresses**. Signing in to another Pod comes last, as a
+with the note that signing out applies only to this device
+(`controls.disconnectHint`; an empty string hides it) and the collapsed
+**Full addresses**. Signing in to another Pod comes last, as a
 collapsed **Connect another Pod** (`mode="multiple"` only). The access facts are
 the catalogue's rights for this app's session: they do not say whether a Context
 was shared in this consent or is public, and changing them is the Pod's consent
@@ -224,8 +229,8 @@ Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
 `style`/`className` where supported. They inherit across SDK components. Existing
 `--sempods-access-*` names remain fallback aliases; the shared names take priority.
-Without them the SDK uses a calm neutral grey palette (since 0.5.1; before, a
-green accent); set `--sempods-accent` to give controls your brand colour.
+Without them the SDK uses a neutral grey palette (0.5.0 and earlier used a green
+accent); set `--sempods-accent` to give controls your brand colour.
 React 19 hoists and deduplicates the static scoped sheets using its
 [`style` resource support](https://react.dev/reference/react-dom/components/style).
 Inline scoped styles still require a compatible CSP. Hosts that prohibit them can
@@ -413,12 +418,15 @@ label never gates reads, selection or drafts. The policy does not change the
 complete-catalogue API.
 
 A custom menu that names other Contexts asks for their labels explicitly with
-`useApp().loadContextLabels(id, iris)`: at most 20 IRIs per call, only readable
+`useApp().loadContextLabels(id, iris)`: at most 20 IRIs per call (more reject
+with `RuntimeError` before any request), only readable
 Contexts of the ready catalogue, display text only. Results arrive in
 `catalogue.labels` and share the selected label's cache; a failed or absent
 label keeps the fallback name without retry.
 
 ```tsx
+// Fragment: useEffect from react, useApp from @sempods/app-sdk/react,
+// type Connection from @sempods/app-sdk.
 function ListMenu({ connection }: { readonly connection: Connection }) {
   const app = useApp();
   const fact = connection.catalogue;
@@ -495,7 +503,8 @@ function Notes() {
   the editor needs no `TargetScreen`. Unlike a `TargetScreen` it asks for no
   selected Context: `AppAccess` offers no Context chooser for it and stays
   hidden while the catalogue loads. A failed catalogue still shows there with
-  **Check access**; for an `unreadable` target, management (`open`) offers it. `open()` resolves
+  **Check access**. For an `unreadable` target, opening management (`open`)
+  offers **Change sharing** and **Check access**. `open()` resolves
   `true` once the target is open. Whether it becomes `ready` is reported through
   `phase`. Opening another target and `close()` run under the leave policy.
 - **Phases.**
@@ -838,12 +847,13 @@ is inferred from an absent grant. Each server operation remains authoritative.
 
 ## Customize without replacing safety
 
-`AppShell` accepts `title`, `style` and `components={{ Connections: MyPicker }}`.
+`AppShell` accepts `title`, `mode`, `style` and
+`components={{ Connections: MyPicker }}`.
 It composes a title/management header, `AppAccess`, and the content. Usable access
 hides administration; **Pods & sharing** opens it, including replacement controls.
 Startup still gates content until durable storage is ready; later access loss or
 management toggles retain mounted content and its drafts. Read-only feedback stays
-visible. See [0.3 migration](migration.md#from-02-to-03) for the changed presentation.
+visible.
 A replacement uses `useConnections`, `useAppState` and guarded `useApp()` actions;
 it must not call raw runtime selection directly. For a different layout, omit
 AppShell, keep the provider, and place `ConnectionControls`/`AccessNotice` and
@@ -937,7 +947,8 @@ like a completed one; another connection's target returns once the person
 selects it again. Custom layouts that read `startup.interaction` directly
 should use `callbackNotice` to decide whether the outcome is still current. A
 restoring connection waits, and a `leaving` one (the page is navigating to the
-Pod's sign-in) keeps its screen inert and offers no sign-in;
+Pod's sign-in) keeps its screen inert and offers no sign-in (`AppAccess` shows
+`controls.leaving` meanwhile);
 `active` and `renewing` are authenticated facts, not interchangeable with context
 access. A cancelled re-authorization keeps the signed-in session
 (`startup.resumed`).
@@ -945,8 +956,9 @@ access. A cancelled re-authorization keeps the signed-in session
 A provider's `access_denied` answer does not say whether the person cancelled
 or declined, and its free-text `error_description` is never shown or
 interpreted. After a first sign-in the callback notice therefore says that no
-access was granted, next to the connection's one **Sign in**. After a declined
-re-authorization that kept the session, it says that sharing was not changed and
+access was granted (`controls.signInCancelled`), next to the connection's one
+**Sign in**. After a declined re-authorization that kept the session, it says
+that sharing was not changed (`controls.sharingUnchanged`) and
 `AppAccess` offers **Change sharing** as the one next step. Any other provider
 answer names its cause and also leads to **Sign in**. Select a readable context explicitly; after a reload or re-authorization
 the runtime reselects the last chosen one while it is still readable. `Check
@@ -1055,7 +1067,7 @@ commands and partial changes. Live Pod evidence belongs to the quickstart valida
 the provisional Action profile does not settle the outstanding task-vocabulary
 or mixed-Action collection decisions.
 
-## Kotlin-to-TypeScript orientation and independent exercise
+## Kotlin-to-TypeScript orientation
 
 A `fields()` object is a stable mapping definition shared by Node and React,
 not a service instance. Hooks belong at component top level; their subscriptions
@@ -1063,9 +1075,3 @@ and cleanup follow the selected view's lifetime. Keep the browser runtime outsid
 render, use readonly drafts plus `change`, and handle discriminated results by
 `kind` rather than exceptions for expected conflicts. React render is declarative;
 SDK actions own asynchronous mutations and guards.
-
-For the independent participant exercise, start from the quickstart and use only
-public API/docs to add a field, override a message/language, and relocate/replace
-the picker using guarded actions. Record steps, confusion, assistance and any
-need to inspect internals. This exercise remains pending until someone
-unfamiliar with the SDK performs it; automated examples are separate evidence.

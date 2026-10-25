@@ -6,7 +6,8 @@ automatic conversion of legacy app data or stored credentials.
 
 ## From 0.5.1 to 0.6.0
 
-The minor changes defaults and adds options; upgrade both packages together.
+This minor release changes some defaults and result types and adds options;
+upgrade both packages together.
 Check these points:
 
 - **Edit failure details.** Hand-built `UpdateOutcome`, `RemoveSnapshotOutcome`
@@ -20,10 +21,12 @@ Check these points:
   `locale` or `language` alone keeps its previous meaning; `createLocale` and
   `resolveLocale` are unchanged and read no browser globals.
 - **Cancelling a re-authorization keeps the session.** When the provider
-  answers a signed-in connection's re-authorization with `access_denied`, or
-  the person comes back without a callback, the earlier session resumes while
-  it is still valid: the report says `interaction: 'cancelled'` and
-  `resumed: true`, and the connection stays `active`. Every other failure
+  answers a signed-in connection's re-authorization with `access_denied`, the
+  earlier session resumes while it is still valid: the report says
+  `interaction: 'cancelled'` and `resumed: true`, and the connection stays
+  `active`. When the person comes back without a callback (back navigation, an
+  abandoned attempt), it resumes the same way during startup, with
+  `interaction: 'none'` and the connection going `restoring` → `active`. Every other failure
   still ends it; a successful narrower grant replaces the earlier one. Code
   that treated a cancelled callback as "signed out" checks the connection's
   session instead.
@@ -390,20 +393,16 @@ subjects as strings; no app code needs to change. Browser support is unchanged.
    old and new app interoperability before using existing personal data. Test a
    clean install and a returning browser separately.
 
-The portable OAuth API has changed during the preview: `prepareAuthorization`
-uses protocol input with optional development options; browser session envelopes,
-attempt lifetime and return navigation belong to app-sdk. Use the
-[client reference](../packages/client-sdk/README.md) for the current portable API,
-and the runtime for browser applications. Avoid adapting an old auth flow by
-casting its objects to new types.
+Use the [client reference](../packages/client-sdk/README.md) for the portable
+OAuth API and the runtime for browser applications. Do not adapt an old auth flow
+by casting its objects to new types.
 
 ## Know what persists
 
 The runtime stores validated, versioned session records in IndexedDB and uses Web
 Locks for one active runtime per configuration. The current namespace uses identity
 kind plus the did:web client ID, or the dynamic redirect URI. Display-name changes
-are not a new namespace. There is no automatic migration from the earlier
-configuration-derived preview namespace. Unsupported or corrupt records are
+are not a new namespace. Unsupported or corrupt records are
 reported as unreadable and retained; they are not silently converted or erased.
 See [the runtime contract](browser-runtime.md) for details.
 

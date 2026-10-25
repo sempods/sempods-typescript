@@ -48,7 +48,8 @@ export type SessionFact =
     };
 /**
  * Registry labels (`rdfs:label`, SPS-CTX-032) keyed by exact context IRI, read
- * only for the selected, validated Context in the background. Display text only: absent while
+ * in the background for the selected, validated Context and for readable
+ * Contexts named in `loadContextLabels`. Display text only: absent while
  * unread, for contexts without a label and after a failed read; never an
  * identity or a grant.
  */

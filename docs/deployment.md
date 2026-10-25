@@ -35,8 +35,9 @@ auth configuration. These are three valid examples; choose one:
 The host must be a domain name; the
 [did:web method](https://w3c-ccg.github.io/did-method-web/#method-specific-identifier)
 forbids IP addresses. The SDK also requires at least one dot and rejects
-`*.localhost` and `*.invalid` names, with `invalid-config` on `clientId`; only
-local development accepts a loopback identity.
+`*.localhost` and `*.invalid` names, with `invalid-config` on `clientId`. Only
+`localhost`, `127.0.0.1` and `[::1]` are exempt, and only with
+`development: 'loopback-http'`.
 
 Replace the local runtime configuration with this production configuration,
 using **your** domain:
@@ -159,7 +160,7 @@ and [SPA rewrites](https://docs.netlify.com/manage/routing/redirects/rewrites-pr
 
 ### Several apps under one site
 
-The existing sempods apps use a useful static pattern: build each app with its
+A common static pattern: build each app with its
 own asset base, copy its output into a matching subdirectory of one publish
 folder, then give each app its own SPA fallback. For a `/tasks/` app:
 

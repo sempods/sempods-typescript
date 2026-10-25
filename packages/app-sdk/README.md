@@ -58,7 +58,7 @@ screen and access-management controls, follow the complete
 
 `AppAccess` provides login, context choice and recovery without a mandatory app
 frame. It hides when access is usable, including read-only access. The app owns
-its layout and a way to reopen data-access management. Optional `AppShell` adds a
+its layout and a **Pods & sharing** button that opens management (`open`). Optional `AppShell` adds a
 title and management control. Use `useList`, `useCreation`, `useFieldUpdate` and
 `useResourceEditor` for data screens, with `ResourceEditor` and `UpdateNotice`
 for editing feedback. See
@@ -109,8 +109,9 @@ and `usePodLoad`. Startup and read recovery then request no catalogue. Mount
 still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
 
 Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
-validated Context's label is fetched; cached labels never gate selection or
-reads. `useContextEditor` edits an overview row in the Context its `GRAPH`
+validated Context's label is fetched automatically; `loadContextLabels(id, iris)`
+on the runtime or `useApp()` reads up to 20 more on demand. Labels never gate
+selection or reads. `useContextEditor` edits an overview row in the Context its `GRAPH`
 binding names, without changing the selection; the
 [copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/recipes/pod-overview.tsx)
 shows it.

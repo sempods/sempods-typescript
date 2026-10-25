@@ -78,12 +78,6 @@ by its code only, as documented on `OAuthProblem`; the provider's free-text
 description is dropped. A forged or malformed callback is `callback`. Callback URLs may not carry authorization-response parameters
 (`code`, `state`, `iss`, `error`, `error_description`, `error_uri`, `response`).
 
-Alpha API change: `prepareAuthorization` now takes protocol input and optional
-`{ development }` options; the previous timestamp argument and app envelope
-fields are removed. `SessionBinding`, session/attempt parsers, `assertAttemptFresh`
-and `safeReturnTo` are no longer client exports. Browser hosts use the app runtime;
-standalone hosts enforce their own attempt lifetime before exchanging a code.
-
 ## Reading across the Pod
 
 `pod.sparql.select()` and `pod.sparql.construct()` query the caller's readable
@@ -193,7 +187,7 @@ Handle the returned outcome: `precondition-failed` means the resource changed
 between read and write; reread and decide. `uncertain` means the answer does not
 establish whether the write happened. For form editing, use the helpers below.
 
-Supported operations in 0.5 (Pod-wide `select` and `construct` are new in 0.4.0):
+Supported operations:
 
 | Operation                                     | Request                                                                                             | Results                                                                                                                          |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -462,9 +456,10 @@ export async function renameWithEditor(
 - Typing continues while saving; only the submitted draft counts as saved.
   Losing read access (`setAccess`) clears server data but keeps the draft and
   any open review of a write; after it returns, `refresh()` adopts the current
-  version silently when the draft is unchanged. Revoking access or disposing the
-  editor from its initial saving notification stops the first save/delete with
-  `not-ready`; after dispatch, the actual write outcome is retained.
+  version silently when the draft is unchanged. If access is revoked or the
+  editor disposed before the first save or delete is dispatched (for example
+  from the subscriber's first `saving` notification), it ends with `not-ready`;
+  once dispatched, the actual write outcome is kept.
   A `refresh()` requested while a
   read or write is in flight runs once afterwards, so it is never lost. Reads
   that are cancelled, stopped or invalidated by
