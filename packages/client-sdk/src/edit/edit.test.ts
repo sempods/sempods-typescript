@@ -516,6 +516,22 @@ describe('dateTime fields', () => {
 });
 
 describe('resource editor scenarios', () => {
+  it('notifies nothing for unchanged access and once for a real change', async () => {
+    const pod = memoryPod();
+    const editor = await opened(createResourceEditor(pod.source, TASK, task));
+    const state = editor.state;
+    let notified = 0;
+    editor.subscribe(() => notified++);
+    editor.setAccess({ read: true, write: true });
+    expect(editor.state).toBe(state);
+    expect(notified).toBe(0);
+    editor.setAccess({ read: true, write: false });
+    expect(notified).toBe(1);
+    expect(editor.state.canRemove).toBe(false);
+    editor.setAccess({ read: true, write: false });
+    expect(notified).toBe(1);
+    editor.dispose();
+  });
   it.each(['save', 'remove'] as const)(
     'stops the first %s after synchronous host invalidation (#120)',
     async (operation) => {
