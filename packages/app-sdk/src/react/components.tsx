@@ -246,7 +246,11 @@ export function AccessNotice() {
   if (c.missingRequiredScopes.length)
     return <Notice>{m.missingScopes(c.missingRequiredScopes, format)}</Notice>;
   if (c.catalogue.kind === 'failed') return <Notice>{m.catalogueError}</Notice>;
-  if (c.catalogue.kind !== 'ready')
+  // A reload that still has the earlier Contexts is not unknown access.
+  if (
+    c.catalogue.kind !== 'ready' &&
+    !(c.catalogue.kind === 'loading' && c.catalogue.contexts)
+  )
     return <Notice>{m.cataloguePending}</Notice>;
   if (!c.selectedContext)
     return (

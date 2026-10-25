@@ -1770,3 +1770,30 @@ it('returns focus to the focus target when the management dialog closes', async 
     screen.getByRole('button', { name: 'Menu' }),
   );
 });
+
+it('keeps the known Context while the management dialog checks access again', async () => {
+  const f = fixture();
+  f.setCatalogue(async () => catalogue([work], []));
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  await act(async () => {
+    await logged.runtime.loadContexts(logged.id);
+    logged.runtime.selectContext(logged.id, work);
+  });
+  const held = deferred<Response>();
+  f.setCatalogue(() => held.promise);
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <AppAccess appName="Shopping" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(f.count('/_system/contexts')).toBe(3));
+  // The reload is pending: the same line stays, and neither a chooser nor
+  // an "access unknown" notice appears meanwhile.
+  expect(screen.getByText('This app can read')).toBeTruthy();
+  expect(screen.queryByRole('combobox')).toBeNull();
+  expect(screen.queryByText(/Access is unknown/)).toBeNull();
+  await act(async () => held.resolve(catalogue([work], [])));
+  expect(screen.getByText('This app can read')).toBeTruthy();
+  expect(screen.queryByRole('combobox')).toBeNull();
+});

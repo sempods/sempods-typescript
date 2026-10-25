@@ -476,9 +476,11 @@ function AccessConnections({
     defaultUrl === state.allowedPods[0];
   const fixedContext =
     state.preset?.podUrl === c?.podUrl ? state.preset?.contextIri : undefined;
+  // A reload (for example on opening the dialog) keeps the earlier Contexts
+  // on screen until it settles, so the view does not change size meanwhile.
   const readable =
-    c?.catalogue.kind === 'ready'
-      ? c.catalogue.contexts.filter((entry) => entry.readable)
+    c?.catalogue.kind === 'ready' || c?.catalogue.kind === 'loading'
+      ? (c.catalogue.contexts ?? []).filter((entry) => entry.readable)
       : [];
   const unavailable =
     busy ||
