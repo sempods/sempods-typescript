@@ -61,8 +61,24 @@ requires HTTPS.
 
 Call `initialize()` once at startup, including on the callback route. Repeated
 calls share one promise and one report. The runtime scrubs callback parameters
-and restores the configured same-origin return location. The host router decides
+and restores the return location stored with the sign-in. The host router decides
 what to render; the runtime does not render login or recovery UI.
+
+`returnTo` names that location: a same-origin path with optional query and hash,
+never the callback path, `//` or OAuth response parameters. A string is checked
+when the runtime is created and used for every sign-in. To keep deep links, pass
+a function instead: it is called each time a sign-in or re-authorization starts,
+and its result is checked the same way.
+
+```ts
+// A person on /items/add?list=groceries signs in and returns there.
+returnTo: () => location.pathname + location.search + location.hash,
+```
+
+An unsafe result rejects that sign-in with a `configuration` error before any
+request. A callback without a matching attempt returns to the string, or to `/`
+for a function. The app's router then shows the page, for example opening an
+add dialog for `/items/add`; Context selection and drafts follow the usual rules.
 
 The report separates interaction (`none`, `completed`, `cancelled`, `failed`)
 from storage (`durable`, `unavailable`, `busy`). Interaction describes the

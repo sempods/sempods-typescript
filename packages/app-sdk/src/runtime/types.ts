@@ -144,7 +144,17 @@ export interface BrowserRuntimeOptions {
    */
   readonly allowedPods?: readonly string[];
   readonly identity: ClientIdentity;
-  readonly returnTo?: string;
+  /**
+   * Where the app returns after a sign-in: a same-origin path with optional
+   * query and hash (default `/`), never the callback path, `//` or OAuth
+   * response parameters. A string is checked when the runtime is created. A
+   * function, such as `() => location.pathname + location.search + location.hash`,
+   * is called each time a sign-in or re-authorization starts, so a deep link
+   * reached by in-app navigation survives the sign-in; an unsafe result rejects
+   * that start with a `configuration` error before any request. A callback
+   * without a matching attempt returns to the string, or to `/` for a function.
+   */
+  readonly returnTo?: string | (() => string);
   readonly scopes?: FeatureScopes;
   readonly development?: 'loopback-http';
   readonly fetch?: PodOptions['fetch'];

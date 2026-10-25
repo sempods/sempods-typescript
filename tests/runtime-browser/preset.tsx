@@ -55,7 +55,8 @@ const runtime = createBrowserRuntime({
           : {}),
   scopes: { required: ['tasks'], optional: ['ai'] },
   development: 'loopback-http',
-  returnTo: '/app?identity=' + identity,
+  // The address when a sign-in starts, so an in-app deep link survives it.
+  returnTo: () => location.pathname + location.search + location.hash,
 });
 window.addEventListener('pagehide', () => runtime.dispose());
 const task = fields({

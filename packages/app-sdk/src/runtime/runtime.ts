@@ -81,7 +81,16 @@ export function createBrowserRuntime(
     identity.redirectUri,
     options.development === 'loopback-http',
   );
-  const returnTo = safeReturnTo(options.returnTo ?? '/', identity.redirectUri);
+  // A string is checked once; a function each time a sign-in starts, so the
+  // address the person is on then (a deep link) survives the sign-in.
+  const configuredReturnTo = options.returnTo ?? '/';
+  const fixedReturnTo =
+    typeof configuredReturnTo === 'string'
+      ? safeReturnTo(configuredReturnTo, identity.redirectUri)
+      : undefined;
+  const returnTo = () =>
+    fixedReturnTo ??
+    safeReturnTo((configuredReturnTo as () => string)(), identity.redirectUri);
   const namespace = JSON.stringify([
     identity.kind,
     identity.kind === 'did-web' ? identity.clientId : identity.redirectUri,
@@ -735,7 +744,9 @@ export function createBrowserRuntime(
     };
     let callback = false;
     let attempted: string | undefined;
-    let destination = returnTo;
+    // A callback without a matching attempt never calls a function form: on
+    // the callback route it would name the callback itself.
+    let destination = fixedReturnTo ?? '/';
     try {
       const location = new URL(
         (options.location ?? (() => window.location.href))(),
@@ -974,6 +985,8 @@ export function createBrowserRuntime(
         e.lifetime = new AbortController();
         e.generation = crypto.randomUUID();
       }
+      // An unsafe return address rejects before any request or change.
+      const destination = returnTo();
       // Prepare while the current session keeps working: if discovery,
       // registration or persisting the attempt fails, nothing was reset.
       const before = e.generation;
@@ -990,7 +1003,7 @@ export function createBrowserRuntime(
           generation,
           pod,
           client,
-          returnTo,
+          returnTo: destination,
           scopes: requested,
         },
         Date.now(),
