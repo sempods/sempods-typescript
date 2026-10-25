@@ -514,12 +514,15 @@ export function createBrowserRuntime(
     return e.revalidation;
   }
 
+  /** Counts the browser's `online` events, so a restoration knows it missed one. */
+  let onlineEvents = 0;
   /** Restores one saved signed-in Pod; publishes its own outcome (`active`/`ended`). */
   async function restore(
     e: Entry,
     saved: Extract<SessionRecord, { kind: 'ready' }>,
   ) {
     const generation = e.generation;
+    const events = onlineEvents;
     try {
       const pod = await discoverPod(e.pod.podUrl, {
         ...protocol,
@@ -545,6 +548,9 @@ export function createBrowserRuntime(
           }),
         };
         publish();
+        // The browser came back online while this attempt was under way: its
+        // retry found the session still restoring, so try once more now.
+        if (restorable && onlineEvents !== events) void retryRestore(e);
       }
     }
   }
@@ -564,6 +570,7 @@ export function createBrowserRuntime(
     removeEventListener?: (type: string, listener: () => void) => void;
   };
   const online = () => {
+    onlineEvents++;
     for (const e of entries.values()) void retryRestore(e);
   };
   page.addEventListener?.('online', online);

@@ -8,7 +8,7 @@ import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime } from './types.js';
-import { fixture, restored, settleLease } from './fixture.test.js';
+import { deferred, fixture, restored, settleLease } from './fixture.test.js';
 
 const runtimes: BrowserRuntime[] = [];
 const keep = (runtime: BrowserRuntime) => (runtimes.push(runtime), runtime);
@@ -119,4 +119,31 @@ it('does nothing for an active session and stops listening once disposed', async
   const removed = vi.spyOn(window, 'removeEventListener');
   runtime.dispose();
   expect(removed).toHaveBeenCalledWith('online', expect.any(Function));
+});
+
+it('restores once more when the browser came online during a pending restoration', async () => {
+  const f = fixture({ preferences: null });
+  const { runtime, id } = await f.login();
+  runtime.dispose();
+  await settleLease();
+  const original = f.fetch.getMockImplementation()!;
+  const held = deferred<Response>();
+  let first = true;
+  f.fetch.mockImplementation(async (url, init) => {
+    if (first && url.includes('/.well-known/')) {
+      first = false;
+      return held.promise;
+    }
+    return original(url, init);
+  });
+  const next = keep(createBrowserRuntime(f.options));
+  await next.initialize();
+  expect(session(next)?.kind).toBe('restoring');
+  // Online arrives while the first discovery is still pending, then it fails.
+  window.dispatchEvent(new Event('online'));
+  held.reject(new TypeError('Failed to fetch'));
+  await vi.waitFor(() =>
+    expect(session(next)).toMatchObject({ kind: 'active' }),
+  );
+  expect(next.getSnapshot()[0]?.id).toBe(id);
 });
