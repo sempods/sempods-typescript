@@ -426,10 +426,11 @@ export function ResourceEditor<D, U = D>({
           style={{ border: 0, padding: 0, margin: 0 }}
           onKeyDown={(event) => {
             // Enter in a text field saves; Escape cancels an editor in place.
+            // Both belong to an active IME composition first.
+            if (event.nativeEvent.isComposing) return;
             const field = event.target as HTMLElement;
             if (
               event.key === 'Enter' &&
-              !event.nativeEvent.isComposing &&
               field instanceof HTMLInputElement &&
               !['checkbox', 'radio', 'button', 'submit'].includes(field.type)
             ) {

@@ -173,9 +173,16 @@ it('the TODO row becomes its editor: Escape cancels, Enter saves, delete closes'
     fireEvent.click(await screen.findByRole('button', { name: title }));
     return (await screen.findByLabelText('Task')) as HTMLInputElement;
   };
-  // Escape discards the change and shows the row again; nothing is written.
+  // Keys of an active IME composition belong to it: the draft stays.
   let field = await edit('Buy milk');
   fireEvent.change(field, { target: { value: 'Oat milk' } });
+  fireEvent.keyDown(field, { key: 'Escape', isComposing: true });
+  fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+  expect((screen.getByLabelText('Task') as HTMLInputElement).value).toBe(
+    'Oat milk',
+  );
+  expect(writes).toEqual([]);
+  // Escape discards the change and shows the row again; nothing is written.
   fireEvent.keyDown(field, { key: 'Escape' });
   expect(await screen.findByRole('button', { name: 'Buy milk' })).toBeTruthy();
   expect(screen.queryByLabelText('Task')).toBeNull();
