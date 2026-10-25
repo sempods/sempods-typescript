@@ -1447,7 +1447,7 @@ try {
     await germanUpdate.waitFor();
     assert.equal(await englishUpdate.count(), 0);
     assert.equal(
-      await page.getByLabel('Aufgabe', { exact: true }).first().inputValue(),
+      await page.getByLabel('Neue Aufgabe', { exact: true }).inputValue(),
       'Unsaved draft',
     );
     // The already-visible notice follows the app's language without a remount
@@ -1463,7 +1463,7 @@ try {
     await germanUpdate.waitFor();
     assert.equal(await englishUpdate.count(), 0);
     assert.equal(
-      await page.getByLabel('Aufgabe', { exact: true }).first().inputValue(),
+      await page.getByLabel('Neue Aufgabe', { exact: true }).inputValue(),
       'Unsaved draft',
     );
     assert.deepEqual(
