@@ -40,6 +40,19 @@ function TaskScreen() {
   });
   const { selected, select } = useSelection();
   const editor = useResourceEditor(selected, taskFields);
+  // Enter saves, Escape or Cancel closes; a saved or deleted row closes it.
+  const editing = (
+    <ResourceEditor editor={editor} onClose={() => select(null)}>
+      {(draft, change) => (
+        <input
+          aria-label={m.task}
+          autoFocus
+          value={draft.title}
+          onChange={(e) => change({ title: e.target.value })}
+        />
+      )}
+    </ResourceEditor>
+  );
 
   return (
     <section aria-label={m.tasks}>
@@ -59,38 +72,19 @@ function TaskScreen() {
                 void mutate.update(item, { done: !item.data.done })
               }
             />
-            <button
-              aria-expanded={selected === item.iri}
-              onClick={() => void select(item.iri)}
-            >
-              {item.data.title}
-            </button>
+            {/* The title opens the row's editor in its place. */}
+            {selected === item.iri ? (
+              editing
+            ) : (
+              <button className="title" onClick={() => void select(item.iri)}>
+                {item.data.title}
+              </button>
+            )}
           </li>
         ))}
       </ul>
-      {selected && (
-        <ResourceEditor editor={editor} onClose={() => select(null)}>
-          {(draft, change) => (
-            <>
-              <label>
-                {m.task}
-                <input
-                  value={draft.title}
-                  onChange={(e) => change({ title: e.target.value })}
-                />
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.done}
-                  onChange={(e) => change({ done: e.target.checked })}
-                />
-                {m.done}
-              </label>
-            </>
-          )}
-        </ResourceEditor>
-      )}
+      {/* A row that left the list (deleted elsewhere) keeps its editor. */}
+      {selected && !tasks?.some((item) => item.iri === selected) && editing}
       <UpdateNotice {...creation.notice} quiet />
       <form
         className="composer"

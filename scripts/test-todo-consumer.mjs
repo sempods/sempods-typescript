@@ -608,7 +608,6 @@ try {
     const save = editor.getByRole('button', { name: 'Save', exact: true });
     const field = editor.getByLabel('Task', { exact: true });
     await field.fill('Unfinished baseline');
-    await page.keyboard.press('Tab'); // Checkbox.
     await page.keyboard.press('Tab'); // Save.
     assert.equal(
       await save.evaluate((button) => button === document.activeElement),
@@ -619,14 +618,6 @@ try {
         (button) => getComputedStyle(button).outlineStyle !== 'none',
       ),
     );
-    // A compact checkbox; its label is the 44px target.
-    const done = editor.getByRole('checkbox');
-    const doneBox = await done.boundingBox();
-    assert.ok(doneBox.width <= 24 && doneBox.height <= 24);
-    const doneLabel = await editor
-      .locator('label:has(input[type=checkbox])')
-      .boundingBox();
-    assert.ok(doneLabel.height >= 44 && doneLabel.width >= 44);
     for (const control of [
       save,
       field,
@@ -706,7 +697,7 @@ try {
     // App-owned list controls retain browser appearance; SDK styles do not leak into app content.
     assert.notEqual(
       await page
-        .getByRole('button', { name: 'SDK baseline', exact: true })
+        .getByRole('button', { name: 'Add', exact: true })
         .evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
@@ -815,8 +806,8 @@ try {
     await newDraft.fill('  First  ');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('button', { name: 'First', exact: true }).waitFor();
-    // The row is the confirmation: creation and row changes stay quiet (#107);
-    // only the editor's own save announces success, once (#72).
+    // The row is the confirmation: creation, row changes and the inline
+    // editor's save stay quiet (#107); a confirmed save closes the editor.
     const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
     const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
     assert.equal(await created.count(), 0);
@@ -838,12 +829,16 @@ try {
     await draft.fill('Renamed');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
-    await page
-      .locator('[data-sempods-ui="editor"]')
-      .getByRole('status')
-      .filter({ hasText: /^Saved\.$/ })
-      .waitFor();
-    assert.equal(await saved.count(), 1);
+    await draft.waitFor({ state: 'detached' });
+    assert.equal(await saved.count(), 0);
+    // Escape discards an edit and closes the editor without writing.
+    await page.getByRole('button', { name: 'Renamed', exact: true }).click();
+    const beforeEscape = writes;
+    await draft.fill('Escaped');
+    await draft.press('Escape');
+    await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
+    assert.equal(writes, beforeEscape);
+    await page.getByRole('button', { name: 'Renamed', exact: true }).click();
     await draft.fill('Draft retained');
     await menu(page, 'Deutsch');
     assert.equal(
@@ -859,9 +854,8 @@ try {
     await page.keyboard.press('Escape');
     assert.equal(await page.getByLabel('Datenkontext').inputValue(), work);
     await menu(page, 'English');
-    await page
-      .getByRole('button', { name: 'Discard changes', exact: true })
-      .click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Renamed', exact: true }).click();
     conflict = true;
     await draft.fill('Mine');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -874,7 +868,7 @@ try {
       .getByRole('button', { name: 'Continue with my changes', exact: true })
       .click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await page.getByRole('button', { name: 'Mine', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Mine', exact: true }).click();
     // Dispatch through the real client, apply on the fixture, then hide the answer.
     let loseMethod = 'PATCH';
     const loseAnswer = async (route) => {
@@ -899,9 +893,9 @@ try {
     await page.getByRole('alert').filter({ hasText: 'unconfirmed' }).waitFor();
     assert.equal(writes, before + 1);
     await page.unroute('**/_system/resources/**', loseAnswer);
-    await page
-      .getByRole('button', { name: 'Discard changes', exact: true })
-      .click();
+    // Cancel discards after the comparison read and closes; reopen the row.
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.locator('.tasks .title').click();
     // The first Delete only asks; Escape keeps the task, confirming sends one DELETE.
     const beforeAsk = writes;
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
