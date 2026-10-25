@@ -29,6 +29,11 @@ async function menu(page, name) {
     .getByRole('button', { name, exact: true })
     .click();
 }
+/** Closes the management dialog in either language. */
+async function closeManagement(page) {
+  await page.getByRole('button', { name: /^(Close|Schließen)$/ }).click();
+  await page.getByRole('dialog').waitFor({ state: 'detached' });
+}
 /** Coming back to the page reloads the list (the example has no reload button). */
 async function reloadList(page) {
   await page.evaluate(() =>
@@ -704,22 +709,19 @@ try {
         .evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
+    // Management is a modal dialog; the leave prompt opens above it.
     await menu(page, 'Pods & sharing');
-    // Signing in to another Pod is the collapsed secondary section.
-    await page.getByText('Connect another Pod', { exact: true }).click();
-    const addPod = page.getByRole('button', { name: 'Sign in', exact: true });
-    assert.equal(
-      await addPod.evaluate(
-        (button) => getComputedStyle(button).backgroundColor,
-      ),
-      'rgba(0, 0, 0, 0)',
-    );
+    await page.getByRole('dialog', { name: 'Pods & sharing' }).waitFor();
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page
+      .getByRole('dialog', { name: 'Pods & sharing' })
+      .waitFor({ state: 'detached' });
     await menu(page, german);
     await editor
       .getByRole('button', { name: 'Speichern', exact: true })
@@ -767,8 +769,7 @@ try {
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await menu(page, 'Pods & sharing');
-    await page.getByText('Connect another Pod', { exact: true }).click();
-    // New drafts cannot start while connect awaits discovery/registration.
+    // New drafts cannot start while a sign-in awaits discovery/registration.
     let releaseDiscovery;
     const discoveryStarted = new Promise((resolve) => {
       releaseDiscovery = resolve;
@@ -779,8 +780,9 @@ try {
       releaseDiscovery();
     };
     await page.route('**/.well-known/oauth-protected-resource', holdDiscovery);
-    await page.getByLabel('Pod address').fill(pod);
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Change sharing', exact: true })
+      .click();
     await discoveryStarted;
     const newDraft = page.getByLabel('New task', { exact: true });
     assert.equal(
@@ -796,6 +798,7 @@ try {
     );
     await heldDiscovery.abort('failed');
     await page.waitForFunction(() => !document.querySelector('[inert]'));
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
     const add = async (title) => {
       await page.getByLabel('New task', { exact: true }).fill(title);
       await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -848,6 +851,9 @@ try {
       await page.getByLabel('Aufgabe', { exact: true }).last().inputValue(),
       'Draft retained',
     );
+    // The Context is chosen in the management dialog; the leave prompt opens
+    // above it and keeps the draft.
+    await menu(page, 'Pods & Freigaben');
     await page.getByLabel('Datenkontext').selectOption(personal);
     await page.getByRole('alertdialog').waitFor();
     assert.equal(
@@ -856,6 +862,7 @@ try {
     );
     await page.keyboard.press('Escape');
     assert.equal(await page.getByLabel('Datenkontext').inputValue(), work);
+    await closeManagement(page);
     await menu(page, english);
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).click();
@@ -1019,12 +1026,16 @@ try {
       .getByRole('button', { name: 'Maybe created', exact: true })
       .click();
     await page.getByLabel('Task', { exact: true }).fill('Leave me');
+    await menu(page, 'Pods & sharing');
     await page.getByLabel('Data context').selectOption(personal);
     await page
       .getByRole('button', { name: 'Discard and continue', exact: true })
       .click();
+    await closeManagement(page);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
+    await menu(page, 'Pods & sharing');
     await page.getByLabel('Data context').selectOption(work);
+    await closeManagement(page);
     await page
       .getByRole('button', { name: 'Maybe created', exact: true })
       .waitFor();
@@ -1179,30 +1190,22 @@ try {
       body['http://www.w3.org/ns/sparql-service-description#namedGraph'] = [];
       await route.fulfill({ response, json: body });
     });
-    // AppAccess offers Check access in its management.
-    const management = page
-      .locator('#app-menu')
-      .getByRole('button', { name: 'Pods & sharing', exact: true });
-    let opened = false;
+    // Lost access shows AppAccess with Check access; the management dialog
+    // checks again by itself when it opens.
     const recheck = async () => {
       const check = page.getByRole('button', {
         name: 'Check access',
         exact: true,
       });
-      if ((await check.count()) === 0) {
-        await menu(page, 'Pods & sharing');
-        opened = true;
-      }
-      await check.click();
+      if ((await check.count()) > 0) return check.click();
+      await menu(page, 'Pods & sharing');
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
     };
     await recheck();
     await keptRow().waitFor({ state: 'detached' });
     await page.unroute('**/alice/_system/contexts');
     await recheck();
     await keptRow().waitFor();
-    // Leave the shell as it was for the steps below.
-    if (opened && (await management.getAttribute('aria-expanded')) === 'true')
-      await menu(page, 'Pods & sharing');
     // Creation drafts use the same keyboard-accessible leave confirmation.
     await page.getByLabel('New task', { exact: true }).fill('Uncreated');
     await page
@@ -1213,6 +1216,7 @@ try {
       await page.getByLabel('New task', { exact: true }).inputValue(),
       'Uncreated',
     );
+    await menu(page, 'Pods & sharing');
     await page.getByLabel('Data context').selectOption(personal);
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Tab');
@@ -1221,6 +1225,7 @@ try {
       'Discard and continue',
     );
     await page.keyboard.press('Escape');
+    await closeManagement(page);
     assert.ok(
       await page.evaluate(
         () =>

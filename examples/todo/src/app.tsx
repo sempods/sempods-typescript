@@ -194,8 +194,8 @@ function StandardScreen({
             <button
               popoverTarget="app-menu"
               popoverTargetAction="hide"
-              aria-expanded={open}
-              onClick={() => setOpen(!open)}
+              aria-haspopup="dialog"
+              onClick={() => setOpen(true)}
             >
               {messages.controls.dataAccess}
             </button>
@@ -227,7 +227,9 @@ function StandardScreen({
         description={
           de ? 'Aufgaben, gespeichert in einem Pod.' : 'Tasks, stored in a Pod.'
         }
+        mode="single"
         open={open}
+        onClose={() => setOpen(false)}
         focusTarget={focusTarget}
       />
       {view && access.read && !access.write && <AccessNotice />}
