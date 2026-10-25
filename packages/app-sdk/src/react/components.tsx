@@ -487,6 +487,7 @@ export function ResourceEditor<D, U = D>({
       ) : (
         <div className="sp-sdk-actions">
           <button
+            className="sp-sdk-primary"
             disabled={!state.canSave}
             onClick={() => void act(() => editor.save())}
           >

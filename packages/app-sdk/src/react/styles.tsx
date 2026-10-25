@@ -1,5 +1,6 @@
 /** Internal shared baseline. Public tokens inherit from the host; no style registry.
- * Without them, the fallbacks are a calm neutral grey palette. */
+ * Without them, the fallbacks are a calm neutral grey palette. Actions read as
+ * text, as in AppAccess; the one main action of a surface is filled. */
 export function SdkStyles() {
   return (
     <style href="sempods-sdk" precedence="sempods">
@@ -23,7 +24,9 @@ const styles = `
 ${surfaces} :where(.sp-sdk-actions) { display:flex; flex-wrap:wrap; gap:8px; }
 ${surfaces}, ${surfaces} * { box-sizing:border-box; }
 ${surfaces} :where(button,input,select,textarea) { font:inherit; max-width:100%; min-width:0; min-height:44px; }
-${surfaces} :where(button) { font-weight:500; border:1px solid var(--sp-line); border-radius:5px; color:var(--sp-accent); background:var(--sp-bg); padding:10px 14px; cursor:pointer; }
+${surfaces} :where(button) { font-weight:500; border:0; border-radius:8px; color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }
+${surfaces} :where(button:hover:not(:disabled)) { background:color-mix(in srgb,var(--sp-accent) 8%,transparent); }
+${surfaces} :where(button.sp-sdk-primary) { color:var(--sp-on-accent); background:var(--sp-accent); }
 ${surfaces} :where(input,select,textarea) { color:var(--sp-text); background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:4px; padding:10px; }
 ${surfaces} :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { display:block; width:100%; margin-block:6px 14px; }
 ${surfaces} :where(input[type=checkbox],input[type=radio]) { width:24px; height:24px; min-height:24px; flex:none; vertical-align:middle; margin:0; margin-inline-end:10px; accent-color:var(--sp-accent); }

@@ -563,7 +563,10 @@ on the same target: one Context of the same connection, signed-in subject and
 authorization generation, through any of its handles (the selected view or an
 explicit one from `runtime.bindContext`). Explicitly cancelled lists stay
 cancelled until `reload()`.
-It does not poll, subscribe to other clients' writes or invalidate other Pods.
+It also reads again when the page becomes visible (`visibilitychange`: back in
+the tab or the installed app), unless cancelled, so changes from other devices
+appear without a reload button. It does not poll, subscribe to other clients'
+writes or invalidate other Pods.
 An equal inline definition or `type` does not restart it; a real change reads again.
 
 A list keeps its last result on screen while it reloads (`retain`, on by

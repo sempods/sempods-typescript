@@ -220,8 +220,10 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   };
 }
 /**
- * A typed list, refreshed after this bound target's own confirmed mutations.
- * Those refreshes and `reload()` keep the rows visible (`retain`, see
+ * A typed list, refreshed after this bound target's own confirmed mutations
+ * and when the page becomes visible again (back in the tab or app), so other
+ * devices' changes appear without a reload button. Those refreshes and
+ * `reload()` keep the rows visible (`retain`, see
  * `LoadOptions`, on by default; `retain: false` shows only `loading`).
  * `data` is what to render: the current rows, or the kept ones while
  * `loading` or after a failed refresh; `LoadNotice` says which.
@@ -277,6 +279,16 @@ export function useList<D>(
     return observeWrites(view, () => {
       if (!scope.cancelled) void reload();
     });
+  }, [view, reload, scope]);
+  // Back in the tab or app, other devices may have changed the list.
+  useEffect(() => {
+    if (!view || typeof document === 'undefined') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !scope.cancelled)
+        void reload();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [view, reload, scope]);
   return {
     state,
