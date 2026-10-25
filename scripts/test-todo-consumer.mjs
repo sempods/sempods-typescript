@@ -41,7 +41,7 @@ const confirmText = 'Delete this from the pod? This cannot be undone.';
 async function confirmDelete(page) {
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page
-    .getByRole('group', { name: confirmText, exact: true })
+    .getByRole('alertdialog', { name: confirmText, exact: true })
     .getByRole('button', { name: 'Delete', exact: true })
     .click();
 }
@@ -899,7 +899,10 @@ try {
     // The first Delete only asks; Escape keeps the task, confirming sends one DELETE.
     const beforeAsk = writes;
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
-    const ask = page.getByRole('group', { name: confirmText, exact: true });
+    const ask = page.getByRole('alertdialog', {
+      name: confirmText,
+      exact: true,
+    });
     await ask.waitFor();
     assert.equal(
       await ask

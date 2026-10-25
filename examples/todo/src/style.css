@@ -142,6 +142,23 @@ input:disabled {
   color: var(--sempods-text);
   font-weight: 400;
 }
+.menu [role='group'] {
+  display: grid;
+}
+.menu-label {
+  margin: 0;
+  padding: 10px 12px 2px;
+  border-top: 1px solid var(--sempods-line);
+  color: var(--sempods-muted);
+  font-size: 0.875rem;
+}
+.menu-label:first-child {
+  border-top: 0;
+}
+.check {
+  display: inline-block;
+  width: 1.5em;
+}
 
 /* The list: a checkbox to finish a task, its title to edit it. */
 .tasks {

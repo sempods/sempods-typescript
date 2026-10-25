@@ -117,6 +117,12 @@ function TaskScreen() {
   );
 }
 
+/** The menu's languages; the provider follows the browser's until one is picked. */
+const languages = [
+  ['de', 'Deutsch'],
+  ['en', 'English'],
+] as const;
+
 /** The app's icon: in the header and on the sign-in screen. */
 const icon = (
   <svg className="app-icon" viewBox="0 0 32 32" aria-hidden="true">
@@ -195,20 +201,25 @@ function StandardScreen({
               {messages.controls.dataAccess}
             </button>
           )}
-          <button
-            popoverTarget="app-menu"
-            popoverTargetAction="hide"
-            onClick={() => onLocale('en')}
-          >
-            English
-          </button>
-          <button
-            popoverTarget="app-menu"
-            popoverTargetAction="hide"
-            onClick={() => onLocale('de')}
-          >
-            Deutsch
-          </button>
+          <p id="menu-language" className="menu-label">
+            {de ? 'Sprache' : 'Language'}
+          </p>
+          <div role="group" aria-labelledby="menu-language">
+            {languages.map(([code, name]) => (
+              <button
+                key={code}
+                popoverTarget="app-menu"
+                popoverTargetAction="hide"
+                aria-pressed={language === code}
+                onClick={() => onLocale(code)}
+              >
+                <span className="check" aria-hidden="true">
+                  {language === code ? '✓' : ''}
+                </span>
+                {name}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
       <AppAccess
