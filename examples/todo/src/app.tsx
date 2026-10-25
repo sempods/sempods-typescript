@@ -1,12 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react';
 import {
-  AppShell,
   AppAccess,
-  ConnectionControls,
   AccessNotice,
   ResourceEditor,
   UpdateNotice,
-  CallbackNotice,
   SempodsProvider,
   useAppState,
   useFieldUpdate,
@@ -161,50 +158,18 @@ function TaskScreen() {
   );
 }
 
-function CustomScreen() {
-  const state = useAppState();
-  const { messages, error } = useSdkLocale();
-  const m = messages.controls;
-
-  return (
-    <main className="custom">
-      <h1>TODO · Custom</h1>
-      {state.startupError ? (
-        <p role="alert">{error(state.startupError)}</p>
-      ) : !state.startup ? (
-        <p>{m.loading}</p>
-      ) : state.startup.storage === 'busy' ? (
-        <p role="alert">{m.busy}</p>
-      ) : state.startup.storage === 'unavailable' ? (
-        <p role="alert">{m.storage}</p>
-      ) : (
-        <>
-          <CallbackNotice />
-          <aside>
-            <ConnectionControls />
-          </aside>
-          <AccessNotice />
-          <TargetScreen>
-            <TaskScreen />
-          </TargetScreen>
-        </>
-      )}
-    </main>
-  );
-}
-
+/**
+ * The TODO app with the SDK's standard UI: `AppAccess` beside the app's own
+ * header and screen. The EN/DE switch is the only addition; until it is used,
+ * the provider follows the browser's language.
+ */
 export function TodoApp({
   runtime,
-  custom,
   children,
-  legacy = false,
 }: {
   readonly runtime: BrowserRuntime;
-  readonly custom?: boolean;
   /** App-level notices share the selected language and remain outside target gates. */
   readonly children?: ReactNode;
-  /** Legacy AppShell remains available for existing applications. */
-  readonly legacy?: boolean;
 }) {
   // Until the person picks one, the provider follows the browser's language.
   // A picked locale sets messages and formatting together.
@@ -217,29 +182,8 @@ export function TodoApp({
         <button onClick={() => setLocale('de')}>Deutsch</button>
       </nav>
       {children}
-      <TodoLayout custom={custom} legacy={legacy} />
+      <StandardScreen />
     </SempodsProvider>
-  );
-}
-
-function TodoLayout({
-  custom,
-  legacy,
-}: {
-  readonly custom: boolean | undefined;
-  readonly legacy: boolean;
-}) {
-  useAppState(); // Also redraw after the initializer restores the callback's return route.
-  return (custom ?? location.pathname === '/custom') ? (
-    <CustomScreen />
-  ) : legacy || location.pathname === '/legacy' ? (
-    <AppShell title="TODO" style={{ color: 'light-dark(#173740, #e8eee9)' }}>
-      <TargetScreen>
-        <TaskScreen />
-      </TargetScreen>
-    </AppShell>
-  ) : (
-    <StandardScreen />
   );
 }
 

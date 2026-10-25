@@ -858,8 +858,7 @@ visible.
 A replacement uses `useConnections`, `useAppState` and guarded `useApp()` actions;
 it must not call raw runtime selection directly. For a different layout, omit
 AppShell, keep the provider, and place `ConnectionControls`/`AccessNotice` and
-your screen anywhere. The TODO's `/custom` route demonstrates this using the
-same screen and domain functions as `/`.
+your screen anywhere.
 
 Override text with `messages={{ controls: { save: translate('save') } }}` or supply
 individual message functions. Changes retranslate in place. `language` selects
@@ -1057,7 +1056,7 @@ other subscribers and operation settlement; `editor.loaded` still settles.
 ## Evidence and remaining validation
 
 `pnpm test:todo` installs packed SDKs outside the workspace, typechecks and bundles
-both actual examples, and drives the standard/custom screens through real loopback
+both actual examples, and drives the standard screen through real loopback
 PKCE redirects, CRUD, conflict/unknown outcomes, guarded selection, EN/DE, keyboard,
 mobile width and a busy second tab. It also executes the Node CRUD loop. Unit and
 React tests cover access/draft preservation, lifecycle and cancellation. These are

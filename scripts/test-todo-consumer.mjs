@@ -235,8 +235,6 @@ try {
       if (
         [
           '/',
-          '/custom',
-          '/legacy',
           '/baseline',
           '/baseline/callback',
           '/callback',
@@ -650,7 +648,6 @@ try {
       save,
       field,
       page.getByRole('button', { name: 'Check current version', exact: true }),
-      page.getByRole('button', { name: 'Pods & sharing', exact: true }),
     ]) {
       const box = await control.boundingBox();
       assert.ok(box.height >= 44);
@@ -708,7 +705,7 @@ try {
       document.documentElement.style.removeProperty('color-scheme');
     });
     assert.equal(await field.inputValue(), 'Unfinished baseline');
-    // One inherited token styles both shell management and standalone editor controls.
+    // One inherited token styles every SDK control; the app's header button is its own.
     await page.evaluate(() =>
       document.documentElement.style.setProperty('--sempods-accent', '#654321'),
     );
@@ -718,17 +715,11 @@ try {
     );
     assert.equal(
       await page
-        .getByRole('button', { name: 'Pods & sharing', exact: true })
-        .evaluate((button) => getComputedStyle(button).color),
-      'rgb(101, 67, 33)',
-    );
-    assert.equal(
-      await page
         .getByRole('button', { name: 'Check current version', exact: true })
         .evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
-    // App-owned list controls retain browser appearance; the shell does not style descendants globally.
+    // App-owned list controls retain browser appearance; SDK styles do not leak into app content.
     assert.notEqual(
       await page
         .getByRole('button', { name: 'SDK baseline', exact: true })
@@ -776,9 +767,9 @@ try {
     await context.close();
   }
   console.log(
-    'Packed SDK baseline without a stylesheet: AppShell, editor, inherited tokens, app-content isolation, EN/DE, 320/375px light/dark, touch targets, focus and guarded drafts passed.',
+    'Packed SDK baseline without a stylesheet: standard TODO screen, editor, inherited tokens, app-content isolation, EN/DE, 320/375px light/dark, touch targets, focus and guarded drafts passed.',
   );
-  for (const custom of [false, true]) {
+  {
     tasks.clear();
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -794,22 +785,15 @@ try {
         ? route.continue()
         : route.abort(),
     );
-    await page.goto(origin + (custom ? '/custom' : '/legacy'));
-    await page.getByLabel(custom ? 'Pod URL' : 'Pod address').fill(pod);
-    await page
-      .getByRole('button', {
-        name: custom ? 'Connect' : 'Sign in',
-        exact: true,
-      })
-      .click();
+    await page.goto(origin + '/');
+    await page.getByLabel('Pod address').fill(pod);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
-    if (!custom) {
-      await page
-        .getByRole('button', { name: 'Pods & sharing', exact: true })
-        .click();
-      await page.getByText('Connect another Pod', { exact: true }).click();
-    }
+    await page
+      .getByRole('button', { name: 'Pods & sharing', exact: true })
+      .click();
+    await page.getByText('Connect another Pod', { exact: true }).click();
     // New drafts cannot start while connect awaits discovery/registration.
     let releaseDiscovery;
     const discoveryStarted = new Promise((resolve) => {
@@ -821,13 +805,8 @@ try {
       releaseDiscovery();
     };
     await page.route('**/.well-known/oauth-protected-resource', holdDiscovery);
-    await page.getByLabel(custom ? 'Pod URL' : 'Pod address').fill(pod);
-    await page
-      .getByRole('button', {
-        name: custom ? 'Connect' : 'Sign in',
-        exact: true,
-      })
-      .click();
+    await page.getByLabel('Pod address').fill(pod);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await discoveryStarted;
     const newDraft = page.getByLabel('Task', { exact: true }).first();
     assert.equal(
@@ -1206,20 +1185,13 @@ try {
       body['http://www.w3.org/ns/sparql-service-description#namedGraph'] = [];
       await route.fulfill({ response, json: body });
     });
-    // Custom controls recheck with Check again; AppShell's AppAccess offers
-    // Check access in its management.
+    // AppAccess offers Check access in its management.
     const management = page.getByRole('button', {
       name: 'Pods & sharing',
       exact: true,
     });
     let opened = false;
     const recheck = async () => {
-      if (custom) {
-        await page
-          .getByRole('button', { name: 'Check again', exact: true })
-          .click();
-        return;
-      }
       const check = page.getByRole('button', {
         name: 'Check access',
         exact: true,
@@ -1264,14 +1236,11 @@ try {
       ),
     );
     await page.screenshot({
-      path: join(
-        tmpdir(),
-        'issue18-todo-' + (custom ? 'custom' : 'standard') + '.png',
-      ),
+      path: join(tmpdir(), 'issue18-todo-standard.png'),
       fullPage: true,
     });
     const busy = await context.newPage();
-    await busy.goto(origin + (custom ? '/custom' : '/legacy'));
+    await busy.goto(origin + '/');
     await busy.getByRole('alert').filter({ hasText: 'another tab' }).waitFor();
     await busy.getByRole('button', { name: 'Deutsch', exact: true }).click();
     await busy.getByRole('alert').filter({ hasText: 'anderen Tab' }).waitFor();
@@ -1311,7 +1280,7 @@ try {
       }),
     );
     const failed = await unavailable.newPage();
-    await failed.goto(origin + (custom ? '/custom' : '/legacy'));
+    await failed.goto(origin + '/');
     await failed
       .getByRole('alert')
       .filter({ hasText: 'storage could not be opened' })
@@ -1722,7 +1691,7 @@ try {
   assert.deepEqual(JSON.parse(await node(['list'])), []);
   assert.deepEqual(serverErrors, []);
   console.log(
-    'Packed TODO: standard/custom UI, EN/DE, CRUD, conflict/unknown save/create/delete, custom message/picker, draft guards, A-B-A, keyboard/mobile, second-tab notice, reload with remembered context; shared Node CRUD passed.',
+    'Packed TODO: standard UI, EN/DE, CRUD, conflict/unknown save/create/delete, custom message/picker, draft guards, A-B-A, keyboard/mobile, second-tab notice, reload with remembered context; shared Node CRUD passed.',
   );
 } finally {
   await browser?.close();
