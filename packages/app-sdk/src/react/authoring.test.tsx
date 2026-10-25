@@ -1319,3 +1319,23 @@ it('keeps a connection-scoped app draft through a Context selection without aski
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(discard).not.toHaveBeenCalled();
 });
+
+it('keeps the delete question through a view notification that leaves access unchanged', async () => {
+  const f = await connected();
+  const { deletes } = deletions(f);
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Form />
+    </SempodsProvider>,
+  );
+  await screen.findByDisplayValue('Original');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  const ask = screen.getByRole('group', asked);
+  // An unchanged catalogue reload notifies the view without changing access.
+  await act(async () => {
+    await f.runtime.loadContexts(f.id);
+  });
+  expect(screen.getByRole('group', asked)).toBe(ask);
+  fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(deletes).toEqual(['"v1"']));
+});

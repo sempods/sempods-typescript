@@ -128,7 +128,10 @@ export interface ResourceEditor<D, U = D> {
   refresh(): Promise<void>;
   /** Review: keep the draft and base the next save on the compared version. */
   continueFromCurrent(): void;
-  /** Losing read access clears server data but keeps the draft; call `refresh()` after regaining it. */
+  /**
+   * Losing read access clears server data but keeps the draft; call `refresh()`
+   * after regaining it. Unchanged access changes nothing and notifies no one.
+   */
   setAccess(access: EditAccess): void;
   /** Ignores late results. A dispatched write cannot be undone. */
   dispose(): void;
@@ -684,6 +687,9 @@ export function createResourceEditor<D>(
     },
     setAccess(next) {
       if (disposed) return;
+      // Unchanged access is no new state: a question asked about the current
+      // state (such as a delete confirmation) stays valid.
+      if (next.read === access.read && next.write === access.write) return;
       const lost = access.read && !next.read;
       access = { read: next.read, write: next.write };
       if (lost) {
