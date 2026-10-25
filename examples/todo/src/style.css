@@ -1,8 +1,9 @@
 /*
  * The app's own elements in the SDK's neutral look. The tokens below are the
  * SDK's defaults, set once on the page: the SDK surfaces (AppAccess, editor,
- * notices) and this app's header, form and list read the same values. Change a
- * token here to brand both together.
+ * notices) and this app's header, list and input read the same values. Change
+ * a token here to brand both together. The SDK styles its own surfaces, so the
+ * rules below name the app's elements instead of every button or input.
  */
 :root {
   color-scheme: light dark;
@@ -24,81 +25,142 @@
 body {
   margin: 0;
 }
-
-/* Controls match the SDK's: 44px targets, thin lines, the accent for text. */
-input,
-select,
-button {
+button,
+input {
   font: inherit;
-  max-width: 100%;
-  min-height: 44px;
-}
-button {
-  font-weight: 500;
-  border: 1px solid var(--sempods-line);
-  border-radius: 5px;
-  color: var(--sempods-accent);
-  background: var(--sempods-bg);
-  padding: 10px 14px;
-  cursor: pointer;
-}
-input,
-select {
-  color: var(--sempods-text);
-  background: var(--sempods-bg);
-  border: 1px solid var(--sempods-line);
-  border-radius: 4px;
-  padding: 10px;
-}
-input:not([type='checkbox']),
-select {
-  display: block;
-  width: 100%;
-}
-button:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 :focus-visible {
   outline: 2px solid var(--sempods-accent);
   outline-offset: 3px;
 }
-label {
-  display: block;
-  max-width: 100%;
+
+/* App actions read as text; only adding a task is filled. */
+nav button,
+.app-heading button,
+.tasks button,
+.reload {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--sempods-accent);
+  background: transparent;
+  font-weight: 500;
+  cursor: pointer;
+}
+nav button:hover,
+.app-heading button:hover,
+.tasks button:hover,
+.reload:hover {
+  background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
+}
+.primary {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--sempods-on-accent);
+  background: var(--sempods-accent);
+  font-weight: 500;
+  cursor: pointer;
+}
+button:disabled,
+input:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
-/* Layout and spacing. */
+/* Page: a narrow column, the language switch small at the top. */
+nav,
+.standard {
+  max-width: 640px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
 nav {
   display: flex;
-  gap: 8px;
-  padding: 8px;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+nav button {
+  color: var(--sempods-muted);
+  font-size: 0.875rem;
 }
 .standard {
-  max-width: 760px;
-  margin: auto;
-  padding: clamp(12px, 4vw, 32px);
+  padding-bottom: 32px;
 }
 .app-heading {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 12px;
 }
 .app-heading h1 {
-  font-size: 1.75rem;
-  font-weight: 500;
-  line-height: 1.25;
   margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
 }
-form,
-section {
-  margin-block: 16px;
+.app-heading button {
+  margin-inline-start: auto;
 }
-ul {
-  padding-left: 0;
+
+/* The list: a checkbox to finish a task, its title to edit it. */
+.tasks {
+  margin: 16px 0;
+  padding: 0;
   list-style: none;
 }
-li + li {
-  border-top: 1px solid var(--sempods-line);
+.tasks li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--sempods-line);
+}
+.tasks input {
+  width: 22px;
+  height: 22px;
+  margin: 11px;
+  accent-color: var(--sempods-accent);
+  cursor: pointer;
+}
+.tasks li button {
+  flex: 1;
+  text-align: start;
+  color: var(--sempods-text);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.tasks li.done button {
+  color: var(--sempods-muted);
+  text-decoration: line-through;
+}
+.tasks button[aria-expanded='true'] {
+  font-weight: 600;
+}
+.empty {
+  color: var(--sempods-muted);
+  text-align: center;
+  padding-block: 24px;
+}
+
+/* The input for a new task, below the list. */
+.composer {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.composer input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--sempods-line);
+  border-radius: 8px;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
+}
+.reload {
+  display: block;
+  margin: 16px auto 0;
+  color: var(--sempods-muted);
+  font-size: 0.875rem;
 }

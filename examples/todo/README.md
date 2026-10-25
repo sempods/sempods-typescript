@@ -29,9 +29,10 @@ the app. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 
-Create, list, rename, complete, reopen and delete tasks. The list keeps its rows
-while it reloads (`useList(…, { retain: true })`) and after a failed refresh,
-with a note that they may be out of date. A new or changed row is its own
+Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
+or reopens a task, its title opens the editor below the list, and the input at
+the bottom adds one. The list keeps its rows while it reloads and after a
+failed refresh; `LoadNotice` says what the read does, with a retry. A new or changed row is its own
 confirmation (`UpdateNotice quiet`); refusals, conflicts and unconfirmed
 outcomes still show. The UI starts in the browser's language (German or
 English, else English); the EN/DE switches then pick one and retranslate

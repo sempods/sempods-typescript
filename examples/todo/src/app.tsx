@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import {
   AppAccess,
   AccessNotice,
+  LoadNotice,
   ResourceEditor,
   UpdateNotice,
   SempodsProvider,
@@ -16,20 +17,22 @@ import {
   useWorkflowAccess,
 } from '@sempods/app-sdk/react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
-import { emptyTask, supportedTasks, taskFields } from './domain.js';
+import { emptyTask, taskFields } from './domain.js';
 
 function TaskScreen() {
-  const { language, messages, error } = useSdkLocale();
-  const de = language === 'de';
-  // retain: the rows stay while the list reloads, also after a confirmed write.
-  const list = useList(taskFields, { retain: true });
-  const shown =
-    list.state.kind === 'ready'
-      ? list.state.data
-      : 'previous' in list.state
-        ? list.state.previous
-        : undefined;
-  const tasks = shown ? supportedTasks(shown) : null;
+  const de = useSdkLocale().language === 'de';
+  const m = {
+    tasks: de ? 'Aufgaben' : 'Tasks',
+    task: de ? 'Aufgabe' : 'Task',
+    newTask: de ? 'Neue Aufgabe' : 'New task',
+    add: de ? 'Hinzufügen' : 'Add',
+    done: de ? 'Erledigt' : 'Done',
+    empty: de ? 'Noch keine Aufgaben.' : 'No tasks yet.',
+    reload: de ? 'Neu laden' : 'Reload',
+  };
+  // The rows stay while the list reloads; LoadNotice says what the read does.
+  const list = useList(taskFields);
+  const tasks = list.data?.items;
   const mutate = useFieldUpdate(taskFields);
   const creation = useCreation(taskFields, {
     initial: emptyTask,
@@ -37,106 +40,40 @@ function TaskScreen() {
   });
   const { selected, select } = useSelection();
   const editor = useResourceEditor(selected, taskFields);
-  const m = {
-    title: de ? 'Aufgabe' : 'Task',
-    add: de ? 'Hinzufügen' : 'Add',
-    done: de ? 'Erledigt' : 'Done',
-    tasks: de ? 'Aufgaben' : 'Tasks',
-    empty: de ? 'Noch keine Aufgaben.' : 'No tasks yet.',
-    complete: de ? 'Erledigen' : 'Complete',
-    reopen: de ? 'Wieder öffnen' : 'Reopen',
-    skipped: de ? 'Nicht unterstützte Einträge' : 'Unsupported entries',
-    reload: de ? 'Neu laden' : 'Reload',
-    cancelled: de ? 'Das Laden wurde abgebrochen.' : 'Loading was cancelled.',
-    unavailable: de
-      ? 'Die Aufgaben können gerade nicht gelesen werden.'
-      : 'The tasks cannot be read right now.',
-    stale: de
-      ? 'Die Liste unten ist vielleicht nicht aktuell.'
-      : 'The list below may be out of date.',
-  };
 
   return (
     <section aria-label={m.tasks}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          creation.change({ title: creation.draft.title.trim() });
-          void creation.create();
-        }}
-      >
-        <label>
-          {m.title}
-          <input
-            required
-            disabled={!creation.canEdit}
-            value={creation.draft.title}
-            onChange={(e) => creation.change({ title: e.target.value })}
-          />
-        </label>{' '}
-        <button disabled={!creation.canCreate}>{m.add}</button>
-      </form>
+      <LoadNotice {...list} />
       {/* The new or changed row is the confirmation; problems still show. */}
-      <UpdateNotice {...creation.notice} quiet />
       <UpdateNotice {...mutate.notice} quiet />
-      {/* Each read state says what happened; none promises a draft. */}
-      {list.state.kind === 'loading' && !tasks && (
-        <p role="status">{messages.controls.loading}</p>
-      )}
-      {list.state.kind === 'failed' && (
-        <p role="alert">
-          {error(list.state.error)}
-          {tasks ? ` ${m.stale}` : ''}
-        </p>
-      )}
-      {list.state.kind === 'cancelled' && <p role="status">{m.cancelled}</p>}
-      {list.state.kind === 'unavailable' && (
-        <p role="status">{m.unavailable}</p>
-      )}
-      <button onClick={() => void list.reload()}>{m.reload}</button>
-      {tasks && (
-        <>
-          {tasks.skipped > 0 && (
-            <p>
-              {m.skipped}: {tasks.skipped}
-            </p>
-          )}
-          {tasks.items.length === 0 && <p>{m.empty}</p>}
-          <ul>
-            {tasks.items.map((item) => (
-              <li
-                key={item.iri}
-                style={{
-                  display: 'flex',
-                  gap: 12,
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  padding: '10px 0',
-                }}
-              >
-                <button onClick={() => void select(item.iri)}>
-                  {item.data.title}
-                </button>
-                <span>{item.data.done ? '✓' : ''}</span>
-                <button
-                  disabled={!mutate.canMutate}
-                  onClick={() =>
-                    void mutate.update(item, { done: !item.data.done })
-                  }
-                >
-                  {item.data.done ? m.reopen : m.complete}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      {tasks?.length === 0 && <p className="empty">{m.empty}</p>}
+      <ul className="tasks">
+        {tasks?.map((item) => (
+          <li key={item.iri} className={item.data.done ? 'done' : undefined}>
+            <input
+              type="checkbox"
+              aria-label={`${m.done}: ${item.data.title}`}
+              checked={item.data.done}
+              disabled={!mutate.canMutate}
+              onChange={() =>
+                void mutate.update(item, { done: !item.data.done })
+              }
+            />
+            <button
+              aria-expanded={selected === item.iri}
+              onClick={() => void select(item.iri)}
+            >
+              {item.data.title}
+            </button>
+          </li>
+        ))}
+      </ul>
       {selected && (
-        <ResourceEditor editor={editor}>
+        <ResourceEditor editor={editor} onClose={() => select(null)}>
           {(draft, change) => (
-            <div style={{ display: 'grid', gap: 12 }}>
+            <>
               <label>
-                {m.title}
+                {m.task}
                 <input
                   value={draft.title}
                   onChange={(e) => change({ title: e.target.value })}
@@ -150,10 +87,34 @@ function TaskScreen() {
                 />
                 {m.done}
               </label>
-            </div>
+            </>
           )}
         </ResourceEditor>
       )}
+      <UpdateNotice {...creation.notice} quiet />
+      <form
+        className="composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          creation.change({ title: creation.draft.title.trim() });
+          void creation.create();
+        }}
+      >
+        <input
+          required
+          aria-label={m.newTask}
+          placeholder={m.newTask}
+          disabled={!creation.canEdit}
+          value={creation.draft.title}
+          onChange={(e) => creation.change({ title: e.target.value })}
+        />
+        <button className="primary" disabled={!creation.canCreate}>
+          {m.add}
+        </button>
+      </form>
+      <button className="reload" onClick={() => void list.reload()}>
+        {m.reload}
+      </button>
     </section>
   );
 }
@@ -178,8 +139,12 @@ export function TodoApp({
   return (
     <SempodsProvider runtime={runtime} {...(locale ? { locale } : {})}>
       <nav aria-label="Language">
-        <button onClick={() => setLocale('en')}>English</button>
-        <button onClick={() => setLocale('de')}>Deutsch</button>
+        <button aria-label="English" onClick={() => setLocale('en')}>
+          EN
+        </button>
+        <button aria-label="Deutsch" onClick={() => setLocale('de')}>
+          DE
+        </button>
       </nav>
       {children}
       <StandardScreen />

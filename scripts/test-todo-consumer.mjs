@@ -476,7 +476,7 @@ try {
       .click();
     // Redirect initializes the example's default language again.
     await page.getByLabel('Data context', { exact: true }).selectOption(work);
-    const input = page.getByLabel('Task', { exact: true }).first();
+    const input = page.getByLabel('New task', { exact: true });
     await input.fill('Shell-free task');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
@@ -575,7 +575,7 @@ try {
     await page
       .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
-    await page.getByLabel('Task', { exact: true }).first().fill('SDK baseline');
+    await page.getByLabel('New task', { exact: true }).fill('SDK baseline');
     assert.deepEqual(labelRequests, [work]);
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
@@ -779,7 +779,7 @@ try {
     await page.getByLabel('Pod address').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await discoveryStarted;
-    const newDraft = page.getByLabel('Task', { exact: true }).first();
+    const newDraft = page.getByLabel('New task', { exact: true });
     assert.equal(
       await newDraft.evaluate((input) => Boolean(input.closest('[inert]'))),
       true,
@@ -794,7 +794,7 @@ try {
     await heldDiscovery.abort('failed');
     await page.waitForFunction(() => !document.querySelector('[inert]'));
     const add = async (title) => {
-      await page.getByLabel('Task', { exact: true }).first().fill(title);
+      await page.getByLabel('New task', { exact: true }).fill(title);
       await page.getByRole('button', { name: 'Add', exact: true }).click();
       await page.getByRole('button', { name: title, exact: true }).waitFor();
     };
@@ -811,13 +811,21 @@ try {
     const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
     const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
     assert.equal(await created.count(), 0);
-    await page.getByRole('button', { name: 'Complete', exact: true }).click();
-    await page.getByRole('button', { name: 'Reopen', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .waitFor();
     assert.equal(await saved.count(), 0);
-    await page.getByRole('button', { name: 'Reopen', exact: true }).click();
-    await page.getByRole('button', { name: 'Complete', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .waitFor();
     await page.getByRole('button', { name: 'First', exact: true }).click();
-    const draft = page.getByLabel('Task', { exact: true }).nth(1);
+    const draft = page.getByLabel('Task', { exact: true });
     await draft.fill('Renamed');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
@@ -944,7 +952,7 @@ try {
     await page
       .getByRole('button', { name: 'Retry captured task', exact: true })
       .click();
-    await page.getByLabel('Task', { exact: true }).nth(1).waitFor();
+    await page.getByLabel('Task', { exact: true }).waitFor();
     await confirmDelete(page);
     await page
       .getByRole('button', { name: 'Retry captured task', exact: true })
@@ -952,16 +960,13 @@ try {
     // An uncertain creation cannot be submitted twice, even after same-view navigation.
     loseMethod = 'PUT';
     await page.route('**/_system/resources/**', loseAnswer);
-    await page
-      .getByLabel('Task', { exact: true })
-      .first()
-      .fill('Maybe created');
+    await page.getByLabel('New task', { exact: true }).fill('Maybe created');
     const beforeCreate = writes;
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('status').filter({ hasText: 'unconfirmed' }).waitFor();
     assert.equal(writes, beforeCreate + 1);
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().isDisabled(),
+      await page.getByLabel('New task', { exact: true }).isDisabled(),
       true,
     );
     assert.equal(
@@ -983,7 +988,7 @@ try {
       true,
     );
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Maybe created',
     );
     assert.equal(writes, beforeCreate + 1);
@@ -1004,7 +1009,7 @@ try {
     await page
       .getByRole('button', { name: 'Maybe created', exact: true })
       .click();
-    await page.getByLabel('Task', { exact: true }).nth(1).fill('Leave me');
+    await page.getByLabel('Task', { exact: true }).fill('Leave me');
     await page.getByLabel('Data context').selectOption(personal);
     await page
       .getByRole('button', { name: 'Discard and continue', exact: true })
@@ -1022,12 +1027,13 @@ try {
     );
     // A row mutation's acknowledgement must not discard a separate creation draft.
     await page
-      .getByLabel('Task', { exact: true })
-      .first()
+      .getByLabel('New task', { exact: true })
       .fill('Keep this new title');
     loseMethod = 'PATCH';
     await page.route('**/_system/resources/**', loseAnswer);
-    await page.getByRole('button', { name: 'Complete', exact: true }).click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .click();
     await page.getByRole('status').filter({ hasText: 'unconfirmed' }).waitFor();
     await page.unroute('**/_system/resources/**', loseAnswer);
     await page
@@ -1037,15 +1043,15 @@ try {
       .getByRole('button', { name: 'I have checked the pod', exact: true })
       .click();
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Keep this new title',
     );
-    await page.getByLabel('Task', { exact: true }).first().fill('');
+    await page.getByLabel('New task', { exact: true }).fill('');
     // A lost deletion answer stays uncertain even when a subsequent read finds absence.
     await page
       .getByRole('button', { name: 'Maybe created', exact: true })
       .click();
-    await page.getByLabel('Task', { exact: true }).nth(1).waitFor();
+    await page.getByLabel('Task', { exact: true }).waitFor();
     loseMethod = 'DELETE';
     await page.route('**/_system/resources/**', loseAnswer);
     const beforeDelete = writes;
@@ -1115,25 +1121,29 @@ try {
     await release();
     release = await holdList();
     requested = listRequest();
-    await page.getByRole('button', { name: 'Complete', exact: true }).click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .click();
     await requested;
     assert.equal(await keptRow().count(), 1);
     assert.equal(await loadingStatus.count(), 0);
     await release();
-    await page.getByRole('button', { name: 'Reopen', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .waitFor();
     await page.route(listQuery, (route) =>
       route.fulfill({ status: 403, body: '' }),
     );
     await page.getByRole('button', { name: 'Reload', exact: true }).click();
     const stale = page
       .getByRole('alert')
-      .filter({ hasText: 'The list below may be out of date.' });
+      .filter({ hasText: 'What is shown may be out of date.' });
     await stale.waitFor();
     assert.equal(await keptRow().count(), 1);
     await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
     await page
       .getByRole('alert')
-      .filter({ hasText: 'Die Liste unten ist vielleicht nicht aktuell.' })
+      .filter({ hasText: 'Die Anzeige ist vielleicht nicht aktuell.' })
       .waitFor();
     await page.getByRole('button', { name: 'English', exact: true }).click();
     await page.unroute(listQuery);
@@ -1146,8 +1156,12 @@ try {
       }),
       0,
     );
-    await page.getByRole('button', { name: 'Reopen', exact: true }).click();
-    await page.getByRole('button', { name: 'Complete', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .waitFor();
     await page.route('**/alice/_system/contexts', async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -1182,13 +1196,13 @@ try {
     if (opened && (await management.getAttribute('aria-expanded')) === 'true')
       await management.click();
     // Creation drafts use the same keyboard-accessible leave confirmation.
-    await page.getByLabel('Task', { exact: true }).first().fill('Uncreated');
+    await page.getByLabel('New task', { exact: true }).fill('Uncreated');
     await page
       .getByRole('button', { name: 'After unknown deletion', exact: true })
       .click();
     assert.equal(await page.getByRole('alertdialog').count(), 0);
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Uncreated',
     );
     await page.getByLabel('Data context').selectOption(personal);
@@ -1323,7 +1337,7 @@ try {
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
-    await page.getByLabel('Task', { exact: true }).first().fill('Installed');
+    await page.getByLabel('New task', { exact: true }).fill('Installed');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
       .getByRole('button', { name: 'Installed', exact: true })
@@ -1418,10 +1432,7 @@ try {
     page.off('request', countAuth);
     assert.deepEqual(afterOffline, { loads: 0, auth: 0 });
     // An update is announced but never reloads over a draft.
-    await page
-      .getByLabel('Task', { exact: true })
-      .first()
-      .fill('Unsaved draft');
+    await page.getByLabel('New task', { exact: true }).fill('Unsaved draft');
     await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
     workerVersion = 'v2';
     await page.evaluate(() =>
@@ -1445,7 +1456,7 @@ try {
     await englishUpdate.waitFor();
     assert.equal(await germanUpdate.count(), 0);
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Unsaved draft',
     );
     await page.getByRole('button', { name: 'Deutsch', exact: true }).click();

@@ -1,9 +1,4 @@
-import {
-  fields,
-  flag,
-  text,
-  type SnapshotList,
-} from '@sempods/client-sdk/edit';
+import { fields, flag, text } from '@sempods/client-sdk/edit';
 
 const schema = 'https://schema.org/';
 
@@ -21,9 +16,3 @@ export const taskFields = fields(
 export type Task = { readonly title: string; readonly done: boolean };
 
 export const emptyTask: Task = { title: '', done: false };
-
-/** The example excludes incomplete Actions as well as unmappable terms. */
-export function supportedTasks(list: SnapshotList<Task>): SnapshotList<Task> {
-  const items = list.items.filter((item) => taskFields.valid!(item.data));
-  return { items, skipped: list.skipped + list.items.length - items.length };
-}
