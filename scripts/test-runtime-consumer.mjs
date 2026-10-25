@@ -1221,7 +1221,7 @@ try {
   console.log(
     'Packed preset React app: one-click PKCE returning to an in-app deep link (returnTo function), exact context, guarded reauthorization, connection reuse and durable reload passed.',
   );
-  for (const surface of ['access', 'controls']) {
+  for (const surface of ['access']) {
     for (const language of ['en', 'de']) {
       const appUrl =
         origin + '/app?identity=signout-' + surface + '-' + language;
@@ -1298,7 +1298,7 @@ try {
     }
   }
   console.log(
-    'Packed sign-out: AppAccess and ConnectionControls with AccessNotice show failed IndexedDB writes once in EN/DE, allow explicit retry and stay signed out after reload.',
+    'Packed sign-out: AppAccess shows failed IndexedDB writes once in EN/DE, allow explicit retry and stay signed out after reload.',
   );
   // The SDK's leave confirmation over an app's own modal dialog (#102): a
   // native top-layer dialog, visible and operable above it, for a dirty editor

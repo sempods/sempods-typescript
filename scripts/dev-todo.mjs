@@ -32,5 +32,5 @@ const server = createServer(async (req, res) => {
   }
 });
 server.listen(port, '127.0.0.1', () =>
-  console.log(`TODO: http://127.0.0.1:${port} (custom: /custom)`),
+  console.log(`TODO: http://127.0.0.1:${port}`),
 );

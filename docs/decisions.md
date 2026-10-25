@@ -183,7 +183,7 @@ a target or access change invalidates pending reads, and loaders retry once.
 Losing read access clears server data but keeps drafts; losing write access
 disables writes. React screens get a provider, a composable `AppAccess` login/recovery
 surface and hooks over a framework-free controller. The app owns its frame and
-an optional way to open access management; `AppShell` provides an optional title/management wrapper around the same access surface.
+an optional way to open access management.
 The access surface does not own children or unmount drafts when access is lost.
 Navigation that would replace a dirty draft or an
 unresolved outcome asks first, and the UI is inert while a transition prepares. The controller exposes no

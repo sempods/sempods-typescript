@@ -1,6 +1,6 @@
 export { SdkLocaleProvider, useSdkLocale } from './locale.js';
 export { AppAccess } from './access.js';
-export type { AppAccessProps } from './access.js';
+export type { AppAccessProps, ConnectionsProps } from './access.js';
 export {
   SempodsProvider,
   TargetScreen,
@@ -30,11 +30,9 @@ export type {
   MutationOutcome,
 } from './hooks.js';
 export {
-  AppShell,
-  ConnectionControls,
   AccessNotice,
   CallbackNotice,
   ResourceEditor,
   UpdateNotice,
 } from './components.js';
-export type { ConnectionControlsProps, FieldLabels } from './components.js';
+export type { FieldLabels } from './components.js';

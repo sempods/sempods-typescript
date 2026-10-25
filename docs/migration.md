@@ -48,8 +48,8 @@ Check these points:
   your own.
 - **Offline start keeps the session.** When restoring a saved session cannot
   reach its Pod (offline, `5xx`, `408`, `429`), the connection ends with
-  `restorable: true` instead of looking signed out. `AppAccess` and
-  `ConnectionControls` show `controls.unreachable` (optional in `UiMessages`)
+  `restorable: true` instead of looking signed out. `AppAccess` shows
+  `controls.unreachable` (optional in `UiMessages`)
   with **Try again** instead of **Sign in**; coming back online restores the
   session by itself. Custom controls check `session.restorable` and call
   `runtime.retryRestore(id)` or `useApp().retryRestore(id)`. Test doubles that
@@ -59,6 +59,31 @@ Check these points:
   `/items/add` inside the app returns there after the callback. A string keeps
   its meaning. The result is checked like a string; an unsafe address rejects
   the sign-in with a `configuration` error.
+- **`AppShell` and `ConnectionControls` are removed.** Both predate `AppAccess`.
+  Replace `AppShell` with your own header and a **Pods & sharing** button
+  beside `AppAccess`:
+
+  ```tsx
+  const [open, setOpen] = useState(false);
+  <header>
+    <h1>My tasks</h1>
+    <button aria-expanded={open} onClick={() => setOpen(!open)}>
+      {useSdkLocale().messages.controls.dataAccess}
+    </button>
+  </header>
+  <AppAccess appName="My tasks" headingLevel={2} open={open} />
+  <TargetScreen>{/* your screen */}</TargetScreen>
+  ```
+
+  Replace standalone `ConnectionControls` with `AppAccess open`, or with your
+  own controls over the guarded `useApp()` actions next to `CallbackNotice`
+  and `AccessNotice`. The replacement slot stays: `AppAccess`
+  `components={{ Connections }}` now types its props as `ConnectionsProps`
+  (was `ConnectionControlsProps`). The CSS aliases `--sempods-access-bg`,
+  `-text`, `-muted`, `-line` and `-accent` are removed; use the `--sempods-*`
+  names. The TODO example no longer ships the known-Pod sign-in recipe: use
+  `AppAccess` with a `preset` (and `podAddress="hidden"` for one permitted Pod).
+
 - **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
   0.6 holds the earlier session; downgrading to 0.5 is not supported.
 - **Leave confirmation in the top layer.** The provider's "Discard unsaved

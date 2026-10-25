@@ -80,10 +80,6 @@ try {
     join(root, 'tests/todo-browser/customized.tsx'),
     join(temp, 'customized.tsx'),
   );
-  await cp(
-    join(root, 'tests/todo-browser/sign-in.tsx'),
-    join(temp, 'sign-in.tsx'),
-  );
   await cp(join(root, 'tests/todo-browser/pwa.tsx'), join(temp, 'pwa.tsx'));
   await cp(
     join(root, 'tests/todo-browser/baseline.tsx'),
@@ -107,7 +103,6 @@ try {
         'examples/**/*.ts',
         'examples/**/*.tsx',
         'customized.tsx',
-        'sign-in.tsx',
         'pwa.tsx',
         'baseline.tsx',
       ],
@@ -151,19 +146,6 @@ try {
     jsx: 'automatic',
     write: false,
   });
-  const signIn = await build({
-    absWorkingDir: temp,
-    entryPoints: ['sign-in.tsx'],
-    bundle: true,
-    platform: 'browser',
-    format: 'esm',
-    jsx: 'automatic',
-    write: false,
-    metafile: true,
-  });
-  assert.ok(
-    Object.keys(signIn.metafile.inputs).every((path) => !path.includes(root)),
-  );
   const pwa = await build({
     absWorkingDir: temp,
     entryPoints: ['pwa.tsx'],
@@ -239,8 +221,6 @@ try {
           '/baseline/callback',
           '/callback',
           '/customized',
-          '/recipe',
-          '/recipe/callback',
         ].includes(url.pathname)
       ) {
         res.writeHead(200, { 'content-type': 'text/html' });
@@ -253,13 +233,11 @@ try {
               ? ''
               : '<link rel="stylesheet" href="/app.css">') +
             '<div id="root"></div><script type="module" src="' +
-            (url.pathname.startsWith('/recipe')
-              ? '/sign-in.js'
-              : url.pathname.startsWith('/baseline')
-                ? '/baseline.js'
-                : url.pathname === '/customized'
-                  ? '/customized.js'
-                  : '/app.js') +
+            (url.pathname.startsWith('/baseline')
+              ? '/baseline.js'
+              : url.pathname === '/customized'
+                ? '/customized.js'
+                : '/app.js') +
             '"></script></html>',
         );
         return;
@@ -267,11 +245,6 @@ try {
       if (url.pathname === '/baseline.js') {
         res.writeHead(200, { 'content-type': 'text/javascript' });
         res.end(baseline.outputFiles[0].text);
-        return;
-      }
-      if (url.pathname === '/sign-in.js') {
-        res.writeHead(200, { 'content-type': 'text/javascript' });
-        res.end(signIn.outputFiles[0].text);
         return;
       }
       if (url.pathname === '/customized.js') {
@@ -585,9 +558,7 @@ try {
         await surface.evaluate(
           (element) => getComputedStyle(element).backgroundColor,
         ),
-        ['shell', 'access'].includes(
-          await surface.getAttribute('data-sempods-ui'),
-        )
+        ['access'].includes(await surface.getAttribute('data-sempods-ui'))
           ? 'rgb(255, 255, 255)'
           : 'rgba(0, 0, 0, 0)',
       );
@@ -1297,121 +1268,6 @@ try {
       .filter({ hasText: 'Sitzungsspeicher' })
       .waitFor();
     await unavailable.close();
-  }
-  // The separate known-Pod recipe uses the same packed SDK and real PKCE fixture.
-  {
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-    });
-    const page = await context.newPage();
-    const errors = [];
-    page.on('pageerror', (e) => errors.push(e));
-    await page.route('**/*', (route) =>
-      new URL(route.request().url()).origin === origin
-        ? route.continue()
-        : route.abort(),
-    );
-    await page.goto(origin + '/recipe');
-    assert.equal(await page.getByLabel('Pod URL').count(), 0);
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Data context').selectOption(work);
-    await page.getByLabel('Note', { exact: true }).fill('Keep this note');
-    // While signed in, the same action is labelled as updating access.
-    assert.equal(
-      await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
-      0,
-    );
-    await page
-      .getByRole('button', { name: 'Change sharing', exact: true })
-      .click();
-    await page.getByRole('alertdialog').waitFor();
-    await page.keyboard.press('Escape');
-    assert.equal(
-      await page.getByLabel('Note', { exact: true }).inputValue(),
-      'Keep this note',
-    );
-    await page.getByRole('button', { name: 'EN/DE' }).click();
-    assert.equal(
-      await page.getByLabel('Notiz', { exact: true }).inputValue(),
-      'Keep this note',
-    );
-    await page.getByRole('button', { name: 'EN/DE' }).click();
-    // Lose read access while focus is in the content. Recovery stays outside it.
-    await page.route('**/alice/_system/contexts', async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      body['https://schema.sempods.org/readableContext'] = [];
-      body['https://schema.sempods.org/writableContext'] = [];
-      body['http://www.w3.org/ns/sparql-service-description#namedGraph'] = [];
-      await route.fulfill({ response, json: body });
-    });
-    await page
-      .getByRole('button', { name: 'Check again', exact: true })
-      .click();
-    await page.getByLabel('Note', { exact: true }).waitFor({ state: 'hidden' });
-    assert.equal(
-      await page.getByLabel('Note', { exact: true }).inputValue(),
-      'Keep this note',
-    );
-    await page.getByLabel('Fallback', { exact: true }).selectOption('disabled');
-    await page
-      .getByLabel('Note', { exact: true })
-      .waitFor({ state: 'visible' });
-    assert.equal(
-      await page.getByLabel('Note', { exact: true }).isDisabled(),
-      true,
-    );
-    await page.getByLabel('Fallback', { exact: true }).selectOption('custom');
-    await page.getByText('Contact the host for access.').waitFor();
-    await page.unroute('**/alice/_system/contexts');
-    await page
-      .getByRole('button', { name: 'Check again', exact: true })
-      .click();
-    await page
-      .getByLabel('Note', { exact: true })
-      .waitFor({ state: 'visible' });
-    assert.equal(
-      await page.getByLabel('Note', { exact: true }).inputValue(),
-      'Keep this note',
-    );
-    const beforeWrites = writes;
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await page.getByText('Created.', { exact: true }).waitFor();
-    assert.equal(writes, beforeWrites + 1);
-    assert.equal(
-      await page.getByLabel('Connections', { exact: true }).textContent(),
-      '1',
-    );
-    await page
-      .getByRole('button', { name: 'Change sharing', exact: true })
-      .click();
-    // Re-authorization returns to the remembered, still readable context.
-    await page
-      .getByLabel('Note', { exact: true })
-      .waitFor({ state: 'visible' });
-    assert.equal(await page.getByLabel('Data context').inputValue(), work);
-    assert.equal(
-      await page.getByLabel('Connections', { exact: true }).textContent(),
-      '1',
-    );
-    const second = await context.newPage();
-    await second.goto(origin + '/recipe');
-    await second
-      .getByRole('alert')
-      .filter({ hasText: 'another tab' })
-      .waitFor();
-    assert.equal(
-      await second
-        .getByRole('button', { name: 'Sign in', exact: true })
-        .isDisabled(),
-      true,
-    );
-    await second.close();
-    assert.deepEqual(errors, []);
-    await context.close();
-    console.log(
-      'Packed known-Pod recipe: PKCE callback, explicit context, reauthorization to the remembered context, draft guards, EN/DE, hidden/disabled/custom access recovery and busy-tab feedback passed.',
-    );
   }
   // The TODO app as an installable PWA with the recipe's service worker. The
   // Pod shares this origin, the hardest case for a worker's request filter.

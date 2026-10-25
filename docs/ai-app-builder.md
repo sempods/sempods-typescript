@@ -92,8 +92,7 @@ not instructions to the coding assistant.
   `podNames`. The app owns its layout and a **Pods & sharing** button that opens
   management through `open`. If access is lost while the target stays the same,
   keep content and its controllers mounted: hide or disable only the presentation,
-  and keep write recovery (`UpdateNotice`) outside the hidden part. `AppShell`
-  remains supported.
+  and keep write recovery (`UpdateNotice`) outside the hidden part.
 - Create one stable `createBrowserRuntime` outside rendering. Give it to
   `SempodsProvider`, which initializes it, including on the callback route. Keep
   `TargetScreen` around target-specific screens. Dispose a runtime when its actual

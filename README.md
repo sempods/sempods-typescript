@@ -51,8 +51,8 @@ pnpm dev:todo
 ```
 
 Open `http://127.0.0.1:5173/` and connect a Pod with a test context. The
-[TODO example](examples/todo/README.md) shares one task screen across an app-owned
-layout, an optional AppShell at `/legacy`, and a custom layout at `/custom`.
+[TODO example](examples/todo/README.md) uses only the SDK's standard UI beside an
+app-owned header and task screen.
 The [Node example](examples/node-script/README.md) uses the same field definitions.
 
 Both packages are published on npm under Apache-2.0 (documentation: CC BY 4.0;

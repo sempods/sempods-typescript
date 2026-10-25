@@ -16,7 +16,6 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AccessNotice,
   AppAccess,
-  ConnectionControls,
   SempodsProvider,
   TargetScreen,
   useApp,
@@ -80,7 +79,7 @@ it.each([
             <AppAccess appName="Tasks" open />
           ) : (
             <>
-              <ConnectionControls />
+              <AppAccess appName="Tasks" open />
               {surface === 'controls-with-notice' && <AccessNotice />}
             </>
           )}
@@ -1628,7 +1627,7 @@ it.each(['app', 'management'] as const)(
 );
 
 it.each(['en', 'de'] as const)(
-  'keeps custom controls quiet while the page leaves for a re-authorization (%s)',
+  "keeps a custom layout's access notice quiet while the page leaves for a re-authorization (%s)",
   async (language) => {
     const f = fixture();
     const logged = await f.login();
@@ -1642,17 +1641,12 @@ it.each(['en', 'de'] as const)(
     }
     render(
       <SempodsProvider runtime={logged.runtime} language={language}>
-        <ConnectionControls />
         <AccessNotice />
         <Share />
       </SempodsProvider>,
     );
-    const signOut = language === 'en' ? 'Sign out' : 'Abmelden';
     await waitFor(() =>
-      expect(
-        (screen.getByRole('button', { name: signOut }) as HTMLButtonElement)
-          .disabled,
-      ).toBe(false),
+      expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('active'),
     );
     const navigations = f.navigate.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'Share' }));
@@ -1661,30 +1655,10 @@ it.each(['en', 'de'] as const)(
     );
     await act(async () => {});
     expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('leaving');
-    // Nothing was lost: no access-loss notice, one leaving status.
+    // Nothing was lost: no access-loss notice while the page leaves.
     expect(document.body.textContent).not.toMatch(
       /Access is unavailable|Der Zugriff ist nicht verfügbar/,
     );
-    expect(
-      screen.getAllByRole('status').map((status) => status.textContent),
-    ).toEqual([
-      language === 'en'
-        ? 'Opening your Pod’s sign-in…'
-        : 'Die Anmeldung deines Pods wird geöffnet…',
-    ]);
-    expect(
-      screen.queryByRole('button', {
-        name: language === 'en' ? 'Sign in' : 'Anmelden',
-      }),
-    ).toBeNull();
-    for (const control of [
-      ...screen.getAllByRole('combobox'),
-      ...screen
-        .getAllByRole('button')
-        .filter((button) => button.textContent !== 'Share'),
-    ])
-      expect((control as HTMLButtonElement | HTMLSelectElement).disabled).toBe(
-        true,
-      );
+    expect(screen.queryByRole('status')).toBeNull();
   },
 );
