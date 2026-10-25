@@ -441,8 +441,8 @@ it.each([
       fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     const changed = 'The pod has changed. Compare before continuing.';
     // The first case runs the review path cold (about five times slower than the
-    // others locally), which exceeded the default second on loaded CI runners.
-    await screen.findByRole('alert', {}, { timeout: 5000 });
+    // others locally); loaded CI runners have needed more than five seconds.
+    await screen.findByRole('alert', {}, { timeout: 12_000 });
     expect(screen.getByText(changed)).toBeTruthy();
     await waitFor(() =>
       expect((screen.getByText(recovery) as HTMLButtonElement).disabled).toBe(
@@ -462,10 +462,10 @@ it.each([
         ([, init]) => init?.method === 'PATCH' || init?.method === 'DELETE',
       ),
     ).toHaveLength(1);
-    // The alert wait above may take up to five seconds; the test needs room
-    // beyond it, or a loaded runner hits the default test timeout first.
+    // The alert wait above may take up to twelve seconds; the test needs room
+    // beyond it, or a loaded runner hits the test timeout first.
   },
-  15_000,
+  20_000,
 );
 
 const asked = { name: 'Delete this from the pod? This cannot be undone.' };
@@ -1318,4 +1318,24 @@ it('keeps a connection-scoped app draft through a Context selection without aski
   );
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(discard).not.toHaveBeenCalled();
+});
+
+it('keeps the delete question through a view notification that leaves access unchanged', async () => {
+  const f = await connected();
+  const { deletes } = deletions(f);
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Form />
+    </SempodsProvider>,
+  );
+  await screen.findByDisplayValue('Original');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  const ask = screen.getByRole('group', asked);
+  // An unchanged catalogue reload notifies the view without changing access.
+  await act(async () => {
+    await f.runtime.loadContexts(f.id);
+  });
+  expect(screen.getByRole('group', asked)).toBe(ask);
+  fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(deletes).toEqual(['"v1"']));
 });
