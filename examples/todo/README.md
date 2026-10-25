@@ -43,7 +43,7 @@ leave. If comparison finds no resource, acknowledgement keeps the input locked
 and enables an explicit Add retry with the same captured IRI and body. This does
 not replay automatically or create a second task if the original arrives late.
 
-The provisional Focus subset uses `schema:Action`, untagged `schema:name`, explicit
+The example's task mapping uses `schema:Action`, untagged `schema:name` and explicit
 Potential/Completed action status. Creation writes these declared fields; edits
 preserve other RDF terms already present. Unsupported list entries are
 reported, not converted into plausible tasks. Broader task-vocabulary interoperability and mixed Action collections remain

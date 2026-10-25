@@ -66,9 +66,6 @@ export const task = fields(
 
 ## 3. The app: `src/App.tsx`
 
-The `AppAccess` composition below needs 0.3.0 or newer. For an older installed
-version, use the reference shipped with that exact version.
-
 ```tsx
 import { useRef, useState } from 'react';
 import { createBrowserRuntime } from '@sempods/app-sdk';
@@ -207,8 +204,8 @@ function Tasks() {
 `useSelection` asks before replacing a dirty editor. `canCreate`/`canMutate`
 reflect access and pending recovery, and `canCreate` also a valid draft: a blank
 title keeps Add disabled without app code. The input also locks while creation is
-pending or uncertain. `UpdateNotice` checks the captured subject without replay
-before acknowledgement. A success notice retires once another of these writes on
+pending or uncertain. When an outcome is unclear, `UpdateNotice` lets the person
+check the Pod's current version before acknowledging; nothing is resent. A success notice retires once another of these writes on
 the target starts, so the notices show the last action; unresolved outcomes stay until
 acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The

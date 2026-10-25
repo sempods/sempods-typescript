@@ -23,7 +23,8 @@ version and commit. Use the [contributor rules](../contributing.md).
   path is a contract: moving or renaming it needs a migration note.
 - Run `pnpm check` on the exact release candidate. Pack both packages with pnpm into
   a fresh directory and inspect contents and `npm publish --dry-run` output.
-  Record artifact contents/integrity separately from archive byte identity.
+  Compare packages by their extracted file contents, as the publisher does, not by
+  tarball checksum; archive metadata can differ between packs.
 - Prepare concise release notes and the release PR with tested environments and
   unverified live/device cases. An approved older commit is not current approval.
 

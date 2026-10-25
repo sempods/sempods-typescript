@@ -4,5 +4,4 @@ description: Review SDK documentation against changed behavior, public contracts
 ---
 
 Follow the shared [doc-review procedure](../../../docs/agents/doc-review.md).
-Use the repository [instruction map](../../../docs/agents/ai-instructions.md)
-for scope and contributor rules. The procedure does not expand the user's request.
+Use the root [AGENTS.md](../../../AGENTS.md) for scopes and contributor rules. The procedure does not expand the user's request.

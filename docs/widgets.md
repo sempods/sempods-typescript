@@ -138,9 +138,9 @@ does not import client-sdk directly, it need not declare that peer. If it import
 React DOM, declare/externalize that peer too.
 
 Externalize root imports **and subpaths**: `@sempods/app-sdk/react`,
-`@sempods/client-sdk/edit`, `react/jsx-runtime`, and their package roots. The
-test uses esbuild's `packages: 'external'`, retaining these imports and bundling
-only the widget/recipe code. Keep field definitions private, or annotate exported
+`@sempods/client-sdk/edit`, `react/jsx-runtime`, and their package roots. For
+example, esbuild's `packages: 'external'` keeps these imports and bundles only
+your widget code. Keep field definitions private, or annotate exported
 definitions with public SDK types when emitting library declarations; do not
 expose inferred implementation-only brands in your library API.
 
@@ -151,10 +151,10 @@ For a linked development library, check bundler resolution as well: symlinks can
 produce two module instances even with the same version. React requires provider
 and consumer to use the very same [context object](https://react.dev/reference/react/useContext#caveats).
 
-The test deliberately builds a widget against a second app-sdk copy. Its hooks
-fail with `SempodsProvider is required` despite the host provider. The correct
-fix is shared package resolution, not a nested provider or a second runtime.
-Duplicate modules do not bypass the browser's lease.
+If widget hooks fail with `SempodsProvider is required` although the host renders
+a provider, the widget resolved a second app-sdk copy. Fix the package
+resolution; do not nest a provider or create a second runtime. Duplicate modules
+do not bypass the browser's lease.
 
 ## Embedding profiles and limits
 

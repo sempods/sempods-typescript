@@ -81,7 +81,7 @@ These are the moving parts you will reuse:
 | Explain an outcome                        | `UpdateNotice`                                                     | The creation/update hook's `notice`                                        |
 
 For example, the quickstart's completion action is
-`update.update(t, { done: !t.data.done })`. Here `t` is the snapshot supplied by
+`update.update(item, { done: !item.data.done })`. Here `item` is the snapshot supplied by
 `useList`, including evidence of the data the person saw. Rebuilding it from a
 plain `{ title, done }` object loses that evidence. For a form, call
 `change({ title: value })` and let the editor preserve untouched properties and
