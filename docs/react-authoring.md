@@ -251,8 +251,9 @@ RDF terms once; it works with form editing, list actions and the Node consumer.
 `useResourceEditor(iri, definition)` manages subscription, access and disposal.
 `ResourceEditor` supplies save/delete/discard and comparison controls; its child
 renders only a draft and calls `change({ title })` for an original `fields()` definition.
-**Delete** asks in place first (`controls.confirmRemove`); only the confirmation
-sends one conditional `DELETE` of the version shown. Cancel or Escape keeps the
+**Delete** asks first in a modal dialog (`controls.confirmRemove`, role
+`alertdialog`, like the leave confirmation); only its **Delete** sends one
+conditional `DELETE` of the version shown. Cancel or Escape keeps the
 draft and the target, and any newer editor state (an edit, a read that adopts a
 newer version, lost write access, another subject) withdraws the question.
 The headless `editor.remove()` stays direct. A checkbox or radio inside the

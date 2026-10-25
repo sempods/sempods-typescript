@@ -9,7 +9,7 @@ export function SdkStyles() {
   );
 }
 const surfaces =
-  ':where([data-sempods-ui="access"], [data-sempods-ui="editor"], [data-sempods-ui="notice"])';
+  ':where([data-sempods-ui="access"], [data-sempods-ui="editor"], [data-sempods-ui="notice"], .sp-sdk-dialog)';
 const styles = `
 :where([data-sempods-ui]) {
   --sp-bg:var(--sempods-bg,light-dark(#fff,#111315));
@@ -40,6 +40,10 @@ ${surfaces} :where(dt) { color:var(--sp-muted); font-size:.875rem; }
 ${surfaces} :where(dd) { margin:0; white-space:pre-wrap; }
 ${surfaces} :where(details) { color:var(--sp-muted); font-size:.875rem; margin-block:12px; }
 ${surfaces} :where(summary) { min-height:44px; padding-block:10px; cursor:pointer; }
+:where(.sp-sdk-dialog) { background:var(--sp-bg); border:0; border-radius:12px; padding:24px; max-width:min(420px,calc(100vw - 32px)); box-shadow:0 12px 32px rgb(0 0 0 / .2); }
+:where(.sp-sdk-dialog)::backdrop { background:rgb(0 0 0 / .45); }
+:where(.sp-sdk-dialog) :where(h2) { font-size:1.25rem; font-weight:600; margin:0 0 8px; }
+:where(.sp-sdk-dialog) :where(.sp-sdk-actions) { justify-content:flex-end; margin-top:20px; }
 :where([data-sempods-ui="notice"]) { margin-block:12px; }
 :where([data-sempods-ui="notice"][role=alert]) { border-inline-start:2px solid var(--sp-accent); padding-inline-start:12px; }
 :where([data-sempods-ui="editor"]) { margin-block:16px; }

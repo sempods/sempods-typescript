@@ -447,7 +447,7 @@ it.each([
     if (operation === 'Delete')
       fireEvent.click(
         await enabled(
-          within(screen.getByRole('group', asked)).getByRole('button', {
+          within(screen.getByRole('alertdialog', asked)).getByRole('button', {
             name: 'Delete',
           }),
         ),
@@ -561,25 +561,25 @@ it.each([
     await screen.findByDisplayValue('Original');
     const remove = screen.getByRole('button', { name: text.remove });
     fireEvent.click(remove);
-    const ask = screen.getByRole('group', { name: text.ask });
+    const ask = screen.getByRole('alertdialog', { name: text.ask });
     const cancel = within(ask).getByRole('button', { name: text.cancel });
     expect(document.activeElement).toBe(cancel);
     fireEvent.click(cancel);
-    expect(screen.queryByRole('group', { name: text.ask })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: text.ask })).toBeNull();
     expect(document.activeElement).toBe(
       screen.getByRole('button', { name: text.remove }),
     );
     fireEvent.click(screen.getByRole('button', { name: text.remove }));
-    fireEvent.keyDown(screen.getByRole('group', { name: text.ask }), {
+    fireEvent.keyDown(screen.getByRole('alertdialog', { name: text.ask }), {
       key: 'Escape',
     });
-    expect(screen.queryByRole('group', { name: text.ask })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: text.ask })).toBeNull();
     expect(screen.getByDisplayValue('Original')).toBeTruthy();
     await act(async () => {});
     expect(deletes).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: text.remove }));
     const confirm = within(
-      screen.getByRole('group', { name: text.ask }),
+      screen.getByRole('alertdialog', { name: text.ask }),
     ).getByRole('button', { name: text.remove });
     fireEvent.click(confirm);
     // A second press reaches no confirmation and sends nothing more.
@@ -605,7 +605,7 @@ it('withdraws the delete question for an edit, a newer version and lost write ac
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Typed' },
   });
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   fireEvent.click(screen.getByText('Discard changes'));
   // A newer version adopted while asked withdraws the question; the next
   // confirmation deletes that version.
@@ -614,12 +614,12 @@ it('withdraws the delete question for an edit, a newer version and lost write ac
   pod.version = 2;
   await act(() => shownEditor!.refresh());
   await screen.findByDisplayValue('Newer');
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   // Lost write access withdraws it and disables Delete.
   ask();
   f.setCatalogue(async () => catalogue([work], []));
   await act(() => f.runtime.loadContexts(f.id));
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   expect(
     (screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement)
       .disabled,
@@ -635,7 +635,7 @@ it('withdraws the delete question for an edit, a newer version and lost write ac
   );
   ask();
   fireEvent.click(
-    within(screen.getByRole('group', asked)).getByRole('button', {
+    within(screen.getByRole('alertdialog', asked)).getByRole('button', {
       name: 'Delete',
     }),
   );
@@ -654,10 +654,10 @@ it('withdraws the delete question when the editor moves to another subject', asy
   const mounted = render(ui('urn:item'));
   await screen.findByDisplayValue('Original');
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-  expect(screen.getByRole('group', asked)).toBeTruthy();
+  expect(screen.getByRole('alertdialog', asked)).toBeTruthy();
   mounted.rerender(ui('urn:other'));
   await screen.findByDisplayValue('Original');
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   expect(deletes).toEqual([]);
 });
 
@@ -690,7 +690,7 @@ it.each([
     await screen.findByDisplayValue('Original');
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     fireEvent.click(
-      within(screen.getByRole('group', asked)).getByRole('button', {
+      within(screen.getByRole('alertdialog', asked)).getByRole('button', {
         name: 'Delete',
       }),
     );
@@ -1245,12 +1245,12 @@ it('keeps the delete question through a view notification that leaves access unc
   );
   await screen.findByDisplayValue('Original');
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-  const ask = screen.getByRole('group', asked);
+  const ask = screen.getByRole('alertdialog', asked);
   // An unchanged catalogue reload notifies the view without changing access.
   await act(async () => {
     await f.runtime.loadContexts(f.id);
   });
-  expect(screen.getByRole('group', asked)).toBe(ask);
+  expect(screen.getByRole('alertdialog', asked)).toBe(ask);
   fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }));
   await waitFor(() => expect(deletes).toEqual(['"v1"']));
 });

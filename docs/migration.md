@@ -114,7 +114,9 @@ Check these points:
   (pass the guarded `() => select(null)`) the editor works in place: Cancel or
   Escape discards and closes, and a confirmed save or delete closes it. In
   every editor Enter in a text field saves, actions read as text with Save
-  filled, and Delete moves to the end; tests that find buttons by position
+  filled, Delete moves to the end and asks in a modal dialog (role
+  `alertdialog`, as the leave confirmation; it was an inline `group`), and both
+  dialogs follow the `--sempods-*` tokens, including dark mode; tests that find buttons by position
   should find them by name.
 - **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
   `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,

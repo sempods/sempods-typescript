@@ -199,7 +199,7 @@ it('the TODO row becomes its editor: Escape cancels, Enter saves, delete closes'
     expect((remove as HTMLButtonElement).disabled).toBe(false),
   );
   fireEvent.click(remove);
-  const confirm = screen.getByRole('group', {
+  const confirm = screen.getByRole('alertdialog', {
     name: 'Delete this from the pod? This cannot be undone.',
   });
   fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));

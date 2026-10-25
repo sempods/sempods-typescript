@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
@@ -11,6 +11,7 @@ import { describeFailure, type SdkMessages } from '../locale.js';
 import type { SessionFact } from '../runtime/types.js';
 import type { LoadState } from '../authoring/load.js';
 import { SdkStyles } from './styles.js';
+import { ConfirmDialog } from './confirm.js';
 import { startCount, succeeded } from '../authoring/changes.js';
 import { editorTarget } from '../authoring/editor.js';
 
@@ -338,8 +339,8 @@ function Comparison({
   );
 }
 /** Default save/delete/review UI; children supply only domain fields.
- * Delete asks in place first: only the confirmation sends one conditional
- * DELETE of the version shown. Any later editor state (an edit, a read, another
+ * Delete asks first in a modal dialog, like the leave confirmation: only its
+ * Delete sends one conditional DELETE of the version shown. Any later editor state (an edit, a read, another
  * subject) withdraws the question; cancel or Escape keeps draft and target.
  * Success feedback retires with any later editor state and, for an editor from
  * `useResourceEditor`, when another write on the same target starts.
@@ -380,28 +381,14 @@ export function ResourceEditor<D, U = D>({
   } | null>(null);
   // The editor state the person was asked about; any newer state withdraws it.
   const [confirming, setConfirming] = useState<Editor<D>['state'] | null>(null);
-  const question = useId();
   const removeButton = useRef<HTMLButtonElement>(null);
-  const cancelButton = useRef<HTMLButtonElement>(null);
-  const returnFocus = useRef(false);
   const view = editor ? editorTarget(editor) : undefined;
   const starts = useStartCount(view);
   const asking =
     confirming !== null && confirming === editor?.state && confirming.canRemove;
-  useEffect(() => {
-    if (asking) cancelButton.current?.focus();
-    else if (returnFocus.current) {
-      returnFocus.current = false;
-      removeButton.current?.focus();
-    }
-  }, [asking]);
   if (!editor || editor.state.phase === 'loading')
     return <Notice>{m.loading}</Notice>;
   const state = editor.state;
-  const keep = () => {
-    returnFocus.current = true;
-    setConfirming(null);
-  };
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
     // A bound editor counts its own start synchronously in `action()`.
     const pending = action();
@@ -490,65 +477,49 @@ export function ResourceEditor<D, U = D>({
           </button>
         </section>
       )}
-      {asking ? (
-        <div
-          role="group"
-          aria-labelledby={question}
-          onKeyDown={(event) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            keep();
-          }}
+      <div className="sp-sdk-actions">
+        <button
+          className="sp-sdk-primary"
+          disabled={!state.canSave}
+          onClick={save}
         >
-          <p id={question}>{m.confirmRemove ?? m.remove}</p>
-          <div className="sp-sdk-actions">
-            <button
-              onClick={() => {
-                // Withdrawn first: a second press cannot send another DELETE.
-                setConfirming(null);
-                if (editor.state === confirming)
-                  void act(() => editor.remove());
-              }}
-            >
-              {m.remove}
-            </button>
-            <button ref={cancelButton} onClick={keep}>
-              {m.cancel}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="sp-sdk-actions">
-          <button
-            className="sp-sdk-primary"
-            disabled={!state.canSave}
-            onClick={save}
-          >
-            {m.save}
+          {m.save}
+        </button>
+        {onClose ? (
+          <button onClick={cancel}>{m.cancel}</button>
+        ) : (
+          <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
+            {m.discard}
           </button>
-          {onClose ? (
-            <button onClick={cancel}>{m.cancel}</button>
-          ) : (
-            <button
-              disabled={!state.canDiscard}
-              onClick={() => editor.discard()}
-            >
-              {m.discard}
-            </button>
-          )}
-          {state.phase === 'blocked' && (
-            <button onClick={() => void editor.refresh()}>{m.refresh}</button>
-          )}
-          <button
-            ref={removeButton}
-            className="sp-sdk-end"
-            disabled={!state.canRemove}
-            onClick={() => setConfirming(state)}
-          >
-            {m.remove}
-          </button>
-        </div>
-      )}
+        )}
+        {state.phase === 'blocked' && (
+          <button onClick={() => void editor.refresh()}>{m.refresh}</button>
+        )}
+        <button
+          ref={removeButton}
+          className="sp-sdk-end"
+          disabled={!state.canRemove}
+          onClick={() => setConfirming(state)}
+        >
+          {m.remove}
+        </button>
+      </div>
+      {/* Only the dialog's Delete sends one conditional DELETE. */}
+      <ConfirmDialog
+        open={asking}
+        ui="remove"
+        returnFocus={removeButton}
+        cancel={m.cancel}
+        confirm={m.remove}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          // Withdrawn first: a second press cannot send another DELETE.
+          setConfirming(null);
+          if (editor.state === confirming) void act(() => editor.remove());
+        }}
+      >
+        <p>{m.confirmRemove ?? m.remove}</p>
+      </ConfirmDialog>
       {!state.review && (
         <UpdateNotice
           quiet={quiet}
