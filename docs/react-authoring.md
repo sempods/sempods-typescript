@@ -732,15 +732,45 @@ const runtime = createBrowserRuntime({
   preset: { podUrl: 'https://pods.example/alice' },
 });
 
+function TasksApp() {
+  const [open, setOpen] = useState(false);
+  const focusTarget = useRef<HTMLButtonElement>(null);
+  const { messages } = useSdkLocale();
+  return (
+    <>
+      <header>
+        <h1>My tasks</h1>
+        <button
+          ref={focusTarget}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {messages.controls.dataAccess}
+        </button>
+      </header>
+      <AppAccess
+        appName="My tasks"
+        headingLevel={2}
+        mode="single"
+        podAddress="hidden"
+        open={open}
+        focusTarget={focusTarget}
+      />
+      <TargetScreen>
+        <Tasks />
+      </TargetScreen>
+    </>
+  );
+}
+
 <SempodsProvider runtime={runtime}>
-  <AppAccess appName="My tasks" mode="single" podAddress="hidden" />
-  <TargetScreen>
-    <Tasks />
-  </TargetScreen>
+  <TasksApp />
 </SempodsProvider>;
 ```
 
-`Tasks` is your existing app screen. The first visit offers **Sign in** without a
+`Tasks` is your existing app screen. Once access is usable `AppAccess` hides
+unless `open` is set, so the header's **Pods & sharing** button keeps signing
+out, changing sharing and choosing another context reachable. The first visit offers **Sign in** without a
 **Pod address** field (`podAddress="hidden"` with exactly one permitted Pod,
 see below); after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
 **Pods & sharing** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
