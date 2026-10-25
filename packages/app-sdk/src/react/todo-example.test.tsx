@@ -143,3 +143,23 @@ it.each(['en', 'de'] as const)(
     expect(await screen.findByText(text[language].description)).toBeTruthy();
   },
 );
+
+it.each([
+  [['de-DE', 'en'], 'de', 'en'],
+  [['en-GB'], 'en', 'de'],
+  [['fr-CA'], 'en', 'de'],
+] as const)(
+  'the TODO example follows the browser languages %j until a language is picked',
+  async (languages, initial, picked) => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue([...languages]);
+    const f = fixture();
+    cleanups.push(() => f.runtime.dispose());
+    render(<TodoApp runtime={f.runtime} />);
+    expect(await screen.findByText(text[initial].description)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole('button', { name: text[picked].language }),
+    );
+    expect(await screen.findByText(text[picked].description)).toBeTruthy();
+    expect(screen.queryByText(text[initial].description)).toBeNull();
+  },
+);
