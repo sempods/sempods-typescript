@@ -18,6 +18,9 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
 
+/** Menu language names follow the current language (Deutsch/Englisch, German/English). */
+const german = /^(German|Deutsch)$/;
+const english = /^(English|Englisch)$/;
 /** Clicks an item of the TODO header menu, opening the menu first. */
 async function menu(page, name) {
   await page.locator('.menu-button').click();
@@ -476,7 +479,7 @@ try {
     });
     const page = await context.newPage();
     await page.goto(origin + '/');
-    if (language === 'de') await menu(page, 'Deutsch');
+    if (language === 'de') await menu(page, german);
     await page
       .getByLabel(language === 'de' ? 'Pod-Adresse' : 'Pod address', {
         exact: true,
@@ -717,7 +720,7 @@ try {
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
-    await menu(page, 'Deutsch');
+    await menu(page, german);
     await editor
       .getByRole('button', { name: 'Speichern', exact: true })
       .waitFor();
@@ -840,7 +843,7 @@ try {
     assert.equal(writes, beforeEscape);
     await page.getByRole('button', { name: 'Renamed', exact: true }).click();
     await draft.fill('Draft retained');
-    await menu(page, 'Deutsch');
+    await menu(page, german);
     assert.equal(
       await page.getByLabel('Aufgabe', { exact: true }).last().inputValue(),
       'Draft retained',
@@ -853,7 +856,7 @@ try {
     );
     await page.keyboard.press('Escape');
     assert.equal(await page.getByLabel('Datenkontext').inputValue(), work);
-    await menu(page, 'English');
+    await menu(page, english);
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).click();
     conflict = true;
@@ -1146,12 +1149,12 @@ try {
       .filter({ hasText: 'What is shown may be out of date.' });
     await stale.waitFor();
     assert.equal(await keptRow().count(), 1);
-    await menu(page, 'Deutsch');
+    await menu(page, german);
     await page
       .getByRole('alert')
       .filter({ hasText: 'Die Anzeige ist vielleicht nicht aktuell.' })
       .waitFor();
-    await menu(page, 'English');
+    await menu(page, english);
     await page.unroute(listQuery);
     await reloadList(page);
     await stale.waitFor({ state: 'detached' });
@@ -1232,7 +1235,7 @@ try {
     const busy = await context.newPage();
     await busy.goto(origin + '/');
     await busy.getByRole('alert').filter({ hasText: 'another tab' }).waitFor();
-    await menu(busy, 'Deutsch');
+    await menu(busy, german);
     await busy.getByRole('alert').filter({ hasText: 'anderen Tab' }).waitFor();
     await busy.close();
     // A reload keeps the session and reselects the last chosen context from
@@ -1281,7 +1284,7 @@ try {
         .count(),
       0,
     );
-    await menu(failed, 'Deutsch');
+    await menu(failed, german);
     await failed
       .getByRole('alert')
       .filter({ hasText: 'Sitzungsspeicher' })
@@ -1438,7 +1441,7 @@ try {
     assert.deepEqual(afterOffline, { loads: 0, auth: 0 });
     // An update is announced but never reloads over a draft.
     await page.getByLabel('New task', { exact: true }).fill('Unsaved draft');
-    await menu(page, 'Deutsch');
+    await menu(page, german);
     workerVersion = 'v2';
     await page.evaluate(() =>
       navigator.serviceWorker.getRegistration().then((r) => r.update()),
@@ -1457,14 +1460,14 @@ try {
     );
     // The already-visible notice follows the app's language without a remount
     // or worker takeover; the creation draft survives both changes.
-    await menu(page, 'English');
+    await menu(page, english);
     await englishUpdate.waitFor();
     assert.equal(await germanUpdate.count(), 0);
     assert.equal(
       await page.getByLabel('New task', { exact: true }).inputValue(),
       'Unsaved draft',
     );
-    await menu(page, 'Deutsch');
+    await menu(page, german);
     await germanUpdate.waitFor();
     assert.equal(await englishUpdate.count(), 0);
     assert.equal(

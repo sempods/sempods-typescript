@@ -118,10 +118,7 @@ function TaskScreen() {
 }
 
 /** The menu's languages; the provider follows the browser's until one is picked. */
-const languages = [
-  ['de', 'Deutsch'],
-  ['en', 'English'],
-] as const;
+const languages = ['de', 'en'] as const;
 
 /** The app's icon: in the header and on the sign-in screen. */
 const icon = (
@@ -166,6 +163,8 @@ function StandardScreen({
   const { view, connections } = useAppState();
   const access = useWorkflowAccess();
   const de = language === 'de';
+  // Language names in the current language: Deutsch/Englisch, German/English.
+  const names = new Intl.DisplayNames([language], { type: 'language' });
 
   return (
     <main className="standard">
@@ -205,7 +204,7 @@ function StandardScreen({
             {de ? 'Sprache' : 'Language'}
           </p>
           <div role="group" aria-labelledby="menu-language">
-            {languages.map(([code, name]) => (
+            {languages.map((code) => (
               <button
                 key={code}
                 popoverTarget="app-menu"
@@ -216,7 +215,7 @@ function StandardScreen({
                 <span className="check" aria-hidden="true">
                   {language === code ? '✓' : ''}
                 </span>
-                {name}
+                {names.of(code)}
               </button>
             ))}
           </div>

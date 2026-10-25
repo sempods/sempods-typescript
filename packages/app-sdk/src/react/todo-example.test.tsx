@@ -36,7 +36,7 @@ afterEach(() => {
 });
 const text = {
   en: {
-    language: 'English',
+    language: /^(English|Englisch)$/,
     retry: 'Try again',
     failed: 'The pod reported an error. Try again later.',
     unavailable: 'This cannot be read right now.',
@@ -45,7 +45,7 @@ const text = {
     description: 'Tasks, stored in a Pod.',
   },
   de: {
-    language: 'Deutsch',
+    language: /^(German|Deutsch)$/,
     retry: 'Erneut versuchen',
     failed: 'Der Pod hat einen Fehler gemeldet. Versuche es später erneut.',
     unavailable: 'Das kann gerade nicht gelesen werden.',
