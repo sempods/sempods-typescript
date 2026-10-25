@@ -268,6 +268,9 @@ outcomes still show with their controls. The SDK applies no optimistic changes;
 an unconfirmed write stays visible and is never replayed. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
 (yes/no for flags, a dash for empty text); pass `labels={{ title: 'Task' }}` to
 name the fields instead of showing their keys.
+An editor shown inline beside its list takes `onClose`: it adds a close button
+and is called after a confirmed delete. Pass the guarded reset,
+`onClose={() => select(null)}`, so unsaved changes ask before it closes.
 
 A `fields()` definition may be written inline: hooks compare it by structure, so
 an equal definition on every render changes nothing, while a real change (another
@@ -563,25 +566,35 @@ cancelled until `reload()`.
 It does not poll, subscribe to other clients' writes or invalidate other Pods.
 An equal inline definition or `type` does not restart it; a real change reads again.
 
-By default each reload shows `loading` without data. Pass `retain: true` to
-`useList`, `useLoad` or `usePodLoad` to keep the last result on screen: while
-the same target reloads, `state` is `{ kind: 'loading', previous }`, and after a
-refresh that failed it is `{ kind: 'failed', error, previous }`. That data is
-still readable but was not confirmed by the failed read, so show a notice and a
-retry beside it. Retained data is only what a read returned; it is dropped for
-another connection, authorization, Context or definition, after lost read
-access or changed Pod grants, and after `cancel()`. A late answer never
-replaces it.
+A list keeps its last result on screen while it reloads (`retain`, on by
+default for `useList`; pass `retain: true` to `useLoad` or `usePodLoad`, and
+`retain: false` to a list that should show only `loading`). While the same
+target reloads, `state` is `{ kind: 'loading', previous }`, and after a refresh
+that failed it is `{ kind: 'failed', error, previous }`. That data is still
+readable but was not confirmed by the failed read. Retained data is only what a
+read returned; it is dropped for another connection, authorization, Context or
+definition, after lost read access or changed Pod grants, and after `cancel()`.
+A late answer never replaces it.
+
+`useList` returns the rows to render as `data`: the current ones, or the kept
+ones while loading or after a failed refresh. `LoadNotice` says what the read
+does when the rows alone do not: loading before any data, a failed refresh with
+its error (and a note when kept rows are shown), a cancelled or unavailable
+read, each with a retry, and entries the definition cannot show
+(`data.skipped`: unmapped terms, blank nodes or values it does not accept).
 
 ```tsx
-const list = useList(taskFields, { retain: true });
-const rows =
-  list.state.kind === 'ready'
-    ? list.state.data
-    : 'previous' in list.state
-      ? list.state.previous
-      : undefined;
-// …render rows; for list.state.kind === 'failed' add a notice and a retry.
+const list = useList(taskFields);
+return (
+  <>
+    <LoadNotice {...list} />
+    <ul>
+      {list.data?.items.map((item) => (
+        <li key={item.iri}>{item.data.title}</li>
+      ))}
+    </ul>
+  </>
+);
 ```
 
 `useFieldUpdate(definition)` exposes `canMutate` (write access, pending and both

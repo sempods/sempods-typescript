@@ -221,8 +221,10 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
 }
 /**
  * A typed list, refreshed after this bound target's own confirmed mutations.
- * With `retain` (see `LoadOptions`) those refreshes and `reload()` keep the
- * rows visible as `state.previous`.
+ * Those refreshes and `reload()` keep the rows visible (`retain`, see
+ * `LoadOptions`, on by default; `retain: false` shows only `loading`).
+ * `data` is what to render: the current rows, or the kept ones while
+ * `loading` or after a failed refresh; `LoadNotice` says which.
  */
 export function useList<D>(
   definition: FieldDefinition<D>,
@@ -247,7 +249,7 @@ export function useList<D>(
     [listKey, latest, type],
   );
   const load = useBoundLoad(view, read, loading, {
-    retain: options.retain ?? false,
+    retain: options.retain ?? true,
   });
   // Until the read for a changed definition or type has started, the rows on
   // screen belong to the previous definition and cannot be mutated with the
@@ -278,6 +280,12 @@ export function useList<D>(
   }, [view, reload, scope]);
   return {
     state,
+    data:
+      state.kind === 'ready'
+        ? state.data
+        : 'previous' in state
+          ? state.previous
+          : undefined,
     reload: () => {
       scope.cancelled = false;
       return reload();

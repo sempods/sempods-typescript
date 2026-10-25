@@ -9,6 +9,7 @@ import { useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure, type SdkMessages } from '../locale.js';
 import type { SessionFact } from '../runtime/types.js';
+import type { LoadState } from '../authoring/load.js';
 import { SdkStyles } from './styles.js';
 import { startCount, succeeded } from '../authoring/changes.js';
 import { editorTarget } from '../authoring/editor.js';
@@ -148,6 +149,58 @@ export function UpdateNotice({
           </button>
         )}
       </div>
+    </section>
+  );
+}
+/**
+ * What a read is doing when its data does not say it: loading before any
+ * data, a failed refresh (its error, a note when kept data is still shown,
+ * and a retry), a cancelled or unavailable read (with a retry) and list
+ * entries that cannot be shown. Renders nothing for ready data otherwise.
+ * Takes the result of `useList`, `useLoad` or `usePodLoad`:
+ * `<LoadNotice {...list} />`.
+ */
+export function LoadNotice({
+  state,
+  reload,
+}: {
+  readonly state: LoadState<unknown>;
+  readonly reload?: () => unknown;
+}) {
+  const { messages: m, error, format } = useSdkLocale();
+  const c = m.controls;
+  const shown =
+    state.kind === 'ready'
+      ? state.data
+      : 'previous' in state
+        ? state.previous
+        : undefined;
+  const skipped =
+    shown !== null &&
+    typeof shown === 'object' &&
+    'skipped' in shown &&
+    typeof shown.skipped === 'number'
+      ? shown.skipped
+      : 0;
+  if (state.kind === 'loading')
+    return shown === undefined ? <Notice>{c.loading}</Notice> : null;
+  if (state.kind === 'ready')
+    return skipped > 0 ? <Notice>{m.skipped!(skipped, format)}</Notice> : null;
+  const text =
+    state.kind === 'failed'
+      ? `${error(state.error)}${shown === undefined ? '' : ` ${c.stale}`}`
+      : state.kind === 'cancelled'
+        ? c.loadCancelled
+        : c.loadUnavailable;
+  return (
+    <section data-sempods-ui="notice">
+      <SdkStyles />
+      <p role={state.kind === 'failed' ? 'alert' : 'status'}>{text}</p>
+      {reload && (
+        <div className="sp-sdk-actions">
+          <button onClick={() => void reload()}>{c.retry}</button>
+        </div>
+      )}
     </section>
   );
 }
@@ -299,9 +352,16 @@ export function ResourceEditor<D, U = D>({
   onChanged,
   labels,
   quiet = false,
+  onClose,
 }: {
   /** As for `UpdateNotice`: no message for a confirmed save or delete. */
   readonly quiet?: boolean;
+  /**
+   * Shows a close button and is called after a confirmed delete. Pass the
+   * guarded selection reset, `() => select(null)`, so unsaved changes ask
+   * first.
+   */
+  readonly onClose?: () => unknown;
   readonly editor: Editor<D, U> | null;
   readonly children: (draft: D, change: (draft: U) => void) => ReactNode;
   readonly onChanged?: () => void;
@@ -354,6 +414,7 @@ export function ResourceEditor<D, U = D>({
         : { editor, state: editor.state, outcome: result, start },
     );
     if (succeeded(result)) onChanged?.();
+    if (result.kind === 'removed') onClose?.();
   };
   return (
     <section data-sempods-ui="editor">
@@ -444,6 +505,7 @@ export function ResourceEditor<D, U = D>({
           {state.phase === 'blocked' && (
             <button onClick={() => void editor.refresh()}>{m.refresh}</button>
           )}
+          {onClose && <button onClick={() => void onClose()}>{m.close}</button>}
         </div>
       )}
       {!state.review && (

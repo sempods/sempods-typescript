@@ -143,10 +143,11 @@ not instructions to the coding assistant.
   `useResourceEditor` and `useContextEditor` with
   `ResourceEditor`/`UpdateNotice`. Pass original snapshots
   to list actions. Use `useApp()`'s guarded actions for custom connection/context
-  controls. Pass `retain: true` to `useList`/`useLoad`/`usePodLoad` to keep rows
-  visible while reloading (`state.previous`), and `quiet` to
+  controls. Render `useList`'s `data` (it keeps the rows while reloading) with
+  `<LoadNotice {...list} />` for loading, failures, retry and unshown entries;
+  pass `retain: true` to `useLoad`/`usePodLoad` for the same. Pass `quiet` to
   `UpdateNotice`/`ResourceEditor` when the changed row is itself the
-  confirmation. The authoring guide gives exact signatures and lifecycle rules.
+  confirmation, and `onClose={() => select(null)}` to an inline editor. The authoring guide gives exact signatures and lifecycle rules.
 - Render loading, unavailable access, conflicts and unconfirmed writes distinctly.
   Never add an unconditional retry loop for mutations, default to overwrite, or
   generate another resource IRI to retry uncertain creation. Recovery stays on the

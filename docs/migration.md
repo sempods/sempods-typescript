@@ -94,12 +94,25 @@ Check these points:
   working. Without top-layer support (for example jsdom) it renders in place.
 - **`AppAccess` description.** The new optional `description` prop shows a
   short line under the app name on the sign-in screen; it is display only.
-- **Lists can keep their rows while reloading.** `useList`, `useLoad` and
-  `usePodLoad` accept `{ retain: true }`; `createViewLoader` takes the same
-  option as a third argument. With it, `LoadState`'s `loading` and `failed`
-  carry the last data as `previous`. Without it nothing changes. Code that
-  builds `LoadState` values itself still compiles; exhaustive checks over
-  `kind` are unchanged.
+- **Lists keep their rows while reloading.** `useList` now does this by
+  default: its `loading` and failed `state` carry the last rows as `previous`,
+  and its new `data` is what to render (current or kept rows). Pass
+  `retain: false` for the 0.5 behaviour. `useLoad` and `usePodLoad` accept
+  `{ retain: true }`; `createViewLoader` takes the same option as a third
+  argument. Code that builds `LoadState` values itself still compiles;
+  exhaustive checks over `kind` are unchanged.
+- **`LoadNotice`.** `<LoadNotice {...list} />` renders a read's loading,
+  failure, cancelled and unavailable states with a retry, a note for kept rows
+  after a failed refresh, and the count of entries it cannot show, in the SDK's
+  languages. It replaces app-written branches over `list.state.kind`.
+- **Lists skip values the definition does not accept.** `listSubjects` and
+  `snapshots` (client SDK) count a subject whose values fail the definition's
+  `valid` (for example an empty required text) in `skipped` instead of
+  returning it: no update could write such a row back. Remove app-side filters
+  such as `items.filter((item) => definition.valid(item.data))`.
+- **`ResourceEditor` `onClose`.** An optional close button for an inline editor,
+  also called after a confirmed delete. Pass the guarded reset,
+  `onClose={() => select(null)}`, so unsaved changes ask first.
 - **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
   `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,
   readable Contexts into `catalogue.labels`, for example for a list menu.

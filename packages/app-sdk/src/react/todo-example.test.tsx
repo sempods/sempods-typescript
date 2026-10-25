@@ -7,10 +7,18 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
+  within,
 } from '@testing-library/react';
 import { TodoApp } from '../../../../examples/todo/src/app.js';
 import type { PodFetch } from '@sempods/client-sdk';
-import { catalogue, deferred, fixture, work } from '../runtime/fixture.test.js';
+import {
+  catalogue,
+  deferred,
+  fixture,
+  resourceIri,
+  work,
+} from '../runtime/fixture.test.js';
 
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
@@ -30,19 +38,21 @@ const text = {
   en: {
     language: 'English',
     reload: 'Reload',
+    retry: 'Try again',
     failed: 'The pod reported an error. Try again later.',
-    unavailable: 'The tasks cannot be read right now.',
+    unavailable: 'This cannot be read right now.',
     empty: 'No tasks yet.',
-    stale: 'The list below may be out of date.',
+    stale: 'What is shown may be out of date.',
     description: 'Tasks, stored in a Pod.',
   },
   de: {
     language: 'Deutsch',
     reload: 'Neu laden',
+    retry: 'Erneut versuchen',
     failed: 'Der Pod hat einen Fehler gemeldet. Versuche es später erneut.',
-    unavailable: 'Die Aufgaben können gerade nicht gelesen werden.',
+    unavailable: 'Das kann gerade nicht gelesen werden.',
     empty: 'Noch keine Aufgaben.',
-    stale: 'Die Liste unten ist vielleicht nicht aktuell.',
+    stale: 'Die Anzeige ist vielleicht nicht aktuell.',
     description: 'Aufgaben, gespeichert in einem Pod.',
   },
 } as const;
@@ -67,14 +77,14 @@ async function signedIn(language: 'en' | 'de', query: PodFetch) {
 }
 
 it.each(['en', 'de'] as const)(
-  'the TODO list names a failed read and reloads with its own label (%s)',
+  'the TODO list names a failed read and retries it (%s)',
   async (language) => {
     const t = text[language];
     const f = await signedIn(
       language,
       async () => new Response(null, { status: 500 }),
     );
-    const reload = await screen.findByRole('button', { name: t.reload });
+    const reload = await screen.findByRole('button', { name: t.retry });
     expect((await screen.findByRole('alert')).textContent).toBe(t.failed);
     expect(promisesDraft(language)).toBe(false);
     f.setQuery(async () => Response.json([]));
@@ -130,6 +140,43 @@ it.each(['en', 'de'] as const)(
     expect(promisesDraft(language)).toBe(false);
   },
 );
+
+it('the TODO editor closes with its button and after a confirmed delete', async () => {
+  const rows = new Map([[milk['@id'], milk]]);
+  const f = await signedIn('en', async () => Response.json([...rows.values()]));
+  f.setResource(async (url, init) => {
+    const iri = resourceIri(url);
+    if (init?.method === 'DELETE') {
+      rows.delete(iri);
+      return new Response(null, { status: 204 });
+    }
+    return rows.has(iri)
+      ? Response.json(rows.get(iri), { headers: { etag: '"v1"' } })
+      : new Response(null, { status: 404 });
+  });
+  const open = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: 'Buy milk' }));
+    return screen.findByRole('button', { name: 'Close' });
+  };
+  fireEvent.click(await open());
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull(),
+  );
+  await open();
+  const remove = screen.getByRole('button', { name: 'Delete' });
+  await waitFor(() =>
+    expect((remove as HTMLButtonElement).disabled).toBe(false),
+  );
+  fireEvent.click(remove);
+  const confirm = screen.getByRole('group', {
+    name: 'Delete this from the pod? This cannot be undone.',
+  });
+  fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull(),
+  );
+  expect(await screen.findByText(text.en.empty)).toBeTruthy();
+});
 
 it.each(['en', 'de'] as const)(
   'the TODO sign-in describes the app (%s)',

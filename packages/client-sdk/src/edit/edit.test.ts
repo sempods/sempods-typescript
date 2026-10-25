@@ -1366,6 +1366,22 @@ describe('resource editor scenarios', () => {
 });
 
 describe('snapshots and one-click updates', () => {
+  it('skips a subject whose values the definition does not accept', () => {
+    const pod = memoryPod();
+    // An empty required title reads, but no update could write it back.
+    const empty = {
+      ...structuredClone(initial()),
+      '@id': 'https://pod.example/alice/tasks/2',
+      [NAME]: [{ '@value': '', '@language': 'en' }],
+    };
+    const list = snapshots(
+      pod.source,
+      [structuredClone(initial()), empty],
+      task,
+    );
+    expect(list.items.map((s) => s.iri)).toEqual([TASK]);
+    expect(list.skipped).toBe(1);
+  });
   it('updates one field from a list while keeping a concurrent change to another', async () => {
     const pod = memoryPod();
     const list = snapshots(

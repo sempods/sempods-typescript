@@ -70,6 +70,10 @@ function capture<D>(
     throw new TypeError('A subject needs an absolute IRI.');
   const copy = frozenCopy(node);
   const data = frozenCopy(definition.read(copy));
+  // A row the definition does not accept (for example an empty required
+  // text) could not be written back by any update: skip it like an unreadable one.
+  if (definition.valid && !definition.valid(data))
+    throw new TypeError('The values are not valid.');
   const snapshot = Object.freeze({ iri: id, data });
   evidence.set(snapshot, {
     source,
@@ -84,7 +88,8 @@ function capture<D>(
  * Snapshots from query nodes (for example `CONSTRUCT { ?s ?p ?o }`). The query
  * must return the fields' terms completely; strict per item, tolerant per list.
  * Nodes without an absolute IRI (blank nodes) are skipped: they cannot be
- * addressed by a later update or deletion.
+ * addressed by a later update or deletion. So are values the definition does
+ * not accept (`valid`): no update could write such a row back.
  * Deleting from a snapshot additionally needs the subject's whole description
  * in the target context; a projection makes `removeSnapshot` report a change.
  */
