@@ -558,9 +558,7 @@ try {
         await surface.evaluate(
           (element) => getComputedStyle(element).backgroundColor,
         ),
-        ['shell', 'access'].includes(
-          await surface.getAttribute('data-sempods-ui'),
-        )
+        ['access'].includes(await surface.getAttribute('data-sempods-ui'))
           ? 'rgb(255, 255, 255)'
           : 'rgba(0, 0, 0, 0)',
       );
