@@ -81,6 +81,10 @@ try {
     join(root, 'examples/todo/recipes/pod-overview.tsx'),
     join(temp, 'pod-overview.tsx'),
   );
+  await cp(
+    join(root, 'examples/todo/recipes/overview-toggle.tsx'),
+    join(temp, 'overview-toggle.tsx'),
+  );
   await writeFile(
     join(temp, 'tsconfig.json'),
     JSON.stringify({
@@ -176,6 +180,19 @@ try {
   let overviewNoteWrites = 0;
   // Notes created in the overview Pod's second Context, by IRI.
   const overviewCreated = new Map();
+  // The one-click recipe's task, ticked in its own Context (#134, #136).
+  let toggleTask = {
+    status: 'https://schema.org/PotentialActionStatus',
+    version: 1,
+  };
+  const toggleWrites = [];
+  let toggleConflict = false;
+  const toggleBody = () => ({
+    '@id': 'urn:toggle-task',
+    '@type': ['https://schema.org/Action'],
+    'https://schema.org/name': [{ '@value': 'Buy milk' }],
+    'https://schema.org/actionStatus': [{ '@id': toggleTask.status }],
+  });
   /** The subject IRI a `/_system/resources/` URL addresses. */
   const resourceIri = (url) =>
     Buffer.from(url.pathname.split('/').at(-1), 'base64url').toString();
@@ -233,7 +250,8 @@ try {
         });
         if (
           url.searchParams.get('identity') === 'overview' ||
-          url.searchParams.get('identity') === 'expiring'
+          url.searchParams.get('identity') === 'expiring' ||
+          url.searchParams.get('identity') === 'toggle'
         ) {
           res.end(
             '<html><div id="app"></div><script type="module" src="/overview.js"></script></html>',
@@ -402,7 +420,10 @@ try {
           access_token: token(
             base,
             client,
-            name === 'widgets-pod' || name === 'overview-pod' || expiring
+            name === 'widgets-pod' ||
+              name === 'overview-pod' ||
+              name === 'toggle-pod' ||
+              expiring
               ? ''
               : name === 'delayed'
                 ? delayedScope
@@ -452,6 +473,43 @@ try {
               : []),
           ],
         });
+        return;
+      }
+      if (
+        name === 'toggle-pod' &&
+        url.pathname.includes('/_system/resources/')
+      ) {
+        assert.equal(req.headers.cookie, undefined);
+        assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        assert.equal(
+          url.searchParams.get('context'),
+          base + '/_system/contexts/work',
+        );
+        assert.equal(resourceIri(url), 'urn:toggle-task');
+        if (req.method === 'GET') {
+          json(toggleBody(), 200, { etag: `"t${toggleTask.version}"` });
+          return;
+        }
+        assert.equal(req.method, 'PATCH');
+        toggleWrites.push(req.headers['if-match']);
+        if (toggleConflict) {
+          // Another writer changed the task since it was read.
+          toggleTask = { ...toggleTask, version: toggleTask.version + 1 };
+          json({}, 412);
+          return;
+        }
+        if (req.headers['if-match'] !== `"t${toggleTask.version}"`) {
+          json({}, 412);
+          return;
+        }
+        toggleTask = {
+          status: body.includes('CompletedActionStatus')
+            ? 'https://schema.org/CompletedActionStatus'
+            : 'https://schema.org/PotentialActionStatus',
+          version: toggleTask.version + 1,
+        };
+        res.writeHead(204);
+        res.end();
         return;
       }
       if (
@@ -556,6 +614,30 @@ try {
             );
             return;
           }
+        }
+        if (name === 'toggle-pod') {
+          assert.equal(url.search, '');
+          json(
+            {
+              head: { vars: ['item', 'graph', 'title', 'status'] },
+              results: {
+                bindings: [
+                  {
+                    item: { type: 'uri', value: 'urn:toggle-task' },
+                    graph: {
+                      type: 'uri',
+                      value: base + '/_system/contexts/work',
+                    },
+                    title: { type: 'literal', value: 'Buy milk' },
+                    status: { type: 'uri', value: toggleTask.status },
+                  },
+                ],
+              },
+            },
+            200,
+            { 'content-type': 'application/sparql-results+json' },
+          );
+          return;
         }
         if (name === 'overview-pod' || name === 'expiring-pod') {
           assert.equal(url.search, '');
@@ -1893,6 +1975,96 @@ try {
   assert.equal(expiredRejections, probes);
   console.log(
     'Packed short-lived tokens: renewal before dispatch for Pods refusing expired tokens with or without a challenge, no expired token sent, refused renewal ends in a visible sign-in and recovers passed.',
+  );
+  // The one-click recipe (#134): a task ticked in its own Context, and its
+  // overview kept visible in every frame while it reloads (#136).
+  const toggleQuery = (url) =>
+    url.pathname === '/toggle-pod/_system/sparql/query';
+  await page.goto(origin + '/app?identity=toggle');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=toggle');
+  const milk = page
+    .locator('ul')
+    .getByRole('checkbox', { name: 'Buy milk', exact: true });
+  const milkState = () =>
+    page.evaluate(() => {
+      const box = document.querySelector('ul input[type="checkbox"]');
+      return box && { checked: box.checked, disabled: box.disabled };
+    });
+  await page.waitForFunction(
+    () =>
+      document.querySelector('ul input[type="checkbox"]')?.disabled === false,
+  );
+  await page.evaluate(() => {
+    window.__toggleEmpty = 0;
+    window.__toggleObserver = new window.MutationObserver(() => {
+      if (!document.querySelector('ul input[type="checkbox"]'))
+        window.__toggleEmpty++;
+    });
+    window.__toggleObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  });
+  let releaseToggle;
+  const heldToggle = new Promise((resolve) => (releaseToggle = resolve));
+  await page.route(toggleQuery, async (route) => {
+    await heldToggle;
+    await route.continue();
+  });
+  const toggleReload = page.waitForRequest((request) =>
+    toggleQuery(new URL(request.url())),
+  );
+  await milk.click();
+  await toggleReload;
+  // Saved once with the read version; nothing is shown as ticked before the
+  // overview confirms it, and the row stays while the overview reloads.
+  assert.deepEqual(toggleWrites, ['"t1"']);
+  // The confirmed toggle is finished, so the box is usable again.
+  assert.deepEqual(await milkState(), { checked: false, disabled: false });
+  const toggleReloaded = page.waitForResponse((response) =>
+    toggleQuery(new URL(response.url())),
+  );
+  releaseToggle();
+  await toggleReloaded;
+  await page.unroute(toggleQuery);
+  await page.waitForFunction(
+    () => document.querySelector('ul input[type="checkbox"]')?.checked === true,
+  );
+  assert.equal(
+    await page.evaluate(() => {
+      window.__toggleObserver.disconnect();
+      return window.__toggleEmpty;
+    }),
+    0,
+  );
+  // A conflict keeps the editor with its recovery; nothing is resent beyond
+  // the editor's single rebase, and the box stays as the Pod last confirmed.
+  toggleConflict = true;
+  await milk.click();
+  const finish = page.getByRole('region', { name: 'Finish the change' });
+  await finish
+    .getByText('The pod has changed. Compare before continuing.')
+    .waitFor();
+  assert.deepEqual(toggleWrites, ['"t1"', '"t2"', '"t3"']);
+  assert.deepEqual(await milkState(), { checked: true, disabled: true });
+  toggleConflict = false;
+  await finish
+    .getByRole('button', { name: 'Continue with my changes', exact: true })
+    .click();
+  await finish.getByRole('button', { name: 'Save', exact: true }).click();
+  await finish.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => {
+    const box = document.querySelector('ul input[type="checkbox"]');
+    return box?.checked === false && box.disabled === false;
+  });
+  assert.equal(toggleWrites.length, 4);
+  assert.equal(toggleTask.status, 'https://schema.org/PotentialActionStatus');
+  console.log(
+    'Packed one-click overview recipe: tick in its own Context with one If-Match write, overview kept in every frame while reloading, conflict review with no resend, recovered save closes and reloads passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
