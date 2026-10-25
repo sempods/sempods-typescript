@@ -1,13 +1,13 @@
 # Build a widget, let the host own the session
 
-A dashboard can show a task list beside a quick-add form without using AppShell.
+A dashboard can show a task list beside a quick-add form, each without its own sign-in UI.
 The list reads the selected context; the form creates a task there. A confirmed
 creation refreshes the list. Both use one host session and one leave policy.
 
 Start with the [widget source](../examples/todo/widgets/index.tsx). It is an
 app-owned example library, not another SDK package or a published npm product.
 It exposes `TaskListWidget` and `QuickAddWidget`, uses public SDK imports only,
-and reuses the [access-panel recipe](../examples/todo/recipes/sign-in.tsx).
+and keeps its content gate (`AccessPanel`) in the same file.
 Its Action vocabulary matches the TODO subset; it does not treat every RDF
 Action as a task. Copy the widget directory and its referenced recipe with their
 relative layout, then adapt the private field mapping to your domain.
@@ -188,7 +188,7 @@ tests cover the individual helpers; this consumer tests their composition.
 
 The host uses `AppAccess` for startup/callback/login presentation plus a stable
 runtime/provider, target lifetime and layout. The widget content gate (`AccessPanel`
-in the recipe) remains app-owned and distinct from the SDK's `AppAccess` surface.
+in the widget source) remains app-owned and distinct from the SDK's `AppAccess` surface.
 A general removal/reload guard,
 independent targets, per-widget scope composition and isolated iframe login need
 explicit contracts before more public names. This automated evidence does not

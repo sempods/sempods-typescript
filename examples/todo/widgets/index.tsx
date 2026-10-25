@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
+  AccessNotice,
   UpdateNotice,
   useAppState,
   useCreation,
@@ -8,7 +9,6 @@ import {
   useWorkflowAccess,
 } from '@sempods/app-sdk/react';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
-import { AccessPanel } from '../recipes/sign-in.js';
 
 const schema = 'https://schema.org/';
 
@@ -30,6 +30,61 @@ export type WidgetFallback =
   'hidden' | 'disabled' | { readonly content: ReactNode };
 export interface WidgetProps {
   readonly fallback?: WidgetFallback | undefined;
+}
+
+/** Keep this region mounted for its target lifetime. Eligibility is a view fact. */
+function AccessPanel({
+  podUrl,
+  children,
+  recovery,
+  fallback = 'hidden',
+}: {
+  readonly podUrl: string;
+  readonly children: ReactNode;
+  readonly recovery?: ReactNode;
+  readonly fallback?: 'hidden' | 'disabled' | { readonly content: ReactNode };
+}) {
+  const access = useWorkflowAccess();
+  const readable =
+    access.connection?.podUrl === podUrl && access.current && access.read;
+  const notice = useRef<HTMLDivElement>(null);
+  const focusInside = useRef(false);
+  const { messages } = useSdkLocale();
+  useEffect(() => {
+    if (!readable && focusInside.current) {
+      notice.current?.focus();
+      focusInside.current = false;
+    }
+  }, [readable]);
+  return (
+    <>
+      <div ref={notice} tabIndex={-1} aria-label={messages.reviewAccess}>
+        {access.connection?.podUrl === podUrl ? (
+          <AccessNotice />
+        ) : (
+          <p role="status">{messages.controls.noTarget}</p>
+        )}
+        {recovery}
+        {!readable && typeof fallback === 'object' && fallback.content}
+      </div>
+      <div
+        hidden={!readable && fallback !== 'disabled'}
+        inert={!readable}
+        onFocusCapture={() => {
+          focusInside.current = true;
+        }}
+        onBlurCapture={(event) => {
+          if (
+            event.relatedTarget &&
+            !event.currentTarget.contains(event.relatedTarget)
+          )
+            focusInside.current = false;
+        }}
+      >
+        {children}
+      </div>
+    </>
+  );
 }
 
 function Frame({

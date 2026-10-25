@@ -1,31 +1,17 @@
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ComponentType,
-  type ReactNode,
-} from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
   RemoveOutcome,
 } from '@sempods/client-sdk/edit';
 import { useStartCount, type MutationOutcome } from './hooks.js';
-import {
-  useApp,
-  useAppState,
-  useContextDemand,
-  useWorkflowAccess,
-} from './app.js';
+import { useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure, type SdkMessages } from '../locale.js';
 import type { SessionFact } from '../runtime/types.js';
-import { AppAccess } from './access.js';
 import { SdkStyles } from './styles.js';
 import { startCount, succeeded } from '../authoring/changes.js';
 import { editorTarget } from '../authoring/editor.js';
-import { contextName, podName, distinctName } from './names.js';
 
 function Notice({
   children,
@@ -185,7 +171,7 @@ export function endedMessage(
 }
 /**
  * Explains current access limitations. Failed sign-out retry advice belongs
- * beside the action in ConnectionControls or custom controls. While the page
+ * beside the action in AppAccess or custom controls. While the page
  * leaves for a sign-in (`leaving`) nothing was lost, so it shows nothing.
  */
 export function AccessNotice() {
@@ -220,284 +206,9 @@ export function AccessNotice() {
   if (!access.write) return <Notice>{m.controls.readOnly}</Notice>;
   return null;
 }
-export interface ConnectionControlsProps {
-  readonly mode?: 'single' | 'multiple';
-  /** Optional app-supplied display names keyed by exact Pod URL. Never identities. */
-  readonly podNames?: Readonly<Record<string, string>>;
-}
-/** All selectors and connection actions use the same leave policy as custom composition. */
-export function ConnectionControls({
-  mode = 'multiple',
-  podNames,
-}: ConnectionControlsProps) {
-  const app = useApp();
-  const state = useAppState();
-  const { messages: m, error } = useSdkLocale();
-  const controls = m.controls;
-  const disconnectId = useId();
-  const [url, setUrl] = useState('');
-  const [busy, setBusy] = useState(false);
-  const inFlight = useRef(false);
-  // The cause decides the message: an invalid URL, discovery, a denied login.
-  const [failure, setFailure] = useState<{ readonly cause: unknown } | null>(
-    null,
-  );
-  const connection = state.connections.find((c) => c.id === state.activeId);
-  const disconnectFailed =
-    connection?.session.kind === 'ended' && connection.session.saved === false;
-  const disconnectHint = disconnectFailed
-    ? controls.disconnectFailed
-    : controls.disconnectHint;
-  const action = async (task: () => Promise<unknown>) => {
-    if (inFlight.current || state.changing || state.confirmingLeave) return;
-    inFlight.current = true;
-    setBusy(true);
-    setFailure(null);
-    try {
-      await task();
-    } catch (cause) {
-      setFailure({ cause });
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  };
-  const active =
-    connection?.session.kind === 'active' ||
-    connection?.session.kind === 'renewing';
-  const fixedContext =
-    state.preset?.podUrl === connection?.podUrl
-      ? state.preset?.contextIri
-      : undefined;
-  const displayedContext = connection?.selectedContext ?? fixedContext;
-  const leaving = connection?.session.kind === 'leaving';
-  const restorable =
-    connection?.session.kind === 'ended' &&
-    connection.session.restorable === true;
-  const unavailable =
-    busy ||
-    leaving ||
-    !state.startup ||
-    state.startup.storage !== 'durable' ||
-    Boolean(state.startupError) ||
-    state.changing ||
-    state.confirmingLeave;
-  // Only readable contexts can be selected; none at all is its own message.
-  const readable =
-    connection?.catalogue.kind === 'ready'
-      ? connection.catalogue.contexts.filter((c) => c.readable)
-      : [];
-  const podUrls = [
-    ...new Set([
-      ...state.connections.map((entry) => entry.podUrl),
-      ...(state.preset ? [state.preset.podUrl] : []),
-    ]),
-  ];
-  const podLabel = (url: string) =>
-    distinctName(url, podUrls, (value) => podName(value, podNames));
-  const labels =
-    connection?.catalogue.kind !== 'unknown'
-      ? connection?.catalogue.labels
-      : undefined;
-  const contextLabel = (iri: string) =>
-    distinctName(
-      iri,
-      readable.map((entry) => entry.iri),
-      (value) => contextName(value, labels),
-    );
-  return (
-    <section data-sempods-ui="connections" aria-label={controls.choosePod}>
-      <SdkStyles />
-      {state.preset && connection?.podUrl !== state.preset.podUrl && (
-        <div>
-          <span style={{ overflowWrap: 'anywhere' }}>
-            {podLabel(state.preset.podUrl)}
-          </span>{' '}
-          <button
-            disabled={unavailable}
-            onClick={() => void action(() => app.connect())}
-          >
-            {controls.signIn}
-          </button>
-        </div>
-      )}
-      {!state.preset &&
-        (mode === 'multiple' || state.connections.length === 0) && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void action(() => app.connect(url));
-            }}
-            style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}
-          >
-            <label>
-              {controls.podUrl}
-              <input
-                type="url"
-                required
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://pod.example/alice"
-              />
-            </label>
-            <button disabled={unavailable}>{controls.connect}</button>
-          </form>
-        )}
-      {state.connections.length > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            flexWrap: 'wrap',
-            alignItems: 'end',
-          }}
-        >
-          <label>
-            {m.activePod}
-            <select
-              aria-label={m.activePod}
-              value={state.activeId ?? ''}
-              disabled={busy || leaving}
-              onChange={(e) =>
-                void action(() => app.selectConnection(e.target.value))
-              }
-            >
-              <option value="" disabled>
-                {controls.choosePod}
-              </option>
-              {state.connections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {podLabel(c.podUrl)}
-                  {state.connections.filter(
-                    (other) => other.podUrl === c.podUrl,
-                  ).length > 1
-                    ? ` · ${state.connections.indexOf(c) + 1}`
-                    : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          {active && !fixedContext && (
-            <label>
-              {m.dataContext}
-              <select
-                aria-label={m.dataContext}
-                value={connection?.selectedContext ?? ''}
-                disabled={
-                  busy ||
-                  connection?.catalogue.kind !== 'ready' ||
-                  readable.length === 0
-                }
-                onChange={(e) =>
-                  void action(() => app.selectContext(e.target.value))
-                }
-              >
-                <option value="" disabled>
-                  {m.chooseContext}
-                </option>
-                {readable.map((c) => (
-                  <option key={c.iri} value={c.iri}>
-                    {contextLabel(c.iri)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {active && fixedContext && (
-            <p style={{ overflowWrap: 'anywhere' }}>
-              {m.dataContext}: {contextLabel(fixedContext)}
-            </p>
-          )}
-          {active &&
-            !fixedContext &&
-            connection?.catalogue.kind === 'ready' &&
-            readable.length === 0 && <p role="status">{m.noContexts}</p>}
-          {leaving && (
-            <p role="status">{controls.leaving ?? controls.loading}</p>
-          )}
-          {connection && (
-            <>
-              {!leaving &&
-                (restorable ? (
-                  // The Pod was unreachable, not the session lost.
-                  <button
-                    disabled={unavailable}
-                    onClick={() =>
-                      void action(() => app.retryRestore(connection.id))
-                    }
-                  >
-                    {controls.retry}
-                  </button>
-                ) : (
-                  <button
-                    disabled={
-                      unavailable || connection.session.kind === 'restoring'
-                    }
-                    onClick={() =>
-                      void action(() => app.authorize(connection.id))
-                    }
-                  >
-                    {active ? controls.updateAccess : controls.signIn}
-                  </button>
-                ))}
-              {active && (
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void action(() => app.refreshContexts(connection.id))
-                  }
-                >
-                  {controls.refresh}
-                </button>
-              )}
-              <button
-                disabled={busy || leaving}
-                aria-describedby={disconnectHint ? disconnectId : undefined}
-                onClick={() => void action(() => app.disconnect(connection.id))}
-              >
-                {controls.disconnect}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {connection && disconnectHint && (
-        <p id={disconnectId} role={disconnectFailed ? 'alert' : undefined}>
-          {disconnectHint}
-        </p>
-      )}
-      {(connection || state.preset) && (
-        <details>
-          <summary>{controls.addresses}</summary>
-          <dl>
-            {podUrls.map((url) => (
-              <div key={url}>
-                <dt>{podLabel(url)}</dt>
-                <dd>{url}</dd>
-              </div>
-            ))}
-          </dl>
-          {displayedContext &&
-            !readable.some((entry) => entry.iri === displayedContext) && (
-              <p>{displayedContext}</p>
-            )}
-          <dl>
-            {readable.map((entry) => (
-              <div key={entry.iri}>
-                <dt>{contextLabel(entry.iri)}</dt>
-                <dd>{entry.iri}</dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      )}
-      {failure && <p role="alert">{error(failure.cause)}</p>}
-    </section>
-  );
-}
 /**
  * The outcome of a returning sign-in that failed or was cancelled, with its
- * protocol cause when the runtime kept one. AppShell renders it; custom
+ * protocol cause when the runtime kept one. AppAccess renders it; custom
  * layouts place it themselves. It clears once the person selects another
  * connection, disconnects one or starts a sign-in (`callbackNotice`).
  * Renders nothing otherwise.
@@ -523,63 +234,6 @@ export function CallbackNotice() {
           ? describeFailure(messages.errors, state.startup.failure)
           : messages.controls.failure}
     </Notice>
-  );
-}
-/** Optional app frame: title/management, AppAccess, then startup-gated content.
- * Existing title/style/replacement controls remain supported. Controls now hide
- * with usable access; mode is passed through and is presentation, not Pod policy.
- * Uses inline scoped --sempods-* styling; see the CSP note in the authoring guide.
- */
-export function AppShell({
-  children,
-  title = 'sempods',
-  mode = 'multiple',
-  components = {},
-  style,
-}: {
-  readonly children: ReactNode;
-  readonly title?: string;
-  readonly mode?: 'single' | 'multiple';
-  readonly components?: {
-    readonly Connections?: ComponentType<ConnectionControlsProps>;
-  };
-  readonly style?: React.CSSProperties;
-}) {
-  const [open, setOpen] = useState(false);
-  const state = useAppState();
-  const target = useRef<HTMLButtonElement>(null);
-  const { messages, direction } = useSdkLocale();
-  const access = useWorkflowAccess();
-  const contextRequired = useContextDemand(false);
-  return (
-    <main dir={direction} data-sempods-ui="shell" style={style}>
-      <SdkStyles />
-      <header>
-        <h1>{title}</h1>
-        <button
-          ref={target}
-          data-sempods-button=""
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          {messages.controls.dataAccess}
-        </button>
-      </header>
-      <AppAccess
-        appName={title}
-        headingLevel={2}
-        open={open}
-        focusTarget={target}
-        mode={mode}
-        components={components}
-      />
-      {!open &&
-        contextRequired &&
-        access.read &&
-        !access.write &&
-        access.connection?.catalogue.kind === 'ready' && <AccessNotice />}
-      {state.startup?.storage === 'durable' && !state.startupError && children}
-    </main>
   );
 }
 /**

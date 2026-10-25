@@ -29,9 +29,7 @@ it.each([
     [
       'AccessNotice',
       'AppAccess',
-      'AppShell',
       'CallbackNotice',
-      'ConnectionControls',
       'ResourceEditor',
       'SdkLocaleProvider',
       'SempodsProvider',

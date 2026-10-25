@@ -50,6 +50,7 @@ export async function prepareWidgets(root, temp) {
         exactOptionalPropertyTypes: true,
         declaration: true,
         emitDeclarationOnly: true,
+        rootDir: '.',
         outDir: 'declarations',
       },
       files: ['widgets/index.tsx'],

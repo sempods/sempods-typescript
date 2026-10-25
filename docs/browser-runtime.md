@@ -257,9 +257,7 @@ storage namespace and single-tab lease remain unchanged when the policy changes.
 
 `AppAccess` presents one/set/free Pod configuration directly, including the
 finite picker. See [login composition](react-authoring.md#login-without-an-app-frame).
-Standalone `ConnectionControls` still uses `preset` for presentation; combine it with
-`allowedPods` for that UI's single-Pod preset path. Custom controls can read
-`useAppState().allowedPods` too.
+Custom controls can read `useAppState().allowedPods` too.
 Configure the policy once outside rendering and use the existing guarded actions
 for Pod/context switches; replacing the runtime first requires settling drafts
 and unresolved operations, as with presets.
@@ -586,7 +584,7 @@ connection. The fact survives UI remounts and remains during explicit retries;
 a successful retry removes the connection. It is not persisted across reloads:
 the saved session may still restore. Offer **Sign out** again, not a reload.
 A late exchange cannot resurrect the locally blocked connection.
-`AppAccess` and `ConnectionControls` show this failure next to **Sign out** in
+`AppAccess` shows this failure next to **Sign out** in
 EN/DE (`controls.disconnectFailed`). The ordinary hint notes that sign-out applies
 only to this device: it neither revokes sharing on the Pod, deletes Pod data nor
 signs out at the Pod's provider. `dispose()` releases memory/locks while
@@ -649,7 +647,7 @@ transfers attempts or tokens between storage containers. See
 [supported environments](../README.md#supported-environments).
 
 Sign-in against a deployed Pod in a real browser is not yet recorded as evidence.
-React/AppShell and localized
+React `AppAccess` and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
 checks. Multi-tab concurrent operation, revocation and anonymous reading are not
 implemented here.

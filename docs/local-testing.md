@@ -149,7 +149,7 @@ contexts it reads in the app's notes.
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Connect and consent               | Only the contexts the app reads are granted; an on-demand overview loads without a context choice                                       |
 | Loading, empty and failed         | Loading, an empty result and a failed read look different; a refused or failed read never shows as empty                                |
-| Read access only                  | Where the Pod lets you grant read access alone, the app works fully; `AppShell` may show its read-only notice, which is expected        |
+| Read access only                  | Where the Pod lets you grant read access alone, the app works fully; a read-only notice (`AccessNotice`) is expected                    |
 | Remove read access, Context reads | For `useLoad`/`useList`, displayed data is cleared after revalidation; no fallback to another context                                   |
 | Remove read access, Pod overview  | A `usePodLoad` result stays on screen; after `reload()` it no longer contains that Context's data                                       |
 | No writes                         | The browser's network panel over a full session shows no `PUT`, `PATCH` or `DELETE`; `POST` only for queries, sign-in and token renewal |

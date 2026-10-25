@@ -19,16 +19,17 @@ import {
   type AppActions,
 } from './app.js';
 import { useSdkLocale } from './locale.js';
-import {
-  AccessNotice,
-  CallbackNotice,
-  endedMessage,
-  type ConnectionControlsProps,
-} from './components.js';
+import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { SdkStyles } from './styles.js';
 import { contextName, podName, distinctName } from './names.js';
 import { presentAccess, type ConnectionBody } from './access-presentation.js';
 
+/** What a replacement for the connection view (`components.Connections`) receives. */
+export interface ConnectionsProps {
+  readonly mode?: 'single' | 'multiple';
+  /** Optional app-supplied display names keyed by exact Pod URL. Never identities. */
+  readonly podNames?: Readonly<Record<string, string>>;
+}
 export interface AppAccessProps {
   readonly appName: string;
   /** Heading under a host title; omitted means h1 initially, h2 for management/recovery. */
@@ -61,7 +62,7 @@ export interface AppAccessProps {
    */
   readonly focusTarget?: RefObject<HTMLElement | null>;
   readonly components?: {
-    readonly Connections?: ComponentType<ConnectionControlsProps>;
+    readonly Connections?: ComponentType<ConnectionsProps>;
   };
   readonly className?: string;
   readonly style?: CSSProperties;

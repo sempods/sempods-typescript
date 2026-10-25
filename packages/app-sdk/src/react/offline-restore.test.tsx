@@ -9,12 +9,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import {
-  AccessNotice,
-  AppAccess,
-  ConnectionControls,
-  SempodsProvider,
-} from './index.js';
+import { AccessNotice, AppAccess, SempodsProvider } from './index.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import { fixture, restored, settleLease } from '../runtime/fixture.test.js';
@@ -68,8 +63,8 @@ const text = {
 it.each([
   ['access', 'en'],
   ['access', 'de'],
-  ['controls', 'en'],
-  ['controls', 'de'],
+  ['notice', 'en'],
+  ['notice', 'de'],
 ] as const)(
   'offers Try again instead of Sign in when the Pod is unreachable at startup (%s, %s)',
   async (surface, language) => {
@@ -77,14 +72,9 @@ it.each([
     const { f, runtime, net } = await offlineStart();
     render(
       <SempodsProvider runtime={runtime} language={language}>
-        {surface === 'access' ? (
-          <AppAccess appName="Tasks" />
-        ) : (
-          <>
-            <ConnectionControls />
-            <AccessNotice />
-          </>
-        )}
+        <AppAccess appName="Tasks" />
+        {/* A custom layout's notice names the same cause. */}
+        {surface === 'notice' && <AccessNotice />}
       </SempodsProvider>,
     );
     await act(() => restored(runtime));

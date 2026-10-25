@@ -97,7 +97,7 @@ to hide behind a generic retry button.
 ## Make it your app
 
 Use your own CSS and screen components. The [authoring guide](react-authoring.md)
-shows replacing shell components, composing without AppShell, translating SDK
+shows replacing the connection view, composing without `AppAccess`, translating SDK
 messages, adding custom reads and using the headless controllers without React.
 UI language, RDF content language and display time zone are independent choices.
 Keep the runtime instance stable as you change presentation; `fields()` definitions

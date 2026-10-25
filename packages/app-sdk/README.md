@@ -58,8 +58,7 @@ screen and access-management controls, follow the complete
 
 `AppAccess` provides login, context choice and recovery without a mandatory app
 frame. It hides when access is usable, including read-only access. The app owns
-its layout and a **Pods & sharing** button that opens management (`open`). Optional `AppShell` adds a
-title and management control. Use `useList`, `useCreation`, `useFieldUpdate` and
+its layout and a **Pods & sharing** button that opens management (`open`). Use `useList`, `useCreation`, `useFieldUpdate` and
 `useResourceEditor` for data screens, with `ResourceEditor` and `UpdateNotice`
 for editing feedback. See
 [React/headless authoring](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md)
@@ -87,8 +86,8 @@ See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.5.0/
 for startup outcomes, restrictions and recovery limits.
 
 If **Sign out** cannot be saved on this device, the connection stays locally
-blocked and exposes an ended session with `saved: false`. `AppAccess` and
-`ConnectionControls` explain the failure and offer signing out again. The
+blocked and exposes an ended session with `saved: false`. `AppAccess` explains
+the failure and offers signing out again. The
 guarded action's Boolean says whether it ran; the retained fact tells custom
 controls that a retry is needed. Successful retry removes the connection.
 

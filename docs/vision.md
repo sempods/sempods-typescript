@@ -14,7 +14,7 @@ The TypeScript SDK makes this practical for people and coding assistants.
 first working slice easy; replacing that UI should preserve the same safe editing,
 connection and recovery behavior. Apps should be deployable as PWAs, while support
 claims follow actual browser and installed-device evidence. Small shared-host
-widgets should use the same facilities without requiring AppShell.
+widgets should use the same facilities without an app frame of their own.
 
 `@sempods/client-sdk` is also an independent product: portable protocol and editing
 for browser or Node consumers, without requiring React or browser sessions.

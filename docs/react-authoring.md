@@ -77,9 +77,9 @@ It shows:
 
 It hides once the selected target is readable, including read-only access;
 catalogue failures stay visible even if the runtime retains previous access
-facts. `AppShell`, `ConnectionControls` and fully custom layouts remain
-supported; custom layouts that omit `AppAccess` place `CallbackNotice`
-themselves.
+facts. Fully custom layouts remain supported; those that omit `AppAccess` place
+`CallbackNotice` themselves (see
+[custom layouts](#custom-layouts-without-appaccess)).
 
 ## Login without an app frame
 
@@ -104,7 +104,7 @@ Management (`open`) and **Full addresses** always show it, and a custom
 `components.Connections` does not receive the option. The default is
 `'visible'`; SDK markup is not a stable hook for hiding the address with CSS.
 
-`AppAccess` and `ConnectionControls` prefer the Context label from the runtime's
+`AppAccess` prefers the Context label from the runtime's
 selected-Context description reads, falling back to a safe readable last path segment.
 An `unknown` catalogue carries no labels, so narrow it before reading one:
 
@@ -204,12 +204,12 @@ needs explanation and operation eligibility to disable edits.
 
 ### Shared SDK appearance
 
-`AppAccess`, `AppShell`, `ConnectionControls`, `ResourceEditor`, `UpdateNotice`,
-`AccessNotice` and `CallbackNotice` share a scoped baseline: light/dark appearance,
-44px touch targets, visible keyboard focus and wrapping comparisons. No stylesheet
-import or UI framework is required. AppShell styles its own header; it does not
-style app list rows or controls elsewhere in its children. ResourceEditor styles
-the fields rendered inside that editor as well as its review/actions.
+`AppAccess`, `ResourceEditor`, `UpdateNotice`, `AccessNotice` and
+`CallbackNotice` share a scoped baseline: light/dark appearance, 44px touch
+targets, visible keyboard focus and wrapping comparisons. No stylesheet import or
+UI framework is required. The SDK does not style the app's own header, list rows
+or controls. ResourceEditor styles the fields rendered inside that editor as well
+as its review/actions.
 
 The host owns the color scheme; SDK surfaces inherit it. A page without a scheme
 stays light even when the system prefers dark. Enable page-wide automatic dark
@@ -222,14 +222,13 @@ appearance in the app's CSS:
 ```
 
 Keep any explicit page backgrounds/text colors compatible with that choice
-(for example with `light-dark()`). Embedded notices, editors and connection controls
-have transparent surfaces; their fields/buttons use the shared tokens. AppShell
-and AppAccess retain their themed background.
+(for example with `light-dark()`). Embedded notices and editors have
+transparent surfaces; their fields/buttons use the shared tokens. AppAccess
+retains its themed background.
 
 Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` and `--sempods-on-accent` on an ancestor or on the component's
-`style`/`className` where supported. They inherit across SDK components. Existing
-`--sempods-access-*` names remain fallback aliases; the shared names take priority.
+`style`/`className` where supported. They inherit across SDK components.
 Without them the SDK uses a neutral grey palette (0.5.0 and earlier used a green
 accent); set `--sempods-accent` to give controls your brand colour.
 React 19 hoists and deduplicates the static scoped sheets using its
@@ -242,7 +241,7 @@ retaining startup/callback presentation. All actions must still use `useApp()`.
 `mode="single"` hides adding another Pod once selected; it is a presentation choice,
 not a restriction. Use runtime `allowedPods` to enforce the permitted Pods.
 When a host already provides its title, use `headingLevel={2}` for subordinate
-access headings; AppShell does this automatically.
+access headings.
 
 ## A screen
 
@@ -721,7 +720,7 @@ Without React, prepare one `prepareCreation` per item with `newSubjectIri` and
 ## Standard UI for one known Pod
 
 For an app with one known Pod, put the preset in the host-owned runtime and keep
-the same AppShell and screen code:
+the same `AppAccess` and screen code:
 
 ```tsx
 const runtime = createBrowserRuntime({
@@ -734,16 +733,16 @@ const runtime = createBrowserRuntime({
 });
 
 <SempodsProvider runtime={runtime}>
-  <AppShell mode="single" title="My tasks">
-    <TargetScreen>
-      <Tasks />
-    </TargetScreen>
-  </AppShell>
+  <AppAccess appName="My tasks" mode="single" podAddress="hidden" />
+  <TargetScreen>
+    <Tasks />
+  </TargetScreen>
 </SempodsProvider>;
 ```
 
 `Tasks` is your existing app screen. The first visit offers **Sign in** without a
-**Pod address** field; after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
+**Pod address** field (`podAddress="hidden"` with exactly one permitted Pod,
+see below); after consent, the person chooses a context. The preset supplies the initial sign-in destination. With `mode="multiple"`,
 **Pods & sharing** also offers another Pod unless `allowedPods` restricts the choice. Existing foreign
 connections remain available for selection. Add the optional
 `contextIri` inside `preset` to declare an exact context instead. The SDK waits for
@@ -766,24 +765,21 @@ that configuration. Custom controls can read `useAppState().allowedPods`; one
 allowed Pod also supports argument-free `useApp().connect()` without a preset.
 With several allowed Pods and no preset, pass the chosen URL. The runtime enforces
 the policy for restore and callbacks too; see
-[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). `AppAccess` and AppShell present allowed Pod sets directly; standalone
-ConnectionControls continues to use `preset` for its form presentation.
+[permitted Pods](browser-runtime.md#restrict-the-permitted-pods). `AppAccess` presents allowed Pod sets directly.
 
 The [runtime guide](browser-runtime.md#one-known-pod) explains validation, exact
-context precedence, reload and foreign-session behavior. The recipe below
-remains useful when your app owns the selection/presentation policy instead of
-using this standard preset. Both paths share the same runtime and leave guards.
+context precedence, reload and foreign-session behavior.
 
 ## Selection and draft lifetime
 
 `disconnect(id)` keeps its guarded `Promise<boolean>` contract: `true` means
 the action ran, not that sign-out was saved. If persistence fails, the connection
 in `useAppState().connections` retains an ended session with
-`problem: 'disconnected', saved: false`. `AppAccess` and `ConnectionControls`
-show `controls.disconnectFailed` beside the existing **Sign out** button, also
-after a provider remount over the same runtime. Custom controls should offer
-the same explicit retry. `AccessNotice` keeps the general access-loss message,
-so composing it with `ConnectionControls` does not repeat the retry advice.
+`problem: 'disconnected', saved: false`. `AppAccess` shows
+`controls.disconnectFailed` beside its **Sign out** button, also after a
+provider remount over the same runtime. Custom controls should offer the same
+explicit retry. `AccessNotice` keeps the general access-loss message, so a
+custom layout's own sign-out control carries the retry advice.
 The fact stays while retrying; success removes the connection and its message.
 Do not suggest reloading: the saved session may still restore until a retry
 succeeds.
@@ -848,17 +844,14 @@ is inferred from an absent grant. Each server operation remains authoritative.
 
 ## Customize without replacing safety
 
-`AppShell` accepts `title`, `mode`, `style` and
-`components={{ Connections: MyPicker }}`.
-It composes a title/management header, `AppAccess`, and the content. Usable access
-hides administration; **Pods & sharing** opens it, including replacement controls.
-Startup still gates content until durable storage is ready; later access loss or
-management toggles retain mounted content and its drafts. Read-only feedback stays
-visible.
-A replacement uses `useConnections`, `useAppState` and guarded `useApp()` actions;
-it must not call raw runtime selection directly. For a different layout, omit
-AppShell, keep the provider, and place `ConnectionControls`/`AccessNotice` and
-your screen anywhere.
+Replace `AppAccess`'s connection view with
+`components={{ Connections: MyPicker }}`; the replacement receives
+`ConnectionsProps` (`mode`, `podNames`). Usable access hides administration; the
+app's **Pods & sharing** button opens it, including a replacement. A replacement
+uses `useConnections`, `useAppState` and guarded `useApp()` actions; it must not
+call raw runtime selection directly. Later access loss or management toggles
+retain mounted content and its drafts. For a layout without `AppAccess`, see
+[custom layouts](#custom-layouts-without-appaccess).
 
 Override text with `messages={{ controls: { save: translate('save') } }}` or supply
 individual message functions. Changes retranslate in place. `language` selects
@@ -899,47 +892,16 @@ be closed from behind the confirmation. TODO inputs/buttons use visible focus
 and mobile touch targets. Applications retain responsibility for labels and
 accessibility of custom fields.
 
-## A known Pod and replaceable access UI
+## Custom layouts without AppAccess
 
-The [sign-in recipe](../examples/todo/recipes/sign-in.tsx) is a copyable app-owned
-example using existing public exports. It supplies `KnownPodControls`, an
-`AccessPanel` and a small note form. These names are example components, not SDK
-exports. No runtime policy, login coordinator or new session-state union is added.
-
-```tsx
-import { createBrowserRuntime } from '@sempods/app-sdk';
-import { KnownPodExample } from './sign-in.js'; // Copy the recipe into your app.
-
-// Create once outside render; the host disposes it at application shutdown.
-const runtime = createBrowserRuntime({
-  identity: {
-    kind: 'did-web',
-    clientId: 'did:web:notes.example',
-    redirectUri: 'https://notes.example/callback',
-  },
-  returnTo: '/',
-  scopes: { required: [], optional: [] }, // Declare your actual feature needs.
-});
-
-<KnownPodExample
-  runtime={runtime}
-  podUrl="https://pod.example/alice"
-  fallback={{ content: <p>Ask the host for access, then check again.</p> }}
-/>;
-```
-
-Configure static callback routing as in [deployment](deployment.md). For local
-loopback testing use the quickstart's dynamic identity/development setting.
-`podUrl` is stable, canonical configuration: exactly the runtime-reported base
-URL, with no trailing slash, query or fragment. The client already rejects
-noncanonical input before discovery; the recipe does not implement another URL
-normalizer. It matches saved connections by that exact URL and calls
-`authorize(id)` when one exists, including after failed login preparation.
-Otherwise it calls `connect(podUrl)`. If older code created duplicates, it prefers
-the active matching connection, otherwise the first match; it does not delete
-records. All actions use the shared leave policy, and rapid concurrent clicks
-cannot bypass it. No login occurs on mount. This is a known-Pod UI, not an
-allowlist: other connections can still exist in the runtime.
+An app that does not use `AppAccess` keeps the provider and composes
+`CallbackNotice`, `AccessNotice` and its own controls from the guarded `useApp()`
+actions (`connect`, `authorize`, `disconnect`, `selectConnection`,
+`selectContext`, `refreshContexts`). No runtime policy, login coordinator or new
+session-state union is involved. Call actions only from user input, disable
+controls until startup storage is durable and while `changing`/`confirmingLeave`
+or restoration is pending, and present action errors with
+`useSdkLocale().error`. A returned `false` means the leave policy declined.
 
 Startup/storage feedback and `CallbackNotice` remain outside the content gate.
 A failed or cancelled callback activates the connection being signed in to,
@@ -948,10 +910,11 @@ selects it again. Custom layouts that read `startup.interaction` directly
 should use `callbackNotice` to decide whether the outcome is still current. A
 restoring connection waits, and a `leaving` one (the page is navigating to the
 Pod's sign-in) keeps its screen inert and offers no sign-in (`AppAccess` shows
-`controls.leaving` meanwhile);
+`controls.leaving` meanwhile; `AccessNotice` shows nothing);
 `active` and `renewing` are authenticated facts, not interchangeable with context
 access. A cancelled re-authorization keeps the signed-in session
-(`startup.resumed`).
+(`startup.resumed`), and a session whose Pod was unreachable at startup is
+`ended` with `restorable: true`: offer `retryRestore(id)`, not a sign-in.
 
 A provider's `access_denied` answer does not say whether the person cancelled
 or declined, and its free-text `error_description` is never shown or
@@ -960,59 +923,32 @@ access was granted (`controls.signInCancelled`), next to the connection's one
 **Sign in**. After a declined re-authorization that kept the session, it says
 that sharing was not changed (`controls.sharingUnchanged`) and
 `AppAccess` offers **Change sharing** as the one next step. Any other provider
-answer names its cause and also leads to **Sign in**. Select a readable context explicitly; after a reload or re-authorization
-the runtime reselects the last chosen one while it is still readable. `Check
-again` refreshes that connection's catalogue, while the sign-in button requests
-authorization (labelled `Change sharing` while signed in); neither retries a
-write. A busy/unavailable startup offers the SDK's reload guidance, not a call to
-the memoized initializer pretending to restart it. Saved-record warnings do not
-hide healthy connections. Sign-in cancellation by the leave guard is not an error.
+answer names its cause and also leads to **Sign in**. Select a readable context
+explicitly; after a reload or re-authorization the runtime reselects the last
+chosen one while it is still readable. Refreshing the catalogue and requesting
+authorization never retry a write. A busy/unavailable startup offers the SDK's
+reload guidance, not a call to the memoized initializer pretending to restart
+it. Saved-record warnings do not hide healthy connections. Sign-in cancellation
+by the leave guard is not an error.
 
-The example's view facts decide whether note content is readable; write access
-and `useCreation` decide whether its controls can edit/save. Catalogue errors
-retain known access with visible failure feedback. Missing required feature
-scopes block the relevant bound view, optional missing scopes do not. An empty
+Keep a target's content mounted through same-target access loss: hide it
+visually or make it inert, but do not unmount it, and keep mutation notices
+(`UpdateNotice`) outside the hidden or inert part, so captured drafts and
+unconfirmed outcomes survive. Move focus to the access feedback if focused
+content becomes unreadable. Hiding or inert UI does not cancel code or authorize
+requests; children still honor their own operation eligibility. An empty
 catalogue, no selected context and read-only access remain distinct facts in
-`AccessNotice`. The Pod still authorizes every operation.
+`AccessNotice`. The widgets example's `AccessPanel` implements this with hidden,
+disabled and custom fallbacks.
 
-Choose `fallback="hidden"`, `fallback="disabled"` or a custom `content` node.
-Before a target exists, the disabled variant is an empty inert preview. After
-selection, the content stays mounted through same-target access loss; hidden
-means visually hidden, not unmounted. The disabled variant is inert, with actual
-inputs disabled by their SDK eligibility. Focus moves to the access feedback if
-the focused content becomes unreadable. Custom children must honor their own
-operation eligibility: hiding/inert UI does not cancel code or authorize requests.
-
-Place mutation notices **outside** the hidden/inert region: the recipe's
-`recovery` slot keeps `UpdateNotice` visible. Its creation hook owns the captured
-IRI, draft and pending/unconfirmed result. Read loss hides the note input without
-losing that evidence; reauthorization or context changes still ask before
-leaving it. A real target change uses `TargetScreen` to start a fresh lifetime;
-renewal, locale and access changes do not. This pattern also works with
-`ResourceEditor` when its controller and recovery remain mounted.
-
-The host owns one provider/runtime and one leave-guard registry. For an existing
-provider, compose `KnownPodControls` and the recipe's content there instead of
-nesting `KnownPodExample`, which creates a provider. Dispose the host runtime at
-shutdown; provider unmount alone does not dispose it. Direct browser reload/close
-is outside the SDK navigation guard. The recipe has no logout control. A host can
-add `ConnectionControls`, or use the guarded `disconnect` action and its retained
-session failure fact as described in [Selection and draft lifetime](#selection-and-draft-lifetime).
-
-The packed browser check runs this exact recipe against installed SDK archives:
-PKCE callback, explicit context, reauthorization back to the remembered context,
-draft guards, EN/DE, each access
-fallback and the second-tab notice. Focused React tests also exercise callback
-failure alongside an active session and unconfirmed creation through read loss.
-These are synthetic fixtures, not live Pod or installed-PWA evidence. Enforce
-Pod sets with the runtime's existing `allowedPods` option; this recipe alone is
-a known-Pod UI. Per-widget scopes, independent targets and additional gate APIs
-remain separate design work.
+The host owns one provider/runtime and one leave-guard registry. Dispose the
+host runtime at shutdown; provider unmount alone does not dispose it. Direct
+browser reload/close is outside the SDK navigation guard.
 
 ## Several widgets in one host
 
 The [widget guide](widgets.md) composes a list and quick-add form under one
-host runtime/provider, without AppShell. It explains shared targets, package
+host runtime/provider, without `AppAccess` in every widget. It explains shared targets, package
 peers and why access loss must not unmount a mutating widget.
 
 ## Without React
