@@ -160,7 +160,8 @@ try {
   let consent;
   let refreshes = 0;
   let overviewRefuse = false;
-  let delayedOffline = false;
+  /** A failing discovery status for the delayed Pod: 503 is transient, 404 is not. */
+  let delayedOffline = 0;
   let delayedScope = 'tasks';
   let slowCatalogueFailing = false;
   // The expiring Pod issues short-lived tokens and refuses them after expiry,
@@ -312,7 +313,7 @@ try {
       // readable only after a delay, both after the callback and on restore.
       if (name === 'delayed' && url.pathname.includes('/.well-known/')) {
         if (delayedOffline) {
-          res.writeHead(503);
+          res.writeHead(delayedOffline);
           res.end();
           return;
         }
@@ -1643,11 +1644,24 @@ try {
   await page.reload();
   await settled('hidden');
   assert.deepEqual(await accessTrace(), ['loading', 'hidden']);
-  delayedOffline = true;
+  // An unreachable Pod keeps the session: Try again restores it, no sign-in.
+  delayedOffline = 503;
+  await page.reload();
+  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
+  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  assert.equal(
+    await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
+    0,
+  );
+  delayedOffline = 0;
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await settled('hidden');
+  // A discovery that fails for good ends the session; it asks to sign in.
+  delayedOffline = 404;
   await page.reload();
   await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
   assert.deepEqual(await accessTrace(), ['loading', 'connection']);
-  delayedOffline = false;
+  delayedOffline = 0;
   delayedScope = '';
   await Promise.all([
     page.waitForURL('**/callback?**'),
@@ -1658,7 +1672,7 @@ try {
   assert.deepEqual(await accessTrace(), ['loading', 'connection']);
   delayedScope = 'tasks';
   console.log(
-    'Packed AppAccess, one Pod on demand: loading status only (no Full addresses) from callback and restore until the delayed Pod reader is readable, then hidden; ended session and missing required scopes show recovery directly passed.',
+    'Packed AppAccess, one Pod on demand: loading status only (no Full addresses) from callback and restore until the delayed Pod reader is readable, then hidden; an unreachable Pod offers Try again and restores, an ended session and missing required scopes show recovery directly passed.',
   );
   // A demanded Context catalogue that answers after a delay: with a preset
   // Context the target settles by itself, so sign-in and restore show only the
