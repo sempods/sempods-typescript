@@ -268,9 +268,14 @@ outcomes still show with their controls. The SDK applies no optimistic changes;
 an unconfirmed write stays visible and is never replayed. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
 (yes/no for flags, a dash for empty text); pass `labels={{ title: 'Task' }}` to
 name the fields instead of showing their keys.
-An editor shown inline beside its list takes `onClose`: it adds a close button
-and is called after a confirmed delete. Pass the guarded reset,
-`onClose={() => select(null)}`, so unsaved changes ask before it closes.
+An editor that opens in place, for example in a list row, takes `onClose`
+(the guarded reset, `onClose={() => select(null)}`). It then shows **Cancel**
+instead of **Discard changes**: Cancel or Escape discards and closes, as that
+click is the decision (switching rows or Contexts still asks). A confirmed save
+or delete closes it too, so the changed row is the confirmation; refusals,
+conflicts and unconfirmed answers keep it open with their controls. In any
+editor, Enter in a text field saves when Save is enabled, and Delete is the
+last action.
 
 A `fields()` definition may be written inline: hooks compare it by structure, so
 an equal definition on every render changes nothing, while a real change (another

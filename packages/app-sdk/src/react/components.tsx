@@ -357,9 +357,11 @@ export function ResourceEditor<D, U = D>({
   /** As for `UpdateNotice`: no message for a confirmed save or delete. */
   readonly quiet?: boolean;
   /**
-   * Shows a close button and is called after a confirmed delete. Pass the
-   * guarded selection reset, `() => select(null)`, so unsaved changes ask
-   * first.
+   * An editor that opens in place, for example in a list row: Cancel (or
+   * Escape) discards and closes, and a confirmed save or delete closes it, as
+   * the changed row is the confirmation. Refusals, conflicts and unconfirmed
+   * answers keep it open. Pass the guarded selection reset,
+   * `() => select(null)`.
    */
   readonly onClose?: () => unknown;
   readonly editor: Editor<D, U> | null;
@@ -414,13 +416,44 @@ export function ResourceEditor<D, U = D>({
         : { editor, state: editor.state, outcome: result, start },
     );
     if (succeeded(result)) onChanged?.();
-    if (result.kind === 'removed') onClose?.();
+    // Edits made while saving stay open (closing would ask about them).
+    if (
+      result.kind === 'removed' ||
+      (result.kind === 'saved' && !editor.state.dirty)
+    )
+      onClose?.();
+  };
+  const save = () => {
+    if (editor.state.canSave) void act(() => editor.save());
+  };
+  // An explicit Cancel is the decision to discard; switching rows still asks.
+  const cancel = () => {
+    if (editor.state.canDiscard) editor.discard();
+    void onClose?.();
   };
   return (
     <section data-sempods-ui="editor">
       <SdkStyles />
       {state.draft !== null && state.phase !== 'deleted' && (
-        <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+        <fieldset
+          style={{ border: 0, padding: 0, margin: 0 }}
+          onKeyDown={(event) => {
+            // Enter in a text field saves; Escape cancels an editor in place.
+            const field = event.target as HTMLElement;
+            if (
+              event.key === 'Enter' &&
+              !event.nativeEvent.isComposing &&
+              field instanceof HTMLInputElement &&
+              !['checkbox', 'radio', 'button', 'submit'].includes(field.type)
+            ) {
+              event.preventDefault();
+              save();
+            } else if (event.key === 'Escape' && onClose) {
+              event.preventDefault();
+              cancel();
+            }
+          }}
+        >
           {children(state.draft, editor.change)}
         </fieldset>
       )}
@@ -489,24 +522,31 @@ export function ResourceEditor<D, U = D>({
           <button
             className="sp-sdk-primary"
             disabled={!state.canSave}
-            onClick={() => void act(() => editor.save())}
+            onClick={save}
           >
             {m.save}
           </button>
+          {onClose ? (
+            <button onClick={cancel}>{m.cancel}</button>
+          ) : (
+            <button
+              disabled={!state.canDiscard}
+              onClick={() => editor.discard()}
+            >
+              {m.discard}
+            </button>
+          )}
+          {state.phase === 'blocked' && (
+            <button onClick={() => void editor.refresh()}>{m.refresh}</button>
+          )}
           <button
             ref={removeButton}
+            className="sp-sdk-end"
             disabled={!state.canRemove}
             onClick={() => setConfirming(state)}
           >
             {m.remove}
           </button>
-          <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
-            {m.discard}
-          </button>
-          {state.phase === 'blocked' && (
-            <button onClick={() => void editor.refresh()}>{m.refresh}</button>
-          )}
-          {onClose && <button onClick={() => void onClose()}>{m.close}</button>}
         </div>
       )}
       {!state.review && (

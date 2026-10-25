@@ -151,14 +151,13 @@ export interface UiMessages {
   readonly retry: string;
   readonly cancel: string;
   /*
-   * Reading and closing (added in 0.6.0; optional in the type, `createLocale`
-   * fills them): `LoadNotice` for a cancelled or unavailable read and for
-   * data kept from before a failed refresh, `ResourceEditor`'s close button.
+   * Reading (added in 0.6.0; optional in the type, `createLocale` fills
+   * them): `LoadNotice` for a cancelled or unavailable read and for data kept
+   * from before a failed refresh.
    */
   readonly loadCancelled?: string;
   readonly loadUnavailable?: string;
   readonly stale?: string;
-  readonly close?: string;
   readonly failure: string;
   readonly current: string;
   readonly notPresent: string;
@@ -267,7 +266,6 @@ export const englishMessages: SdkMessages = {
     loadCancelled: 'Loading was cancelled.',
     loadUnavailable: 'This cannot be read right now.',
     stale: 'What is shown may be out of date.',
-    close: 'Close',
     failure: 'The operation could not be completed.',
     current: 'Current on the pod',
     notPresent: 'This resource is not currently present on the pod.',
@@ -406,7 +404,6 @@ export const germanMessages: SdkMessages = {
     loadCancelled: 'Das Laden wurde abgebrochen.',
     loadUnavailable: 'Das kann gerade nicht gelesen werden.',
     stale: 'Die Anzeige ist vielleicht nicht aktuell.',
-    close: 'Schließen',
     failure: 'Die Aktion konnte nicht abgeschlossen werden.',
     current: 'Aktuell auf dem Pod',
     notPresent: 'Diese Ressource ist aktuell nicht auf dem Pod vorhanden.',

@@ -22,6 +22,7 @@ const styles = `
 }
 :where([data-sempods-ui="access"]) { background:var(--sp-bg); }
 ${surfaces} :where(.sp-sdk-actions) { display:flex; flex-wrap:wrap; gap:8px; }
+${surfaces} :where(.sp-sdk-end) { margin-inline-start:auto; }
 ${surfaces}, ${surfaces} * { box-sizing:border-box; }
 ${surfaces} :where(button,input,select,textarea) { font:inherit; max-width:100%; min-width:0; min-height:44px; }
 ${surfaces} :where(button) { font-weight:500; border:0; border-radius:8px; color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }

@@ -149,28 +149,51 @@ it.each(['en', 'de'] as const)(
   },
 );
 
-it('the TODO editor closes with its button and after a confirmed delete', async () => {
-  const rows = new Map([[milk['@id'], milk]]);
+it('the TODO row becomes its editor: Escape cancels, Enter saves, delete closes', async () => {
+  const rows = new Map<string, Record<string, unknown>>([[milk['@id'], milk]]);
   const f = await signedIn('en', async () => Response.json([...rows.values()]));
+  const writes: string[] = [];
   f.setResource(async (url, init) => {
     const iri = resourceIri(url);
-    if (init?.method === 'DELETE') {
-      rows.delete(iri);
-      return new Response(null, { status: 204 });
-    }
-    return rows.has(iri)
-      ? Response.json(rows.get(iri), { headers: { etag: '"v1"' } })
-      : new Response(null, { status: 404 });
+    const method = init?.method ?? 'GET';
+    if (method === 'GET')
+      return rows.has(iri)
+        ? Response.json(rows.get(iri), { headers: { etag: '"v1"' } })
+        : new Response(null, { status: 404 });
+    writes.push(method);
+    if (method === 'DELETE') rows.delete(iri);
+    else
+      rows.set(iri, {
+        ...rows.get(iri),
+        ...(JSON.parse(init!.body as string) as Record<string, unknown>),
+      });
+    return new Response(null, { status: 204 });
   });
-  const open = async () => {
-    fireEvent.click(await screen.findByRole('button', { name: 'Buy milk' }));
-    return screen.findByRole('button', { name: 'Close' });
+  const edit = async (title: string) => {
+    fireEvent.click(await screen.findByRole('button', { name: title }));
+    return (await screen.findByLabelText('Task')) as HTMLInputElement;
   };
-  fireEvent.click(await open());
+  // Escape discards the change and shows the row again; nothing is written.
+  let field = await edit('Buy milk');
+  fireEvent.change(field, { target: { value: 'Oat milk' } });
+  fireEvent.keyDown(field, { key: 'Escape' });
+  expect(await screen.findByRole('button', { name: 'Buy milk' })).toBeTruthy();
+  expect(screen.queryByLabelText('Task')).toBeNull();
+  // Enter saves; the confirmed save closes the editor and the row shows it.
+  field = await edit('Buy milk');
+  fireEvent.change(field, { target: { value: 'Oat milk' } });
   await waitFor(() =>
-    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull(),
+    expect(
+      (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
   );
-  await open();
+  fireEvent.keyDown(field, { key: 'Enter' });
+  expect(await screen.findByRole('button', { name: 'Oat milk' })).toBeTruthy();
+  expect(screen.queryByLabelText('Task')).toBeNull();
+  expect(writes).toEqual(['PATCH']);
+  // A confirmed delete closes it too.
+  await edit('Oat milk');
   const remove = screen.getByRole('button', { name: 'Delete' });
   await waitFor(() =>
     expect((remove as HTMLButtonElement).disabled).toBe(false),
@@ -180,10 +203,8 @@ it('the TODO editor closes with its button and after a confirmed delete', async 
     name: 'Delete this from the pod? This cannot be undone.',
   });
   fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));
-  await waitFor(() =>
-    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull(),
-  );
   expect(await screen.findByText(text.en.empty)).toBeTruthy();
+  expect(screen.queryByLabelText('Task')).toBeNull();
 });
 
 it.each(['en', 'de'] as const)(

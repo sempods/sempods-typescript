@@ -110,9 +110,12 @@ Check these points:
   `valid` (for example an empty required text) in `skipped` instead of
   returning it: no update could write such a row back. Remove app-side filters
   such as `items.filter((item) => definition.valid(item.data))`.
-- **`ResourceEditor` `onClose`.** An optional close button for an inline editor,
-  also called after a confirmed delete. Pass the guarded reset,
-  `onClose={() => select(null)}`, so unsaved changes ask first.
+- **`ResourceEditor` `onClose`, Enter and the action order.** With `onClose`
+  (pass the guarded `() => select(null)`) the editor works in place: Cancel or
+  Escape discards and closes, and a confirmed save or delete closes it. In
+  every editor Enter in a text field saves, actions read as text with Save
+  filled, and Delete moves to the end; tests that find buttons by position
+  should find them by name.
 - **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
   `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,
   readable Contexts into `catalogue.labels`, for example for a list menu.
