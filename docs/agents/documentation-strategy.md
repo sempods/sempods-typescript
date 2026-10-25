@@ -6,7 +6,8 @@ for this SDK's packages, TypeScript contracts and app-author audience.
 ## Ownership and navigation
 
 - [Vision](../vision.md) describes purpose and direction. Maintained guides describe
-  implemented behavior. Issues own scope, decisions, dependencies and progress.
+  implemented behavior. Issues own scope, dependencies and progress;
+  [architecture decisions](../decisions.md) record accepted boundaries and why.
   A substantial proposal may need a separate document, clearly marked proposed
   and linked to its issue; accepting a proposal does not implement it.
 - Place details with the narrowest code owner. Define API contracts once, in
@@ -50,26 +51,20 @@ stand alone without private work logs, credentials or personal test data.
 
 `pnpm check:docs` checks local Markdown links, fragments and navigation, including
 agent and skill files. It uses [remark-validate-links](https://github.com/remarkjs/remark-validate-links)
-through remark's CLI: the plugin's standalone API does not validate headings in
-other files. A small runner supplies the repository inventory and checks reachability
-using the same Markdown syntax tree. It inventories the current working tree,
+through remark's CLI. It inventories the current working tree,
 including unstaged additions, deletions and renames. Remaining links to deleted
 files still fail, as do missing README/AGENTS entry points. Local links and images
 in package READMEs must stay within their package directory. Repository URLs
 for files/directories must name the package manifest's version.
 This local assertion does not verify that the release tag exists remotely.
-The runner does not implement a Markdown parser.
 
-[Lychee](https://lychee.cli.rs/recipes/anchors/) is another reusable option, with
-Markdown/HTML and external URL support. The Node-based remark integration fits
-this repository's pinned toolchain without another binary prerequisite.
-[Cross-repository adoption](https://github.com/sempods/sempods-typescript/issues/11)
-will assess that tradeoff for Kotlin and apps. sempods-spec and its stricter rules
-are excluded; Kotlin's requirement-ID and executable-example checks are separate.
+[Lychee](https://lychee.cli.rs/recipes/anchors/) would add external-URL checks
+but needs another binary; the remark integration fits the pinned Node toolchain.
+sempods-spec keeps its own stricter checks; Kotlin's requirement-ID and
+executable-example checks are separate.
 
 The local gate makes no network requests. External availability, raw HTML links,
 prose/backtick paths, TSDoc links and the truth of documentation still need review.
 Undefined Markdown reference labels render as text and are not checked as links.
 Retain packed example tests; extend those tests when adding executable recipes.
-External URL checking can be a separate explicit or scheduled task; a network
-outage should not block ordinary local documentation validation.
+No check verifies external URLs; check changed ones manually.

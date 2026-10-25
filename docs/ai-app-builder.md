@@ -39,8 +39,7 @@ Copy this prompt and fill in the brackets:
 A GitHub MCP connection is helpful: it lets the assistant read source, examples
 and the specification in their repositories. Use your assistant's connector setup
 with [GitHub's MCP server](https://github.com/github/github-mcp-server). Read access
-is enough for research; access to private SDK source must be explicitly granted.
-The installed package or a local checkout works as well. MCP access to
+is enough for research. The installed package or a local checkout works as well. MCP access to
 GitHub is separate from access to a person's Pod. Never paste connector tokens
 into a prompt or app configuration.
 
@@ -87,12 +86,14 @@ not instructions to the coding assistant.
 
 ## Implementation contract
 
-- Build a TypeScript frontend. Prefer React with `AppAccess` beside `TargetScreen`
-  for the first slice: a centered login/recovery surface without an SDK app frame.
-  An optional app icon and Pod display names belong to presentation. The app owns
-  its layout and a way to open data-access management. Keep content/controllers
-  mounted during same-target access loss; hide/inert only presentation, with write
-  recovery outside it. Existing AppShell consumers remain supported.
+- Build a TypeScript frontend, preferably React. For the first slice put
+  `AppAccess` beside `TargetScreen`. `AppAccess` is a centered sign-in and recovery
+  surface, not an app frame; it takes an optional `icon`, `description` and
+  `podNames`. The app owns its layout and a **Pods & sharing** button that opens
+  management through `open`. If access is lost while the target stays the same,
+  keep content and its controllers mounted: hide or disable only the presentation,
+  and keep write recovery (`UpdateNotice`) outside the hidden part. `AppShell`
+  remains supported.
 - Create one stable `createBrowserRuntime` outside rendering. Give it to
   `SempodsProvider`, which initializes it, including on the callback route. Keep
   `TargetScreen` around target-specific screens. Dispose a runtime when its actual
@@ -108,20 +109,20 @@ not instructions to the coding assistant.
 - Keep Pod URL, app origin/callback and selected context distinct. Ordinary CRUD
   uses context grants; omit feature scopes unless the feature and Pod require a
   documented scope. Empty context selection never means all contexts.
-- For an overview across authorized Contexts, use `pod.sparql.select`/`construct`
-  through `usePodLoad` and provider `contextSelection="on-demand"`. Keep the
-  overview outside `TargetScreen`; do not enumerate Contexts or query/fetch each
-  one to build it. Mount `TargetScreen` before a view exists when a scoped flow
-  is requested, with `AppAccess` alongside for discovery, chooser and explicit
-  retry. The default `'required'` policy preserves ordinary CRUD startup.
-  `useWorkflowAccess` stays Context-only. Query rows are read-only pointers: to
-  edit an existing item, reread it in its explicit Context with its ETag: pass
-  the row's subject and its `GRAPH` Context to `open` of
-  `useContextEditor(definition)`. It binds that Context without changing
-  the selection, rereads the item there and saves with its ETag. Render its
-  `editor` while `phase` is `ready`, and present `problem` when it is
-  `unavailable`. For a one-click change such as ticking a task, drive the same
-  editor (`change`, then one `save`) as the
+- For an overview across authorized Contexts, set `contextSelection="on-demand"`
+  on the provider and read with `pod.sparql.select`/`construct` through
+  `usePodLoad`. Keep the overview outside `TargetScreen`; do not enumerate
+  Contexts or query each one. When a flow needs a selected Context, such as a
+  creation form, mount `TargetScreen` for it; `AppAccess` then offers the chooser
+  and **Check access**. Without `contextSelection`, ordinary CRUD keeps the
+  default `'required'` startup. `useWorkflowAccess` describes the selected Context
+  only.
+- An overview row is a read-only pointer. To edit it, pass the row's subject and
+  its `GRAPH` Context to `open` of `useContextEditor(definition)`. It rereads the
+  item in that Context without changing the selection and saves against the
+  version it read. Render `editor` while `phase` is `ready`; show `problem` while
+  `phase` is `unavailable`. For a one-click change such as ticking a task, drive
+  the same editor (`change`, then one `save`) as the
   [one-click recipe](../examples/todo/recipes/overview-toggle.tsx) does. See the
   [overview recipe](../examples/todo/recipes/pod-overview.tsx),
   [editing an overview row](react-authoring.md#editing-an-overview-row) and the
@@ -140,7 +141,10 @@ not instructions to the coding assistant.
   `useResourceEditor` and `useContextEditor` with
   `ResourceEditor`/`UpdateNotice`. Pass original snapshots
   to list actions. Use `useApp()`'s guarded actions for custom connection/context
-  controls. The authoring guide gives exact signatures and lifecycle rules.
+  controls. Pass `retain: true` to `useList`/`useLoad`/`usePodLoad` to keep rows
+  visible while reloading (`state.previous`), and `quiet` to
+  `UpdateNotice`/`ResourceEditor` when the changed row is itself the
+  confirmation. The authoring guide gives exact signatures and lifecycle rules.
 - Render loading, unavailable access, conflicts and unconfirmed writes distinctly.
   Never add an unconditional retry loop for mutations, default to overwrite, or
   generate another resource IRI to retry uncertain creation. Recovery stays on the

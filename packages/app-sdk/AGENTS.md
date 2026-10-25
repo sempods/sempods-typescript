@@ -6,8 +6,8 @@ Read the [package overview](README.md),
 [React/headless authoring](../../docs/react-authoring.md).
 
 Runtime and headless changes must preserve the React-free root entry. UI changes
-consume existing facts and guarded actions rather than adding another coordinator
-or inferred session taxonomy. For shared widgets, follow the
+use the runtime's existing state and guarded actions; do not add another
+coordinator or derive new session states in the UI. For shared widgets, follow the
 [host ownership and duplicate-module rules](../../docs/widgets.md).
 For worker or callback changes, read the [PWA invariants](../../docs/pwa.md).
 

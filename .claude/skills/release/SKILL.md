@@ -4,5 +4,4 @@ description: Assess, prepare or explicitly publish a sempods TypeScript npm rele
 ---
 
 Follow the shared [release procedure](../../../docs/agents/release.md).
-Use the repository [instruction map](../../../docs/agents/ai-instructions.md)
-for scope and contributor rules. The procedure does not expand the user's request.
+Use the root [AGENTS.md](../../../AGENTS.md) for scopes and contributor rules. The procedure does not expand the user's request.
