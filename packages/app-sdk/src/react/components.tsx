@@ -175,6 +175,7 @@ export function endedMessage(
   m: SdkMessages,
   signingIn = false,
 ) {
+  if (session.restorable) return m.controls.unreachable ?? m.controls.readLost;
   if (signingIn && session.failure)
     return describeFailure(m.errors, session.failure);
   return session.problem === 'interrupted' ||
@@ -270,6 +271,9 @@ export function ConnectionControls({
       : undefined;
   const displayedContext = connection?.selectedContext ?? fixedContext;
   const leaving = connection?.session.kind === 'leaving';
+  const restorable =
+    connection?.session.kind === 'ended' &&
+    connection.session.restorable === true;
   const unavailable =
     busy ||
     leaving ||
@@ -413,18 +417,29 @@ export function ConnectionControls({
           )}
           {connection && (
             <>
-              {!leaving && (
-                <button
-                  disabled={
-                    unavailable || connection.session.kind === 'restoring'
-                  }
-                  onClick={() =>
-                    void action(() => app.authorize(connection.id))
-                  }
-                >
-                  {active ? controls.updateAccess : controls.signIn}
-                </button>
-              )}
+              {!leaving &&
+                (restorable ? (
+                  // The Pod was unreachable, not the session lost.
+                  <button
+                    disabled={unavailable}
+                    onClick={() =>
+                      void action(() => app.retryRestore(connection.id))
+                    }
+                  >
+                    {controls.retry}
+                  </button>
+                ) : (
+                  <button
+                    disabled={
+                      unavailable || connection.session.kind === 'restoring'
+                    }
+                    onClick={() =>
+                      void action(() => app.authorize(connection.id))
+                    }
+                  >
+                    {active ? controls.updateAccess : controls.signIn}
+                  </button>
+                ))}
               {active && (
                 <button
                   disabled={busy}

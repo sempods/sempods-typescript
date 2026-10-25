@@ -531,18 +531,42 @@ export function createBrowserRuntime(
       install(e, saved.credentials);
     } catch (error) {
       if (eligible(e, generation)) {
+        // An unreachable or failing Pod is not a logout: the saved session
+        // stays and is restored again, also once the browser is back online.
+        const restorable = transientBeforeClaim(error);
+        if (restorable) e.restorable = saved;
         e.view = {
           ...e.view,
           session: Object.freeze({
             kind: 'ended',
             problem: runtimeProblem(error),
             ...runtimeFailure(error),
+            ...(restorable ? { restorable: true as const } : {}),
           }),
         };
         publish();
       }
     }
   }
+  /** Restores a session whose restoration found its Pod unreachable; no-op otherwise. */
+  async function retryRestore(e: Entry) {
+    const saved = e.restorable;
+    const session = e.view.session;
+    if (!saved || session.kind !== 'ended' || !session.restorable) return;
+    delete e.restorable;
+    e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+    publish();
+    await restore(e, saved);
+  }
+  // Coming back online restores every session that could not reach its Pod.
+  const page = globalThis as {
+    addEventListener?: (type: string, listener: () => void) => void;
+    removeEventListener?: (type: string, listener: () => void) => void;
+  };
+  const online = () => {
+    for (const e of entries.values()) void retryRestore(e);
+  };
+  page.addEventListener?.('online', online);
   /**
    * Resumes the session a denied (`callback`) or abandoned re-authorization
    * started from, and publishes it. Returns false, changing nothing, when the
@@ -1182,9 +1206,13 @@ export function createBrowserRuntime(
         );
       return view;
     },
+    async retryRestore(id) {
+      await retryRestore(get(id));
+    },
     dispose() {
       disposed = true;
       initialized = false;
+      page.removeEventListener?.('online', online);
       for (const e of entries.values()) {
         delete e.credentials;
         delete e.credential;

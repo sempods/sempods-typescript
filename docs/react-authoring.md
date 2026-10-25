@@ -52,7 +52,10 @@ next to its sign-in and disconnect actions. Provider answers such as
 callback notice stays until the person selects another connection, disconnects
 one or starts a sign-in (`AppSnapshot.callbackNotice`); `callbackNotice` never
 rewrites `startup`. A connection whose sign-in never returned, or whose session
-expired, asks to sign in without claiming access or a kept draft. It hides once
+expired, asks to sign in without claiming access or a kept draft. A saved
+session whose Pod could not be reached at startup instead says so
+(`controls.unreachable`) and offers **Try again** (`useApp().retryRestore(id)`),
+not a sign-in; it also restores by itself once the browser is back online. It hides once
 the selected target is readable, including read-only access; catalogue failures
 remain visible even if the runtime retains previous access facts. While the
 active connection restores, is signed in but its Pod reader is not yet

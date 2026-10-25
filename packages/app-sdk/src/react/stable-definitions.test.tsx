@@ -109,6 +109,7 @@ it('useApp exposes only the guarded actions, as one stable object', async () => 
     'loadContextLabels',
     'navigate',
     'refreshContexts',
+    'retryRestore',
     'selectConnection',
     'selectContext',
   ]);

@@ -111,6 +111,13 @@ callback's code claim and exchange, nor keep callback parameters in the address
 bar. Disconnect/dispose still prevent late restoration from publishing
 credentials.
 
+A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` during
+discovery) is not a sign-out: the connection ends with that problem and
+`restorable: true`, and the saved session is kept. The runtime restores it again
+when the browser fires `online`, and `retryRestore(id)` tries at once; both go
+through `restoring` to `active` without a token request or a new sign-in. Any
+other restoration failure, such as a changed binding, ends the session as before.
+
 Configured callback URLs may retain application query parameters, but may not
 contain OAuth response keys (`code`, `response`, `state`, `error`, `iss`).
 Application query keys must be unique, including after percent decoding. Invalid

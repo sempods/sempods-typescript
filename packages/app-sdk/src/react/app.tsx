@@ -33,7 +33,7 @@ const Context = createContext<{
 const Demand = createContext({ selection: false, discovery: false });
 /**
  * Guarded user actions for custom screens and replacement controls. Each
- * guarded action (all except `refreshContexts` and `loadContextLabels`) resolves `false`, discarding
+ * guarded action (all except `refreshContexts`, `loadContextLabels` and `retryRestore`) resolves `false`, discarding
  * nothing, if the connection that was active when the person was asked stops
  * being active outside a guarded action.
  */
@@ -60,6 +60,11 @@ export interface AppActions {
    * `BrowserRuntime.loadContextLabels`. Display text only; not guarded.
    */
   loadContextLabels(id: string, iris: readonly string[]): Promise<void>;
+  /**
+   * Restore a saved session again after its Pod was unreachable
+   * (`session.restorable`); see `BrowserRuntime.retryRestore`. Not guarded.
+   */
+  retryRestore(id: string): Promise<void>;
   /** Run local row/page navigation under the same leave policy. */
   navigate(action: () => void | Promise<void>): Promise<boolean>;
 }
@@ -133,6 +138,7 @@ export function SempodsProvider({
       refreshContexts: (id: string) => runtime.loadContexts(id),
       loadContextLabels: (id: string, iris: readonly string[]) =>
         runtime.loadContextLabels(id, iris),
+      retryRestore: (id: string) => runtime.retryRestore(id),
       navigate: (action: () => void | Promise<void>) =>
         controller.navigate(action),
     });
