@@ -37,7 +37,6 @@ afterEach(() => {
 const text = {
   en: {
     language: 'English',
-    reload: 'Reload',
     retry: 'Try again',
     failed: 'The pod reported an error. Try again later.',
     unavailable: 'This cannot be read right now.',
@@ -47,7 +46,6 @@ const text = {
   },
   de: {
     language: 'Deutsch',
-    reload: 'Neu laden',
     retry: 'Erneut versuchen',
     failed: 'Der Pod hat einen Fehler gemeldet. Versuche es später erneut.',
     unavailable: 'Das kann gerade nicht gelesen werden.',
@@ -64,15 +62,23 @@ const promisesDraft = (language: 'en' | 'de') =>
     }).textContent ?? '',
   );
 
+/**
+ * Picks a language from the header menu. jsdom does not open popovers, so the
+ * closed menu's item is found although hidden.
+ */
+function pick(language: 'en' | 'de') {
+  fireEvent.click(
+    screen.getByRole('button', { name: text[language].language, hidden: true }),
+  );
+}
+
 async function signedIn(language: 'en' | 'de', query: PodFetch) {
   const f = fixture();
   const session = await f.login();
   cleanups.push(() => session.runtime.dispose());
   f.setQuery(query);
   render(<TodoApp runtime={session.runtime} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: text[language].language }),
-  );
+  pick(language);
   return { ...f, ...session };
 }
 
@@ -119,16 +125,18 @@ const milk = {
 };
 
 it.each(['en', 'de'] as const)(
-  'the TODO list keeps its rows while reloading and after a failed refresh (%s)',
+  'the TODO list reloads when the page is visible again, keeping its rows (%s)',
   async (language) => {
     const t = text[language];
     const f = await signedIn(language, async () => Response.json([milk]));
     expect(await screen.findByText('Buy milk')).toBeTruthy();
     const held = deferred<Response>();
     f.setQuery(() => held.promise);
-    await act(async () =>
-      screen.getByRole('button', { name: t.reload }).click(),
-    );
+    // Back on the page: the list reads again without a reload button.
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
     // No empty frame: the row stays and no loading status replaces it.
     expect(screen.getByText('Buy milk')).toBeTruthy();
     expect(screen.queryByRole('status')).toBeNull();
@@ -184,9 +192,7 @@ it.each(['en', 'de'] as const)(
     const f = fixture();
     cleanups.push(() => f.runtime.dispose());
     render(<TodoApp runtime={f.runtime} />);
-    fireEvent.click(
-      screen.getByRole('button', { name: text[language].language }),
-    );
+    pick(language);
     expect(await screen.findByText(text[language].description)).toBeTruthy();
   },
 );
@@ -203,9 +209,7 @@ it.each([
     cleanups.push(() => f.runtime.dispose());
     render(<TodoApp runtime={f.runtime} />);
     expect(await screen.findByText(text[initial].description)).toBeTruthy();
-    fireEvent.click(
-      screen.getByRole('button', { name: text[picked].language }),
-    );
+    pick(picked);
     expect(await screen.findByText(text[picked].description)).toBeTruthy();
     expect(screen.queryByText(text[initial].description)).toBeNull();
   },

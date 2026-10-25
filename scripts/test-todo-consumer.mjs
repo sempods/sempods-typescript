@@ -1,4 +1,4 @@
-/* global getComputedStyle, window, document, URLSearchParams, navigator, caches */
+/* global getComputedStyle, window, document, URLSearchParams, navigator, caches, Event */
 import assert from 'node:assert/strict';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -17,6 +17,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
+
+/** Clicks an item of the TODO header menu, opening the menu first. */
+async function menu(page, name) {
+  await page.locator('.menu-button').click();
+  await page
+    .locator('#app-menu')
+    .getByRole('button', { name, exact: true })
+    .click();
+}
+/** Coming back to the page reloads the list (the example has no reload button). */
+async function reloadList(page) {
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event('visibilitychange')),
+  );
+}
 
 const root = process.cwd();
 const temp = await mkdtemp(join(tmpdir(), 'sempods-todo-'));
@@ -461,8 +476,7 @@ try {
     });
     const page = await context.newPage();
     await page.goto(origin + '/');
-    if (language === 'de')
-      await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    if (language === 'de') await menu(page, 'Deutsch');
     await page
       .getByLabel(language === 'de' ? 'Pod-Adresse' : 'Pod address', {
         exact: true,
@@ -486,9 +500,7 @@ try {
       .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
     await input.fill('Keep this draft');
-    await page
-      .getByRole('button', { name: 'Pods & sharing', exact: true })
-      .click();
+    await menu(page, 'Pods & sharing');
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
@@ -680,8 +692,9 @@ try {
     await page.evaluate(() =>
       document.documentElement.style.setProperty('--sempods-accent', '#654321'),
     );
+    // Save is the editor's main action: filled with the accent.
     assert.equal(
-      await save.evaluate((button) => getComputedStyle(button).color),
+      await save.evaluate((button) => getComputedStyle(button).backgroundColor),
       'rgb(101, 67, 33)',
     );
     assert.equal(
@@ -697,9 +710,7 @@ try {
         .evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
-    await page
-      .getByRole('button', { name: 'Pods & sharing', exact: true })
-      .click();
+    await menu(page, 'Pods & sharing');
     // Signing in to another Pod is the collapsed secondary section.
     await page.getByText('Connect another Pod', { exact: true }).click();
     const addPod = page.getByRole('button', { name: 'Sign in', exact: true });
@@ -715,7 +726,7 @@ try {
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, 'Deutsch');
     await editor
       .getByRole('button', { name: 'Speichern', exact: true })
       .waitFor();
@@ -761,9 +772,7 @@ try {
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
-    await page
-      .getByRole('button', { name: 'Pods & sharing', exact: true })
-      .click();
+    await menu(page, 'Pods & sharing');
     await page.getByText('Connect another Pod', { exact: true }).click();
     // New drafts cannot start while connect awaits discovery/registration.
     let releaseDiscovery;
@@ -836,7 +845,7 @@ try {
       .waitFor();
     assert.equal(await saved.count(), 1);
     await draft.fill('Draft retained');
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, 'Deutsch');
     assert.equal(
       await page.getByLabel('Aufgabe', { exact: true }).last().inputValue(),
       'Draft retained',
@@ -849,7 +858,7 @@ try {
     );
     await page.keyboard.press('Escape');
     assert.equal(await page.getByLabel('Datenkontext').inputValue(), work);
-    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await menu(page, 'English');
     await page
       .getByRole('button', { name: 'Discard changes', exact: true })
       .click();
@@ -1067,7 +1076,7 @@ try {
       .getByRole('button', { name: 'I have checked the pod', exact: true })
       .click();
     // The list reloads with the app's own label, not the SDK's.
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await add('After unknown deletion');
     // #136: a retained list keeps its rows in every frame while it reloads,
@@ -1114,7 +1123,7 @@ try {
       .filter({ hasText: /^Loading/ });
     let release = await holdList();
     let requested = listRequest();
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     await requested;
     assert.equal(await keptRow().count(), 1);
     assert.equal(await loadingStatus.count(), 0);
@@ -1134,20 +1143,20 @@ try {
     await page.route(listQuery, (route) =>
       route.fulfill({ status: 403, body: '' }),
     );
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     const stale = page
       .getByRole('alert')
       .filter({ hasText: 'What is shown may be out of date.' });
     await stale.waitFor();
     assert.equal(await keptRow().count(), 1);
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, 'Deutsch');
     await page
       .getByRole('alert')
       .filter({ hasText: 'Die Anzeige ist vielleicht nicht aktuell.' })
       .waitFor();
-    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await menu(page, 'English');
     await page.unroute(listQuery);
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     await stale.waitFor({ state: 'detached' });
     assert.equal(
       await page.evaluate(() => {
@@ -1171,10 +1180,9 @@ try {
       await route.fulfill({ response, json: body });
     });
     // AppAccess offers Check access in its management.
-    const management = page.getByRole('button', {
-      name: 'Pods & sharing',
-      exact: true,
-    });
+    const management = page
+      .locator('#app-menu')
+      .getByRole('button', { name: 'Pods & sharing', exact: true });
     let opened = false;
     const recheck = async () => {
       const check = page.getByRole('button', {
@@ -1182,7 +1190,7 @@ try {
         exact: true,
       });
       if ((await check.count()) === 0) {
-        await management.click();
+        await menu(page, 'Pods & sharing');
         opened = true;
       }
       await check.click();
@@ -1194,7 +1202,7 @@ try {
     await keptRow().waitFor();
     // Leave the shell as it was for the steps below.
     if (opened && (await management.getAttribute('aria-expanded')) === 'true')
-      await management.click();
+      await menu(page, 'Pods & sharing');
     // Creation drafts use the same keyboard-accessible leave confirmation.
     await page.getByLabel('New task', { exact: true }).fill('Uncreated');
     await page
@@ -1227,7 +1235,7 @@ try {
     const busy = await context.newPage();
     await busy.goto(origin + '/');
     await busy.getByRole('alert').filter({ hasText: 'another tab' }).waitFor();
-    await busy.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(busy, 'Deutsch');
     await busy.getByRole('alert').filter({ hasText: 'anderen Tab' }).waitFor();
     await busy.close();
     // A reload keeps the session and reselects the last chosen context from
@@ -1276,7 +1284,7 @@ try {
         .count(),
       0,
     );
-    await failed.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(failed, 'Deutsch');
     await failed
       .getByRole('alert')
       .filter({ hasText: 'Sitzungsspeicher' })
@@ -1433,7 +1441,7 @@ try {
     assert.deepEqual(afterOffline, { loads: 0, auth: 0 });
     // An update is announced but never reloads over a draft.
     await page.getByLabel('New task', { exact: true }).fill('Unsaved draft');
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, 'Deutsch');
     workerVersion = 'v2';
     await page.evaluate(() =>
       navigator.serviceWorker.getRegistration().then((r) => r.update()),
@@ -1452,14 +1460,14 @@ try {
     );
     // The already-visible notice follows the app's language without a remount
     // or worker takeover; the creation draft survives both changes.
-    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await menu(page, 'English');
     await englishUpdate.waitFor();
     assert.equal(await germanUpdate.count(), 0);
     assert.equal(
       await page.getByLabel('New task', { exact: true }).inputValue(),
       'Unsaved draft',
     );
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, 'Deutsch');
     await germanUpdate.waitFor();
     assert.equal(await englishUpdate.count(), 0);
     assert.equal(

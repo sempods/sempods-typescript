@@ -35,10 +35,9 @@ input {
 }
 
 /* App actions read as text; only adding a task is filled. */
-nav button,
-.app-heading button,
-.tasks button,
-.reload {
+.menu-button,
+.menu button,
+.tasks button {
   min-height: 44px;
   padding: 10px 12px;
   border: 0;
@@ -48,21 +47,37 @@ nav button,
   font-weight: 500;
   cursor: pointer;
 }
-nav button:hover,
-.app-heading button:hover,
-.tasks button:hover,
-.reload:hover {
+.menu-button:hover,
+.menu button:hover {
   background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
 }
-.primary {
-  min-height: 44px;
-  padding: 10px 16px;
+svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.add {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 50%;
   color: var(--sempods-on-accent);
   background: var(--sempods-accent);
-  font-weight: 500;
   cursor: pointer;
+}
+.add svg,
+.menu-button svg {
+  width: 22px;
+  height: 22px;
+}
+.menu-button svg {
+  fill: currentColor;
+  stroke: none;
 }
 button:disabled,
 input:disabled {
@@ -70,37 +85,62 @@ input:disabled {
   cursor: default;
 }
 
-/* Page: a narrow column, the language switch small at the top. */
-nav,
+/* Page: a narrow column with the header on top. */
 .standard {
   max-width: 640px;
   margin-inline: auto;
-  padding-inline: 16px;
-}
-nav {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 8px;
-}
-nav button {
-  color: var(--sempods-muted);
-  font-size: 0.875rem;
-}
-.standard {
-  padding-bottom: 32px;
+  padding: 8px 16px 32px;
 }
 .app-heading {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-height: 56px;
 }
 .app-heading h1 {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 600;
 }
-.app-heading button {
+.app-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--sempods-accent);
+}
+.menu-button {
   margin-inline-start: auto;
+  padding: 10px;
+  anchor-name: --app-menu;
+}
+
+/* The menu opens below its button (anchor positioning, else top right). */
+.menu {
+  inset: auto;
+  position-anchor: --app-menu;
+  top: anchor(bottom);
+  right: anchor(right);
+  margin: 4px 0 0;
+  min-width: 12rem;
+  padding: 6px;
+  border: 1px solid var(--sempods-line);
+  border-radius: 12px;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+@supports not (anchor-name: --a) {
+  .menu {
+    top: 56px;
+    right: 16px;
+  }
+}
+.menu:popover-open {
+  display: grid;
+}
+.menu button {
+  text-align: start;
+  color: var(--sempods-text);
+  font-weight: 400;
 }
 
 /* The list: a checkbox to finish a task, its title to edit it. */
@@ -124,6 +164,7 @@ nav button {
 }
 .tasks li button {
   flex: 1;
+  padding-inline: 4px;
   text-align: start;
   color: var(--sempods-text);
   font-weight: 400;
@@ -157,10 +198,4 @@ nav button {
   border-radius: 8px;
   color: var(--sempods-text);
   background: var(--sempods-bg);
-}
-.reload {
-  display: block;
-  margin: 16px auto 0;
-  color: var(--sempods-muted);
-  font-size: 0.875rem;
 }

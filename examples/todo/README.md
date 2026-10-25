@@ -21,8 +21,9 @@ its own Context with one click) are further copyable screens.
 
 Open `http://127.0.0.1:5173/`. The app uses only the SDK's standard UI:
 `AppAccess` for sign-in and recovery beside the app's own header and task
-screen, `ResourceEditor` and `UpdateNotice` for editing and outcomes. Use
-**Pods & sharing** to open management after connecting. Enter the Pod address,
+screen, `ResourceEditor` and `UpdateNotice` for editing and outcomes. The ⋮ menu
+in the header (a native popover) opens **Pods & sharing** after connecting and
+picks the language. Enter the Pod address,
 sign in on the Pod, then explicitly select a context. The UI follows the
 browser's language until EN/DE is picked. No protocol or session logic lives in
 the app. The callback route is served by the development server. Configure
@@ -31,11 +32,12 @@ a production identity/HTTPS origin before deploying; see
 
 Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
 or reopens a task, its title opens the editor below the list, and the input at
-the bottom adds one. The list keeps its rows while it reloads and after a
-failed refresh; `LoadNotice` says what the read does, with a retry. A new or changed row is its own
+the bottom adds one. The list reads again when the page becomes visible
+(no reload button) and keeps its rows while it reloads and after a failed
+refresh; `LoadNotice` says what the read does, with a retry. A new or changed row is its own
 confirmation (`UpdateNotice quiet`); refusals, conflicts and unconfirmed
 outcomes still show. The UI starts in the browser's language (German or
-English, else English); the EN/DE switches then pick one and retranslate
+English, else English); picking one in the menu retranslates
 controls without changing an open draft. Row/context/Pod switches confirm dirty
 drafts. Conflict and lost-answer feedback requires comparison before continuing;
 no write is automatically replayed. The new-task input is cleared only after

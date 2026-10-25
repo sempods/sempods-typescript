@@ -28,9 +28,9 @@ function TaskScreen() {
     add: de ? 'Hinzufügen' : 'Add',
     done: de ? 'Erledigt' : 'Done',
     empty: de ? 'Noch keine Aufgaben.' : 'No tasks yet.',
-    reload: de ? 'Neu laden' : 'Reload',
   };
-  // The rows stay while the list reloads; LoadNotice says what the read does.
+  // The rows stay while the list reloads, also when the page becomes visible
+  // again; LoadNotice says what the read does and offers a retry.
   const list = useList(taskFields);
   const tasks = list.data?.items;
   const mutate = useFieldUpdate(taskFields);
@@ -108,21 +108,33 @@ function TaskScreen() {
           value={creation.draft.title}
           onChange={(e) => creation.change({ title: e.target.value })}
         />
-        <button className="primary" disabled={!creation.canCreate}>
-          {m.add}
+        <button
+          className="add"
+          aria-label={m.add}
+          title={m.add}
+          disabled={!creation.canCreate}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
         </button>
       </form>
-      <button className="reload" onClick={() => void list.reload()}>
-        {m.reload}
-      </button>
     </section>
   );
 }
 
+/** The app's icon: in the header and on the sign-in screen. */
+const icon = (
+  <svg className="app-icon" viewBox="0 0 32 32" aria-hidden="true">
+    <rect x="3" y="3" width="26" height="26" rx="7" />
+    <path d="m10 16.5 4 4 8-9" />
+  </svg>
+);
+
 /**
  * The TODO app with the SDK's standard UI: `AppAccess` beside the app's own
- * header and screen. The EN/DE switch is the only addition; until it is used,
- * the provider follows the browser's language.
+ * header and screen. Until a language is picked in the menu, the provider
+ * follows the browser's language.
  */
 export function TodoApp({
   runtime,
@@ -132,53 +144,84 @@ export function TodoApp({
   /** App-level notices share the selected language and remain outside target gates. */
   readonly children?: ReactNode;
 }) {
-  // Until the person picks one, the provider follows the browser's language.
   // A picked locale sets messages and formatting together.
   const [locale, setLocale] = useState<'en' | 'de'>();
 
   return (
     <SempodsProvider runtime={runtime} {...(locale ? { locale } : {})}>
-      <nav aria-label="Language">
-        <button aria-label="English" onClick={() => setLocale('en')}>
-          EN
-        </button>
-        <button aria-label="Deutsch" onClick={() => setLocale('de')}>
-          DE
-        </button>
-      </nav>
       {children}
-      <StandardScreen />
+      <StandardScreen onLocale={setLocale} />
     </SempodsProvider>
   );
 }
 
-function StandardScreen() {
+function StandardScreen({
+  onLocale,
+}: {
+  readonly onLocale: (locale: 'en' | 'de') => void;
+}) {
   const [open, setOpen] = useState(false);
   const focusTarget = useRef<HTMLButtonElement>(null);
   const { messages, language } = useSdkLocale();
   const { view, connections } = useAppState();
   const access = useWorkflowAccess();
+  const de = language === 'de';
 
   return (
     <main className="standard">
-      {connections.length > 0 && (
-        <header className="app-heading">
-          {view && <h1>TODO</h1>}
+      <header className="app-heading">
+        {view && (
+          <>
+            {icon}
+            <h1>TODO</h1>
+          </>
+        )}
+        {/* A native popover: the browser closes it on Escape or outside. */}
+        <button
+          ref={focusTarget}
+          className="menu-button"
+          popoverTarget="app-menu"
+          aria-label={de ? 'Menü' : 'Menu'}
+          title={de ? 'Menü' : 'Menu'}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="5" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="12" cy="19" r="1.8" />
+          </svg>
+        </button>
+        <div id="app-menu" className="menu" popover="auto">
+          {connections.length > 0 && (
+            <button
+              popoverTarget="app-menu"
+              popoverTargetAction="hide"
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+            >
+              {messages.controls.dataAccess}
+            </button>
+          )}
           <button
-            ref={focusTarget}
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
+            popoverTarget="app-menu"
+            popoverTargetAction="hide"
+            onClick={() => onLocale('en')}
           >
-            {messages.controls.dataAccess}
+            English
           </button>
-        </header>
-      )}
+          <button
+            popoverTarget="app-menu"
+            popoverTargetAction="hide"
+            onClick={() => onLocale('de')}
+          >
+            Deutsch
+          </button>
+        </div>
+      </header>
       <AppAccess
         appName="TODO"
+        icon={icon}
         description={
-          language === 'de'
-            ? 'Aufgaben, gespeichert in einem Pod.'
-            : 'Tasks, stored in a Pod.'
+          de ? 'Aufgaben, gespeichert in einem Pod.' : 'Tasks, stored in a Pod.'
         }
         open={open}
         focusTarget={focusTarget}

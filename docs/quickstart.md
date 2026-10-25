@@ -203,7 +203,8 @@ check the Pod's current version before acknowledging; nothing is resent. A succe
 the target starts, so the notices show the last action; unresolved outcomes stay until
 acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
-[TODO example](../examples/todo/src/app.tsx) adds an EN/DE switch.
+[TODO example](../examples/todo/src/app.tsx) adds an icon and a header menu
+with the language switch.
 
 Replace Vite's demo styles in `src/index.css`. AppAccess, the editor and the
 notices style themselves from the `--sempods-*` tokens; set them once so your
