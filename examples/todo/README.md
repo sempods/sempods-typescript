@@ -23,8 +23,9 @@ Open `http://127.0.0.1:5173/`. The app uses only the SDK's standard UI:
 `AppAccess` for sign-in and recovery beside the app's own header and task
 screen, `ResourceEditor` and `UpdateNotice` for editing and outcomes. The ⋮ menu
 in the header (a native popover) opens **Pods & sharing** after connecting and
-picks the language. Enter the Pod address,
-sign in on the Pod, then explicitly select a context. The UI follows the
+picks the language. Enter the Pod address and sign in on the Pod; the app
+then shows a list (a readable Context) and names it in the header. With several
+lists the title switches between them (`useContexts()`). The UI follows the
 browser's language until EN/DE is picked. No protocol or session logic lives in
 the app. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see

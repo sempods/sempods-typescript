@@ -242,3 +242,58 @@ it.each([
     expect(screen.queryByText(text[initial].description)).toBeNull();
   },
 );
+
+it('the TODO header switches lists and marks a read-only one', async () => {
+  await signedIn('en', async () => Response.json([]));
+  expect(await screen.findByText(text.en.empty)).toBeTruthy();
+  const heading = screen.getByRole('heading', { level: 1 });
+  expect(heading.textContent).toBe('work');
+  const menu = document.getElementById('list-menu')!;
+  const personalList = within(menu).getByRole('button', {
+    name: /^personal/,
+    hidden: true,
+  });
+  expect(personalList.textContent).toContain('read only');
+  expect(
+    within(menu)
+      .getByRole('button', { name: /^work/, hidden: true })
+      .getAttribute('aria-pressed'),
+  ).toBe('true');
+  fireEvent.click(personalList);
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
+      'personal',
+    ),
+  );
+  expect(
+    await screen.findByText('You can read this context, but cannot change it.'),
+  ).toBeTruthy();
+});
+
+it('the TODO header names a single list without a switch', async () => {
+  const f = fixture();
+  f.setCatalogue(async () => catalogue([work], [work]));
+  const session = await f.login();
+  cleanups.push(() => session.runtime.dispose());
+  f.setQuery(async () => Response.json([]));
+  render(<TodoApp runtime={session.runtime} />);
+  expect(await screen.findByText(text.en.empty)).toBeTruthy();
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('work');
+  expect(document.getElementById('list-menu')).toBeNull();
+});
+
+it('the TODO header says when sharing more lists cannot reach the Pod', async () => {
+  const f = await signedIn('en', async () => Response.json([]));
+  expect(await screen.findByText(text.en.empty)).toBeTruthy();
+  const share = within(document.getElementById('list-menu')!).getByRole(
+    'button',
+    { name: 'Share more lists', hidden: true },
+  );
+  // Preparing the consent fails before the page leaves: the session stays.
+  const navigations = f.navigate.mock.calls.length;
+  f.fetch.mockRejectedValueOnce(new TypeError('offline'));
+  fireEvent.click(share);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  expect(screen.getByText(text.en.empty)).toBeTruthy();
+});

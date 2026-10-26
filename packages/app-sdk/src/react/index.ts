@@ -8,10 +8,11 @@ export {
   useApp,
   useAppState,
   useConnections,
+  useContexts,
   useView,
   useWorkflowAccess,
 } from './app.js';
-export type { AppActions } from './app.js';
+export type { AppActions, ContextChoice } from './app.js';
 export {
   useLoad,
   usePodLoad,

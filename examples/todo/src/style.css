@@ -98,6 +98,9 @@ input:disabled {
   min-height: 56px;
 }
 .app-heading h1 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: 1.5rem;
   font-weight: 600;
@@ -157,6 +160,52 @@ input:disabled {
 .check {
   display: inline-block;
   width: 1.5em;
+}
+.menu small {
+  margin-inline-start: 8px;
+  color: var(--sempods-muted);
+  font-size: 0.8125rem;
+}
+.menu hr {
+  margin: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--sempods-line);
+}
+
+/* The list switch: the list's name as the title, its menu below it. */
+.list-button {
+  display: inline-flex;
+  max-width: 100%;
+  text-align: start;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin-inline-start: -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--sempods-text);
+  background: transparent;
+  cursor: pointer;
+  anchor-name: --list-menu;
+}
+.list-button:hover {
+  background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
+}
+.list-button svg {
+  width: 20px;
+  height: 20px;
+}
+.list-menu {
+  position-anchor: --list-menu;
+  right: auto;
+  left: anchor(left);
+}
+@supports not (anchor-name: --a) {
+  .list-menu {
+    right: auto;
+    left: 16px;
+  }
 }
 
 /* The list: a checkbox to finish a task, its title to edit it. */

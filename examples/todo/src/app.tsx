@@ -6,7 +6,9 @@ import {
   ResourceEditor,
   UpdateNotice,
   SempodsProvider,
+  useApp,
   useAppState,
+  useContexts,
   useFieldUpdate,
   useCreation,
   useList,
@@ -159,9 +161,13 @@ function StandardScreen({
 }) {
   const [open, setOpen] = useState(false);
   const focusTarget = useRef<HTMLButtonElement>(null);
-  const { messages, language } = useSdkLocale();
+  const { messages, language, error } = useSdkLocale();
   const { view, connections } = useAppState();
   const access = useWorkflowAccess();
+  // Mounted before a list is chosen: it selects one, so no chooser appears.
+  const lists = useContexts();
+  // Preparing the Pod's consent can fail (unreachable Pod); say so here.
+  const [shareFailure, setShareFailure] = useState<{ cause: unknown }>();
   const de = language === 'de';
   // Language names in the current language: Deutsch/Englisch, German/English.
   const names = useMemo(
@@ -175,7 +181,7 @@ function StandardScreen({
         {view && (
           <>
             {icon}
-            <h1>TODO</h1>
+            <ListSwitch lists={lists} onShareFailed={setShareFailure} />
           </>
         )}
         {/* A native popover: the browser closes it on Escape or outside. */}
@@ -224,6 +230,7 @@ function StandardScreen({
           </div>
         </div>
       </header>
+      {shareFailure && <p role="alert">{error(shareFailure.cause)}</p>}
       <AppAccess
         appName="TODO"
         icon={icon}
@@ -240,5 +247,71 @@ function StandardScreen({
         <TaskScreen />
       </TargetScreen>
     </main>
+  );
+}
+
+/**
+ * The header's list switch: the chosen list's name, and with several lists a
+ * menu to switch (under the leave policy) or to share more lists on the Pod.
+ */
+function ListSwitch({
+  lists,
+  onShareFailed,
+}: {
+  readonly lists: ReturnType<typeof useContexts>;
+  /** Sharing more lists failed before reaching the Pod; undefined clears it. */
+  readonly onShareFailed: (failure: { cause: unknown } | undefined) => void;
+}) {
+  const de = useSdkLocale().language === 'de';
+  const { authorize } = useApp();
+  const { connection } = useWorkflowAccess();
+  const current = lists.selected;
+  if (!current) return null;
+  if (lists.contexts.length < 2) return <h1>{current.name}</h1>;
+  return (
+    <>
+      <h1>
+        <button className="list-button" popoverTarget="list-menu">
+          {current.name}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+      </h1>
+      <div id="list-menu" className="menu list-menu" popover="auto">
+        {lists.contexts.map((list) => (
+          <button
+            key={list.iri}
+            popoverTarget="list-menu"
+            popoverTargetAction="hide"
+            aria-pressed={list.iri === current.iri}
+            onClick={() => void lists.select(list.iri)}
+          >
+            <span className="check" aria-hidden="true">
+              {list.iri === current.iri ? '✓' : ''}
+            </span>
+            {list.name}
+            {!list.writable && <small>{de ? 'nur lesen' : 'read only'}</small>}
+          </button>
+        ))}
+        {connection && (
+          <>
+            <hr />
+            <button
+              popoverTarget="list-menu"
+              popoverTargetAction="hide"
+              onClick={() => {
+                onShareFailed(undefined);
+                void authorize(connection.id).catch((cause: unknown) =>
+                  onShareFailed({ cause }),
+                );
+              }}
+            >
+              {de ? 'Weitere Listen freigeben' : 'Share more lists'}
+            </button>
+          </>
+        )}
+      </div>
+    </>
   );
 }

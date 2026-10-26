@@ -29,6 +29,18 @@ async function menu(page, name) {
     .getByRole('button', { name, exact: true })
     .click();
 }
+/** Switches lists in the header (the app's own Context switch). */
+async function switchList(page, name) {
+  await page.locator('.list-button').click();
+  await page
+    .locator('#list-menu')
+    .getByRole('button', { name: new RegExp('^' + name) })
+    .click();
+}
+/** The app selects a list itself after sign-in: no chooser appears. */
+async function listShown(page, name) {
+  await page.getByRole('heading', { level: 1, name, exact: true }).waitFor();
+}
 /** Closes the management dialog in either language. */
 async function closeManagement(page) {
   await page.getByRole('button', { name: /^(Close|Schließen)$/ }).click();
@@ -497,7 +509,7 @@ try {
       })
       .click();
     // Redirect initializes the example's default language again.
-    await page.getByLabel('Data context', { exact: true }).selectOption(work);
+    await listShown(page, 'work');
     const input = page.getByLabel('New task', { exact: true });
     await input.fill('Shell-free task');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -585,18 +597,14 @@ try {
     }
     await page.getByLabel('Pod address').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page
-      .getByRole('option', { name: 'work', exact: true })
-      .waitFor({ state: 'attached' });
-    await page
-      .getByRole('option', { name: 'personal', exact: true })
-      .waitFor({ state: 'attached' });
-    await page.getByLabel('Data context', { exact: true }).selectOption(work);
+    // Both lists are labelled "Tasks": the switch adds their short names.
+    await listShown(page, 'Tasks · work');
     await page
       .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
     await page.getByLabel('New task', { exact: true }).fill('SDK baseline');
-    assert.deepEqual(labelRequests, [work]);
+    // The list switch names each readable list once.
+    assert.deepEqual([...labelRequests].sort(), [personal, work].sort());
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
       .getByRole('button', { name: 'SDK baseline', exact: true })
@@ -763,7 +771,7 @@ try {
     await page.goto(origin + '/');
     await page.getByLabel('Pod address').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Data context').selectOption(work);
+    await listShown(page, 'work');
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await menu(page, 'Pods & sharing');
     // New drafts cannot start while a sign-in awaits discovery/registration.
@@ -848,18 +856,15 @@ try {
       await page.getByLabel('Aufgabe', { exact: true }).last().inputValue(),
       'Draft retained',
     );
-    // The Context is chosen in the management dialog; the leave prompt opens
-    // above it and keeps the draft.
-    await menu(page, 'Pods & Freigaben');
-    await page.getByLabel('Datenkontext').selectOption(personal);
+    // Switching lists in the header asks before the draft is lost.
+    await switchList(page, 'personal');
     await page.getByRole('alertdialog').waitFor();
     assert.equal(
       await page.evaluate(() => document.activeElement?.textContent),
       'Weiter bearbeiten',
     );
     await page.keyboard.press('Escape');
-    assert.equal(await page.getByLabel('Datenkontext').inputValue(), work);
-    await closeManagement(page);
+    await listShown(page, 'work');
     await menu(page, english);
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).click();
@@ -1023,16 +1028,12 @@ try {
       .getByRole('button', { name: 'Maybe created', exact: true })
       .click();
     await page.getByLabel('Task', { exact: true }).fill('Leave me');
-    await menu(page, 'Pods & sharing');
-    await page.getByLabel('Data context').selectOption(personal);
+    await switchList(page, 'personal');
     await page
       .getByRole('button', { name: 'Discard and continue', exact: true })
       .click();
-    await closeManagement(page);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
-    await menu(page, 'Pods & sharing');
-    await page.getByLabel('Data context').selectOption(work);
-    await closeManagement(page);
+    await switchList(page, 'work');
     await page
       .getByRole('button', { name: 'Maybe created', exact: true })
       .waitFor();
@@ -1213,8 +1214,7 @@ try {
       await page.getByLabel('New task', { exact: true }).inputValue(),
       'Uncreated',
     );
-    await menu(page, 'Pods & sharing');
-    await page.getByLabel('Data context').selectOption(personal);
+    await switchList(page, 'personal');
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Tab');
     assert.equal(
@@ -1222,7 +1222,6 @@ try {
       'Discard and continue',
     );
     await page.keyboard.press('Escape');
-    await closeManagement(page);
     assert.ok(
       await page.evaluate(
         () =>
@@ -1345,7 +1344,7 @@ try {
     seen.length = 0;
     await page.getByLabel('Pod address').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Data context').selectOption(work);
+    await listShown(page, 'work');
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await page.getByLabel('New task', { exact: true }).fill('Installed');
     await page.getByRole('button', { name: 'Add', exact: true }).click();

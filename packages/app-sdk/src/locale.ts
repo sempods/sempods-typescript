@@ -231,8 +231,8 @@ export const englishMessages: SdkMessages = {
       'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
 
     contextAccess: 'Available to this app',
-    canRead: 'This app can read',
-    canChange: 'This app can read and change',
+    canRead: 'Read only',
+    canChange: 'Read and write',
     connectAnother: 'Connect another Pod',
     refresh: 'Check again',
     busy: 'Open in another tab. Close that tab and reload here.',
@@ -369,8 +369,8 @@ export const germanMessages: SdkMessages = {
       'Der Pod ist gerade nicht erreichbar. Du bleibst angemeldet; die App verbindet sich wieder, sobald das Netz zurück ist.',
 
     contextAccess: 'Für diese App verfügbar',
-    canRead: 'Diese App kann lesen',
-    canChange: 'Diese App kann lesen und ändern',
+    canRead: 'Nur lesen',
+    canChange: 'Lesen und schreiben',
     connectAnother: 'Weiteren Pod verbinden',
     refresh: 'Erneut prüfen',
     busy: 'In einem anderen Tab geöffnet. Schließe diesen Tab und lade hier neu.',
