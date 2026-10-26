@@ -368,6 +368,22 @@ export function useContexts() {
   const retry = useCallback(async () => {
     if (id) await actions.refreshContexts(id).catch(() => {});
   }, [actions, id]);
+  const { error } = useSdkLocale();
+  // A failure before the Pod's consent page, kept for its connection only.
+  const [shareFailure, setShareFailure] = useState<{
+    readonly id: string;
+    readonly cause: unknown;
+  } | null>(null);
+  const share = useCallback(async () => {
+    if (!id) return false;
+    setShareFailure(null);
+    try {
+      return await actions.authorize(id);
+    } catch (cause) {
+      setShareFailure({ id, cause });
+      return false;
+    }
+  }, [actions, id]);
   return {
     contexts,
     selected: contexts.find((entry) => entry.iri === selectedIri) ?? null,
@@ -378,6 +394,16 @@ export function useContexts() {
     /** The catalogue failed; known Contexts may still show. */
     failed: catalogue?.kind === 'failed',
     retry,
+    /** Whether `share` can ask the Pod now (a signed-in connection). */
+    canShare: id !== null,
+    /**
+     * Asks the Pod to share more Contexts with this app: its consent page
+     * opens, and the catalogue reloads on return. Runs under the leave policy.
+     */
+    share,
+    /** Why the last `share` failed before reaching the Pod, in the UI language. */
+    shareProblem:
+      shareFailure && shareFailure.id === id ? error(shareFailure.cause) : null,
   };
 }
 /** What `useContexts` returns. */

@@ -6,6 +6,7 @@ import {
   useAppState,
   useCreation,
   useList,
+  useMessages,
   useSdkLocale,
   useWorkflowAccess,
 } from '@sempods/app-sdk/react';
@@ -109,20 +110,35 @@ function Frame({
   );
 }
 
+const labels = {
+  en: {
+    tasks: 'Tasks',
+    empty: 'No tasks yet.',
+    quickAdd: 'Quick add',
+    newTask: 'New task',
+    add: 'Add',
+  },
+  de: {
+    tasks: 'Aufgaben',
+    empty: 'Noch keine Aufgaben.',
+    quickAdd: 'Schnellerfassung',
+    newTask: 'Neue Aufgabe',
+    add: 'Hinzufügen',
+  },
+};
+
 /** Read-only list: the host's write grant is not required to display tasks. */
 export function TaskListWidget({ fallback }: WidgetProps) {
   // Rows the definition cannot show are already skipped and counted.
   const list = useList(taskFields);
-  const { language } = useSdkLocale();
+  const m = useMessages(labels);
   const items = list.data?.items;
   return (
-    <section aria-label={language === 'de' ? 'Aufgaben' : 'Tasks'}>
-      <h2>{language === 'de' ? 'Aufgaben' : 'Tasks'}</h2>
+    <section aria-label={m.tasks}>
+      <h2>{m.tasks}</h2>
       <Frame fallback={fallback}>
         <LoadNotice {...list} />
-        {items?.length === 0 && (
-          <p>{language === 'de' ? 'Noch keine Aufgaben.' : 'No tasks yet.'}</p>
-        )}
+        {items?.length === 0 && <p>{m.empty}</p>}
         {items && (
           <ul>
             {items.map((item) => (
@@ -145,10 +161,10 @@ export function QuickAddWidget({ fallback }: WidgetProps) {
     collection: 'tasks',
   });
   const access = useWorkflowAccess();
-  const { language } = useSdkLocale();
+  const m = useMessages(labels);
   return (
-    <section aria-label={language === 'de' ? 'Schnellerfassung' : 'Quick add'}>
-      <h2>{language === 'de' ? 'Schnellerfassung' : 'Quick add'}</h2>
+    <section aria-label={m.quickAdd}>
+      <h2>{m.quickAdd}</h2>
       <Frame
         fallback={fallback}
         recovery={<UpdateNotice {...creation.notice} />}
@@ -160,7 +176,7 @@ export function QuickAddWidget({ fallback }: WidgetProps) {
           }}
         >
           <label>
-            {language === 'de' ? 'Neue Aufgabe' : 'New task'}
+            {m.newTask}
             <input
               value={creation.draft.title}
               disabled={!access.write || !creation.canEdit}
@@ -169,9 +185,7 @@ export function QuickAddWidget({ fallback }: WidgetProps) {
               }
             />
           </label>
-          <button disabled={!creation.canCreate}>
-            {language === 'de' ? 'Hinzufügen' : 'Add'}
-          </button>
+          <button disabled={!creation.canCreate}>{m.add}</button>
         </form>
       </Frame>
     </section>
