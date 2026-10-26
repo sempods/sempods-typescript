@@ -308,9 +308,18 @@ export function useContexts() {
     const labels =
       catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
     const iris = readable.map((entry) => entry.iri);
+    const label = (iri: string) => contextName(iri, labels);
+    // Equal labels add the short name ("Tasks · work"), still equal ones the IRI.
+    const short = (iri: string) => {
+      const plain = contextName(iri, undefined);
+      return label(iri) === plain ? plain : `${label(iri)} · ${plain}`;
+    };
     return readable.map((entry): ContextChoice => ({
       iri: entry.iri,
-      name: distinctName(entry.iri, iris, (iri) => contextName(iri, labels)),
+      name:
+        distinctName(entry.iri, iris, label) === label(entry.iri)
+          ? label(entry.iri)
+          : distinctName(entry.iri, iris, short),
       writable: entry.writable,
     }));
   }, [catalogue, fixed]);

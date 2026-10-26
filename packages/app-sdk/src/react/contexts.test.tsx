@@ -153,6 +153,18 @@ it.each(['required', 'on-demand'] as const)(
   },
 );
 
+it('tells equal labels apart by their short names', async () => {
+  const f = await returnedSession(keep);
+  f.setDescriptions(labelled({ [work]: 'Tasks', [personal]: 'Tasks' }));
+  render(<App runtime={f.runtime} />);
+  await waitFor(() =>
+    expect(items()).toEqual([
+      'Tasks · workcan change',
+      'Tasks · personalread only',
+    ]),
+  );
+});
+
 it('keeps a preset Context and offers only that one', async () => {
   const f = await returnedSession(
     keep,
