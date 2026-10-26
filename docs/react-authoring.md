@@ -389,8 +389,13 @@ Decide first which Contexts the app works with:
 - **Several Contexts, acting in the selected one,** for example task lists or
   shopping lists switched in the app's header: use `useContexts()`.
 - **Reading all Contexts, writing in one:** see
-  [Pod overviews](#pod-overviews-with-contexts-on-demand); the selected
-  Context is the one `useCreation` writes into.
+  [Pod overviews](#pod-overviews-with-contexts-on-demand); `useCreation` writes
+  into the selected Context, or into a fixed one with `context`.
+- **Writing into several Contexts,** for example a shared task with a private
+  note: one `useCreation` per Context with `context`, created one after the
+  other, as the
+  [task-with-note recipe](../examples/todo/recipes/task-with-note.tsx) shows.
+  There is no transaction across Contexts: each part reports its own outcome.
 
 `useContexts()` gives an app-owned switch what it needs:
 
@@ -696,7 +701,22 @@ have separate feedback and cannot clear the creation draft. The registered targe
 protects unsubmitted drafts and recovery through row navigation, and asks before
 a context/Pod/disconnect transition. A forced lifetime change retires old results.
 Use `<UpdateNotice {...creation.notice} />` and bind input disabled state to
-`!creation.canEdit`, submit to `!creation.canCreate`.
+`!creation.canEdit`, submit to `!creation.canCreate`. Every sent `create()`
+resolves with the captured `iri`, for example to link a second creation to it;
+an unconfirmed creation keeps that IRI for its check and retry.
+
+`context` creates in an explicit Context instead of the selected one:
+`useCreation(definition, { initial, collection, context })`. The hook binds it
+with `runtime.bindContext` once startup has settled and demands catalogue
+discovery (no selection) so its write access is known. `refused` reports a
+`context` that is not a Context of the active connection's Pod, or not an exact
+preset's; nothing is created there. The draft, its target and a pending or
+uncertain creation stay when another Context is selected or a row opens (guard
+scope `explicit`); connection actions ask first. Lists of the same Context read
+again after a confirmed creation, as for the selected one. Without React,
+`bindCreation(runtime.bindContext(id, context), definition, draft, { collection })`
+captures one creation; its `run()` counts as a write on that Context in the
+same way.
 
 Creation, row and editor feedback on one target follow one rule, so notices
 rendered side by side describe the last write. A success (`created`, `saved`,
@@ -785,7 +805,10 @@ as the hook: a target change then drops it, instead of carrying unsent items to
 another target. [React tests](../packages/app-sdk/src/react/safe-authoring.test.tsx)
 run this handler against fixtures, including a target change during a creation.
 Without React, prepare one `prepareCreation` per item with `newSubjectIri` and
-`await` each `run()` the same way.
+`await` each `run()` the same way. Parts of one input that belong in different
+Contexts are created the same way with one hook per Context (`context`); the
+[task-with-note recipe](../examples/todo/recipes/task-with-note.tsx) keeps a
+created task when its private note is refused and retries only the note.
 
 ## Standard UI for one known Pod
 

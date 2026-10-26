@@ -463,6 +463,49 @@ it('lets a Context selection pass a saving connection-scoped editor, which still
   expect(await app.selectContext(personal)).toBe(true);
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBe(personal);
 });
+it('keeps an explicit-scoped draft through row navigation and Context selection, but asks before a connection change', async () => {
+  const f = await connected();
+  const other = await f.runtime.connect('https://pod.example/bob');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const discard = vi.fn();
+  app.register({
+    scope: 'explicit',
+    dirty: () => true,
+    blocked: () => false,
+    discard,
+  });
+  const row = vi.fn();
+  expect(await app.navigate(row)).toBe(true);
+  expect(row).toHaveBeenCalled();
+  expect(await app.selectContext(personal)).toBe(true);
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  expect(discard).not.toHaveBeenCalled();
+  const switching = app.selectConnection(other.id);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  app.cancelLeave();
+  expect(await switching).toBe(false);
+  expect(discard).not.toHaveBeenCalled();
+});
+it('lets a Context selection pass a pending explicit-scoped creation, which still blocks row navigation', async () => {
+  const f = await connected();
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  app.register({
+    scope: 'explicit',
+    dirty: () => true,
+    blocked: () => true,
+    discard: () => {},
+  });
+  const row = vi.fn();
+  expect(await app.navigate(row)).toBe(false);
+  expect(row).not.toHaveBeenCalled();
+  expect(await app.selectContext(personal)).toBe(true);
+});
 it('keeps a saving target-scoped write blocking row navigation', async () => {
   const f = await connected();
   const app = createAppController(f.runtime);

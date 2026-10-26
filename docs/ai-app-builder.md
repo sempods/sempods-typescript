@@ -126,7 +126,9 @@ not instructions to the coding assistant.
   `phase` is `unavailable`. For a one-click change such as ticking a task, drive
   the same editor (`change`, then one `save`) as the
   [one-click recipe](../examples/todo/recipes/overview-toggle.tsx) does. See the
-  [overview recipe](../examples/todo/recipes/pod-overview.tsx),
+  [overview recipe](../examples/todo/recipes/pod-overview.tsx), the
+  [task-with-note recipe](../examples/todo/recipes/task-with-note.tsx) for
+  writing one input into several Contexts (`useCreation` with `context`),
   [editing an overview row](react-authoring.md#editing-an-overview-row) and the
   [loader/access contract](react-authoring.md#pod-overviews-with-contexts-on-demand).
 - For an app that only reads, such as a data explorer, settle that early and

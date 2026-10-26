@@ -39,6 +39,7 @@ Full signatures and examples:
 | Read across the Pod             | `usePodLoad` (React), calling `pod.sparql.select`/`construct` | Set `contextSelection="on-demand"` on the provider; edits still need a Context.                 |
 | Edit a Pod-overview row         | `useContextEditor`, `ResourceEditor` (React)                  | Open a row's subject and its `GRAPH` Context.                                                   |
 | Add an item                     | `useCreation` (React)                                         | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`.                    |
+| Add into another Context        | `useCreation` with `context`, `bindCreation` (headless)       | Draft stays across list switches; one hook per Context, no transaction across them.             |
 | Update or remove a row          | `useFieldUpdate` (React)                                      | Pass the original list snapshot; respect `canMutate`.                                           |
 | Edit a form safely              | `useResourceEditor`, `ResourceEditor` (React)                 | Hook owns the editor; component supplies save/delete/recovery UI.                               |
 | Change selection                | `useSelection`, `useApp` (React)                              | Use guarded row selection and connection/context/navigation actions.                            |
