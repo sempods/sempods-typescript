@@ -67,6 +67,17 @@ function limiter() {
   };
 }
 
+/** One Context's loader and what to stop with it, or a refused binding. */
+type Entry<D> =
+  | {
+      readonly loader: ReturnType<typeof createViewLoader<SnapshotList<D>>>;
+      readonly stops: readonly (() => void)[];
+    }
+  | 'refused';
+function release<D>(entry: Entry<D>) {
+  if (entry !== 'refused') entry.stops.forEach((stop) => stop());
+}
+
 /**
  * Items of one type from every readable Context of the active Pod, as real
  * snapshots of their own Context. It discovers which Contexts hold the type
@@ -124,39 +135,34 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
   const wanted = graphs.filter(readable).join(' ');
 
   // One loader per readable Context, for this connection and definition.
+  // A changed set of Contexts adds and removes loaders; the others keep their
+  // rows and reads. Another connection or definition starts over.
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const loaders = useRef(
-    new Map<
-      string,
-      | {
-          view: BoundView;
-          loader: ReturnType<typeof createViewLoader<SnapshotList<D>>>;
-        }
-      | 'refused'
-    >(),
-  );
+  const store = useRef<{
+    readonly owner: string;
+    readonly map: Map<string, Entry<D>>;
+    readonly limit: ReturnType<typeof limiter>;
+  } | null>(null);
   const latest = useRef(canonical);
   latest.current = canonical;
   useEffect(() => {
-    const map = new Map<
-      string,
-      | {
-          view: BoundView;
-          loader: ReturnType<typeof createViewLoader<SnapshotList<D>>>;
-        }
-      | 'refused'
-    >();
-    loaders.current = map;
-    if (!activeId || !wanted) {
-      rerender();
-      return;
+    const owner = `${activeId ?? ''} ${key} ${type}`;
+    if (store.current?.owner !== owner) {
+      if (store.current) store.current.map.forEach(release);
+      store.current = { owner, map: new Map(), limit: limiter() };
     }
-    const limit = limiter();
-    const stops: (() => void)[] = [];
-    for (const iri of wanted.split(' ')) {
+    const { map, limit } = store.current;
+    const want = new Set(activeId && wanted ? wanted.split(' ') : []);
+    for (const [iri, entry] of map)
+      if (!want.has(iri)) {
+        release(entry);
+        map.delete(iri);
+      }
+    for (const iri of want) {
+      if (map.has(iri)) continue;
       let view: BoundView;
       try {
-        view = app.runtime.bindContext(activeId, iri);
+        view = app.runtime.bindContext(activeId!, iri);
       } catch (error) {
         if (!(error instanceof RuntimeError)) throw error;
         map.set(iri, 'refused');
@@ -168,15 +174,27 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
           limit(() => listSubjects(target, latest.current, { signal, type })),
         { retain: true },
       );
-      map.set(iri, { view, loader });
-      stops.push(loader.subscribe(rerender));
-      stops.push(observeWrites(view, () => void loader.reload()));
-      stops.push(() => loader.dispose());
+      map.set(iri, {
+        loader,
+        stops: [
+          loader.subscribe(rerender),
+          observeWrites(view, () => void loader.reload()),
+          () => loader.dispose(),
+        ],
+      });
       void loader.reload();
     }
     rerender();
-    return () => stops.forEach((stop) => stop());
   }, [app, activeId, wanted, key, type]);
+  // Unmounting releases every loader (StrictMode mounts again from scratch).
+  useEffect(
+    () => () => {
+      store.current?.map.forEach(release);
+      store.current = null;
+    },
+    [],
+  );
+  const loaders = store.current?.map;
 
   // A confirmed write anywhere on the Pod may add a Context that holds the type.
   const podUrl = useAppFacts((s) => s.pod?.podUrl ?? null);
@@ -188,7 +206,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
   );
   const reload = useCallback(() => {
     void discover();
-    for (const entry of loaders.current.values())
+    for (const entry of store.current?.map.values() ?? [])
       if (entry !== 'refused') void entry.loader.reload();
   }, [discover]);
   // Back in the tab or app, other devices may have changed it.
@@ -202,7 +220,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
   }, [reload]);
 
   const contexts: PodListContext<D>[] = graphs.map((iri) => {
-    const entry = loaders.current.get(iri);
+    const entry = loaders?.get(iri);
     // While the catalogue is not known yet, access is not decided either.
     const problem: ContextEditorProblem | null =
       entry === 'refused'
@@ -230,7 +248,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
     };
   });
   const parts = contexts.map((c) => shownData(c.state));
-  const data: PodListData<D> | undefined =
+  const all: PodListData<D> | undefined =
     shownData(discovery.state) === undefined
       ? undefined
       : {
@@ -245,20 +263,32 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
   const complete =
     discovery.state.kind === 'ready' &&
     contexts.every((c) => c.state.kind === 'ready');
+  // Still finding out: a Context without its first answer, or access not
+  // known yet. Until then the overview is loading, not complete or empty.
+  const pending = contexts.some(
+    (c) =>
+      c.state.kind === 'loading' && parts[contexts.indexOf(c)] === undefined,
+  );
+  const shown = all && (all.items.length > 0 || !pending) ? all : undefined;
   // The discovery's state, carrying the items, for `LoadNotice`.
   const d = discovery.state;
   const state: LoadState<PodListData<D>> =
     d.kind === 'ready'
-      ? { kind: 'ready', data: data! }
+      ? pending
+        ? shown
+          ? { kind: 'loading', previous: shown }
+          : { kind: 'loading' }
+        : { kind: 'ready', data: all! }
       : d.kind === 'loading'
-        ? data
-          ? { kind: 'loading', previous: data }
+        ? shown
+          ? { kind: 'loading', previous: shown }
           : { kind: 'loading' }
         : d.kind === 'failed'
-          ? data
-            ? { kind: 'failed', error: d.error, previous: data }
+          ? shown
+            ? { kind: 'failed', error: d.error, previous: shown }
             : { kind: 'failed', error: d.error }
           : { kind: d.kind };
+  const data = shownData(state);
   return { state, data, contexts, complete, reload };
 }
 /** What `usePodList` returns. */

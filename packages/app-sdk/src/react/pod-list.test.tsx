@@ -13,6 +13,7 @@ import {
 import type { BrowserRuntime } from '../runtime/types.js';
 import {
   catalogue,
+  deferred,
   personal,
   resourceIri,
   returnedSession,
@@ -56,6 +57,8 @@ async function setup() {
     [personal, new Map()],
   ]);
   const failing = new Set<string>();
+  // Reads of these Contexts wait until released.
+  const held = new Map<string, Promise<void>>();
   const reads: string[] = [];
   f.setQuery(async (url, init) => {
     const context = new URL(url).searchParams.get('default-graph-uri');
@@ -76,6 +79,7 @@ async function setup() {
     }
     expect(String(init?.body)).toContain('CONSTRUCT');
     reads.push(context);
+    await held.get(context);
     if (failing.has(context)) return new Response(null, { status: 500 });
     return Response.json([...(tasks.get(context)?.values() ?? [])]);
   });
@@ -121,7 +125,7 @@ async function setup() {
       <Overview />
     </SempodsProvider>,
   );
-  return { ...f, tasks, failing, reads, api: () => api };
+  return { ...f, tasks, failing, held, reads, api: () => api };
 }
 
 it('lists the type from every Context that holds it, each with its own state', async () => {
@@ -170,6 +174,7 @@ it('finds a Context again after this app creates its first item there', async ()
   const f = await setup();
   await waitFor(() => expect(f.api().list.complete).toBe(true));
   expect(f.api().list.contexts.map((c) => c.context)).toEqual([work]);
+  const workReads = f.reads.filter((c) => c === work).length;
   await waitFor(() => expect(f.api().creation.canEdit).toBe(true));
   act(() => f.api().creation.change({ title: 'Call Ann' }));
   await act(async () => {
@@ -183,6 +188,9 @@ it('finds a Context again after this app creates its first item there', async ()
       .list.contexts.map((c) => c.context)
       .sort(),
   ).toEqual([personal, work].sort());
+  // The new Context was added; the one already read kept its rows and read.
+  expect(f.reads.filter((c) => c === work).length).toBe(workReads);
+  expect(screen.getByText('Buy milk')).toBeTruthy();
 });
 
 it('drops a Context whose read access is lost and says the list is incomplete', async () => {
@@ -197,4 +205,26 @@ it('drops a Context whose read access is lost and says the list is incomplete', 
     f.api().list.contexts.find((c) => c.context === personal)?.problem,
   ).toBe('unreadable');
   expect(f.api().list.complete).toBe(false);
+});
+
+it('is loading, not finished or empty, until every Context has answered once', async () => {
+  const f = await setup();
+  f.tasks.get(personal)!.set('urn:b', node('urn:b', 'Call Ann'));
+  const workRead = deferred<void>();
+  const personalRead = deferred<void>();
+  f.held.set(work, workRead.promise);
+  f.held.set(personal, personalRead.promise);
+  // Discovery is done, no Context has answered: loading, and no empty list.
+  await waitFor(() => expect(f.api().list.contexts).toHaveLength(2));
+  expect(f.api().list.state.kind).toBe('loading');
+  expect(f.api().list.data).toBeUndefined();
+  expect(screen.getByText('Loading…')).toBeTruthy();
+  // One answered: its rows show, the overview is still loading.
+  await act(async () => workRead.resolve());
+  expect(await screen.findByText('Buy milk')).toBeTruthy();
+  expect(f.api().list.state.kind).toBe('loading');
+  expect(f.api().list.complete).toBe(false);
+  await act(async () => personalRead.resolve());
+  await waitFor(() => expect(f.api().list.state.kind).toBe('ready'));
+  expect(f.api().list.complete).toBe(true);
 });
