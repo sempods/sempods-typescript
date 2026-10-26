@@ -574,7 +574,9 @@ export function RemoveButton({
   const button = useRef<HTMLButtonElement>(null);
   // Withdrawn for good: enabled again later, it does not reopen.
   if (asking && disabled) setAsking(null);
-  const name = label ?? (children === undefined ? m.remove : undefined);
+  // The icon shows for absent content (`undefined` or `null`), and then needs a name.
+  const content = children ?? null;
+  const name = label ?? (content === null ? m.remove : undefined);
   return (
     <>
       <SdkStyles />
@@ -588,7 +590,7 @@ export function RemoveButton({
         disabled={disabled}
         onClick={() => setAsking({ remove: onRemove })}
       >
-        {children ?? trash}
+        {content ?? trash}
       </button>
       <ConfirmDialog
         open={asking !== null}

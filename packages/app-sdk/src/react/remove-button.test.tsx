@@ -99,6 +99,9 @@ it('is a named trash icon by default; children replace it', () => {
   expect(screen.getByRole('button', { name: 'Delete: Milk' }).title).toBe(
     'Delete: Milk',
   );
+  // No content, null included, still means the named icon.
+  view.rerender(<RemoveButton onRemove={() => {}}>{null}</RemoveButton>);
+  expect(screen.getByRole('button', { name: 'Delete' }).title).toBe('Delete');
   view.rerender(<RemoveButton onRemove={() => {}}>Remove it</RemoveButton>);
   const text = screen.getByRole('button', { name: 'Remove it' });
   expect(text.hasAttribute('title')).toBe(false);
