@@ -175,6 +175,10 @@ it('the TODO row becomes its editor: Escape cancels, Enter saves, delete closes'
   };
   // Keys of an active IME composition belong to it: the draft stays.
   let field = await edit('Buy milk');
+  // In place, the editor is the SDK's quiet card.
+  expect(
+    field.closest('[data-sempods-ui="editor"]')?.hasAttribute('data-inline'),
+  ).toBe(true);
   fireEvent.change(field, { target: { value: 'Oat milk' } });
   fireEvent.keyDown(field, { key: 'Escape', isComposing: true });
   fireEvent.keyDown(field, { key: 'Enter', isComposing: true });

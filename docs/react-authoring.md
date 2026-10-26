@@ -218,7 +218,9 @@ needs explanation and operation eligibility to disable edits.
 targets, visible keyboard focus and wrapping comparisons. No stylesheet import or
 UI framework is required. The SDK does not style the app's own header, list rows
 or controls. ResourceEditor styles the fields rendered inside that editor as well
-as its review/actions.
+as its review/actions; with `onClose` (in place, for example in a list row) it
+is a quiet card with a tinted background, and its **Delete** steps back in the
+muted colour. `RemoveButton` brings its own icon look.
 
 The host owns the color scheme; SDK surfaces inherit it. A page without a scheme
 stays light even when the system prefers dark. Enable page-wide automatic dark
@@ -232,7 +234,8 @@ appearance in the app's CSS:
 
 Keep any explicit page backgrounds/text colors compatible with that choice
 (for example with `light-dark()`). Embedded notices and editors have
-transparent surfaces; their fields/buttons use the shared tokens. AppAccess
+transparent surfaces (an editor in place a translucent tint); their
+fields/buttons use the shared tokens. AppAccess
 retains its themed background.
 
 Set `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
@@ -700,8 +703,9 @@ For a delete in the row, `RemoveButton` asks with the same dialog and texts as
 `ResourceEditor`'s **Delete** and calls `onRemove`, as it was when asked, only
 from its confirmation (a row read again meanwhile shows as a conflict):
 `<RemoveButton label={...} disabled={!mutate.canMutateFor(item)} onRemove={() => mutate.remove(item)} />`.
-Its children replace the **Delete** text, for example with an icon; `label`
-then names it. The TODO example offers it for done tasks. `canMutate`, `outcome`,
+It is a quiet trash icon with a 44px target, named **Delete** or by `label`
+(for example `Delete: ${title}`); children replace the icon, and `className`
+overrides its look. The TODO example offers it for done tasks. `canMutate`, `outcome`,
 `notice` and `acknowledge` keep their list-wide meaning (false while any
 resource's write is pending or unresolved; the latest write's feedback).
 

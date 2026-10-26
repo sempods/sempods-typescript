@@ -415,7 +415,11 @@ export function ResourceEditor<D, U = D>({
     void onClose?.();
   };
   return (
-    <section data-sempods-ui="editor">
+    <section
+      data-sempods-ui="editor"
+      // In place (a list row): a quiet card, see SdkStyles.
+      data-inline={onClose ? '' : undefined}
+    >
       <SdkStyles />
       {state.draft !== null && state.phase !== 'deleted' && (
         <fieldset
@@ -543,7 +547,9 @@ export function ResourceEditor<D, U = D>({
  * Pass the hook's check and command, for example
  * `disabled={!mutate.canMutateFor(item)}` and `onRemove={() => mutate.remove(item)}`;
  * the outcome shows where the hook's notice is. A button that becomes disabled
- * while asking withdraws the question.
+ * while asking withdraws the question. Without children it is a quiet trash
+ * icon with a 44px target, named Delete or `label`; `className` overrides its
+ * look.
  */
 export function RemoveButton({
   onRemove,
@@ -554,10 +560,10 @@ export function RemoveButton({
 }: {
   readonly onRemove: () => unknown;
   readonly disabled?: boolean;
-  /** Accessible name and tooltip, for example for an icon; defaults to Delete. */
+  /** Accessible name and tooltip, for example `Delete: ${title}`; the icon defaults to Delete. */
   readonly label?: string;
   readonly className?: string;
-  /** The button's content, for example an icon; defaults to Delete. */
+  /** The button's content instead of the trash icon, for example a text. */
   readonly children?: ReactNode;
 }) {
   const m = useSdkLocale().messages.controls;
@@ -568,18 +574,23 @@ export function RemoveButton({
   const button = useRef<HTMLButtonElement>(null);
   // Withdrawn for good: enabled again later, it does not reopen.
   if (asking && disabled) setAsking(null);
+  // The icon shows for absent content (`undefined` or `null`), and then needs a name.
+  const content = children ?? null;
+  const name = label ?? (content === null ? m.remove : undefined);
   return (
     <>
+      <SdkStyles />
       <button
         ref={button}
         type="button"
+        data-sempods-ui="remove-button"
         className={className}
-        aria-label={label}
-        title={label}
+        aria-label={name}
+        title={name}
         disabled={disabled}
         onClick={() => setAsking({ remove: onRemove })}
       >
-        {children ?? m.remove}
+        {content ?? trash}
       </button>
       <ConfirmDialog
         open={asking !== null}
@@ -599,3 +610,17 @@ export function RemoveButton({
     </>
   );
 }
+
+const trash = (
+  <svg
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3" />
+  </svg>
+);

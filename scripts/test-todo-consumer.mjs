@@ -655,15 +655,18 @@ try {
         ),
         'light dark',
       );
+    // Embedded surfaces let the page show through: transparent, an editor in
+    // place only a translucent tint.
     for (const surface of await page
       .locator('[data-sempods-ui="editor"], [data-sempods-ui="notice"]')
-      .all())
-      assert.equal(
-        await surface.evaluate(
-          (element) => getComputedStyle(element).backgroundColor,
-        ),
-        'rgba(0, 0, 0, 0)',
-      );
+      .all()) {
+      const [background, inline] = await surface.evaluate((element) => [
+        getComputedStyle(element).backgroundColor,
+        element.hasAttribute('data-inline'),
+      ]);
+      if (inline) assert.match(background, /\/ 0\.05\)$/);
+      else assert.equal(background, 'rgba(0, 0, 0, 0)');
+    }
     // The root declaration also changes the browser's page canvas, not just SDK boxes.
     const canvas = await page.evaluate(() => {
       const probe = document.createElement('div');
@@ -941,7 +944,10 @@ try {
     });
     await trash.waitFor();
     await page.waitForFunction(
-      () => !document.querySelector('.tasks .remove')?.hasAttribute('disabled'),
+      () =>
+        !document
+          .querySelector('.tasks [data-sempods-ui="remove-button"]')
+          ?.hasAttribute('disabled'),
     );
     const beforeTrash = writes;
     await trash.click();
