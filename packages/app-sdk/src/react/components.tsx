@@ -4,7 +4,11 @@ import type {
   SaveOutcome,
   RemoveOutcome,
 } from '@sempods/client-sdk/edit';
-import { useStartCount, type MutationOutcome } from './hooks.js';
+import {
+  useStartCount,
+  type FieldUpdate,
+  type MutationOutcome,
+} from './hooks.js';
 import { useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure, type SdkMessages } from '../locale.js';
@@ -104,10 +108,15 @@ export function UpdateNotice({
                 : m.notSaved;
   const uncertain =
     outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
+  const success =
+    outcome.kind === 'saved' ||
+    outcome.kind === 'created' ||
+    outcome.kind === 'removed';
   return (
     <section data-sempods-ui="notice">
       <SdkStyles />
-      <p role="status">{text}</p>
+      {/* Problems and uncertain outcomes are announced at once. */}
+      <p role={success ? 'status' : 'alert'}>{text}</p>
       {uncertain && (current !== undefined || unreadable) && (
         <section aria-label={m.current}>
           <h3>{m.current}</h3>
@@ -152,6 +161,30 @@ export function UpdateNotice({
         )}
       </div>
     </section>
+  );
+}
+/**
+ * The notices of unresolved writes whose row is not shown, for example a task
+ * deleted elsewhere or filtered out, so their check and acknowledgement stay
+ * reachable: `<UnresolvedNotices of={mutate} shown={list.data?.items} />`.
+ */
+export function UnresolvedNotices<D>({
+  of,
+  shown,
+}: {
+  readonly of: Pick<FieldUpdate<D>, 'unresolved' | 'for'>;
+  /** The rows on screen; their notices show with them. */
+  readonly shown: readonly { readonly iri: string }[] | undefined;
+}) {
+  const rows = new Set(shown?.map((row) => row.iri));
+  return (
+    <>
+      {of.unresolved
+        .filter((iri) => !rows.has(iri))
+        .map((iri) => (
+          <UpdateNotice key={iri} {...of.for(iri).notice} />
+        ))}
+    </>
   );
 }
 /**
@@ -224,11 +257,23 @@ export function endedMessage(
  * beside the action in AppAccess or custom controls. While the page
  * leaves for a sign-in (`leaving`) nothing was lost, so it shows nothing.
  */
-export function AccessNotice() {
+export function AccessNotice({
+  only,
+}: {
+  /**
+   * `write`: only say that the target is read-only, for an app that renders
+   * `AppAccess`, which already explains the other states.
+   */
+  readonly only?: 'write';
+} = {}) {
   const access = useWorkflowAccess();
   const { preset } = useAppState();
   const { messages: m, format } = useSdkLocale();
   const c = access.connection;
+  if (only === 'write')
+    return access.read && !access.write ? (
+      <Notice>{m.controls.readOnly}</Notice>
+    ) : null;
   if (!c) return <Notice>{m.controls.noTarget}</Notice>;
   if (c.session.kind === 'leaving') return null;
   if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
@@ -446,7 +491,7 @@ export function ResourceEditor<D, U = D>({
         </fieldset>
       )}
       {state.problem && (
-        <p role="status">
+        <p role="alert">
           {state.problem.kind === 'refused' ||
           state.problem.kind === 'unavailable'
             ? m.readLost

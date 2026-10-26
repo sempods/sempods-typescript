@@ -41,6 +41,7 @@ export {
   LoadNotice,
   RemoveButton,
   ResourceEditor,
+  UnresolvedNotices,
   UpdateNotice,
 } from './components.js';
 export type { FieldLabels } from './components.js';

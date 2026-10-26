@@ -238,7 +238,9 @@ example. `AppAccess` takes no content children and does not gate/unmount your
 screen: keep `TargetScreen` and mutation controllers mounted through same-target
 access loss. Keep uncertain-write recovery outside hidden/inert widget regions.
 Read-only content remains useful; use `AccessNotice` where a write limitation
-needs explanation and operation eligibility to disable edits.
+needs explanation and operation eligibility to disable edits. Beside
+`AppAccess`, which explains the other states, `<AccessNotice only="write" />`
+says only that the list is read-only.
 
 ### Shared SDK appearance
 
@@ -380,8 +382,9 @@ export function Resource({ iri }: { readonly iri: string }) {
 }
 ```
 
-Render it as `<Resource key={iri} iri={iri} />`, or call `reload()` after the
-IRI changes. A CONSTRUCT needs no wrapping:
+Render it as `<Resource key={iri} iri={iri} />`, or pass the read's inputs as
+`key` (`useLoad(read, { key: iri })`): a new value reads again, without data
+kept for the old one. A CONSTRUCT needs no wrapping:
 `useLoad((view, signal) => view.sparql.construct(query, { signal }))` is ready
 with the node array. `not-found` means absent or hidden in this Context; the
 two look the same.
@@ -756,9 +759,10 @@ because its snapshot no longer shows the resource (`update` would resolve
 `not-sent` with reason `stale`). Because the lane lives in the hook, an
 unresolved write and its leave guard stay while the row is not rendered, for
 example during lost read access, and return with the row. `unresolved` lists
-the IRIs whose write still needs a check; show `mutate.for(iri).notice`
-outside the list for those without a row, for example a task deleted
-elsewhere, as the TODO example does. Do not give each row a hook of its own:
+the IRIs whose write still needs a check;
+`<UnresolvedNotices of={mutate} shown={list.data?.items} />` shows the notices
+of those without a row, for example a task deleted elsewhere, as the TODO
+example does (`mutate.for(iri).notice` is the same for a single one). Do not give each row a hook of its own:
 unmounting the row would drop its unresolved write.
 
 A command that sends nothing resolves `{ kind: 'not-sent', reason }`:

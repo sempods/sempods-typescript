@@ -38,11 +38,16 @@ export interface TextField<Optional extends boolean = boolean> {
   /**
    * `""` is a valid RDF string; `reject` (default) makes the draft invalid,
    * also for whitespace only, so forms need no own blank check. Values are
-   * never trimmed: what the person typed is what is stored.
+   * stored as typed unless `trim` is set.
    * In a required field an absent value also reads as `""`, so writing `""`
    * there is a no-op: the field never materializes an empty literal by itself.
    */
   readonly empty: 'reject' | 'allow';
+  /**
+   * Writes the value without leading and trailing whitespace, in creation and
+   * update alike. The draft keeps what the person typed until it is saved.
+   */
+  readonly trim?: boolean;
   /**
    * Optional fields read an absent value as `null`. Writing `null` removes
    * this field's value (an explicit intent); writing `""` stores an empty
@@ -98,9 +103,14 @@ type ValueOf<F> = F extends FlagField
     : F extends { readonly optional: boolean }
       ? string | null
       : string;
-export type DraftOf<S extends { readonly [name: string]: Field }> = {
-  readonly [K in keyof S]: ValueOf<S[K]>;
-};
+/**
+ * The draft of a field spec, or of a definition:
+ * `type Task = DraftOf<typeof taskFields>`.
+ */
+export type DraftOf<S> =
+  S extends EditDefinition<infer D>
+    ? D
+    : { readonly [K in keyof S]: S[K] extends Field ? ValueOf<S[K]> : never };
 
 /**
  * The type-level mark of a definition created by `fields()`. It matches the
@@ -131,6 +141,7 @@ function predicateOf(predicate: string): string {
 type TextOptions = {
   readonly language: string | null;
   readonly empty?: 'reject' | 'allow';
+  readonly trim?: boolean;
 };
 /** A string in one language, edited in place; other languages and values are preserved. */
 export function text(
@@ -153,6 +164,7 @@ export function text(
     language: options.language,
     empty: options.empty ?? 'reject',
     optional: options.optional ?? false,
+    ...(options.trim ? { trim: true } : {}),
   });
 }
 
@@ -283,6 +295,8 @@ function writeField(
   terms: readonly Term[],
   value: Value,
 ): readonly Term[] {
+  if (field.kind === 'text' && field.trim && typeof value === 'string')
+    value = value.trim();
   if (readField(field, terms) === value) return terms;
   switch (field.kind) {
     case 'text':

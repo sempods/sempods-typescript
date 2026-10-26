@@ -131,7 +131,7 @@ function useDefinition<T>(input: T, hook: string) {
 /**
  * Runs `read` for the current target. A new target gets a fresh loader; the
  * latest `read` is used on each (re)load, so an inline function never loops.
- * Call `reload()` after changing what `read` returns.
+ * Pass `key` for inputs such as a search term: a new value reads again.
  */
 export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
   const { state, reload, cancel } = useBoundLoad(
@@ -152,13 +152,19 @@ export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
  */
 export interface LoadOptions {
   readonly retain?: boolean;
+  /**
+   * What the read depends on besides the target, for example a search term.
+   * A changed value (compared with `Object.is`) reads again without the kept
+   * data, which belongs to the old inputs. Use a string or number.
+   */
+  readonly key?: unknown;
 }
 /**
  * Loads the active BoundPod using the same cancellable/bounded loader as useLoad.
  * Context/catalogue/label changes do not reload it. Changed Pod/session/grants
  * retire obsolete results; no catalogue or Context fallback is requested.
  * No reader means unavailable after startup completes or fails. Inline callbacks do not loop:
- * call reload after changing the query or other read inputs.
+ * pass `key` for the query's inputs, and a new value reads again.
  */
 export function usePodLoad<T>(read: PodRead<T>, options: LoadOptions = {}) {
   const { pod, startup, startupError } = useAppState();
@@ -174,7 +180,7 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   view: H | null,
   read: (handle: H, signal: AbortSignal) => ReturnType<ViewRead<T>>,
   empty: LoadState<T> = loading,
-  { retain = false }: LoadOptions = {},
+  { retain = false, key }: LoadOptions = {},
 ) {
   const latest = useRef(read);
   latest.current = read;
@@ -215,6 +221,13 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     return loader?.getSnapshot();
   }, [loader]);
   const cancel = useCallback(() => loader?.cancel(), [loader]);
+  // Changed read inputs: a fresh read for this loader (a new one reads anyway).
+  const inputs = useRef({ loader, key });
+  useEffect(() => {
+    const before = inputs.current;
+    inputs.current = { loader, key };
+    if (before.loader === loader && !Object.is(before.key, key)) void restart();
+  }, [loader, key, restart]);
   return { state, reload, restart, cancel };
 }
 /**

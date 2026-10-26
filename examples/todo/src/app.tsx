@@ -5,6 +5,7 @@ import {
   LoadNotice,
   RemoveButton,
   ResourceEditor,
+  UnresolvedNotices,
   UpdateNotice,
   SempodsProvider,
   useApp,
@@ -79,11 +80,7 @@ function TaskScreen() {
         ))}
       </ul>
       {/* An unresolved tick or delete whose task left the list keeps its recovery. */}
-      {mutate.unresolved
-        .filter((iri) => !tasks?.some((item) => item.iri === iri))
-        .map((iri) => (
-          <UpdateNotice key={iri} {...mutate.for(iri).notice} />
-        ))}
+      <UnresolvedNotices of={mutate} shown={tasks} />
       {/* A row that left the list (deleted elsewhere) keeps its editor. */}
       {selected && !tasks?.some((item) => item.iri === selected) && editing}
       <UpdateNotice {...creation.notice} quiet />
@@ -91,12 +88,10 @@ function TaskScreen() {
         className="composer"
         onSubmit={(e) => {
           e.preventDefault();
-          creation.change({ title: creation.draft.title.trim() });
           void creation.create();
         }}
       >
         <input
-          required
           aria-label={m.newTask}
           placeholder={m.newTask}
           disabled={!creation.canEdit}
@@ -210,7 +205,6 @@ function StandardScreen({
   const focusTarget = useRef<HTMLButtonElement>(null);
   const { messages, language, error } = useSdkLocale();
   const { view, connections } = useAppState();
-  const access = useWorkflowAccess();
   // Mounted before a list is chosen: it selects one, so no chooser appears.
   const lists = useContexts();
   // Preparing the Pod's consent can fail (unreachable Pod); say so here.
@@ -289,7 +283,7 @@ function StandardScreen({
         onClose={() => setOpen(false)}
         focusTarget={focusTarget}
       />
-      {view && access.read && !access.write && <AccessNotice />}
+      <AccessNotice only="write" />
       <TargetScreen>
         <TaskScreen />
       </TargetScreen>

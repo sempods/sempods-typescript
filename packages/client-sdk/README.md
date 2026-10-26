@@ -362,11 +362,13 @@ import {
   prepareCreation,
   text,
   updateFields,
+  type DraftOf,
 } from '@sempods/client-sdk/edit';
 
 const task = fields(
   {
-    title: text('https://schema.org/name', { language: 'en' }),
+    // trim: stored without outer whitespace, in creation and update alike
+    title: text('https://schema.org/name', { language: 'en', trim: true }),
     note: text('https://schema.org/description', {
       language: 'en',
       optional: true, // absent reads as null; null removes it again
@@ -378,6 +380,9 @@ const task = fields(
   },
   { type: 'https://schema.org/Action' }, // lists and creation use it
 );
+
+// The draft type of a definition: { title: string; note: string | null; done: boolean }
+type Task = DraftOf<typeof task>;
 
 export async function addTask(tasks: ContextView, title: string) {
   const iri = newSubjectIri(tasks, 'tasks');
@@ -394,8 +399,6 @@ export async function addTask(tasks: ContextView, title: string) {
 export function listTasks(tasks: ContextView) {
   return listSubjects(tasks, task);
 }
-
-type Task = ReturnType<typeof task.read>;
 
 export function completeTask(tasks: ContextView, item: Snapshot<Task>) {
   // Pass the original snapshot, including evidence of the fields that were read.
