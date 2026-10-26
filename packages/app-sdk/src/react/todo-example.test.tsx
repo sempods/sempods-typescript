@@ -281,3 +281,19 @@ it('the TODO header names a single list without a switch', async () => {
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('work');
   expect(document.getElementById('list-menu')).toBeNull();
 });
+
+it('the TODO header says when sharing more lists cannot reach the Pod', async () => {
+  const f = await signedIn('en', async () => Response.json([]));
+  expect(await screen.findByText(text.en.empty)).toBeTruthy();
+  const share = within(document.getElementById('list-menu')!).getByRole(
+    'button',
+    { name: 'Share more lists', hidden: true },
+  );
+  // Preparing the consent fails before the page leaves: the session stays.
+  const navigations = f.navigate.mock.calls.length;
+  f.fetch.mockRejectedValueOnce(new TypeError('offline'));
+  fireEvent.click(share);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  expect(screen.getByText(text.en.empty)).toBeTruthy();
+});

@@ -161,11 +161,13 @@ function StandardScreen({
 }) {
   const [open, setOpen] = useState(false);
   const focusTarget = useRef<HTMLButtonElement>(null);
-  const { messages, language } = useSdkLocale();
+  const { messages, language, error } = useSdkLocale();
   const { view, connections } = useAppState();
   const access = useWorkflowAccess();
   // Mounted before a list is chosen: it selects one, so no chooser appears.
   const lists = useContexts();
+  // Preparing the Pod's consent can fail (unreachable Pod); say so here.
+  const [shareFailure, setShareFailure] = useState<{ cause: unknown }>();
   const de = language === 'de';
   // Language names in the current language: Deutsch/Englisch, German/English.
   const names = useMemo(
@@ -179,7 +181,7 @@ function StandardScreen({
         {view && (
           <>
             {icon}
-            <ListSwitch lists={lists} />
+            <ListSwitch lists={lists} onShareFailed={setShareFailure} />
           </>
         )}
         {/* A native popover: the browser closes it on Escape or outside. */}
@@ -228,6 +230,7 @@ function StandardScreen({
           </div>
         </div>
       </header>
+      {shareFailure && <p role="alert">{error(shareFailure.cause)}</p>}
       <AppAccess
         appName="TODO"
         icon={icon}
@@ -253,8 +256,11 @@ function StandardScreen({
  */
 function ListSwitch({
   lists,
+  onShareFailed,
 }: {
   readonly lists: ReturnType<typeof useContexts>;
+  /** Sharing more lists failed before reaching the Pod; undefined clears it. */
+  readonly onShareFailed: (failure: { cause: unknown } | undefined) => void;
 }) {
   const de = useSdkLocale().language === 'de';
   const { authorize } = useApp();
@@ -294,7 +300,12 @@ function ListSwitch({
             <button
               popoverTarget="list-menu"
               popoverTargetAction="hide"
-              onClick={() => void authorize(connection.id)}
+              onClick={() => {
+                onShareFailed(undefined);
+                void authorize(connection.id).catch((cause: unknown) =>
+                  onShareFailed({ cause }),
+                );
+              }}
             >
               {de ? 'Weitere Listen freigeben' : 'Share more lists'}
             </button>
