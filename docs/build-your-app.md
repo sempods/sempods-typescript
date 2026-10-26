@@ -64,21 +64,9 @@ contains the reading order, a starting prompt and implementation rules.
 ## The API through the task example
 
 The [quickstart](quickstart.md) contains complete `tasks.ts` and `App.tsx` files.
-These are the moving parts you will reuse:
-
-| App need                                  | API                                                                | What you supply                                                            |
-| ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Start the app                             | `createBrowserRuntime` → `SempodsProvider` + `AppAccess`           | One stable runtime, identity and app name                                  |
-| Keep state attached to the chosen context | `TargetScreen`                                                     | Your screen inside it                                                      |
-| Read across the authorized Pod            | `usePodLoad` with provider `contextSelection="on-demand"`          | One SELECT/CONSTRUCT query; mount `TargetScreen` later for scoped flows    |
-| Edit a row of that overview               | `useContextEditor(task)` + `ResourceEditor`                        | The row's subject and `GRAPH` Context                                      |
-| Describe a task                           | `fields`, `text`, `flag`, `iri`, `dateTime` from `client-sdk/edit` | Type and predicate IRIs; explicit text language                            |
-| Display tasks                             | `useList(task)`                                                    | The same field definition; render ready, loading and failure states        |
-| Add a task                                | `useCreation(task, options)`                                       | Initial draft, collection path, inputs calling `change`                    |
-| Complete a task                           | `useFieldUpdate(task)`                                             | The original list snapshot and the changed field                           |
-| Open another task                         | `useSelection()`                                                   | Selected IRI; use its guarded `select` action                              |
-| Edit or delete                            | `useResourceEditor(selected, task)` + `ResourceEditor`             | Inputs for the draft; the component supplies save/delete/recovery controls |
-| Explain an outcome                        | `UpdateNotice`                                                     | The creation/update hook's `notice`                                        |
+The [API table](react-authoring.md#api-at-a-glance) maps each app need, from
+starting the runtime to explaining an outcome, to the hook or component and
+what you supply.
 
 For example, the quickstart's completion action is
 `update.update(item, { done: !item.data.done })`. Here `item` is the snapshot supplied by

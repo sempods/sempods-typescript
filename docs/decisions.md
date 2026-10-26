@@ -19,7 +19,8 @@ React; apps need sessions and UI on top of the same client, not a second one.
 
 Pods speak RDF, JSON-LD and SPARQL with absolute IRIs. The SDK adds field
 definitions, lists without SPARQL, safe editing and session handling, without
-inventing protocol extensions.
+inventing protocol extensions. A `fields()` definition is plain mapping data
+shared by Node and React, not a service instance.
 
 _Why:_ every client of a Pod sees the same data model; conveniences can evolve
 without changing servers.
