@@ -183,6 +183,8 @@ export function createResourceEditor<D>(
   let base: Base<D> | null = null;
   let draft: D | null = null;
   let review: Review<D> | null = null;
+  // What an unconfirmed write should have left on the Pod, as stored.
+  let expected: D | null = null;
   let compared: Compared<D> = null;
   let problem: EditProblem | null = null;
   const fieldwise = isFieldDefinition(definition) ? definition : null;
@@ -329,7 +331,7 @@ export function createResourceEditor<D>(
               (review.intent === 'remove'
                 ? current === null
                 : current !== null &&
-                  sameData(current, storedDraft(definition, review.mine))),
+                  sameData(current, expected ?? review.mine)),
           }
         : { ...review, current };
   }
@@ -403,6 +405,8 @@ export function createResourceEditor<D>(
     done: () => Promise<O>,
     reviewed: (kind: Review<D>['kind']) => O,
     failed: (reason: NotDone) => O,
+    /** `mine` as stored on the version written onto. */
+    stored: D | null = mine,
   ): Promise<O> {
     switch (result.kind) {
       case 'applied':
@@ -413,7 +417,7 @@ export function createResourceEditor<D>(
           result.kind === 'uncertain' ? 'unconfirmed' : 'changed-on-pod';
         // The write outcome survives read loss; only a fresh comparison is shown.
         if (guard.alive()) {
-          openReview(kind, intent, mine);
+          openReview(kind, intent, mine, stored);
           phase = 'review';
           if (access.read && guard.fresh()) {
             const fetched = await read();
@@ -439,8 +443,10 @@ export function createResourceEditor<D>(
     kind: Review<D>['kind'],
     intent: 'save' | 'remove',
     mine: D | null,
+    stored: D | null = mine,
   ) {
     compared = null;
+    expected = stored;
     review =
       kind === 'unconfirmed'
         ? { kind, intent, mine, current: undefined, desiredObserved: false }
@@ -585,7 +591,7 @@ export function createResourceEditor<D>(
                     safely(() =>
                       sameData(
                         definition.read(fetched.body),
-                        storedDraft(definition, mine),
+                        storedDraft(definition, mine, onto.data),
                       ),
                     )))
               ) {
@@ -614,6 +620,7 @@ export function createResourceEditor<D>(
             },
             () => ({ kind: 'review' }),
             (reason) => ({ kind: 'not-saved', reason }),
+            storedDraft(definition, mine, onto.data),
           );
         },
       );
