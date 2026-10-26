@@ -177,3 +177,32 @@ it('links the note to an unconfirmed task once it is checked, without a second t
   expect(s.puts.map((put) => put.context)).toEqual([work, personal]);
   expect(linkOf(s.puts[1]!)).toBe(s.puts[0]!.iri);
 });
+
+it('sends a refused task again before its note, and never links the refused one', async () => {
+  const s = await setup();
+  s.refuse(work);
+  await fill('Water plants', 'The big one too');
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(s.puts).toHaveLength(1));
+  expect(
+    await screen.findByText(
+      'The change was not saved. Check access and try again.',
+    ),
+  ).toBeTruthy();
+  // Not linked: the task stays editable and nothing claims it is saved.
+  expect(field('Task').disabled).toBe(false);
+  expect(
+    screen.queryByText('The task is saved; its private note is not yet.'),
+  ).toBeNull();
+  s.refuse('');
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(s.puts).toHaveLength(3));
+  expect(s.puts.map((put) => put.context)).toEqual([work, work, personal]);
+  expect(linkOf(s.puts[2]!)).toBe(s.puts[1]!.iri);
+});

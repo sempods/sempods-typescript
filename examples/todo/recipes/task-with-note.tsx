@@ -27,7 +27,8 @@ const note = fields(
  *
  * These are two separate creations, each with its own outcome: there is no
  * transaction across Contexts. The task is created first, and the note keeps
- * its IRI from the first attempt on, also when the task's answer was lost.
+ * its IRI once it landed or may have landed (its answer was lost); a refused
+ * task is not linked and is sent again by the next save.
  * The note is sent once the task is confirmed: at once, or after its check
  * and acknowledgement; a task found absent is retried under the same IRI.
  * A refused or unconfirmed note keeps its own draft for a retry that sends
@@ -64,7 +65,10 @@ export function TaskWithNote({
     if (!hasNote || taskUnresolved) return;
     if (taskToSend) {
       const outcome = await taskCreation.create();
-      if (outcome) noteCreation.change({ about: outcome.iri });
+      // Link only a task that landed or may have landed; a refused one is
+      // sent again (as a new task) by the next save.
+      if (outcome?.kind === 'created' || outcome?.kind === 'unconfirmed')
+        noteCreation.change({ about: outcome.iri });
       if (outcome?.kind !== 'created') return;
     }
     await noteCreation.create();
