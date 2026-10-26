@@ -226,3 +226,18 @@ it('names only the selected Context in management when the app switches', async 
     within(region).queryByRole('combobox', { name: 'Data context' }),
   ).toBeNull();
 });
+
+it('offers the chooser again when the selected Context loses access', async () => {
+  const f = await returnedSession(keep);
+  render(<App runtime={f.runtime} />);
+  await screen.findByText('Content');
+  expect(selected()).toBe('work');
+  // The selection is kept (for drafts); the app's switch cannot show it.
+  f.setCatalogue(async () => catalogue([personal], [personal]));
+  await act(() => f.runtime.loadContexts(f.id));
+  expect(selected()).toBe('');
+  const chooser = await screen.findByRole('combobox', { name: 'Data context' });
+  fireEvent.change(chooser, { target: { value: personal } });
+  await waitFor(() => expect(selected()).toBe('personal'));
+  await screen.findByText('Content');
+});

@@ -808,8 +808,13 @@ function AccessConnections({
           {' · '}
           {accessFact(named)}
         </p>
-      ) : active && contextRequired && !fixedContext && switching ? (
-        // The app's own switch selects; this only waits for it.
+      ) : active &&
+        contextRequired &&
+        !fixedContext &&
+        switching &&
+        !c?.selectedContext ? (
+        // The app's own switch selects a first Context; this only waits. A
+        // kept selection that lost access needs the chooser below instead.
         readable.length > 0 && <p role="status">{m.controls.loading}</p>
       ) : active && contextRequired && !fixedContext ? (
         <label>
