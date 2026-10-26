@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import {
   AccessNotice,
+  LoadNotice,
   UpdateNotice,
   useAppState,
   useCreation,
@@ -110,50 +111,27 @@ function Frame({
 
 /** Read-only list: the host's write grant is not required to display tasks. */
 export function TaskListWidget({ fallback }: WidgetProps) {
-  const { state } = useList(taskFields);
-  const { language, error } = useSdkLocale();
-  const source = state.kind === 'ready' ? state.data : undefined;
-  const items = source?.items.filter((item) => taskFields.valid!(item.data));
-  const list =
-    source && items
-      ? { items, skipped: source.skipped + source.items.length - items.length }
-      : undefined;
+  // Rows the definition cannot show are already skipped and counted.
+  const list = useList(taskFields);
+  const { language } = useSdkLocale();
+  const items = list.data?.items;
   return (
     <section aria-label={language === 'de' ? 'Aufgaben' : 'Tasks'}>
       <h2>{language === 'de' ? 'Aufgaben' : 'Tasks'}</h2>
       <Frame fallback={fallback}>
-        {state.kind === 'failed' ? (
-          <p role="alert">{error(state.error)}</p>
-        ) : null}
-        {state.kind !== 'ready' && state.kind !== 'failed' ? (
-          <p role="status">
-            {language === 'de' ? 'Wird geladen…' : 'Loading…'}
-          </p>
-        ) : null}
-        {list && (
-          <>
-            {list.items.length === 0 && (
-              <p>
-                {language === 'de' ? 'Noch keine Aufgaben.' : 'No tasks yet.'}
-              </p>
-            )}
-            <ul>
-              {list.items.map((item) => (
-                <li key={item.iri}>
-                  {item.data.title}
-                  {item.data.done ? ' ✓' : ''}
-                </li>
-              ))}
-            </ul>
-            {list.skipped > 0 && (
-              <p>
-                {language === 'de'
-                  ? 'Nicht unterstützte Einträge'
-                  : 'Unsupported entries'}
-                : {list.skipped}
-              </p>
-            )}
-          </>
+        <LoadNotice {...list} />
+        {items?.length === 0 && (
+          <p>{language === 'de' ? 'Noch keine Aufgaben.' : 'No tasks yet.'}</p>
+        )}
+        {items && (
+          <ul>
+            {items.map((item) => (
+              <li key={item.iri}>
+                {item.data.title}
+                {item.data.done ? ' ✓' : ''}
+              </li>
+            ))}
+          </ul>
         )}
       </Frame>
     </section>

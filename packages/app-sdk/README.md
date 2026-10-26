@@ -1,8 +1,9 @@
 # @sempods/app-sdk
 
-Connect a browser app to sempods without putting login, tokens or write recovery
-in every screen. The runtime owns durable sessions and target access; authoring
-helpers keep drafts, conditional edits and recovery attached to that target.
+Build a browser app on a person's Pod without writing sign-in, tokens or
+conflict handling yourself. The runtime keeps the session and the access to the
+chosen data area (a Context); the hooks and components keep drafts, safe edits
+and their recovery attached to it.
 
 Choose the entry that fits your UI:
 
