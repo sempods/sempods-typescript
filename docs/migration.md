@@ -8,7 +8,16 @@ automatic conversion of legacy app data or stored credentials.
 
 This minor release changes some defaults and result types and adds options;
 upgrade both packages together.
-Check these points:
+
+**Needs action in most apps:** replace `AppShell`/`ConnectionControls` with
+`AppAccess`; pin `language="en" locale="en"` if the UI must stay English in
+other browsers; add `problem` to hand-built failure outcomes; handle the
+session kind `leaving` in exhaustive switches; drop app-side `valid` filters
+over list items; compare creation outcomes with `toMatchObject` (they now
+carry `iri`); find editor and dialog buttons by name, not position. The other
+points add options or change the look.
+
+All points:
 
 - **Edit failure details.** Hand-built `UpdateOutcome`, `RemoveSnapshotOutcome`
   and `CreateOutcome` failures now need `problem`, for example
@@ -168,10 +177,10 @@ Check these points:
 - **Quiet success.** `UpdateNotice` and `ResourceEditor` accept `quiet` to show
   nothing for a confirmed save, creation or deletion; problems and unconfirmed
   outcomes still show.
-- **Management shows the connected Pod first.** With `open`, `AppAccess` lists
-  the connected Pod, its readable Contexts with **Read only** / **Read and
-  write**, then the actions and **Full addresses**; signing in
-  to another Pod moved to a collapsed **Connect another Pod** at the end.
+- **Management shows the connected Pod first.** With `open`, `AppAccess`
+  starts with the connected Pod and its access (see "Management as a dialog"
+  above for what it no longer shows); signing in to another Pod moved to a
+  collapsed **Connect another Pod** at the end.
   End-to-end tests that fill **Pod address** in management first expand that
   section. New message keys `controls.contextAccess`, `canRead`, `canChange`
   and `connectAnother` are optional in `UiMessages`.

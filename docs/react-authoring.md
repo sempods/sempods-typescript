@@ -1,5 +1,34 @@
 # React and headless authoring
 
+## How the pieces fit
+
+```text
+runtime ─ SempodsProvider ─ AppAccess        sign-in, choice, sharing, recovery
+                         └ TargetScreen      renders once a target is usable
+                             └ your screen   useList, useCreation, useFieldUpdate,
+                                             useResourceEditor, notices
+```
+
+- **Pod**: a person's data service. **Connection**: a signed-in session with
+  one Pod; several can exist, one is active.
+- **Context**: a named area of data in a Pod (for example a task list), with
+  its own read and write access per app. The **catalogue** lists the Contexts
+  this app may use.
+- **Selection**: the Context the app currently works in; `AppAccess` or
+  `useContexts()` choose it. With `contextSelection: 'on-demand'` an app works
+  across Contexts and selects one only where a screen needs it.
+- **Target**: the active connection plus the selected Context and its access.
+  Hooks inside `TargetScreen` read and write the target; when it changes, their
+  drafts and reads are replaced (after asking about unsaved work).
+- **Preset**: a Pod (and optionally a Context) the app suggests or fixes.
+- **Guard scope**: which changes ask about a draft before discarding it: row
+  navigation, a Context selection, or a connection change (see
+  [selection and draft lifetime](#selection-and-draft-lifetime)).
+- **Write outcomes**: `saved`/`created`/`removed`; `not-saved` and its
+  siblings (refused or failed; nothing changed); `changed-on-pod` (someone
+  changed it first: compare, then decide); `unconfirmed` (the answer was lost:
+  check the Pod, never resend blindly). `UpdateNotice` renders all of them.
+
 Create one browser runtime outside render and pass it to one `SempodsProvider`.
 The provider consumes `runtime.initialize()`; it does not create a second session
 coordinator. Equivalent inline locale/message props do not replace the runtime or
@@ -27,7 +56,7 @@ const runtime = createBrowserRuntime({
   development: 'loopback-http', // only for local HTTP development
 });
 
-<SempodsProvider runtime={runtime} language="de" locale="de-CH">
+<SempodsProvider runtime={runtime}>
   <AppAccess appName="My tasks" />
   <TargetScreen>
     <TaskScreen />
@@ -573,6 +602,7 @@ function Notes() {
   `true` once the target is open. Whether it becomes `ready` is reported through
   `phase`. Opening another target and `close()` run under the leave policy.
 - **Phases.**
+  - `idle`: no target was opened yet, or `close()` cleared it.
   - `loading`: startup, sign-in or the catalogue is not settled yet. No editor
     starts before startup settles.
   - `unavailable`: the target could not be established; `problem` is
@@ -938,8 +968,8 @@ succeeds.
 
 `useApp()` returns the guarded actions only: `selectConnection`, `selectContext`,
 `connect`, `authorize`, `disconnect` and `navigate(action)` for row/page changes
-under the same policy, plus the unguarded reads `refreshContexts(id)` and
-`loadContextLabels(id, iris)`. Read state with `useAppState`,
+under the same policy, plus the unguarded `refreshContexts(id)`,
+`loadContextLabels(id, iris)` and `retryRestore(id)`. Read state with `useAppState`,
 `useConnections` and `useView`; the runtime and leave-dialog internals are not
 part of it. `useSelection<T>()` provides a guarded `select(value)` and
 `selected` value for the common row case. Place app-local screen state inside
@@ -960,19 +990,21 @@ and reset that draft once one appears. Keep their inputs disabled while
 `useWorkflowAccess().write` is false, as the recipes do. Local row navigation leaves editor guards
 only: list mutations and app-owned creation drafts survive, and uncertain outcomes still require comparison and
 acknowledgement. `useDraftGuard(dirty, discard)` is target-scoped by default;
-pass a third argument `'local'` only for a draft that row navigation leaves, or
+pass a third argument `'local'` only for a draft that row navigation leaves,
 `'connection'` for a draft bound to an explicit Context
 ([`runtime.bindContext`](browser-runtime.md#bind-an-explicit-context)) rather
-than to the selection.
+than to the selection, or `'explicit'` for a creation in an explicit Context
+that row navigation and Context selection both leave alone.
 
-| Change                                                   | Leaves (asks about, then discards)        |
-| -------------------------------------------------------- | ----------------------------------------- |
-| Row navigation (`navigate`, `useSelection().select`)     | `local`, `connection` and unscoped guards |
-| Context selection (`selectContext`)                      | `local`, `target` and unscoped guards     |
-| `selectConnection`, `connect`, `authorize`, `disconnect` | every guard                               |
+| Change                                                   | Leaves (asks about, then discards)            |
+| -------------------------------------------------------- | --------------------------------------------- |
+| Row navigation (`navigate`, `useSelection().select`)     | `local` (or unscoped) and `connection` guards |
+| Context selection (`selectContext`)                      | `local` (or unscoped) and `target` guards     |
+| `selectConnection`, `connect`, `authorize`, `disconnect` | every guard                                   |
 
-A pending write blocks every change, except that a saving `connection`-scoped
-editor does not block a Context selection, which leaves it alone. A confirmation explicitly names any
+A pending write blocks every change, except that a saving `connection`- or
+`explicit`-scoped draft does not block a Context selection, which leaves it
+alone. A confirmation explicitly names any
 unconfirmed write among the guards the change leaves and warns that discarding local recovery does not undo it.
 The provider makes its content inert during confirmation and guarded action
 preparation, including discovery, registration and redirect preparation, so new
