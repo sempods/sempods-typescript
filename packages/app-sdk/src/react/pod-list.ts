@@ -19,7 +19,7 @@ import {
   useContextDiscovery,
   useController,
 } from './app.js';
-import { knownContexts } from './access-presentation.js';
+import { catalogueLists } from '../runtime/binding.js';
 import { contextName } from './names.js';
 import {
   useDefinition,
@@ -128,9 +128,14 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
       ),
     ].sort();
   }, [discovery.state]);
-  const known = knownContexts(catalogue);
+  // The runtime's own authority: a failed refresh keeps the earlier Contexts,
+  // and reads from them stay allowed, so their rows stay too.
+  const evidence =
+    catalogue !== undefined &&
+    'contexts' in catalogue &&
+    catalogue.contexts !== undefined;
   const readable = (iri: string) =>
-    known?.some((c) => c.iri === iri && c.readable) ?? false;
+    catalogue !== undefined && catalogueLists(catalogue, iri);
   const labels = catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
   const wanted = graphs.filter(readable).join(' ');
 
@@ -225,7 +230,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
     const problem: ContextEditorProblem | null =
       entry === 'refused'
         ? 'refused'
-        : readable(iri) || (!known && catalogue?.kind !== 'failed')
+        : readable(iri) || (!evidence && catalogue?.kind !== 'failed')
           ? null
           : catalogue?.kind === 'failed'
             ? 'discovery-failed'

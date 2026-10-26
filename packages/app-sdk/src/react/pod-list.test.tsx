@@ -228,3 +228,16 @@ it('is loading, not finished or empty, until every Context has answered once', a
   await waitFor(() => expect(f.api().list.state.kind).toBe('ready'));
   expect(f.api().list.complete).toBe(true);
 });
+
+it('keeps the rows when a catalogue refresh fails, as reads stay allowed', async () => {
+  const f = await setup();
+  f.tasks.get(personal)!.set('urn:b', node('urn:b', 'Call Ann'));
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  f.setCatalogue(async () => new Response(null, { status: 500 }));
+  await act(() => f.runtime.loadContexts(f.id).catch(() => {}));
+  await act(async () => {});
+  expect(screen.getByText('Buy milk')).toBeTruthy();
+  expect(screen.getByText('Call Ann')).toBeTruthy();
+  expect(f.api().list.contexts.map((c) => c.problem)).toEqual([null, null]);
+  expect(f.api().list.complete).toBe(true);
+});
