@@ -108,8 +108,12 @@ input:disabled {
   color: var(--sempods-accent);
 }
 .menu-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   margin-inline-start: auto;
-  padding: 10px;
+  padding: 0;
   anchor-name: --app-menu;
 }
 
