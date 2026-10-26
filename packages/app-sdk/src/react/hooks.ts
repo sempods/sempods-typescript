@@ -1198,10 +1198,9 @@ export function useCreation<D extends object>(
         captured.run(),
       );
       if (outcome?.kind === 'created' && current.current === submitted) reset();
-      // The new resource's IRI, for example to link a second creation to it.
-      return outcome?.kind === 'created'
-        ? { ...outcome, iri: captured.iri }
-        : outcome;
+      // The captured IRI of every sent creation, for example to link a second
+      // creation to it; an unconfirmed one keeps it for its retry as well.
+      return outcome ? { ...outcome, iri: captured.iri } : outcome;
     },
     notice: {
       ...mutation.notice,

@@ -701,9 +701,9 @@ have separate feedback and cannot clear the creation draft. The registered targe
 protects unsubmitted drafts and recovery through row navigation, and asks before
 a context/Pod/disconnect transition. A forced lifetime change retires old results.
 Use `<UpdateNotice {...creation.notice} />` and bind input disabled state to
-`!creation.canEdit`, submit to `!creation.canCreate`. A confirmed `create()`
-resolves `{ kind: 'created', iri }` with the new resource's IRI, for example to
-link a second creation to it.
+`!creation.canEdit`, submit to `!creation.canCreate`. Every sent `create()`
+resolves with the captured `iri`, for example to link a second creation to it;
+an unconfirmed creation keeps that IRI for its check and retry.
 
 `context` creates in an explicit Context instead of the selected one:
 `useCreation(definition, { initial, collection, context })`. The hook binds it

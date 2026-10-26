@@ -26,11 +26,13 @@ const note = fields(
  * two Context IRIs with `useContexts()` or fix them with presets.
  *
  * These are two separate creations, each with its own outcome: there is no
- * transaction across Contexts. The task is created first. If the note is then
- * refused or its answer is lost, the task stays created and the note keeps its
- * draft (with the link) for a retry that sends only the note; the task is
- * never created twice. An unconfirmed creation shows its check and
- * acknowledgement, as everywhere in the SDK, and is never resent by itself.
+ * transaction across Contexts. The task is created first, and the note keeps
+ * its IRI from the first attempt on, also when the task's answer was lost.
+ * The note is sent once the task is confirmed: at once, or after its check
+ * and acknowledgement; a task found absent is retried under the same IRI.
+ * A refused or unconfirmed note keeps its own draft for a retry that sends
+ * only the note. The task is never created twice, and nothing is resent by
+ * itself.
  */
 export function TaskWithNote({
   shared,
@@ -49,18 +51,22 @@ export function TaskWithNote({
     collection: 'notes',
     context: personal,
   });
-  // The task exists once the note's draft points to it.
+  // The note points to the one task this form writes, from its first attempt.
   const linked = noteCreation.draft.about !== '';
+  // The task still needs sending: its first attempt, or the retry of the same
+  // IRI after a check found it absent. An unresolved task waits for its check.
+  const taskToSend =
+    !linked || (!taskCreation.canEdit && taskCreation.canCreate);
+  const taskUnresolved = !taskCreation.canEdit && !taskCreation.canCreate;
+  const hasNote = noteCreation.draft.text.trim() !== '';
 
   async function save() {
-    let about = noteCreation.draft.about;
-    if (!linked) {
-      const created = await taskCreation.create();
-      if (created?.kind !== 'created') return;
-      about = created.iri;
+    if (!hasNote || taskUnresolved) return;
+    if (taskToSend) {
+      const outcome = await taskCreation.create();
+      if (outcome) noteCreation.change({ about: outcome.iri });
+      if (outcome?.kind !== 'created') return;
     }
-    if (noteCreation.draft.text.trim() === '') return;
-    noteCreation.change({ about });
     await noteCreation.create();
   }
 
@@ -89,12 +95,16 @@ export function TaskWithNote({
           />
         </label>
         <button
-          disabled={linked ? !noteCreation.canCreate : !taskCreation.canCreate}
+          disabled={
+            !hasNote ||
+            taskUnresolved ||
+            (taskToSend ? !taskCreation.canCreate : !noteCreation.canCreate)
+          }
         >
           {linked ? 'Save the note again' : 'Save'}
         </button>
       </form>
-      {linked && (
+      {linked && !taskToSend && !taskUnresolved && (
         <p role="status">The task is saved; its private note is not yet.</p>
       )}
       {/* Each part reports its own outcome. */}

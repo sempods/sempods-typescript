@@ -501,7 +501,7 @@ it.each([401, 403] as const)(
     });
     act(() => f.api.creation.change({ title: 'New' }));
     await act(async () => {
-      expect(await f.api.creation.create()).toEqual({
+      expect(await f.api.creation.create()).toMatchObject({
         kind: 'not-created',
         reason: 'refused',
         problem: { kind: 'refused', status },
@@ -924,7 +924,7 @@ it('R3: a taken IRI stays unconfirmed; the draft is never re-sent under a fresh 
   });
   act(() => f.api.creation.change({ title: 'Unchanged' }));
   await act(async () => {
-    expect(await f.api.creation.create()).toEqual({
+    expect(await f.api.creation.create()).toMatchObject({
       kind: 'unconfirmed',
       desiredObserved: false,
     });
@@ -953,7 +953,7 @@ it('a taken IRI the definition cannot read can still be compared and settled', a
   });
   act(() => f.api.creation.change({ title: 'Mine' }));
   await act(async () => {
-    expect(await f.api.creation.create()).toEqual({
+    expect(await f.api.creation.create()).toMatchObject({
       kind: 'unconfirmed',
       desiredObserved: false,
     });
@@ -981,7 +981,7 @@ it('a creation the browser resent is not taken for a collision and gets no fresh
   });
   act(() => f.api.creation.change({ title: 'Once' }));
   await act(async () => {
-    expect(await f.api.creation.create()).toEqual({
+    expect(await f.api.creation.create()).toMatchObject({
       kind: 'unconfirmed',
       desiredObserved: true,
     });

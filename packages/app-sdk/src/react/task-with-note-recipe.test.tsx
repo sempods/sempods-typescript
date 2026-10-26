@@ -42,15 +42,25 @@ async function setup() {
   runtimes.push(session.runtime);
   const puts: Put[] = [];
   let refuse = '';
+  // Lands the next task, but its answer is lost (202: not a confirmation).
+  let loseTask = false;
+  const stored = new Map<string, Record<string, unknown>>();
   f.setResource(async (url, init) => {
-    if (init?.method !== 'PUT') return new Response(null, { status: 404 });
+    const iri = resourceIri(url);
+    if (init?.method !== 'PUT')
+      return stored.has(iri)
+        ? Response.json(stored.get(iri), { headers: { etag: '"v1"' } })
+        : new Response(null, { status: 404 });
     const context = new URL(url).searchParams.get('context') ?? '';
-    puts.push({
-      context,
-      iri: resourceIri(url),
-      body: JSON.parse(init.body as string) as Record<string, unknown>,
-    });
-    return new Response(null, { status: context === refuse ? 403 : 201 });
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    puts.push({ context, iri, body });
+    if (context === refuse) return new Response(null, { status: 403 });
+    stored.set(iri, { ...body, '@id': iri });
+    if (loseTask && context === work) {
+      loseTask = false;
+      return new Response(null, { status: 202 });
+    }
+    return new Response(null, { status: 201 });
   });
   render(
     <TaskWithNoteExample
@@ -63,6 +73,9 @@ async function setup() {
     puts,
     refuse: (context: string) => {
       refuse = context;
+    },
+    loseTask: () => {
+      loseTask = true;
     },
   };
 }
@@ -116,4 +129,51 @@ it('keeps the task when the note is refused and retries only the note', async ()
   expect(s.puts[2]!.context).toBe(personal);
   expect(linkOf(s.puts[2]!)).toBe(s.puts[0]!.iri);
   await waitFor(() => expect(field('Private note').value).toBe(''));
+});
+
+it('sends nothing until the note has text', async () => {
+  const s = await setup();
+  await waitFor(() => expect(field('Task').disabled).toBe(false));
+  fireEvent.change(field('Task'), { target: { value: 'Only a title' } });
+  const save = screen.getByRole('button', {
+    name: 'Save',
+  }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  fireEvent.change(field('Private note'), { target: { value: '   ' } });
+  expect(save.disabled).toBe(true);
+  expect(s.puts).toEqual([]);
+});
+
+it('links the note to an unconfirmed task once it is checked, without a second task', async () => {
+  const s = await setup();
+  s.loseTask();
+  await fill('Pay rent', 'Before the 3rd');
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByText(/The result is unconfirmed/)).toBeTruthy();
+  expect(s.puts.map((put) => put.context)).toEqual([work]);
+  // The note waits for the task's check; the person checks and acknowledges.
+  expect(
+    (
+      screen.getByRole('button', {
+        name: 'Save the note again',
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Check current version' }),
+  );
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'I have checked the pod' }),
+  );
+  await screen.findByText('The task is saved; its private note is not yet.');
+  fireEvent.click(screen.getByRole('button', { name: 'Save the note again' }));
+  await waitFor(() => expect(s.puts).toHaveLength(2));
+  expect(s.puts.map((put) => put.context)).toEqual([work, personal]);
+  expect(linkOf(s.puts[1]!)).toBe(s.puts[0]!.iri);
 });
