@@ -75,6 +75,12 @@ function TaskScreen() {
           />
         ))}
       </ul>
+      {/* An unresolved tick whose task left the list keeps its recovery. */}
+      {mutate.unresolved
+        .filter((iri) => !tasks?.some((item) => item.iri === iri))
+        .map((iri) => (
+          <UpdateNotice key={iri} {...mutate.noticeFor(iri)} />
+        ))}
       {/* A row that left the list (deleted elsewhere) keeps its editor. */}
       {selected && !tasks?.some((item) => item.iri === selected) && editing}
       <UpdateNotice {...creation.notice} quiet />

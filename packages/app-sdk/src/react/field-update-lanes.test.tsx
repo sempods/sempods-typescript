@@ -3,7 +3,7 @@
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import { fields, flag, text } from '@sempods/client-sdk/edit';
+import { fields, flag, text, type Snapshot } from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
 import {
   SempodsProvider,
@@ -66,15 +66,19 @@ async function setup() {
   f.setResource(async (url, init) => {
     const iri = resourceIri(url);
     if ((init?.method ?? 'GET') === 'GET')
-      return Response.json(rows.get(iri), { headers: { etag: '"v1"' } });
+      return rows.has(iri)
+        ? Response.json(rows.get(iri), { headers: { etag: '"v1"' } })
+        : new Response(null, { status: 404 });
     patches.push(iri);
     return answer();
   });
   let api!: Api;
   let app!: ReturnType<typeof useApp>;
+  let shown: readonly Snapshot<{ title: string; done: boolean }>[] = [];
   function Screen() {
     const list = useList(definition);
     api = useFieldUpdate(definition);
+    shown = list.data?.items ?? shown;
     app = useApp();
     // Rows render only while the list has data, as an app's rows do.
     return (
@@ -93,7 +97,7 @@ async function setup() {
       </ul>
     );
   }
-  render(
+  const view = render(
     <SempodsProvider runtime={session.runtime}>
       <TargetScreen>
         <Screen />
@@ -105,6 +109,9 @@ async function setup() {
     ...f,
     ...session,
     patches,
+    rows,
+    unmount: () => view.unmount(),
+    shown: () => shown,
     api: () => api,
     app: () => app,
     answer: (next: typeof answer) => {
@@ -166,4 +173,33 @@ it('keeps an unconfirmed write through lost read access while its row is gone', 
   expect(screen.getByText(/The result is unconfirmed/)).toBeTruthy();
   expect(button('Two').disabled).toBe(false);
   expect(s.patches).toEqual(['urn:one']);
+});
+
+it('sends nothing for a resource once the hook has unmounted', async () => {
+  const s = await setup();
+  await waitFor(() => expect(button('Two').disabled).toBe(false));
+  const api = s.api();
+  const two = s.shown().find((row) => row.iri === 'urn:two')!;
+  s.unmount();
+  expect(await api.update(two, { done: true })).toBeUndefined();
+  expect(s.patches).toEqual([]);
+});
+
+it('reports an unresolved write whose row was deleted, until acknowledged', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  act(() => button('One').click());
+  expect(await screen.findByText(/The result is unconfirmed/)).toBeTruthy();
+  // Deleted elsewhere: the check finds it absent and the list drops the row.
+  s.rows.delete('urn:one');
+  await act(async () => {
+    await s.api().noticeFor('urn:one').onCheck();
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: 'One' })).toBeNull(),
+  );
+  expect(s.api().unresolved).toEqual(['urn:one']);
+  act(() => s.api().noticeFor('urn:one').onAcknowledge());
+  expect(s.api().unresolved).toEqual([]);
 });

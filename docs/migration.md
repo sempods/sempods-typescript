@@ -113,7 +113,9 @@ Check these points:
   for those elements in management need updating.
 - **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane
   per resource; new `canMutateFor(item)` and `noticeFor(item)` lock and report
-  a single row, and an unresolved write survives its row being unmounted.
+  a single row, and an unresolved write survives its row being unmounted;
+  `unresolved` lists the IRIs that still need a check, so an app can show the
+  notice of a row that left the list.
   `canMutate`, `outcome`, `notice` and `acknowledge` keep their list-wide
   meaning. A write for another resource is no longer refused while one is
   pending or unresolved; apps that disable on `canMutate` behave as before.

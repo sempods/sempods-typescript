@@ -691,8 +691,11 @@ list and ask per row: `disabled={!mutate.canMutateFor(item)}` and
 then locks only that row, and a refusal or an unconfirmed answer shows at that
 row. Because the lane lives in the hook, an unresolved write and its leave
 guard stay while the row is not rendered, for example during lost read
-access, and return with the row. Do not give each row a hook of its own:
-unmounting the row would drop its unresolved write. `canMutate`, `outcome`,
+access, and return with the row. `unresolved` lists the IRIs whose write still
+needs a check; show `noticeFor(iri)` outside the list for those without a row,
+for example a task deleted elsewhere, as the TODO example does. Do not give
+each row a hook of its own: unmounting the row would drop its unresolved write.
+After the hook unmounts, `update`, `remove` and `create` send nothing. `canMutate`, `outcome`,
 `notice` and `acknowledge` keep their list-wide meaning (false while any
 resource's write is pending or unresolved; the latest write's feedback).
 

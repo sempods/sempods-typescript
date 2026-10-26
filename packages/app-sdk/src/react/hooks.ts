@@ -843,8 +843,12 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     };
   }
   const lanes = generation.current;
+  // A lane writes only while this hook is mounted for its target: a callback
+  // resuming after unmount reaches no guard or recovery UI.
   const holds = () =>
-    generation.current === lanes && app.getSnapshot().view === view;
+    generation.current === lanes &&
+    lanes.mounted &&
+    app.getSnapshot().view === view;
   const register = (lane: Lane<D>) => {
     if (!lanes.guards.has(lane))
       lanes.guards.set(lane, app.register(lane.guard('target')));
@@ -888,7 +892,8 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   const available = Boolean(
     view &&
     access.write &&
-    holds() &&
+    generation.current === lanes &&
+    app.getSnapshot().view === view &&
     !app.getSnapshot().changing &&
     !app.getSnapshot().confirmingLeave,
   );
@@ -898,6 +903,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     operation: 'create' | 'update' | 'remove',
     action: (target: BoundView) => Promise<MutationOutcome<D>>,
   ) => {
+    if (!lanes.mounted) return Promise.resolve(undefined);
     const lane = laneFor(iri);
     lanes.latest = lane;
     return lane.execute(operation, iri, action);
@@ -916,6 +922,12 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     /** `UpdateNotice` props for this resource's latest write. */
     noticeFor: (item: string | { readonly iri: string }) =>
       lanes.lanes.get(iriOf(item))?.notice(starts) ?? noNotice,
+    /**
+     * Resources whose write is unconfirmed or changed on the Pod, until checked
+     * and acknowledged. Show `noticeFor` for those whose rows are gone, for
+     * example deleted elsewhere, so their recovery stays reachable.
+     */
+    unresolved: all.filter((l) => l.unresolved).map((l) => l.iri),
     update: (snapshot: Snapshot<D>, change: Partial<D>) =>
       run(snapshot.iri, 'update', (v) =>
         updateFields(v, snapshot, definition, change),
