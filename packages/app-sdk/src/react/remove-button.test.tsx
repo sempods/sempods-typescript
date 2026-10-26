@@ -73,3 +73,19 @@ it('never submits an enclosing form', () => {
   expect(onRemove).toHaveBeenCalledTimes(1);
   expect(onSubmit).not.toHaveBeenCalled();
 });
+
+it('confirms the action it asked about, not a newer one', () => {
+  const asked = vi.fn();
+  const newer = vi.fn();
+  const view = render(<RemoveButton onRemove={asked} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  // The row read again meanwhile: its callback now holds a newer snapshot.
+  view.rerender(<RemoveButton onRemove={newer} />);
+  fireEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Delete',
+    }),
+  );
+  expect(asked).toHaveBeenCalledTimes(1);
+  expect(newer).not.toHaveBeenCalled();
+});

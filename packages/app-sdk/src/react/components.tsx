@@ -536,7 +536,10 @@ export function ResourceEditor<D, U = D>({
 
 /**
  * A delete button that asks first, with the dialog and texts of
- * `ResourceEditor`'s Delete: only the dialog's Delete calls `onRemove`, once.
+ * `ResourceEditor`'s Delete: only the dialog's Delete calls `onRemove`, once,
+ * as it was when the question opened. A row read again meanwhile does not
+ * change what is removed, so a conditional delete of the version shown reports
+ * a newer one as a conflict.
  * Pass the hook's check and command, for example
  * `disabled={!mutate.canMutateFor(item)}` and `onRemove={() => mutate.remove(item)}`;
  * the outcome shows where the hook's notice is. A button that becomes disabled
@@ -558,10 +561,13 @@ export function RemoveButton({
   readonly children?: ReactNode;
 }) {
   const m = useSdkLocale().messages.controls;
-  const [asking, setAsking] = useState(false);
+  // The action asked about, captured when the question opens.
+  const [asking, setAsking] = useState<{
+    readonly remove: () => unknown;
+  } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   // Withdrawn for good: enabled again later, it does not reopen.
-  if (asking && disabled) setAsking(false);
+  if (asking && disabled) setAsking(null);
   return (
     <>
       <button
@@ -571,21 +577,21 @@ export function RemoveButton({
         aria-label={label}
         title={label}
         disabled={disabled}
-        onClick={() => setAsking(true)}
+        onClick={() => setAsking({ remove: onRemove })}
       >
         {children ?? m.remove}
       </button>
       <ConfirmDialog
-        open={asking}
+        open={asking !== null}
         ui="remove"
         returnFocus={button}
         cancel={m.cancel}
         confirm={m.remove}
-        onCancel={() => setAsking(false)}
+        onCancel={() => setAsking(null)}
         onConfirm={() => {
           // Withdrawn first: a second press cannot remove again.
-          setAsking(false);
-          void onRemove();
+          setAsking(null);
+          if (asking) void asking.remove();
         }}
       >
         <p>{m.confirmRemove ?? m.remove}</p>
