@@ -39,6 +39,11 @@ export class Lane<D> {
   version = 0;
   uncertain = false;
   alive = true;
+  /**
+   * The snapshot a confirmed update was made from. It no longer shows the
+   * resource, so it cannot be written again; the next read brings a fresh one.
+   */
+  spent: object | null = null;
   state: {
     outcome: MutationOutcome<D> | null;
     operation: 'create' | 'update' | 'remove';
@@ -110,10 +115,11 @@ export class Lane<D> {
     };
   }
   /** Whether a write may start now; `execute` sends nothing otherwise. */
-  startable() {
+  startable(subject?: object) {
     const view = this.view;
     return Boolean(
       view &&
+      (subject === undefined || subject !== this.spent) &&
       this.eligible() &&
       !this.pending &&
       !this.unresolved &&
@@ -126,9 +132,11 @@ export class Lane<D> {
     operation: 'create' | 'update' | 'remove',
     iri: string,
     action: (target: BoundView) => Promise<MutationOutcome<D>>,
+    /** The snapshot written from; a confirmed update spends it. */
+    subject?: object,
   ) {
     const view = this.view;
-    if (!view || !this.startable()) return;
+    if (!view || !this.startable(subject)) return;
     const version = ++this.version;
     this.pending = true;
     this.checked = false;
@@ -151,6 +159,7 @@ export class Lane<D> {
     }
     this.pending = false;
     if (!this.eligible()) return;
+    if (outcome.kind === 'saved' && subject) this.spent = subject;
     // A result may contain a read made before access was lost and regained.
     if (this.version !== version || !this.readable())
       outcome = withoutComparison(outcome)!;
@@ -214,10 +223,11 @@ export class Lane<D> {
       : null;
   }
   /** Whether this lane may write now, given the target's write access. */
-  canMutate(writable: boolean) {
+  canMutate(writable: boolean, subject?: object) {
     return Boolean(
       this.view &&
       writable &&
+      (subject === undefined || subject !== this.spent) &&
       this.eligible() &&
       !this.pending &&
       !this.unresolved &&

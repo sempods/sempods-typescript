@@ -124,7 +124,8 @@ All points:
   per resource; new `canMutateFor(item)` and `noticeFor(item)` lock and report
   a single row, and an unresolved write survives its row being unmounted;
   `unresolved` lists the IRIs that still need a check, so an app can show the
-  notice of a row that left the list.
+  notice of a row that left the list. After a confirmed update, the snapshot
+  it was made from stays locked until the list reads again.
   `canMutate`, `outcome`, `notice` and `acknowledge` keep their list-wide
   meaning. A write for another resource is no longer refused while one is
   pending or unresolved; apps that disable on `canMutate` behave as before.

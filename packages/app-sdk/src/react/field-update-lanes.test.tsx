@@ -243,3 +243,24 @@ it('keeps the list-wide recovery when a write for another resource is refused', 
   expect(s.api().unresolved).toEqual([]);
   expect(s.api().notice.outcome).toBeNull();
 });
+
+it('does not write again from the snapshot a confirmed update was made from', async () => {
+  const s = await setup();
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  const one = s.shown().find((row) => row.iri === 'urn:one')!;
+  await act(async () => {
+    expect(await s.api().update(one, { done: true })).toMatchObject({
+      kind: 'saved',
+    });
+  });
+  expect(s.api().canMutateFor(one)).toBe(false);
+  expect(await s.api().update(one, { done: false })).toBeUndefined();
+  expect(s.patches).toEqual(['urn:one']);
+  // The list reads again: its fresh snapshot is writable.
+  await waitFor(() =>
+    expect(s.shown().find((row) => row.iri === 'urn:one')).not.toBe(one),
+  );
+  expect(
+    s.api().canMutateFor(s.shown().find((row) => row.iri === 'urn:one')!),
+  ).toBe(true);
+});

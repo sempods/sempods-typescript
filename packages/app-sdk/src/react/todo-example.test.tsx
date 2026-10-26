@@ -419,3 +419,54 @@ it('the TODO list deletes a done task from its row after asking', async () => {
   expect(writes).toEqual(['DELETE urn:task:milk']);
   expect(screen.getByRole('button', { name: 'Buy bread' })).toBeTruthy();
 });
+
+it('the TODO row waits for a fresh read after a confirmed tick, so a second tick is no conflict', async () => {
+  const rows = new Map<string, Record<string, unknown>>([[milk['@id'], milk]]);
+  let held: ReturnType<typeof deferred<Response>> | null = null;
+  let version = 1;
+  const f = await signedIn('en', async () =>
+    held ? held.promise : Response.json([...rows.values()]),
+  );
+  const patches: string[] = [];
+  f.setResource(async (url, init) => {
+    const iri = resourceIri(url);
+    if ((init?.method ?? 'GET') === 'GET')
+      return Response.json(rows.get(iri), {
+        headers: { etag: `"v${version}"` },
+      });
+    patches.push(init!.body as string);
+    rows.set(iri, {
+      ...rows.get(iri),
+      ...(JSON.parse(init!.body as string) as Record<string, unknown>),
+    });
+    version++;
+    held = deferred<Response>();
+    return new Response(null, { status: 204 });
+  });
+  const box = () =>
+    screen.getByRole('checkbox', {
+      name: 'Done: Buy milk',
+    }) as HTMLInputElement;
+  await screen.findByRole('checkbox', { name: 'Done: Buy milk' });
+  await waitFor(() => expect(box().disabled).toBe(false));
+  fireEvent.click(box());
+  await waitFor(() => expect(patches).toHaveLength(1));
+  // Saved, but the list has not read again: the shown row is spent.
+  await act(async () => {});
+  expect(box().disabled).toBe(true);
+  fireEvent.click(box());
+  expect(patches).toHaveLength(1);
+  // The fresh read shows the change and frees the row; the next tick saves.
+  const read = held!;
+  held = null;
+  await act(async () => read.resolve(Response.json([...rows.values()])));
+  await waitFor(() => expect(box().checked).toBe(true));
+  await waitFor(() => expect(box().disabled).toBe(false));
+  fireEvent.click(box());
+  await waitFor(() => expect(patches).toHaveLength(2));
+  const again = held!;
+  held = null;
+  await act(async () => again.resolve(Response.json([...rows.values()])));
+  await waitFor(() => expect(box().checked).toBe(false));
+  expect(screen.queryByText(/The pod has changed/)).toBeNull();
+});

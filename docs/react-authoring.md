@@ -722,7 +722,10 @@ list and ask per row: `disabled={!mutate.canMutateFor(item)}` and
 `<UpdateNotice {...mutate.noticeFor(item)} quiet />`, as the
 [TODO example's `TaskRow`](../examples/todo/src/app.tsx) does. Ticking one task
 then locks only that row, and a refusal or an unconfirmed answer shows at that
-row. Because the lane lives in the hook, an unresolved write and its leave
+row. After a confirmed update, the row's snapshot no longer shows the
+resource: it stays locked until the list shows the fresh one, so a quick
+second tick does not compare against what the person's own write replaced.
+Because the lane lives in the hook, an unresolved write and its leave
 guard stay while the row is not rendered, for example during lost read
 access, and return with the row. `unresolved` lists the IRIs whose write still
 needs a check; show `noticeFor(iri)` outside the list for those without a row,
