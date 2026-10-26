@@ -695,7 +695,12 @@ access, and return with the row. `unresolved` lists the IRIs whose write still
 needs a check; show `noticeFor(iri)` outside the list for those without a row,
 for example a task deleted elsewhere, as the TODO example does. Do not give
 each row a hook of its own: unmounting the row would drop its unresolved write.
-After the hook unmounts, `update`, `remove` and `create` send nothing. `canMutate`, `outcome`,
+After the hook unmounts, `update`, `remove` and `create` send nothing.
+For a delete in the row, `RemoveButton` asks with the same dialog and texts as
+`ResourceEditor`'s **Delete** and calls `onRemove` only from its confirmation:
+`<RemoveButton label={...} disabled={!mutate.canMutateFor(item)} onRemove={() => mutate.remove(item)} />`.
+Its children replace the **Delete** text, for example with an icon; `label`
+then names it. The TODO example offers it for done tasks. `canMutate`, `outcome`,
 `notice` and `acknowledge` keep their list-wide meaning (false while any
 resource's write is pending or unresolved; the latest write's feedback).
 

@@ -3,6 +3,7 @@ import {
   AppAccess,
   AccessNotice,
   LoadNotice,
+  RemoveButton,
   ResourceEditor,
   UpdateNotice,
   SempodsProvider,
@@ -30,6 +31,7 @@ function TaskScreen() {
     newTask: de ? 'Neue Aufgabe' : 'New task',
     add: de ? 'Hinzufügen' : 'Add',
     done: de ? 'Erledigt' : 'Done',
+    remove: de ? 'Löschen' : 'Delete',
     empty: de ? 'Noch keine Aufgaben.' : 'No tasks yet.',
   };
   // The rows stay while the list reloads, also when the page becomes visible
@@ -70,12 +72,13 @@ function TaskScreen() {
             item={item}
             mutate={mutate}
             doneLabel={m.done}
+            removeLabel={m.remove}
             editing={selected === item.iri ? editing : null}
             onOpen={() => void select(item.iri)}
           />
         ))}
       </ul>
-      {/* An unresolved tick whose task left the list keeps its recovery. */}
+      {/* An unresolved tick or delete whose task left the list keeps its recovery. */}
       {mutate.unresolved
         .filter((iri) => !tasks?.some((item) => item.iri === iri))
         .map((iri) => (
@@ -116,20 +119,22 @@ function TaskScreen() {
 }
 
 /**
- * One task: a checkbox to finish it and its title to edit it. Its tick locks
- * only this row, and a problem with it shows right here. The changed row is
- * the confirmation.
+ * One task: a checkbox to finish it, its title to edit it and, once done, a
+ * delete button that asks first. Its write locks only this row, and a problem
+ * with it shows right here. The changed or vanished row is the confirmation.
  */
 function TaskRow({
   item,
   mutate,
   doneLabel,
+  removeLabel,
   editing,
   onOpen,
 }: {
   readonly item: Snapshot<Task>;
   readonly mutate: ReturnType<typeof useFieldUpdate<Task>>;
   readonly doneLabel: string;
+  readonly removeLabel: string;
   /** The row's editor while it is open; the title opens it in its place. */
   readonly editing: ReactNode;
   readonly onOpen: () => void;
@@ -147,6 +152,19 @@ function TaskRow({
         <button className="title" onClick={onOpen}>
           {item.data.title}
         </button>
+      )}
+      {/* The open editor has its own Delete. */}
+      {item.data.done && !editing && (
+        <RemoveButton
+          className="remove"
+          label={`${removeLabel}: ${item.data.title}`}
+          disabled={!mutate.canMutateFor(item)}
+          onRemove={() => mutate.remove(item)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3" />
+          </svg>
+        </RemoveButton>
       )}
       <UpdateNotice {...mutate.noticeFor(item)} quiet />
     </li>

@@ -928,6 +928,26 @@ try {
     await confirmDelete(page);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     assert.equal(writes, beforeAsk + 1);
+    // A done task deletes from its row, after the same question.
+    await add('Done row');
+    assert.equal(
+      await page.getByRole('button', { name: 'Delete: Done row' }).count(),
+      0,
+    );
+    await page.getByRole('checkbox', { name: 'Done: Done row' }).click();
+    const trash = page.getByRole('button', {
+      name: 'Delete: Done row',
+      exact: true,
+    });
+    await trash.waitFor();
+    await page.waitForFunction(
+      () => !document.querySelector('.tasks .remove')?.hasAttribute('disabled'),
+    );
+    const beforeTrash = writes;
+    await trash.click();
+    await ask.getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.getByText('No tasks yet.', { exact: true }).waitFor();
+    assert.equal(writes, beforeTrash + 1);
     await add('Existing row');
     // C1: observing absence preserves the draft for an explicit same-IRI retry.
     const createAttempts = [];
@@ -1567,7 +1587,7 @@ try {
   assert.deepEqual(JSON.parse(await node(['list'])), []);
   assert.deepEqual(serverErrors, []);
   console.log(
-    'Packed TODO: standard UI, EN/DE, CRUD, conflict/unknown save/create/delete, custom message/picker, draft guards, A-B-A, keyboard/mobile, second-tab notice, reload with remembered context; shared Node CRUD passed.',
+    'Packed TODO: standard UI, EN/DE, CRUD, row delete of a done task, conflict/unknown save/create/delete, custom message/picker, draft guards, A-B-A, keyboard/mobile, second-tab notice, reload with remembered context; shared Node CRUD passed.',
   );
 } finally {
   await browser?.close();

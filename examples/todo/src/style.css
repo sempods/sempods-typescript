@@ -236,7 +236,29 @@ input:disabled {
   color: var(--sempods-muted);
   text-decoration: line-through;
 }
-/* A row's own notice (a refused or unconfirmed tick) below its title. */
+/* A done task's delete button, quiet beside its title. */
+.remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--sempods-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.remove:hover:not(:disabled) {
+  color: var(--sempods-text);
+  background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
+}
+.remove svg {
+  width: 20px;
+  height: 20px;
+}
+/* A row's own notice (a refused or unconfirmed write) below its title. */
 .tasks li {
   flex-wrap: wrap;
 }

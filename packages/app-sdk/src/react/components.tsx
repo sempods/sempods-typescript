@@ -533,3 +533,62 @@ export function ResourceEditor<D, U = D>({
     </section>
   );
 }
+
+/**
+ * A delete button that asks first, with the dialog and texts of
+ * `ResourceEditor`'s Delete: only the dialog's Delete calls `onRemove`, once.
+ * Pass the hook's check and command, for example
+ * `disabled={!mutate.canMutateFor(item)}` and `onRemove={() => mutate.remove(item)}`;
+ * the outcome shows where the hook's notice is. A button that becomes disabled
+ * while asking withdraws the question.
+ */
+export function RemoveButton({
+  onRemove,
+  disabled = false,
+  label,
+  className,
+  children,
+}: {
+  readonly onRemove: () => unknown;
+  readonly disabled?: boolean;
+  /** Accessible name and tooltip, for example for an icon; defaults to Delete. */
+  readonly label?: string;
+  readonly className?: string;
+  /** The button's content, for example an icon; defaults to Delete. */
+  readonly children?: ReactNode;
+}) {
+  const m = useSdkLocale().messages.controls;
+  const [asking, setAsking] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  // Withdrawn for good: enabled again later, it does not reopen.
+  if (asking && disabled) setAsking(false);
+  return (
+    <>
+      <button
+        ref={button}
+        className={className}
+        aria-label={label}
+        title={label}
+        disabled={disabled}
+        onClick={() => setAsking(true)}
+      >
+        {children ?? m.remove}
+      </button>
+      <ConfirmDialog
+        open={asking}
+        ui="remove"
+        returnFocus={button}
+        cancel={m.cancel}
+        confirm={m.remove}
+        onCancel={() => setAsking(false)}
+        onConfirm={() => {
+          // Withdrawn first: a second press cannot remove again.
+          setAsking(false);
+          void onRemove();
+        }}
+      >
+        <p>{m.confirmRemove ?? m.remove}</p>
+      </ConfirmDialog>
+    </>
+  );
+}

@@ -119,6 +119,9 @@ Check these points:
   `canMutate`, `outcome`, `notice` and `acknowledge` keep their list-wide
   meaning. A write for another resource is no longer refused while one is
   pending or unresolved; apps that disable on `canMutate` behave as before.
+- **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
+  question before it calls `onRemove`, for a delete in a list row with
+  `useFieldUpdate`'s `remove`. Nothing existing changes.
 - **Creating in an explicit Context.** `useCreation` takes `context` to create
   in a Context other than the selected one, reports `refused`, and resolves every sent `create()` with the captured
   `iri` (tests comparing the outcome with `toEqual` need the `iri` or

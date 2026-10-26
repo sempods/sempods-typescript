@@ -32,6 +32,7 @@ it.each([
       'AppAccess',
       'CallbackNotice',
       'LoadNotice',
+      'RemoveButton',
       'ResourceEditor',
       'SdkLocaleProvider',
       'SempodsProvider',
