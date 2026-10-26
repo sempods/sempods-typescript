@@ -206,11 +206,20 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     return () => loader.dispose();
   }, [view]);
   const loader = active?.view === view ? active.loader : null;
-  const state: LoadState<T> = useSyncExternalStore(
+  const loaded: LoadState<T> = useSyncExternalStore(
     loader?.subscribe ?? noopSubscribe,
     loader?.getSnapshot ?? (() => empty),
     loader?.getSnapshot ?? (() => empty),
   );
+  // The key whose read the loader's state belongs to; a newer key shows
+  // loading until its own read starts, never the old inputs' data.
+  const inputs = useRef({ loader, key });
+  const state =
+    loader &&
+    inputs.current.loader === loader &&
+    !Object.is(inputs.current.key, key)
+      ? loading
+      : loaded;
   const reload = useCallback(async () => {
     await loader?.reload();
     return loader?.getSnapshot();
@@ -222,7 +231,6 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   }, [loader]);
   const cancel = useCallback(() => loader?.cancel(), [loader]);
   // Changed read inputs: a fresh read for this loader (a new one reads anyway).
-  const inputs = useRef({ loader, key });
   useEffect(() => {
     const before = inputs.current;
     inputs.current = { loader, key };
@@ -1229,9 +1237,9 @@ export function useCreation<D extends object>(
     > => {
       if (!view || current.current.view !== view)
         return notSent(view ? 'ended' : 'unavailable');
+      // Live: a batch may call this before the render after its last item.
       const refused = mutation.refusal();
       if (refused) return notSent(refused);
-      if (!mutation.canMutate) return notSent('unavailable');
       if (!valid(current.current.draft)) return notSent('invalid');
       const submitted = current.current;
       if (command.current?.state !== submitted)
