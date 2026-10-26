@@ -566,6 +566,7 @@ export function RemoveButton({
     <>
       <button
         ref={button}
+        type="button"
         className={className}
         aria-label={label}
         title={label}

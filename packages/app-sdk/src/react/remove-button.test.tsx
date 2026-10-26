@@ -46,3 +46,30 @@ it('withdraws the question when it becomes disabled, for good', () => {
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(onRemove).not.toHaveBeenCalled();
 });
+
+it('never submits an enclosing form', () => {
+  const onSubmit = vi.fn((e: { preventDefault: () => void }) =>
+    e.preventDefault(),
+  );
+  const onRemove = vi.fn();
+  render(
+    <form onSubmit={onSubmit}>
+      <RemoveButton onRemove={onRemove} />
+    </form>,
+  );
+  const button = screen.getByRole('button', { name: 'Delete' });
+  fireEvent.click(button);
+  fireEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Cancel',
+    }),
+  );
+  fireEvent.click(button);
+  fireEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Delete',
+    }),
+  );
+  expect(onRemove).toHaveBeenCalledTimes(1);
+  expect(onSubmit).not.toHaveBeenCalled();
+});

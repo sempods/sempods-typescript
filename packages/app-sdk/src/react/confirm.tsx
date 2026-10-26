@@ -101,10 +101,11 @@ export function ConfirmDialog({
       {title ? <h2 id={label}>{title}</h2> : null}
       {title ? children : <div id={label}>{children}</div>}
       <div className="sp-sdk-actions">
-        <button ref={stay} onClick={onCancel}>
+        {/* Inside an app's form, neither answer submits it. */}
+        <button ref={stay} type="button" onClick={onCancel}>
           {cancel}
         </button>
-        <button className="sp-sdk-primary" onClick={onConfirm}>
+        <button type="button" className="sp-sdk-primary" onClick={onConfirm}>
           {confirm}
         </button>
       </div>
