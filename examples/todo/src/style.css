@@ -236,6 +236,14 @@ input:disabled {
   color: var(--sempods-muted);
   text-decoration: line-through;
 }
+/* A row's own notice (a refused or unconfirmed tick) below its title. */
+.tasks li {
+  flex-wrap: wrap;
+}
+.tasks li > [data-sempods-ui='notice'] {
+  flex-basis: 100%;
+  margin: 0 0 8px 44px;
+}
 .tasks [data-sempods-ui='editor'] {
   flex: 1;
   min-width: 0;

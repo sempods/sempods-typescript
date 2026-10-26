@@ -297,3 +297,33 @@ it('the TODO header says when sharing more lists cannot reach the Pod', async ()
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
   expect(screen.getByText(text.en.empty)).toBeTruthy();
 });
+
+it('the TODO list locks only the row whose tick is being saved', async () => {
+  const bread = {
+    ...milk,
+    '@id': 'urn:task:bread',
+    [schema + 'name']: [{ '@value': 'Buy bread' }],
+  };
+  const rows = new Map<string, Record<string, unknown>>([
+    [milk['@id'], milk],
+    [bread['@id'], bread],
+  ]);
+  const f = await signedIn('en', async () => Response.json([...rows.values()]));
+  const held = deferred<Response>();
+  f.setResource(async (url, init) => {
+    const iri = resourceIri(url);
+    if ((init?.method ?? 'GET') === 'GET')
+      return Response.json(rows.get(iri), { headers: { etag: '"v1"' } });
+    return held.promise;
+  });
+  const box = (name: string) =>
+    screen.getByRole('checkbox', { name: `Done: ${name}` }) as HTMLInputElement;
+  await screen.findByRole('checkbox', { name: 'Done: Buy milk' });
+  await waitFor(() => expect(box('Buy milk').disabled).toBe(false));
+  fireEvent.click(box('Buy milk'));
+  await waitFor(() => expect(box('Buy milk').disabled).toBe(true));
+  // Another task is a separate resource: it stays usable meanwhile.
+  expect(box('Buy bread').disabled).toBe(false);
+  await act(async () => held.resolve(new Response(null, { status: 204 })));
+  await waitFor(() => expect(box('Buy milk').disabled).toBe(false));
+});
