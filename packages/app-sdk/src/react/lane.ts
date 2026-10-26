@@ -109,22 +109,26 @@ export class Lane<D> {
       },
     };
   }
+  /** Whether a write may start now; `execute` sends nothing otherwise. */
+  startable() {
+    const view = this.view;
+    return Boolean(
+      view &&
+      this.eligible() &&
+      !this.pending &&
+      !this.unresolved &&
+      view.getSnapshot().write &&
+      !this.app.getSnapshot().changing &&
+      !this.app.getSnapshot().confirmingLeave,
+    );
+  }
   async execute(
     operation: 'create' | 'update' | 'remove',
     iri: string,
     action: (target: BoundView) => Promise<MutationOutcome<D>>,
   ) {
     const view = this.view;
-    if (
-      !view ||
-      !this.eligible() ||
-      this.pending ||
-      this.unresolved ||
-      !view.getSnapshot().write ||
-      this.app.getSnapshot().changing ||
-      this.app.getSnapshot().confirmingLeave
-    )
-      return;
+    if (!view || !this.startable()) return;
     const version = ++this.version;
     this.pending = true;
     this.checked = false;

@@ -18,6 +18,7 @@ import {
   catalogue,
   deferred,
   fixture,
+  work,
   personal,
   resourceIri,
 } from '../runtime/fixture.test.js';
@@ -218,4 +219,27 @@ it('acknowledges the write that a retained result just made', async () => {
   act(() => api.acknowledge());
   expect(s.api().unresolved).toEqual([]);
   expect(button('One').disabled).toBe(false);
+});
+
+it('keeps the list-wide recovery when a write for another resource is refused', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  act(() => button('One').click());
+  expect(await screen.findByText(/The result is unconfirmed/)).toBeTruthy();
+  // Write access is lost; a retained callback tries an untouched resource.
+  s.setCatalogue(async () => catalogue([work, personal], []));
+  await act(() => s.runtime.loadContexts(s.id));
+  await waitFor(() => expect(button('Two').disabled).toBe(true));
+  const two = s.shown().find((row) => row.iri === 'urn:two')!;
+  await act(async () => {
+    expect(await s.api().update(two, { done: true })).toBeUndefined();
+  });
+  expect(s.patches).toEqual(['urn:one']);
+  expect(s.api().notice.outcome).toMatchObject({ kind: 'unconfirmed' });
+  expect(s.api().outcome).toMatchObject({ kind: 'unconfirmed' });
+  // The list-wide acknowledgement still addresses the unconfirmed write.
+  act(() => s.api().acknowledge());
+  expect(s.api().unresolved).toEqual([]);
+  expect(s.api().notice.outcome).toBeNull();
 });

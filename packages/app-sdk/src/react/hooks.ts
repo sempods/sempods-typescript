@@ -905,6 +905,8 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   ) => {
     if (!lanes.mounted) return Promise.resolve(undefined);
     const lane = laneFor(iri);
+    // A refused write sends nothing and keeps the latest write's recovery.
+    if (!lane.startable()) return Promise.resolve(undefined);
     lanes.latest = lane;
     return lane.execute(operation, iri, action);
   };
