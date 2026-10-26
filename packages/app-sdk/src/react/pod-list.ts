@@ -150,8 +150,9 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
   } | null>(null);
   const latest = useRef(canonical);
   latest.current = canonical;
+  // Whose loaders they are: another connection or definition starts over.
+  const owner = `${activeId ?? ''} ${key} ${type}`;
   useEffect(() => {
-    const owner = `${activeId ?? ''} ${key} ${type}`;
     if (store.current?.owner !== owner) {
       if (store.current) store.current.map.forEach(release);
       store.current = { owner, map: new Map(), limit: limiter() };
@@ -190,7 +191,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
       void loader.reload();
     }
     rerender();
-  }, [app, activeId, wanted, key, type]);
+  }, [app, activeId, wanted, owner, type]);
   // Unmounting releases every loader (StrictMode mounts again from scratch).
   useEffect(
     () => () => {
@@ -199,7 +200,10 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
     },
     [],
   );
-  const loaders = store.current?.map;
+  // Until this render's connection and definition have loaders of their own,
+  // the old ones' rows do not show: they belong to another definition.
+  const loaders =
+    store.current?.owner === owner ? store.current.map : undefined;
 
   // A confirmed write anywhere on the Pod may add a Context that holds the type.
   const podUrl = useAppFacts((s) => s.pod?.podUrl ?? null);

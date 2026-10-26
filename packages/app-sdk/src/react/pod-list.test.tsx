@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /** `usePodList`: one type across the Pod's readable Contexts, with partial results. */
 import { webcrypto } from 'node:crypto';
+import { useState } from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
@@ -259,4 +260,50 @@ it('refreshes the catalogue for a Context it does not list yet', async () => {
   act(() => f.api().list.reload());
   expect(await screen.findByText('Call Ann')).toBeTruthy();
   await waitFor(() => expect(f.api().list.complete).toBe(true));
+});
+
+it('never shows snapshots of the previous definition after it changes', async () => {
+  const f = await setup();
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  cleanup();
+  // Same type, one more field: every snapshot must come from the new one.
+  const withNote = fields(
+    {
+      title: text('urn:title', { language: null }),
+      done: flag('urn:status', { on: 'urn:done', off: 'urn:open' }),
+      note: text('urn:note', { language: null, optional: true }),
+    },
+    { type: 'urn:Task' },
+  );
+  const seen: {
+    readonly note: boolean;
+    readonly items: number;
+    readonly ok: boolean;
+  }[] = [];
+  let swap!: () => void;
+  function Switching() {
+    const [noted, setNoted] = useState(false);
+    swap = () => setNoted(true);
+    const list = usePodList<Record<string, unknown>>(
+      (noted ? withNote : task) as never,
+    );
+    const items = list.data?.items ?? [];
+    seen.push({
+      note: noted,
+      items: items.length,
+      ok: !noted || items.every((i) => 'note' in i.snapshot.data),
+    });
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <Switching />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(seen.at(-1)?.items).toBe(1));
+  act(() => swap());
+  await waitFor(() =>
+    expect(seen.at(-1)).toMatchObject({ note: true, items: 1 }),
+  );
+  expect(seen.filter((r) => !r.ok)).toEqual([]);
 });
