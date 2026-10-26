@@ -969,7 +969,7 @@ try {
     await page.route('**/_system/resources/**', absentCreation);
     await newDraft.fill('Retry captured task');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
-    await page.getByRole('status').filter({ hasText: 'unconfirmed' }).waitFor();
+    await page.getByRole('alert').filter({ hasText: 'unconfirmed' }).waitFor();
     await page.unroute('**/_system/resources/**', absentCreation);
     await page
       .getByRole('button', { name: 'Check current version', exact: true })
@@ -1007,7 +1007,7 @@ try {
     await page.getByLabel('New task', { exact: true }).fill('Maybe created');
     const beforeCreate = writes;
     await page.getByRole('button', { name: 'Add', exact: true }).click();
-    await page.getByRole('status').filter({ hasText: 'unconfirmed' }).waitFor();
+    await page.getByRole('alert').filter({ hasText: 'unconfirmed' }).waitFor();
     assert.equal(writes, beforeCreate + 1);
     assert.equal(
       await page.getByLabel('New task', { exact: true }).isDisabled(),
@@ -1078,7 +1078,7 @@ try {
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
       .click();
-    await page.getByRole('status').filter({ hasText: 'unconfirmed' }).waitFor();
+    await page.getByRole('alert').filter({ hasText: 'unconfirmed' }).waitFor();
     await page.unroute('**/_system/resources/**', loseAnswer);
     await page
       .getByRole('button', { name: 'Check current version', exact: true })

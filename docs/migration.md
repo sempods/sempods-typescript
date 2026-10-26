@@ -145,6 +145,17 @@ All points:
   `FieldUpdateRow`, `FieldUpdateState`, `FieldUpdateNotice`, `NotSent`,
   `ContextList`. `useLoad` and `usePodLoad` return `data` like `useList`.
   `locale` and `language` accept `undefined` (same as leaving them out).
+- **Smaller conveniences.** `<UnresolvedNotices of={mutate} shown={items} />`
+  renders the notices of unresolved writes whose row is gone; `useLoad` and
+  `usePodLoad` take `key` (a changed value reads again, without kept data);
+  `<AccessNotice only="write" />` says only that the target is read-only;
+  `text(…, { trim: true })` stores values without outer whitespace in creation
+  and update (remove app-side `.trim()` before `create()`); `DraftOf` also
+  takes a definition (`type Task = DraftOf<typeof taskFields>`).
+- **Problems are announced at once.** `UpdateNotice` and `ResourceEditor`
+  render failures, conflicts and unconfirmed outcomes with `role="alert"`
+  (confirmed successes keep `role="status"`); tests that found them by the
+  `status` role look for `alert`.
 - **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
   question before it calls `onRemove`, for a delete in a list row with
   `useFieldUpdate`'s `remove`, shown as a quiet trash icon. Nothing existing

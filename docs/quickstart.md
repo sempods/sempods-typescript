@@ -54,7 +54,7 @@ const schema = 'https://schema.org/';
 
 export const task = fields(
   {
-    title: text(`${schema}name`, { language: null }),
+    title: text(`${schema}name`, { language: null, trim: true }),
     done: flag(`${schema}actionStatus`, {
       on: `${schema}CompletedActionStatus`,
       off: `${schema}PotentialActionStatus`,
@@ -186,7 +186,6 @@ function Tasks() {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          creation.change({ title: creation.draft.title.trim() });
           void creation.create();
         }}
       >

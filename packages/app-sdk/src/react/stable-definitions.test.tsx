@@ -622,3 +622,40 @@ it('R5: the same fields in another order keep the editor and both drafts', async
   expect(api.editor?.state.draft?.title).toBe('Unsaved edit');
   expect(api.creation.draft.title).toBe('Unsaved creation');
 });
+
+it('useLoad reads again when its key changes, without the old data', async () => {
+  const f = await setup();
+  let api!: {
+    load: ReturnType<typeof useLoad<string>>;
+    search: (term: string) => void;
+  };
+  // Every render's input and data: a new term never shows the old result.
+  const shown: [string, string | undefined][] = [];
+  function Screen() {
+    const [term, search] = useState('milk');
+    const load = useLoad(
+      async (view) => {
+        const r = await view.sparql.construct('CONSTRUCT {} WHERE {}');
+        return r.kind === 'ok'
+          ? { kind: 'ok', body: `results for ${term}` }
+          : r;
+      },
+      { key: term, retain: true },
+    );
+    api = { load, search };
+    shown.push([term, load.data]);
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <TargetScreen>
+        <Screen />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(api.load.data).toBe('results for milk'));
+  act(() => api.search('bread'));
+  // The kept data belonged to the old term: a fresh read, not a retained one.
+  await waitFor(() => expect(api.load.data).toBe('results for bread'));
+  expect(shown).not.toContainEqual(['bread', 'results for milk']);
+});

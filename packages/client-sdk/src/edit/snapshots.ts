@@ -2,6 +2,7 @@ import type { JsonLd, WriteOptions, WriteResult } from '../results.js';
 import {
   isFieldDefinition,
   owned,
+  storedDraft,
   type Field,
   type FieldDefinition,
 } from './fields.js';
@@ -317,6 +318,8 @@ export async function updateFields<D>(
     if (!(name in definition.fields))
       throw new TypeError(`Unknown field: ${name}`);
   let wanted: D | undefined;
+  // What the write was based on: values it leaves untouched stay as they were.
+  let onto: D | undefined;
   return conditional<D, UpdateOutcome<D>>(
     source,
     snapshot,
@@ -325,6 +328,7 @@ export async function updateFields<D>(
       seenAgain(proof, definition as FieldDefinition<unknown>, body, names),
     true,
     (now) => {
+      onto = now.snapshot.data;
       wanted = { ...now.snapshot.data, ...command };
       if (definition.valid && !definition.valid(wanted))
         throw new TypeError('The changed values are not valid.');
@@ -339,15 +343,20 @@ export async function updateFields<D>(
         options,
       );
     },
-    (now) =>
-      now.kind === 'ok' &&
-      wanted !== undefined &&
-      names.every((name) =>
+    (now) => {
+      if (now.kind !== 'ok' || wanted === undefined) return false;
+      // Compared as stored: a trimmed field is on the Pod without its spaces.
+      const desired = storedDraft(definition, wanted, onto) as Record<
+        string,
+        unknown
+      >;
+      return names.every((name) =>
         sameData(
           (now.snapshot.data as Record<string, unknown>)[name],
-          (wanted as Record<string, unknown>)[name],
+          desired[name],
         ),
-      ),
+      );
+    },
     {
       done: { kind: 'saved' },
       failed: (problem) => ({

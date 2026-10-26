@@ -37,6 +37,7 @@ it.each([
       'SdkLocaleProvider',
       'SempodsProvider',
       'TargetScreen',
+      'UnresolvedNotices',
       'UpdateNotice',
       'useApp',
       'useAppState',

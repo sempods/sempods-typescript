@@ -218,7 +218,8 @@ it.each(['en', 'de'] as const)(
         <UpdateNotice outcome={{ kind: 'unconfirmed' }} />
       </SempodsProvider>,
     );
-    expect(screen.getByRole('status').textContent).toMatch(
+    // Uncertain outcomes are announced at once.
+    expect(screen.getByRole('alert').textContent).toMatch(
       language === 'en' ? /unconfirmed/i : /bestätigt/i,
     );
   },

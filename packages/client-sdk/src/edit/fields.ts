@@ -38,11 +38,16 @@ export interface TextField<Optional extends boolean = boolean> {
   /**
    * `""` is a valid RDF string; `reject` (default) makes the draft invalid,
    * also for whitespace only, so forms need no own blank check. Values are
-   * never trimmed: what the person typed is what is stored.
+   * stored as typed unless `trim` is set.
    * In a required field an absent value also reads as `""`, so writing `""`
    * there is a no-op: the field never materializes an empty literal by itself.
    */
   readonly empty: 'reject' | 'allow';
+  /**
+   * Writes the value without leading and trailing whitespace, in creation and
+   * update alike. The draft keeps what the person typed until it is saved.
+   */
+  readonly trim?: boolean;
   /**
    * Optional fields read an absent value as `null`. Writing `null` removes
    * this field's value (an explicit intent); writing `""` stores an empty
@@ -98,9 +103,14 @@ type ValueOf<F> = F extends FlagField
     : F extends { readonly optional: boolean }
       ? string | null
       : string;
-export type DraftOf<S extends { readonly [name: string]: Field }> = {
-  readonly [K in keyof S]: ValueOf<S[K]>;
-};
+/**
+ * The draft of a field spec, or of a definition:
+ * `type Task = DraftOf<typeof taskFields>`.
+ */
+export type DraftOf<S> =
+  S extends EditDefinition<infer D>
+    ? D
+    : { readonly [K in keyof S]: S[K] extends Field ? ValueOf<S[K]> : never };
 
 /**
  * The type-level mark of a definition created by `fields()`. It matches the
@@ -131,6 +141,7 @@ function predicateOf(predicate: string): string {
 type TextOptions = {
   readonly language: string | null;
   readonly empty?: 'reject' | 'allow';
+  readonly trim?: boolean;
 };
 /** A string in one language, edited in place; other languages and values are preserved. */
 export function text(
@@ -153,6 +164,7 @@ export function text(
     language: options.language,
     empty: options.empty ?? 'reject',
     optional: options.optional ?? false,
+    ...(options.trim ? { trim: true } : {}),
   });
 }
 
@@ -283,6 +295,9 @@ function writeField(
   terms: readonly Term[],
   value: Value,
 ): readonly Term[] {
+  // An untouched field keeps its terms as they are, whitespace included.
+  if (readField(field, terms) === value) return terms;
+  value = stored(field, value);
   if (readField(field, terms) === value) return terms;
   switch (field.kind) {
     case 'text':
@@ -494,8 +509,50 @@ export function describeNew<D>(
   return body;
 }
 
+/** The value as it is written: a `trim` text field without outer whitespace. */
+function stored(field: Field, value: Value): Value {
+  return field.kind === 'text' && field.trim && typeof value === 'string'
+    ? value.trim()
+    : value;
+}
+
+/**
+ * A draft as `fields()` stores it when written onto `base` (text fields with
+ * `trim` without outer whitespace; a value equal to `base`'s stays as it is,
+ * as the write leaves it), for comparing what should be on the Pod with what
+ * is there. Other definitions keep the draft as it is.
+ */
+export function storedDraft<D>(
+  definition: EditDefinition<D>,
+  draft: D,
+  base?: D | null,
+): D {
+  if (
+    !isFieldDefinition(definition) ||
+    draft === null ||
+    typeof draft !== 'object'
+  )
+    return draft;
+  const values = draft as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...values };
+  let changed = false;
+  const before = base as Record<string, unknown> | null | undefined;
+  for (const [name, field] of Object.entries(
+    definition.fields as Record<string, Field>,
+  )) {
+    if (before && sameData(values[name], before[name])) continue;
+    const value = stored(field, values[name] as Value);
+    if (value !== values[name]) {
+      next[name] = value;
+      changed = true;
+    }
+  }
+  return changed ? (Object.freeze(next) as D) : draft;
+}
+
 /** A field's value as terms of a subject that does not exist yet. */
 function freshTerms(field: Field, value: Value): readonly Term[] {
+  value = stored(field, value);
   switch (field.kind) {
     case 'text':
       if (value === null) return [];
