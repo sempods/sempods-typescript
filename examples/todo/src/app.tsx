@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AppAccess,
   AccessNotice,
@@ -164,7 +164,10 @@ function StandardScreen({
   const access = useWorkflowAccess();
   const de = language === 'de';
   // Language names in the current language: Deutsch/Englisch, German/English.
-  const names = new Intl.DisplayNames([language], { type: 'language' });
+  const names = useMemo(
+    () => new Intl.DisplayNames([language], { type: 'language' }),
+    [language],
+  );
 
   return (
     <main className="standard">

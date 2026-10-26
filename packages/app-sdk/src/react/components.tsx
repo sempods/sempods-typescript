@@ -9,7 +9,8 @@ import { useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure, type SdkMessages } from '../locale.js';
 import type { SessionFact } from '../runtime/types.js';
-import type { LoadState } from '../authoring/load.js';
+import { shownData, type LoadState } from '../authoring/load.js';
+import { knownContexts } from './access-presentation.js';
 import { SdkStyles } from './styles.js';
 import { ConfirmDialog } from './confirm.js';
 import { startCount, succeeded } from '../authoring/changes.js';
@@ -170,12 +171,7 @@ export function LoadNotice({
 }) {
   const { messages: m, error, format } = useSdkLocale();
   const c = m.controls;
-  const shown =
-    state.kind === 'ready'
-      ? state.data
-      : 'previous' in state
-        ? state.previous
-        : undefined;
+  const shown = shownData(state);
   const skipped =
     shown !== null &&
     typeof shown === 'object' &&
@@ -247,11 +243,7 @@ export function AccessNotice() {
     return <Notice>{m.missingScopes(c.missingRequiredScopes, format)}</Notice>;
   if (c.catalogue.kind === 'failed') return <Notice>{m.catalogueError}</Notice>;
   // A reload that still has the earlier Contexts is not unknown access.
-  if (
-    c.catalogue.kind !== 'ready' &&
-    !(c.catalogue.kind === 'loading' && c.catalogue.contexts)
-  )
-    return <Notice>{m.cataloguePending}</Notice>;
+  if (!knownContexts(c.catalogue)) return <Notice>{m.cataloguePending}</Notice>;
   if (!c.selectedContext)
     return (
       <Notice>

@@ -42,9 +42,9 @@ input {
   padding: 10px 12px;
   border: 0;
   border-radius: 8px;
-  color: var(--sempods-accent);
+  color: var(--sempods-text);
   background: transparent;
-  font-weight: 500;
+  text-align: start;
   cursor: pointer;
 }
 .menu-button:hover,
@@ -141,11 +141,6 @@ input:disabled {
 .menu:popover-open {
   display: grid;
 }
-.menu button {
-  text-align: start;
-  color: var(--sempods-text);
-  font-weight: 400;
-}
 .menu [role='group'] {
   display: grid;
 }
@@ -186,9 +181,6 @@ input:disabled {
 .title {
   flex: 1;
   padding-inline: 4px;
-  text-align: start;
-  color: var(--sempods-text);
-  font-weight: 400;
   overflow-wrap: anywhere;
 }
 .done .title {

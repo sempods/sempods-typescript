@@ -718,10 +718,7 @@ try {
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
-    await page
-      .getByRole('dialog', { name: 'Pods & sharing' })
-      .waitFor({ state: 'detached' });
+    await closeManagement(page);
     await menu(page, german);
     await editor
       .getByRole('button', { name: 'Speichern', exact: true })
@@ -798,7 +795,7 @@ try {
     );
     await heldDiscovery.abort('failed');
     await page.waitForFunction(() => !document.querySelector('[inert]'));
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await closeManagement(page);
     const add = async (title) => {
       await page.getByLabel('New task', { exact: true }).fill(title);
       await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -1199,7 +1196,7 @@ try {
       });
       if ((await check.count()) > 0) return check.click();
       await menu(page, 'Pods & sharing');
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await closeManagement(page);
     };
     await recheck();
     await keptRow().waitFor({ state: 'detached' });

@@ -21,8 +21,13 @@ import {
 import { useSdkLocale } from './locale.js';
 import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { SdkStyles } from './styles.js';
+import { useModalDialog } from './confirm.js';
 import { contextName, podName, distinctName } from './names.js';
-import { presentAccess, type ConnectionBody } from './access-presentation.js';
+import {
+  knownContexts,
+  presentAccess,
+  type ConnectionBody,
+} from './access-presentation.js';
 
 /** What a replacement for the connection view (`components.Connections`) receives. */
 export interface ConnectionsProps {
@@ -182,7 +187,7 @@ export function AppAccess({
   // mounted during that reload.
   const catalogueSettled =
     settledHere === c?.id ||
-    (c?.catalogue.kind === 'loading' && Boolean(c.catalogue.contexts));
+    (c?.catalogue.kind === 'loading' && Boolean(knownContexts(c.catalogue)));
   const presentation = presentAccess({
     state,
     connection: c,
@@ -319,9 +324,9 @@ export function AppAccess({
                 ) : (
                   <AccessConnections
                     contextRequired={contextRequired}
-                    discovery={discovery}
+                    // The dialog checks the access again on opening instead.
+                    discovery={discovery && !asDialog}
                     manage={open}
-                    dialog={asDialog}
                     mode={mode}
                     body={body}
                     podAddress={podAddress}
@@ -368,28 +373,13 @@ function ManagementDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const label = useId();
   const { messages: m, direction } = useSdkLocale();
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    const back =
-      returnFocus?.current ??
-      (element.ownerDocument.activeElement as HTMLElement | null);
-    // Environments without top-layer support (jsdom) still show it in place.
-    if (typeof element.showModal === 'function') {
-      if (!element.open) element.showModal();
-    } else element.setAttribute('open', '');
-    return () => {
-      if (typeof element.close === 'function') element.close();
-      else element.removeAttribute('open');
-      back?.focus();
-    };
-  }, [returnFocus]);
+  useModalDialog(dialog, true, returnFocus);
   return (
     <dialog
       ref={dialog}
       aria-labelledby={label}
       data-sempods-ui="management"
-      className="sp-access-dialog"
+      className="sp-sdk-dialog sp-access-dialog"
       dir={direction}
       onCancel={(event) => {
         event.preventDefault();
@@ -429,7 +419,6 @@ function enteredPod(value: string) {
 
 function AccessConnections({
   manage,
-  dialog,
   mode,
   podNames,
   contextRequired,
@@ -438,13 +427,11 @@ function AccessConnections({
   podAddress,
 }: {
   readonly manage: boolean;
-  /** Management in its dialog, which checks the access again on opening. */
-  readonly dialog: boolean;
   readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
   readonly contextRequired: boolean;
-  /** Catalogue discovery is demanded, with or without a selection. */
+  /** Catalogue discovery is demanded and checked by hand (**Check access**). */
   readonly discovery: boolean;
   readonly body: ConnectionBody;
 }) {
@@ -478,10 +465,9 @@ function AccessConnections({
     state.preset?.podUrl === c?.podUrl ? state.preset?.contextIri : undefined;
   // A reload (for example on opening the dialog) keeps the earlier Contexts
   // on screen until it settles, so the view does not change size meanwhile.
-  const readable =
-    c?.catalogue.kind === 'ready' || c?.catalogue.kind === 'loading'
-      ? (c.catalogue.contexts ?? []).filter((entry) => entry.readable)
-      : [];
+  const readable = (knownContexts(c?.catalogue) ?? []).filter(
+    (entry) => entry.readable,
+  );
   const unavailable =
     busy ||
     state.changing ||
@@ -549,6 +535,12 @@ function AccessConnections({
     c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
   const selectedEntry = readable.find(
     (entry) => entry.iri === c?.selectedContext,
+  );
+  // What the catalogue says this app may do in a Context.
+  const accessFact = (entry: { readonly writable: boolean }) => (
+    <span className="sp-access-fact">
+      {entry.writable ? m.controls.canChange : m.controls.canRead}
+    </span>
   );
   // One readable Context, already selected: a choice adds nothing.
   const onlyContext =
@@ -635,7 +627,7 @@ function AccessConnections({
               >
                 {m.controls.updateAccess}
               </button>
-              {discovery && !dialog && (
+              {discovery && (
                 <button
                   disabled={unavailable}
                   onClick={() => void act(() => app.refreshContexts(c.id))}
@@ -802,16 +794,13 @@ function AccessConnections({
           )}
         </>
       )}
-      {active && contextRequired && !fixedContext && onlyContext && (
+      {active && contextRequired && !fixedContext && onlyContext ? (
         <p>
           {contextLabel(onlyContext.iri)}
           {' · '}
-          <span className="sp-access-fact">
-            {onlyContext.writable ? m.controls.canChange : m.controls.canRead}
-          </span>
+          {accessFact(onlyContext)}
         </p>
-      )}
-      {active && contextRequired && !fixedContext && !onlyContext && (
+      ) : active && contextRequired && !fixedContext ? (
         <label>
           {m.dataContext}
           <select
@@ -835,15 +824,9 @@ function AccessConnections({
               </option>
             ))}
           </select>
-          {selectedEntry && (
-            <span className="sp-access-fact">
-              {selectedEntry.writable
-                ? m.controls.canChange
-                : m.controls.canRead}
-            </span>
-          )}
+          {selectedEntry && accessFact(selectedEntry)}
         </label>
-      )}
+      ) : null}
       {active && contextRequired && fixedContext && (
         <p>
           {m.dataContext}: {contextLabel(fixedContext)}
@@ -867,9 +850,7 @@ function AccessConnections({
             {readable.map((entry) => (
               <li key={entry.iri}>
                 <span>{contextLabel(entry.iri)}</span>
-                <span className="sp-access-fact">
-                  {entry.writable ? m.controls.canChange : m.controls.canRead}
-                </span>
+                {accessFact(entry)}
               </li>
             ))}
           </ul>
@@ -939,13 +920,10 @@ const styles = `
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
 [data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:5px; padding:10px 12px; }
 [data-sempods-access] summary { min-height:44px; padding:10px; cursor:pointer; }
-.sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-height:calc(100dvh - 32px); padding:0; border:0; border-radius:12px; background:var(--sp-bg); color:var(--sp-text); box-shadow:0 12px 32px rgb(0 0 0 / .2); }
-.sp-access-dialog::backdrop { background:rgb(0 0 0 / .45); }
+.sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
-.sp-access-dialog-header h2 { flex:1; margin:0; font-size:1.25rem; font-weight:600; }
-.sp-access-close { width:44px; height:44px; display:grid; place-items:center; padding:0; border:0; border-radius:8px; color:var(--sp-text); background:transparent; cursor:pointer; }
-.sp-access-close:hover { background:color-mix(in srgb,var(--sp-accent) 8%,transparent); }
-.sp-access-close:focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
+.sp-access-dialog-header h2 { flex:1; margin:0; }
+.sp-access-close { width:44px; height:44px; display:grid; place-items:center; padding:0; color:var(--sp-text); }
 .sp-access-close svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
 .sp-access-dialog [data-sempods-access] { padding:8px 24px 24px; text-align:start; }
 .sp-access-dialog [data-sempods-access] .sp-access-content { max-width:none; }

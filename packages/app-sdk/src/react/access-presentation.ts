@@ -1,5 +1,15 @@
 import type { AppSnapshot } from '../authoring/app.js';
-import type { Connection } from '../runtime/types.js';
+import type { CatalogueFact, Connection } from '../runtime/types.js';
+
+/**
+ * The Contexts to show: a ready catalogue's, or the earlier ones a reload keeps
+ * until it settles; none before the first catalogue or after a failure.
+ */
+export function knownContexts(catalogue: CatalogueFact | undefined) {
+  return catalogue?.kind === 'ready' || catalogue?.kind === 'loading'
+    ? catalogue.contexts
+    : undefined;
+}
 
 /** Private rendering inputs; history stays with AppAccess, authority with the runtime. */
 export interface AccessFacts {

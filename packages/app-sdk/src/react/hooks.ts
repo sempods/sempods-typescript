@@ -45,6 +45,7 @@ import {
   useView,
   useWorkflowAccess,
 } from './app.js';
+import { shownData } from '../authoring/load.js';
 import {
   changed,
   observeStarts,
@@ -280,11 +281,18 @@ export function useList<D>(
       if (!scope.cancelled) void reload();
     });
   }, [view, reload, scope]);
-  // Back in the tab or app, other devices may have changed the list.
+  // Back in the tab or app, other devices may have changed the list. A read
+  // still running answers that already: it is joined, not aborted.
+  const shownState = useRef(state);
+  shownState.current = state;
   useEffect(() => {
     if (!view || typeof document === 'undefined') return;
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && !scope.cancelled)
+      if (
+        document.visibilityState === 'visible' &&
+        !scope.cancelled &&
+        shownState.current.kind !== 'loading'
+      )
         void reload();
     };
     document.addEventListener('visibilitychange', onVisible);
@@ -292,12 +300,7 @@ export function useList<D>(
   }, [view, reload, scope]);
   return {
     state,
-    data:
-      state.kind === 'ready'
-        ? state.data
-        : 'previous' in state
-          ? state.previous
-          : undefined,
+    data: shownData(state),
     reload: () => {
       scope.cancelled = false;
       return reload();

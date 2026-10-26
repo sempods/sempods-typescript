@@ -8,6 +8,36 @@ import {
 import { SdkStyles } from './styles.js';
 
 /**
+ * Internal: shows `ref` as a native modal dialog in the browser's top layer
+ * while `open`, focuses `initialFocus`, and returns the focus on closing to
+ * `returnFocus` or to the element focused before. Without top-layer support
+ * (jsdom) the dialog still shows in place.
+ */
+export function useModalDialog(
+  ref: RefObject<HTMLDialogElement | null>,
+  open: boolean,
+  returnFocus?: RefObject<HTMLElement | null>,
+  initialFocus?: RefObject<HTMLElement | null>,
+) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!open || !element) return;
+    const back =
+      returnFocus?.current ??
+      (element.ownerDocument.activeElement as HTMLElement | null);
+    if (typeof element.showModal === 'function') {
+      if (!element.open) element.showModal();
+    } else element.setAttribute('open', '');
+    initialFocus?.current?.focus();
+    return () => {
+      if (typeof element.close === 'function') element.close();
+      else element.removeAttribute('open');
+      back?.focus();
+    };
+  }, [ref, open, returnFocus, initialFocus]);
+}
+
+/**
  * Internal: a native modal dialog in the browser's top layer. It stays visible
  * and operable above an app's own `showModal()` dialog, while the content
  * behind it (including that dialog) is inert. Cancel has the focus, Escape
@@ -39,23 +69,7 @@ export function ConfirmDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const stay = useRef<HTMLButtonElement>(null);
   const label = useId();
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    if (!open || !element) return;
-    const back =
-      returnFocus?.current ??
-      (element.ownerDocument.activeElement as HTMLElement | null);
-    // Environments without top-layer support (jsdom) still show it in place.
-    if (typeof element.showModal === 'function') {
-      if (!element.open) element.showModal();
-    } else element.setAttribute('open', '');
-    stay.current?.focus();
-    return () => {
-      if (typeof element.close === 'function') element.close();
-      else element.removeAttribute('open');
-      back?.focus();
-    };
-  }, [open, returnFocus]);
+  useModalDialog(dialog, open, returnFocus, stay);
   if (!open) return null;
   return (
     <dialog
