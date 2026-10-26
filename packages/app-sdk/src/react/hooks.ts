@@ -902,13 +902,14 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     iri: string,
     operation: 'create' | 'update' | 'remove',
     action: (target: BoundView) => Promise<MutationOutcome<D>>,
+    subject?: Snapshot<D>,
   ) => {
     if (!lanes.mounted) return Promise.resolve(undefined);
     const lane = laneFor(iri);
     // A refused write sends nothing and keeps the latest write's recovery.
-    if (!lane.startable()) return Promise.resolve(undefined);
+    if (!lane.startable(subject)) return Promise.resolve(undefined);
     lanes.latest = lane;
-    return lane.execute(operation, iri, action);
+    return lane.execute(operation, iri, action, subject);
   };
   return {
     canMutate: available && all.every((l) => !l.pending && !l.unresolved),
@@ -916,10 +917,18 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     outcome: latest?.outcome(starts) ?? null,
     operation: latest?.state?.operation ?? null,
     notice: latest ? latest.notice(starts) : noNotice,
-    /** Whether this resource may be written now; other resources' writes do not lock it. */
+    /**
+     * Whether this resource may be written now; other resources' writes do not
+     * lock it. A snapshot a confirmed update was made from stays locked until
+     * the list shows a fresh one.
+     */
     canMutateFor: (item: string | { readonly iri: string }) => {
       const lane = lanes.lanes.get(iriOf(item));
-      return lane ? lane.canMutate(access.write) : available;
+      if (!lane) return available;
+      return lane.canMutate(
+        access.write,
+        typeof item === 'string' ? undefined : item,
+      );
     },
     /** `UpdateNotice` props for this resource's latest write. */
     noticeFor: (item: string | { readonly iri: string }) =>
@@ -931,8 +940,11 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
      */
     unresolved: all.filter((l) => l.unresolved).map((l) => l.iri),
     update: (snapshot: Snapshot<D>, change: Partial<D>) =>
-      run(snapshot.iri, 'update', (v) =>
-        updateFields(v, snapshot, definition, change),
+      run(
+        snapshot.iri,
+        'update',
+        (v) => updateFields(v, snapshot, definition, change),
+        snapshot,
       ),
     remove: (snapshot: Snapshot<D>) =>
       run(snapshot.iri, 'remove', (v) =>
