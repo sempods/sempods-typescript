@@ -241,3 +241,22 @@ it('keeps the rows when a catalogue refresh fails, as reads stay allowed', async
   expect(f.api().list.contexts.map((c) => c.problem)).toEqual([null, null]);
   expect(f.api().list.complete).toBe(true);
 });
+
+it('refreshes the catalogue for a Context it does not list yet', async () => {
+  const f = await setup();
+  f.tasks.get(personal)!.set('urn:b', node('urn:b', 'Call Ann'));
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  // Another app created `personal` after this catalogue was read.
+  f.setCatalogue(async () => catalogue([work], [work]));
+  await act(() => f.runtime.loadContexts(f.id));
+  await waitFor(() =>
+    expect(
+      f.api().list.contexts.find((c) => c.context === personal)?.problem,
+    ).toBe('unreadable'),
+  );
+  // Now the Pod lists it; an overview reload refreshes the catalogue too.
+  f.setCatalogue(async () => catalogue([work, personal], [work, personal]));
+  act(() => f.api().list.reload());
+  expect(await screen.findByText('Call Ann')).toBeTruthy();
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+});

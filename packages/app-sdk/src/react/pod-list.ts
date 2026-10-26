@@ -209,11 +209,34 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
       podUrl ? observePodWrites(podUrl, () => void discover()) : undefined,
     [podUrl, discover],
   );
+  // A Context the catalogue does not list yet, for example one another app
+  // just created: refresh the catalogue once for it, and again on reload.
+  // The Contexts it knows, also kept while it reloads or after a failure.
+  const listed =
+    catalogue !== undefined && 'contexts' in catalogue
+      ? catalogue.contexts
+      : undefined;
+  const unlisted = listed
+    ? graphs.filter((iri) => !listed.some((c) => c.iri === iri)).join(' ')
+    : '';
+  const refreshCatalogue = useCallback(() => {
+    if (activeId) void app.runtime.loadContexts(activeId).catch(() => {});
+  }, [app, activeId]);
+  // Once per set of unlisted Contexts: a catalogue that still omits them stays.
+  const refreshedFor = useRef('');
+  useEffect(() => {
+    if (!unlisted || unlisted === refreshedFor.current) return;
+    refreshedFor.current = unlisted;
+    refreshCatalogue();
+  }, [unlisted, refreshCatalogue]);
+  const unlistedNow = useRef(unlisted);
+  unlistedNow.current = unlisted;
   const reload = useCallback(() => {
     void discover();
+    if (unlistedNow.current) refreshCatalogue();
     for (const entry of store.current?.map.values() ?? [])
       if (entry !== 'refused') void entry.loader.reload();
-  }, [discover]);
+  }, [discover, refreshCatalogue]);
   // Back in the tab or app, other devices may have changed it.
   useEffect(() => {
     if (typeof document === 'undefined') return;
