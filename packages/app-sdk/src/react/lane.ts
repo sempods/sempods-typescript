@@ -12,6 +12,26 @@ import type { BoundView } from '../runtime/view.js';
 export type MutationOutcome<D> =
   UpdateOutcome<D> | RemoveSnapshotOutcome<D> | CreateOutcome;
 
+/**
+ * Nothing was sent, so nothing changed and the draft or row is as before.
+ * Once a write is sent, its own outcome comes back instead, also if the
+ * screen or target changed meanwhile.
+ * - `unavailable`: no write access now, or a guarded change is in progress.
+ * - `busy`: this resource's previous write is still pending.
+ * - `unresolved`: this resource's last write needs a check first.
+ * - `stale`: the snapshot no longer shows the resource (a confirmed update was
+ *   made from it); write from the fresh one the list reads.
+ * - `invalid`: the creation draft does not satisfy the definition.
+ * - `ended`: the hook unmounted or its target changed.
+ */
+export interface NotSent {
+  readonly kind: 'not-sent';
+  readonly reason:
+    'unavailable' | 'busy' | 'unresolved' | 'stale' | 'invalid' | 'ended';
+}
+export const notSent = (reason: NotSent['reason']): NotSent =>
+  Object.freeze({ kind: 'not-sent', reason });
+
 /** Keep the write outcome while dropping observations made under lost read access. */
 export function withoutComparison<D>(
   outcome: MutationOutcome<D> | null,
@@ -44,6 +64,8 @@ export class Lane<D> {
    * resource, so it cannot be written again; the next read brings a fresh one.
    */
   spent: object | null = null;
+  /** What the spent snapshot shows after the confirmed update. */
+  spentData: D | null = null;
   state: {
     outcome: MutationOutcome<D> | null;
     operation: 'create' | 'update' | 'remove';
@@ -116,17 +138,22 @@ export class Lane<D> {
   }
   /** Whether a write may start now; `execute` sends nothing otherwise. */
   startable(subject?: object) {
+    return this.refusal(subject) === null;
+  }
+  /** Why a write would send nothing now, or `null` when it may start. */
+  refusal(subject?: object): NotSent['reason'] | null {
     const view = this.view;
-    return Boolean(
-      view &&
-      (subject === undefined || subject !== this.spent) &&
-      this.eligible() &&
-      !this.pending &&
-      !this.unresolved &&
-      view.getSnapshot().write &&
-      !this.app.getSnapshot().changing &&
-      !this.app.getSnapshot().confirmingLeave,
-    );
+    if (!view || !this.eligible()) return view ? 'ended' : 'unavailable';
+    if (this.pending) return 'busy';
+    if (this.unresolved) return 'unresolved';
+    if (subject !== undefined && subject === this.spent) return 'stale';
+    if (
+      !view.getSnapshot().write ||
+      this.app.getSnapshot().changing ||
+      this.app.getSnapshot().confirmingLeave
+    )
+      return 'unavailable';
+    return null;
   }
   async execute(
     operation: 'create' | 'update' | 'remove',
@@ -134,9 +161,12 @@ export class Lane<D> {
     action: (target: BoundView) => Promise<MutationOutcome<D>>,
     /** The snapshot written from; a confirmed update spends it. */
     subject?: object,
-  ) {
+    /** What `subject` shows once the update is confirmed. */
+    after?: D,
+  ): Promise<MutationOutcome<D> | NotSent> {
     const view = this.view;
-    if (!view || !this.startable(subject)) return;
+    const refused = this.refusal(subject);
+    if (!view || refused) return notSent(refused ?? 'unavailable');
     const version = ++this.version;
     this.pending = true;
     this.checked = false;
@@ -158,8 +188,12 @@ export class Lane<D> {
             : { kind: 'not-saved', reason: 'failure', problem };
     }
     this.pending = false;
-    if (!this.eligible()) return;
-    if (outcome.kind === 'saved' && subject) this.spent = subject;
+    // Sent: the caller always learns what happened, also after the target ended.
+    if (!this.eligible()) return outcome;
+    if (outcome.kind === 'saved' && subject) {
+      this.spent = subject;
+      this.spentData = after ?? null;
+    }
     // A result may contain a read made before access was lost and regained.
     if (this.version !== version || !this.readable())
       outcome = withoutComparison(outcome)!;

@@ -19,6 +19,7 @@ import {
 } from '../index.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog } from './confirm.js';
+import { useCommands } from './commands.js';
 import { knownContexts } from './access-presentation.js';
 import { contextName, distinctName } from './names.js';
 const Context = createContext<{
@@ -379,6 +380,8 @@ export function useContexts() {
     retry,
   };
 }
+/** What `useContexts` returns. */
+export type ContextList = ReturnType<typeof useContexts>;
 function useDemand(active: boolean, kind: 'selection' | 'discovery') {
   const value = useContext(Context);
   if (!value) throw new Error('SempodsProvider is required.');
@@ -478,8 +481,7 @@ export function useSelection<T = string>() {
   const view = useView();
   const [state, setState] = useState({ view, selected: null as T | null });
   if (state.view !== view) setState({ view, selected: null });
-  return {
-    selected: state.view === view ? state.selected : null,
+  const { select } = useCommands([app, view], {
     select: (selected: T | null) => {
       if (!view || app.getSnapshot().view !== view)
         return Promise.resolve(false);
@@ -489,5 +491,6 @@ export function useSelection<T = string>() {
         if (app.getSnapshot().view === view) setState({ view, selected });
       });
     },
-  };
+  });
+  return { selected: state.view === view ? state.selected : null, select };
 }

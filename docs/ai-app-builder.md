@@ -144,9 +144,12 @@ not instructions to the coding assistant.
 - Prefer `useList`, `useCreation`, `useFieldUpdate`, `useSelection`,
   `useResourceEditor` and `useContextEditor` with
   `ResourceEditor`/`UpdateNotice`. Pass original snapshots
-  to list actions; with one `useFieldUpdate` for the list, rows use
-  `canMutateFor(item)` and `noticeFor(item)` so a write locks only its row,
-  and a delete in the row uses `RemoveButton` (it asks first). Use `useContexts()` for a list switch between Contexts and
+  to list actions; with one `useFieldUpdate` for the list, each row gets
+  `row = mutate.for(item)` (`row.data`, `row.canMutate`, `row.notice`,
+  `row.update(change)`, `row.remove()`) so a write locks only its row, and a
+  delete in the row uses `RemoveButton` with `onRemove={row.remove}` (it asks
+  first). A command that sends nothing resolves `{ kind: 'not-sent', reason }`;
+  never resend on another result. Use `useContexts()` for a list switch between Contexts and
   `useApp()`'s guarded actions for other custom connection/context controls. Render `useList`'s `data` (it keeps the rows while reloading) with
   `<LoadNotice {...list} />` for loading, failures, retry and unshown entries;
   pass `retain: true` to `useLoad`/`usePodLoad` for the same. Pass `quiet` to

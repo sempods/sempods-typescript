@@ -28,22 +28,22 @@ Import the named APIs from the table's entry: **app** = `@sempods/app-sdk`,
 Full signatures and examples:
 [authoring guide](react-authoring.md), [working task screen](../examples/todo/src/app.tsx).
 
-| Job                             | API (entry)                                                   | Remember                                                                                        |
-| ------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Start the browser session       | `createBrowserRuntime` (app)                                  | One stable runtime outside render; dispose at app shutdown.                                     |
-| Bind the UI to it               | `SempodsProvider`, `TargetScreen` (React)                     | Provider initializes; TargetScreen resets app-local state per target.                           |
-| Get connection/context controls | `AppAccess` (React)                                           | Place login/recovery beside your screen; the app owns its frame.                                |
-| Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit)            | Choose exact predicate/type IRIs and an explicit text language.                                 |
-| Read a typed list               | `useList`, `LoadNotice` (React)                               | Render `data` (kept while reloading); `<LoadNotice {...list} />` covers loading, errors, retry. |
-| Switch between Contexts         | `useContexts` (React)                                         | Mount outside `TargetScreen`; it selects a default and keeps AppAccess's chooser away.          |
-| Read across the Pod             | `usePodLoad` (React), calling `pod.sparql.select`/`construct` | Set `contextSelection="on-demand"` on the provider; edits still need a Context.                 |
-| Edit a Pod-overview row         | `useContextEditor`, `ResourceEditor` (React)                  | Open a row's subject and its `GRAPH` Context.                                                   |
-| Add an item                     | `useCreation` (React)                                         | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`.                    |
-| Add into another Context        | `useCreation` with `context`, `bindCreation` (headless)       | Draft stays across list switches; one hook per Context, no transaction across them.             |
-| Update or remove a row          | `useFieldUpdate` (React)                                      | Pass the original list snapshot; respect `canMutate`.                                           |
-| Edit a form safely              | `useResourceEditor`, `ResourceEditor` (React)                 | Hook owns the editor; component supplies save/delete/recovery UI.                               |
-| Change selection                | `useSelection`, `useApp` (React)                              | Use guarded row selection and connection/context/navigation actions.                            |
-| Show mutation recovery          | `UpdateNotice` (React)                                        | Render it with `{...creation.notice}` and `{...update.notice}`.                                 |
+| Job                             | API (entry)                                                   | Remember                                                                                          |
+| ------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Start the browser session       | `createBrowserRuntime` (app)                                  | One stable runtime outside render; dispose at app shutdown.                                       |
+| Bind the UI to it               | `SempodsProvider`, `TargetScreen` (React)                     | Provider initializes; TargetScreen resets app-local state per target.                             |
+| Get connection/context controls | `AppAccess` (React)                                           | Place login/recovery beside your screen; the app owns its frame.                                  |
+| Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit)            | Choose exact predicate/type IRIs and an explicit text language.                                   |
+| Read a typed list               | `useList`, `LoadNotice` (React)                               | Render `data` (kept while reloading); `<LoadNotice {...list} />` covers loading, errors, retry.   |
+| Switch between Contexts         | `useContexts` (React)                                         | Mount outside `TargetScreen`; it selects a default and keeps AppAccess's chooser away.            |
+| Read across the Pod             | `usePodLoad` (React), calling `pod.sparql.select`/`construct` | Set `contextSelection="on-demand"` on the provider; edits still need a Context.                   |
+| Edit a Pod-overview row         | `useContextEditor`, `ResourceEditor` (React)                  | Open a row's subject and its `GRAPH` Context.                                                     |
+| Add an item                     | `useCreation` (React)                                         | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`.                      |
+| Add into another Context        | `useCreation` with `context`, `bindCreation` (headless)       | Draft stays across list switches; one hook per Context, no transaction across them.               |
+| Update or remove a row          | `useFieldUpdate` (React)                                      | One hook per list; per row `mutate.for(item)`: `data`, `canMutate`, `notice`, `update`, `remove`. |
+| Edit a form safely              | `useResourceEditor`, `ResourceEditor` (React)                 | Hook owns the editor; component supplies save/delete/recovery UI.                                 |
+| Change selection                | `useSelection`, `useApp` (React)                              | Use guarded row selection and connection/context/navigation actions.                              |
+| Show mutation recovery          | `UpdateNotice` (React)                                        | Render it with `{...creation.notice}` and per row `{...row.notice}`.                              |
 
 ## Avoid the common traps
 

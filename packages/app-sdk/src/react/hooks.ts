@@ -30,6 +30,9 @@ import {
   type FieldDefinition,
   type ResourceEditor,
   type Snapshot,
+  type UpdateOutcome,
+  type RemoveSnapshotOutcome,
+  type CreateOutcome,
 } from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
 import { startupSettled } from '../authoring/app.js';
@@ -44,8 +47,9 @@ import {
   useWorkflowAccess,
 } from './app.js';
 import { shownData } from '../authoring/load.js';
-import { Lane, type MutationOutcome } from './lane.js';
-export type { MutationOutcome } from './lane.js';
+import { useCommands } from './commands.js';
+import { Lane, notSent, type MutationOutcome, type NotSent } from './lane.js';
+export type { MutationOutcome, NotSent } from './lane.js';
 import {
   observeStarts,
   observeWrites,
@@ -136,7 +140,7 @@ export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
     loading,
     options,
   );
-  return { state, reload, cancel };
+  return { state, data: shownData(state), reload, cancel };
 }
 /**
  * `retain`: a reload of the same target keeps the last data visible as
@@ -164,7 +168,7 @@ export function usePodLoad<T>(read: PodRead<T>, options: LoadOptions = {}) {
     startupSettled({ startup, startupError }) ? unavailable : loading,
     options,
   );
-  return { state, reload, cancel };
+  return { state, data: shownData(state), reload, cancel };
 }
 function useBoundLoad<T, H extends BoundView | BoundPod>(
   view: H | null,
@@ -210,12 +214,8 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     await loader?.reload({ fresh: true });
     return loader?.getSnapshot();
   }, [loader]);
-  return {
-    state,
-    reload,
-    restart,
-    cancel: () => loader?.cancel(),
-  };
+  const cancel = useCallback(() => loader?.cancel(), [loader]);
+  return { state, reload, restart, cancel };
 }
 /**
  * A typed list, refreshed after this bound target's own confirmed mutations
@@ -295,17 +295,20 @@ export function useList<D>(
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [view, reload, scope]);
+  const { cancel } = load;
+  const reloadList = useCallback(() => {
+    scope.cancelled = false;
+    return reload();
+  }, [scope, reload]);
+  const cancelList = useCallback(() => {
+    scope.cancelled = true;
+    cancel();
+  }, [scope, cancel]);
   return {
     state,
     data: shownData(state),
-    reload: () => {
-      scope.cancelled = false;
-      return reload();
-    },
-    cancel: () => {
-      scope.cancelled = true;
-      load.cancel();
-    },
+    reload: reloadList,
+    cancel: cancelList,
   };
 }
 /** Identity/target and row changes create new editors; access and locale changes do not. */
@@ -759,6 +762,7 @@ function useMutation<D>(
       action: (target: BoundView) => Promise<MutationOutcome<D>>,
     ) => lane.execute(operation, iri, action),
     editable: () => lane.eligible() && !lane.pending && !lane.unresolved,
+    refusal: () => lane.refusal(),
     acknowledge: () => lane.acknowledge(),
     busy: lane.state?.busy ?? false,
     unresolved: lane.unresolved,
@@ -785,13 +789,14 @@ const iriOf = (target: string | { readonly iri: string }) =>
  * Safe availability and standard recovery feedback for one-click row mutations.
  *
  * Each resource has its own write lane, held by this hook rather than by a row
- * component: `canMutateFor(item)` and `noticeFor(item)` lock and report only
- * that resource, so ticking one task leaves the others usable, and an
- * unresolved write stays (with its check and acknowledgement) also while its
- * row is not rendered, for example during lost read access. `canMutate`,
- * `outcome`, `notice` and `acknowledge` keep their list-wide meaning: false
- * while any resource's write is pending or unresolved, and the latest write's
- * feedback.
+ * component. `const row = mutate.for(item)` gives one row what it needs:
+ * `row.data` to show, `row.canMutate`, `row.notice` and `row.update(change)` /
+ * `row.remove()`. Ticking one task leaves the others usable, and an unresolved
+ * write stays (with its check and acknowledgement) also while its row is not
+ * rendered, for example during lost read access. `canMutate`, `outcome`,
+ * `notice` and `acknowledge` keep their list-wide meaning: false while any
+ * resource's write is pending or unresolved, and the latest write's feedback.
+ * The commands keep their identity for one target and definition.
  *
  * A success in the feedback retires when this hook or another creation,
  * row mutation or bound editor starts a write on the same target, and is not
@@ -802,9 +807,9 @@ const iriOf = (target: string | { readonly iri: string }) =>
  * and `desiredObserved`) and `checked`. Regaining access needs a fresh
  * check. Write-only loss retains comparison evidence; neither loss replays a write.
  *
- * All mutation methods return `undefined` both when nothing was sent and when
- * the target lifetime ended before completion. It is not proof that no write
- * happened; stop a batch instead of resending its item on another target.
+ * A command that sends nothing resolves `{ kind: 'not-sent', reason }` (see
+ * `NotSent`). A sent one always resolves its outcome, also when the target
+ * changed meanwhile; then it is no longer shown or guarded here.
  */
 export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   // The same instance as useList's snapshots (see canonicalOf).
@@ -898,76 +903,145 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     !app.getSnapshot().confirmingLeave,
   );
   const latest = lanes.latest;
-  const run = (
-    iri: string,
-    operation: 'create' | 'update' | 'remove',
-    action: (target: BoundView) => Promise<MutationOutcome<D>>,
-    subject?: Snapshot<D>,
-  ) => {
-    if (!lanes.mounted) return Promise.resolve(undefined);
-    const lane = laneFor(iri);
-    // A refused write sends nothing and keeps the latest write's recovery.
-    if (!lane.startable(subject)) return Promise.resolve(undefined);
-    lanes.latest = lane;
-    return lane.execute(operation, iri, action, subject);
-  };
+  // The commands keep their identity for this target and definition, so they
+  // fit effect dependencies; a retained one keeps writing to its own target.
+  const actions = useMemo(() => {
+    const run = (
+      iri: string,
+      operation: 'create' | 'update' | 'remove',
+      action: (target: BoundView) => Promise<MutationOutcome<D>>,
+      subject?: Snapshot<D>,
+      after?: D,
+    ): Promise<MutationOutcome<D> | NotSent> => {
+      if (!lanes.mounted) return Promise.resolve(notSent('ended'));
+      const lane = laneFor(iri);
+      // A refused write sends nothing and keeps the latest write's recovery.
+      const refused = lane.refusal(subject);
+      if (refused) return Promise.resolve(notSent(refused));
+      lanes.latest = lane;
+      return lane.execute(operation, iri, action, subject, after);
+    };
+    return {
+      update: (snapshot: Snapshot<D>, change: Partial<D>) =>
+        run(
+          snapshot.iri,
+          'update',
+          (v) => updateFields(v, snapshot, definition, change),
+          snapshot,
+          {
+            ...snapshot.data,
+            ...Object.fromEntries(
+              Object.entries(change).filter(([, value]) => value !== undefined),
+            ),
+          },
+        ) as Promise<UpdateOutcome<D> | NotSent>,
+      remove: (snapshot: Snapshot<D>) =>
+        run(snapshot.iri, 'remove', (v) =>
+          removeSnapshot(v, snapshot, definition),
+        ) as Promise<RemoveSnapshotOutcome<D> | NotSent>,
+      create: (
+        ...args:
+          | [iri: string, body: JsonLd]
+          | [iri: string, definition: FieldDefinition<D>, draft: D]
+      ) =>
+        run(args[0], 'create', (v) =>
+          args.length === 3
+            ? prepareCreation(v, args[0], args[1], args[2]).run()
+            : prepareCreation(v, args[0], args[1]).run(),
+        ) as Promise<CreateOutcome | NotSent>,
+      acknowledge: () => lanes.latest?.acknowledge(),
+    };
+    // `laneFor` and `definition` belong to `lanes` (same target and definition).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lanes]);
+  function rowFor(item: Snapshot<D>): FieldUpdateRow<D>;
+  function rowFor(item: string): FieldUpdateState<D>;
+  function rowFor(
+    item: Snapshot<D> | string,
+  ): FieldUpdateState<D> | FieldUpdateRow<D> {
+    const lane = lanes.lanes.get(iriOf(item));
+    const state: FieldUpdateState<D> = {
+      canMutate: lane
+        ? lane.canMutate(
+            access.write,
+            typeof item === 'string' ? undefined : item,
+          )
+        : available,
+      notice: lane?.notice(starts) ?? noNotice,
+    };
+    if (typeof item === 'string') return state;
+    return {
+      ...state,
+      data:
+        lane && lane.spent === item && lane.spentData
+          ? lane.spentData
+          : item.data,
+      update: (change: Partial<D>) => actions.update(item, change),
+      remove: () => actions.remove(item),
+    } satisfies FieldUpdateRow<D>;
+  }
   return {
+    /**
+     * One resource: whether it may be written now, its notice, what to show
+     * and its commands. Other resources' writes do not lock it. Pass the
+     * list's snapshot; an IRI alone gives `canMutate` and `notice`, for
+     * example for a resource whose row is gone.
+     */
+    for: rowFor,
+    /**
+     * Resources whose write is unconfirmed or changed on the Pod, until checked
+     * and acknowledged. Show `for(iri).notice` for those whose rows are gone,
+     * for example deleted elsewhere, so their recovery stays reachable.
+     */
+    unresolved: all.filter((l) => l.unresolved).map((l) => l.iri),
+    /** False while any resource's write is pending or unresolved. */
     canMutate: available && all.every((l) => !l.pending && !l.unresolved),
+    /** The latest write's state and feedback, for a single shared notice. */
     busy: latest?.state?.busy ?? false,
     outcome: latest?.outcome(starts) ?? null,
     operation: latest?.state?.operation ?? null,
     notice: latest ? latest.notice(starts) : noNotice,
-    /**
-     * Whether this resource may be written now; other resources' writes do not
-     * lock it. A snapshot a confirmed update was made from stays locked until
-     * the list shows a fresh one.
-     */
-    canMutateFor: (item: string | { readonly iri: string }) => {
-      const lane = lanes.lanes.get(iriOf(item));
-      if (!lane) return available;
-      return lane.canMutate(
-        access.write,
-        typeof item === 'string' ? undefined : item,
-      );
-    },
-    /** `UpdateNotice` props for this resource's latest write. */
-    noticeFor: (item: string | { readonly iri: string }) =>
-      lanes.lanes.get(iriOf(item))?.notice(starts) ?? noNotice,
-    /**
-     * Resources whose write is unconfirmed or changed on the Pod, until checked
-     * and acknowledged. Show `noticeFor` for those whose rows are gone, for
-     * example deleted elsewhere, so their recovery stays reachable.
-     */
-    unresolved: all.filter((l) => l.unresolved).map((l) => l.iri),
-    update: (snapshot: Snapshot<D>, change: Partial<D>) =>
-      run(
-        snapshot.iri,
-        'update',
-        (v) => updateFields(v, snapshot, definition, change),
-        snapshot,
-      ),
-    remove: (snapshot: Snapshot<D>) =>
-      run(snapshot.iri, 'remove', (v) =>
-        removeSnapshot(v, snapshot, definition),
-      ),
-    create: (
-      ...args:
-        | [iri: string, body: JsonLd]
-        | [iri: string, definition: FieldDefinition<D>, draft: D]
-    ) =>
-      run(args[0], 'create', (v) =>
-        args.length === 3
-          ? prepareCreation(v, args[0], args[1], args[2]).run()
-          : prepareCreation(v, args[0], args[1]).run(),
-      ),
+    update: actions.update,
+    remove: actions.remove,
+    create: actions.create,
     /**
      * Explicit acknowledgement does not replay the command. Prefer notice for
      * checked UI recovery. It reads the live latest lane, so a result kept
      * across an awaited write acknowledges that write.
      */
-    acknowledge: () => lanes.latest?.acknowledge(),
+    acknowledge: actions.acknowledge,
   };
 }
+
+/** `UpdateNotice` props for one resource's latest write. */
+export interface FieldUpdateNotice<D> {
+  readonly outcome: MutationOutcome<D> | null;
+  readonly checked: boolean;
+  readonly current: D | null | undefined;
+  readonly unreadable: boolean;
+  readonly onCheck: () => Promise<boolean>;
+  readonly onAcknowledge: () => void;
+}
+/** One resource of `useFieldUpdate`, from `for(iri)`. */
+export interface FieldUpdateState<D> {
+  /** Whether this resource may be written now. */
+  readonly canMutate: boolean;
+  readonly notice: FieldUpdateNotice<D>;
+}
+/** One resource of `useFieldUpdate`, from `for(snapshot)`. */
+export interface FieldUpdateRow<D> extends FieldUpdateState<D> {
+  /**
+   * What to show: the snapshot's values, with a confirmed update laid over
+   * until the list reads the resource again.
+   */
+  readonly data: D;
+  /** Updates the changed fields from this snapshot; see `useFieldUpdate`. */
+  update(change: Partial<D>): Promise<UpdateOutcome<D> | NotSent>;
+  /** Removes the version this snapshot shows. */
+  remove(): Promise<RemoveSnapshotOutcome<D> | NotSent>;
+}
+/** What `useFieldUpdate` returns. */
+export type FieldUpdate<D> = ReturnType<typeof useFieldUpdate<D>>;
 
 /**
  * A view bound to an explicit Context of the active connection, as
@@ -1106,17 +1180,8 @@ export function useCreation<D extends object>(
       return false;
     }
   };
-  return {
-    draft,
-    canEdit: canEdit && view !== null,
-    canCreate: mutation.canMutate && valid(draft),
-    /**
-     * The `context` is not a Context of the active connection's Pod, or not
-     * the preset's: nothing is created there.
-     */
-    refused: explicit.refused,
-    busy: mutation.busy,
-    outcome: mutation.outcome,
+  // Both keep their identity for this target and definition.
+  const commands = useCommands([view, key], {
     /**
      * Applies at once, so a following `create()` submits this draft. Ignored
      * while a command is pending, unconfirmed or held for an explicit retry
@@ -1141,21 +1206,20 @@ export function useCreation<D extends object>(
       setState(next);
     },
     /**
-     * Sends the current draft under its captured IRI. `undefined` either means
-     * nothing was sent (no write access, an invalid draft, a pending or
-     * unconfirmed command or a guarded transition; the draft is kept) or that
-     * the target lifetime ended before the answer. In the second case the
-     * write may have landed and its result is retired; the two cannot be told
-     * apart here, so treat the item as possibly created.
+     * Sends the current draft under its captured IRI and resolves its outcome
+     * with that `iri`, also when the target changed meanwhile (then the
+     * notice is gone, but the item may exist; never resubmit it from the
+     * input). `not-sent` means nothing was sent and the draft is kept.
      */
-    create: async () => {
-      if (
-        !view ||
-        !mutation.canMutate ||
-        !valid(current.current.draft) ||
-        current.current.view !== view
-      )
-        return;
+    create: async (): Promise<
+      (CreateOutcome & { readonly iri: string }) | NotSent
+    > => {
+      if (!view || current.current.view !== view)
+        return notSent(view ? 'ended' : 'unavailable');
+      // Live: a batch may call this before the render after its last item.
+      const refused = mutation.refusal();
+      if (refused) return notSent(refused);
+      if (!valid(current.current.draft)) return notSent('invalid');
       const submitted = current.current;
       if (command.current?.state !== submitted)
         command.current = {
@@ -1172,11 +1236,26 @@ export function useCreation<D extends object>(
       const outcome = await mutation.execute('create', captured.iri, () =>
         captured.run(),
       );
-      if (outcome?.kind === 'created' && current.current === submitted) reset();
+      if (outcome.kind === 'not-sent') return outcome;
+      if (outcome.kind === 'created' && current.current === submitted) reset();
       // The captured IRI of every sent creation, for example to link a second
       // creation to it; an unconfirmed one keeps it for its retry as well.
-      return outcome ? { ...outcome, iri: captured.iri } : outcome;
+      return { ...(outcome as CreateOutcome), iri: captured.iri };
     },
+  });
+  return {
+    draft,
+    canEdit: canEdit && view !== null,
+    canCreate: mutation.canMutate && valid(draft),
+    /**
+     * The `context` is not a Context of the active connection's Pod, or not
+     * the preset's: nothing is created there.
+     */
+    refused: explicit.refused,
+    busy: mutation.busy,
+    outcome: mutation.outcome,
+    change: commands.change,
+    create: commands.create,
     notice: {
       ...mutation.notice,
       onAcknowledge: () => {

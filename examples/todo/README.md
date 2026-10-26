@@ -33,7 +33,7 @@ a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 
 Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
-or reopens a task (`useFieldUpdate`'s `canMutateFor`/`noticeFor`: a tick locks
+or reopens a task (`useFieldUpdate`'s `for(item)`: a tick locks
 only its row), its title opens the editor below the list, a done task
 offers a delete button that asks first (`RemoveButton` with
 `mutate.remove(item)`), and the input at the bottom adds one. The list reads again when the page becomes visible

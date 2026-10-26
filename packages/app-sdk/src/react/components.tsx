@@ -545,7 +545,7 @@ export function ResourceEditor<D, U = D>({
  * change what is removed, so a conditional delete of the version shown reports
  * a newer one as a conflict.
  * Pass the hook's check and command, for example
- * `disabled={!mutate.canMutateFor(item)}` and `onRemove={() => mutate.remove(item)}`;
+ * `disabled={!row.canMutate}` and `onRemove={row.remove}` for `row = mutate.for(item)`;
  * the outcome shows where the hook's notice is. A button that becomes disabled
  * while asking withdraws the question. Without children it is a quiet trash
  * icon with a 44px target, named Delete or `label`; `className` overrides its

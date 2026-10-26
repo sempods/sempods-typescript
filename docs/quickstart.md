@@ -144,29 +144,33 @@ function Tasks() {
     initial: { title: '', done: false },
     collection: 'tasks',
   });
-  const update = useFieldUpdate(task);
+  // One hook for the list; each row gets its part with `mutate.for(item)`.
+  const mutate = useFieldUpdate(task);
   const { selected, select } = useSelection();
   const editor = useResourceEditor(selected, task);
 
   return (
     <section>
       <LoadNotice {...list} />
-      {/* The new or changed row is the confirmation; problems still show. */}
-      <UpdateNotice {...update.notice} quiet />
-      {list.data?.items.map((item) => (
-        <p key={item.iri}>
-          <input
-            type="checkbox"
-            aria-label={`Complete ${item.data.title}`}
-            checked={item.data.done}
-            disabled={!update.canMutate}
-            onChange={() => void update.update(item, { done: !item.data.done })}
-          />
-          <button onClick={() => void select(item.iri)}>
-            {item.data.title}
-          </button>
-        </p>
-      ))}
+      {list.data?.items.map((item) => {
+        const row = mutate.for(item);
+        return (
+          <div key={item.iri}>
+            <input
+              type="checkbox"
+              aria-label={`Complete ${row.data.title}`}
+              checked={row.data.done}
+              disabled={!row.canMutate}
+              onChange={() => void row.update({ done: !row.data.done })}
+            />
+            <button onClick={() => void select(item.iri)}>
+              {row.data.title}
+            </button>
+            {/* The changed row is the confirmation; problems show here. */}
+            <UpdateNotice {...row.notice} quiet />
+          </div>
+        );
+      })}
       {selected && (
         <ResourceEditor editor={editor} onClose={() => select(null)}>
           {(draft, change) => (
@@ -200,8 +204,10 @@ function Tasks() {
 ```
 
 `useCreation` owns the draft, its leave guard and one captured creation command.
-`useSelection` asks before replacing a dirty editor. `canCreate`/`canMutate`
-reflect access and pending recovery, and `canCreate` also a valid draft: a blank
+`useSelection` asks before replacing a dirty editor. `mutate.for(item)` gives
+each row what to show (`data`, with a confirmed tick at once), its lock
+(`canMutate`, so a tick locks only its row), its notice and its commands.
+`canCreate` and `row.canMutate` reflect access and pending recovery, and `canCreate` also a valid draft: a blank
 title keeps Add disabled without app code. The input also locks while creation is
 pending or uncertain. When an outcome is unclear, `UpdateNotice` lets the person
 check the Pod's current version before acknowledging; nothing is resent. A success notice retires once another of these writes on

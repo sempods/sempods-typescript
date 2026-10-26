@@ -143,10 +143,12 @@ async function setup(
       for (const [index, name] of names.entries()) {
         creation.change({ title: name });
         const outcome = await creation.create();
-        if (outcome?.kind === 'created') continue;
-        // Stop. This item is held in the draft or may already exist: it never
-        // returns to the input. Only the unsent rest does.
-        setInput(names.slice(index + 1).join(', '));
+        if (outcome.kind === 'created') continue;
+        // Stop. The item stays in the draft (or may already exist) and never
+        // returns to the input; only the unsent rest does. An item not sent
+        // because the target ended returns too: its draft ended with it.
+        const ended = outcome.kind === 'not-sent' && outcome.reason === 'ended';
+        setInput(names.slice(ended ? index : index + 1).join(', '));
         return;
       }
       setInput('');
@@ -933,7 +935,10 @@ it('R3: a taken IRI stays unconfirmed; the draft is never re-sent under a fresh 
   expect(f.api.creation.canEdit).toBe(false);
   expect(f.api.creation.canCreate).toBe(false);
   await act(async () => {
-    expect(await f.api.creation.create()).toBeUndefined();
+    expect(await f.api.creation.create()).toEqual({
+      kind: 'not-sent',
+      reason: 'unresolved',
+    });
   });
   expect(attempts).toHaveLength(1);
 });
@@ -1168,7 +1173,9 @@ it.each([
     if (held) {
       act(() => f.api.creation.change({ title: 'Eggs' }));
       await act(async () => {
-        expect(await f.api.creation.create()).toBeUndefined();
+        expect(await f.api.creation.create()).toMatchObject({
+          kind: 'not-sent',
+        });
       });
       expect(f.api.creation.draft.title).toBe('Bread');
     }
@@ -1256,8 +1263,9 @@ it.each([false, true])(
       gate.resolve();
     });
     await waitFor(() => expect(finished).toBe(true));
-    // The answer was applied, but it belongs to the ended lifetime: the hook
-    // reports `undefined` and the new lifetime starts with a blank draft.
+    // The answer was applied and comes back as `created`, although it belongs
+    // to the ended lifetime; the next item is `not-sent` (ended) and returns
+    // to the input. The new lifetime starts with a blank draft.
     expect(f.api.creation.draft).toEqual(initial);
     expect(f.api.creation.outcome).toBeNull();
     expect(f.api.input).toBe(hostInput ? 'Bread' : '');
