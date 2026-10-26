@@ -60,7 +60,7 @@ The host must render on the callback route too.
 
 `AppAccess` uses the preset/allowed Pods and the existing guarded `useApp().connect()`
 path. It reuses a matching connection, and sign-in occurs only after a click.
-You can replace those controls through the [authoring API](react-authoring.md#standard-ui-for-one-known-pod).
+You can replace those controls through the [authoring API](react-authoring.md#replacing-the-connection-view).
 Widgets neither create a runtime/provider nor repeat connection matching,
 login, callback, refresh, storage or service-worker code.
 

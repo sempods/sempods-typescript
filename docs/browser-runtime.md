@@ -256,7 +256,7 @@ automatically. Other permitted sessions restore independently. The identity-base
 storage namespace and single-tab lease remain unchanged when the policy changes.
 
 `AppAccess` presents one/set/free Pod configuration directly, including the
-finite picker. See [login composition](react-authoring.md#login-without-an-app-frame).
+finite picker. See [sign-in composition](react-authoring.md#sign-in-and-pod-addresses).
 Custom controls can read `useAppState().allowedPods` too.
 Configure the policy once outside rendering and use the existing guarded actions
 for Pod/context switches; replacing the runtime first requires settling drafts

@@ -23,27 +23,15 @@ Use a dedicated test context and synthetic data; follow
 
 ## APIs to keep nearby
 
-Import the named APIs from the table's entry: **app** = `@sempods/app-sdk`,
-**React** = `@sempods/app-sdk/react`, **edit** = `@sempods/client-sdk/edit`.
-Full signatures and examples:
-[authoring guide](react-authoring.md), [working task screen](../examples/todo/src/app.tsx).
+The [API table](react-authoring.md#api-at-a-glance) maps every job to its hook
+or component and entry; the [working task screen](../examples/todo/src/app.tsx)
+uses them together. For the first hour you need:
 
-| Job                             | API (entry)                                                   | Remember                                                                                          |
-| ------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Start the browser session       | `createBrowserRuntime` (app)                                  | One stable runtime outside render; dispose at app shutdown.                                       |
-| Bind the UI to it               | `SempodsProvider`, `TargetScreen` (React)                     | Provider initializes; TargetScreen resets app-local state per target.                             |
-| Get connection/context controls | `AppAccess` (React)                                           | Place login/recovery beside your screen; the app owns its frame.                                  |
-| Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit)            | Choose exact predicate/type IRIs and an explicit text language.                                   |
-| Read a typed list               | `useList`, `LoadNotice` (React)                               | Render `data` (kept while reloading); `<LoadNotice {...list} />` covers loading, errors, retry.   |
-| Switch between Contexts         | `useContexts` (React)                                         | Mount outside `TargetScreen`; it selects a default and keeps AppAccess's chooser away.            |
-| Read across the Pod             | `usePodLoad` (React), calling `pod.sparql.select`/`construct` | Set `contextSelection="on-demand"` on the provider; edits still need a Context.                   |
-| Edit a Pod-overview row         | `useContextEditor`, `ResourceEditor` (React)                  | Open a row's subject and its `GRAPH` Context.                                                     |
-| Add an item                     | `useCreation` (React)                                         | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`.                      |
-| Add into another Context        | `useCreation` with `context`, `bindCreation` (headless)       | Draft stays across list switches; one hook per Context, no transaction across them.               |
-| Update or remove a row          | `useFieldUpdate` (React)                                      | One hook per list; per row `mutate.for(item)`: `data`, `canMutate`, `notice`, `update`, `remove`. |
-| Edit a form safely              | `useResourceEditor`, `ResourceEditor` (React)                 | Hook owns the editor; component supplies save/delete/recovery UI.                                 |
-| Change selection                | `useSelection`, `useApp` (React)                              | Use guarded row selection and connection/context/navigation actions.                              |
-| Show mutation recovery          | `UpdateNotice` (React)                                        | Render it with `{...creation.notice}` and per row `{...row.notice}`.                              |
+- `createBrowserRuntime`, `SempodsProvider`, `AppAccess` and `TargetScreen`;
+- `fields` and `text` (with `trim: true`) for your data;
+- `useList` with `<LoadNotice {...list} />`, `useCreation`, and one
+  `useFieldUpdate` per list with `mutate.for(item)` per row;
+- `UpdateNotice` for every write's outcome.
 
 ## Avoid the common traps
 
@@ -55,7 +43,7 @@ Full signatures and examples:
   another context.
 - **Unconfirmed is not failed.** A lost answer may hide a completed write.
   Use the SDK's comparison and acknowledgement UI; do not auto-retry or invent
-  a fresh IRI for uncertain creation. [Recovery details](react-authoring.md#lists-and-creation).
+  a fresh IRI for uncertain creation. [Recovery details](react-authoring.md#notices-updatenotice).
 - **Local and deployed identities differ.** Local HTTP uses the quickstart's
   dynamic identity and `loopback-http` option. Deployment uses an explicit
   `did:web` identity, matching HTTPS callback host/port/path, and a route that

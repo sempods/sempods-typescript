@@ -194,3 +194,28 @@ Pod/label regressions and the packed Chromium runtime also run with
 listener cleanup, and controller regressions keep unexpected binding defects
 visible. Removing an API in Chromium is compatibility regression evidence, not
 a test on an older Safari/iOS device.
+
+## Authoring and example evidence
+
+These notes back the [React/headless authoring guide](react-authoring.md); they
+are fixture evidence, not live Kotlin compatibility or independent usability
+evidence.
+
+- `pnpm test:todo` installs packed SDKs outside the workspace, typechecks and
+  bundles both examples, and drives the standard screen through real loopback
+  PKCE redirects, CRUD, conflict and unknown outcomes, guarded selection, EN/DE,
+  keyboard, mobile width and a busy second tab. It also runs the Node CRUD loop.
+  Unit and React tests cover access and draft preservation, lifecycle and
+  cancellation.
+- [React tests](../packages/app-sdk/src/react/safe-authoring.test.tsx) run the
+  guide's several-resources-from-one-input handler against fixtures, including
+  a target change during a creation; keep the test and the guide in step.
+- The packed browser test runs the
+  [overview recipe](../examples/todo/recipes/pod-overview.tsx) with installed
+  archives, including an edit beside a creation draft in another Context.
+  Evidence on a deployed Pod and in a real browser is tracked in
+  [#52](https://github.com/sempods/sempods-typescript/issues/52).
+- TODO and Node share portable field definitions, typed lists, captured
+  creation commands and partial changes. Live Pod evidence belongs to the
+  quickstart validation; the provisional Action profile does not settle the
+  outstanding task-vocabulary or mixed-Action collection decisions.

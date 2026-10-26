@@ -367,7 +367,7 @@ New in 0.5:
 - `AppAccess` accepts `podAddress="hidden"` to omit the Pod address from
   signing in when the runtime permits exactly one Pod. It defaults to
   `'visible'`, so existing apps are unchanged; see
-  [login composition](react-authoring.md#login-without-an-app-frame).
+  [login composition](react-authoring.md#sign-in-and-pod-addresses).
 
 ## From 0.3 to 0.4
 
