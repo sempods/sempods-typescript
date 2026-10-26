@@ -111,6 +111,12 @@ Check these points:
   Context's access instead of the **Available to this app** list, which remains
   only where there is no selection (on-demand management). Tests that looked
   for those elements in management need updating.
+- **`useContexts()`.** A hook for apps that switch between Contexts in their
+  own UI (a list switch): readable Contexts with names and access, the
+  selected one, a guarded `select`, catalogue state with `retry`, and a default
+  selection (first writable) when nothing is remembered or preset. While it is
+  mounted, `AppAccess` shows no chooser and management names only the selected
+  Context. Replace app-written catalogue, label and selection code with it.
 - **`LoadNotice`.** `<LoadNotice {...list} />` renders a read's loading,
   failure, cancelled and unavailable states with a retry, a note for kept rows
   after a failed refresh, and the count of entries it cannot show, in the SDK's

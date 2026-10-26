@@ -107,6 +107,10 @@ and `usePodLoad`. Startup and read recovery then request no catalogue. Mount
 **Check access** retries failed discovery explicitly. Preset/remembered targets
 still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
 
+An app that switches Contexts in its own UI, such as a list switch, uses
+`useContexts()`: readable Contexts with names and access, a guarded `select`,
+catalogue state and a default selection; `AppAccess` then shows no chooser.
+
 Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
 validated Context's label is fetched automatically; `loadContextLabels(id, iris)`
 on the runtime or `useApp()` reads up to 20 more on demand. Labels never gate

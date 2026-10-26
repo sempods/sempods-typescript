@@ -6,7 +6,9 @@ import {
   ResourceEditor,
   UpdateNotice,
   SempodsProvider,
+  useApp,
   useAppState,
+  useContexts,
   useFieldUpdate,
   useCreation,
   useList,
@@ -162,6 +164,8 @@ function StandardScreen({
   const { messages, language } = useSdkLocale();
   const { view, connections } = useAppState();
   const access = useWorkflowAccess();
+  // Mounted before a list is chosen: it selects one, so no chooser appears.
+  const lists = useContexts();
   const de = language === 'de';
   // Language names in the current language: Deutsch/Englisch, German/English.
   const names = useMemo(
@@ -175,7 +179,7 @@ function StandardScreen({
         {view && (
           <>
             {icon}
-            <h1>TODO</h1>
+            <ListSwitch lists={lists} />
           </>
         )}
         {/* A native popover: the browser closes it on Escape or outside. */}
@@ -240,5 +244,63 @@ function StandardScreen({
         <TaskScreen />
       </TargetScreen>
     </main>
+  );
+}
+
+/**
+ * The header's list switch: the chosen list's name, and with several lists a
+ * menu to switch (under the leave policy) or to share more lists on the Pod.
+ */
+function ListSwitch({
+  lists,
+}: {
+  readonly lists: ReturnType<typeof useContexts>;
+}) {
+  const de = useSdkLocale().language === 'de';
+  const { authorize } = useApp();
+  const { connection } = useWorkflowAccess();
+  const current = lists.selected;
+  if (!current) return null;
+  if (lists.contexts.length < 2) return <h1>{current.name}</h1>;
+  return (
+    <>
+      <h1>
+        <button className="list-button" popoverTarget="list-menu">
+          {current.name}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+      </h1>
+      <div id="list-menu" className="menu list-menu" popover="auto">
+        {lists.contexts.map((list) => (
+          <button
+            key={list.iri}
+            popoverTarget="list-menu"
+            popoverTargetAction="hide"
+            aria-pressed={list.iri === current.iri}
+            onClick={() => void lists.select(list.iri)}
+          >
+            <span className="check" aria-hidden="true">
+              {list.iri === current.iri ? '✓' : ''}
+            </span>
+            {list.name}
+            {!list.writable && <small>{de ? 'nur lesen' : 'read only'}</small>}
+          </button>
+        ))}
+        {connection && (
+          <>
+            <hr />
+            <button
+              popoverTarget="list-menu"
+              popoverTargetAction="hide"
+              onClick={() => void authorize(connection.id)}
+            >
+              {de ? 'Weitere Listen freigeben' : 'Share more lists'}
+            </button>
+          </>
+        )}
+      </div>
+    </>
   );
 }

@@ -35,6 +35,7 @@ Full signatures and examples:
 | Get connection/context controls | `AppAccess` (React)                                           | Place login/recovery beside your screen; the app owns its frame.                                |
 | Describe your data              | `fields`, `text`, `flag`, `iri`, `dateTime` (edit)            | Choose exact predicate/type IRIs and an explicit text language.                                 |
 | Read a typed list               | `useList`, `LoadNotice` (React)                               | Render `data` (kept while reloading); `<LoadNotice {...list} />` covers loading, errors, retry. |
+| Switch between Contexts         | `useContexts` (React)                                         | Mount outside `TargetScreen`; it selects a default and keeps AppAccess's chooser away.          |
 | Read across the Pod             | `usePodLoad` (React), calling `pod.sparql.select`/`construct` | Set `contextSelection="on-demand"` on the provider; edits still need a Context.                 |
 | Edit a Pod-overview row         | `useContextEditor`, `ResourceEditor` (React)                  | Open a row's subject and its `GRAPH` Context.                                                   |
 | Add an item                     | `useCreation` (React)                                         | Bind inputs to `canEdit`, submit to `canCreate`; use its draft and `change`.                    |

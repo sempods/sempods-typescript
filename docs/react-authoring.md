@@ -380,6 +380,44 @@ describes the bodies: a single node from `subjects.get`, CONSTRUCT node arrays,
 blank nodes, types and literals with a language or datatype. Pod SELECT rows
 use their own [term shapes](../packages/client-sdk/README.md#reading-across-the-pod).
 
+## Apps that switch Contexts
+
+Decide first which Contexts the app works with:
+
+- **One Context:** chosen once in `AppAccess`, or fixed by `preset.contextIri`.
+  `TargetScreen` and the list, creation and editor hooks work on it.
+- **Several Contexts, acting in the selected one,** for example task lists or
+  shopping lists switched in the app's header: use `useContexts()`.
+- **Reading all Contexts, writing in one:** see
+  [Pod overviews](#pod-overviews-with-contexts-on-demand); the selected
+  Context is the one `useCreation` writes into.
+
+`useContexts()` gives an app-owned switch what it needs:
+
+```tsx
+const lists = useContexts();
+// lists.contexts: [{ iri, name, writable }] of the readable Contexts
+// lists.selected: the selected one or null
+// lists.select(iri): guarded; resolves false when refused or not selectable
+// lists.loading / lists.failed / lists.retry(): catalogue state
+```
+
+It loads the catalogue in both `contextSelection` modes, reads the labels of
+up to 20 Contexts once, and keeps known Contexts during a reload. Names follow
+the labels; equal labels add the short name ("Tasks · work"), and still equal
+ones the IRI. Without a remembered or preset Context it selects one itself,
+the first writable, else the first readable. An exact preset keeps only its
+Context. `select` runs under the leave policy, so a dirty draft asks first.
+Mount it outside `TargetScreen`, so it can select before a view exists.
+
+While it is mounted, `AppAccess` offers no Context chooser of its own (it
+shows its loading status until the hook selects) and management names only
+the selected Context with its access. Sign-in, recovery, **Change sharing** and
+**Sign out** stay in `AppAccess`. The
+[TODO example](../examples/todo/src/app.tsx) puts the switch in its header:
+the list name as the title and, with several lists, a menu with the lists, a
+"read only" hint and **Share more lists** (`useApp().authorize`).
+
 ## Pod overviews with Contexts on-demand
 
 Keep `contextSelection` omitted (or `'required'`) for the existing Context-based
