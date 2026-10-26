@@ -15,6 +15,7 @@ import {
   useContextDemand,
   useContextDiscovery,
   useDiscoveryDemand,
+  useSwitchDemand,
   useWorkflowAccess,
   type AppActions,
 } from './app.js';
@@ -127,6 +128,7 @@ export function AppAccess({
   useContextDiscovery(open);
   // An explicit target (useContextEditor) needs the catalogue, not a selection.
   const discoveryDemand = useDiscoveryDemand();
+  const switching = useSwitchDemand();
   const discovery = contextRequired || discoveryDemand;
   const podAccess = useSyncExternalStore(
     state.pod?.subscribe ?? noSubscription,
@@ -324,6 +326,7 @@ export function AppAccess({
                 ) : (
                   <AccessConnections
                     contextRequired={contextRequired}
+                    switching={switching}
                     // The dialog checks the access again on opening instead.
                     discovery={discovery && !asDialog}
                     manage={open}
@@ -422,6 +425,7 @@ function AccessConnections({
   mode,
   podNames,
   contextRequired,
+  switching,
   discovery,
   body,
   podAddress,
@@ -431,6 +435,8 @@ function AccessConnections({
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
   readonly contextRequired: boolean;
+  /** The app selects through its own switch (`useContexts`): no chooser here. */
+  readonly switching: boolean;
   /** Catalogue discovery is demanded and checked by hand (**Check access**). */
   readonly discovery: boolean;
   readonly body: ConnectionBody;
@@ -542,9 +548,11 @@ function AccessConnections({
       {entry.writable ? m.controls.canChange : m.controls.canRead}
     </span>
   );
-  // One readable Context, already selected: a choice adds nothing.
+  // One readable Context, already selected: a choice adds nothing. With an
+  // app-owned switch, the selected Context is only named here.
   const onlyContext =
     readable.length === 1 && selectedEntry ? selectedEntry : undefined;
+  const named = onlyContext ?? (switching ? selectedEntry : undefined);
   const contextLabel = (iri: string) =>
     distinctName(
       iri,
@@ -794,12 +802,15 @@ function AccessConnections({
           )}
         </>
       )}
-      {active && contextRequired && !fixedContext && onlyContext ? (
+      {active && contextRequired && !fixedContext && named ? (
         <p>
-          {contextLabel(onlyContext.iri)}
+          {contextLabel(named.iri)}
           {' · '}
-          {accessFact(onlyContext)}
+          {accessFact(named)}
         </p>
+      ) : active && contextRequired && !fixedContext && switching ? (
+        // The app's own switch selects; this only waits for it.
+        readable.length > 0 && <p role="status">{m.controls.loading}</p>
       ) : active && contextRequired && !fixedContext ? (
         <label>
           {m.dataContext}

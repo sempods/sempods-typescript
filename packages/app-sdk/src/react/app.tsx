@@ -19,18 +19,26 @@ import {
 } from '../index.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog } from './confirm.js';
+import { knownContexts } from './access-presentation.js';
+import { contextName, distinctName } from './names.js';
 const Context = createContext<{
   readonly controller: AppController;
   readonly actions: AppActions;
   readonly retainContext: () => () => void;
   /** Catalogue discovery for an explicit target; asks for no selection. */
   readonly retainDiscovery: () => () => void;
+  /** An app-owned Context switch (`useContexts`) selects instead of AppAccess. */
+  readonly retainSwitch: () => () => void;
 } | null>(null);
 /**
  * Whether any Context demand exists, apart from the stable owner above: a
  * demand change re-renders only the hooks that read it, not every editor host.
  */
-const Demand = createContext({ selection: false, discovery: false });
+const Demand = createContext({
+  selection: false,
+  discovery: false,
+  switching: false,
+});
 /**
  * Guarded user actions for custom screens and replacement controls. Each
  * guarded action (all except `refreshContexts`, `loadContextLabels` and `retryRestore`) resolves `false`, discarding
@@ -148,17 +156,20 @@ export function SempodsProvider({
   const retainContext = useRetain(setDemands);
   const [discoveries, setDiscoveries] = useState(0);
   const retainDiscovery = useRetain(setDiscoveries);
+  const [switches, setSwitches] = useState(0);
+  const retainSwitch = useRetain(setSwitches);
   // Only whether any demand exists reaches consumers: another retain or
   // release does not re-render every SDK hook.
   const selection = demands > 0;
   const discovery = discoveries > 0;
+  const switching = switches > 0;
   const value = useMemo(
-    () => ({ ...owner, retainContext, retainDiscovery }),
-    [owner, retainContext, retainDiscovery],
+    () => ({ ...owner, retainContext, retainDiscovery, retainSwitch }),
+    [owner, retainContext, retainDiscovery, retainSwitch],
   );
   const demand = useMemo(
-    () => ({ selection, discovery }),
-    [selection, discovery],
+    () => ({ selection, discovery, switching }),
+    [selection, discovery, switching],
   );
   const app = owner.controller;
   useEffect(() => {
@@ -247,6 +258,109 @@ export function useContextDiscovery(active: boolean) {
 /** Internal: whether an explicit target currently demands catalogue discovery. */
 export function useDiscoveryDemand() {
   return useContext(Demand).discovery;
+}
+/** Internal: whether the app renders its own Context switch (`useContexts`). */
+export function useSwitchDemand() {
+  return useContext(Demand).switching;
+}
+
+/** A readable Context as an app's switch shows it. */
+export interface ContextChoice {
+  readonly iri: string;
+  /** Its label, else a readable last path segment; duplicates add the IRI. */
+  readonly name: string;
+  /** Whether this app may change data there, not only read it. */
+  readonly writable: boolean;
+}
+/**
+ * The readable Contexts of the active connection for an app-owned switch, such
+ * as a list switch in the header. It loads the catalogue in both modes, reads
+ * the labels of up to 20 Contexts once, and keeps known Contexts during a
+ * reload. Without a remembered or preset Context it selects one itself, the
+ * first writable, else the first readable, so `AppAccess` offers no chooser of
+ * its own; management then names only the selected Context. `select` runs
+ * under the leave policy and resolves `false` when refused or not selectable.
+ */
+export function useContexts() {
+  const value = useContext(Context);
+  if (!value) throw new Error('SempodsProvider is required.');
+  useDemand(true, 'discovery');
+  const { retainSwitch, actions } = value;
+  useEffect(() => retainSwitch(), [retainSwitch]);
+  const { connection, preset } = useAppFacts(
+    (s) => ({
+      connection: s.connections.find((c) => c.id === s.activeId),
+      preset: s.preset,
+    }),
+    shallowEqual,
+  );
+  const active =
+    connection?.session.kind === 'active' ||
+    connection?.session.kind === 'renewing';
+  const catalogue = active ? connection.catalogue : undefined;
+  // An exact preset keeps the app in its one Context.
+  const fixed =
+    preset?.podUrl === connection?.podUrl ? preset?.contextIri : undefined;
+  const contexts = useMemo(() => {
+    const readable = (knownContexts(catalogue) ?? []).filter(
+      (entry) => entry.readable && (!fixed || entry.iri === fixed),
+    );
+    const labels =
+      catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
+    const iris = readable.map((entry) => entry.iri);
+    return readable.map((entry): ContextChoice => ({
+      iri: entry.iri,
+      name: distinctName(entry.iri, iris, (iri) => contextName(iri, labels)),
+      writable: entry.writable,
+    }));
+  }, [catalogue, fixed]);
+  const id = active ? connection.id : null;
+  const selectedIri = active ? connection.selectedContext : null;
+  // Labels for the names, once per set of Contexts (display text only).
+  const labelled =
+    catalogue?.kind === 'ready'
+      ? contexts
+          .slice(0, 20)
+          .map((entry) => entry.iri)
+          .join(' ')
+      : '';
+  useEffect(() => {
+    if (id && labelled)
+      void actions.loadContextLabels(id, labelled.split(' ')).catch(() => {});
+  }, [actions, id, labelled]);
+  // The runtime already chose a remembered or preset Context when it could.
+  const fallback =
+    catalogue?.kind === 'ready' && !selectedIri
+      ? (contexts.find((entry) => entry.writable) ?? contexts[0])?.iri
+      : undefined;
+  useEffect(() => {
+    if (fallback) void actions.selectContext(fallback).catch(() => {});
+  }, [actions, fallback]);
+  const select = useCallback(
+    async (iri: string) => {
+      if (iri === selectedIri) return true;
+      try {
+        return await actions.selectContext(iri);
+      } catch {
+        return false;
+      }
+    },
+    [actions, selectedIri],
+  );
+  const retry = useCallback(async () => {
+    if (id) await actions.refreshContexts(id).catch(() => {});
+  }, [actions, id]);
+  return {
+    contexts,
+    selected: contexts.find((entry) => entry.iri === selectedIri) ?? null,
+    select,
+    /** Signed in, but no Contexts known yet. */
+    loading:
+      active && !knownContexts(catalogue) && catalogue?.kind !== 'failed',
+    /** The catalogue failed; known Contexts may still show. */
+    failed: catalogue?.kind === 'failed',
+    retry,
+  };
 }
 function useDemand(active: boolean, kind: 'selection' | 'discovery') {
   const value = useContext(Context);
