@@ -51,6 +51,16 @@ describe('text(…, { trim: true })', () => {
     });
   });
 
+  it('leaves an untouched value as stored, whitespace included', () => {
+    const resource = {
+      'urn:title': [{ '@value': ' Milk ' }],
+      'urn:status': [{ '@id': 'urn:open' }],
+    };
+    expect(
+      task.patch(resource, { title: ' Milk ', note: null, done: true }),
+    ).toEqual({ 'urn:status': [{ '@id': 'urn:done' }] });
+  });
+
   it('rejects a blank value and leaves fields without trim as typed', () => {
     expect(task.valid!({ title: '   ', note: null, done: false })).toBe(false);
     expect(

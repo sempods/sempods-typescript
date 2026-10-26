@@ -295,6 +295,8 @@ function writeField(
   terms: readonly Term[],
   value: Value,
 ): readonly Term[] {
+  // An untouched field keeps its terms as they are, whitespace included.
+  if (readField(field, terms) === value) return terms;
   value = stored(field, value);
   if (readField(field, terms) === value) return terms;
   switch (field.kind) {
