@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { fields, flag, text, type DraftOf } from './index.js';
+import { describeNew } from './fields.js';
 
 const task = fields(
   {
@@ -14,7 +15,22 @@ const task = fields(
 const fresh = { 'urn:status': [{ '@id': 'urn:open' }] };
 
 describe('text(…, { trim: true })', () => {
-  it('writes the value without outer whitespace when created', () => {
+  it('creates the subject with the value without outer whitespace', () => {
+    expect(
+      describeNew(task, 'urn:one', {
+        title: '  Milk ',
+        note: null,
+        done: false,
+      }),
+    ).toEqual({
+      '@id': 'urn:one',
+      '@type': ['urn:Task'],
+      'urn:title': [{ '@value': 'Milk' }],
+      'urn:status': [{ '@id': 'urn:open' }],
+    });
+  });
+
+  it('writes the value without outer whitespace into an empty subject', () => {
     expect(
       task.patch(fresh, { title: '  Milk ', note: null, done: false }),
     ).toEqual(expect.objectContaining({ 'urn:title': [{ '@value': 'Milk' }] }));

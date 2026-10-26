@@ -295,8 +295,7 @@ function writeField(
   terms: readonly Term[],
   value: Value,
 ): readonly Term[] {
-  if (field.kind === 'text' && field.trim && typeof value === 'string')
-    value = value.trim();
+  value = stored(field, value);
   if (readField(field, terms) === value) return terms;
   switch (field.kind) {
     case 'text':
@@ -508,8 +507,16 @@ export function describeNew<D>(
   return body;
 }
 
+/** The value as it is written: a `trim` text field without outer whitespace. */
+function stored(field: Field, value: Value): Value {
+  return field.kind === 'text' && field.trim && typeof value === 'string'
+    ? value.trim()
+    : value;
+}
+
 /** A field's value as terms of a subject that does not exist yet. */
 function freshTerms(field: Field, value: Value): readonly Term[] {
+  value = stored(field, value);
   switch (field.kind) {
     case 'text':
       if (value === null) return [];
