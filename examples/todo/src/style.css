@@ -236,7 +236,29 @@ input:disabled {
   color: var(--sempods-muted);
   text-decoration: line-through;
 }
-/* A row's own notice (a refused or unconfirmed tick) below its title. */
+/* A done task's delete button, quiet beside its title. */
+.remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--sempods-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.remove:hover:not(:disabled) {
+  color: var(--sempods-text);
+  background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
+}
+.remove svg {
+  width: 20px;
+  height: 20px;
+}
+/* A row's own notice (a refused or unconfirmed write) below its title. */
 .tasks li {
   flex-wrap: wrap;
 }
@@ -244,13 +266,35 @@ input:disabled {
   flex-basis: 100%;
   margin: 0 0 8px 44px;
 }
+/* The open row: a quiet card; its field looks like the new-task input and
+   Delete steps back from Save. */
+.tasks li:has(> [data-sempods-ui='editor']) {
+  margin-block: 4px;
+  padding: 6px 8px 4px 0;
+  border-bottom-color: transparent;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sempods-accent) 5%, transparent);
+}
 .tasks [data-sempods-ui='editor'] {
   flex: 1;
   min-width: 0;
-  margin-block: 0 8px;
+  margin: 0;
 }
 .tasks [data-sempods-ui='editor'] input {
-  margin-block: 0 8px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--sempods-line);
+  border-radius: 8px;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
+}
+.tasks [data-sempods-ui='editor'] input:focus-visible {
+  outline-offset: -1px;
+}
+.tasks [data-sempods-ui='editor'] .sp-sdk-end {
+  color: var(--sempods-muted);
 }
 .empty {
   color: var(--sempods-muted);

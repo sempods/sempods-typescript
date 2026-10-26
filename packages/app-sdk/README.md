@@ -60,7 +60,7 @@ screen and access-management controls, follow the complete
 frame. It hides when access is usable, including read-only access. The app owns
 its layout and a **Pods & sharing** button that opens management (`open`). Use `useList`, `useCreation`, `useFieldUpdate` and
 `useResourceEditor` for data screens, with `ResourceEditor` and `UpdateNotice`
-for editing feedback. See
+for editing feedback and `RemoveButton` for a confirmed delete in a row. See
 [React/headless authoring](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md)
 and the runnable [TODO example](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/README.md).
 

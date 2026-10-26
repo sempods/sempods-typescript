@@ -34,6 +34,7 @@ export {
   AccessNotice,
   CallbackNotice,
   LoadNotice,
+  RemoveButton,
   ResourceEditor,
   UpdateNotice,
 } from './components.js';

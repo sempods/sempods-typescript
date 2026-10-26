@@ -357,3 +357,61 @@ it('the TODO list keeps the recovery of an unconfirmed tick whose task was delet
     expect(screen.queryByText(/The result is unconfirmed/)).toBeNull(),
   );
 });
+
+it('the TODO list deletes a done task from its row after asking', async () => {
+  const done = {
+    ...milk,
+    [schema + 'actionStatus']: [{ '@id': schema + 'CompletedActionStatus' }],
+  };
+  const bread = {
+    ...milk,
+    '@id': 'urn:task:bread',
+    [schema + 'name']: [{ '@value': 'Buy bread' }],
+  };
+  const rows = new Map<string, Record<string, unknown>>([
+    [done['@id'], done],
+    [bread['@id'], bread],
+  ]);
+  const f = await signedIn('en', async () => Response.json([...rows.values()]));
+  const writes: string[] = [];
+  f.setResource(async (url, init) => {
+    const iri = resourceIri(url);
+    const method = init?.method ?? 'GET';
+    if (method === 'GET')
+      return Response.json(rows.get(iri), { headers: { etag: '"v1"' } });
+    writes.push(`${method} ${iri}`);
+    rows.delete(iri);
+    return new Response(null, { status: 204 });
+  });
+  const remove = (await screen.findByRole('button', {
+    name: 'Delete: Buy milk',
+  })) as HTMLButtonElement;
+  // Only a done task offers it in its row.
+  expect(
+    screen.queryByRole('button', { name: 'Delete: Buy bread' }),
+  ).toBeNull();
+  await waitFor(() => expect(remove.disabled).toBe(false));
+  // Cancel sends nothing.
+  fireEvent.click(remove);
+  const question = 'Delete this from the pod? This cannot be undone.';
+  fireEvent.click(
+    within(screen.getByRole('alertdialog', { name: question })).getByRole(
+      'button',
+      { name: 'Cancel' },
+    ),
+  );
+  expect(writes).toEqual([]);
+  // The dialog's Delete sends one DELETE; the row leaves, the other stays.
+  fireEvent.click(remove);
+  fireEvent.click(
+    within(screen.getByRole('alertdialog', { name: question })).getByRole(
+      'button',
+      { name: 'Delete' },
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: 'Buy milk' })).toBeNull(),
+  );
+  expect(writes).toEqual(['DELETE urn:task:milk']);
+  expect(screen.getByRole('button', { name: 'Buy bread' })).toBeTruthy();
+});

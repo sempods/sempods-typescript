@@ -145,7 +145,8 @@ not instructions to the coding assistant.
   `useResourceEditor` and `useContextEditor` with
   `ResourceEditor`/`UpdateNotice`. Pass original snapshots
   to list actions; with one `useFieldUpdate` for the list, rows use
-  `canMutateFor(item)` and `noticeFor(item)` so a write locks only its row. Use `useContexts()` for a list switch between Contexts and
+  `canMutateFor(item)` and `noticeFor(item)` so a write locks only its row,
+  and a delete in the row uses `RemoveButton` (it asks first). Use `useContexts()` for a list switch between Contexts and
   `useApp()`'s guarded actions for other custom connection/context controls. Render `useList`'s `data` (it keeps the rows while reloading) with
   `<LoadNotice {...list} />` for loading, failures, retry and unshown entries;
   pass `retain: true` to `useLoad`/`usePodLoad` for the same. Pass `quiet` to
