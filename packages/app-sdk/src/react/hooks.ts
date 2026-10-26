@@ -946,8 +946,12 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
           ? prepareCreation(v, args[0], args[1], args[2]).run()
           : prepareCreation(v, args[0], args[1]).run(),
       ),
-    /** Explicit acknowledgement does not replay the command. Prefer notice for checked UI recovery. */
-    acknowledge: () => latest?.acknowledge(),
+    /**
+     * Explicit acknowledgement does not replay the command. Prefer notice for
+     * checked UI recovery. It reads the live latest lane, so a result kept
+     * across an awaited write acknowledges that write.
+     */
+    acknowledge: () => lanes.latest?.acknowledge(),
   };
 }
 

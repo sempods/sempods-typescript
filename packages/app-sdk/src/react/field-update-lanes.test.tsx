@@ -203,3 +203,19 @@ it('reports an unresolved write whose row was deleted, until acknowledged', asyn
   act(() => s.api().noticeFor('urn:one').onAcknowledge());
   expect(s.api().unresolved).toEqual([]);
 });
+
+it('acknowledges the write that a retained result just made', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  const api = s.api();
+  const one = s.shown().find((row) => row.iri === 'urn:one')!;
+  await act(async () => {
+    expect(await api.update(one, { done: true })).toMatchObject({
+      kind: 'unconfirmed',
+    });
+  });
+  act(() => api.acknowledge());
+  expect(s.api().unresolved).toEqual([]);
+  expect(button('One').disabled).toBe(false);
+});
