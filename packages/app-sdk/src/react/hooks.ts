@@ -45,6 +45,7 @@ import {
   useView,
   useWorkflowAccess,
 } from './app.js';
+import { shownData } from '../authoring/load.js';
 import {
   changed,
   observeStarts,
@@ -220,9 +221,13 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   };
 }
 /**
- * A typed list, refreshed after this bound target's own confirmed mutations.
- * With `retain` (see `LoadOptions`) those refreshes and `reload()` keep the
- * rows visible as `state.previous`.
+ * A typed list, refreshed after this bound target's own confirmed mutations
+ * and when the page becomes visible again (back in the tab or app), so other
+ * devices' changes appear without a reload button. Those refreshes and
+ * `reload()` keep the rows visible (`retain`, see
+ * `LoadOptions`, on by default; `retain: false` shows only `loading`).
+ * `data` is what to render: the current rows, or the kept ones while
+ * `loading` or after a failed refresh; `LoadNotice` says which.
  */
 export function useList<D>(
   definition: FieldDefinition<D>,
@@ -247,7 +252,7 @@ export function useList<D>(
     [listKey, latest, type],
   );
   const load = useBoundLoad(view, read, loading, {
-    retain: options.retain ?? false,
+    retain: options.retain ?? true,
   });
   // Until the read for a changed definition or type has started, the rows on
   // screen belong to the previous definition and cannot be mutated with the
@@ -276,8 +281,26 @@ export function useList<D>(
       if (!scope.cancelled) void reload();
     });
   }, [view, reload, scope]);
+  // Back in the tab or app, other devices may have changed the list. A read
+  // still running answers that already: it is joined, not aborted.
+  const shownState = useRef(state);
+  shownState.current = state;
+  useEffect(() => {
+    if (!view || typeof document === 'undefined') return;
+    const onVisible = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        !scope.cancelled &&
+        shownState.current.kind !== 'loading'
+      )
+        void reload();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [view, reload, scope]);
   return {
     state,
+    data: shownData(state),
     reload: () => {
       scope.cancelled = false;
       return reload();

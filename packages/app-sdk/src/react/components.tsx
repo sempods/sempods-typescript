@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
@@ -9,7 +9,10 @@ import { useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure, type SdkMessages } from '../locale.js';
 import type { SessionFact } from '../runtime/types.js';
+import { shownData, type LoadState } from '../authoring/load.js';
+import { knownContexts } from './access-presentation.js';
 import { SdkStyles } from './styles.js';
+import { ConfirmDialog } from './confirm.js';
 import { startCount, succeeded } from '../authoring/changes.js';
 import { editorTarget } from '../authoring/editor.js';
 
@@ -152,6 +155,53 @@ export function UpdateNotice({
   );
 }
 /**
+ * What a read is doing when its data does not say it: loading before any
+ * data, a failed refresh (its error, a note when kept data is still shown,
+ * and a retry), a cancelled or unavailable read (with a retry) and list
+ * entries that cannot be shown. Renders nothing for ready data otherwise.
+ * Takes the result of `useList`, `useLoad` or `usePodLoad`:
+ * `<LoadNotice {...list} />`.
+ */
+export function LoadNotice({
+  state,
+  reload,
+}: {
+  readonly state: LoadState<unknown>;
+  readonly reload?: () => unknown;
+}) {
+  const { messages: m, error, format } = useSdkLocale();
+  const c = m.controls;
+  const shown = shownData(state);
+  const skipped =
+    shown !== null &&
+    typeof shown === 'object' &&
+    'skipped' in shown &&
+    typeof shown.skipped === 'number'
+      ? shown.skipped
+      : 0;
+  if (state.kind === 'loading')
+    return shown === undefined ? <Notice>{c.loading}</Notice> : null;
+  if (state.kind === 'ready')
+    return skipped > 0 ? <Notice>{m.skipped!(skipped, format)}</Notice> : null;
+  const text =
+    state.kind === 'failed'
+      ? `${error(state.error)}${shown === undefined ? '' : ` ${c.stale}`}`
+      : state.kind === 'cancelled'
+        ? c.loadCancelled
+        : c.loadUnavailable;
+  return (
+    <section data-sempods-ui="notice">
+      <SdkStyles />
+      <p role={state.kind === 'failed' ? 'alert' : 'status'}>{text}</p>
+      {reload && (
+        <div className="sp-sdk-actions">
+          <button onClick={() => void reload()}>{c.retry}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+/**
  * Why an ended session is unusable. An interrupted sign-in is found at startup,
  * before any draft. Next to a sign-in action, which navigates away, an expired
  * session keeps none either, and the protocol cause is shown when kept.
@@ -192,8 +242,8 @@ export function AccessNotice() {
   if (c.missingRequiredScopes.length)
     return <Notice>{m.missingScopes(c.missingRequiredScopes, format)}</Notice>;
   if (c.catalogue.kind === 'failed') return <Notice>{m.catalogueError}</Notice>;
-  if (c.catalogue.kind !== 'ready')
-    return <Notice>{m.cataloguePending}</Notice>;
+  // A reload that still has the earlier Contexts is not unknown access.
+  if (!knownContexts(c.catalogue)) return <Notice>{m.cataloguePending}</Notice>;
   if (!c.selectedContext)
     return (
       <Notice>
@@ -285,8 +335,8 @@ function Comparison({
   );
 }
 /** Default save/delete/review UI; children supply only domain fields.
- * Delete asks in place first: only the confirmation sends one conditional
- * DELETE of the version shown. Any later editor state (an edit, a read, another
+ * Delete asks first in a modal dialog, like the leave confirmation: only its
+ * Delete sends one conditional DELETE of the version shown. Any later editor state (an edit, a read, another
  * subject) withdraws the question; cancel or Escape keeps draft and target.
  * Success feedback retires with any later editor state and, for an editor from
  * `useResourceEditor`, when another write on the same target starts.
@@ -299,9 +349,18 @@ export function ResourceEditor<D, U = D>({
   onChanged,
   labels,
   quiet = false,
+  onClose,
 }: {
   /** As for `UpdateNotice`: no message for a confirmed save or delete. */
   readonly quiet?: boolean;
+  /**
+   * An editor that opens in place, for example in a list row: Cancel (or
+   * Escape) discards and closes, and a confirmed save or delete closes it, as
+   * the changed row is the confirmation. Refusals, conflicts and unconfirmed
+   * answers keep it open. Pass the guarded selection reset,
+   * `() => select(null)`.
+   */
+  readonly onClose?: () => unknown;
   readonly editor: Editor<D, U> | null;
   readonly children: (draft: D, change: (draft: U) => void) => ReactNode;
   readonly onChanged?: () => void;
@@ -318,28 +377,14 @@ export function ResourceEditor<D, U = D>({
   } | null>(null);
   // The editor state the person was asked about; any newer state withdraws it.
   const [confirming, setConfirming] = useState<Editor<D>['state'] | null>(null);
-  const question = useId();
   const removeButton = useRef<HTMLButtonElement>(null);
-  const cancelButton = useRef<HTMLButtonElement>(null);
-  const returnFocus = useRef(false);
   const view = editor ? editorTarget(editor) : undefined;
   const starts = useStartCount(view);
   const asking =
     confirming !== null && confirming === editor?.state && confirming.canRemove;
-  useEffect(() => {
-    if (asking) cancelButton.current?.focus();
-    else if (returnFocus.current) {
-      returnFocus.current = false;
-      removeButton.current?.focus();
-    }
-  }, [asking]);
   if (!editor || editor.state.phase === 'loading')
     return <Notice>{m.loading}</Notice>;
   const state = editor.state;
-  const keep = () => {
-    returnFocus.current = true;
-    setConfirming(null);
-  };
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
     // A bound editor counts its own start synchronously in `action()`.
     const pending = action();
@@ -354,12 +399,45 @@ export function ResourceEditor<D, U = D>({
         : { editor, state: editor.state, outcome: result, start },
     );
     if (succeeded(result)) onChanged?.();
+    // Edits made while saving stay open (closing would ask about them).
+    if (
+      result.kind === 'removed' ||
+      (result.kind === 'saved' && !editor.state.dirty)
+    )
+      onClose?.();
+  };
+  const save = () => {
+    if (editor.state.canSave) void act(() => editor.save());
+  };
+  // An explicit Cancel is the decision to discard; switching rows still asks.
+  const cancel = () => {
+    if (editor.state.canDiscard) editor.discard();
+    void onClose?.();
   };
   return (
     <section data-sempods-ui="editor">
       <SdkStyles />
       {state.draft !== null && state.phase !== 'deleted' && (
-        <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+        <fieldset
+          style={{ border: 0, padding: 0, margin: 0 }}
+          onKeyDown={(event) => {
+            // Enter in a text field saves; Escape cancels an editor in place.
+            // Both belong to an active IME composition first.
+            if (event.nativeEvent.isComposing) return;
+            const field = event.target as HTMLElement;
+            if (
+              event.key === 'Enter' &&
+              field instanceof HTMLInputElement &&
+              !['checkbox', 'radio', 'button', 'submit'].includes(field.type)
+            ) {
+              event.preventDefault();
+              save();
+            } else if (event.key === 'Escape' && onClose) {
+              event.preventDefault();
+              cancel();
+            }
+          }}
+        >
           {children(state.draft, editor.change)}
         </fieldset>
       )}
@@ -396,56 +474,49 @@ export function ResourceEditor<D, U = D>({
           </button>
         </section>
       )}
-      {asking ? (
-        <div
-          role="group"
-          aria-labelledby={question}
-          onKeyDown={(event) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            keep();
-          }}
+      <div className="sp-sdk-actions">
+        <button
+          className="sp-sdk-primary"
+          disabled={!state.canSave}
+          onClick={save}
         >
-          <p id={question}>{m.confirmRemove ?? m.remove}</p>
-          <div className="sp-sdk-actions">
-            <button
-              onClick={() => {
-                // Withdrawn first: a second press cannot send another DELETE.
-                setConfirming(null);
-                if (editor.state === confirming)
-                  void act(() => editor.remove());
-              }}
-            >
-              {m.remove}
-            </button>
-            <button ref={cancelButton} onClick={keep}>
-              {m.cancel}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="sp-sdk-actions">
-          <button
-            disabled={!state.canSave}
-            onClick={() => void act(() => editor.save())}
-          >
-            {m.save}
-          </button>
-          <button
-            ref={removeButton}
-            disabled={!state.canRemove}
-            onClick={() => setConfirming(state)}
-          >
-            {m.remove}
-          </button>
+          {m.save}
+        </button>
+        {onClose ? (
+          <button onClick={cancel}>{m.cancel}</button>
+        ) : (
           <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
             {m.discard}
           </button>
-          {state.phase === 'blocked' && (
-            <button onClick={() => void editor.refresh()}>{m.refresh}</button>
-          )}
-        </div>
-      )}
+        )}
+        {state.phase === 'blocked' && (
+          <button onClick={() => void editor.refresh()}>{m.refresh}</button>
+        )}
+        <button
+          ref={removeButton}
+          className="sp-sdk-end"
+          disabled={!state.canRemove}
+          onClick={() => setConfirming(state)}
+        >
+          {m.remove}
+        </button>
+      </div>
+      {/* Only the dialog's Delete sends one conditional DELETE. */}
+      <ConfirmDialog
+        open={asking}
+        ui="remove"
+        returnFocus={removeButton}
+        cancel={m.cancel}
+        confirm={m.remove}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          // Withdrawn first: a second press cannot send another DELETE.
+          setConfirming(null);
+          if (editor.state === confirming) void act(() => editor.remove());
+        }}
+      >
+        <p>{m.confirmRemove ?? m.remove}</p>
+      </ConfirmDialog>
       {!state.review && (
         <UpdateNotice
           quiet={quiet}

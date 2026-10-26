@@ -150,6 +150,16 @@ export interface UiMessages {
   readonly leave: string;
   readonly retry: string;
   readonly cancel: string;
+  /*
+   * Reading (added in 0.6.0; optional in the type, `createLocale` fills
+   * them): `LoadNotice` for a cancelled or unavailable read and for data kept
+   * from before a failed refresh.
+   */
+  readonly loadCancelled?: string;
+  readonly loadUnavailable?: string;
+  readonly stale?: string;
+  /** Closes the management dialog (`AppAccess` with `onClose`). Added in 0.6.0. */
+  readonly close?: string;
   readonly failure: string;
   readonly current: string;
   readonly notPresent: string;
@@ -195,6 +205,11 @@ export interface SdkMessages {
     scopes: readonly string[],
     format: Formatters,
   ) => string;
+  /**
+   * Entries a list read but cannot show, shown by `LoadNotice`. Optional in
+   * the type (added in 0.6.0); `createLocale` fills it.
+   */
+  readonly skipped?: (count: number, format: Formatters) => string;
   readonly errors: FailureMessages;
 }
 
@@ -250,6 +265,10 @@ export const englishMessages: SdkMessages = {
     leave: 'Discard and continue',
     retry: 'Try again',
     cancel: 'Cancel',
+    loadCancelled: 'Loading was cancelled.',
+    loadUnavailable: 'This cannot be read right now.',
+    stale: 'What is shown may be out of date.',
+    close: 'Close',
     failure: 'The operation could not be completed.',
     current: 'Current on the pod',
     notPresent: 'This resource is not currently present on the pod.',
@@ -280,6 +299,11 @@ export const englishMessages: SdkMessages = {
   reviewAccess: 'Review access',
   missingScopes: (scopes, format) =>
     `Review required feature access: ${format.list(scopes)}.`,
+  skipped: (count, format) =>
+    format.plural(count, {
+      one: 'One entry cannot be shown.',
+      other: `${format.number(count)} entries cannot be shown.`,
+    }),
   errors: {
     'invalid-pod-url': () => 'Enter a valid pod URL.',
     'invalid-argument': () =>
@@ -380,6 +404,10 @@ export const germanMessages: SdkMessages = {
     leave: 'Verwerfen und fortfahren',
     retry: 'Erneut versuchen',
     cancel: 'Abbrechen',
+    loadCancelled: 'Das Laden wurde abgebrochen.',
+    loadUnavailable: 'Das kann gerade nicht gelesen werden.',
+    stale: 'Die Anzeige ist vielleicht nicht aktuell.',
+    close: 'Schließen',
     failure: 'Die Aktion konnte nicht abgeschlossen werden.',
     current: 'Aktuell auf dem Pod',
     notPresent: 'Diese Ressource ist aktuell nicht auf dem Pod vorhanden.',
@@ -412,6 +440,11 @@ export const germanMessages: SdkMessages = {
   reviewAccess: 'Zugriff prüfen',
   missingScopes: (scopes, format) =>
     `Prüfe den Zugriff auf benötigte Funktionen: ${format.list(scopes)}.`,
+  skipped: (count, format) =>
+    format.plural(count, {
+      one: 'Ein Eintrag kann nicht angezeigt werden.',
+      other: `${format.number(count)} Einträge können nicht angezeigt werden.`,
+    }),
   errors: {
     'invalid-pod-url': () => 'Gib eine gültige Pod-URL ein.',
     'invalid-argument': () =>

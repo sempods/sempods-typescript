@@ -487,10 +487,12 @@ it.each(['missing', 'offline'] as const)(
     await waitFor(() => expect(phase()).toBe('ready'));
     // The editor's own retry, inside the exposed editor.
     const retry = () =>
-      document
-        .querySelector('[data-sempods-ui="editor"]')!
-        .querySelector<HTMLButtonElement>('button:last-of-type')!;
-    await waitFor(() => expect(retry().textContent).toBe('Check again'));
+      [
+        ...document
+          .querySelector('[data-sempods-ui="editor"]')!
+          .querySelectorAll<HTMLButtonElement>('button'),
+      ].find((button) => button.textContent === 'Check again')!;
+    await waitFor(() => expect(retry()).toBeTruthy());
     expect(screen.queryByLabelText('Note title')).toBeNull();
     if (mode === 'missing')
       data.set(`${work} urn:a`, { title: 'Created meanwhile', version: 1 });

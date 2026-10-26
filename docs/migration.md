@@ -94,12 +94,40 @@ Check these points:
   working. Without top-layer support (for example jsdom) it renders in place.
 - **`AppAccess` description.** The new optional `description` prop shows a
   short line under the app name on the sign-in screen; it is display only.
-- **Lists can keep their rows while reloading.** `useList`, `useLoad` and
-  `usePodLoad` accept `{ retain: true }`; `createViewLoader` takes the same
-  option as a third argument. With it, `LoadState`'s `loading` and `failed`
-  carry the last data as `previous`. Without it nothing changes. Code that
-  builds `LoadState` values itself still compiles; exhaustive checks over
-  `kind` are unchanged.
+- **Lists keep their rows while reloading.** `useList` now does this by
+  default: its `loading` and failed `state` carry the last rows as `previous`,
+  and its new `data` is what to render (current or kept rows). Pass
+  `retain: false` for the 0.5 behaviour. `useLoad` and `usePodLoad` accept
+  `{ retain: true }`; `createViewLoader` takes the same option as a third
+  argument. Code that builds `LoadState` values itself still compiles;
+  exhaustive checks over `kind` are unchanged.
+- **Management as a dialog, with fewer details.** `AppAccess` takes
+  `onClose`: with `open` it shows management as a native modal dialog (title,
+  **Close**, Escape, a click beside it) that checks the access again when it
+  opens, so it has no **Check access**. Replace an app-owned dialog around
+  `AppAccess` with `open={open} onClose={() => setOpen(false)}`. Management in
+  general no longer shows the app icon or **Full addresses**, names one
+  readable, selected Context instead of offering a choice, and shows the chosen
+  Context's access instead of the **Available to this app** list, which remains
+  only where there is no selection (on-demand management). Tests that looked
+  for those elements in management need updating.
+- **`LoadNotice`.** `<LoadNotice {...list} />` renders a read's loading,
+  failure, cancelled and unavailable states with a retry, a note for kept rows
+  after a failed refresh, and the count of entries it cannot show, in the SDK's
+  languages. It replaces app-written branches over `list.state.kind`.
+- **Lists skip values the definition does not accept.** `listSubjects` and
+  `snapshots` (client SDK) count a subject whose values fail the definition's
+  `valid` (for example an empty required text) in `skipped` instead of
+  returning it: no update could write such a row back. Remove app-side filters
+  such as `items.filter((item) => definition.valid(item.data))`.
+- **`ResourceEditor` `onClose`, Enter and the action order.** With `onClose`
+  (pass the guarded `() => select(null)`) the editor works in place: Cancel or
+  Escape discards and closes, and a confirmed save or delete closes it. In
+  every editor Enter in a text field saves, actions read as text with Save
+  filled, Delete moves to the end and asks in a modal dialog (role
+  `alertdialog`, as the leave confirmation; it was an inline `group`), and both
+  dialogs follow the `--sempods-*` tokens, including dark mode; tests that find buttons by position
+  should find them by name.
 - **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
   `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,
   readable Contexts into `catalogue.labels`, for example for a list menu.

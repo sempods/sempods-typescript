@@ -12,6 +12,7 @@ import {
   resourceIri,
 } from '../runtime/fixture.test.js';
 import {
+  LoadNotice,
   SempodsProvider,
   TargetScreen,
   UpdateNotice,
@@ -49,7 +50,7 @@ const task = (iri: string, title: string, done = false): JsonLd => ({
   'urn:status': [{ '@id': done ? 'urn:done' : 'urn:open' }],
 });
 
-async function setup(retain = true) {
+async function setup(retain?: boolean) {
   const f = fixture();
   const session = await f.login();
   cleanups.push(() => session.runtime.dispose());
@@ -79,28 +80,22 @@ async function setup(retain = true) {
     app: ReturnType<typeof useApp>;
   };
   function Screen() {
-    const list = useList(definition, { retain });
+    // Without an option, as apps write it: rows are retained by default.
+    const list = useList(definition, retain === undefined ? {} : { retain });
     const creation = useCreation(definition, {
       initial: { title: '', done: false },
       collection: 'tasks',
     });
     const update = useFieldUpdate(definition);
     api = { list, creation, update, app: useApp() };
-    const state = list.state;
-    const shown =
-      state.kind === 'ready'
-        ? state.data
-        : 'previous' in state
-          ? state.previous
-          : undefined;
     return (
       <>
+        <LoadNotice {...list} />
         <UpdateNotice {...creation.notice} quiet />
         <UpdateNotice {...update.notice} quiet />
-        <output aria-label="state">{state.kind}</output>
-        {state.kind === 'failed' && shown && <p role="alert">Not refreshed</p>}
+        <output aria-label="state">{list.state.kind}</output>
         <ul>
-          {shown?.items.map((row) => (
+          {list.data?.items.map((row) => (
             <li key={row.iri}>{row.data.title}</li>
           ))}
         </ul>
@@ -157,13 +152,34 @@ it('keeps readable rows after a failed refresh, distinguishable, and retries', a
   });
   expect(status()).toBe('failed');
   expect(titles()).toEqual(['One']);
-  expect(screen.getByRole('alert').textContent).toBe('Not refreshed');
+  expect(screen.getByRole('alert').textContent).toMatch(
+    / What is shown may be out of date\.$/,
+  );
   s.f.setQuery(async () => Response.json([...s.rows.values()]));
-  await act(async () => {
-    await s.api().list.reload();
-  });
-  expect(status()).toBe('ready');
+  await act(async () =>
+    screen.getByRole('button', { name: 'Try again' }).click(),
+  );
+  await waitFor(() => expect(status()).toBe('ready'));
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('names a cancelled read and entries it cannot show, and retries', async () => {
+  const s = await setup();
+  // An empty required title reads, but no update could write it back.
+  s.rows.set('urn:empty', task('urn:empty', ''));
+  s.hold();
+  await act(async () => {
+    void s.api().list.reload();
+  });
+  await act(async () => s.api().list.cancel());
+  expect(status()).toBe('cancelled');
+  expect(screen.getByText('Loading was cancelled.')).toBeTruthy();
+  s.f.setQuery(async () => Response.json([...s.rows.values()]));
+  await act(async () =>
+    screen.getByRole('button', { name: 'Try again' }).click(),
+  );
+  expect(await screen.findByText('One entry cannot be shown.')).toBeTruthy();
+  expect(titles()).toEqual(['One']);
 });
 
 it('clears retained rows for another Context', async () => {

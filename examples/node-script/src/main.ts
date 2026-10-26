@@ -5,7 +5,7 @@ import {
   newSubjectIri,
   prepareCreation,
 } from '@sempods/client-sdk/edit';
-import { supportedTasks, taskFields } from '../../todo/src/domain.js';
+import { taskFields } from '../../todo/src/domain.js';
 
 const [podUrl, contextIri, command = 'list', ...args] = process.argv.slice(2);
 const token = process.env['SEMPODS_TOKEN'];
@@ -42,10 +42,9 @@ if (command === 'list') {
   const result = await listSubjects(view, taskFields);
   if (result.kind !== 'ok') throw new Error(`List unavailable: ${result.kind}`);
 
-  const tasks = supportedTasks(result.body);
   console.log(
     JSON.stringify(
-      tasks.items.map((item) => ({ iri: item.iri, ...item.data })),
+      result.body.items.map((item) => ({ iri: item.iri, ...item.data })),
       null,
       2,
     ),

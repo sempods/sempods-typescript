@@ -1439,7 +1439,7 @@ it('an editor delete retires a row success and a later creation retires it', asy
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
   fireEvent.click(
     within(
-      screen.getByRole('group', {
+      screen.getByRole('alertdialog', {
         name: 'Delete this from the pod? This cannot be undone.',
       }),
     ).getByRole('button', { name: 'Delete' }),

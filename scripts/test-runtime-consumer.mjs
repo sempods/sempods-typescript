@@ -1465,9 +1465,9 @@ try {
     await page
       .getByRole('button', { name: 'Check access', exact: true })
       .waitFor();
-    await page.getByText('Full addresses', { exact: true }).click();
+    // Management names the Pod and still shows its address under the name.
     await page
-      .locator('[data-sempods-access] details')
+      .locator('[data-sempods-access]')
       .getByText(origin + '/alice', { exact: true })
       .waitFor();
     assert.ok(
@@ -1484,7 +1484,7 @@ try {
       });
   }
   console.log(
-    'Packed AppAccess: one/set/free Pod UI, Pod address omitted only for one permitted Pod with podAddress="hidden" and kept in Full addresses, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+    'Packed AppAccess: one/set/free Pod UI, Pod address omitted only for one permitted Pod with podAddress="hidden" and kept in management, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
   );
   // A declined re-authorization leaves a usable session and one retry. Native
   // inert removes focus while that retry prepares; a preparation failure must
