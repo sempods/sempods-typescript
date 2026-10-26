@@ -693,11 +693,25 @@ function withoutComparison<D>(
       : { kind: 'unconfirmed' };
   return outcome;
 }
-/** One mutation lane. Captures target/subject; stale completions never update a new lane. */
-function useMutation<D>(definition: FieldDefinition<D>) {
-  const view = useView();
+/**
+ * One mutation lane. Captures target/subject; stale completions never update a
+ * new lane. `explicit` is a view bound to an explicit Context (`null` while it
+ * binds); without it the lane follows the selected view.
+ */
+function useMutation<D>(
+  definition: FieldDefinition<D>,
+  explicit?: BoundView | null,
+) {
+  const selected = useView();
+  const view = explicit === undefined ? selected : explicit;
   const app = useController();
   const access = useWorkflowAccess();
+  const ownWrite = useSyncExternalStore(
+    explicit?.subscribe ?? noopSubscribe,
+    () => explicit?.getSnapshot().write ?? false,
+    () => explicit?.getSnapshot().write ?? false,
+  );
+  const writable = explicit === undefined ? access.write : ownWrite;
   const { key } = useDefinition(definition, 'useFieldUpdate');
   const current = useRef({
     view,
@@ -769,7 +783,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     const unsubscribe = view?.subscribe(followAccess);
     followAccess();
     const unregister = app.register({
-      scope: 'target',
+      // An explicit Context stays through row changes and Context selection.
+      scope: explicit === undefined ? 'target' : 'explicit',
       unconfirmed: () => lane.uncertain,
       blocked: () => lane.pending,
       dirty: () => lane.unresolved,
@@ -789,6 +804,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
       unsubscribe?.();
       unregister();
     };
+    // `explicit` only switches between the two kinds of lane, which `view` keys.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app, lane, view]);
   const starts = useStartCount(view);
   const visible = state?.lane === lane ? state : null;
@@ -798,8 +815,14 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     visible && !(succeeded(visible.outcome) && visible.start !== starts)
       ? visible.outcome
       : null;
+  // The selected view must still be selected; an explicit one still current
+  // (same connection and authorization).
   const eligible = () =>
-    lane.alive && current.current === lane && app.getSnapshot().view === view;
+    lane.alive &&
+    current.current === lane &&
+    (explicit === undefined
+      ? app.getSnapshot().view === view
+      : Boolean(view?.getSnapshot().current));
   const readable = () => eligible() && Boolean(view?.getSnapshot().read);
   const checked = () => readable() && lane.checked;
   async function execute(
@@ -896,7 +919,7 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     unresolved: lane.unresolved,
     canMutate: Boolean(
       view &&
-      access.write &&
+      writable &&
       eligible() &&
       !lane.pending &&
       !lane.unresolved &&
@@ -981,6 +1004,46 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
 }
 
 /**
+ * A view bound to an explicit Context of the active connection, as
+ * `useContextEditor` binds one: after startup settles, through
+ * `runtime.bindContext`. A configuration refusal (not a Context of this Pod,
+ * or not the preset's) is reported; while signed out it waits. It demands
+ * catalogue discovery, so its write access is known, but no selection.
+ */
+function useExplicitView(context: string | undefined) {
+  const app = useController();
+  const { activeId, ready } = useAppFacts(
+    (s) => ({
+      activeId: s.activeId,
+      ready: startupSettled(s) && s.pod !== null,
+    }),
+    shallowEqual,
+  );
+  const key =
+    context !== undefined && activeId ? `${activeId} ${context}` : null;
+  const [binding, setBinding] = useState<{
+    readonly key: string;
+    readonly view: BoundView | 'refused';
+  } | null>(null);
+  const current = binding?.key === key ? binding.view : null;
+  useEffect(() => {
+    if (!key || !ready || current !== null) return;
+    try {
+      setBinding({ key, view: app.runtime.bindContext(activeId!, context!) });
+    } catch (error) {
+      if (!(error instanceof RuntimeError)) throw error;
+      if (error.problem === 'configuration')
+        setBinding({ key, view: 'refused' });
+      else if (error.problem !== 'disconnected') throw error;
+    }
+  }, [app, key, ready, current, activeId, context]);
+  useContextDiscovery(current !== null && current !== 'refused');
+  return {
+    view: current === 'refused' ? null : current,
+    refused: current === 'refused',
+  };
+}
+/**
  * Owns the draft, leave guard and captured command for one intended creation.
  *
  * Several resources from one input are created one at a time: while `canEdit`
@@ -1000,11 +1063,25 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
  */
 export function useCreation<D extends object>(
   definition: FieldDefinition<D>,
-  options: { readonly initial: D; readonly collection: string },
+  options: {
+    readonly initial: D;
+    readonly collection: string;
+    /**
+     * Create in this Context instead of the selected one, through
+     * `runtime.bindContext`. The draft and its target stay when another
+     * Context is selected or a row opens; connection actions ask first.
+     */
+    readonly context?: string;
+  },
 ) {
-  const view = useView();
+  const explicit = useExplicitView(options.context);
+  const selected = useView();
+  const view = options.context === undefined ? selected : explicit.view;
   const { key } = useDefinition(definition, 'useCreation');
-  const mutation = useMutation(definition);
+  const mutation = useMutation(
+    definition,
+    options.context === undefined ? undefined : explicit.view,
+  );
   const initial = useRef(options.initial);
   initial.current = options.initial;
   const copy = (draft: D) => Object.freeze({ ...draft });
@@ -1042,6 +1119,7 @@ export function useCreation<D extends object>(
   useDraftGuard(
     JSON.stringify(draft) !== JSON.stringify(options.initial),
     reset,
+    options.context === undefined ? 'target' : 'explicit',
   );
   const retrying = () =>
     command.current?.state === current.current && command.current.retry;
@@ -1055,8 +1133,13 @@ export function useCreation<D extends object>(
   };
   return {
     draft,
-    canEdit,
+    canEdit: canEdit && view !== null,
     canCreate: mutation.canMutate && valid(draft),
+    /**
+     * The `context` is not a Context of the active connection's Pod, or not
+     * the preset's: nothing is created there.
+     */
+    refused: explicit.refused,
     busy: mutation.busy,
     outcome: mutation.outcome,
     /**
@@ -1115,7 +1198,10 @@ export function useCreation<D extends object>(
         captured.run(),
       );
       if (outcome?.kind === 'created' && current.current === submitted) reset();
-      return outcome;
+      // The new resource's IRI, for example to link a second creation to it.
+      return outcome?.kind === 'created'
+        ? { ...outcome, iri: captured.iri }
+        : outcome;
     },
     notice: {
       ...mutation.notice,
@@ -1135,13 +1221,14 @@ export function useCreation<D extends object>(
 
 /**
  * App drafts survive row changes by default; choose `local` for drafts left by
- * row navigation, or `connection` for a draft bound to an explicit Context,
- * which survives a Context selection (see `LeaveGuard.scope`).
+ * row navigation, `connection` for a draft bound to an explicit Context, which
+ * survives a Context selection, or `explicit` for a draft at an explicit
+ * Context that also survives row navigation (see `LeaveGuard.scope`).
  */
 export function useDraftGuard(
   dirty: boolean,
   discard: () => void,
-  scope: 'local' | 'target' | 'connection' = 'target',
+  scope: 'local' | 'target' | 'connection' | 'explicit' = 'target',
 ) {
   const app = useController();
   const latest = useRef({ dirty, discard });

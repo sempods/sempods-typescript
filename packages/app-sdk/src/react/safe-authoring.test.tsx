@@ -1204,7 +1204,11 @@ it('S3: an unconfirmed item keeps its IRI through recovery; the rest continues a
   await addAll(f); // the batch waits until the held item is settled
   expect(track.puts).toHaveLength(3);
   await act(async () => {
-    expect(await f.api.creation.create()).toEqual({ kind: 'created' });
+    // The retry reports the held IRI, not a new one.
+    expect(await f.api.creation.create()).toEqual({
+      kind: 'created',
+      iri: track.puts[2]!.iri,
+    });
   });
   expect(track.puts).toHaveLength(4);
   expect(track.puts[3]!.iri).toBe(track.puts[2]!.iri);

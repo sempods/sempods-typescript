@@ -42,6 +42,7 @@ export type {
 } from './runtime/types.js';
 export type { SessionLocks, SessionStore } from './sessions/types.js';
 export { bindResourceEditor } from './authoring/editor.js';
+export { bindCreation } from './authoring/creation.js';
 export { createAppController } from './authoring/app.js';
 export type {
   AppController,
