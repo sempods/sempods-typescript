@@ -475,8 +475,8 @@ export async function renameWithEditor(
   Every unknown predicate and language value still participates.
 - `listSubjects(view, definition)` lists all subjects of the definition's type
   in the view's context as snapshots (the query's own outcomes pass through;
-  unfitting subjects and blank nodes, which cannot be addressed later, are
-  counted in `skipped`). `newSubjectIri(view, 'tasks')`
+  unfitting subjects, values the definition does not accept and blank nodes,
+  none of which a later write could address, are counted in `skipped`). `newSubjectIri(view, 'tasks')`
   makes a fresh IRI under the Pod.
 - `prepareCreation(source, iri, definition, draft)` derives the body (type
   included) from a `fields()` definition; `prepareCreation(source, iri, body)`

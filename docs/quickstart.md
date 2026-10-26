@@ -71,6 +71,7 @@ import { useRef, useState } from 'react';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
+  LoadNotice,
   ResourceEditor,
   SempodsProvider,
   TargetScreen,
@@ -118,13 +119,18 @@ function AppContent() {
       {connections.length > 0 && (
         <button
           ref={focusTarget}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
+          aria-haspopup="dialog"
+          onClick={() => setOpen(true)}
         >
           {messages.controls.dataAccess}
         </button>
       )}
-      <AppAccess appName="My tasks" open={open} focusTarget={focusTarget} />
+      <AppAccess
+        appName="My tasks"
+        open={open}
+        onClose={() => setOpen(false)}
+        focusTarget={focusTarget}
+      />
       <TargetScreen>
         <Tasks />
       </TargetScreen>
@@ -144,6 +150,35 @@ function Tasks() {
 
   return (
     <section>
+      <LoadNotice {...list} />
+      {/* The new or changed row is the confirmation; problems still show. */}
+      <UpdateNotice {...update.notice} quiet />
+      {list.data?.items.map((item) => (
+        <p key={item.iri}>
+          <input
+            type="checkbox"
+            aria-label={`Complete ${item.data.title}`}
+            checked={item.data.done}
+            disabled={!update.canMutate}
+            onChange={() => void update.update(item, { done: !item.data.done })}
+          />
+          <button onClick={() => void select(item.iri)}>
+            {item.data.title}
+          </button>
+        </p>
+      ))}
+      {selected && (
+        <ResourceEditor editor={editor} onClose={() => select(null)}>
+          {(draft, change) => (
+            <input
+              aria-label="Task title"
+              value={draft.title}
+              onChange={(event) => change({ title: event.target.value })}
+            />
+          )}
+        </ResourceEditor>
+      )}
+      <UpdateNotice {...creation.notice} quiet />
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -159,42 +194,6 @@ function Tasks() {
         />
         <button disabled={!creation.canCreate}>Add</button>
       </form>
-      <UpdateNotice {...creation.notice} />
-      <UpdateNotice {...update.notice} />
-      {list.state.kind !== 'ready' && (
-        <p role="status">List: {list.state.kind}</p>
-      )}
-      {list.state.kind === 'ready' && list.state.data.skipped > 0 && (
-        <p>Unsupported entries: {list.state.data.skipped}</p>
-      )}
-      {list.state.kind === 'ready' &&
-        list.state.data.items.map((item) => (
-          <p key={item.iri}>
-            <input
-              type="checkbox"
-              aria-label={`Complete ${item.data.title}`}
-              checked={item.data.done}
-              disabled={!update.canMutate}
-              onChange={() =>
-                void update.update(item, { done: !item.data.done })
-              }
-            />
-            <button onClick={() => void select(item.iri)}>
-              {item.data.title}
-            </button>
-          </p>
-        ))}
-      {selected && (
-        <ResourceEditor editor={editor}>
-          {(draft, change) => (
-            <input
-              aria-label="Task title"
-              value={draft.title}
-              onChange={(event) => change({ title: event.target.value })}
-            />
-          )}
-        </ResourceEditor>
-      )}
     </section>
   );
 }
@@ -209,35 +208,41 @@ check the Pod's current version before acknowledging; nothing is resent. A succe
 the target starts, so the notices show the last action; unresolved outcomes stay until
 acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
-[TODO example](../examples/todo/src/app.tsx) adds an EN/DE switch.
+[TODO example](../examples/todo/src/app.tsx) adds an icon and a header menu
+with the language switch.
 
-Replace Vite's demo styles in `src/index.css` with a simple baseline for your
-app content. AppAccess supplies its own scoped login/recovery styles:
+Replace Vite's demo styles in `src/index.css`. AppAccess, the editor and the
+notices style themselves from the `--sempods-*` tokens; set them once so your
+own elements match (the [TODO example's styles](../examples/todo/src/style.css)
+add a checkbox list, text buttons and the input row):
 
 ```css
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  color: light-dark(#173740, #e8eee9);
-  background: light-dark(#f6faf9, #191b1a);
+  --sempods-bg: light-dark(#fff, #111315);
+  --sempods-text: light-dark(#1f2933, #e5e7eb);
+  --sempods-muted: light-dark(#6b7280, #9ca3af);
+  --sempods-line: light-dark(#e5e7eb, #2d3138);
+  --sempods-accent: light-dark(#1f2933, #e5e7eb);
+  --sempods-on-accent: light-dark(#fff, #111315);
+  font:
+    400 1rem/1.5 system-ui,
+    sans-serif;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
 }
 body {
   margin: 0;
 }
 main {
-  max-width: 760px;
+  max-width: 640px;
   margin: auto;
   padding: 16px;
 }
 button,
-input,
-select {
+input {
   font: inherit;
-  margin: 0.25rem;
-  padding: 0.4rem;
-}
-input[type='checkbox'] {
-  accent-color: #176354;
+  min-height: 44px;
 }
 ```
 

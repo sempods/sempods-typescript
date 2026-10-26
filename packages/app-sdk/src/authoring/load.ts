@@ -29,6 +29,14 @@ export type LoadState<T> =
        */
       readonly previous?: T;
     };
+/** What to show: ready data, or `previous` kept while reloading or after a failed refresh. */
+export function shownData<T>(state: LoadState<T>): T | undefined {
+  return state.kind === 'ready'
+    ? state.data
+    : 'previous' in state
+      ? state.previous
+      : undefined;
+}
 /**
  * `retain` keeps the last ready data of a loader as `previous` while the same
  * target reloads and after a refresh that failed. It is read at each

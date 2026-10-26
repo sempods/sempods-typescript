@@ -32,6 +32,7 @@ export type {
 export {
   AccessNotice,
   CallbackNotice,
+  LoadNotice,
   ResourceEditor,
   UpdateNotice,
 } from './components.js';

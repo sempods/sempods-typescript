@@ -1,4 +1,4 @@
-/* global getComputedStyle, window, document, URLSearchParams, navigator, caches */
+/* global getComputedStyle, window, document, URLSearchParams, navigator, caches, Event */
 import assert from 'node:assert/strict';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -18,6 +18,29 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
 
+/** Menu language names follow the current language (Deutsch/Englisch, German/English). */
+const german = /^(German|Deutsch)$/;
+const english = /^(English|Englisch)$/;
+/** Clicks an item of the TODO header menu, opening the menu first. */
+async function menu(page, name) {
+  await page.locator('.menu-button').click();
+  await page
+    .locator('#app-menu')
+    .getByRole('button', { name, exact: true })
+    .click();
+}
+/** Closes the management dialog in either language. */
+async function closeManagement(page) {
+  await page.getByRole('button', { name: /^(Close|Schließen)$/ }).click();
+  await page.getByRole('dialog').waitFor({ state: 'detached' });
+}
+/** Coming back to the page reloads the list (the example has no reload button). */
+async function reloadList(page) {
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event('visibilitychange')),
+  );
+}
+
 const root = process.cwd();
 const temp = await mkdtemp(join(tmpdir(), 'sempods-todo-'));
 const execute = promisify(execFile);
@@ -26,7 +49,7 @@ const confirmText = 'Delete this from the pod? This cannot be undone.';
 async function confirmDelete(page) {
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page
-    .getByRole('group', { name: confirmText, exact: true })
+    .getByRole('alertdialog', { name: confirmText, exact: true })
     .getByRole('button', { name: 'Delete', exact: true })
     .click();
 }
@@ -461,8 +484,7 @@ try {
     });
     const page = await context.newPage();
     await page.goto(origin + '/');
-    if (language === 'de')
-      await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    if (language === 'de') await menu(page, german);
     await page
       .getByLabel(language === 'de' ? 'Pod-Adresse' : 'Pod address', {
         exact: true,
@@ -476,7 +498,7 @@ try {
       .click();
     // Redirect initializes the example's default language again.
     await page.getByLabel('Data context', { exact: true }).selectOption(work);
-    const input = page.getByLabel('Task', { exact: true }).first();
+    const input = page.getByLabel('New task', { exact: true });
     await input.fill('Shell-free task');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
@@ -486,9 +508,7 @@ try {
       .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
     await input.fill('Keep this draft');
-    await page
-      .getByRole('button', { name: 'Pods & sharing', exact: true })
-      .click();
+    await menu(page, 'Pods & sharing');
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
@@ -575,7 +595,7 @@ try {
     await page
       .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
-    await page.getByLabel('Task', { exact: true }).first().fill('SDK baseline');
+    await page.getByLabel('New task', { exact: true }).fill('SDK baseline');
     assert.deepEqual(labelRequests, [work]);
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
@@ -596,7 +616,6 @@ try {
     const save = editor.getByRole('button', { name: 'Save', exact: true });
     const field = editor.getByLabel('Task', { exact: true });
     await field.fill('Unfinished baseline');
-    await page.keyboard.press('Tab'); // Checkbox.
     await page.keyboard.press('Tab'); // Save.
     assert.equal(
       await save.evaluate((button) => button === document.activeElement),
@@ -607,14 +626,6 @@ try {
         (button) => getComputedStyle(button).outlineStyle !== 'none',
       ),
     );
-    // A compact checkbox; its label is the 44px target.
-    const done = editor.getByRole('checkbox');
-    const doneBox = await done.boundingBox();
-    assert.ok(doneBox.width <= 24 && doneBox.height <= 24);
-    const doneLabel = await editor
-      .locator('label:has(input[type=checkbox])')
-      .boundingBox();
-    assert.ok(doneLabel.height >= 44 && doneLabel.width >= 44);
     for (const control of [
       save,
       field,
@@ -680,8 +691,9 @@ try {
     await page.evaluate(() =>
       document.documentElement.style.setProperty('--sempods-accent', '#654321'),
     );
+    // Save is the editor's main action: filled with the accent.
     assert.equal(
-      await save.evaluate((button) => getComputedStyle(button).color),
+      await save.evaluate((button) => getComputedStyle(button).backgroundColor),
       'rgb(101, 67, 33)',
     );
     assert.equal(
@@ -693,29 +705,21 @@ try {
     // App-owned list controls retain browser appearance; SDK styles do not leak into app content.
     assert.notEqual(
       await page
-        .getByRole('button', { name: 'SDK baseline', exact: true })
+        .getByRole('button', { name: 'Add', exact: true })
         .evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
-    await page
-      .getByRole('button', { name: 'Pods & sharing', exact: true })
-      .click();
-    // Signing in to another Pod is the collapsed secondary section.
-    await page.getByText('Connect another Pod', { exact: true }).click();
-    const addPod = page.getByRole('button', { name: 'Sign in', exact: true });
-    assert.equal(
-      await addPod.evaluate(
-        (button) => getComputedStyle(button).backgroundColor,
-      ),
-      'rgba(0, 0, 0, 0)',
-    );
+    // Management is a modal dialog; the leave prompt opens above it.
+    await menu(page, 'Pods & sharing');
+    await page.getByRole('dialog', { name: 'Pods & sharing' }).waitFor();
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await closeManagement(page);
+    await menu(page, german);
     await editor
       .getByRole('button', { name: 'Speichern', exact: true })
       .waitFor();
@@ -761,11 +765,8 @@ try {
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
-    await page
-      .getByRole('button', { name: 'Pods & sharing', exact: true })
-      .click();
-    await page.getByText('Connect another Pod', { exact: true }).click();
-    // New drafts cannot start while connect awaits discovery/registration.
+    await menu(page, 'Pods & sharing');
+    // New drafts cannot start while a sign-in awaits discovery/registration.
     let releaseDiscovery;
     const discoveryStarted = new Promise((resolve) => {
       releaseDiscovery = resolve;
@@ -776,10 +777,11 @@ try {
       releaseDiscovery();
     };
     await page.route('**/.well-known/oauth-protected-resource', holdDiscovery);
-    await page.getByLabel('Pod address').fill(pod);
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Change sharing', exact: true })
+      .click();
     await discoveryStarted;
-    const newDraft = page.getByLabel('Task', { exact: true }).first();
+    const newDraft = page.getByLabel('New task', { exact: true });
     assert.equal(
       await newDraft.evaluate((input) => Boolean(input.closest('[inert]'))),
       true,
@@ -793,8 +795,9 @@ try {
     );
     await heldDiscovery.abort('failed');
     await page.waitForFunction(() => !document.querySelector('[inert]'));
+    await closeManagement(page);
     const add = async (title) => {
-      await page.getByLabel('Task', { exact: true }).first().fill(title);
+      await page.getByLabel('New task', { exact: true }).fill(title);
       await page.getByRole('button', { name: 'Add', exact: true }).click();
       await page.getByRole('button', { name: title, exact: true }).waitFor();
     };
@@ -806,33 +809,48 @@ try {
     await newDraft.fill('  First  ');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('button', { name: 'First', exact: true }).waitFor();
-    // The row is the confirmation: creation and row changes stay quiet (#107);
-    // only the editor's own save announces success, once (#72).
+    // The row is the confirmation: creation, row changes and the inline
+    // editor's save stay quiet (#107); a confirmed save closes the editor.
     const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
     const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
     assert.equal(await created.count(), 0);
-    await page.getByRole('button', { name: 'Complete', exact: true }).click();
-    await page.getByRole('button', { name: 'Reopen', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .waitFor();
     assert.equal(await saved.count(), 0);
-    await page.getByRole('button', { name: 'Reopen', exact: true }).click();
-    await page.getByRole('button', { name: 'Complete', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .waitFor();
     await page.getByRole('button', { name: 'First', exact: true }).click();
-    const draft = page.getByLabel('Task', { exact: true }).nth(1);
+    const draft = page.getByLabel('Task', { exact: true });
     await draft.fill('Renamed');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
-    await page
-      .locator('[data-sempods-ui="editor"]')
-      .getByRole('status')
-      .filter({ hasText: /^Saved\.$/ })
-      .waitFor();
-    assert.equal(await saved.count(), 1);
+    await draft.waitFor({ state: 'detached' });
+    assert.equal(await saved.count(), 0);
+    // Escape discards an edit and closes the editor without writing.
+    await page.getByRole('button', { name: 'Renamed', exact: true }).click();
+    const beforeEscape = writes;
+    await draft.fill('Escaped');
+    await draft.press('Escape');
+    await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
+    assert.equal(writes, beforeEscape);
+    await page.getByRole('button', { name: 'Renamed', exact: true }).click();
     await draft.fill('Draft retained');
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, german);
     assert.equal(
       await page.getByLabel('Aufgabe', { exact: true }).last().inputValue(),
       'Draft retained',
     );
+    // The Context is chosen in the management dialog; the leave prompt opens
+    // above it and keeps the draft.
+    await menu(page, 'Pods & Freigaben');
     await page.getByLabel('Datenkontext').selectOption(personal);
     await page.getByRole('alertdialog').waitFor();
     assert.equal(
@@ -841,10 +859,10 @@ try {
     );
     await page.keyboard.press('Escape');
     assert.equal(await page.getByLabel('Datenkontext').inputValue(), work);
-    await page.getByRole('button', { name: 'English', exact: true }).click();
-    await page
-      .getByRole('button', { name: 'Discard changes', exact: true })
-      .click();
+    await closeManagement(page);
+    await menu(page, english);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Renamed', exact: true }).click();
     conflict = true;
     await draft.fill('Mine');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -857,7 +875,7 @@ try {
       .getByRole('button', { name: 'Continue with my changes', exact: true })
       .click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await page.getByRole('button', { name: 'Mine', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Mine', exact: true }).click();
     // Dispatch through the real client, apply on the fixture, then hide the answer.
     let loseMethod = 'PATCH';
     const loseAnswer = async (route) => {
@@ -882,13 +900,16 @@ try {
     await page.getByRole('alert').filter({ hasText: 'unconfirmed' }).waitFor();
     assert.equal(writes, before + 1);
     await page.unroute('**/_system/resources/**', loseAnswer);
-    await page
-      .getByRole('button', { name: 'Discard changes', exact: true })
-      .click();
+    // Cancel discards after the comparison read and closes; reopen the row.
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.locator('.tasks .title').click();
     // The first Delete only asks; Escape keeps the task, confirming sends one DELETE.
     const beforeAsk = writes;
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
-    const ask = page.getByRole('group', { name: confirmText, exact: true });
+    const ask = page.getByRole('alertdialog', {
+      name: confirmText,
+      exact: true,
+    });
     await ask.waitFor();
     assert.equal(
       await ask
@@ -944,7 +965,7 @@ try {
     await page
       .getByRole('button', { name: 'Retry captured task', exact: true })
       .click();
-    await page.getByLabel('Task', { exact: true }).nth(1).waitFor();
+    await page.getByLabel('Task', { exact: true }).waitFor();
     await confirmDelete(page);
     await page
       .getByRole('button', { name: 'Retry captured task', exact: true })
@@ -952,16 +973,13 @@ try {
     // An uncertain creation cannot be submitted twice, even after same-view navigation.
     loseMethod = 'PUT';
     await page.route('**/_system/resources/**', loseAnswer);
-    await page
-      .getByLabel('Task', { exact: true })
-      .first()
-      .fill('Maybe created');
+    await page.getByLabel('New task', { exact: true }).fill('Maybe created');
     const beforeCreate = writes;
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('status').filter({ hasText: 'unconfirmed' }).waitFor();
     assert.equal(writes, beforeCreate + 1);
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().isDisabled(),
+      await page.getByLabel('New task', { exact: true }).isDisabled(),
       true,
     );
     assert.equal(
@@ -983,7 +1001,7 @@ try {
       true,
     );
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Maybe created',
     );
     assert.equal(writes, beforeCreate + 1);
@@ -1004,13 +1022,17 @@ try {
     await page
       .getByRole('button', { name: 'Maybe created', exact: true })
       .click();
-    await page.getByLabel('Task', { exact: true }).nth(1).fill('Leave me');
+    await page.getByLabel('Task', { exact: true }).fill('Leave me');
+    await menu(page, 'Pods & sharing');
     await page.getByLabel('Data context').selectOption(personal);
     await page
       .getByRole('button', { name: 'Discard and continue', exact: true })
       .click();
+    await closeManagement(page);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
+    await menu(page, 'Pods & sharing');
     await page.getByLabel('Data context').selectOption(work);
+    await closeManagement(page);
     await page
       .getByRole('button', { name: 'Maybe created', exact: true })
       .waitFor();
@@ -1022,12 +1044,13 @@ try {
     );
     // A row mutation's acknowledgement must not discard a separate creation draft.
     await page
-      .getByLabel('Task', { exact: true })
-      .first()
+      .getByLabel('New task', { exact: true })
       .fill('Keep this new title');
     loseMethod = 'PATCH';
     await page.route('**/_system/resources/**', loseAnswer);
-    await page.getByRole('button', { name: 'Complete', exact: true }).click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .click();
     await page.getByRole('status').filter({ hasText: 'unconfirmed' }).waitFor();
     await page.unroute('**/_system/resources/**', loseAnswer);
     await page
@@ -1037,15 +1060,15 @@ try {
       .getByRole('button', { name: 'I have checked the pod', exact: true })
       .click();
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Keep this new title',
     );
-    await page.getByLabel('Task', { exact: true }).first().fill('');
+    await page.getByLabel('New task', { exact: true }).fill('');
     // A lost deletion answer stays uncertain even when a subsequent read finds absence.
     await page
       .getByRole('button', { name: 'Maybe created', exact: true })
       .click();
-    await page.getByLabel('Task', { exact: true }).nth(1).waitFor();
+    await page.getByLabel('Task', { exact: true }).waitFor();
     loseMethod = 'DELETE';
     await page.route('**/_system/resources/**', loseAnswer);
     const beforeDelete = writes;
@@ -1061,7 +1084,7 @@ try {
       .getByRole('button', { name: 'I have checked the pod', exact: true })
       .click();
     // The list reloads with the app's own label, not the SDK's.
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
     await add('After unknown deletion');
     // #136: a retained list keeps its rows in every frame while it reloads,
@@ -1108,36 +1131,40 @@ try {
       .filter({ hasText: /^Loading/ });
     let release = await holdList();
     let requested = listRequest();
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     await requested;
     assert.equal(await keptRow().count(), 1);
     assert.equal(await loadingStatus.count(), 0);
     await release();
     release = await holdList();
     requested = listRequest();
-    await page.getByRole('button', { name: 'Complete', exact: true }).click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .click();
     await requested;
     assert.equal(await keptRow().count(), 1);
     assert.equal(await loadingStatus.count(), 0);
     await release();
-    await page.getByRole('button', { name: 'Reopen', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .waitFor();
     await page.route(listQuery, (route) =>
       route.fulfill({ status: 403, body: '' }),
     );
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     const stale = page
       .getByRole('alert')
-      .filter({ hasText: 'The list below may be out of date.' });
+      .filter({ hasText: 'What is shown may be out of date.' });
     await stale.waitFor();
     assert.equal(await keptRow().count(), 1);
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, german);
     await page
       .getByRole('alert')
-      .filter({ hasText: 'Die Liste unten ist vielleicht nicht aktuell.' })
+      .filter({ hasText: 'Die Anzeige ist vielleicht nicht aktuell.' })
       .waitFor();
-    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await menu(page, english);
     await page.unroute(listQuery);
-    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+    await reloadList(page);
     await stale.waitFor({ state: 'detached' });
     assert.equal(
       await page.evaluate(() => {
@@ -1146,8 +1173,12 @@ try {
       }),
       0,
     );
-    await page.getByRole('button', { name: 'Reopen', exact: true }).click();
-    await page.getByRole('button', { name: 'Complete', exact: true }).waitFor();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .click();
+    await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .waitFor();
     await page.route('**/alice/_system/contexts', async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -1156,41 +1187,33 @@ try {
       body['http://www.w3.org/ns/sparql-service-description#namedGraph'] = [];
       await route.fulfill({ response, json: body });
     });
-    // AppAccess offers Check access in its management.
-    const management = page.getByRole('button', {
-      name: 'Pods & sharing',
-      exact: true,
-    });
-    let opened = false;
+    // Lost access shows AppAccess with Check access; the management dialog
+    // checks again by itself when it opens.
     const recheck = async () => {
       const check = page.getByRole('button', {
         name: 'Check access',
         exact: true,
       });
-      if ((await check.count()) === 0) {
-        await management.click();
-        opened = true;
-      }
-      await check.click();
+      if ((await check.count()) > 0) return check.click();
+      await menu(page, 'Pods & sharing');
+      await closeManagement(page);
     };
     await recheck();
     await keptRow().waitFor({ state: 'detached' });
     await page.unroute('**/alice/_system/contexts');
     await recheck();
     await keptRow().waitFor();
-    // Leave the shell as it was for the steps below.
-    if (opened && (await management.getAttribute('aria-expanded')) === 'true')
-      await management.click();
     // Creation drafts use the same keyboard-accessible leave confirmation.
-    await page.getByLabel('Task', { exact: true }).first().fill('Uncreated');
+    await page.getByLabel('New task', { exact: true }).fill('Uncreated');
     await page
       .getByRole('button', { name: 'After unknown deletion', exact: true })
       .click();
     assert.equal(await page.getByRole('alertdialog').count(), 0);
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Uncreated',
     );
+    await menu(page, 'Pods & sharing');
     await page.getByLabel('Data context').selectOption(personal);
     await page.getByRole('alertdialog').waitFor();
     await page.keyboard.press('Tab');
@@ -1199,6 +1222,7 @@ try {
       'Discard and continue',
     );
     await page.keyboard.press('Escape');
+    await closeManagement(page);
     assert.ok(
       await page.evaluate(
         () =>
@@ -1213,7 +1237,7 @@ try {
     const busy = await context.newPage();
     await busy.goto(origin + '/');
     await busy.getByRole('alert').filter({ hasText: 'another tab' }).waitFor();
-    await busy.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(busy, german);
     await busy.getByRole('alert').filter({ hasText: 'anderen Tab' }).waitFor();
     await busy.close();
     // A reload keeps the session and reselects the last chosen context from
@@ -1262,7 +1286,7 @@ try {
         .count(),
       0,
     );
-    await failed.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(failed, german);
     await failed
       .getByRole('alert')
       .filter({ hasText: 'Sitzungsspeicher' })
@@ -1323,7 +1347,7 @@ try {
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByLabel('Data context').selectOption(work);
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
-    await page.getByLabel('Task', { exact: true }).first().fill('Installed');
+    await page.getByLabel('New task', { exact: true }).fill('Installed');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page
       .getByRole('button', { name: 'Installed', exact: true })
@@ -1418,11 +1442,8 @@ try {
     page.off('request', countAuth);
     assert.deepEqual(afterOffline, { loads: 0, auth: 0 });
     // An update is announced but never reloads over a draft.
-    await page
-      .getByLabel('Task', { exact: true })
-      .first()
-      .fill('Unsaved draft');
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await page.getByLabel('New task', { exact: true }).fill('Unsaved draft');
+    await menu(page, german);
     workerVersion = 'v2';
     await page.evaluate(() =>
       navigator.serviceWorker.getRegistration().then((r) => r.update()),
@@ -1436,23 +1457,23 @@ try {
     await germanUpdate.waitFor();
     assert.equal(await englishUpdate.count(), 0);
     assert.equal(
-      await page.getByLabel('Aufgabe', { exact: true }).first().inputValue(),
+      await page.getByLabel('Neue Aufgabe', { exact: true }).inputValue(),
       'Unsaved draft',
     );
     // The already-visible notice follows the app's language without a remount
     // or worker takeover; the creation draft survives both changes.
-    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await menu(page, english);
     await englishUpdate.waitFor();
     assert.equal(await germanUpdate.count(), 0);
     assert.equal(
-      await page.getByLabel('Task', { exact: true }).first().inputValue(),
+      await page.getByLabel('New task', { exact: true }).inputValue(),
       'Unsaved draft',
     );
-    await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
+    await menu(page, german);
     await germanUpdate.waitFor();
     assert.equal(await englishUpdate.count(), 0);
     assert.equal(
-      await page.getByLabel('Aufgabe', { exact: true }).first().inputValue(),
+      await page.getByLabel('Neue Aufgabe', { exact: true }).inputValue(),
       'Unsaved draft',
     );
     assert.deepEqual(

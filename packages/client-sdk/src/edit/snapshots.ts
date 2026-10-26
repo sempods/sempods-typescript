@@ -84,7 +84,8 @@ function capture<D>(
  * Snapshots from query nodes (for example `CONSTRUCT { ?s ?p ?o }`). The query
  * must return the fields' terms completely; strict per item, tolerant per list.
  * Nodes without an absolute IRI (blank nodes) are skipped: they cannot be
- * addressed by a later update or deletion.
+ * addressed by a later update or deletion. So are values the definition does
+ * not accept (`valid`): no update could write such a row back.
  * Deleting from a snapshot additionally needs the subject's whole description
  * in the target context; a projection makes `removeSnapshot` report a change.
  */
@@ -101,6 +102,11 @@ export function snapshots<D>(
   for (const node of nodes) {
     try {
       const snapshot = capture(source, definition, node);
+      // A row the definition does not accept (for example an empty required
+      // text) could not be written back by any update: skip it like an
+      // unreadable one. Conflict reads keep such values to compare them.
+      if (definition.valid && !definition.valid(snapshot.data))
+        throw new TypeError('The values are not valid.');
       if (ids.has(snapshot.iri)) throw new TypeError('Duplicate subject.');
       ids.add(snapshot.iri);
       items.push(snapshot);

@@ -1,9 +1,23 @@
+/*
+ * The app's own elements in the SDK's neutral look. The tokens below are the
+ * SDK's defaults, set once on the page: the SDK surfaces (AppAccess, editor,
+ * notices) and this app's header, list and input read the same values. Change
+ * a token here to brand both together. The SDK styles its own surfaces, so the
+ * rules below name the app's elements instead of every button or input.
+ */
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  color: light-dark(#173740, #e8eee9);
-  background: light-dark(#f3f6f7, #191b1a);
-  font-size: 16px;
+  --sempods-bg: light-dark(#fff, #111315);
+  --sempods-text: light-dark(#1f2933, #e5e7eb);
+  --sempods-muted: light-dark(#6b7280, #9ca3af);
+  --sempods-line: light-dark(#e5e7eb, #2d3138);
+  --sempods-accent: light-dark(#1f2933, #e5e7eb);
+  --sempods-on-accent: light-dark(#fff, #111315);
+  font:
+    400 1rem/1.5 system-ui,
+    sans-serif;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
 }
 * {
   box-sizing: border-box;
@@ -11,76 +25,195 @@
 body {
   margin: 0;
 }
-main {
-  background: light-dark(white, #191b1a);
-  min-height: 100vh;
-}
-input,
-select,
-button {
+button,
+input {
   font: inherit;
-  max-width: 100%;
+}
+:focus-visible {
+  outline: 2px solid var(--sempods-accent);
+  outline-offset: 3px;
+}
+
+/* App actions read as text; only adding a task is filled. */
+.menu-button,
+.menu button,
+.title {
   min-height: 44px;
-  border: 1px solid #77909a;
-  border-radius: 6px;
-  padding: 8px 12px;
-}
-input,
-select {
-  display: block;
-  width: 100%;
-}
-input[type='checkbox'] {
-  display: inline;
-  width: auto;
-  margin-right: 8px;
-  vertical-align: middle;
-}
-label {
-  display: block;
-  max-width: 100%;
-}
-button {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--sempods-text);
+  background: transparent;
+  text-align: start;
   cursor: pointer;
-  background: light-dark(#ecf3f4, #252d27);
-  color: light-dark(#103d48, #e8eee9);
 }
-button:disabled {
+.menu-button:hover,
+.menu button:hover {
+  background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
+}
+svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.add {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--sempods-on-accent);
+  background: var(--sempods-accent);
+  cursor: pointer;
+}
+.add svg,
+.menu-button svg {
+  width: 22px;
+  height: 22px;
+}
+.menu-button svg {
+  fill: currentColor;
+  stroke: none;
+}
+button:disabled,
+input:disabled {
   opacity: 0.55;
   cursor: default;
 }
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 3px solid #ad5400;
-  outline-offset: 2px;
-}
-nav {
-  padding: 8px;
-  display: flex;
-  gap: 8px;
-}
-form,
-section {
-  margin-block: 16px;
-}
-ul {
-  padding-left: 0;
-  list-style: none;
-}
+
+/* Page: a narrow column with the header on top. */
 .standard {
-  max-width: 760px;
-  margin: auto;
-  padding: clamp(12px, 4vw, 32px);
+  max-width: 640px;
+  margin-inline: auto;
+  padding: 8px 16px 32px;
 }
 .app-heading {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-height: 56px;
 }
-@media (min-width: 700px) {
-  input {
-    min-width: 180px;
+.app-heading h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+.app-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--sempods-accent);
+}
+.menu-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-inline-start: auto;
+  padding: 0;
+  anchor-name: --app-menu;
+}
+
+/* The menu opens below its button (anchor positioning, else top right). */
+.menu {
+  inset: auto;
+  position-anchor: --app-menu;
+  top: anchor(bottom);
+  right: anchor(right);
+  margin: 4px 0 0;
+  min-width: 12rem;
+  padding: 6px;
+  border: 1px solid var(--sempods-line);
+  border-radius: 12px;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+@supports not (anchor-name: --a) {
+  .menu {
+    top: 56px;
+    right: 16px;
   }
+}
+.menu:popover-open {
+  display: grid;
+}
+.menu [role='group'] {
+  display: grid;
+}
+.menu-label {
+  margin: 0;
+  padding: 10px 12px 2px;
+  border-top: 1px solid var(--sempods-line);
+  color: var(--sempods-muted);
+  font-size: 0.875rem;
+}
+.menu-label:first-child {
+  border-top: 0;
+}
+.check {
+  display: inline-block;
+  width: 1.5em;
+}
+
+/* The list: a checkbox to finish a task, its title to edit it. */
+.tasks {
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+.tasks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  border-bottom: 1px solid var(--sempods-line);
+}
+.tasks > li > input {
+  width: 22px;
+  height: 22px;
+  margin: 11px;
+  accent-color: var(--sempods-accent);
+  cursor: pointer;
+}
+.title {
+  flex: 1;
+  padding-inline: 4px;
+  overflow-wrap: anywhere;
+}
+.done .title {
+  color: var(--sempods-muted);
+  text-decoration: line-through;
+}
+.tasks [data-sempods-ui='editor'] {
+  flex: 1;
+  min-width: 0;
+  margin-block: 0 8px;
+}
+.tasks [data-sempods-ui='editor'] input {
+  margin-block: 0 8px;
+}
+.empty {
+  color: var(--sempods-muted);
+  text-align: center;
+  padding-block: 24px;
+}
+
+/* The input for a new task, below the list. */
+.composer {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.composer input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--sempods-line);
+  border-radius: 8px;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
 }

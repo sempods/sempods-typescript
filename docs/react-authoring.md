@@ -100,7 +100,7 @@ person cannot choose another Pod, and the Pod's provider shows its own login
 page and address. With several or
 unrestricted Pods, including a preset without `allowedPods`, the address stays
 visible, because there the person chooses or must recognize the destination.
-Management (`open`) and **Full addresses** always show it, and a custom
+Management (`open`) and, outside management, **Full addresses** always show it, and a custom
 `components.Connections` does not receive the option. The default is
 `'visible'`; SDK markup is not a stable hook for hiding the address with CSS.
 
@@ -119,8 +119,8 @@ const label = labels?.[iri];
 Only the selected, validated Context is fetched automatically; other entries use
 the fallback immediately, including on small Pods. An app reads more labels
 explicitly with [`loadContextLabels`](#pod-overviews-with-contexts-on-demand).
-Duplicate context names include the full IRI; **Full addresses** exposes all readable
-context identities. Names never replace Pod/context identity, unless `podAddress`
+Duplicate context names include the full IRI; outside management, **Full
+addresses** exposes all readable context identities. Names never replace Pod/context identity, unless `podAddress`
 hides the address of the one permitted Pod; displaying them
 starts no additional requests. Late or refreshed labels do not change selection
 or discard drafts.
@@ -142,16 +142,24 @@ The initial login uses an `h1`; recovery with an existing target and explicitly
 opened management use an `h2`, below the app’s own main heading.
 
 The app may put a **Pods & sharing** button (`controls.dataAccess`) in its own menu or header. `open` shows
-management. In on-demand mode, opening it also demands Context discovery. Pod/context changes still run
+management. With `onClose` as well, management opens as a native modal dialog
+titled **Pods & sharing**: the app behind it is inert, a leave confirmation still
+opens above it, and Escape, the **Close** button (`controls.close`) and a click
+beside it call `onClose`, which sets `open` back to false. Opening the dialog
+checks the access again, so it shows no **Check access**. Sign-in and recovery
+stay inline, as the main content. Without `onClose`, management renders in place.
+In on-demand mode, opening it also demands Context discovery. Pod/context changes still run
 through the same leave guards.
 
-Management shows the connected Pod first: its name, then **Available to this
-app** with each readable Context and what this app may do there (**This app can
-read** or **This app can read and change**), then **Change sharing**, **Sign out**
-with the note that signing out applies only to this device
-(`controls.disconnectHint`; an empty string hides it) and the collapsed
-**Full addresses**. Signing in to another Pod comes last, as a
-collapsed **Connect another Pod** (`mode="multiple"` only). The access facts are
+Management shows the connected Pod first: its name, then the Context and what
+this app may do there (**This app can read** or **This app can read and
+change**): one readable, selected Context by name, several in the **Data
+context** chooser with the chosen one's access beside it. Without a selection
+(on-demand management) **Available to this app** lists each readable Context
+with its access. Then come **Change sharing** and **Sign out** with the note that
+signing out applies only to this device (`controls.disconnectHint`; an empty
+string hides it). Signing in to another Pod comes last, as a collapsed
+**Connect another Pod** (`mode="multiple"` only). The access facts are
 the catalogue's rights for this app's session: they do not say whether a Context
 was shared in this consent or is public, and changing them is the Pod's consent
 step behind **Change sharing**, not an edit in the app. Management lists the
@@ -173,8 +181,8 @@ function AppContent() {
       {connections.length > 0 && (
         <button
           ref={target}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
+          aria-haspopup="dialog"
+          onClick={() => setOpen(true)}
         >
           {messages.controls.dataAccess}
         </button>
@@ -182,6 +190,7 @@ function AppContent() {
       <AppAccess
         appName="My tasks"
         open={open}
+        onClose={() => setOpen(false)}
         focusTarget={target}
         icon={<img src="/icon.png" alt="" />}
         podNames={{ 'https://pods.example/alice': 'Personal' }}
@@ -251,8 +260,9 @@ RDF terms once; it works with form editing, list actions and the Node consumer.
 `useResourceEditor(iri, definition)` manages subscription, access and disposal.
 `ResourceEditor` supplies save/delete/discard and comparison controls; its child
 renders only a draft and calls `change({ title })` for an original `fields()` definition.
-**Delete** asks in place first (`controls.confirmRemove`); only the confirmation
-sends one conditional `DELETE` of the version shown. Cancel or Escape keeps the
+**Delete** asks first in a modal dialog (`controls.confirmRemove`, role
+`alertdialog`, like the leave confirmation); only its **Delete** sends one
+conditional `DELETE` of the version shown. Cancel or Escape keeps the
 draft and the target, and any newer editor state (an edit, a read that adopts a
 newer version, lost write access, another subject) withdraws the question.
 The headless `editor.remove()` stays direct. A checkbox or radio inside the
@@ -268,6 +278,14 @@ outcomes still show with their controls. The SDK applies no optimistic changes;
 an unconfirmed write stays visible and is never replayed. Comparisons in `ResourceEditor` and `UpdateNotice` show localized values
 (yes/no for flags, a dash for empty text); pass `labels={{ title: 'Task' }}` to
 name the fields instead of showing their keys.
+An editor that opens in place, for example in a list row, takes `onClose`
+(the guarded reset, `onClose={() => select(null)}`). It then shows **Cancel**
+instead of **Discard changes**: Cancel or Escape discards and closes, as that
+click is the decision (switching rows or Contexts still asks). A confirmed save
+or delete closes it too, so the changed row is the confirmation; refusals,
+conflicts and unconfirmed answers keep it open with their controls. In any
+editor, Enter in a text field saves when Save is enabled, and Delete is the
+last action.
 
 A `fields()` definition may be written inline: hooks compare it by structure, so
 an equal definition on every render changes nothing, while a real change (another
@@ -504,7 +522,8 @@ function Notes() {
   selected Context: `AppAccess` offers no Context chooser for it and stays
   hidden while the catalogue loads. A failed catalogue still shows there with
   **Check access**. For an `unreadable` target, opening management (`open`)
-  offers **Change sharing** and **Check access**. `open()` resolves
+  offers **Change sharing**, and **Check access** in place (the management
+  dialog checks again when it opens). `open()` resolves
   `true` once the target is open. Whether it becomes `ready` is reported through
   `phase`. Opening another target and `close()` run under the leave policy.
 - **Phases.**
@@ -560,28 +579,41 @@ on the same target: one Context of the same connection, signed-in subject and
 authorization generation, through any of its handles (the selected view or an
 explicit one from `runtime.bindContext`). Explicitly cancelled lists stay
 cancelled until `reload()`.
-It does not poll, subscribe to other clients' writes or invalidate other Pods.
+It also reads again when the page becomes visible (`visibilitychange`: back in
+the tab or the installed app), unless cancelled, so changes from other devices
+appear without a reload button. It does not poll, subscribe to other clients'
+writes or invalidate other Pods.
 An equal inline definition or `type` does not restart it; a real change reads again.
 
-By default each reload shows `loading` without data. Pass `retain: true` to
-`useList`, `useLoad` or `usePodLoad` to keep the last result on screen: while
-the same target reloads, `state` is `{ kind: 'loading', previous }`, and after a
-refresh that failed it is `{ kind: 'failed', error, previous }`. That data is
-still readable but was not confirmed by the failed read, so show a notice and a
-retry beside it. Retained data is only what a read returned; it is dropped for
-another connection, authorization, Context or definition, after lost read
-access or changed Pod grants, and after `cancel()`. A late answer never
-replaces it.
+A list keeps its last result on screen while it reloads (`retain`, on by
+default for `useList`; pass `retain: true` to `useLoad` or `usePodLoad`, and
+`retain: false` to a list that should show only `loading`). While the same
+target reloads, `state` is `{ kind: 'loading', previous }`, and after a refresh
+that failed it is `{ kind: 'failed', error, previous }`. That data is still
+readable but was not confirmed by the failed read. Retained data is only what a
+read returned; it is dropped for another connection, authorization, Context or
+definition, after lost read access or changed Pod grants, and after `cancel()`.
+A late answer never replaces it.
+
+`useList` returns the rows to render as `data`: the current ones, or the kept
+ones while loading or after a failed refresh. `LoadNotice` says what the read
+does when the rows alone do not: loading before any data, a failed refresh with
+its error (and a note when kept rows are shown), a cancelled or unavailable
+read, each with a retry, and entries the definition cannot show
+(`data.skipped`: unmapped terms, blank nodes or values it does not accept).
 
 ```tsx
-const list = useList(taskFields, { retain: true });
-const rows =
-  list.state.kind === 'ready'
-    ? list.state.data
-    : 'previous' in list.state
-      ? list.state.previous
-      : undefined;
-// …render rows; for list.state.kind === 'failed' add a notice and a retry.
+const list = useList(taskFields);
+return (
+  <>
+    <LoadNotice {...list} />
+    <ul>
+      {list.data?.items.map((item) => (
+        <li key={item.iri}>{item.data.title}</li>
+      ))}
+    </ul>
+  </>
+);
 ```
 
 `useFieldUpdate(definition)` exposes `canMutate` (write access, pending and both
@@ -914,11 +946,10 @@ The default confirmation has keyboard focus, Escape cancellation and focus
 restoration. It is a native modal `<dialog>` (role `alertdialog`) in the
 browser's top layer, so it stays visible and operable above an app's own dialog
 opened with `showModal()`, while that dialog and the rest of the guarded content
-are inert. Management (`AppAccess` with `open`) and editors can therefore live
-inside an app modal under the same `SempodsProvider`; the dialog itself, its
-close policy and its styling stay with the app (the apps template provides a
-recipe). Keep the app dialog mounted while a confirmation is pending; it cannot
-be closed from behind the confirmation. TODO inputs/buttons use visible focus
+are inert. `AppAccess` with `onClose` brings its own management dialog; editors
+and an inline `AppAccess` can also live inside an app's own modal under the same
+`SempodsProvider`. Keep such an app dialog mounted while a confirmation is
+pending; it cannot be closed from behind the confirmation. TODO inputs/buttons use visible focus
 and mobile touch targets. Applications retain responsibility for labels and
 accessibility of custom fields.
 

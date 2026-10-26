@@ -3,7 +3,6 @@ import {
   Fragment,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useSyncExternalStore,
   useState,
@@ -19,6 +18,7 @@ import {
   type LocaleOptions,
 } from '../index.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
+import { ConfirmDialog } from './confirm.js';
 const Context = createContext<{
   readonly controller: AppController;
   readonly actions: AppActions;
@@ -300,85 +300,33 @@ export function useWorkflowAccess() {
       })) ?? [],
   };
 }
-/**
- * A native modal dialog in the browser's top layer: it stays visible and
- * operable above an app's own `showModal()` dialog, while the guarded content
- * (including that dialog) is inert.
- */
+/** Asks before a guarded transition discards a draft or unresolved write. */
 function LeaveConfirmation() {
   const app = useController();
   const { confirmingLeave, unconfirmedLeave } = useAppState();
   const m = useSdkLocale().messages.controls;
-  const dialog = useRef<HTMLDialogElement>(null);
-  const stay = useRef<HTMLButtonElement>(null);
   const [failed, setFailed] = useState(false);
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    if (!confirmingLeave || !element) return;
-    setFailed(false);
-    const previous = element.ownerDocument.activeElement as HTMLElement | null;
-    // Environments without top-layer support (jsdom) still show it in place.
-    if (typeof element.showModal === 'function') {
-      if (!element.open) element.showModal();
-    } else element.setAttribute('open', '');
-    stay.current?.focus();
-    return () => {
-      if (typeof element.close === 'function') element.close();
-      else element.removeAttribute('open');
-      previous?.focus();
-    };
-  }, [confirmingLeave]);
+  const [asked, setAsked] = useState(confirmingLeave);
+  if (asked !== confirmingLeave) {
+    setAsked(confirmingLeave);
+    if (confirmingLeave) setFailed(false);
+  }
   if (!confirmingLeave) return failed ? <p role="alert">{m.failure}</p> : null;
   return (
-    <dialog
-      ref={dialog}
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="sempods-leave-title"
-      data-sempods-ui="leave"
-      style={{
-        background: 'white',
-        color: '#172b32',
-        border: 0,
-        padding: 24,
-        maxWidth: 'min(420px, calc(100vw - 32px))',
-        borderRadius: 12,
-      }}
-      onCancel={(e) => {
-        // Escape and other close requests keep the draft, as Stay does.
-        e.preventDefault();
-        app.cancelLeave();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          app.cancelLeave();
-        }
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          const buttons = e.currentTarget.querySelectorAll('button');
-          const target = e.target === buttons[0] ? buttons[1] : buttons[0];
-          target?.focus();
-        }
+    <ConfirmDialog
+      open
+      ui="leave"
+      title={m.leaveTitle}
+      cancel={m.stay}
+      confirm={m.leave}
+      onCancel={() => app.cancelLeave()}
+      onConfirm={() => {
+        void app.confirmLeave().catch(() => setFailed(true));
       }}
     >
-      <style href="sempods-leave" precedence="sempods">
-        {'[data-sempods-ui="leave"]::backdrop { background:#0009; }'}
-      </style>
-      <h2 id="sempods-leave-title">{m.leaveTitle}</h2>
       <p>{unconfirmedLeave ? m.leaveUnconfirmed : m.leaveBody}</p>
       {failed && <p role="alert">{m.failure}</p>}
-      <button ref={stay} onClick={() => app.cancelLeave()}>
-        {m.stay}
-      </button>{' '}
-      <button
-        onClick={() => {
-          void app.confirmLeave().catch(() => setFailed(true));
-        }}
-      >
-        {m.leave}
-      </button>
-    </dialog>
+    </ConfirmDialog>
   );
 }
 
