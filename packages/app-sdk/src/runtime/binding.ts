@@ -61,6 +61,24 @@ function observationFor(e: Entry, contextIri: string): object {
 }
 const observations = new WeakMap<BoundView, object>();
 /**
+ * The Pod-wide write-observation identity of an entry's authorization
+ * lifetime: its Context observations' map, cleared with them. Its views and
+ * its Pod reader share it.
+ */
+export function podObservationFor(e: Entry): object {
+  e.observations ??= new Map();
+  return e.observations;
+}
+const podObservations = new WeakMap<object, object>();
+/** Registers a handle (view or Pod reader) under its entry's Pod identity. */
+export function observePod(handle: object, e: Entry) {
+  podObservations.set(handle, podObservationFor(e));
+}
+/** What Pod-wide write observation keys by; a test double is its own identity. */
+export function podObservationOf(handle: object): object {
+  return podObservations.get(handle) ?? handle;
+}
+/**
  * What write observation keys by. A view created elsewhere, for example a test
  * double, is its own identity.
  */
@@ -250,5 +268,6 @@ export function bindView(
     }),
   } satisfies BoundView);
   observations.set(view, target.observation);
+  observePod(view, e);
   return view;
 }

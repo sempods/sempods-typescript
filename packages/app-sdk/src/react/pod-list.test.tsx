@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /** `usePodList`: one type across the Pod's readable Contexts, with partial results. */
 import { webcrypto } from 'node:crypto';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
@@ -16,6 +16,7 @@ import {
   catalogue,
   deferred,
   personal,
+  restored,
   resourceIri,
   returnedSession,
   work,
@@ -50,7 +51,7 @@ const node = (iri: string, title: string) => ({
 });
 
 /** Tasks per Context; the Pod query names the Contexts that hold any. */
-async function setup() {
+async function setup({ strict = false } = {}) {
   const f = await returnedSession((r) => void runtimes.push(r));
   f.setCatalogue(async () => catalogue([work, personal], [work, personal]));
   const tasks = new Map<string, Map<string, ReturnType<typeof node>>>([
@@ -121,11 +122,12 @@ async function setup() {
       </>
     );
   }
-  render(
+  const app = (
     <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
       <Overview />
-    </SempodsProvider>,
+    </SempodsProvider>
   );
+  render(strict ? <StrictMode>{app}</StrictMode> : app);
   return { ...f, tasks, failing, held, reads, api: () => api };
 }
 
@@ -306,4 +308,66 @@ it('never shows snapshots of the previous definition after it changes', async ()
     expect(seen.at(-1)).toMatchObject({ note: true, items: 1 }),
   );
   expect(seen.filter((r) => !r.ok)).toEqual([]);
+});
+
+it('says the overview could not be read when every Context fails, not that it is empty', async () => {
+  const f = await setup();
+  f.tasks.get(personal)!.set('urn:b', node('urn:b', 'Call Ann'));
+  f.failing.add(work);
+  f.failing.add(personal);
+  await waitFor(() => expect(f.api().list.state.kind).toBe('failed'));
+  expect(f.api().list.data).toBeUndefined();
+  expect(f.api().list.complete).toBe(false);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.queryByText(/lists could not be read/)).toBeNull();
+});
+
+it('works the same under StrictMode', async () => {
+  const f = await setup({ strict: true });
+  f.tasks.get(personal)!.set('urn:b', node('urn:b', 'Call Ann'));
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  expect(screen.getByText('Buy milk')).toBeTruthy();
+  expect(screen.getByText('Call Ann')).toBeTruthy();
+});
+
+it('reads at most four Contexts at once', async () => {
+  const f = await setup();
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  const gate = deferred<void>();
+  const extra = Array.from({ length: 5 }, (_, i) => `${work}-${i}`);
+  for (const iri of extra) {
+    f.tasks.set(iri, new Map([[`urn:${iri}`, node(`urn:${iri}`, iri)]]));
+    f.held.set(iri, gate.promise);
+  }
+  f.setCatalogue(async () => catalogue([work, personal, ...extra], [work]));
+  await act(() => f.runtime.loadContexts(f.id));
+  act(() => f.api().list.reload());
+  await waitFor(() =>
+    expect(f.reads.filter((c) => extra.includes(c)).length).toBe(4),
+  );
+  await new Promise((r) => setTimeout(r, 30));
+  expect(f.reads.filter((c) => extra.includes(c)).length).toBe(4);
+  await act(async () => gate.resolve());
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  expect(f.reads.filter((c) => extra.includes(c)).length).toBe(5);
+});
+
+it('binds its Contexts again after a new authorization', async () => {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  const f = await setup();
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  // A re-authorization resumes from the back/forward cache: new views.
+  await act(() => f.runtime.beginAuthorization(f.id));
+  await act(async () => {
+    page.dispatchEvent(
+      Object.assign(new Event('pageshow'), { persisted: true }),
+    );
+    await restored(f.runtime);
+  });
+  f.tasks.get(work)!.set('urn:c', node('urn:c', 'After return'));
+  act(() => f.api().list.reload());
+  expect(await screen.findByText('After return')).toBeTruthy();
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
 });

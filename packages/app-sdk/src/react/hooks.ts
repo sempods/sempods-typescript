@@ -67,6 +67,24 @@ export function useStartCount(view: BoundView | null | undefined) {
   const read = () => (view ? startCount(view) : 0);
   return useSyncExternalStore(subscribe, read, read);
 }
+/**
+ * Internal: calls `reload` when the page becomes visible again (back in the
+ * tab or app), unless `skip()` says not to, for example while a read is
+ * running and will answer anyway. Both are read when the page shows.
+ */
+export function useOnVisible(reload: () => void, skip: () => boolean) {
+  const latest = useRef({ reload, skip });
+  latest.current = { reload, skip };
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !latest.current.skip())
+        latest.current.reload();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+}
 const loading = Object.freeze({ kind: 'loading' as const });
 const unavailable = Object.freeze({ kind: 'unavailable' as const });
 /** Reported in the console: a lost draft or write guard is an app bug. */
@@ -304,19 +322,10 @@ export function useList<D>(
   // still running answers that already: it is joined, not aborted.
   const shownState = useRef(state);
   shownState.current = state;
-  useEffect(() => {
-    if (!view || typeof document === 'undefined') return;
-    const onVisible = () => {
-      if (
-        document.visibilityState === 'visible' &&
-        !scope.cancelled &&
-        shownState.current.kind !== 'loading'
-      )
-        void reload();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [view, reload, scope]);
+  useOnVisible(
+    () => void reload(),
+    () => !view || scope.cancelled || shownState.current.kind === 'loading',
+  );
   const { cancel } = load;
   const reloadList = useCallback(() => {
     scope.cancelled = false;
