@@ -16,11 +16,15 @@ export interface LeaveGuard {
    * - `target`: survives `navigate` (row navigation); left by the others.
    * - `connection`: survives `selectContext`, for a draft bound to an explicit
    *   Context rather than the selection; left by the others.
+   * - `explicit`: survives `navigate` and `selectContext`, for a creation in an
+   *   explicit Context that row navigation does not touch; left by connection
+   *   actions.
    *
    * A pending write (`blocked()`) blocks every change, except that a
-   * `connection` guard does not block `selectContext`, which leaves it alone.
+   * `connection` or `explicit` guard does not block `selectContext`, which
+   * leaves it alone.
    */
-  readonly scope?: 'local' | 'target' | 'connection';
+  readonly scope?: 'local' | 'target' | 'connection' | 'explicit';
   unconfirmed?(): boolean;
   blocked(): boolean;
   dirty(): boolean;
@@ -36,8 +40,10 @@ export function startupSettled(
 type Change = 'navigate' | 'context' | 'connection';
 /** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
 function leaves(change: Change, guard: LeaveGuard) {
-  if (change === 'navigate') return guard.scope !== 'target';
-  if (change === 'context') return guard.scope !== 'connection';
+  if (change === 'navigate')
+    return guard.scope !== 'target' && guard.scope !== 'explicit';
+  if (change === 'context')
+    return guard.scope !== 'connection' && guard.scope !== 'explicit';
   return true;
 }
 export interface AppSnapshot {
@@ -212,7 +218,10 @@ export function createAppController(
   /** Whether a pending write blocks a change: always, unless it ignores the guard. */
   function blocked(change: Change) {
     return [...guards].some(
-      (g) => (change !== 'context' || g.scope !== 'connection') && g.blocked(),
+      (g) =>
+        (change !== 'context' ||
+          (g.scope !== 'connection' && g.scope !== 'explicit')) &&
+        g.blocked(),
     );
   }
   async function guard(

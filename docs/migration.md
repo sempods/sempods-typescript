@@ -111,6 +111,14 @@ Check these points:
   Context's access instead of the **Available to this app** list, which remains
   only where there is no selection (on-demand management). Tests that looked
   for those elements in management need updating.
+- **Creating in an explicit Context.** `useCreation` takes `context` to create
+  in a Context other than the selected one, reports `refused`, and resolves every sent `create()` with the captured
+  `iri` (tests comparing the outcome with `toEqual` need the `iri` or
+  `toMatchObject`).
+  `bindCreation` is the headless counterpart. `useDraftGuard` and leave guards
+  accept the scope `explicit` (survives row navigation and Context selection).
+  The [task-with-note recipe](../examples/todo/recipes/task-with-note.tsx)
+  writes one input into two Contexts.
 - **`useContexts()`.** A hook for apps that switch between Contexts in their
   own UI (a list switch): readable Contexts with names and access, the
   selected one, a guarded `select`, catalogue state with `retry`, and a default

@@ -11,6 +11,7 @@ it.each([
     () => import('./index.js'),
     [
       'RuntimeError',
+      'bindCreation',
       'bindResourceEditor',
       'createAppController',
       'createBrowserRuntime',

@@ -85,6 +85,10 @@ try {
     join(root, 'examples/todo/recipes/overview-toggle.tsx'),
     join(temp, 'overview-toggle.tsx'),
   );
+  await cp(
+    join(root, 'examples/todo/recipes/task-with-note.tsx'),
+    join(temp, 'task-with-note.tsx'),
+  );
   await writeFile(
     join(temp, 'tsconfig.json'),
     JSON.stringify({
@@ -187,6 +191,9 @@ try {
     version: 1,
   };
   const toggleWrites = [];
+  // The task-with-note recipe's creations, and whether notes are refused.
+  const splitCreated = [];
+  let splitRefuseNotes = false;
   let toggleConflict = false;
   const toggleBody = () => ({
     '@id': 'urn:toggle-task',
@@ -252,7 +259,8 @@ try {
         if (
           url.searchParams.get('identity') === 'overview' ||
           url.searchParams.get('identity') === 'expiring' ||
-          url.searchParams.get('identity') === 'toggle'
+          url.searchParams.get('identity') === 'toggle' ||
+          url.searchParams.get('identity') === 'split'
         ) {
           res.end(
             '<html><div id="app"></div><script type="module" src="/overview.js"></script></html>',
@@ -424,6 +432,7 @@ try {
             name === 'widgets-pod' ||
               name === 'overview-pod' ||
               name === 'toggle-pod' ||
+              name === 'split-pod' ||
               expiring
               ? ''
               : name === 'delayed'
@@ -457,19 +466,19 @@ try {
           ['http://www.w3.org/ns/sparql-service-description#namedGraph']: [
             { '@id': base + '/_system/contexts/work' },
             // The overview Pod's second Context holds a note in another Context.
-            ...(name === 'overview-pod'
+            ...(name === 'overview-pod' || name === 'split-pod'
               ? [{ '@id': base + '/_system/contexts/notes' }]
               : []),
           ],
           ['https://schema.sempods.org/readableContext']: [
             { '@id': base + '/_system/contexts/work' },
-            ...(name === 'overview-pod'
+            ...(name === 'overview-pod' || name === 'split-pod'
               ? [{ '@id': base + '/_system/contexts/notes' }]
               : []),
           ],
           ['https://schema.sempods.org/writableContext']: [
             { '@id': base + '/_system/contexts/work' },
-            ...(name === 'overview-pod'
+            ...(name === 'overview-pod' || name === 'split-pod'
               ? [{ '@id': base + '/_system/contexts/notes' }]
               : []),
           ],
@@ -510,6 +519,30 @@ try {
           version: toggleTask.version + 1,
         };
         res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (
+        name === 'split-pod' &&
+        url.pathname.includes('/_system/resources/')
+      ) {
+        // Only creations, each exactly once; notes may be refused.
+        assert.equal(req.headers.cookie, undefined);
+        assert.equal(req.method, 'PUT');
+        assert.equal(req.headers['if-none-match'], '*');
+        const iri = resourceIri(url);
+        const context = url.searchParams.get('context');
+        assert.equal(
+          splitCreated.some((created) => created.iri === iri),
+          false,
+        );
+        if (splitRefuseNotes && context === base + '/_system/contexts/notes') {
+          res.writeHead(403);
+          res.end();
+          return;
+        }
+        splitCreated.push({ iri, context, body: JSON.parse(body) });
+        res.writeHead(201);
         res.end();
         return;
       }
@@ -2094,6 +2127,61 @@ try {
   assert.equal(toggleTask.status, 'https://schema.org/PotentialActionStatus');
   console.log(
     'Packed one-click overview recipe: tick in its own Context with one If-Match write, overview kept in every frame while reloading, conflict review with no resend, recovered save closes and reloads passed.',
+  );
+  // The task-with-note recipe (#149): one input written into two Contexts.
+  await page.goto(origin + '/app?identity=split');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=split');
+  const splitContexts = origin + '/split-pod/_system/contexts/';
+  // A label wrapping its field names it with the field's text, so the
+  // fields are found as elements.
+  const recipe = page.getByRole('region', {
+    name: 'New task with a private note',
+  });
+  const taskInput = recipe.locator('input');
+  const noteInput = recipe.locator('textarea');
+  const linkOf = (created) =>
+    created.body['https://schema.org/about']?.[0]?.['@id'];
+  await taskInput.fill('Buy milk');
+  await noteInput.fill('Oat, not cow');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector('textarea')?.value === '',
+  );
+  assert.deepEqual(
+    splitCreated.map((created) => created.context),
+    [splitContexts + 'work', splitContexts + 'notes'],
+  );
+  assert.equal(linkOf(splitCreated[1]), splitCreated[0].iri);
+  // A refused note keeps the created task; the retry sends only the note.
+  splitRefuseNotes = true;
+  await taskInput.fill('Call mum');
+  await noteInput.fill('Ask about the weekend');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page
+    .getByText('The task is saved; its private note is not yet.', {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(splitCreated.length, 3);
+  assert.equal(await noteInput.inputValue(), 'Ask about the weekend');
+  splitRefuseNotes = false;
+  await page
+    .getByRole('button', { name: 'Save the note again', exact: true })
+    .click();
+  await page.waitForFunction(
+    () => document.querySelector('textarea')?.value === '',
+  );
+  assert.deepEqual(
+    splitCreated.slice(2).map((created) => created.context),
+    [splitContexts + 'work', splitContexts + 'notes'],
+  );
+  assert.equal(linkOf(splitCreated[3]), splitCreated[2].iri);
+  console.log(
+    'Packed task-with-note recipe: one input into a shared and a personal Context with a link, a refused note keeps the created task and its retry sends only the note passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
