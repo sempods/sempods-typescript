@@ -1237,9 +1237,9 @@ export function useCreation<D extends object>(
     > => {
       if (!view || current.current.view !== view)
         return notSent(view ? 'ended' : 'unavailable');
+      // Live: a batch may call this before the render after its last item.
       const refused = mutation.refusal();
       if (refused) return notSent(refused);
-      if (!mutation.canMutate) return notSent('unavailable');
       if (!valid(current.current.draft)) return notSent('invalid');
       const submitted = current.current;
       if (command.current?.state !== submitted)
