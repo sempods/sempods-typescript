@@ -113,7 +113,8 @@ function canonicalOf<T>(definition: T, key: string | null): T {
   canonical.set(key, definition);
   return definition;
 }
-function useDefinition<T>(input: T, hook: string) {
+/** Internal: the stable key and canonical instance of a definition (see above). */
+export function useDefinition<T>(input: T, hook: string) {
   const structure = definitionKey(input);
   const definition = canonicalOf(input, structure);
   const latest = useRef(definition);

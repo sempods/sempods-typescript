@@ -192,15 +192,23 @@ export function UnresolvedNotices<D>({
  * data, a failed refresh (its error, a note when kept data is still shown,
  * and a retry), a cancelled or unavailable read (with a retry) and list
  * entries that cannot be shown. Renders nothing for ready data otherwise.
- * Takes the result of `useList`, `useLoad` or `usePodLoad`:
- * `<LoadNotice {...list} />`.
+ * Takes the result of `useList`, `useLoad`, `usePodLoad` or `usePodList`:
+ * `<LoadNotice {...list} />`. For `usePodList` it also says how many of the
+ * Contexts could not be read, with a retry of just those.
  */
 export function LoadNotice({
   state,
   reload,
+  contexts,
 }: {
   readonly state: LoadState<unknown>;
   readonly reload?: () => unknown;
+  /** Per-Context reads of an overview (`usePodList`). */
+  readonly contexts?: readonly {
+    readonly state: LoadState<unknown>;
+    readonly problem: unknown;
+    readonly retry: () => void;
+  }[];
 }) {
   const { messages: m, error, format } = useSdkLocale();
   const c = m.controls;
@@ -212,10 +220,47 @@ export function LoadNotice({
     typeof shown.skipped === 'number'
       ? shown.skipped
       : 0;
+  // Contexts an overview found but could not read: the others are shown.
+  const missing =
+    contexts?.filter(
+      (context) =>
+        context.problem !== null ||
+        context.state.kind === 'failed' ||
+        context.state.kind === 'cancelled' ||
+        context.state.kind === 'unavailable',
+    ) ?? [];
+  const partial =
+    missing.length > 0 && shown !== undefined ? (
+      <section data-sempods-ui="notice">
+        <SdkStyles />
+        <p role="alert">
+          {m.partialRead!(missing.length, contexts!.length, format)}
+        </p>
+        <div className="sp-sdk-actions">
+          <button onClick={() => missing.forEach((context) => context.retry())}>
+            {c.retry}
+          </button>
+        </div>
+      </section>
+    ) : null;
+  const unshown =
+    skipped > 0 ? <Notice>{m.skipped!(skipped, format)}</Notice> : null;
   if (state.kind === 'loading')
-    return shown === undefined ? <Notice>{c.loading}</Notice> : null;
+    return shown === undefined ? (
+      <Notice>{c.loading}</Notice>
+    ) : (
+      <>
+        {partial}
+        {unshown}
+      </>
+    );
   if (state.kind === 'ready')
-    return skipped > 0 ? <Notice>{m.skipped!(skipped, format)}</Notice> : null;
+    return (
+      <>
+        {partial}
+        {unshown}
+      </>
+    );
   const text =
     state.kind === 'failed'
       ? `${error(state.error)}${shown === undefined ? '' : ` ${c.stale}`}`

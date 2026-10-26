@@ -33,8 +33,22 @@ export function observeWrites(view: BoundView, listener: () => void) {
     entries.delete(listener);
   };
 }
+// A confirmed write anywhere on a Pod, for overviews that discover which
+// Contexts hold a type: the first item in another Context changes that set.
+const podListeners = new Map<string, Set<() => void>>();
+/** Observes this app's confirmed writes in any Context of the Pod. */
+export function observePodWrites(podUrl: string, listener: () => void) {
+  let entries = podListeners.get(podUrl);
+  if (!entries) podListeners.set(podUrl, (entries = new Set()));
+  entries.add(listener);
+  return () => {
+    entries.delete(listener);
+    if (entries.size === 0) podListeners.delete(podUrl);
+  };
+}
 export function changed(view: BoundView) {
   notify(listeners.get(observationOf(view)) ?? []);
+  notify(podListeners.get(view.podUrl) ?? []);
 }
 function startsOf(view: BoundView) {
   const target = observationOf(view);

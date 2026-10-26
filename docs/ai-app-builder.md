@@ -189,9 +189,10 @@ Settle early which Contexts the app works with:
   outside `TargetScreen`; see [apps that switch Contexts](react-authoring.md#apps-that-switch-contexts).
 - **Read all Contexts, write in one:** a
   [Pod overview](react-authoring.md#pod-overviews-with-contexts-on-demand):
-  `contextSelection="on-demand"` on the provider and one
-  `pod.sparql.select`/`construct` through `usePodLoad`, outside `TargetScreen`.
-  Never enumerate Contexts or query each one. Mount `TargetScreen` for a flow
+  `contextSelection="on-demand"` on the provider and, outside `TargetScreen`,
+  `usePodList(definition)` for items of one type (the SDK finds and reads the
+  Contexts, with partial results) or one `pod.sparql.select`/`construct`
+  through `usePodLoad`. Never enumerate or query Contexts yourself. Mount `TargetScreen` for a flow
   that needs a selected Context, such as a creation form; `AppAccess` then offers
   the chooser and **Check access**. `useWorkflowAccess` describes the selected
   Context only.
