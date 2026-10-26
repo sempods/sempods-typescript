@@ -107,11 +107,23 @@ function TaskScreen() {
   });
   const { selected, select } = useSelection();
   const editor = useResourceEditor(selected, taskFields);
+  const editing = (
+    <ResourceEditor editor={editor} onClose={() => select(null)}>
+      {(draft, change) => (
+        <input
+          aria-label={m.task}
+          value={draft.title}
+          onChange={(e) => change({ title: e.target.value })}
+        />
+      )}
+    </ResourceEditor>
+  );
+  const shown = list.data?.items;
   return (
     <section>
       <LoadNotice {...list} />
       <ul>
-        {list.data?.items.map((item) => {
+        {shown?.map((item) => {
           const row = mutate.for(item); // this row's data, lock and notice
           return (
             <li key={item.iri}>
@@ -123,15 +135,7 @@ function TaskScreen() {
                 onChange={() => void row.update({ done: !row.data.done })}
               />
               {selected === item.iri ? (
-                <ResourceEditor editor={editor} onClose={() => select(null)}>
-                  {(draft, change) => (
-                    <input
-                      aria-label={m.task}
-                      value={draft.title}
-                      onChange={(e) => change({ title: e.target.value })}
-                    />
-                  )}
-                </ResourceEditor>
+                editing
               ) : (
                 <button onClick={() => void select(item.iri)}>
                   {row.data.title}
@@ -149,7 +153,9 @@ function TaskScreen() {
           );
         })}
       </ul>
-      <UnresolvedNotices of={mutate} shown={list.data?.items} />
+      <UnresolvedNotices of={mutate} shown={shown} />
+      {/* A row deleted elsewhere keeps its editor, draft and recovery. */}
+      {selected && !shown?.some((item) => item.iri === selected) && editing}
       <UpdateNotice {...creation.notice} quiet />
       <form
         onSubmit={(e) => {
