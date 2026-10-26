@@ -89,3 +89,18 @@ it('confirms the action it asked about, not a newer one', () => {
   expect(asked).toHaveBeenCalledTimes(1);
   expect(newer).not.toHaveBeenCalled();
 });
+
+it('is a named trash icon by default; children replace it', () => {
+  const view = render(<RemoveButton onRemove={() => {}} />);
+  const icon = screen.getByRole('button', { name: 'Delete' });
+  expect(icon.title).toBe('Delete');
+  expect(icon.querySelector('svg')).toBeTruthy();
+  view.rerender(<RemoveButton label="Delete: Milk" onRemove={() => {}} />);
+  expect(screen.getByRole('button', { name: 'Delete: Milk' }).title).toBe(
+    'Delete: Milk',
+  );
+  view.rerender(<RemoveButton onRemove={() => {}}>Remove it</RemoveButton>);
+  const text = screen.getByRole('button', { name: 'Remove it' });
+  expect(text.hasAttribute('title')).toBe(false);
+  expect(text.querySelector('svg')).toBeNull();
+});

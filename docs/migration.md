@@ -121,7 +121,13 @@ Check these points:
   pending or unresolved; apps that disable on `canMutate` behave as before.
 - **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
   question before it calls `onRemove`, for a delete in a list row with
-  `useFieldUpdate`'s `remove`. Nothing existing changes.
+  `useFieldUpdate`'s `remove`, shown as a quiet trash icon. Nothing existing
+  changes.
+- **Calmer SDK controls.** Fields in SDK surfaces have an 8px radius and their
+  focus ring on the border; `ResourceEditor`'s **Delete** uses the muted
+  colour; with `onClose` the editor is a card with a tinted background and
+  padding. Apps that drew their own card around an inline editor can drop it;
+  screenshot baselines need updating.
 - **Creating in an explicit Context.** `useCreation` takes `context` to create
   in a Context other than the selected one, reports `refused`, and resolves every sent `create()` with the captured
   `iri` (tests comparing the outcome with `toEqual` need the `iri` or

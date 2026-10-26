@@ -156,15 +156,10 @@ function TaskRow({
       {/* The open editor has its own Delete. */}
       {item.data.done && !editing && (
         <RemoveButton
-          className="remove"
           label={`${removeLabel}: ${item.data.title}`}
           disabled={!mutate.canMutateFor(item)}
           onRemove={() => mutate.remove(item)}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3" />
-          </svg>
-        </RemoveButton>
+        />
       )}
       <UpdateNotice {...mutate.noticeFor(item)} quiet />
     </li>
