@@ -683,13 +683,18 @@ For a refusal, inspect `problem.status`; for `problem.kind === 'failure'`,
 pass a present `problem.failure` to `describeFailure`. Unconfirmed writes
 remain unconfirmed and carry no failure that would imply they were not sent.
 
-One `useFieldUpdate` is one write lane: while its write is pending or its
-outcome unresolved, `canMutate` is false for everything it serves. Rows of a
-list are separate resources, so give each row its own hook in a small row
-component, as the [TODO example's `TaskRow`](../examples/todo/src/app.tsx)
-does. Ticking one task then locks only that row, and its notice
-(`<UpdateNotice {...mutate.notice} quiet />`) shows a refusal or an unconfirmed
-answer right at that row.
+`useFieldUpdate` keeps one write lane per resource, held by the hook rather
+than by a row. Rows of a list are separate resources, so use one hook for the
+list and ask per row: `disabled={!mutate.canMutateFor(item)}` and
+`<UpdateNotice {...mutate.noticeFor(item)} quiet />`, as the
+[TODO example's `TaskRow`](../examples/todo/src/app.tsx) does. Ticking one task
+then locks only that row, and a refusal or an unconfirmed answer shows at that
+row. Because the lane lives in the hook, an unresolved write and its leave
+guard stay while the row is not rendered, for example during lost read
+access, and return with the row. Do not give each row a hook of its own:
+unmounting the row would drop its unresolved write. `canMutate`, `outcome`,
+`notice` and `acknowledge` keep their list-wide meaning (false while any
+resource's write is pending or unresolved; the latest write's feedback).
 
 `useCreation(definition, { initial, collection })` owns a typed draft, partial
 `change`, `create`, `canCreate`, `canEdit` and `notice`. The initial draft should

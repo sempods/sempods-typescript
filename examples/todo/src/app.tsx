@@ -36,6 +36,9 @@ function TaskScreen() {
   // again; LoadNotice says what the read does and offers a retry.
   const list = useList(taskFields);
   const tasks = list.data?.items;
+  // One hook for the list; it keeps a write lane per task, so a tick locks
+  // only its row, and an unresolved one survives the row being gone.
+  const mutate = useFieldUpdate(taskFields);
   const creation = useCreation(taskFields, {
     initial: emptyTask,
     collection: 'tasks',
@@ -65,6 +68,7 @@ function TaskScreen() {
           <TaskRow
             key={item.iri}
             item={item}
+            mutate={mutate}
             doneLabel={m.done}
             editing={selected === item.iri ? editing : null}
             onOpen={() => void select(item.iri)}
@@ -106,30 +110,31 @@ function TaskScreen() {
 }
 
 /**
- * One task: a checkbox to finish it and its title to edit it. Each row has its
- * own write lane, so ticking one task locks only that row, and a problem with
- * it shows right there. The changed row is the confirmation.
+ * One task: a checkbox to finish it and its title to edit it. Its tick locks
+ * only this row, and a problem with it shows right here. The changed row is
+ * the confirmation.
  */
 function TaskRow({
   item,
+  mutate,
   doneLabel,
   editing,
   onOpen,
 }: {
   readonly item: Snapshot<Task>;
+  readonly mutate: ReturnType<typeof useFieldUpdate<Task>>;
   readonly doneLabel: string;
   /** The row's editor while it is open; the title opens it in its place. */
   readonly editing: ReactNode;
   readonly onOpen: () => void;
 }) {
-  const mutate = useFieldUpdate(taskFields);
   return (
     <li className={item.data.done ? 'done' : undefined}>
       <input
         type="checkbox"
         aria-label={`${doneLabel}: ${item.data.title}`}
         checked={item.data.done}
-        disabled={!mutate.canMutate}
+        disabled={!mutate.canMutateFor(item)}
         onChange={() => void mutate.update(item, { done: !item.data.done })}
       />
       {editing ?? (
@@ -137,7 +142,7 @@ function TaskRow({
           {item.data.title}
         </button>
       )}
-      <UpdateNotice {...mutate.notice} quiet />
+      <UpdateNotice {...mutate.noticeFor(item)} quiet />
     </li>
   );
 }

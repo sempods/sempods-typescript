@@ -1,0 +1,169 @@
+// @vitest-environment jsdom
+/** `useFieldUpdate` keeps one write lane per resource, held at list level. */
+import { webcrypto } from 'node:crypto';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { fields, flag, text } from '@sempods/client-sdk/edit';
+import type { JsonLd } from '@sempods/client-sdk';
+import {
+  SempodsProvider,
+  TargetScreen,
+  UpdateNotice,
+  useApp,
+  useFieldUpdate,
+  useList,
+} from './index.js';
+import type { BrowserRuntime } from '../runtime/types.js';
+import {
+  catalogue,
+  deferred,
+  fixture,
+  personal,
+  resourceIri,
+} from '../runtime/fixture.test.js';
+
+const definition = fields(
+  {
+    title: text('urn:title', { language: null }),
+    done: flag('urn:status', { on: 'urn:done', off: 'urn:open' }),
+  },
+  { type: 'urn:Task' },
+);
+const task = (iri: string, title: string): JsonLd => ({
+  '@id': iri,
+  '@type': ['urn:Task'],
+  'urn:title': [{ '@value': title }],
+  'urn:status': [{ '@id': 'urn:open' }],
+});
+const runtimes: BrowserRuntime[] = [];
+beforeEach(async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubGlobal(
+    'ArrayBuffer',
+    (await webcrypto.subtle.digest('SHA-256', new Uint8Array())).constructor,
+  );
+});
+afterEach(() => {
+  cleanup();
+  runtimes.splice(0).forEach((r) => r.dispose());
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+type Api = ReturnType<typeof useFieldUpdate<{ title: string; done: boolean }>>;
+async function setup() {
+  const f = fixture();
+  const session = await f.login();
+  runtimes.push(session.runtime);
+  const rows = new Map<string, JsonLd>([
+    ['urn:one', task('urn:one', 'One')],
+    ['urn:two', task('urn:two', 'Two')],
+  ]);
+  const patches: string[] = [];
+  let answer: () => Promise<Response> | Response = () =>
+    new Response(null, { status: 204 });
+  f.setQuery(async () => Response.json([...rows.values()]));
+  f.setResource(async (url, init) => {
+    const iri = resourceIri(url);
+    if ((init?.method ?? 'GET') === 'GET')
+      return Response.json(rows.get(iri), { headers: { etag: '"v1"' } });
+    patches.push(iri);
+    return answer();
+  });
+  let api!: Api;
+  let app!: ReturnType<typeof useApp>;
+  function Screen() {
+    const list = useList(definition);
+    api = useFieldUpdate(definition);
+    app = useApp();
+    // Rows render only while the list has data, as an app's rows do.
+    return (
+      <ul>
+        {list.data?.items.map((row) => (
+          <li key={row.iri}>
+            <button
+              disabled={!api.canMutateFor(row)}
+              onClick={() => void api.update(row, { done: true })}
+            >
+              {row.data.title}
+            </button>
+            <UpdateNotice {...api.noticeFor(row)} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  render(
+    <SempodsProvider runtime={session.runtime}>
+      <TargetScreen>
+        <Screen />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  await screen.findByRole('button', { name: 'One' });
+  return {
+    ...f,
+    ...session,
+    patches,
+    api: () => api,
+    app: () => app,
+    answer: (next: typeof answer) => {
+      answer = next;
+    },
+  };
+}
+const button = (name: string) =>
+  screen.getByRole('button', { name }) as HTMLButtonElement;
+
+it('locks only the resource being written; another one writes meanwhile', async () => {
+  const s = await setup();
+  const held = deferred<Response>();
+  s.answer(() => held.promise);
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  act(() => button('One').click());
+  await waitFor(() => expect(button('One').disabled).toBe(true));
+  expect(button('Two').disabled).toBe(false);
+  // The list-wide availability stays as it was: false while any write runs.
+  expect(s.api().canMutate).toBe(false);
+  s.answer(() => new Response(null, { status: 204 }));
+  act(() => button('Two').click());
+  await waitFor(() => expect(s.patches).toEqual(['urn:one', 'urn:two']));
+  await act(async () => held.resolve(new Response(null, { status: 204 })));
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  expect(s.api().canMutate).toBe(true);
+});
+
+it('keeps an unconfirmed write through lost read access while its row is gone', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  act(() => button('One').click());
+  expect(await screen.findByText(/The result is unconfirmed/)).toBeTruthy();
+  // Read access is lost: the list drops its rows, the lane stays.
+  s.setCatalogue(async () => catalogue([personal], [personal]));
+  await act(() => s.runtime.loadContexts(s.id));
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: 'One' })).toBeNull(),
+  );
+  expect(s.api().canMutateFor('urn:one')).toBe(false);
+  expect(s.api().noticeFor('urn:one').outcome).toMatchObject({
+    kind: 'unconfirmed',
+  });
+  // Leaving the target still asks about the unconfirmed write.
+  let left: boolean | undefined;
+  void s
+    .app()
+    .selectContext(personal)
+    .then((result) => (left = result));
+  expect(await screen.findByRole('alertdialog')).toBeTruthy();
+  act(() => screen.getByRole('button', { name: 'Keep editing' }).click());
+  await waitFor(() => expect(left).toBe(false));
+  // Access returns: the row is back, still locked with its notice; nothing resent.
+  s.setCatalogue(async () => catalogue());
+  await act(() => s.runtime.loadContexts(s.id));
+  await screen.findByRole('button', { name: 'One' });
+  expect(button('One').disabled).toBe(true);
+  expect(screen.getByText(/The result is unconfirmed/)).toBeTruthy();
+  expect(button('Two').disabled).toBe(false);
+  expect(s.patches).toEqual(['urn:one']);
+});

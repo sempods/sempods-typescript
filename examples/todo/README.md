@@ -33,8 +33,8 @@ a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 
 Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
-or reopens a task (each row has its own `useFieldUpdate`, so a tick locks only
-its row), its title opens the editor below the list, and the input at
+or reopens a task (`useFieldUpdate`'s `canMutateFor`/`noticeFor`: a tick locks
+only its row), its title opens the editor below the list, and the input at
 the bottom adds one. The list reads again when the page becomes visible
 (no reload button) and keeps its rows while it reloads and after a failed
 refresh; `LoadNotice` says what the read does, with a retry. A new or changed row is its own
