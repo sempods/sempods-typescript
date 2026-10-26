@@ -309,17 +309,25 @@ export function useContexts() {
       catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
     const iris = readable.map((entry) => entry.iri);
     const label = (iri: string) => contextName(iri, labels);
-    // Equal labels add the short name ("Tasks · work"), still equal ones the IRI.
-    const short = (iri: string) => {
-      const plain = contextName(iri, undefined);
-      return label(iri) === plain ? plain : `${label(iri)} · ${plain}`;
-    };
+    // Equal labels add the short name ("Tasks · work"); names that are still
+    // equal after that, whatever made them so, add the IRI.
+    const candidate = new Map(
+      iris.map((iri) => {
+        const plain = contextName(iri, undefined);
+        const shared = iris.some(
+          (other) => other !== iri && label(other) === label(iri),
+        );
+        return [
+          iri,
+          shared && label(iri) !== plain
+            ? `${label(iri)} · ${plain}`
+            : label(iri),
+        ];
+      }),
+    );
     return readable.map((entry): ContextChoice => ({
       iri: entry.iri,
-      name:
-        distinctName(entry.iri, iris, label) === label(entry.iri)
-          ? label(entry.iri)
-          : distinctName(entry.iri, iris, short),
+      name: distinctName(entry.iri, iris, (iri) => candidate.get(iri)!),
       writable: entry.writable,
     }));
   }, [catalogue, fixed]);

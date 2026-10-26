@@ -165,6 +165,29 @@ it('tells equal labels apart by their short names', async () => {
   );
 });
 
+it('adds the IRI when a label equals the short name of another list', async () => {
+  const f = await returnedSession(keep);
+  const errands = pod + '/_system/contexts/errands';
+  f.setCatalogue(async () =>
+    catalogue([work, personal, errands], [work, personal, errands]),
+  );
+  f.setDescriptions(
+    labelled({
+      [work]: 'Tasks',
+      [personal]: 'Tasks',
+      [errands]: 'Tasks · work',
+    }),
+  );
+  render(<App runtime={f.runtime} />);
+  await waitFor(() =>
+    expect(items()).toEqual([
+      `Tasks · work · ${work}can change`,
+      'Tasks · personalcan change',
+      `Tasks · work · ${errands}can change`,
+    ]),
+  );
+});
+
 it('keeps a preset Context and offers only that one', async () => {
   const f = await returnedSession(
     keep,
