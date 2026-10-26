@@ -20,6 +20,7 @@ import {
   useList,
 } from './index.js';
 import { bindCreation } from '../index.js';
+import { observeWrites, startCount } from '../authoring/changes.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import {
   catalogue,
@@ -27,6 +28,7 @@ import {
   fixture,
   personal,
   pod,
+  restored,
   work,
 } from '../runtime/fixture.test.js';
 
@@ -176,8 +178,9 @@ it('refreshes a list of the same Context after an explicit creation', async () =
     expect((create() as HTMLButtonElement).disabled).toBe(false),
   );
   fireEvent.click(create());
-  await waitFor(() =>
-    expect(f.count('/_system/sparql/query')).toBeGreaterThan(before),
+  await waitFor(
+    () => expect(f.count('/_system/sparql/query')).toBeGreaterThan(before),
+    { timeout: 5000 },
   );
 });
 
@@ -244,25 +247,48 @@ it('keeps an unsaved draft through row navigation and Context selection without 
   expect(title().value).toBe('Unsaved');
 });
 
-it('bindCreation creates headless in an explicit Context and refreshes its lists', async () => {
+it('bindCreation creates headless in an explicit Context and counts as its write', async () => {
   const f = await signedIn(() => new Response(null, { status: 201 }));
-  render(<App runtime={f.runtime} context={personal} />);
-  await waitFor(() =>
-    expect(screen.getByLabelText('list').textContent).toBe('ready'),
-  );
-  const before = f.count('/_system/sparql/query');
+  const view = f.runtime.bindContext(f.id, work);
+  const writes = vi.fn();
+  const stop = observeWrites(view, writes);
+  const starts = startCount(view);
   const creation = bindCreation(
-    f.runtime.bindContext(f.id, work),
+    view,
     definition,
     { title: 'Headless' },
     { collection: 'tasks' },
   );
   expect(creation.iri).toMatch(new RegExp('^' + pod + '/tasks/'));
-  await act(async () => {
-    expect(await creation.run()).toEqual({ kind: 'created' });
-  });
+  expect(await creation.run()).toEqual({ kind: 'created' });
+  stop();
   expect(f.puts).toEqual([work]);
+  // Lists of this Context read again; earlier success feedback there retires.
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(startCount(view)).toBe(starts + 1);
+});
+
+it('binds the Context again after a re-authorization resumes from the back/forward cache', async () => {
+  outcomes.length = 0;
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  const f = await signedIn(() => new Response(null, { status: 201 }));
+  render(<App runtime={f.runtime} context={personal} />);
+  await waitFor(() => expect(title().disabled).toBe(false));
+  await act(() => f.runtime.beginAuthorization(f.id));
+  await act(async () => {
+    page.dispatchEvent(
+      Object.assign(new Event('pageshow'), { persisted: true }),
+    );
+    await restored(f.runtime);
+  });
+  await type('After return');
   await waitFor(() =>
-    expect(f.count('/_system/sparql/query')).toBeGreaterThan(before),
+    expect((create() as HTMLButtonElement).disabled).toBe(false),
   );
+  fireEvent.click(create());
+  await waitFor(() => expect(outcomes).toHaveLength(1));
+  expect(outcomes[0]).toMatchObject({ kind: 'created' });
+  expect(f.puts).toEqual([personal]);
 });

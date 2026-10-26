@@ -1026,17 +1026,26 @@ function useExplicitView(context: string | undefined) {
     readonly view: BoundView | 'refused';
   } | null>(null);
   const current = binding?.key === key ? binding.view : null;
+  const bound = current === 'refused' ? null : current;
+  // A binding stays through access loss; a new authorization (for example a
+  // re-authorization resumed from the back/forward cache) retires it.
+  const live = useSyncExternalStore(
+    bound?.subscribe ?? noopSubscribe,
+    () => bound?.getSnapshot().current ?? true,
+    () => bound?.getSnapshot().current ?? true,
+  );
   useEffect(() => {
-    if (!key || !ready || current !== null) return;
+    if (!key || !ready || current === 'refused' || (current && live)) return;
     try {
-      setBinding({ key, view: app.runtime.bindContext(activeId!, context!) });
+      const view = app.runtime.bindContext(activeId!, context!);
+      if (view !== current) setBinding({ key, view });
     } catch (error) {
       if (!(error instanceof RuntimeError)) throw error;
       if (error.problem === 'configuration')
         setBinding({ key, view: 'refused' });
       else if (error.problem !== 'disconnected') throw error;
     }
-  }, [app, key, ready, current, activeId, context]);
+  }, [app, key, ready, current, live, activeId, context]);
   useContextDiscovery(current !== null && current !== 'refused');
   return {
     view: current === 'refused' ? null : current,
