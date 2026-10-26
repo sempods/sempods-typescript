@@ -688,24 +688,64 @@ remain unconfirmed and carry no failure that would imply they were not sent.
 
 `useFieldUpdate` keeps one write lane per resource, held by the hook rather
 than by a row. Rows of a list are separate resources, so use one hook for the
-list and ask per row: `disabled={!mutate.canMutateFor(item)}` and
-`<UpdateNotice {...mutate.noticeFor(item)} quiet />`, as the
-[TODO example's `TaskRow`](../examples/todo/src/app.tsx) does. Ticking one task
-then locks only that row, and a refusal or an unconfirmed answer shows at that
-row. After a confirmed update, the row's snapshot no longer shows the
-resource: it stays locked until the list shows the fresh one, so a quick
-second tick does not compare against what the person's own write replaced.
-Because the lane lives in the hook, an unresolved write and its leave
-guard stay while the row is not rendered, for example during lost read
-access, and return with the row. `unresolved` lists the IRIs whose write still
-needs a check; show `noticeFor(iri)` outside the list for those without a row,
-for example a task deleted elsewhere, as the TODO example does. Do not give
-each row a hook of its own: unmounting the row would drop its unresolved write.
-After the hook unmounts, `update`, `remove` and `create` send nothing.
+list and give each row its part with `mutate.for(item)`, as the
+[TODO example's `TaskRow`](../examples/todo/src/app.tsx) does:
+
+```tsx
+const mutate = useFieldUpdate(taskFields); // once, for the list
+
+function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
+  const task = row.data; // what to show
+  return (
+    <li>
+      <input
+        type="checkbox"
+        checked={task.done}
+        disabled={!row.canMutate}
+        onChange={() => void row.update({ done: !task.done })}
+      />
+      {task.title}
+      {task.done && (
+        <RemoveButton
+          label={`Delete: ${task.title}`}
+          disabled={!row.canMutate}
+          onRemove={row.remove}
+        />
+      )}
+      <UpdateNotice {...row.notice} quiet />
+    </li>
+  );
+}
+// <TaskRow key={item.iri} row={mutate.for(item)} />
+```
+
+Ticking one task then locks only that row, and a refusal or an unconfirmed
+answer shows at that row. After a confirmed update, `row.data` shows the new
+values at once while the list reads again; until then the row stays locked,
+because its snapshot no longer shows the resource (`update` would resolve
+`not-sent` with reason `stale`). Because the lane lives in the hook, an
+unresolved write and its leave guard stay while the row is not rendered, for
+example during lost read access, and return with the row. `unresolved` lists
+the IRIs whose write still needs a check; show `mutate.for(iri).notice`
+outside the list for those without a row, for example a task deleted
+elsewhere, as the TODO example does. Do not give each row a hook of its own:
+unmounting the row would drop its unresolved write.
+
+A command that sends nothing resolves `{ kind: 'not-sent', reason }`:
+`unavailable` (no write access now, or a guarded change runs), `busy` (this
+resource's write is pending), `unresolved` (its last write needs a check),
+`stale` (see above), `invalid` (a creation draft the definition rejects) or
+`ended` (the hook unmounted or its target changed). Nothing changed, so the
+draft or row is as before. A sent command always resolves its outcome, also
+when the target changed meanwhile. The commands (`update`, `remove`,
+`create`, `acknowledge`, `useCreation`'s `change` and `create`, `useList`'s
+`reload` and `cancel`, `useSelection().select`) keep their identity for one
+target and definition, so they fit effect dependencies; one kept from an
+earlier target still acts on that target only.
+
 For a delete in the row, `RemoveButton` asks with the same dialog and texts as
 `ResourceEditor`'s **Delete** and calls `onRemove`, as it was when asked, only
-from its confirmation (a row read again meanwhile shows as a conflict):
-`<RemoveButton label={...} disabled={!mutate.canMutateFor(item)} onRemove={() => mutate.remove(item)} />`.
+from its confirmation (a row read again meanwhile shows as a conflict).
 It is a quiet trash icon with a 44px target, named **Delete** or by `label`
 (for example `Delete: ${title}`); children replace the icon, and `className`
 overrides its look. The TODO example offers it for done tasks. `canMutate`, `outcome`,
@@ -785,10 +825,12 @@ async function addAll() {
   for (const [index, name] of names.entries()) {
     creation.change({ title: name });
     const outcome = await creation.create();
-    if (outcome?.kind === 'created') continue;
-    // Stop. This item is held in the draft or may already exist: it never
-    // returns to the input. Only the unsent rest does.
-    setInput(names.slice(index + 1).join(', '));
+    if (outcome.kind === 'created') continue;
+    // Stop. The item stays in the draft (or may already exist) and never
+    // returns to the input; only the unsent rest does. An item not sent
+    // because the target ended returns too: its draft ended with it.
+    const ended = outcome.kind === 'not-sent' && outcome.reason === 'ended';
+    setInput(names.slice(ended ? index : index + 1).join(', '));
     return;
   }
   setInput('');
@@ -819,13 +861,12 @@ bound to `change` and disabled by `!creation.canEdit`, and Create disabled by
   Create sends it again under the captured IRI; editing or clearing it is the
   person's choice. A taken IRI (`412`) is never reported as definitive: it
   stays `unconfirmed`, because the resource there may be this creation's own.
-- `undefined`: usually nothing was sent, for example after write access was
-  lost; the item stays in the editable draft and `outcome` is empty. But
-  `create` also returns `undefined` when the target lifetime ended while the
-  request was in flight, for example through a direct runtime call. That write
-  may have landed, and the handler cannot tell the two cases apart. The new
-  lifetime starts with a blank draft and, inside `TargetScreen`, a blank input;
-  the person checks the list before typing the item again.
+- `not-sent`: nothing was sent, for example after write access was lost; the
+  item stays in the editable draft and `outcome` is empty. With reason `ended`
+  the target changed before this item: the new lifetime starts with a blank
+  draft, so the item returns to the input with the rest. A creation already in
+  flight when the target changed resolves its own outcome (for example
+  `created`) and is not shown in the new lifetime.
 
 Items confirmed earlier stay created; a later stop does not affect them.
 Nothing is retried automatically, an uncertain item never gets a new IRI, and

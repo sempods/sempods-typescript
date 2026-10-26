@@ -10,8 +10,10 @@ import {
   TargetScreen,
   UpdateNotice,
   useApp,
+  useCreation,
   useFieldUpdate,
   useList,
+  useSelection,
 } from './index.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import {
@@ -75,24 +77,46 @@ async function setup() {
   });
   let api!: Api;
   let app!: ReturnType<typeof useApp>;
+  let creationApi!: ReturnType<
+    typeof useCreation<{ title: string; done: boolean }>
+  >;
   let shown: readonly Snapshot<{ title: string; done: boolean }>[] = [];
+  // Each render's commands, to check that they keep their identity.
+  const commands: unknown[][] = [];
   function Screen() {
     const list = useList(definition);
     api = useFieldUpdate(definition);
     shown = list.data?.items ?? shown;
     app = useApp();
+    const selection = useSelection();
+    const creation = useCreation(definition, {
+      initial: { title: '', done: false },
+      collection: 'tasks',
+    });
+    commands.push([
+      list.reload,
+      list.cancel,
+      api.update,
+      api.remove,
+      api.create,
+      api.acknowledge,
+      selection.select,
+      creation.change,
+      creation.create,
+    ]);
+    creationApi = creation;
     // Rows render only while the list has data, as an app's rows do.
     return (
       <ul>
         {list.data?.items.map((row) => (
           <li key={row.iri}>
             <button
-              disabled={!api.canMutateFor(row)}
+              disabled={!api.for(row).canMutate}
               onClick={() => void api.update(row, { done: true })}
             >
               {row.data.title}
             </button>
-            <UpdateNotice {...api.noticeFor(row)} />
+            <UpdateNotice {...api.for(row).notice} />
           </li>
         ))}
       </ul>
@@ -113,6 +137,8 @@ async function setup() {
     rows,
     unmount: () => view.unmount(),
     shown: () => shown,
+    commands,
+    creation: () => creationApi,
     api: () => api,
     app: () => app,
     answer: (next: typeof answer) => {
@@ -153,8 +179,8 @@ it('keeps an unconfirmed write through lost read access while its row is gone', 
   await waitFor(() =>
     expect(screen.queryByRole('button', { name: 'One' })).toBeNull(),
   );
-  expect(s.api().canMutateFor('urn:one')).toBe(false);
-  expect(s.api().noticeFor('urn:one').outcome).toMatchObject({
+  expect(s.api().for('urn:one').canMutate).toBe(false);
+  expect(s.api().for('urn:one').notice.outcome).toMatchObject({
     kind: 'unconfirmed',
   });
   // Leaving the target still asks about the unconfirmed write.
@@ -182,7 +208,10 @@ it('sends nothing for a resource once the hook has unmounted', async () => {
   const api = s.api();
   const two = s.shown().find((row) => row.iri === 'urn:two')!;
   s.unmount();
-  expect(await api.update(two, { done: true })).toBeUndefined();
+  expect(await api.update(two, { done: true })).toEqual({
+    kind: 'not-sent',
+    reason: 'ended',
+  });
   expect(s.patches).toEqual([]);
 });
 
@@ -195,13 +224,13 @@ it('reports an unresolved write whose row was deleted, until acknowledged', asyn
   // Deleted elsewhere: the check finds it absent and the list drops the row.
   s.rows.delete('urn:one');
   await act(async () => {
-    await s.api().noticeFor('urn:one').onCheck();
+    await s.api().for('urn:one').notice.onCheck();
   });
   await waitFor(() =>
     expect(screen.queryByRole('button', { name: 'One' })).toBeNull(),
   );
   expect(s.api().unresolved).toEqual(['urn:one']);
-  act(() => s.api().noticeFor('urn:one').onAcknowledge());
+  act(() => s.api().for('urn:one').notice.onAcknowledge());
   expect(s.api().unresolved).toEqual([]);
 });
 
@@ -233,7 +262,10 @@ it('keeps the list-wide recovery when a write for another resource is refused', 
   await waitFor(() => expect(button('Two').disabled).toBe(true));
   const two = s.shown().find((row) => row.iri === 'urn:two')!;
   await act(async () => {
-    expect(await s.api().update(two, { done: true })).toBeUndefined();
+    expect(await s.api().update(two, { done: true })).toEqual({
+      kind: 'not-sent',
+      reason: 'unavailable',
+    });
   });
   expect(s.patches).toEqual(['urn:one']);
   expect(s.api().notice.outcome).toMatchObject({ kind: 'unconfirmed' });
@@ -253,14 +285,62 @@ it('does not write again from the snapshot a confirmed update was made from', as
       kind: 'saved',
     });
   });
-  expect(s.api().canMutateFor(one)).toBe(false);
-  expect(await s.api().update(one, { done: false })).toBeUndefined();
+  expect(s.api().for(one).canMutate).toBe(false);
+  expect(await s.api().for(one).update({ done: false })).toEqual({
+    kind: 'not-sent',
+    reason: 'stale',
+  });
   expect(s.patches).toEqual(['urn:one']);
   // The list reads again: its fresh snapshot is writable.
   await waitFor(() =>
     expect(s.shown().find((row) => row.iri === 'urn:one')).not.toBe(one),
   );
   expect(
-    s.api().canMutateFor(s.shown().find((row) => row.iri === 'urn:one')!),
+    s.api().for(s.shown().find((row) => row.iri === 'urn:one')!).canMutate,
   ).toBe(true);
+});
+
+it('shows a confirmed update on the row until the list reads it again', async () => {
+  const s = await setup();
+  const held = deferred<Response>();
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  const one = s.shown().find((row) => row.iri === 'urn:one')!;
+  // The next list read waits, so the spent snapshot stays on screen.
+  s.setQuery(() => held.promise);
+  await act(async () => {
+    expect(await s.api().for(one).update({ done: true })).toMatchObject({
+      kind: 'saved',
+    });
+  });
+  expect(one.data.done).toBe(false);
+  expect(s.api().for(one).data).toEqual({ title: 'One', done: true });
+  expect(s.api().for(one).canMutate).toBe(false);
+});
+
+it('keeps its commands for one target; they change with the target', async () => {
+  const s = await setup();
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  const loaded = s.commands.length;
+  const first = s.commands.at(-1)!;
+  // A write and the list's reread render several times.
+  act(() => button('Two').click());
+  await waitFor(() => expect(s.patches).toEqual(['urn:two']));
+  await waitFor(() => expect(button('Two').disabled).toBe(false));
+  expect(s.commands.length).toBeGreaterThan(loaded + 1);
+  for (const render of s.commands.slice(loaded))
+    render.forEach((command, i) => expect(command).toBe(first[i]));
+  // Another Context: new commands (the old ones keep their own target).
+  await act(() => s.app().selectContext(personal));
+  await waitFor(() => expect(s.commands.at(-1)![2]).not.toBe(first[2]));
+});
+
+it('names why a creation was not sent', async () => {
+  const s = await setup();
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  // The draft is blank and the definition requires a title.
+  expect(await s.creation().create()).toEqual({
+    kind: 'not-sent',
+    reason: 'invalid',
+  });
+  expect(s.patches).toEqual([]);
 });

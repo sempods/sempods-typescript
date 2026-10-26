@@ -18,9 +18,10 @@ import {
   useResourceEditor,
   useSdkLocale,
   useWorkflowAccess,
+  type ContextList,
+  type FieldUpdateRow,
 } from '@sempods/app-sdk/react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
-import type { Snapshot } from '@sempods/client-sdk/edit';
 import { emptyTask, taskFields, type Task } from './domain.js';
 
 function TaskScreen() {
@@ -69,8 +70,7 @@ function TaskScreen() {
         {tasks?.map((item) => (
           <TaskRow
             key={item.iri}
-            item={item}
-            mutate={mutate}
+            row={mutate.for(item)}
             doneLabel={m.done}
             removeLabel={m.remove}
             editing={selected === item.iri ? editing : null}
@@ -82,7 +82,7 @@ function TaskScreen() {
       {mutate.unresolved
         .filter((iri) => !tasks?.some((item) => item.iri === iri))
         .map((iri) => (
-          <UpdateNotice key={iri} {...mutate.noticeFor(iri)} />
+          <UpdateNotice key={iri} {...mutate.for(iri).notice} />
         ))}
       {/* A row that left the list (deleted elsewhere) keeps its editor. */}
       {selected && !tasks?.some((item) => item.iri === selected) && editing}
@@ -124,44 +124,44 @@ function TaskScreen() {
  * with it shows right here. The changed or vanished row is the confirmation.
  */
 function TaskRow({
-  item,
-  mutate,
+  row,
   doneLabel,
   removeLabel,
   editing,
   onOpen,
 }: {
-  readonly item: Snapshot<Task>;
-  readonly mutate: ReturnType<typeof useFieldUpdate<Task>>;
+  /** This task in the list's write lanes: what to show, its lock, notice and commands. */
+  readonly row: FieldUpdateRow<Task>;
   readonly doneLabel: string;
   readonly removeLabel: string;
   /** The row's editor while it is open; the title opens it in its place. */
   readonly editing: ReactNode;
   readonly onOpen: () => void;
 }) {
+  const task = row.data;
   return (
-    <li className={item.data.done ? 'done' : undefined}>
+    <li className={task.done ? 'done' : undefined}>
       <input
         type="checkbox"
-        aria-label={`${doneLabel}: ${item.data.title}`}
-        checked={item.data.done}
-        disabled={!mutate.canMutateFor(item)}
-        onChange={() => void mutate.update(item, { done: !item.data.done })}
+        aria-label={`${doneLabel}: ${task.title}`}
+        checked={task.done}
+        disabled={!row.canMutate}
+        onChange={() => void row.update({ done: !task.done })}
       />
       {editing ?? (
         <button className="title" onClick={onOpen}>
-          {item.data.title}
+          {task.title}
         </button>
       )}
       {/* The open editor has its own Delete. */}
-      {item.data.done && !editing && (
+      {task.done && !editing && (
         <RemoveButton
-          label={`${removeLabel}: ${item.data.title}`}
-          disabled={!mutate.canMutateFor(item)}
-          onRemove={() => mutate.remove(item)}
+          label={`${removeLabel}: ${task.title}`}
+          disabled={!row.canMutate}
+          onRemove={row.remove}
         />
       )}
-      <UpdateNotice {...mutate.noticeFor(item)} quiet />
+      <UpdateNotice {...row.notice} quiet />
     </li>
   );
 }
@@ -194,7 +194,7 @@ export function TodoApp({
   const [locale, setLocale] = useState<'en' | 'de'>();
 
   return (
-    <SempodsProvider runtime={runtime} {...(locale ? { locale } : {})}>
+    <SempodsProvider runtime={runtime} locale={locale}>
       {children}
       <StandardScreen onLocale={setLocale} />
     </SempodsProvider>
@@ -305,7 +305,7 @@ function ListSwitch({
   lists,
   onShareFailed,
 }: {
-  readonly lists: ReturnType<typeof useContexts>;
+  readonly lists: ContextList;
   /** Sharing more lists failed before reaching the Pod; undefined clears it. */
   readonly onShareFailed: (failure: { cause: unknown } | undefined) => void;
 }) {

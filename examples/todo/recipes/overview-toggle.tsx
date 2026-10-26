@@ -122,7 +122,7 @@ function useDoneToggle(onSaved: () => void) {
 /** Place inside a `SempodsProvider`, for example with `contextSelection="on-demand"`. */
 export function TasksOverview() {
   // retain: the rows stay visible while the overview reloads after a change.
-  const { state, reload } = usePodLoad(
+  const { state, data, reload } = usePodLoad(
     (pod, signal) => pod.sparql.select(query, { signal }),
     { retain: true },
   );
@@ -145,12 +145,8 @@ export function TasksOverview() {
   const writable = (context: string) =>
     catalogue?.kind === 'ready' &&
     catalogue.contexts.some((c) => c.iri === context && c.writable);
-  const rows =
-    state.kind === 'ready'
-      ? state.data.rows
-      : 'previous' in state && state.previous
-        ? state.previous.rows
-        : null;
+  // The current rows, or the kept ones while reloading or after a failed refresh.
+  const rows = data?.rows ?? null;
   return (
     <section aria-label="Tasks across my Pod">
       <h1>Tasks across my Pod</h1>

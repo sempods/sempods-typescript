@@ -494,8 +494,9 @@ export const germanMessages: SdkMessages = {
 };
 
 export interface LocaleOptions {
-  readonly locale?: string;
-  readonly language?: Language;
+  /** `undefined` is the same as leaving it out: the browser's languages. */
+  readonly locale?: string | undefined;
+  readonly language?: Language | undefined;
   readonly timeZone?: string;
   readonly direction?: Direction;
   /** Partial overrides; `errors` overrides individual failure codes only. */

@@ -112,14 +112,29 @@ Check these points:
   only where there is no selection (on-demand management). Tests that looked
   for those elements in management need updating.
 - **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane
-  per resource; new `canMutateFor(item)` and `noticeFor(item)` lock and report
-  a single row, and an unresolved write survives its row being unmounted;
-  `unresolved` lists the IRIs that still need a check, so an app can show the
-  notice of a row that left the list. After a confirmed update, the snapshot
-  it was made from stays locked until the list reads again.
+  per resource; new `mutate.for(item)` returns a row's `data` (with a
+  confirmed update shown at once), `canMutate`, `notice`, `update(change)` and
+  `remove()`, and an unresolved write survives its row being unmounted;
+  `unresolved` lists the IRIs that still need a check, so an app can show
+  `mutate.for(iri).notice` for a row that left the list. After a confirmed
+  update, the snapshot it was made from stays locked until the list reads
+  again.
   `canMutate`, `outcome`, `notice` and `acknowledge` keep their list-wide
   meaning. A write for another resource is no longer refused while one is
   pending or unresolved; apps that disable on `canMutate` behave as before.
+- **Mutation results are never `undefined` (needs action).** `update`,
+  `remove` and `create` of `useFieldUpdate`, and `useCreation`'s `create`,
+  resolve `{ kind: 'not-sent', reason }` when they send nothing
+  (`unavailable`, `busy`, `unresolved`, `stale`, `invalid`, `ended`) and
+  otherwise the sent write's outcome, also when the target ended meanwhile (it
+  was `undefined`). Replace checks for `undefined`. A batch stops at the first
+  result that is not `created`; only an item not sent because the target
+  `ended` returns to the input.
+- **Stable commands, more types, `data` on loads.** Hook commands keep their
+  identity for one target and definition. New exported types: `FieldUpdate`,
+  `FieldUpdateRow`, `FieldUpdateState`, `FieldUpdateNotice`, `NotSent`,
+  `ContextList`. `useLoad` and `usePodLoad` return `data` like `useList`.
+  `locale` and `language` accept `undefined` (same as leaving them out).
 - **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
   question before it calls `onRemove`, for a delete in a list row with
   `useFieldUpdate`'s `remove`, shown as a quiet trash icon. Nothing existing

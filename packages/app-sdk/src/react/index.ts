@@ -12,7 +12,7 @@ export {
   useView,
   useWorkflowAccess,
 } from './app.js';
-export type { AppActions, ContextChoice } from './app.js';
+export type { AppActions, ContextChoice, ContextList } from './app.js';
 export {
   useLoad,
   usePodLoad,
@@ -28,7 +28,12 @@ export type {
   ContextEditorPhase,
   ContextEditorProblem,
   ContextTarget,
+  FieldUpdate,
+  FieldUpdateNotice,
+  FieldUpdateRow,
+  FieldUpdateState,
   MutationOutcome,
+  NotSent,
 } from './hooks.js';
 export {
   AccessNotice,
