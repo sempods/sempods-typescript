@@ -3,6 +3,7 @@ import {
   changedFields,
   isFieldDefinition,
   sameOwnedTerms,
+  storedDraft,
   withFields,
   type EditDefinition,
   type FieldDefinition,
@@ -327,7 +328,8 @@ export function createResourceEditor<D>(
               current !== undefined &&
               (review.intent === 'remove'
                 ? current === null
-                : current !== null && sameData(current, review.mine)),
+                : current !== null &&
+                  sameData(current, storedDraft(definition, review.mine))),
           }
         : { ...review, current };
   }
@@ -581,7 +583,10 @@ export function createResourceEditor<D>(
                 (exact ||
                   (!dirty() &&
                     safely(() =>
-                      sameData(definition.read(fetched.body), mine),
+                      sameData(
+                        definition.read(fetched.body),
+                        storedDraft(definition, mine),
+                      ),
                     )))
               ) {
                 const next = version(fetched);

@@ -344,3 +344,30 @@ it('names why a creation was not sent', async () => {
   });
   expect(s.patches).toEqual([]);
 });
+
+it('creates the next item right after a slow one, before a new render', async () => {
+  const s = await setup();
+  const held = deferred<Response>();
+  s.answer(() => held.promise);
+  await waitFor(() => expect(button('One').disabled).toBe(false));
+  act(() => s.creation().change({ title: 'First' }));
+  let first!: ReturnType<ReturnType<typeof s.creation>['create']>;
+  act(() => {
+    first = s.creation().create();
+  });
+  // The pending creation has rendered: that render's commands see it busy.
+  await waitFor(() => expect(s.creation().busy).toBe(true));
+  const batch = s.creation();
+  s.answer(() => new Response(null, { status: 201 }));
+  let second: Awaited<typeof first> | undefined;
+  // The next item right after the first, as a batch handler does; the
+  // creation's own check is live, not the last render's `canCreate`.
+  await act(async () => {
+    held.resolve(new Response(null, { status: 201 }));
+    expect(await first).toMatchObject({ kind: 'created' });
+    batch.change({ title: 'Second' });
+    second = await batch.create();
+  });
+  expect(second).toMatchObject({ kind: 'created' });
+  expect(s.patches).toHaveLength(2);
+});

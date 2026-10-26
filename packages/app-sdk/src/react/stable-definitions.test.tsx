@@ -629,6 +629,8 @@ it('useLoad reads again when its key changes, without the old data', async () =>
     load: ReturnType<typeof useLoad<string>>;
     search: (term: string) => void;
   };
+  // Every render's input and data: a new term never shows the old result.
+  const shown: [string, string | undefined][] = [];
   function Screen() {
     const [term, search] = useState('milk');
     const load = useLoad(
@@ -641,6 +643,7 @@ it('useLoad reads again when its key changes, without the old data', async () =>
       { key: term, retain: true },
     );
     api = { load, search };
+    shown.push([term, load.data]);
     return null;
   }
   render(
@@ -654,4 +657,5 @@ it('useLoad reads again when its key changes, without the old data', async () =>
   act(() => api.search('bread'));
   // The kept data belonged to the old term: a fresh read, not a retained one.
   await waitFor(() => expect(api.load.data).toBe('results for bread'));
+  expect(shown).not.toContainEqual(['bread', 'results for milk']);
 });
