@@ -516,6 +516,33 @@ function stored(field: Field, value: Value): Value {
     : value;
 }
 
+/**
+ * A draft as `fields()` stores it (text fields with `trim` without outer
+ * whitespace), for comparing what should be on the Pod with what is there.
+ * Other definitions keep the draft as it is.
+ */
+export function storedDraft<D>(definition: EditDefinition<D>, draft: D): D {
+  if (
+    !isFieldDefinition(definition) ||
+    draft === null ||
+    typeof draft !== 'object'
+  )
+    return draft;
+  const values = draft as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...values };
+  let changed = false;
+  for (const [name, field] of Object.entries(
+    definition.fields as Record<string, Field>,
+  )) {
+    const value = stored(field, values[name] as Value);
+    if (value !== values[name]) {
+      next[name] = value;
+      changed = true;
+    }
+  }
+  return changed ? (Object.freeze(next) as D) : draft;
+}
+
 /** A field's value as terms of a subject that does not exist yet. */
 function freshTerms(field: Field, value: Value): readonly Term[] {
   value = stored(field, value);

@@ -1,5 +1,13 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { fields, flag, text, type DraftOf } from './index.js';
+import {
+  fields,
+  flag,
+  snapshots,
+  text,
+  updateFields,
+  type DraftOf,
+} from './index.js';
+import type { JsonLd, WriteResult } from '../index.js';
 import { describeNew } from './fields.js';
 
 const task = fields(
@@ -77,4 +85,37 @@ it('DraftOf takes a definition as well as a field spec', () => {
     readonly note: string | null;
     readonly done: boolean;
   }>();
+});
+
+it('a lost answer observes the trimmed value as the desired one', async () => {
+  let body: JsonLd = {
+    '@id': 'urn:one',
+    'urn:title': [{ '@value': 'Milk' }],
+    'urn:status': [{ '@id': 'urn:open' }],
+  };
+  let version = 1;
+  const source = {
+    podUrl: 'https://pod.example/alice',
+    subjects: {
+      get: async () => ({ kind: 'ok' as const, body, etag: `"v${version}"` }),
+      put: async (): Promise<WriteResult> => ({ kind: 'precondition-failed' }),
+      delete: async (): Promise<WriteResult> => ({
+        kind: 'precondition-failed',
+      }),
+      // Applied, but the answer is lost.
+      patch: async (_: string, change: JsonLd): Promise<WriteResult> => {
+        body = { ...body, ...change };
+        version++;
+        return {
+          kind: 'uncertain',
+          failure: { code: 'network', retryable: false },
+        } as unknown as WriteResult;
+      },
+    },
+  };
+  const [row] = snapshots(source as never, [body], task).items;
+  expect(
+    await updateFields(source as never, row!, task, { title: ' Oat milk ' }),
+  ).toMatchObject({ kind: 'unconfirmed', desiredObserved: true });
+  expect(body['urn:title']).toEqual([{ '@value': 'Oat milk' }]);
 });
