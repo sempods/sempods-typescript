@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useReducer,
   useState,
   useSyncExternalStore,
   useRef,
@@ -29,11 +30,8 @@ import {
   type FieldDefinition,
   type ResourceEditor,
   type Snapshot,
-  type CreateOutcome,
-  type UpdateOutcome,
-  type RemoveSnapshotOutcome,
 } from '@sempods/client-sdk/edit';
-import { sdkFailure, type JsonLd } from '@sempods/client-sdk';
+import type { JsonLd } from '@sempods/client-sdk';
 import { startupSettled } from '../authoring/app.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
@@ -46,13 +44,12 @@ import {
   useWorkflowAccess,
 } from './app.js';
 import { shownData } from '../authoring/load.js';
+import { Lane, type MutationOutcome } from './lane.js';
+export type { MutationOutcome } from './lane.js';
 import {
-  changed,
   observeStarts,
   observeWrites,
   startCount,
-  started,
-  succeeded,
 } from '../authoring/changes.js';
 
 const noopSubscribe = () => () => {};
@@ -678,21 +675,6 @@ export function useContextEditor<D>(
     [target, phase, problem, editor, open, close],
   );
 }
-export type MutationOutcome<D> =
-  UpdateOutcome<D> | RemoveSnapshotOutcome<D> | CreateOutcome;
-
-/** Keep the write outcome while dropping observations made under lost read access. */
-function withoutComparison<D>(
-  outcome: MutationOutcome<D> | null,
-): MutationOutcome<D> | null {
-  if (outcome?.kind === 'changed-on-pod')
-    return { ...outcome, current: undefined };
-  if (outcome?.kind === 'unconfirmed')
-    return 'current' in outcome
-      ? { ...outcome, current: undefined, desiredObserved: false }
-      : { kind: 'unconfirmed' };
-  return outcome;
-}
 /**
  * One mutation lane. Captures target/subject; stale completions never update a
  * new lane. `explicit` is a view bound to an explicit Context (`null` while it
@@ -713,94 +695,56 @@ function useMutation<D>(
   );
   const writable = explicit === undefined ? access.write : ownWrite;
   const { key } = useDefinition(definition, 'useFieldUpdate');
-  const current = useRef({
-    view,
-    key,
-    pending: false,
-    unresolved: false,
-    checked: false,
-    absent: false,
-    iri: '',
-    version: 0,
-    uncertain: false,
-    alive: true,
-  });
-  if (current.current.view !== view || current.current.key !== key) {
+  const [, rerender] = useReducer((count: number) => count + 1, 0);
+  const current = useRef<{
+    readonly view: BoundView | null;
+    readonly key: string;
+    readonly lane: Lane<D>;
+  } | null>(null);
+  if (current.current?.view !== view || current.current.key !== key) {
     const before = current.current;
     // N3: a new definition for the same target starts a new lane; a pending or
     // unresolved write of the old one loses its guard and feedback.
-    if (before.view === view && (before.pending || before.unresolved))
+    if (
+      before &&
+      before.view === view &&
+      (before.lane.pending || before.lane.unresolved)
+    )
       warn(
         'The field definition changed while a write was pending or unresolved; its guard and feedback were dropped.',
       );
-    current.current = {
+    // The selected view must still be selected; an explicit one still current
+    // (same connection and authorization).
+    const lane: Lane<D> = new Lane(
       view,
-      key,
-      pending: false,
-      unresolved: false,
-      checked: false,
-      absent: false,
-      iri: '',
-      version: 0,
-      uncertain: false,
-      alive: true,
-    };
+      definition,
+      app,
+      () =>
+        current.current?.lane === lane &&
+        (explicit === undefined
+          ? app.getSnapshot().view === view
+          : Boolean(view?.getSnapshot().current)),
+      rerender,
+    );
+    current.current = { view, key, lane };
   }
-  const lane = current.current;
-  const [state, setState] = useState<{
-    lane: typeof lane;
-    outcome: MutationOutcome<D> | null;
-    operation: 'create' | 'update' | 'remove';
-    busy: boolean;
-    /** The target's start count at this lane's own start. */
-    start: number;
-  } | null>(null);
-  const [evidence, setEvidence] = useState<{
-    lane: typeof lane;
-    version: number;
-    value: D | null;
-    /** Present, but the definition cannot read it. */
-    unreadable: boolean;
-  } | null>(null);
+  const lane = current.current.lane;
   useEffect(() => {
     lane.alive = true;
     let readable = true;
     const followAccess = () => {
       const next = view?.getSnapshot().read ?? false;
-      if (readable && !next) {
-        lane.version++;
-        lane.checked = false;
-        lane.absent = false;
-        setEvidence((before) => (before?.lane === lane ? null : before));
-        setState((before) =>
-          before?.lane === lane
-            ? { ...before, outcome: withoutComparison(before.outcome) }
-            : before,
-        );
-      }
+      if (readable && !next) lane.loseRead();
       readable = next;
     };
     const unsubscribe = view?.subscribe(followAccess);
     followAccess();
-    const unregister = app.register({
-      // An explicit Context stays through row changes and Context selection.
-      scope: explicit === undefined ? 'target' : 'explicit',
-      unconfirmed: () => lane.uncertain,
-      blocked: () => lane.pending,
-      dirty: () => lane.unresolved,
-      discard: () => {
-        lane.unresolved = false;
-        lane.uncertain = false;
-        lane.version++;
-        lane.checked = false;
-        if (current.current === lane) setState(null);
-      },
-    });
+    // An explicit Context stays through row changes and Context selection.
+    const unregister = app.register(
+      lane.guard(explicit === undefined ? 'target' : 'explicit'),
+    );
     return () => {
-      lane.alive = false;
-      lane.version++;
-      lane.checked = false;
-      lane.absent = false;
+      lane.retire();
       unsubscribe?.();
       unregister();
     };
@@ -808,161 +752,54 @@ function useMutation<D>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app, lane, view]);
   const starts = useStartCount(view);
-  const visible = state?.lane === lane ? state : null;
-  // Another write started on this target since this lane's own start retires
-  // its success; failures and unresolved outcomes stay.
-  const outcome =
-    visible && !(succeeded(visible.outcome) && visible.start !== starts)
-      ? visible.outcome
-      : null;
-  // The selected view must still be selected; an explicit one still current
-  // (same connection and authorization).
-  const eligible = () =>
-    lane.alive &&
-    current.current === lane &&
-    (explicit === undefined
-      ? app.getSnapshot().view === view
-      : Boolean(view?.getSnapshot().current));
-  const readable = () => eligible() && Boolean(view?.getSnapshot().read);
-  const checked = () => readable() && lane.checked;
-  async function execute(
-    operation: 'create' | 'update' | 'remove',
-    iri: string,
-    action: (target: BoundView) => Promise<MutationOutcome<D>>,
-  ) {
-    if (
-      !view ||
-      !eligible() ||
-      lane.pending ||
-      lane.unresolved ||
-      !view.getSnapshot().write ||
-      app.getSnapshot().changing ||
-      app.getSnapshot().confirmingLeave
-    )
-      return;
-    const version = ++lane.version;
-    lane.pending = true;
-    lane.checked = false;
-    lane.absent = false;
-    lane.iri = iri;
-    const start = started(view);
-    setState({ lane, operation, outcome: null, busy: true, start });
-    let outcome: MutationOutcome<D>;
-    try {
-      outcome = await action(view);
-    } catch (error) {
-      const problem = { kind: 'failure' as const, failure: sdkFailure(error) };
-      outcome =
-        operation === 'create'
-          ? { kind: 'not-created', reason: 'failure', problem }
-          : operation === 'remove'
-            ? { kind: 'not-removed', reason: 'failure', problem }
-            : { kind: 'not-saved', reason: 'failure', problem };
-    }
-    lane.pending = false;
-    if (!eligible()) return;
-    // A result may contain a read made before access was lost and regained.
-    if (lane.version !== version || !readable())
-      outcome = withoutComparison(outcome)!;
-    lane.unresolved =
-      outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
-    lane.uncertain = outcome.kind === 'unconfirmed';
-    setState({ lane, operation, outcome, busy: false, start });
-    if (succeeded(outcome)) changed(view);
-    return outcome;
-  }
-  const acknowledge = () => {
-    if (!eligible() || lane.pending) return;
-    lane.unresolved = false;
-    lane.uncertain = false;
-    lane.version++;
-    lane.checked = false;
-    lane.absent = false;
-    setState(null);
-  };
-  const check = async () => {
-    if (!view || !readable() || !lane.unresolved) return false;
-    lane.checked = false;
-    lane.absent = false;
-    setEvidence(null);
-    const version = ++lane.version;
-    try {
-      const read = await view.subjects.get(lane.iri);
-      if (!readable() || !lane.unresolved || lane.version !== version)
-        return false;
-      if (read.kind !== 'ok' && read.kind !== 'not-found') return false;
-      let value: D | null = null;
-      let unreadable = false;
-      if (read.kind === 'ok')
-        try {
-          value = definition.read(read.body);
-        } catch {
-          // Still evidence of presence: settling must not depend on mapping it.
-          unreadable = true;
-        }
-      if (!readable() || !lane.unresolved || lane.version !== version)
-        return false;
-      setEvidence({ lane, version, value, unreadable });
-      lane.absent = read.kind === 'not-found';
-      lane.checked = true;
-      changed(view);
-      return checked();
-    } catch {
-      return false;
-    }
-  };
   return {
-    execute,
-    editable: () => eligible() && !lane.pending && !lane.unresolved,
-    acknowledge,
-    busy: visible?.busy ?? false,
+    execute: (
+      operation: 'create' | 'update' | 'remove',
+      iri: string,
+      action: (target: BoundView) => Promise<MutationOutcome<D>>,
+    ) => lane.execute(operation, iri, action),
+    editable: () => lane.eligible() && !lane.pending && !lane.unresolved,
+    acknowledge: () => lane.acknowledge(),
+    busy: lane.state?.busy ?? false,
     unresolved: lane.unresolved,
-    canMutate: Boolean(
-      view &&
-      writable &&
-      eligible() &&
-      !lane.pending &&
-      !lane.unresolved &&
-      !app.getSnapshot().changing &&
-      !app.getSnapshot().confirmingLeave,
-    ),
-    outcome,
-    operation: visible?.operation ?? null,
-    notice: {
-      outcome,
-      /** A successful comparison under uninterrupted read access to this lane. */
-      checked: checked(),
-      current:
-        checked() &&
-        evidence?.lane === lane &&
-        evidence.version === lane.version &&
-        !evidence.unreadable
-          ? evidence.value
-          : undefined,
-      unreadable:
-        checked() &&
-        evidence?.lane === lane &&
-        evidence.version === lane.version &&
-        evidence.unreadable,
-      onCheck: check,
-      onAcknowledge: () => {
-        if (checked()) acknowledge();
-      },
-    },
-    checked,
-    absent: () => checked() && lane.absent,
+    canMutate: lane.canMutate(writable),
+    outcome: lane.outcome(starts),
+    operation: lane.state?.operation ?? null,
+    notice: lane.notice(starts),
+    checked: () => lane.isChecked(),
+    absent: () => lane.isChecked() && lane.absent,
   };
 }
+/** Notice props for a resource this hook has not written yet. */
+const noNotice = Object.freeze({
+  outcome: null,
+  checked: false,
+  current: undefined,
+  unreadable: false,
+  onCheck: async () => false,
+  onAcknowledge: () => {},
+});
+const iriOf = (target: string | { readonly iri: string }) =>
+  typeof target === 'string' ? target : target.iri;
 /**
  * Safe availability and standard recovery feedback for one-click row mutations.
  *
- * A success in `outcome`/`notice` retires when this hook or another creation,
+ * Each resource has its own write lane, held by this hook rather than by a row
+ * component: `canMutateFor(item)` and `noticeFor(item)` lock and report only
+ * that resource, so ticking one task leaves the others usable, and an
+ * unresolved write stays (with its check and acknowledgement) also while its
+ * row is not rendered, for example during lost read access. `canMutate`,
+ * `outcome`, `notice` and `acknowledge` keep their list-wide meaning: false
+ * while any resource's write is pending or unresolved, and the latest write's
+ * feedback.
+ *
+ * A success in the feedback retires when this hook or another creation,
  * row mutation or bound editor starts a write on the same target, and is not
  * shown if such a write started while it was pending. A failure
- * stays until this hook writes again; an unresolved outcome (`unconfirmed`,
- * `changed-on-pod`) stays until it is checked and acknowledged.
+ * stays until that resource is written again; an unresolved outcome
+ * (`unconfirmed`, `changed-on-pod`) stays until it is checked and acknowledged.
  * Losing read access clears comparison values (including `outcome.current`
- * and `desiredObserved`) and `notice.checked`. Regaining access needs a fresh
+ * and `desiredObserved`) and `checked`. Regaining access needs a fresh
  * check. Write-only loss retains comparison evidence; neither loss replays a write.
  *
  * All mutation methods return `undefined` both when nothing was sent and when
@@ -970,22 +807,135 @@ function useMutation<D>(
  * happened; stop a batch instead of resending its item on another target.
  */
 export function useFieldUpdate<D>(input: FieldDefinition<D>) {
-  // The same instance as useList's snapshots (see canonicalOf); the lane's
-  // useDefinition below reports a changing custom definition.
+  // The same instance as useList's snapshots (see canonicalOf).
   const definition = canonicalOf(input, definitionKey(input));
-  const mutation = useMutation(definition);
+  const view = useView();
+  const app = useController();
+  const access = useWorkflowAccess();
+  const { key } = useDefinition(definition, 'useFieldUpdate');
+  const [, rerender] = useReducer((count: number) => count + 1, 0);
+  // One set of lanes per target and definition; another one retires it.
+  const generation = useRef<{
+    readonly view: BoundView | null;
+    readonly key: string;
+    readonly lanes: Map<string, Lane<D>>;
+    readonly guards: Map<Lane<D>, () => void>;
+    latest: Lane<D> | null;
+    mounted: boolean;
+  } | null>(null);
+  if (generation.current?.view !== view || generation.current.key !== key) {
+    const before = generation.current;
+    if (
+      before &&
+      before.view === view &&
+      [...before.lanes.values()].some((l) => l.pending || l.unresolved)
+    )
+      warn(
+        'The field definition changed while a write was pending or unresolved; its guard and feedback were dropped.',
+      );
+    generation.current = {
+      view,
+      key,
+      lanes: new Map(),
+      guards: new Map(),
+      latest: null,
+      mounted: false,
+    };
+  }
+  const lanes = generation.current;
+  // A lane writes only while this hook is mounted for its target: a callback
+  // resuming after unmount reaches no guard or recovery UI.
+  const holds = () =>
+    generation.current === lanes &&
+    lanes.mounted &&
+    app.getSnapshot().view === view;
+  const register = (lane: Lane<D>) => {
+    if (!lanes.guards.has(lane))
+      lanes.guards.set(lane, app.register(lane.guard('target')));
+  };
+  const laneFor = (iri: string) => {
+    let lane = lanes.lanes.get(iri);
+    if (!lane) {
+      lane = new Lane(view, definition, app, holds, rerender);
+      lanes.lanes.set(iri, lane);
+      if (lanes.mounted) register(lane);
+    }
+    return lane;
+  };
+  useEffect(() => {
+    lanes.mounted = true;
+    for (const lane of lanes.lanes.values()) {
+      lane.alive = true;
+      register(lane);
+    }
+    let readable = true;
+    const followAccess = () => {
+      const next = view?.getSnapshot().read ?? false;
+      if (readable && !next) lanes.lanes.forEach((lane) => lane.loseRead());
+      readable = next;
+    };
+    const unsubscribe = view?.subscribe(followAccess);
+    followAccess();
+    return () => {
+      lanes.mounted = false;
+      lanes.lanes.forEach((lane) => lane.retire());
+      lanes.guards.forEach((unregister) => unregister());
+      lanes.guards.clear();
+      unsubscribe?.();
+    };
+    // `register` only reads `lanes` and `app`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app, lanes, view]);
+  const starts = useStartCount(view);
+  const all = [...lanes.lanes.values()];
+  // Whether a resource without a lane of its own could be written now.
+  const available = Boolean(
+    view &&
+    access.write &&
+    generation.current === lanes &&
+    app.getSnapshot().view === view &&
+    !app.getSnapshot().changing &&
+    !app.getSnapshot().confirmingLeave,
+  );
+  const latest = lanes.latest;
+  const run = (
+    iri: string,
+    operation: 'create' | 'update' | 'remove',
+    action: (target: BoundView) => Promise<MutationOutcome<D>>,
+  ) => {
+    if (!lanes.mounted) return Promise.resolve(undefined);
+    const lane = laneFor(iri);
+    // A refused write sends nothing and keeps the latest write's recovery.
+    if (!lane.startable()) return Promise.resolve(undefined);
+    lanes.latest = lane;
+    return lane.execute(operation, iri, action);
+  };
   return {
-    canMutate: mutation.canMutate,
-    busy: mutation.busy,
-    outcome: mutation.outcome,
-    operation: mutation.operation,
-    notice: mutation.notice,
+    canMutate: available && all.every((l) => !l.pending && !l.unresolved),
+    busy: latest?.state?.busy ?? false,
+    outcome: latest?.outcome(starts) ?? null,
+    operation: latest?.state?.operation ?? null,
+    notice: latest ? latest.notice(starts) : noNotice,
+    /** Whether this resource may be written now; other resources' writes do not lock it. */
+    canMutateFor: (item: string | { readonly iri: string }) => {
+      const lane = lanes.lanes.get(iriOf(item));
+      return lane ? lane.canMutate(access.write) : available;
+    },
+    /** `UpdateNotice` props for this resource's latest write. */
+    noticeFor: (item: string | { readonly iri: string }) =>
+      lanes.lanes.get(iriOf(item))?.notice(starts) ?? noNotice,
+    /**
+     * Resources whose write is unconfirmed or changed on the Pod, until checked
+     * and acknowledged. Show `noticeFor` for those whose rows are gone, for
+     * example deleted elsewhere, so their recovery stays reachable.
+     */
+    unresolved: all.filter((l) => l.unresolved).map((l) => l.iri),
     update: (snapshot: Snapshot<D>, change: Partial<D>) =>
-      mutation.execute('update', snapshot.iri, (v) =>
+      run(snapshot.iri, 'update', (v) =>
         updateFields(v, snapshot, definition, change),
       ),
     remove: (snapshot: Snapshot<D>) =>
-      mutation.execute('remove', snapshot.iri, (v) =>
+      run(snapshot.iri, 'remove', (v) =>
         removeSnapshot(v, snapshot, definition),
       ),
     create: (
@@ -993,13 +943,17 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
         | [iri: string, body: JsonLd]
         | [iri: string, definition: FieldDefinition<D>, draft: D]
     ) =>
-      mutation.execute('create', args[0], (v) =>
+      run(args[0], 'create', (v) =>
         args.length === 3
           ? prepareCreation(v, args[0], args[1], args[2]).run()
           : prepareCreation(v, args[0], args[1]).run(),
       ),
-    /** Explicit acknowledgement does not replay the command. Prefer notice for checked UI recovery. */
-    acknowledge: mutation.acknowledge,
+    /**
+     * Explicit acknowledgement does not replay the command. Prefer notice for
+     * checked UI recovery. It reads the live latest lane, so a result kept
+     * across an awaited write acknowledges that write.
+     */
+    acknowledge: () => lanes.latest?.acknowledge(),
   };
 }
 

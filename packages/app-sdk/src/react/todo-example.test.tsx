@@ -297,3 +297,63 @@ it('the TODO header says when sharing more lists cannot reach the Pod', async ()
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
   expect(screen.getByText(text.en.empty)).toBeTruthy();
 });
+
+it('the TODO list locks only the row whose tick is being saved', async () => {
+  const bread = {
+    ...milk,
+    '@id': 'urn:task:bread',
+    [schema + 'name']: [{ '@value': 'Buy bread' }],
+  };
+  const rows = new Map<string, Record<string, unknown>>([
+    [milk['@id'], milk],
+    [bread['@id'], bread],
+  ]);
+  const f = await signedIn('en', async () => Response.json([...rows.values()]));
+  const held = deferred<Response>();
+  f.setResource(async (url, init) => {
+    const iri = resourceIri(url);
+    if ((init?.method ?? 'GET') === 'GET')
+      return Response.json(rows.get(iri), { headers: { etag: '"v1"' } });
+    return held.promise;
+  });
+  const box = (name: string) =>
+    screen.getByRole('checkbox', { name: `Done: ${name}` }) as HTMLInputElement;
+  await screen.findByRole('checkbox', { name: 'Done: Buy milk' });
+  await waitFor(() => expect(box('Buy milk').disabled).toBe(false));
+  fireEvent.click(box('Buy milk'));
+  await waitFor(() => expect(box('Buy milk').disabled).toBe(true));
+  // Another task is a separate resource: it stays usable meanwhile.
+  expect(box('Buy bread').disabled).toBe(false);
+  await act(async () => held.resolve(new Response(null, { status: 204 })));
+  await waitFor(() => expect(box('Buy milk').disabled).toBe(false));
+});
+
+it('the TODO list keeps the recovery of an unconfirmed tick whose task was deleted', async () => {
+  const rows = new Map<string, Record<string, unknown>>([[milk['@id'], milk]]);
+  const f = await signedIn('en', async () => Response.json([...rows.values()]));
+  f.setResource(async (url, init) => {
+    const iri = resourceIri(url);
+    if ((init?.method ?? 'GET') === 'GET')
+      return rows.has(iri)
+        ? Response.json(rows.get(iri), { headers: { etag: '"v1"' } })
+        : new Response(null, { status: 404 });
+    return new Response(null, { status: 202 });
+  });
+  const box = await screen.findByRole('checkbox', { name: 'Done: Buy milk' });
+  await waitFor(() => expect((box as HTMLInputElement).disabled).toBe(false));
+  fireEvent.click(box);
+  expect(await screen.findByText(/The result is unconfirmed/)).toBeTruthy();
+  // Deleted elsewhere: the check finds it absent, and the row leaves the list.
+  rows.delete(milk['@id']);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Check current version' }),
+  );
+  expect(await screen.findByText(text.en.empty)).toBeTruthy();
+  // The recovery stays reachable without the row.
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'I have checked the pod' }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByText(/The result is unconfirmed/)).toBeNull(),
+  );
+});

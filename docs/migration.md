@@ -111,6 +111,14 @@ Check these points:
   Context's access instead of the **Available to this app** list, which remains
   only where there is no selection (on-demand management). Tests that looked
   for those elements in management need updating.
+- **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane
+  per resource; new `canMutateFor(item)` and `noticeFor(item)` lock and report
+  a single row, and an unresolved write survives its row being unmounted;
+  `unresolved` lists the IRIs that still need a check, so an app can show the
+  notice of a row that left the list.
+  `canMutate`, `outcome`, `notice` and `acknowledge` keep their list-wide
+  meaning. A write for another resource is no longer refused while one is
+  pending or unresolved; apps that disable on `canMutate` behave as before.
 - **Creating in an explicit Context.** `useCreation` takes `context` to create
   in a Context other than the selected one, reports `refused`, and resolves every sent `create()` with the captured
   `iri` (tests comparing the outcome with `toEqual` need the `iri` or

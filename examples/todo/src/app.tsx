@@ -19,7 +19,8 @@ import {
   useWorkflowAccess,
 } from '@sempods/app-sdk/react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
-import { emptyTask, taskFields } from './domain.js';
+import type { Snapshot } from '@sempods/client-sdk/edit';
+import { emptyTask, taskFields, type Task } from './domain.js';
 
 function TaskScreen() {
   const de = useSdkLocale().language === 'de';
@@ -35,6 +36,8 @@ function TaskScreen() {
   // again; LoadNotice says what the read does and offers a retry.
   const list = useList(taskFields);
   const tasks = list.data?.items;
+  // One hook for the list; it keeps a write lane per task, so a tick locks
+  // only its row, and an unresolved one survives the row being gone.
   const mutate = useFieldUpdate(taskFields);
   const creation = useCreation(taskFields, {
     initial: emptyTask,
@@ -59,32 +62,25 @@ function TaskScreen() {
   return (
     <section aria-label={m.tasks}>
       <LoadNotice {...list} />
-      {/* The new or changed row is the confirmation; problems still show. */}
-      <UpdateNotice {...mutate.notice} quiet />
       {tasks?.length === 0 && <p className="empty">{m.empty}</p>}
       <ul className="tasks">
         {tasks?.map((item) => (
-          <li key={item.iri} className={item.data.done ? 'done' : undefined}>
-            <input
-              type="checkbox"
-              aria-label={`${m.done}: ${item.data.title}`}
-              checked={item.data.done}
-              disabled={!mutate.canMutate}
-              onChange={() =>
-                void mutate.update(item, { done: !item.data.done })
-              }
-            />
-            {/* The title opens the row's editor in its place. */}
-            {selected === item.iri ? (
-              editing
-            ) : (
-              <button className="title" onClick={() => void select(item.iri)}>
-                {item.data.title}
-              </button>
-            )}
-          </li>
+          <TaskRow
+            key={item.iri}
+            item={item}
+            mutate={mutate}
+            doneLabel={m.done}
+            editing={selected === item.iri ? editing : null}
+            onOpen={() => void select(item.iri)}
+          />
         ))}
       </ul>
+      {/* An unresolved tick whose task left the list keeps its recovery. */}
+      {mutate.unresolved
+        .filter((iri) => !tasks?.some((item) => item.iri === iri))
+        .map((iri) => (
+          <UpdateNotice key={iri} {...mutate.noticeFor(iri)} />
+        ))}
       {/* A row that left the list (deleted elsewhere) keeps its editor. */}
       {selected && !tasks?.some((item) => item.iri === selected) && editing}
       <UpdateNotice {...creation.notice} quiet />
@@ -116,6 +112,44 @@ function TaskScreen() {
         </button>
       </form>
     </section>
+  );
+}
+
+/**
+ * One task: a checkbox to finish it and its title to edit it. Its tick locks
+ * only this row, and a problem with it shows right here. The changed row is
+ * the confirmation.
+ */
+function TaskRow({
+  item,
+  mutate,
+  doneLabel,
+  editing,
+  onOpen,
+}: {
+  readonly item: Snapshot<Task>;
+  readonly mutate: ReturnType<typeof useFieldUpdate<Task>>;
+  readonly doneLabel: string;
+  /** The row's editor while it is open; the title opens it in its place. */
+  readonly editing: ReactNode;
+  readonly onOpen: () => void;
+}) {
+  return (
+    <li className={item.data.done ? 'done' : undefined}>
+      <input
+        type="checkbox"
+        aria-label={`${doneLabel}: ${item.data.title}`}
+        checked={item.data.done}
+        disabled={!mutate.canMutateFor(item)}
+        onChange={() => void mutate.update(item, { done: !item.data.done })}
+      />
+      {editing ?? (
+        <button className="title" onClick={onOpen}>
+          {item.data.title}
+        </button>
+      )}
+      <UpdateNotice {...mutate.noticeFor(item)} quiet />
+    </li>
   );
 }
 

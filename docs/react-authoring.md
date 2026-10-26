@@ -683,6 +683,22 @@ For a refusal, inspect `problem.status`; for `problem.kind === 'failure'`,
 pass a present `problem.failure` to `describeFailure`. Unconfirmed writes
 remain unconfirmed and carry no failure that would imply they were not sent.
 
+`useFieldUpdate` keeps one write lane per resource, held by the hook rather
+than by a row. Rows of a list are separate resources, so use one hook for the
+list and ask per row: `disabled={!mutate.canMutateFor(item)}` and
+`<UpdateNotice {...mutate.noticeFor(item)} quiet />`, as the
+[TODO example's `TaskRow`](../examples/todo/src/app.tsx) does. Ticking one task
+then locks only that row, and a refusal or an unconfirmed answer shows at that
+row. Because the lane lives in the hook, an unresolved write and its leave
+guard stay while the row is not rendered, for example during lost read
+access, and return with the row. `unresolved` lists the IRIs whose write still
+needs a check; show `noticeFor(iri)` outside the list for those without a row,
+for example a task deleted elsewhere, as the TODO example does. Do not give
+each row a hook of its own: unmounting the row would drop its unresolved write.
+After the hook unmounts, `update`, `remove` and `create` send nothing. `canMutate`, `outcome`,
+`notice` and `acknowledge` keep their list-wide meaning (false while any
+resource's write is pending or unresolved; the latest write's feedback).
+
 `useCreation(definition, { initial, collection })` owns a typed draft, partial
 `change`, `create`, `canCreate`, `canEdit` and `notice`. The initial draft should
 be blank for the app's form; inline equivalent values are allowed. Changes are

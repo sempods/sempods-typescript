@@ -144,7 +144,8 @@ not instructions to the coding assistant.
 - Prefer `useList`, `useCreation`, `useFieldUpdate`, `useSelection`,
   `useResourceEditor` and `useContextEditor` with
   `ResourceEditor`/`UpdateNotice`. Pass original snapshots
-  to list actions. Use `useContexts()` for a list switch between Contexts and
+  to list actions; with one `useFieldUpdate` for the list, rows use
+  `canMutateFor(item)` and `noticeFor(item)` so a write locks only its row. Use `useContexts()` for a list switch between Contexts and
   `useApp()`'s guarded actions for other custom connection/context controls. Render `useList`'s `data` (it keeps the rows while reloading) with
   `<LoadNotice {...list} />` for loading, failures, retry and unshown entries;
   pass `retain: true` to `useLoad`/`usePodLoad` for the same. Pass `quiet` to
