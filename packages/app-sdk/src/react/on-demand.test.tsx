@@ -172,7 +172,7 @@ it('starts a Pod overview with no catalogue, labels or Context access, and opens
     within(access)
       .getAllByRole('listitem')
       .map((item) => item.textContent),
-  ).toEqual(['workThis app can read and change', 'personalThis app can read']);
+  ).toEqual(['workRead and write', 'personalRead only']);
   expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
   expect(f.count('/_system/contexts')).toBe(1);

@@ -152,8 +152,8 @@ In on-demand mode, opening it also demands Context discovery. Pod/context change
 through the same leave guards.
 
 Management shows the connected Pod first: its name, then the Context and what
-this app may do there (**This app can read** or **This app can read and
-change**): one readable, selected Context by name, several in the **Data
+this app may do there (**Read only** or **Read and write**), set off below
+the Pod: one readable, selected Context by name, several in the **Data
 context** chooser with the chosen one's access beside it. Without a selection
 (on-demand management) **Available to this app** lists each readable Context
 with its access. Then come **Change sharing** and **Sign out** with the note that

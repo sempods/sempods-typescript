@@ -1447,7 +1447,7 @@ it.each(['en', 'de'] as const)(
     });
     expect(
       await within(region).findByText(
-        de ? 'Diese App kann lesen und ändern' : 'This app can read and change',
+        de ? 'Lesen und schreiben' : 'Read and write',
       ),
     ).toBeTruthy();
     // Only the first catalogue, and no request for any Context but the
@@ -1715,7 +1715,7 @@ it('names one readable, selected Context with its access instead of a choice', a
     </SempodsProvider>,
   );
   await act(async () => logged.runtime.selectContext(logged.id, work));
-  expect(await screen.findByText('This app can read')).toBeTruthy();
+  expect(await screen.findByText('Read only')).toBeTruthy();
   expect(screen.getByText('work', { exact: false })).toBeTruthy();
   expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
 });
@@ -1790,11 +1790,11 @@ it('keeps the known Context while the management dialog checks access again', as
   await waitFor(() => expect(f.count('/_system/contexts')).toBe(3));
   // The reload is pending: the same line stays, and neither a chooser nor
   // an "access unknown" notice appears meanwhile.
-  expect(screen.getByText('This app can read')).toBeTruthy();
+  expect(screen.getByText('Read only')).toBeTruthy();
   expect(screen.queryByRole('combobox')).toBeNull();
   expect(screen.queryByText(/Access is unknown/)).toBeNull();
   await act(async () => held.resolve(catalogue([work], [])));
-  expect(screen.getByText('This app can read')).toBeTruthy();
+  expect(screen.getByText('Read only')).toBeTruthy();
   expect(screen.queryByRole('combobox')).toBeNull();
 });
 

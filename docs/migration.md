@@ -143,8 +143,8 @@ Check these points:
   nothing for a confirmed save, creation or deletion; problems and unconfirmed
   outcomes still show.
 - **Management shows the connected Pod first.** With `open`, `AppAccess` lists
-  the connected Pod, its readable Contexts with **This app can read** / **This
-  app can read and change**, then the actions and **Full addresses**; signing in
+  the connected Pod, its readable Contexts with **Read only** / **Read and
+  write**, then the actions and **Full addresses**; signing in
   to another Pod moved to a collapsed **Connect another Pod** at the end.
   End-to-end tests that fill **Pod address** in management first expand that
   section. New message keys `controls.contextAccess`, `canRead`, `canChange`
