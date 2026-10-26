@@ -440,6 +440,8 @@ const lists = useContexts();
 // lists.selected: the selected one or null
 // lists.select(iri): guarded; resolves false when refused or not selectable
 // lists.loading / lists.failed / lists.retry(): catalogue state
+// lists.canShare / lists.share(): ask the Pod to share more Contexts
+// lists.shareProblem: why the last share failed before the Pod, or null
 ```
 
 It loads the catalogue in both `contextSelection` modes, reads the labels of
@@ -456,7 +458,9 @@ the selected Context with its access. Sign-in, recovery, **Change sharing** and
 **Sign out** stay in `AppAccess`. The
 [TODO example](../examples/todo/src/app.tsx) puts the switch in its header:
 the list name as the title and, with several lists, a menu with the lists, a
-"read only" hint and **Share more lists** (`useApp().authorize`).
+"read only" hint and **Share more lists** (`lists.share()`, which opens the
+Pod's consent page under the leave policy; `lists.shareProblem` is the
+localized reason when that fails before reaching the Pod).
 
 ## Pod overviews with Contexts on-demand
 
@@ -1082,7 +1086,27 @@ call raw runtime selection directly. Later access loss or management toggles
 retain mounted content and its drafts. For a layout without `AppAccess`, see
 [custom layouts](#custom-layouts-without-appaccess).
 
-Override text with `messages={{ controls: { save: translate('save') } }}` or supply
+The app's own texts follow the same language with `useMessages`. Define one
+catalogue outside the components; German is optional, but when given it needs
+every key, so a missing translation does not compile:
+
+```tsx
+const text = {
+  en: { add: 'Add', left: (n: number) => `${n} left` },
+  de: { add: 'Hinzufügen', left: (n: number) => `${n} offen` },
+};
+
+function Composer() {
+  const m = useMessages(text);
+  return <button>{m.add}</button>;
+}
+```
+
+Reuse the SDK's own texts where they fit (`useSdkLocale().messages.controls`,
+for example `remove` for a delete button's name) instead of translating them
+again.
+
+Override SDK text with `messages={{ controls: { save: translate('save') } }}` or supply
 individual message functions. Changes retranslate in place. `language` selects
 EN/DE messages, `locale`/`timeZone` control formatting, and `direction` controls
 direction. RDF text language is selected explicitly in domain field definitions;

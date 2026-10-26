@@ -1,4 +1,4 @@
-export { SdkLocaleProvider, useSdkLocale } from './locale.js';
+export { SdkLocaleProvider, useMessages, useSdkLocale } from './locale.js';
 export { AppAccess } from './access.js';
 export type { AppAccessProps, ConnectionsProps } from './access.js';
 export {

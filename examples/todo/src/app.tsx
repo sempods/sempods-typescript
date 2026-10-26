@@ -8,7 +8,6 @@ import {
   UnresolvedNotices,
   UpdateNotice,
   SempodsProvider,
-  useApp,
   useAppState,
   useContexts,
   useFieldUpdate,
@@ -17,25 +16,46 @@ import {
   useSelection,
   TargetScreen,
   useResourceEditor,
+  useMessages,
   useSdkLocale,
-  useWorkflowAccess,
   type ContextList,
   type FieldUpdateRow,
 } from '@sempods/app-sdk/react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
 import { emptyTask, taskFields, type Task } from './domain.js';
 
+/** The app's own texts; the SDK's controls bring theirs. */
+const text = {
+  en: {
+    tasks: 'Tasks',
+    task: 'Task',
+    newTask: 'New task',
+    add: 'Add',
+    done: 'Done',
+    empty: 'No tasks yet.',
+    menu: 'Menu',
+    language: 'Language',
+    description: 'Tasks, stored in a Pod.',
+    readOnly: 'read only',
+    shareMore: 'Share more lists',
+  },
+  de: {
+    tasks: 'Aufgaben',
+    task: 'Aufgabe',
+    newTask: 'Neue Aufgabe',
+    add: 'Hinzufügen',
+    done: 'Erledigt',
+    empty: 'Noch keine Aufgaben.',
+    menu: 'Menü',
+    language: 'Sprache',
+    description: 'Aufgaben, gespeichert in einem Pod.',
+    readOnly: 'nur lesen',
+    shareMore: 'Weitere Listen freigeben',
+  },
+};
+
 function TaskScreen() {
-  const de = useSdkLocale().language === 'de';
-  const m = {
-    tasks: de ? 'Aufgaben' : 'Tasks',
-    task: de ? 'Aufgabe' : 'Task',
-    newTask: de ? 'Neue Aufgabe' : 'New task',
-    add: de ? 'Hinzufügen' : 'Add',
-    done: de ? 'Erledigt' : 'Done',
-    remove: de ? 'Löschen' : 'Delete',
-    empty: de ? 'Noch keine Aufgaben.' : 'No tasks yet.',
-  };
+  const m = useMessages(text);
   // The rows stay while the list reloads, also when the page becomes visible
   // again; LoadNotice says what the read does and offers a retry.
   const list = useList(taskFields);
@@ -72,8 +92,6 @@ function TaskScreen() {
           <TaskRow
             key={item.iri}
             row={mutate.for(item)}
-            doneLabel={m.done}
-            removeLabel={m.remove}
             editing={selected === item.iri ? editing : null}
             onOpen={() => void select(item.iri)}
           />
@@ -120,25 +138,23 @@ function TaskScreen() {
  */
 function TaskRow({
   row,
-  doneLabel,
-  removeLabel,
   editing,
   onOpen,
 }: {
   /** This task in the list's write lanes: what to show, its lock, notice and commands. */
   readonly row: FieldUpdateRow<Task>;
-  readonly doneLabel: string;
-  readonly removeLabel: string;
   /** The row's editor while it is open; the title opens it in its place. */
   readonly editing: ReactNode;
   readonly onOpen: () => void;
 }) {
+  const m = useMessages(text);
+  const { remove } = useSdkLocale().messages.controls;
   const task = row.data;
   return (
     <li className={task.done ? 'done' : undefined}>
       <input
         type="checkbox"
-        aria-label={`${doneLabel}: ${task.title}`}
+        aria-label={`${m.done}: ${task.title}`}
         checked={task.done}
         disabled={!row.canMutate}
         onChange={() => void row.update({ done: !task.done })}
@@ -151,7 +167,7 @@ function TaskRow({
       {/* The open editor has its own Delete. */}
       {task.done && !editing && (
         <RemoveButton
-          label={`${removeLabel}: ${task.title}`}
+          label={`${remove}: ${task.title}`}
           disabled={!row.canMutate}
           onRemove={row.remove}
         />
@@ -203,13 +219,11 @@ function StandardScreen({
 }) {
   const [open, setOpen] = useState(false);
   const focusTarget = useRef<HTMLButtonElement>(null);
-  const { messages, language, error } = useSdkLocale();
+  const { messages, language } = useSdkLocale();
   const { view, connections } = useAppState();
   // Mounted before a list is chosen: it selects one, so no chooser appears.
   const lists = useContexts();
-  // Preparing the Pod's consent can fail (unreachable Pod); say so here.
-  const [shareFailure, setShareFailure] = useState<{ cause: unknown }>();
-  const de = language === 'de';
+  const m = useMessages(text);
   // Language names in the current language: Deutsch/Englisch, German/English.
   const names = useMemo(
     () => new Intl.DisplayNames([language], { type: 'language' }),
@@ -222,7 +236,7 @@ function StandardScreen({
         {view && (
           <>
             {icon}
-            <ListSwitch lists={lists} onShareFailed={setShareFailure} />
+            <ListSwitch lists={lists} />
           </>
         )}
         {/* A native popover: the browser closes it on Escape or outside. */}
@@ -230,8 +244,8 @@ function StandardScreen({
           ref={focusTarget}
           className="menu-button"
           popoverTarget="app-menu"
-          aria-label={de ? 'Menü' : 'Menu'}
-          title={de ? 'Menü' : 'Menu'}
+          aria-label={m.menu}
+          title={m.menu}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="5" r="1.8" />
@@ -251,7 +265,7 @@ function StandardScreen({
             </button>
           )}
           <p id="menu-language" className="menu-label">
-            {de ? 'Sprache' : 'Language'}
+            {m.language}
           </p>
           <div role="group" aria-labelledby="menu-language">
             {languages.map((code) => (
@@ -271,13 +285,12 @@ function StandardScreen({
           </div>
         </div>
       </header>
-      {shareFailure && <p role="alert">{error(shareFailure.cause)}</p>}
+      {/* Preparing the Pod's consent can fail (unreachable Pod); say so here. */}
+      {lists.shareProblem && <p role="alert">{lists.shareProblem}</p>}
       <AppAccess
         appName="TODO"
         icon={icon}
-        description={
-          de ? 'Aufgaben, gespeichert in einem Pod.' : 'Tasks, stored in a Pod.'
-        }
+        description={m.description}
         mode="single"
         open={open}
         onClose={() => setOpen(false)}
@@ -295,17 +308,8 @@ function StandardScreen({
  * The header's list switch: the chosen list's name, and with several lists a
  * menu to switch (under the leave policy) or to share more lists on the Pod.
  */
-function ListSwitch({
-  lists,
-  onShareFailed,
-}: {
-  readonly lists: ContextList;
-  /** Sharing more lists failed before reaching the Pod; undefined clears it. */
-  readonly onShareFailed: (failure: { cause: unknown } | undefined) => void;
-}) {
-  const de = useSdkLocale().language === 'de';
-  const { authorize } = useApp();
-  const { connection } = useWorkflowAccess();
+function ListSwitch({ lists }: { readonly lists: ContextList }) {
+  const m = useMessages(text);
   const current = lists.selected;
   if (!current) return null;
   if (lists.contexts.length < 2) return <h1>{current.name}</h1>;
@@ -332,23 +336,18 @@ function ListSwitch({
               {list.iri === current.iri ? '✓' : ''}
             </span>
             {list.name}
-            {!list.writable && <small>{de ? 'nur lesen' : 'read only'}</small>}
+            {!list.writable && <small>{m.readOnly}</small>}
           </button>
         ))}
-        {connection && (
+        {lists.canShare && (
           <>
             <hr />
             <button
               popoverTarget="list-menu"
               popoverTargetAction="hide"
-              onClick={() => {
-                onShareFailed(undefined);
-                void authorize(connection.id).catch((cause: unknown) =>
-                  onShareFailed({ cause }),
-                );
-              }}
+              onClick={() => void lists.share()}
             >
-              {de ? 'Weitere Listen freigeben' : 'Share more lists'}
+              {m.shareMore}
             </button>
           </>
         )}

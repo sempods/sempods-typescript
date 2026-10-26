@@ -156,6 +156,11 @@ All points:
   render failures, conflicts and unconfirmed outcomes with `role="alert"`
   (confirmed successes keep `role="status"`); tests that found them by the
   `status` role look for `alert`.
+- **App texts and sharing.** `useMessages({ en, de })` returns the app's own
+  texts in the provider's language (German, when given, needs every key);
+  replace `language === 'de' ? … : …` in components. `useContexts()` returns
+  `canShare`, `share()` and a localized `shareProblem`; replace app code that
+  called `useApp().authorize` with its own error state.
 - **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
   question before it calls `onRemove`, for a delete in a list row with
   `useFieldUpdate`'s `remove`, shown as a quiet trash icon. Nothing existing

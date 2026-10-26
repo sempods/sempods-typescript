@@ -151,7 +151,8 @@ not instructions to the coding assistant.
   first). A command that sends nothing resolves `{ kind: 'not-sent', reason }`;
   never resend on another result. Render `<UnresolvedNotices of={mutate}
 shown={items} />` below the list, and declare text fields with `trim: true`
-  instead of trimming before `create()`. Use `useContexts()` for a list switch between Contexts and
+  instead of trimming before `create()`. Use `useContexts()` for a list switch between Contexts (with `share()` for
+  sharing more of them) and
   `useApp()`'s guarded actions for other custom connection/context controls. Render `useList`'s `data` (it keeps the rows while reloading) with
   `<LoadNotice {...list} />` for loading, failures, retry and unshown entries;
   pass `retain: true` to `useLoad`/`usePodLoad` for the same. Pass `quiet` to
@@ -170,7 +171,9 @@ shown={items} />` below the list, and declare text fields with `trim: true`
   bundles, logs, tests and prompts. Vite `VITE_*` values are public bundle content.
 - Build responsive screens with labelled controls and keyboard access. Separate
   UI language, content language and time zone. Reuse the SDK's localized feedback;
-  it follows the browser's language unless you pass `language`/`locale`.
+  it follows the browser's language unless you pass `language`/`locale`. Put
+  the app's own texts in one `useMessages({ en, de })` catalogue instead of
+  `language === 'de' ? … : …` in components.
 
 ## Work in small, demonstrable steps
 

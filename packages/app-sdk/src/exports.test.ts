@@ -49,6 +49,7 @@ it.each([
       'useFieldUpdate',
       'useList',
       'useLoad',
+      'useMessages',
       'usePodLoad',
       'useResourceEditor',
       'useSdkLocale',
