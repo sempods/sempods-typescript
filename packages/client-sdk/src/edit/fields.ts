@@ -517,11 +517,16 @@ function stored(field: Field, value: Value): Value {
 }
 
 /**
- * A draft as `fields()` stores it (text fields with `trim` without outer
- * whitespace), for comparing what should be on the Pod with what is there.
- * Other definitions keep the draft as it is.
+ * A draft as `fields()` stores it when written onto `base` (text fields with
+ * `trim` without outer whitespace; a value equal to `base`'s stays as it is,
+ * as the write leaves it), for comparing what should be on the Pod with what
+ * is there. Other definitions keep the draft as it is.
  */
-export function storedDraft<D>(definition: EditDefinition<D>, draft: D): D {
+export function storedDraft<D>(
+  definition: EditDefinition<D>,
+  draft: D,
+  base?: D | null,
+): D {
   if (
     !isFieldDefinition(definition) ||
     draft === null ||
@@ -531,9 +536,11 @@ export function storedDraft<D>(definition: EditDefinition<D>, draft: D): D {
   const values = draft as Record<string, unknown>;
   const next: Record<string, unknown> = { ...values };
   let changed = false;
+  const before = base as Record<string, unknown> | null | undefined;
   for (const [name, field] of Object.entries(
     definition.fields as Record<string, Field>,
   )) {
+    if (before && sameData(values[name], before[name])) continue;
     const value = stored(field, values[name] as Value);
     if (value !== values[name]) {
       next[name] = value;
