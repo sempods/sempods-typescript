@@ -111,6 +111,10 @@ An app that switches Contexts in its own UI, such as a list switch, uses
 `useContexts()`: readable Contexts with names and access, a guarded `select`,
 catalogue state and a default selection; `AppAccess` then shows no chooser.
 
+`useCreation(definition, { initial, collection, context })` creates in an
+explicit Context instead of the selected one; `bindCreation` does the same
+without React. Its draft stays across Context selection and row navigation.
+
 Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
 validated Context's label is fetched automatically; `loadContextLabels(id, iris)`
 on the runtime or `useApp()` reads up to 20 more on demand. Labels never gate
