@@ -921,6 +921,7 @@ const styles = `
 [data-sempods-access] label { display:block; text-align:start; margin:18px 0; }
 [data-sempods-access] input, [data-sempods-access] select { display:block; width:100%; min-width:0; margin:8px 0; font:inherit; color:inherit; background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:4px; padding:12px; min-height:46px; }
 [data-sempods-access] input { border-width:0 0 1px; border-radius:0; padding-inline:0; }
+[data-sempods-access] select { appearance:none; border-width:0 0 1px; border-radius:0; padding:12px 24px 12px 0; cursor:pointer; background-image:linear-gradient(45deg,transparent 50%,var(--sp-muted) 50%),linear-gradient(135deg,var(--sp-muted) 50%,transparent 50%); background-position:calc(100% - 10px) 50%,calc(100% - 5px) 50%; background-size:5px 5px; background-repeat:no-repeat; }
 [data-sempods-access] input::placeholder { color:var(--sp-muted); opacity:1; }
 [data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:5px; color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }
 [data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-on-accent); background:var(--sp-accent); }
