@@ -15,10 +15,30 @@ upgrade both packages together.
 other browsers; add `problem` to hand-built failure outcomes; handle the
 session kind `leaving` in exhaustive switches; drop app-side `valid` filters
 over list items; compare creation outcomes with `toMatchObject` (they now
-carry `iri`); find editor and dialog buttons by name, not position. The other
-points add options or change the look.
+carry `iri`); find editor and dialog buttons by name, not position. Also replace direct row-hook commands and state as described below.
 
 All points:
+
+- **One row mutation API (needs action).** `useFieldUpdate` now returns only
+  `{ for, unresolved }`, matching `useContextUpdate`. Replace
+  `mutate.update(item, change)` with `mutate.for(item).update(change)` and
+  `mutate.remove(item)` with `mutate.for(item).remove()`. Read `row.canMutate`
+  and `row.notice`; hook-level `canMutate`, `busy`, `outcome`, `operation`,
+  `notice` and `acknowledge` are removed. For recovery, check and acknowledge
+  `row.notice` or render `UpdateNotice`; use `UnresolvedNotices` for missing
+  rows. `for(iri)` is recovery-only and always has `canMutate: false`.
+  `unresolved` excludes pending writes and cannot replace availability checks.
+  Neither row hook guarantees stable wrapper/command identities.
+- **Creation has one form API (needs action for direct `mutate.create`).**
+  Replace typed `mutate.create(iri, definition, draft)` with
+  `useCreation(definition, { initial, iri })`, edit through `change`, then
+  call `create()`. Supply exactly one of `iri` and `collection`; `bindCreation`
+  accepts the same choice. Fixed-IRI creation remains create-only, retains its
+  captured IRI/body on retry and uses the standard checked recovery flow.
+  The raw `mutate.create(iri, body)` overload is removed deliberately. Raw
+  JSON-LD remains available via portable `client-sdk/edit.prepareCreation`,
+  whose caller must own draft/leave guards and recovery UI; it is not an
+  equivalent controller-managed replacement.
 
 - **Edit failure details.** Hand-built `UpdateOutcome`, `RemoveSnapshotOutcome`
   and `CreateOutcome` failures now need `problem`, for example
@@ -150,19 +170,18 @@ All points:
   `mutate.for(iri).notice` for a row that left the list. After a confirmed
   update, the snapshot it was made from stays locked until the list reads
   again.
-  `canMutate`, `outcome`, `notice` and `acknowledge` keep their list-wide
-  meaning. A write for another resource is no longer refused while one is
-  pending or unresolved; apps that disable on `canMutate` behave as before.
-- **Mutation results are never `undefined` (needs action).** `update`,
-  `remove` and `create` of `useFieldUpdate`, and `useCreation`'s `create`,
+  A write for another resource is no longer refused while one is pending or
+  unresolved. Availability and feedback belong to each row (see migration above).
+- **Mutation results are never `undefined` (needs action).** row `update` and
+  `remove`, and `useCreation`'s `create`,
   resolve `{ kind: 'not-sent', reason }` when they send nothing
   (`unavailable`, `busy`, `unresolved`, `stale`, `invalid`, `ended`) and
   otherwise the sent write's outcome, also when the target ended meanwhile (it
   was `undefined`). Replace checks for `undefined`. A batch stops at the first
   result that is not `created`; only an item not sent because the target
   `ended` returns to the input.
-- **Stable commands, more types, `data` on loads.** Hook commands keep their
-  identity for one target and definition. New exported types: `FieldUpdate`,
+- **Stable commands, more types, `data` on loads.** Creation, list and selection commands keep
+  their identity for one target and definition; row wrappers do not promise it. New exported types: `FieldUpdate`,
   `FieldUpdateRow`, `FieldUpdateState`, `FieldUpdateNotice`, `NotSent`,
   `ContextList`. `useLoad` and `usePodLoad` return `data` like `useList`.
   `locale` and `language` accept `undefined` (same as leaving them out).

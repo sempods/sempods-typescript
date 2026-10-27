@@ -77,6 +77,30 @@ function Draft() {
     </>
   );
 }
+function KnownIri() {
+  const creation = useCreation(task, {
+    initial: { title: '' },
+    iri: 'urn:packed-settings',
+  });
+  return (
+    <>
+      <input
+        aria-label="Settings title"
+        value={creation.draft.title}
+        disabled={!creation.canEdit}
+        onChange={(event) => creation.change({ title: event.target.value })}
+      />
+      <button
+        disabled={!creation.canCreate}
+        onClick={() => void creation.create()}
+      >
+        Create settings
+      </button>
+      <output aria-label="Settings outcome">{creation.outcome?.kind}</output>
+      <UpdateNotice {...creation.notice} />
+    </>
+  );
+}
 const named = fields({
   title: text('https://schema.org/name', { language: 'en' }),
 });
@@ -163,6 +187,7 @@ function Evidence() {
           />
           <TargetScreen>
             <Draft />
+            {identity === 'preset' && <KnownIri />}
           </TargetScreen>
         </>
       ) : (
@@ -186,6 +211,7 @@ function Evidence() {
           />
           <TargetScreen>
             <Draft />
+            {identity === 'preset' && <KnownIri />}
           </TargetScreen>
         </>
       )}

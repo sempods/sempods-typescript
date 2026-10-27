@@ -30,7 +30,7 @@ import {
   useApp,
   useAppState,
   useResourceEditor,
-  useFieldUpdate,
+  useCreation,
   useDraftGuard,
   UpdateNotice,
   CallbackNotice,
@@ -288,7 +288,10 @@ it('keeps an uncertain creation and unrelated draft after confirmed same-view ro
   const f = await connected();
   f.setResource(async () => new Response(null, { status: 202 }));
   function Rows() {
-    const mutation = useFieldUpdate(definition);
+    const mutation = useCreation(definition, {
+      iri: 'urn:new',
+      initial: { title: 'New' },
+    });
     const app = useApp();
     const [row, setRow] = useState('A');
     const [title, setTitle] = useState('New task');
@@ -297,16 +300,7 @@ it('keeps an uncertain creation and unrelated draft after confirmed same-view ro
     useDraftGuard(Boolean(rowDraft), () => setRowDraft(''), 'local');
     return (
       <>
-        <button
-          onClick={() =>
-            void mutation.create('urn:new', {
-              '@id': 'urn:new',
-              'urn:name': [{ '@value': 'New' }],
-            })
-          }
-        >
-          Create
-        </button>
+        <button onClick={() => void mutation.create()}>Create</button>
         <button onClick={() => void app.navigate(() => setRow('B'))}>
           Other row
         </button>
@@ -314,11 +308,7 @@ it('keeps an uncertain creation and unrelated draft after confirmed same-view ro
         <p>{title}</p>
         <p>{rowDraft}</p>
         <p>{mutation.outcome?.kind ?? 'No outcome'}</p>
-        <UpdateNotice
-          outcome={mutation.outcome}
-          onCheck={async () => true}
-          onAcknowledge={mutation.acknowledge}
-        />
+        <UpdateNotice {...mutation.notice} />
       </>
     );
   }
@@ -341,6 +331,7 @@ it('keeps an uncertain creation and unrelated draft after confirmed same-view ro
   expect(
     (screen.getByText('I have checked the pod') as HTMLButtonElement).disabled,
   ).toBe(true);
+  f.setResource(async () => new Response(null, { status: 404 }));
   fireEvent.click(screen.getByText('Check current version'));
   await waitFor(() =>
     expect(
@@ -377,6 +368,7 @@ it.each(['success', 'failure'] as const)(
       </SempodsProvider>
     );
     const mounted = render(ui(first));
+    f.setResource(async () => new Response(null, { status: 404 }));
     fireEvent.click(screen.getByText('Check current version'));
     // Discard the first operation, then show a second uncertain operation.
     mounted.rerender(ui(null));
@@ -801,16 +793,13 @@ it.each(['en', 'de'] as const)(
     const f = await connected();
     f.setResource(async () => new Response(null, { status: 202 }));
     function Creation() {
-      const mutation = useFieldUpdate(definition);
+      const mutation = useCreation(definition, {
+        iri: 'urn:new',
+        initial: { title: 'New' },
+      });
       return (
         <>
-          <button
-            onClick={() =>
-              void mutation.create('urn:new', { '@id': 'urn:new' })
-            }
-          >
-            Create
-          </button>
+          <button onClick={() => void mutation.create()}>Create</button>
           <p>{mutation.outcome?.kind}</p>
         </>
       );

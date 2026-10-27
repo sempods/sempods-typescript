@@ -88,8 +88,6 @@ export class Lane<D> {
   uncertain = false;
   /** Its group retired: it never updates again (`holds` may only pause). */
   private retired = false;
-  /** Counts the writes started on this lane, by any hook. */
-  writes = 0;
   state: {
     outcome: MutationOutcome<D> | null;
     operation: 'create' | 'update' | 'remove';
@@ -195,7 +193,6 @@ export class Lane<D> {
     const refused = this.refusal(subject);
     if (refused) return notSent(refused);
     const version = ++this.version;
-    this.writes++;
     this.pending = true;
     this.checked = false;
     this.absent = false;

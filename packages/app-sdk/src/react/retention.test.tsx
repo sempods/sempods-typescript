@@ -92,7 +92,7 @@ async function setup(retain?: boolean) {
       <>
         <LoadNotice {...list} />
         <UpdateNotice {...creation.notice} quiet />
-        <UpdateNotice {...update.notice} quiet />
+        <UpdateNotice {...update.for('urn:one').notice} quiet />
         <output aria-label="state">{list.state.kind}</output>
         <ul>
           {list.data?.items.map((row) => (
@@ -214,7 +214,7 @@ it('still shows an unconfirmed row update with quiet success, never replayed', a
         url.includes('/_system/resources/') && init?.method === 'PATCH',
     ).length;
   await act(async () => {
-    await s.api().update.update(first, { done: true });
+    await s.api().update.for(first).update({ done: true });
   });
   expect(writes()).toBe(1);
   expect(await screen.findByText(/The result is unconfirmed/)).toBeTruthy();

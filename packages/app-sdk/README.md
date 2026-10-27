@@ -123,6 +123,8 @@ catalogue state and a default selection; `AppAccess` then shows no chooser.
 `useCreation(definition, { initial, collection, context })` creates in an
 explicit Context instead of the selected one; `bindCreation` does the same
 without React. Its draft stays across Context selection and row navigation.
+For create-only writes at a known subject IRI, replace `collection` with `iri`
+in either API. Supply exactly one address choice.
 
 Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
 validated Context's label is fetched automatically; `loadContextLabels(id, iris)`
