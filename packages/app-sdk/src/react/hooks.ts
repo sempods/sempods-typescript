@@ -1320,8 +1320,10 @@ export function useCreation<D extends object>(
         const absent = mutation.absent();
         // On the command held with the acknowledged lane, so every form of
         // this name holds it too, also one of a later generation going back.
+        // Present, it is settled there, also when this form has moved on.
         const kept = mutation.held() as HeldCreation<D> | null;
         if (absent && kept) kept.retry = true;
+        else if (kept) mutation.settle(kept);
         mutation.acknowledge();
         if (!absent) reset();
       },

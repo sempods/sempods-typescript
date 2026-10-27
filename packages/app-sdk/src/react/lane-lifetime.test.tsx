@@ -701,3 +701,26 @@ it('an absence acknowledged from an earlier generation still holds the item for 
   });
   expect(s.puts).toEqual([iri, iri]);
 });
+
+it('a presence acknowledged from an earlier generation clears the other forms', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0]!;
+  act(() => s.api.showLate(true));
+  await waitFor(() => expect(s.api.late?.draft.title).toBe('Mine'));
+  s.present.add(iri);
+  const notice = s.api.creation.notice;
+  await act(async () => {
+    expect(await notice.onCheck()).toBe(true);
+  });
+  // The form moves to another definition before the kept handler acknowledges.
+  act(() => s.api.note(true));
+  await waitFor(() => expect(s.api.creation.outcome).toBeNull());
+  act(() => notice.onAcknowledge());
+  // The other form of the collection never sends the acknowledged item again.
+  await waitFor(() => expect(s.api.late?.draft.title).toBe(''));
+});
