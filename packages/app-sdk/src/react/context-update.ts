@@ -139,23 +139,22 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     contexts.set(context, found);
     return found;
   };
+  // Through the group the row was rendered with: its own lifetime check
+  // ends a command kept past another connection or target, also before this
+  // screen renders again (never a fresh lookup for the connection now).
   const run = (
-    context: string,
+    group: LaneGroup<D> | null,
     iri: string,
     operation: 'update' | 'remove',
     action: (target: BoundView) => Promise<MutationOutcome<D>>,
     subject?: Snapshot<D>,
     after?: D,
   ): Promise<MutationOutcome<D> | NotSent> => {
-    if (!shown.current) return Promise.resolve(notSent('ended'));
-    const view = bindOrRefuse(app, activeId, context);
-    if (!view || view === 'refused')
-      return Promise.resolve(notSent('unavailable'));
+    if (!shown.current || (group && !group.holds()))
+      return Promise.resolve(notSent('ended'));
+    if (!group) return Promise.resolve(notSent('unavailable'));
     // A refused write sends nothing and keeps the resource's recovery.
-    return store
-      .group(view, name, definition, 'explicit')
-      .lane(iri)
-      .execute(operation, iri, action, subject, after);
+    return group.lane(iri).execute(operation, iri, action, subject, after);
   };
 
   function rowFor(item: PodListItem<D>): ContextUpdateRow<D>;
@@ -188,7 +187,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
       data: spentData<D>(snapshot) ?? snapshot.data,
       update: (change: Partial<D>) =>
         run(
-          context,
+          group,
           iri,
           'update',
           (v) => updateFields(v, snapshot, definition, change),
@@ -196,7 +195,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
           changedData(snapshot.data, change),
         ) as Promise<UpdateOutcome<D> | NotSent>,
       remove: () =>
-        run(context, iri, 'remove', (v) =>
+        run(group, iri, 'remove', (v) =>
           removeSnapshot(v, snapshot, definition),
         ) as Promise<RemoveSnapshotOutcome<D> | NotSent>,
     } satisfies ContextUpdateRow<D>;

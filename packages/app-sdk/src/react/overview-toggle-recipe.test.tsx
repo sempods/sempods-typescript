@@ -20,6 +20,7 @@ import {
   usePodList,
   type PodListItem,
 } from './index.js';
+import { useController } from './app.js';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
 import type { BrowserRuntime } from '../runtime/types.js';
 import {
@@ -398,6 +399,11 @@ it('offers its rows again once a guarded change that re-rendered them ends', asy
 function harness() {
   const api = {} as {
     app: ReturnType<typeof useApp>;
+    controller: ReturnType<typeof useController>;
+    rows: Record<
+      string,
+      { update(change: { done: boolean }): Promise<unknown> }
+    >;
     overview: ReturnType<
       typeof useContextUpdate<{
         readonly title: string;
@@ -408,12 +414,15 @@ function harness() {
   };
   function Rows() {
     api.app = useApp();
+    api.controller = useController();
+    api.rows = {};
     const list = usePodList(task);
     const overview = (api.overview = useContextUpdate(task));
     return (
       <ul>
         {list.data?.items.map((item) => {
           const row = overview.for(item);
+          api.rows[row.data.title] = row;
           return (
             <li key={`${item.context} ${item.snapshot.iri}`}>
               <label>
@@ -507,4 +516,21 @@ it('follows a change of write access in a Context', async () => {
   });
   await waitFor(() => expect(f.box('Call Ann').disabled).toBe(true));
   expect(f.box('Buy milk').disabled).toBe(false);
+});
+
+it('a row command kept past a switch to another connection sends nothing', async () => {
+  const h = harness();
+  const f = await overview({ ui: h.ui });
+  const kept = h.api.rows['Buy milk']!;
+  // The controller switched before this screen rendered again.
+  const snapshot = h.api.controller.getSnapshot;
+  vi.spyOn(h.api.controller, 'getSnapshot').mockImplementation(() => ({
+    ...snapshot(),
+    activeId: 'another',
+  }));
+  expect(await kept.update({ done: true })).toEqual({
+    kind: 'not-sent',
+    reason: 'ended',
+  });
+  expect(f.writes).toEqual([]);
 });
