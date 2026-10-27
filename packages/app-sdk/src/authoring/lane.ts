@@ -5,8 +5,8 @@ import type {
   RemoveSnapshotOutcome,
   UpdateOutcome,
 } from '@sempods/client-sdk/edit';
-import type { AppController, LeaveGuard } from '../authoring/app.js';
-import { changed, started, succeeded } from '../authoring/changes.js';
+import type { AppController, LeaveGuard } from './app.js';
+import { changed, started, succeeded } from './changes.js';
 import type { BoundView } from '../runtime/view.js';
 
 export type MutationOutcome<D> =
@@ -48,7 +48,8 @@ export function withoutComparison<D>(
 /**
  * Internal: one mutation lane for one target. It captures its subject per
  * write; a retired lane (target or definition changed) never updates again.
- * React hooks read its fields when rendering and re-render on `notify`.
+ * React hooks read its fields when rendering and re-render on `notify`; it
+ * imports nothing from React, so a headless host can drive it too.
  */
 export class Lane<D> {
   pending = false;
