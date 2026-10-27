@@ -136,6 +136,7 @@ function AppContent() {
 }
 
 function Tasks() {
+  const { messages, error } = useSdkLocale();
   const list = useList(task);
   const creation = useCreation(task, {
     initial: { title: '', done: false },
@@ -164,9 +165,24 @@ function Tasks() {
       </form>
       <UpdateNotice {...creation.notice} />
       <UpdateNotice {...update.notice} />
-      {list.state.kind !== 'ready' && (
-        <p role="status">List: {list.state.kind}</p>
+      {list.state.kind === 'failed' && (
+        <p role="alert">{error(list.state.error)}</p>
       )}
+      {list.state.kind === 'loading' && (
+        <p role="status">{messages.controls.loading}</p>
+      )}
+      {list.state.kind === 'cancelled' && (
+        <p role="status">Loading was cancelled.</p>
+      )}
+      {list.state.kind === 'unavailable' && (
+        <p role="status">Tasks cannot be read right now.</p>
+      )}
+      <button
+        onClick={() => void list.reload()}
+        disabled={list.state.kind === 'loading'}
+      >
+        Reload tasks
+      </button>
       {list.state.kind === 'ready' && list.state.data.skipped > 0 && (
         <p>Unsupported entries: {list.state.data.skipped}</p>
       )}
@@ -213,6 +229,10 @@ the target starts, so the notices show the last action; unresolved outcomes stay
 acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
 [TODO example](../examples/todo/src/app.tsx) adds EN/DE and a custom layout.
+
+A failed list read shows the SDK's translated explanation. After restoring the
+connection, choose **Reload tasks** to try the read again; a failure is never
+shown as an empty list. This button only reads data, so it cannot repeat a write.
 
 Replace Vite's demo styles in `src/index.css` with a simple baseline for your
 app content. AppAccess supplies its own scoped login/recovery styles:

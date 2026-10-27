@@ -322,7 +322,9 @@ export function Resource({ iri }: { readonly iri: string }) {
 ```
 
 Render it as `<Resource key={iri} iri={iri} />`, or call `reload()` after the
-IRI changes. A CONSTRUCT needs no wrapping:
+IRI changes. Reads and retention options use the latest committed render;
+a suspended or abandoned render cannot change the active loader's inputs.
+A CONSTRUCT needs no wrapping:
 `useLoad((view, signal) => view.sparql.construct(query, { signal }))` is ready
 with the node array. `not-found` means absent or hidden in this Context; the
 two look the same.

@@ -4,6 +4,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   cp,
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -142,6 +143,42 @@ try {
   });
   const js = bundle.outputFiles.find((f) => f.path.endsWith('.js')).text;
   const css = bundle.outputFiles.find((f) => f.path.endsWith('.css')).text;
+  // Exercise the actual shipped quickstart, not a separately maintained screen.
+  const quickstartDir = join(temp, 'quickstart');
+  await mkdir(quickstartDir);
+  const quickstartGuide = await readFile(
+    join(temp, 'node_modules/@sempods/app-sdk/docs/quickstart.md'),
+    'utf8',
+  );
+  for (const [language, file] of [
+    ['ts', 'tasks.ts'],
+    ['tsx', 'App.tsx'],
+  ]) {
+    const source = quickstartGuide.match(
+      new RegExp('```' + language + '\\n([\\s\\S]*?)\\n```'),
+    )?.[1];
+    assert.ok(source, `Missing quickstart ${file}`);
+    await writeFile(join(quickstartDir, file), source);
+  }
+  const quickstart = await build({
+    stdin: {
+      contents:
+        "import { createRoot } from 'react-dom/client'; import App from './App'; createRoot(document.getElementById('root')).render(<App />);",
+      resolveDir: quickstartDir,
+      loader: 'tsx',
+    },
+    bundle: true,
+    platform: 'browser',
+    format: 'esm',
+    jsx: 'automatic',
+    write: false,
+    metafile: true,
+  });
+  assert.ok(
+    Object.keys(quickstart.metafile.inputs).every(
+      (path) => !path.startsWith(root + '/'),
+    ),
+  );
   const customized = await build({
     absWorkingDir: temp,
     entryPoints: ['customized.tsx'],
@@ -191,6 +228,7 @@ try {
   const worker = (await pwaFile('sw.js')).toString();
   // The installable variant replaces the plain TODO bundle at the same paths.
   let pwaMode = false;
+  let quickstartMode = false;
   let workerVersion = 'v1';
   const codes = new Map();
   const tasks = new Map();
@@ -232,6 +270,11 @@ try {
         });
         res.end(JSON.stringify(body));
       };
+      if (url.pathname === '/away') {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end('<h1>Another page</h1>');
+        return;
+      }
       if (
         [
           '/',
@@ -284,9 +327,11 @@ try {
       if (url.pathname === '/app.js') {
         res.writeHead(200, { 'content-type': 'text/javascript' });
         res.end(
-          pwaMode
-            ? pwa.outputFiles.find((f) => f.path.endsWith('.js')).text
-            : js,
+          quickstartMode
+            ? quickstart.outputFiles[0].text
+            : pwaMode
+              ? pwa.outputFiles.find((f) => f.path.endsWith('.js')).text
+              : js,
         );
         return;
       }
@@ -480,7 +525,127 @@ try {
   const pod = origin + '/alice';
   const work = pod + '/_system/contexts/work';
   const personal = pod + '/_system/contexts/personal';
+  // Full Chromium and its normal cache behavior: Playwright disables BFCache
+  // by default, and Headless Shell cannot establish this lifecycle evidence.
+  browser = await chromium.launch({
+    channel: 'chromium',
+    headless: true,
+    ignoreDefaultArgs: ['--disable-back-forward-cache'],
+  });
+  {
+    tasks.clear();
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error));
+    await page.addInitScript(() => {
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted)
+          document.documentElement.dataset.restores = String(
+            Number(document.documentElement.dataset.restores ?? 0) + 1,
+          );
+      });
+    });
+    let restores = 0;
+    async function returnFromCache() {
+      await page.goto(origin + '/away');
+      await page.goBack({ waitUntil: 'commit' });
+      await page.waitForFunction(
+        (expected) =>
+          Number(document.documentElement.dataset.restores) === expected,
+        ++restores,
+      );
+    }
+    await page.goto(origin + '/');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+    for (let i = 0; i < 2; i++) {
+      await returnFromCache();
+      await page
+        .getByRole('button', { name: 'Sign in', exact: true })
+        .waitFor();
+    }
+    await page.getByLabel('Pod address', { exact: true }).fill(pod);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Data context', { exact: true }).selectOption(work);
+    const input = page.getByLabel('Task', { exact: true }).first();
+    await input.fill('Before cache restore');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Before cache restore', exact: true })
+      .waitFor();
+    // The callback loaded another Document; its own restoration counter starts at zero.
+    restores = 0;
+    const before = writes;
+    await returnFromCache();
+    await page
+      .getByRole('button', { name: 'Before cache restore', exact: true })
+      .waitFor();
+    await input.fill('After cache restore');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'After cache restore', exact: true })
+      .waitFor();
+    assert.equal(writes, before + 1);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  }
+  console.log(
+    'Packed TODO BFCache: repeated native restoration, sign-in, durable session/context restore and one creation after return passed.',
+  );
+  await browser.close();
+  // Other scenarios retain their ordinary Playwright setup, including worker
+  // activation after closing all pages without cached Documents as clients.
   browser = await chromium.launch({ headless: true });
+  {
+    quickstartMode = true;
+    tasks.clear();
+    const iri = pod + '/tasks/recovered';
+    tasks.set(work + '|' + iri, {
+      context: work,
+      version: ++version,
+      body: {
+        '@id': iri,
+        '@type': [schema + 'Action'],
+        [schema + 'name']: [{ '@value': 'Recovered task' }],
+        [schema + 'actionStatus']: [
+          { '@id': schema + 'PotentialActionStatus' },
+        ],
+      },
+    });
+    const context = await browser.newContext({ locale: 'en-US' });
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error));
+    let reads = 0;
+    await page.route('**/alice/_system/sparql/query?*', (route) => {
+      reads++;
+      return reads === 1 ? route.abort('failed') : route.continue();
+    });
+    await page.goto(origin + '/');
+    await page.getByLabel('Pod address', { exact: true }).fill(pod);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByLabel('Data context', { exact: true }).selectOption(work);
+    const failure = page.getByRole('alert').filter({
+      hasText:
+        'The pod could not be reached. Check the connection and try again.',
+    });
+    await failure.waitFor();
+    assert.equal(reads, 1);
+    await page
+      .getByRole('button', { name: 'Reload tasks', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Recovered task', exact: true })
+      .waitFor();
+    assert.equal(await failure.count(), 0);
+    assert.equal(reads, 2);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+    quickstartMode = false;
+  }
+  console.log(
+    'Packed verbatim quickstart: explained network read failure, explicit retry and recovered task list passed.',
+  );
   // The documented default is the actual shell-free TODO, installed from tarballs.
   for (const language of ['en', 'de']) {
     tasks.clear();

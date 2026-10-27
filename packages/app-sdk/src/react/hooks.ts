@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -71,6 +72,14 @@ const unavailable = Object.freeze({ kind: 'unavailable' as const });
 function warn(message: string) {
   console.warn(`[@sempods/app-sdk] ${message}`);
 }
+/** Active operations see only inputs from a committed render. */
+function useCommitted<T>(value: T) {
+  const current = useRef(value);
+  useLayoutEffect(() => {
+    current.current = value;
+  }, [value]);
+  return current;
+}
 /** Structure of a `fields()` definition; `null` for any other definition. */
 function definitionKey(definition: unknown): string | null {
   if (!isFieldDefinition(definition as EditDefinition<unknown>)) return null;
@@ -117,18 +126,21 @@ function useDefinition<T>(input: T, hook: string) {
   const latest = useRef(definition);
   const warned = useRef(false);
   const key = structure ?? 'custom';
-  if (key === 'custom' && latest.current !== definition && !warned.current) {
-    warned.current = true;
-    warn(
-      `${hook}: a custom definition changed identity; the current editor or form keeps the one it started with. Keep custom definitions stable (module constant or useMemo), or remount for a different mapping.`,
-    );
-  }
-  latest.current = definition;
+  useLayoutEffect(() => {
+    if (key === 'custom' && latest.current !== definition && !warned.current) {
+      warned.current = true;
+      warn(
+        `${hook}: a custom definition changed identity; the current editor or form keeps the one it started with. Keep custom definitions stable (module constant or useMemo), or remount for a different mapping.`,
+      );
+    }
+    latest.current = definition;
+  }, [definition, hook, key]);
   return { key, latest, definition };
 }
 /**
  * Runs `read` for the current target. A new target gets a fresh loader; the
- * latest `read` is used on each (re)load, so an inline function never loops.
+ * latest committed `read` is used on each (re)load, so an inline function never loops.
+ * Suspended or abandoned renders never replace the active read inputs.
  * Call `reload()` after changing what `read` returns.
  */
 export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
@@ -174,11 +186,12 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   empty: LoadState<T> = loading,
   { retain = false }: LoadOptions = {},
 ) {
-  const latest = useRef(read);
-  latest.current = read;
+  const latest = useCommitted(read);
   // The loader reads it at each (re)load.
   const loaderOptions = useRef({ retain });
-  loaderOptions.current.retain = retain;
+  useLayoutEffect(() => {
+    loaderOptions.current.retain = retain;
+  }, [retain]);
   const [active, setActive] = useState<{
     view: H;
     loader: ReturnType<typeof createViewLoader<T, H>>;
@@ -196,7 +209,7 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     setActive({ view, loader });
     void loader.reload();
     return () => loader.dispose();
-  }, [view]);
+  }, [view, latest]);
   const loader = active?.view === view ? active.loader : null;
   const state: LoadState<T> = useSyncExternalStore(
     loader?.subscribe ?? noopSubscribe,
@@ -266,10 +279,9 @@ export function useList<D>(
     shown.current = read;
     void restart();
   }, [read, restart]);
-  const current = useRef({ view, read, cancelled: false });
-  if (current.current.view !== view || current.current.read !== read)
-    current.current = { view, read, cancelled: false };
-  const scope = current.current;
+  const [scope, setScope] = useState(() => ({ view, read, cancelled: false }));
+  if (scope.view !== view || scope.read !== read)
+    setScope({ view, read, cancelled: false });
   useEffect(() => {
     if (!view) return;
     return observeWrites(view, () => {
@@ -676,7 +688,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
   const app = useController();
   const access = useWorkflowAccess();
   const { key } = useDefinition(definition, 'useFieldUpdate');
-  const current = useRef({
+  // A render can prepare a new lane without retiring the committed one.
+  const makeLane = () => ({
     view,
     key,
     pending: false,
@@ -688,28 +701,9 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     uncertain: false,
     alive: true,
   });
-  if (current.current.view !== view || current.current.key !== key) {
-    const before = current.current;
-    // N3: a new definition for the same target starts a new lane; a pending or
-    // unresolved write of the old one loses its guard and feedback.
-    if (before.view === view && (before.pending || before.unresolved))
-      warn(
-        'The field definition changed while a write was pending or unresolved; its guard and feedback were dropped.',
-      );
-    current.current = {
-      view,
-      key,
-      pending: false,
-      unresolved: false,
-      checked: false,
-      absent: false,
-      iri: '',
-      version: 0,
-      uncertain: false,
-      alive: true,
-    };
-  }
-  const lane = current.current;
+  const [lane, setLane] = useState(makeLane);
+  if (lane.view !== view || lane.key !== key) setLane(makeLane());
+  const current = useRef(lane);
   const [state, setState] = useState<{
     lane: typeof lane;
     outcome: MutationOutcome<D> | null;
@@ -725,6 +719,20 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     /** Present, but the definition cannot read it. */
     unreadable: boolean;
   } | null>(null);
+  useLayoutEffect(() => {
+    const before = current.current;
+    if (
+      before !== lane &&
+      before.view === view &&
+      (before.pending || before.unresolved)
+    )
+      warn(
+        'The field definition changed while a write was pending or unresolved; its guard and feedback were dropped.',
+      );
+    current.current = lane;
+  }, [lane, view]);
+  // Suspense temporarily disconnects layout effects when hiding a mounted
+  // screen. Its commands and guards must keep their ordinary mount lifetime.
   useEffect(() => {
     lane.alive = true;
     let readable = true;
@@ -874,7 +882,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
     canMutate: Boolean(
       view &&
       access.write &&
-      eligible() &&
+      lane.alive &&
+      app.getSnapshot().view === view &&
       !lane.pending &&
       !lane.unresolved &&
       !app.getSnapshot().changing &&
@@ -918,6 +927,8 @@ function useMutation<D>(definition: FieldDefinition<D>) {
  * Losing read access clears comparison values (including `outcome.current`
  * and `desiredObserved`) and `notice.checked`. Regaining access needs a fresh
  * check. Write-only loss retains comparison evidence; neither loss replays a write.
+ * A new target or definition takes over only when its render commits; suspended
+ * or abandoned renders keep the active command, outcome and leave guard intact.
  *
  * All mutation methods return `undefined` both when nothing was sent and when
  * the target lifetime ended before completion. It is not proof that no write
@@ -982,8 +993,7 @@ export function useCreation<D extends object>(
   const view = useView();
   const { key } = useDefinition(definition, 'useCreation');
   const mutation = useMutation(definition);
-  const initial = useRef(options.initial);
-  initial.current = options.initial;
+  const initial = useCommitted(options.initial);
   const copy = (draft: D) => Object.freeze({ ...draft });
   const [state, setState] = useState(() => ({
     view,
@@ -992,23 +1002,27 @@ export function useCreation<D extends object>(
   }));
   const current = useRef(state);
   if (state.view !== view || state.key !== key) {
+    const next = { view, key, draft: copy(options.initial) };
+    setState(next);
+  }
+  useLayoutEffect(() => {
+    const before = current.current;
     if (
-      state.view === view &&
-      JSON.stringify(state.draft) !== JSON.stringify(options.initial)
+      before.view === state.view &&
+      before.key !== state.key &&
+      JSON.stringify(before.draft) !== JSON.stringify(initial.current)
     )
       warn(
         'useCreation: the field definition changed and the unsaved creation draft was reset.',
       );
-    const next = { view, key, draft: copy(options.initial) };
-    current.current = next;
-    setState(next);
-  } else current.current = state;
+    current.current = state;
+  }, [state, initial]);
   const command = useRef<{
     state: typeof state;
     creation: Creation;
     retry: boolean;
   } | null>(null);
-  const draft = current.current.draft;
+  const draft = state.draft;
   const reset = () => {
     if (current.current.view !== view || current.current.key !== key) return;
     const next = { view, key, draft: copy(initial.current) };
@@ -1072,7 +1086,8 @@ export function useCreation<D extends object>(
         !view ||
         !mutation.canMutate ||
         !valid(current.current.draft) ||
-        current.current.view !== view
+        current.current.view !== view ||
+        current.current.key !== key
       )
         return;
       const submitted = current.current;
@@ -1121,8 +1136,7 @@ export function useDraftGuard(
   scope: 'local' | 'target' | 'connection' = 'target',
 ) {
   const app = useController();
-  const latest = useRef({ dirty, discard });
-  latest.current = { dirty, discard };
+  const latest = useCommitted({ dirty, discard });
   useEffect(
     () =>
       app.register({
@@ -1131,6 +1145,6 @@ export function useDraftGuard(
         blocked: () => false,
         discard: () => latest.current.discard(),
       }),
-    [app, scope],
+    [app, scope, latest],
   );
 }

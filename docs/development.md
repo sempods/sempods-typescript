@@ -100,6 +100,17 @@ and page traffic stay on loopback. Chromium is the automated browser target; see
 The runnable TODO/Node examples and React authoring layer are described in
 [React/headless authoring](react-authoring.md).
 
+React regressions also exercise suspended and abandoned renders: the visible
+screen retains its read inputs, creation draft and unconfirmed-write guard;
+a later committed render can adopt new inputs. These supplement StrictMode
+checks, which alone do not exercise an interrupted update.
+
+`test:todo` includes a full Chromium run with back/forward caching enabled. The actual TODO
+entry survives repeated native cache restores, signs in afterwards and restores
+its durable session/Context before creating another task. It also bundles the
+verbatim quickstart from the installed package and checks a network read failure,
+its explanation and successful explicit retry. These remain loopback fixtures.
+
 `test:todo` installs packed SDKs and compiles the actual examples. The shell-free
 TODO covers EN/DE sign-in, 320px light/dark presentation, explicit context choice,
 creation and guarded management with a retained draft. The unchanged AppShell entry and

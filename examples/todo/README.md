@@ -28,6 +28,12 @@ is duplicated. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 
+The entry releases its runtime and unmounts React on `pagehide`. If the browser
+restores the document from its back/forward cache, `pageshow` mounts a fresh
+runtime and screen, restoring the durable session and remembered Context.
+Browser navigation ends in-memory drafts; this is not the guarded in-app
+selection flow and does not persist unsaved work.
+
 Create, list, rename, complete, reopen and delete tasks. EN/DE switches retranslate
 controls without changing an open draft. Row/context/Pod switches confirm dirty
 drafts. Conflict and lost-answer feedback requires comparison before continuing;
