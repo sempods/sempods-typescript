@@ -10,7 +10,7 @@ For a new app, start in
 Its workflow reads this package's
 `docs/ai-app-builder.md` for safe behavior and useful first-design defaults.
 To integrate the SDK into an existing React app, use the complete
-[quickstart](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/quickstart.md).
+[quickstart](https://github.com/sempods/sempods-typescript/blob/v0.6.0/docs/quickstart.md).
 
 Choose the entry that fits your UI:
 
@@ -21,7 +21,7 @@ Choose the entry that fits your UI:
 
 The package depends on `@sempods/client-sdk` and uses its production client.
 For portable Node scripts or protocol operations without browser sessions, use
-[client-sdk](https://github.com/sempods/sempods-typescript/blob/v0.5.0/packages/client-sdk/README.md).
+[client-sdk](https://github.com/sempods/sempods-typescript/blob/v0.6.0/packages/client-sdk/README.md).
 Both entries provide ESM and TypeScript declarations. Importing the package or
 constructing a runtime starts no requests, navigation or storage.
 
@@ -62,15 +62,15 @@ Replace the identity with your own deployment and serve this app on the callback
 route too. The provider initializes the runtime; the host disposes it when the
 application lifetime ends. For local development, field definitions, a task
 screen and access-management controls, follow the complete
-[quickstart](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/quickstart.md).
+[quickstart](https://github.com/sempods/sempods-typescript/blob/v0.6.0/docs/quickstart.md).
 
 `AppAccess` provides login, context choice and recovery without a mandatory app
 frame. It hides when access is usable, including read-only access. The app owns
 its layout and a **Pods & sharing** button that opens management (`open`). The
-[API table](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md#api-at-a-glance)
+[API table](https://github.com/sempods/sempods-typescript/blob/v0.6.0/docs/react-authoring.md#api-at-a-glance)
 maps each screen task (lists, creation, row updates, editors, notices) to its
 hook or component; the runnable
-[TODO example](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/README.md)
+[TODO example](https://github.com/sempods/sempods-typescript/blob/v0.6.0/examples/todo/README.md)
 uses them together.
 
 ## Connection and target choices
@@ -91,7 +91,7 @@ uses them together.
 The runtime supports dynamic/did:web Code + PKCE login, IndexedDB sessions,
 sequential multi-Pod connections and shared renewal before expiry or after a
 refused request. Screens receive bound views/readers without credentials.
-See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/browser-runtime.md)
+See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.6.0/docs/browser-runtime.md)
 for startup outcomes, restrictions and recovery limits.
 
 If **Sign out** cannot be saved on this device, the connection stays locally
@@ -131,7 +131,7 @@ validated Context's label is fetched automatically; `loadContextLabels(id, iris)
 on the runtime or `useApp()` reads up to 20 more on demand. Labels never gate
 selection or reads. `useContextEditor` edits an overview row in the Context its `GRAPH`
 binding names, without changing the selection; the
-[copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/recipes/pod-overview.tsx)
+[copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.6.0/examples/todo/recipes/pod-overview.tsx)
 shows it.
 
 ## Presentation and documentation
@@ -140,7 +140,7 @@ UI language, regional formatting, time zone and RDF text language are separate
 choices. `SempodsProvider` follows the browser's language unless given locale
 options, and accepts message overrides; SDK controls share
 inherited `--sempods-*` styling tokens. Translating or theming the screen preserves
-its drafts. The [authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md)
+its drafts. The [authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.6.0/docs/react-authoring.md)
 shows message overrides, custom controls and non-React composition.
 
 Override individual failure texts with `messages.errors[code]` as well as UI
@@ -154,14 +154,14 @@ This package ships its app-author reference at the same version as the code.
 Point your coding assistant to
 `node_modules/@sempods/app-sdk/docs/ai-app-builder.md`; it links the guides and
 examples installed with the SDK. The same entry is
-[online](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/ai-app-builder.md).
+[online](https://github.com/sempods/sempods-typescript/blob/v0.6.0/docs/ai-app-builder.md).
 
 Use Node 24.15 or newer for tooling. The runtime needs browser IndexedDB and Web
 Locks; plain consumers need neither React nor its types. React consumers install
 React 19 themselves. Automated browser checks run in Chromium. Installed PWAs
 are experimental; iOS/iPadOS home-screen login is unverified. See
-[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.5.0/README.md#supported-environments)
-and [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/development.md).
+[supported environments](https://github.com/sempods/sempods-typescript/blob/v0.6.0/README.md#supported-environments)
+and [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.6.0/docs/development.md).
 
 Code is Apache-2.0; documentation is CC BY 4.0, as stated in `NOTICE`.
 [Provenance](PROVENANCE.md) records the adaptations and their evidence.
