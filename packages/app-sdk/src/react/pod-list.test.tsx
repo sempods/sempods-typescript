@@ -51,9 +51,13 @@ const node = (iri: string, title: string) => ({
 });
 
 /** Tasks per Context; the Pod query names the Contexts that hold any. */
-async function setup({ strict = false } = {}) {
+async function setup({ strict = false, catalogueFails = false } = {}) {
   const f = await returnedSession((r) => void runtimes.push(r));
-  f.setCatalogue(async () => catalogue([work, personal], [work, personal]));
+  f.setCatalogue(async () =>
+    catalogueFails
+      ? new Response(null, { status: 500 })
+      : catalogue([work, personal], [work, personal]),
+  );
   const tasks = new Map<string, Map<string, ReturnType<typeof node>>>([
     [work, new Map([['urn:a', node('urn:a', 'Buy milk')]])],
     [personal, new Map()],
@@ -222,10 +226,11 @@ it('is loading, not finished or empty, until every Context has answered once', a
   expect(f.api().list.state.kind).toBe('loading');
   expect(f.api().list.data).toBeUndefined();
   expect(screen.getByText('Loading…')).toBeTruthy();
-  // One answered: its rows show, the overview is still loading.
+  // One answered: its rows show, the overview is still loading and says so.
   await act(async () => workRead.resolve());
   expect(await screen.findByText('Buy milk')).toBeTruthy();
   expect(f.api().list.state.kind).toBe('loading');
+  expect(screen.getByText('Loading…')).toBeTruthy();
   expect(f.api().list.complete).toBe(false);
   await act(async () => personalRead.resolve());
   await waitFor(() => expect(f.api().list.state.kind).toBe('ready'));
@@ -370,4 +375,37 @@ it('binds its Contexts again after a new authorization', async () => {
   act(() => f.api().list.reload());
   expect(await screen.findByText('After return')).toBeTruthy();
   await waitFor(() => expect(f.api().list.complete).toBe(true));
+});
+
+it('retries a catalogue that failed from the start when the overview reloads', async () => {
+  const f = await setup({ catalogueFails: true });
+  await waitFor(() =>
+    expect(f.api().list.contexts.map((c) => c.problem)).toEqual([
+      'discovery-failed',
+    ]),
+  );
+  expect(f.api().list.data).toBeUndefined();
+  f.setCatalogue(async () => catalogue([work, personal], [work, personal]));
+  act(() => screen.getByRole('button', { name: 'Try again' }).click());
+  expect(await screen.findByText('Buy milk')).toBeTruthy();
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+});
+
+it('drops the kept rows of a Context whose refresh fails', async () => {
+  const f = await setup();
+  f.tasks.get(personal)!.set('urn:b', node('urn:b', 'Call Ann'));
+  expect(await screen.findByText('Call Ann')).toBeTruthy();
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  f.failing.add(personal);
+  act(() =>
+    f
+      .api()
+      .list.contexts.find((c) => c.context === personal)!
+      .retry(),
+  );
+  await waitFor(() => expect(screen.queryByText('Call Ann')).toBeNull());
+  expect(screen.getByText('Buy milk')).toBeTruthy();
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    '1 of 2 lists could not be read; the others are shown.',
+  );
 });

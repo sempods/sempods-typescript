@@ -238,14 +238,16 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
     refreshedFor.current = unlisted;
     refreshCatalogue();
   }, [unlisted, refreshCatalogue]);
-  const unlistedNow = useRef(unlisted);
-  unlistedNow.current = unlisted;
+  // An explicit reload also retries a catalogue that is missing or failed,
+  // so Contexts waiting on it can be read at all.
+  const catalogueStale = useRef(false);
+  catalogueStale.current = unlisted !== '' || catalogue?.kind === 'failed';
   // A read still running answers already: it is joined, not restarted.
   const discovering = useRef(discovery.state.kind);
   discovering.current = discovery.state.kind;
   const reload = useCallback(() => {
     if (discovering.current !== 'loading') void discover();
-    if (unlistedNow.current) refreshCatalogue();
+    if (catalogueStale.current) refreshCatalogue();
     for (const entry of store.current?.map.values() ?? [])
       if (entry !== 'refused' && entry.loader.getSnapshot().kind !== 'loading')
         void entry.loader.reload();
@@ -281,7 +283,10 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
       },
     };
   });
-  const parts = contexts.map((c) => shownData(c.state));
+  // A failed Context's kept rows leave the list: they are not confirmed.
+  const parts = contexts.map((c) =>
+    c.state.kind === 'failed' ? undefined : shownData(c.state),
+  );
   const all: PodListData<D> | undefined =
     shownData(discovery.state) === undefined
       ? undefined

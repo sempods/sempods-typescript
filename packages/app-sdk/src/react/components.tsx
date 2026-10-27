@@ -245,11 +245,20 @@ export function LoadNotice({
     ) : null;
   const unshown =
     skipped > 0 ? <Notice>{m.skipped!(skipped, format)}</Notice> : null;
+  // An overview whose first reads have not all answered is still loading,
+  // also when some rows show; a background refresh of shown rows is not.
+  const starting =
+    contexts?.some(
+      (context) =>
+        context.state.kind === 'loading' &&
+        shownData(context.state) === undefined,
+    ) ?? false;
   if (state.kind === 'loading')
     return shown === undefined ? (
       <Notice>{c.loading}</Notice>
     ) : (
       <>
+        {starting && <Notice>{c.loading}</Notice>}
         {partial}
         {unshown}
       </>
