@@ -117,6 +117,11 @@ standard screen covers EN/DE sign-in, 320px light/dark presentation, explicit
 context choice, creation and guarded management with a retained draft, and the
 full CRUD, conflict/unknown-outcome, guard, keyboard/mobile and second-tab
 checks, plus the shared Node domain/edit path.
+It also enables native BFCache in full Chromium and checks repeated returns,
+sign-in afterwards, saved session/Context restoration and exactly one creation
+after return. The verbatim quickstart from the installed package is bundled and
+checked for an explained network read failure, explicit retry and recovered data.
+The remaining browser scenarios keep their isolated Headless Shell setup.
 `test:todo` also checks the standard screen, editor and recovery controls without an app
 stylesheet at 320/375px in EN/DE and light/dark, including host-controlled color schemes, transparent embedded surfaces, inherited token overrides,
 44px targets, keyboard focus, and isolation from app-owned list styling.

@@ -216,6 +216,9 @@ writes; `TargetScreen` resets app-local state on a target change. The
 [TODO example](../examples/todo/src/app.tsx) adds an icon and a header menu
 with the language switch.
 
+`LoadNotice` explains a failed read and offers **Try again**. A failure is never
+shown as an empty list. The retry only reads data, so it cannot repeat a write.
+
 Replace Vite's demo styles in `src/index.css`. AppAccess, the editor and the
 notices style themselves from the `--sempods-*` tokens; set them once so your
 own elements match (the [TODO example's styles](../examples/todo/src/style.css)

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useInsertionEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -68,6 +69,17 @@ import {
 } from '../authoring/changes.js';
 
 const noopSubscribe = () => () => {};
+/**
+ * Publish committed inputs before any descendant layout effect can call back.
+ * The insertion phase only updates refs: no state, notifications or DOM access.
+ */
+function useCommitted<T>(value: T) {
+  const current = useRef(value);
+  useInsertionEffect(() => {
+    current.current = value;
+  }, [value]);
+  return current;
+}
 /** Internal: the number of writes started on this target, for feedback lifetime. */
 export function useStartCount(view: BoundView | null | undefined) {
   const subscribe = useCallback(
@@ -84,8 +96,7 @@ export function useStartCount(view: BoundView | null | undefined) {
  * running and will answer anyway. Both are read when the page shows.
  */
 export function useOnVisible(reload: () => void, skip: () => boolean) {
-  const latest = useRef({ reload, skip });
-  latest.current = { reload, skip };
+  const latest = useCommitted({ reload, skip });
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const onVisible = () => {
@@ -94,7 +105,7 @@ export function useOnVisible(reload: () => void, skip: () => boolean) {
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, []);
+  }, [latest]);
 }
 const loading = Object.freeze({ kind: 'loading' as const });
 const noVersion = () => 0;
@@ -147,21 +158,30 @@ function canonicalOf<T>(definition: T, key: string | null): T {
 export function useDefinition<T>(input: T, hook: string) {
   const structure = definitionKey(input);
   const definition = canonicalOf(input, structure);
-  const latest = useRef(definition);
+  const latest = useCommitted(definition);
+  const previous = useRef(definition);
   const warned = useRef(false);
   const key = structure ?? 'custom';
-  if (key === 'custom' && latest.current !== definition && !warned.current) {
-    warned.current = true;
-    warn(
-      `${hook}: a custom definition changed identity; the current editor or form keeps the one it started with. Keep custom definitions stable (module constant or useMemo), or remount for a different mapping.`,
-    );
-  }
-  latest.current = definition;
+  useLayoutEffect(() => {
+    if (
+      key === 'custom' &&
+      previous.current !== definition &&
+      !warned.current
+    ) {
+      warned.current = true;
+      warn(
+        `${hook}: a custom definition changed identity; the current editor or form keeps the one it started with. Keep custom definitions stable (module constant or useMemo), or remount for a different mapping.`,
+      );
+    }
+    previous.current = definition;
+  }, [definition, key, hook]);
   return { key, latest, definition };
 }
 /**
  * Runs `read` for the current target. A new target gets a fresh loader; the
- * latest `read` is used on each (re)load, so an inline function never loops.
+ * latest committed `read` is used on each (re)load, so an inline function never loops.
+ * Committed inputs are available before descendant layout effects run.
+ * Suspended or abandoned renders never replace the active read inputs.
  * Pass `key` for inputs such as a search term: a new value reads again.
  */
 export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
@@ -213,11 +233,12 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   empty: LoadState<T> = loading,
   { retain = false, key }: LoadOptions = {},
 ) {
-  const latest = useRef(read);
-  latest.current = read;
+  const latest = useCommitted(read);
   // The loader reads it at each (re)load.
   const loaderOptions = useRef({ retain });
-  loaderOptions.current.retain = retain;
+  useInsertionEffect(() => {
+    loaderOptions.current.retain = retain;
+  }, [retain]);
   const [active, setActive] = useState<{
     view: H;
     loader: ReturnType<typeof createViewLoader<T, H>>;
@@ -235,7 +256,7 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     setActive({ view, loader });
     void loader.reload();
     return () => loader.dispose();
-  }, [view]);
+  }, [view, latest]);
   const loader = active?.view === view ? active.loader : null;
   const loaded: LoadState<T> = useSyncExternalStore(
     loader?.subscribe ?? noopSubscribe,
@@ -320,10 +341,9 @@ export function useList<D>(
     shown.current = read;
     void restart();
   }, [read, restart]);
-  const current = useRef({ view, read, cancelled: false });
-  if (current.current.view !== view || current.current.read !== read)
-    current.current = { view, read, cancelled: false };
-  const scope = current.current;
+  const [scope, setScope] = useState({ view, read, cancelled: false });
+  if (scope.view !== view || scope.read !== read)
+    setScope({ view, read, cancelled: false });
   useEffect(() => {
     if (!view) return;
     return observeWrites(view, () => {
@@ -332,8 +352,7 @@ export function useList<D>(
   }, [view, reload, scope]);
   // Back in the tab or app, other devices may have changed the list. A read
   // still running answers that already: it is joined, not aborted.
-  const shownState = useRef(state);
-  shownState.current = state;
+  const shownState = useCommitted(state);
   useOnVisible(
     () => void reload(),
     () => !view || scope.cancelled || shownState.current.kind === 'loading',
@@ -1149,8 +1168,7 @@ export function useCreation<D extends object>(
   // started it.
   const live = () => group?.lanes.get('form');
   const starts = useStartCount(view);
-  const initial = useRef(options.initial);
-  initial.current = options.initial;
+  const initial = useCommitted(options.initial);
   const copy = (draft: D) => Object.freeze({ ...draft });
   // This form's own draft and the creation it last sent from it, if any.
   const [state, setState] = useState(() => ({
@@ -1167,34 +1185,42 @@ export function useCreation<D extends object>(
     current.current = next;
     setState(next);
   };
-  current.current = state;
   if (state.view !== view || state.key !== key) {
-    if (
-      state.view === view &&
-      JSON.stringify(state.draft) !== JSON.stringify(options.initial)
-    )
-      warn(
-        'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
-      );
-    replace(copy(options.initial));
+    setState({ view, key, draft: copy(options.initial), sent: null });
   }
+  const resetWarning = useRef(false);
+  useInsertionEffect(() => {
+    const before = current.current;
+    resetWarning.current =
+      before.view === state.view &&
+      before.key !== state.key &&
+      JSON.stringify(before.draft) !== JSON.stringify(initial.current);
+    current.current = state;
+  }, [state, initial]);
+  useLayoutEffect(() => {
+    if (!resetWarning.current) return;
+    resetWarning.current = false;
+    warn(
+      'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
+    );
+  }, [state]);
   // What the form shows, derived: the lane's open creation (locked), or its
   // own draft, blank again once the creation it sent is settled.
   const showing = (
     of: CreationLane<D> | null | undefined,
     blank?: D,
+    own = current.current,
   ): { readonly draft: D; readonly captured: Captured<D> | null } => {
     const open = of?.open() ?? null;
     if (open) return { draft: open.draft, captured: open };
-    const own = current.current;
     return own.sent?.settled
       ? { draft: blank ?? copy(initial.current), captured: null }
       : { draft: own.draft, captured: own.sent };
   };
   // One blank draft per own state, so `draft` keeps its identity.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const blank = useMemo(() => copy(initial.current), [state]);
-  const draft = showing(lane, blank).draft;
+  const blank = useMemo(() => copy(options.initial), [state]);
+  const draft = showing(lane, blank, state).draft;
   const reset = () => {
     if (current.current.view !== view || current.current.key !== key) return;
     replace(copy(initial.current));
@@ -1243,7 +1269,7 @@ export function useCreation<D extends object>(
     create: async (): Promise<
       (CreateOutcome & { readonly iri: string }) | NotSent
     > => {
-      if (!view || current.current.view !== view)
+      if (!view || current.current.view !== view || current.current.key !== key)
         return notSent(view ? 'ended' : 'unavailable');
       if (!group) return notSent('unavailable');
       if (!shown.current) return notSent('ended');
@@ -1317,8 +1343,7 @@ export function useDraftGuard(
   scope: 'local' | 'target' | 'connection' | 'explicit' = 'target',
 ) {
   const app = useController();
-  const latest = useRef({ dirty, discard });
-  latest.current = { dirty, discard };
+  const latest = useCommitted({ dirty, discard });
   useEffect(
     () =>
       app.register({
@@ -1327,6 +1352,6 @@ export function useDraftGuard(
         blocked: () => false,
         discard: () => latest.current.discard(),
       }),
-    [app, scope],
+    [app, scope, latest],
   );
 }

@@ -32,6 +32,11 @@ the app. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 
+On `pagehide`, the entry unmounts React and disposes the runtime. A native
+back/forward-cache return mounts a fresh host, restoring its saved session and
+Context. Browser navigation still ends in-memory drafts; this does not persist
+unsaved work.
+
 Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
 or reopens a task (`useFieldUpdate`'s `for(item)`: a tick locks
 only its row), its title opens the editor below the list, a done task
