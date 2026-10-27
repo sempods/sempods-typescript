@@ -53,14 +53,14 @@ store for SDK drafts or write recovery.
 | App controller (created by the provider) | Resource-editor drafts, pending/unresolved resource writes, captured creations and their recovery, guarded transitions |
 | React screen                             | Row selection, filters, other app-local state and a creation form's own unsent draft                                   |
 
-| Change                                                               | What happens                                                                                                                                                                                           |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Rerender, language or visual change                                  | Keep the runtime/provider and target stable; drafts and recovery stay                                                                                                                                  |
-| Same-target read/write access loss                                   | Keep the screen mounted. Server data/comparison evidence follows read access; drafts and unresolved outcomes stay. Writes follow current eligibility                                                   |
-| Temporarily hide a screen with Suspense or Activity                  | React state is retained. Controller-owned editors and writes remain; show their recovery when the screen is visible again                                                                              |
-| Unmount a screen, then mount it under the same controller and target | Resource editors and captured pending/unresolved writes return. App-local state, row selection and an unsent creation draft do not; do not use arbitrary unmounting as guarded navigation              |
-| Guarded row, Context or connection change                            | Ask about the work being left; pending writes block relevant changes. `TargetScreen` resets local state for a new target. Explicit-Context flows have their own [scope](#selection-and-draft-lifetime) |
-| Dispose/replace the host, reload or leave the page                   | In-memory drafts and recovery end. Saved sessions can restore; browser navigation is not the SDK's guarded navigation                                                                                  |
+| Change                                                               | What happens                                                                                                                                                                                                                   |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Rerender, language or visual change                                  | Keep the runtime/provider and target stable; drafts and recovery stay                                                                                                                                                          |
+| Same-target read/write access loss                                   | Keep the screen mounted. Server data/comparison evidence follows read access; drafts and unresolved outcomes stay. Writes follow current eligibility                                                                           |
+| Temporarily hide a screen with Suspense or Activity                  | React state is retained. Controller-owned editors and writes remain; show their recovery when the screen is visible again                                                                                                      |
+| Unmount a screen, then mount it under the same controller and target | Resource-editor drafts and guards remain; opening the same subject again with the same definition reclaims them. Captured pending/unresolved writes return. App-local state, row selection and an unsent creation draft do not |
+| Guarded row, Context or connection change                            | Ask about the work being left; pending writes block relevant changes. `TargetScreen` resets local state for a new target. Explicit-Context flows have their own [scope](#selection-and-draft-lifetime)                         |
+| Dispose/replace the host, reload or leave the page                   | In-memory drafts and recovery end. Saved sessions can restore; browser navigation is not the SDK's guarded navigation                                                                                                          |
 
 Hidden Activity retains local state but disconnects effects, including an
 unsent creation form's draft guard. Keep that form outside the hidden boundary
@@ -72,6 +72,12 @@ An editor for a selected resource must remain reachable even if its list row
 disappears. The [quickstart](quickstart.md#3-the-app-srcapptsx) shows both.
 For precise scopes and custom navigation, see
 [selection and draft lifetime](#selection-and-draft-lifetime).
+
+Unmounting is not guarded navigation. After a remount, `useSelection` starts
+with no row selected. Selecting the retained editor's subject opens its draft
+or review without discarding it; other local/connection guards still ask, and
+pending writes still block navigation until they settle. This does not restore
+selection automatically or carry an editor across a target change.
 
 ### Runtime and provider
 

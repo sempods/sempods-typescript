@@ -22,6 +22,7 @@ import { ConfirmDialog } from './confirm.js';
 import { useCommands } from './commands.js';
 import { knownContexts } from './access-presentation.js';
 import { contextName, distinctName } from './names.js';
+import { editorsOf } from '../authoring/editors.js';
 const Context = createContext<{
   readonly controller: AppController;
   readonly actions: AppActions;
@@ -520,7 +521,12 @@ export function TargetScreen({ children }: { readonly children: ReactNode }) {
   return view ? <Fragment key={view.key}>{children}</Fragment> : null;
 }
 
-/** Row selection cooperates with the editor's leave guard and resets on target changes. */
+/**
+ * Row selection is local and resets on target changes or remount. Selecting the
+ * same resource after a remount reclaims its controller-retained editor without
+ * discarding that draft or review. Other leave guards and pending writes still
+ * apply; selecting another resource or closing remains guarded.
+ */
 export function useSelection<T = string>() {
   const app = useController();
   const view = useView();
@@ -532,9 +538,12 @@ export function useSelection<T = string>() {
         return Promise.resolve(false);
       if (state.view === view && Object.is(state.selected, selected))
         return Promise.resolve(true);
-      return app.navigate(() => {
+      const choose = () => {
         if (app.getSnapshot().view === view) setState({ view, selected });
-      });
+      };
+      return state.selected === null && typeof selected === 'string'
+        ? editorsOf(app).reopen(view, selected, choose)
+        : app.navigate(choose);
     },
   });
   return { selected: state.view === view ? state.selected : null, select };

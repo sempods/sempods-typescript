@@ -112,6 +112,14 @@ and page traffic stay on loopback. Chromium is the automated browser target; see
 The runnable TODO/Node examples and React authoring layer are described in
 [React/headless authoring](react-authoring.md).
 
+React editor-lifetime regressions combine `useSelection` with
+`useResourceEditor`: after an actual screen unmount/remount, reopening the same
+subject keeps its draft or unconfirmed outcome. Other row/Context changes and
+unrelated guards still ask, pending writes block navigation, old commands cannot
+follow a replacement target, and recovery never replays the write.
+The packed customized consumer also unmounts a dirty editor screen, opens the
+same row after remount and checks the retained draft without a prompt or write.
+
 `test:todo` installs packed SDKs and compiles the actual examples. The TODO's
 standard screen covers EN/DE sign-in, 320px light/dark presentation, explicit
 context choice, creation and guarded management with a retained draft, and the

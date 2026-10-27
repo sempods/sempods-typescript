@@ -87,6 +87,25 @@ export interface AppControllerOptions {
   /** Required preserves automatic catalogues; on-demand uses explicit discovery/Context flows. */
   readonly contextSelection?: 'required' | 'on-demand';
 }
+
+type Navigation = (
+  action: () => void | Promise<void>,
+  retained: ReadonlySet<LeaveGuard>,
+) => Promise<boolean>;
+const retainedNavigation = new WeakMap<object, Navigation>();
+/**
+ * Internal: reopening retained work does not leave its guards. Other guards,
+ * pending writes and an existing transition still apply. No public bypass API.
+ */
+export function navigateRetaining(
+  app: AppController,
+  action: () => void | Promise<void>,
+  retained: ReadonlySet<LeaveGuard>,
+): Promise<boolean> {
+  return (
+    retainedNavigation.get(app)?.(action, retained) ?? app.navigate(action)
+  );
+}
 /**
  * Selection/leave policy, the active Pod reader and the Context-discovery policy
  * (`contextSelection`). Authentication and request authority remain in the runtime.
@@ -117,6 +136,7 @@ export function createAppController(
         resolve: (accepted: boolean) => void;
         /** The connection that was active when the person was asked. */
         activeId: string | null;
+        retained?: ReadonlySet<LeaveGuard>;
       }
     | undefined;
   let snapshot: AppSnapshot = {
@@ -187,7 +207,10 @@ export function createAppController(
       pod,
       confirmingLeave: Boolean(pending),
       unconfirmedLeave: Boolean(
-        pending && leavingGuards(pending.change).some((g) => g.unconfirmed?.()),
+        pending &&
+        leavingGuards(pending.change, pending.retained).some((g) =>
+          g.unconfirmed?.(),
+        ),
       ),
       changing,
     });
@@ -212,8 +235,8 @@ export function createAppController(
     }
   }
   /** The guards a change leaves: asked about first, discarded once it ran. */
-  function leavingGuards(change: Change) {
-    return [...guards].filter((g) => leaves(change, g));
+  function leavingGuards(change: Change, retained?: ReadonlySet<LeaveGuard>) {
+    return [...guards].filter((g) => !retained?.has(g) && leaves(change, g));
   }
   /** Whether a pending write blocks a change: always, unless it ignores the guard. */
   function blocked(change: Change) {
@@ -227,9 +250,10 @@ export function createAppController(
   async function guard(
     action: () => void | Promise<void>,
     change: Change = 'connection',
+    retained?: ReadonlySet<LeaveGuard>,
   ): Promise<boolean> {
     if (changing || pending || blocked(change)) return false;
-    if (!leavingGuards(change).some((g) => g.dirty())) {
+    if (!leavingGuards(change, retained).some((g) => g.dirty())) {
       changing = true;
       publish();
       try {
@@ -241,11 +265,17 @@ export function createAppController(
       }
     }
     return new Promise<boolean>((resolve) => {
-      pending = { action, resolve, change, activeId };
+      pending = {
+        action,
+        resolve,
+        change,
+        activeId,
+        ...(retained ? { retained } : {}),
+      };
       publish();
     });
   }
-  return {
+  const controller = {
     runtime,
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
@@ -304,7 +334,7 @@ export function createAppController(
       const intent = pending;
       if (!intent || blocked(intent.change)) return;
       pending = undefined;
-      const leaving = leavingGuards(intent.change);
+      const leaving = leavingGuards(intent.change, intent.retained);
       changing = true;
       publish();
       try {
@@ -399,5 +429,9 @@ export function createAppController(
       });
     },
   };
+  retainedNavigation.set(controller, (action, retained) =>
+    guard(action, 'navigate', retained),
+  );
+  return controller;
 }
 export type AppController = ReturnType<typeof createAppController>;
