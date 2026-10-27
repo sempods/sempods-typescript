@@ -126,6 +126,9 @@ All points:
   while its screen is unmounted, remounted or hidden by `<Activity>`; before,
   unmounting dropped it, and hiding let a guarded change pass a pending write.
   A guarded change now asks about such a write even when no screen shows it.
+  A remounted `useCreation` form takes over a creation its earlier mount left
+  pending or unconfirmed (check and acknowledge; it cannot be submitted again
+  meanwhile), and a hidden or unmounted form starts no new creation.
   A field definition change no longer drops a pending write (and no longer
   warns about it).
 - **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane

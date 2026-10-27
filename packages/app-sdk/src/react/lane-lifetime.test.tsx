@@ -58,11 +58,13 @@ async function setup() {
   f.setQuery(async () => Response.json([one]));
   let answer: () => Promise<Response> | Response = () =>
     new Response(null, { status: 204 });
+  const writes: string[] = [];
   f.setResource(async (url, init) => {
     if ((init?.method ?? 'GET') === 'GET')
       return resourceIri(url) === 'urn:one'
         ? Response.json(one, { headers: { etag: '"v1"' } })
         : new Response(null, { status: 404 });
+    writes.push(init?.method ?? '');
     return answer();
   });
   const api = {} as {
@@ -111,6 +113,7 @@ async function setup() {
   return {
     ...f,
     api,
+    writes,
     answer: (next: typeof answer) => {
       answer = next;
     },
@@ -219,4 +222,52 @@ it('two hooks share a resource lane but keep their own latest write', async () =
   act(() => s.api.other.acknowledge());
   expect(s.api.mutate.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
   expect(s.api.mutate.unresolved).toEqual(['urn:one']);
+});
+
+it('a remounted form takes over its unconfirmed creation instead of allowing a resend', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({
+      kind: 'unconfirmed',
+    });
+  });
+  act(() => s.api.mount(false));
+  act(() => s.api.mount(true));
+  await waitFor(() =>
+    expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' }),
+  );
+  expect(s.api.creation.canEdit).toBe(false);
+  expect(s.api.creation.canCreate).toBe(false);
+  expect(s.writes).toEqual(['PUT']);
+  // The recovery is reachable: check, then acknowledge.
+  await act(async () => {
+    await s.api.creation.notice.onCheck();
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.outcome).toBeNull());
+});
+
+it('a hidden form starts no creation, also from a kept command', async () => {
+  const s = await setup();
+  act(() => s.api.creation.change({ title: 'New' }));
+  const kept = s.api.creation;
+  act(() => s.api.hide(true));
+  await act(async () => {
+    expect(await kept.create()).toEqual({ kind: 'not-sent', reason: 'ended' });
+  });
+  expect(s.writes).toEqual([]);
+});
+
+it("a form lane is not a row: an unconfirmed creation is not in the rows' unresolved", async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
+  expect(s.api.mutate.unresolved).toEqual([]);
+  expect(s.api.mutate.canMutate).toBe(true);
 });

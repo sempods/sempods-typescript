@@ -722,7 +722,9 @@ export function useContextEditor<D>(
  */
 function useMutation<D>(
   definition: FieldDefinition<D>,
-  explicit?: BoundView | null,
+  explicit: BoundView | null | undefined,
+  /** Forms of one kind (a collection) share a group, apart from row lanes. */
+  forms: string,
 ) {
   const selected = useView();
   const view = explicit === undefined ? selected : explicit;
@@ -741,7 +743,7 @@ function useMutation<D>(
   const group = view
     ? lanesOf(app).group(
         view,
-        key,
+        `forms ${forms} ${key}`,
         definition,
         explicit === undefined ? 'target' : 'explicit',
       )
@@ -751,11 +753,35 @@ function useMutation<D>(
     group?.getVersion ?? noVersion,
     group?.getVersion ?? noVersion,
   );
-  // One lane per hook instance (it survives hiding, not remounting). Commands
-  // look it up live: a create in the same event may have just started it.
-  const id = `form ${useId()}`;
+  // One lane per form instance. A remounted form takes over a pending or
+  // unresolved lane its earlier mount left, to check and acknowledge it, so
+  // it cannot be submitted again meanwhile. Commands look it up live: a
+  // create in the same event may have just started it.
+  const instance = useId();
+  const [adopted, adopt] = useState<{
+    readonly group: LaneGroup<D>;
+    readonly key: string;
+  } | null>(null);
+  const id =
+    adopted && adopted.group === group ? adopted.key : `form ${instance}`;
   const lane = group?.lanes.get(id) ?? null;
   const live = () => group?.lanes.get(id);
+  // Commands start only while this form is mounted and shown; writes already
+  // sent settle in the controller either way.
+  const shown = useRef(false);
+  useEffect(() => {
+    if (!group) return;
+    shown.current = true;
+    const release = group.own(id);
+    if (!group.lanes.has(id)) {
+      const orphan = group.orphan('form ');
+      if (orphan) adopt({ group, key: orphan });
+    }
+    return () => {
+      shown.current = false;
+      release();
+    };
+  }, [group, id]);
   const starts = useStartCount(view);
   const available = Boolean(
     view &&
@@ -770,13 +796,22 @@ function useMutation<D>(
       iri: string,
       action: (target: BoundView) => Promise<MutationOutcome<D>>,
     ): Promise<MutationOutcome<D> | NotSent> =>
-      group
-        ? group.lane(id).execute(operation, iri, action)
-        : Promise.resolve(notSent('unavailable')),
+      !group
+        ? Promise.resolve(notSent('unavailable'))
+        : !shown.current
+          ? Promise.resolve(notSent('ended'))
+          : group.lane(id).execute(operation, iri, action),
     editable: () =>
-      Boolean(group?.holds()) && !live()?.pending && !live()?.unresolved,
+      shown.current &&
+      Boolean(group?.holds()) &&
+      !live()?.pending &&
+      !live()?.unresolved,
     refusal: () =>
-      group ? group.lane(id).refusal() : ('unavailable' as const),
+      !group
+        ? ('unavailable' as const)
+        : !shown.current
+          ? ('ended' as const)
+          : group.lane(id).refusal(),
     acknowledge: () => live()?.acknowledge(),
     busy: lane?.state?.busy ?? false,
     unresolved: lane?.unresolved ?? false,
@@ -835,7 +870,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   // The controller owns the lanes of this target and definition: a write keeps
   // its outcome and leave guard while this screen is hidden or remounts.
   const group = view
-    ? lanesOf(app).group(view, key, definition, 'target')
+    ? lanesOf(app).group(view, `rows ${key}`, definition, 'target')
     : null;
   useSyncExternalStore(
     group?.subscribe ?? noopSubscribe,
@@ -1099,6 +1134,7 @@ export function useCreation<D extends object>(
   const mutation = useMutation(
     definition,
     options.context === undefined ? undefined : explicit.view,
+    options.collection,
   );
   const initial = useRef(options.initial);
   initial.current = options.initial;

@@ -23,6 +23,8 @@ export class LaneGroup<D> {
   private readonly guards = new Map<Lane<D>, () => void>();
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
+  /** Lanes a mounted, shown form currently claims, with a count per key. */
+  private readonly owners = new Map<string, number>();
   private version = 0;
   private alive = true;
   private readable = false;
@@ -84,6 +86,31 @@ export class LaneGroup<D> {
     this.guards.set(lane, this.app.register(lane.guard(this.scope)));
     this.evict();
     return lane;
+  }
+
+  /** A mounted, shown form claims its lane; returns the release. */
+  own(key: string) {
+    this.owners.set(key, (this.owners.get(key) ?? 0) + 1);
+    return () => {
+      const count = (this.owners.get(key) ?? 1) - 1;
+      if (count > 0) this.owners.set(key, count);
+      else this.owners.delete(key);
+    };
+  }
+  /**
+   * A pending or unresolved lane whose key starts with `prefix` and that no
+   * mounted form claims: what an earlier mount of a form left behind, for a
+   * remounted form to take over (check, acknowledge), never to resend.
+   */
+  orphan(prefix: string): string | null {
+    for (const [key, lane] of this.lanes)
+      if (
+        key.startsWith(prefix) &&
+        !this.owners.has(key) &&
+        (lane.pending || lane.unresolved)
+      )
+        return key;
+    return null;
   }
 
   /** Drops the oldest settled, unguarded lanes beyond the bound: feedback only. */
