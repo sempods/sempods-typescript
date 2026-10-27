@@ -121,6 +121,8 @@ It also enables native BFCache in full Chromium and checks repeated returns,
 sign-in afterwards, saved session/Context restoration and exactly one creation
 after return. The verbatim quickstart from the installed package is bundled and
 checked for an explained network read failure, explicit retry and recovered data.
+An empty result stays visible during a held background refresh, while initial
+read and refresh failures show recovery instead of an empty-state message.
 It also loses the answer to an applied row update, removes that row on the
 fixture, refreshes the list and checks that comparison/acknowledgement remain
 reachable without another write.

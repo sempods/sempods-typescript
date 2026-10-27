@@ -152,7 +152,7 @@ function Tasks() {
   return (
     <section>
       <LoadNotice {...list} />
-      {list.state.kind === 'ready' &&
+      {(list.state.kind === 'ready' || list.state.kind === 'loading') &&
         items?.length === 0 &&
         list.data?.skipped === 0 && (
           <p>No tasks yet. Add your first task below.</p>
@@ -224,6 +224,8 @@ with the language switch.
 
 `LoadNotice` explains a failed read and offers **Try again**. A failure is never
 shown as an empty list. The retry only reads data, so it cannot repeat a write.
+An already confirmed empty list stays visible during a background refresh;
+an initial read without data does not claim the list is empty.
 `UnresolvedNotices` keeps comparison and acknowledgement available if a row
 with an unresolved write disappears, for example after another app deletes it.
 The editor also stays outside the row loop so its draft and recovery remain

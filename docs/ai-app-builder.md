@@ -100,7 +100,8 @@ GitHub connector; connector access and Pod access are separate.
 The [quickstart's complete `tasks.ts` and `App.tsx`](quickstart.md#2-describe-your-data-once-srctasksts)
 are the canonical minimal integration. Their actual shipped code is compiled
 and exercised by the SDK's packed consumer checks. Reuse its behavior in the
-starter's existing host; do not add a second runtime or provider.
+app's existing host (the template's starter for new apps); do not add a second
+runtime or provider.
 
 The screen uses `useList` with `LoadNotice`, `useCreation` with its notice,
 one `useFieldUpdate` with `mutate.for(item)` per row, and
@@ -124,7 +125,9 @@ needs them; preserve the minimal screen's recovery when adapting it.
   list snapshots; never reconstruct them from plain values. Preserve unknown
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
-  do not build a token store, credential-bearing fetch or OAuth callback handler.
+  do not implement your own Context enumeration, consent handling, token store,
+  credential-bearing fetch or OAuth callback handler. Use `useContexts` for a
+  Context picker and `usePodList`/`usePodLoad` for Pod-wide reads.
   Every write names a Context; an empty selection never means all Contexts.
   Choose the [app shape](react-authoring.md#choose-the-app-shape) from the
   user's interaction, not by asking them to choose APIs. An app that only reads
