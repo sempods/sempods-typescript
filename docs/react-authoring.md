@@ -51,7 +51,7 @@ store for SDK drafts or write recovery.
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Browser runtime                          | Connections, session persistence, access evidence and bound read/write handles                                         |
 | App controller (created by the provider) | Resource-editor drafts, pending/unresolved resource writes, captured creations and their recovery, guarded transitions |
-| React screen                             | Selection, filters, other app-local state and a creation form's own unsent draft                                       |
+| React screen                             | Row selection, filters, other app-local state and a creation form's own unsent draft                                   |
 
 | Change                                                               | What happens                                                                                                                                                                                           |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -61,6 +61,11 @@ store for SDK drafts or write recovery.
 | Unmount a screen, then mount it under the same controller and target | Resource editors and captured pending/unresolved writes return. App-local state, row selection and an unsent creation draft do not; do not use arbitrary unmounting as guarded navigation              |
 | Guarded row, Context or connection change                            | Ask about the work being left; pending writes block relevant changes. `TargetScreen` resets local state for a new target. Explicit-Context flows have their own [scope](#selection-and-draft-lifetime) |
 | Dispose/replace the host, reload or leave the page                   | In-memory drafts and recovery end. Saved sessions can restore; browser navigation is not the SDK's guarded navigation                                                                                  |
+
+Hidden Activity retains local state but disconnects effects, including an
+unsent creation form's draft guard. Keep that form outside the hidden boundary
+when navigation elsewhere must still ask about its draft. Controller-owned
+editors and pending/unresolved writes keep their guards while hidden.
 
 Render row notices with the row and `UnresolvedNotices` below the list.
 An editor for a selected resource must remain reachable even if its list row
