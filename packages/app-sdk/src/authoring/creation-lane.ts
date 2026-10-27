@@ -74,7 +74,7 @@ export class CreationLane<D> extends Lane<D> {
   notice(starts: number) {
     return { ...super.notice(starts), onAcknowledge: () => this.resolve() };
   }
-  protected settled(outcome: MutationOutcome<D>) {
+  protected onOutcome(outcome: MutationOutcome<D>) {
     if (outcome.kind === 'created') this.settle();
   }
   /** The captured creation is done: marked settled (forms that sent it reset). */

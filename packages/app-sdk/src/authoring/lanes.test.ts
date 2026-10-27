@@ -38,6 +38,10 @@ function fakes() {
     app,
     view,
     guards,
+    /** Selects another view without telling anyone yet, as a leave does. */
+    select(next: unknown) {
+      snapshot = { ...snapshot, view: next };
+    },
     activate(id: string | null) {
       snapshot = { ...snapshot, activeId: id };
       appListeners.forEach((listener) => listener());
@@ -125,3 +129,29 @@ it.each([
     expect(lane.open()).toBe(kept ? captured : null);
   },
 );
+
+it('a discard after its target changed still clears the outcome and notifies', () => {
+  const f = fakes();
+  f.select(f.view);
+  const group = lanesOf(f.app).group(f.view, 'rows', definition, 'target');
+  const lane = group.lane('urn:one');
+  Object.assign(lane, {
+    unresolved: true,
+    state: {
+      operation: 'update',
+      outcome: { kind: 'unconfirmed' },
+      busy: false,
+      start: 0,
+    },
+  });
+  let notified = 0;
+  group.subscribe(() => notified++);
+  const guard = [...f.guards][0]!;
+  expect(guard.dirty()).toBe(true);
+  // A leave runs its action (another view) first, then discards.
+  f.select(null);
+  guard.discard();
+  expect(lane.unresolved).toBe(false);
+  expect(lane.state).toBeNull();
+  expect(notified).toBe(1);
+});

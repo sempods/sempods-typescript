@@ -6,7 +6,7 @@
  * the controller-owned lane store turns them into ordinary tests.
  */
 import { webcrypto } from 'node:crypto';
-import { Activity, useState } from 'react';
+import { Activity, useEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { fields, flag, text, type Snapshot } from '@sempods/client-sdk/edit';
@@ -88,6 +88,8 @@ async function setup() {
     showLate: (shown: boolean) => void;
     note: (noted?: boolean) => void;
     collect: (collection: string) => void;
+    /** Runs from a child's mount effect, after the hooks' first commit. */
+    auto?: () => void;
     mount: (mounted: boolean) => void;
   };
   // The same type with one more field: another definition for the form.
@@ -121,6 +123,12 @@ async function setup() {
       id: 'second',
     });
     api.rows = list.data?.items ?? api.rows ?? [];
+    return <Auto />;
+  }
+  function Auto() {
+    useEffect(() => {
+      api.auto?.();
+    }, []);
     return null;
   }
   // Another form of the same collection, outside the hidden part: it shares
@@ -723,4 +731,79 @@ it('a presence acknowledged from an earlier generation clears the other forms', 
   act(() => notice.onAcknowledge());
   // The other form of the collection never sends the acknowledged item again.
   await waitFor(() => expect(s.api.late?.draft.title).toBe(''));
+});
+
+it("a child's mount effect may already start a write", async () => {
+  const s = await setup();
+  const row = s.api.rows[0]!;
+  let sent: Promise<unknown> | undefined;
+  s.api.auto = () => {
+    sent = s.api.mutate.for(row).update({ done: true });
+  };
+  act(() => s.api.mount(false));
+  act(() => s.api.mount(true));
+  expect(sent).toBeDefined();
+  await act(async () => {
+    expect(await sent).toMatchObject({ kind: 'saved' });
+  });
+});
+
+it("a second form keeps its own draft while another form's creation is open and after it settles", async () => {
+  const s = await setup();
+  act(() => s.api.showLate(true));
+  await waitFor(() => expect(s.api.late).not.toBeNull());
+  act(() => s.api.late!.change({ title: 'Other' }));
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  // Open: every form of the collection shows that creation, locked.
+  await waitFor(() => expect(s.api.late?.draft.title).toBe('Mine'));
+  expect(s.api.late?.canEdit).toBe(false);
+  s.present.add(s.puts[0]!);
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  // Settled: the form that sent it starts afresh, the other keeps its own.
+  await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
+  expect(s.api.late?.draft.title).toBe('Other');
+  expect(s.api.late?.canEdit).toBe(true);
+});
+
+it('a retry without an answer stays held for another same-IRI attempt', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.canCreate).toBe(true));
+  // The retry is refused: nothing was written, the item stays held.
+  // The retry is not confirmed either (the first try may have landed).
+  s.answer(() => new Response(null, { status: 403 }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({
+      kind: 'unconfirmed',
+    });
+  });
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.canCreate).toBe(true));
+  expect(s.api.creation.draft.title).toBe('New');
+  expect(s.api.creation.canEdit).toBe(false);
+  expect(s.api.creation.canCreate).toBe(true);
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toEqual([iri, iri, iri]);
 });

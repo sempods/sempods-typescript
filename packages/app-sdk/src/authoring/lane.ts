@@ -62,6 +62,8 @@ export class Lane<D> {
   iri = '';
   version = 0;
   uncertain = false;
+  /** Its group retired: it never updates again (`holds` may only pause). */
+  private retired = false;
   /** Counts the writes started on this lane, by any hook. */
   writes = 0;
   /**
@@ -125,6 +127,7 @@ export class Lane<D> {
   }
   /** The target or definition changed: the lane never updates again. */
   retire() {
+    this.retired = true;
     this.version++;
     this.checked = false;
     this.absent = false;
@@ -140,7 +143,8 @@ export class Lane<D> {
         this.uncertain = false;
         this.version++;
         this.checked = false;
-        if (this.eligible()) {
+        // Also once its target changed: a leave discards after its action.
+        if (!this.retired) {
           this.state = null;
           this.notify();
         }
@@ -207,14 +211,14 @@ export class Lane<D> {
     this.unresolved =
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     this.uncertain = outcome.kind === 'unconfirmed';
-    this.settled(outcome);
+    this.onOutcome(outcome);
     this.state = { operation, outcome, busy: false, start };
     this.notify();
     if (succeeded(outcome)) changed(view);
     return outcome;
   }
   /** A sent write's outcome arrived, before it is shown (for subclasses). */
-  protected settled(outcome: MutationOutcome<D>): void {
+  protected onOutcome(outcome: MutationOutcome<D>): void {
     void outcome;
   }
   acknowledge() {

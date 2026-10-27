@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -52,7 +53,12 @@ import {
   type MutationOutcome,
   type NotSent,
 } from '../authoring/lane.js';
-import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
+import {
+  lanesOf,
+  type LaneGroup,
+  type LaneKind,
+  type LaneScope,
+} from '../authoring/lanes.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 export type { MutationOutcome, NotSent } from '../authoring/lane.js';
 import {
@@ -718,8 +724,10 @@ export function useContextEditor<D>(
 /**
  * The controller's lane group for one target, subscribed (`version` changes
  * with each of its lane changes), and a token that is true while this hook's
- * screen is mounted and shown: commands start only then, and a command kept
- * from an earlier group (another target or definition) never again.
+ * screen is mounted and shown and this group is its current one: commands
+ * start only then, and a command kept from an earlier group (another target
+ * or definition) never again. Layout effects set it, so a child's effects,
+ * also right after mounting or a group change, may already start commands.
  */
 function useLaneGroup<D, L extends Lane<D> = Lane<D>>(
   view: BoundView | null,
@@ -737,15 +745,28 @@ function useLaneGroup<D, L extends Lane<D> = Lane<D>>(
     group?.getVersion ?? noVersion,
     group?.getVersion ?? noVersion,
   );
-  // `group` is the generation this token belongs to.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => ({ current: false }), [group]);
-  useEffect(() => {
-    shown.current = true;
+  const committed = useRef<{
+    mounted: boolean;
+    group: LaneGroup<D, L> | null;
+  }>({ mounted: false, group: null });
+  useLayoutEffect(() => {
+    const own = committed.current;
+    own.mounted = true;
     return () => {
-      shown.current = false;
+      own.mounted = false;
     };
-  }, [shown]);
+  }, []);
+  useLayoutEffect(() => {
+    committed.current.group = group;
+  }, [group]);
+  const shown = useMemo(
+    () => ({
+      get current() {
+        return committed.current.mounted && committed.current.group === group;
+      },
+    }),
+    [group],
+  );
   return { group, version, shown };
 }
 /** Notice props for a resource this hook has not written yet. */
@@ -1131,13 +1152,13 @@ export function useCreation<D extends object>(
   // own draft, blank again once the creation it sent is settled.
   const showing = (
     of: CreationLane<D> | null | undefined,
-    blank = copy(initial.current),
+    blank?: D,
   ): { readonly draft: D; readonly captured: Captured<D> | null } => {
     const open = of?.open() ?? null;
     if (open) return { draft: open.draft, captured: open };
     const own = current.current;
     return own.sent?.settled
-      ? { draft: blank, captured: null }
+      ? { draft: blank ?? copy(initial.current), captured: null }
       : { draft: own.draft, captured: own.sent };
   };
   // One blank draft per own state, so `draft` keeps its identity.
@@ -1155,7 +1176,7 @@ export function useCreation<D extends object>(
   );
   // Pending, unresolved or held for an explicit retry.
   const locked = (of: CreationLane<D> | null | undefined) =>
-    Boolean(of?.pending || of?.unresolved || of?.captured?.retry);
+    Boolean(of?.outstanding());
   const valid = (value: D) => {
     try {
       return definition.valid?.(value) ?? true;
