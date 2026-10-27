@@ -848,10 +848,12 @@ const iriOf = (target: string | { readonly iri: string }) =>
  * `row.data` to show, `row.canMutate`, `row.notice` and `row.update(change)` /
  * `row.remove()`. Ticking one task leaves the others usable, and an unresolved
  * write stays (with its check and acknowledgement) also while its row is not
- * rendered, for example during lost read access. `canMutate`, `outcome`,
- * `notice` and `acknowledge` keep their list-wide meaning: false while any
- * resource's write is pending or unresolved, and the latest write's feedback.
- * The commands keep their identity for one target and definition.
+ * rendered, for example during lost read access. Hook-level `canMutate` is
+ * false while any resource in the shared target/definition group is pending or
+ * unresolved. `busy`, `outcome`, `operation`, `notice` and `acknowledge` instead
+ * address the latest write started by this hook instance, not an aggregate list
+ * status. The direct hook-level commands keep their identity for one target
+ * and definition; `for(snapshot)` creates row command wrappers per call.
  *
  * A success in the feedback retires when this hook or another creation,
  * row mutation or bound editor starts a write on the same target, and is not
@@ -1001,7 +1003,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     unresolved,
     /** False while any resource's write is pending or unresolved. */
     canMutate: available && !open,
-    /** The latest write's state and feedback, for a single shared notice. */
+    /** This hook instance's latest write state; not an aggregate of all lanes. */
     busy: latest?.state?.busy ?? false,
     outcome: latest?.outcome(starts) ?? null,
     operation: latest?.state?.operation ?? null,

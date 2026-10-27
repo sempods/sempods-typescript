@@ -26,7 +26,8 @@ changing the SDK, its examples or documentation.
 | I want to…                                           | Start here                                                                                                                                            |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Choose a module                                      | [client-sdk](packages/client-sdk/README.md) or [app-sdk](packages/app-sdk/README.md)                                                                  |
-| Build a browser app with React                       | [Quickstart](docs/quickstart.md) and [authoring guide](docs/react-authoring.md)                                                                       |
+| Create a new app with a coding assistant             | [Apps template](https://github.com/sempods/sempods-apps-template); it reads the SDK's installed [AI guide](docs/ai-app-builder.md)                    |
+| Add the SDK to an existing React app                 | [Complete quickstart](docs/quickstart.md), then the relevant [authoring reference](docs/react-authoring.md)                                           |
 | Give a coding assistant the SDK's app-building rules | [AI app-builder entry](docs/ai-app-builder.md), also shipped in app-sdk                                                                               |
 | Use another UI framework                             | [Headless authoring](docs/react-authoring.md#without-react)                                                                                           |
 | Embed widgets in an existing host                    | [Widget authoring](docs/widgets.md)                                                                                                                   |
@@ -36,9 +37,10 @@ changing the SDK, its examples or documentation.
 | Upgrade an existing app                              | [Migration and recovery](docs/migration.md)                                                                                                           |
 | Contribute to the modules                            | [Contributing](docs/contributing.md), [development checks](docs/development.md) and [AGENTS.md](AGENTS.md)                                            |
 
-The [documentation map](docs/README.md) includes all guides. For ideas and a
-first app, see [build your own app](docs/build-your-app.md) or the
-[hackathon reference](docs/hackathon.md). The [vision](docs/vision.md) and
+The [documentation map](docs/README.md) routes to optional guides by task.
+[Build your own app](docs/build-your-app.md) explains the model;
+the [hackathon reference](docs/hackathon.md) is a checklist after setup.
+The [vision](docs/vision.md) and
 [architecture decisions](docs/decisions.md) explain the package boundaries.
 
 ## Try the examples locally

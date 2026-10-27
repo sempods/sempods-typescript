@@ -5,9 +5,17 @@ the interface. People choose where their data lives and which part your app may
 use. Another app can work with the same data when it understands the vocabulary
 and receives permission. A new interface need not become a new data silo.
 
-That is the useful starting point for sempods. Read the
-[vision](https://www.sempods.org/) and [how it works](https://www.sempods.org/how-it-works/),
-then make one small idea real with the [quickstart](quickstart.md).
+For a new app, start in
+[sempods-apps-template](https://github.com/sempods/sempods-apps-template) with
+your coding assistant. A short request such as “a Todo app” is enough: the
+assistant proposes a focused interaction and design, then shows a working
+first draft. You can respond in everyday terms; you do not need to choose SDK
+APIs, colors or layout components first.
+
+Already have a React project? Follow the [SDK quickstart](quickstart.md).
+This page explains the model when you need it. The
+[vision](https://www.sempods.org/) and [how it works](https://www.sempods.org/how-it-works/)
+give more background.
 
 ## What you build, what you reuse
 
@@ -43,13 +51,14 @@ test context, review what the app does, and request only what the feature needs.
 
 ## Start with one complete interaction
 
-For a first task app, write this brief:
+For a first task app, an assistant can turn “a Todo app” into this working brief:
 
 > Show tasks in a context I choose. Let me add a title, complete or reopen a task,
 > rename it and delete the version I saw. Keep my draft if another app changes
 > the same task. Make the screen readable on a phone and usable with a keyboard.
 
-Choose the vocabulary before drawing the screen. The quickstart uses
+The assistant chooses the technical vocabulary from the interaction before
+writing data. The quickstart uses
 `https://schema.org/Action`, `schema:name` as untagged text, and explicit
 Potential/Completed action statuses. This is a small example mapping, not a claim
 that every Action on the Web is a task. Existing apps must agree on type,
@@ -59,7 +68,7 @@ instead of silently converting unfamiliar data.
 Build login → select context → read → create → edit → recover as one small slice.
 After that works, change the layout, add filters or choose a different domain.
 With an AI assistant, begin with [the AI entry document](ai-app-builder.md). It
-contains the reading order, a starting prompt and implementation rules.
+contains design defaults, task-specific references and implementation rules.
 
 ## The API through the task example
 
@@ -69,7 +78,8 @@ starting the runtime to explaining an outcome, to the hook or component and
 what you supply.
 
 For example, the quickstart's completion action is
-`update.update(item, { done: !item.data.done })`. Here `item` is the snapshot supplied by
+`row.update({ done: !row.data.done })`, with `row = mutate.for(item)`.
+Here `item` is the snapshot supplied by
 `useList`, including evidence of the data the person saw. Rebuilding it from a
 plain `{ title, done }` object loses that evidence. For a form, call
 `change({ title: value })` and let the editor preserve untouched properties and
@@ -84,7 +94,14 @@ to hide behind a generic retry button.
 
 ## Make it your app
 
-Use your own CSS and screen components. The [authoring guide](react-authoring.md)
+Use the template's available UI pieces and your own screen design. Keep one
+clear main action, intentional typography and spacing, and useful empty and
+error states. The reference app's behavior is reusable; a journal or recipe
+collection need not look like a task list. The assistant
+[inspects the rendered result](ai-app-builder.md#check-the-result-then-show-it)
+before showing it to you.
+
+The [authoring guide](react-authoring.md)
 shows replacing the connection view, composing without `AppAccess`, translating SDK
 messages, adding custom reads and using the headless controllers without React.
 UI language, RDF content language and display time zone are independent choices.

@@ -1,6 +1,20 @@
 # Documentation map
 
-## Use the modules
+## Start an app
+
+- **New app, including with a coding assistant:** start in
+  [sempods-apps-template](https://github.com/sempods/sempods-apps-template).
+  Its workflow reads the SDK's [AI app-builder guide](ai-app-builder.md).
+  A short description of the app is enough to start a useful first draft.
+- **SDK in an existing React app:** follow the
+  [complete quickstart](quickstart.md).
+- **Understand the data model:** [Build your app](build-your-app.md) explains
+  Pods, Contexts and field mapping. Read it when those concepts become relevant.
+
+The [hackathon checklist](hackathon.md) helps after setup. The guides below are
+references for the task at hand, not prerequisites to read in order.
+
+## Find a reference
 
 - [client-sdk](../packages/client-sdk/README.md): portable Pod requests, OAuth and editing.
 - [app-sdk](../packages/app-sdk/README.md): browser sessions, headless authoring and optional React.
@@ -13,14 +27,6 @@
 - [TODO example](../examples/todo/README.md) and
   [Node example](../examples/node-script/README.md).
 
-## Build an app
-
-For a new app with a coding assistant, start from
-[sempods-apps-template](https://github.com/sempods/sempods-apps-template).
-The guides here also explain using the modules in an existing or empty app:
-
-- [Start with the idea](build-your-app.md), [AI app-builder entry](ai-app-builder.md),
-  [quickstart](quickstart.md) and [hackathon reference](hackathon.md).
 - [Local testing](local-testing.md), [deployment](deployment.md),
   [PWA](pwa.md) and [migration/recovery](migration.md).
 

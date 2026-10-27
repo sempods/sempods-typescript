@@ -637,18 +637,129 @@ try {
     });
     await failure.waitFor();
     assert.equal(reads, 1);
+    assert.equal(
+      await page
+        .getByText('No tasks yet. Add your first task below.', { exact: true })
+        .count(),
+      0,
+    );
     await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await page
       .getByRole('button', { name: 'Recovered task', exact: true })
       .waitFor();
     assert.equal(await failure.count(), 0);
     assert.equal(reads, 2);
+    // A missing row must not hide an unresolved write in the shipped example.
+    const loseAnswer = async (route) => {
+      const request = route.request();
+      if (request.method() !== 'PATCH') return route.continue();
+      const response = await fetch(request.url(), {
+        method: request.method(),
+        headers: request.headers(),
+        body: request.postData(),
+        redirect: 'error',
+      });
+      assert.ok(
+        response.ok,
+        `Quickstart lost-answer fixture returned ${response.status}`,
+      );
+      await route.abort('failed');
+    };
+    await page.route('**/_system/resources/**', loseAnswer);
+    const before = writes;
+    await page
+      .getByRole('checkbox', { name: 'Complete Recovered task', exact: true })
+      .click();
+    const unresolved = page
+      .getByRole('alert')
+      .filter({ hasText: 'unconfirmed' });
+    await unresolved.waitFor();
+    assert.equal(writes, before + 1);
+    await page.unroute('**/_system/resources/**', loseAnswer);
+    // Another app removes the resource; the list's next read no longer has it.
+    tasks.delete(work + '|' + iri);
+    await reloadList(page);
+    await page
+      .getByRole('button', { name: 'Recovered task', exact: true })
+      .waitFor({ state: 'detached' });
+    await page
+      .getByText('No tasks yet. Add your first task below.', { exact: true })
+      .waitFor();
+    await unresolved.waitFor();
+    assert.equal(await unresolved.count(), 1);
+    await page
+      .getByRole('button', { name: 'Check current version', exact: true })
+      .click();
+    await page
+      .getByText('This resource is not currently present on the pod.', {
+        exact: true,
+      })
+      .waitFor();
+    await page
+      .getByRole('button', { name: 'I have checked the pod', exact: true })
+      .click();
+    await unresolved.waitFor({ state: 'detached' });
+    assert.equal(
+      writes,
+      before + 1,
+      'Comparison and acknowledgement must not resend the update',
+    );
+    // Keep a confirmed empty state through a pending refresh, but not a failure.
+    const empty = page.getByText('No tasks yet. Add your first task below.', {
+      exact: true,
+    });
+    let releaseReload;
+    const heldReload = new Promise((resolve) => {
+      releaseReload = resolve;
+    });
+    let reloadStarted;
+    const startedReload = new Promise((resolve) => {
+      reloadStarted = resolve;
+    });
+    const delayReload = async (route) => {
+      reloadStarted();
+      await heldReload;
+      await route.continue();
+    };
+    await page.route('**/alice/_system/sparql/query?*', delayReload);
+    await reloadList(page);
+    await startedReload;
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          window.requestAnimationFrame(() =>
+            window.requestAnimationFrame(resolve),
+          ),
+        ),
+    );
+    assert.equal(
+      await empty.isVisible(),
+      true,
+      'A retained empty list stays visible while reloading',
+    );
+    const refreshed = page.waitForResponse((response) =>
+      new URL(response.url()).pathname.endsWith('/_system/sparql/query'),
+    );
+    releaseReload();
+    await refreshed;
+    await page.unroute('**/alice/_system/sparql/query?*', delayReload);
+    await empty.waitFor();
+    await page.route('**/alice/_system/sparql/query?*', (route) =>
+      route.abort('failed'),
+    );
+    await reloadList(page);
+    await failure.waitFor();
+    assert.equal(
+      await empty.count(),
+      0,
+      'A failed refresh is not presented as empty data',
+    );
     assert.deepEqual(pageErrors, []);
     await context.close();
     quickstartMode = false;
   }
   console.log(
-    'Packed verbatim quickstart: explained network read failure, explicit retry and recovered task list passed.',
+    'Packed verbatim quickstart: read failure/retry, retained empty state during refresh, failed refresh and missing-row recovery without replay passed.',
   );
   // The documented default is the actual shell-free TODO, installed from tarballs.
   for (const language of ['en', 'de']) {

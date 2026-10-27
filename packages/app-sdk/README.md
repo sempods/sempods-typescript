@@ -5,6 +5,13 @@ conflict handling yourself. The runtime keeps the session and the access to the
 chosen data area (a Context); the hooks and components keep drafts, safe edits
 and their recovery attached to it.
 
+For a new app, start in
+[sempods-apps-template](https://github.com/sempods/sempods-apps-template).
+Its workflow reads this package's
+`docs/ai-app-builder.md` for safe behavior and useful first-design defaults.
+To integrate the SDK into an existing React app, use the complete
+[quickstart](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/quickstart.md).
+
 Choose the entry that fits your UI:
 
 | Entry                    | What it supplies                                                                     | React required? |
