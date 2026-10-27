@@ -451,14 +451,14 @@ it.each(['update', 'create', 'draft'] as const)(
         attemptedB = true;
         throw gate.promise;
       }
-      const mutation = operation === 'update' ? update : creation;
+      const row = list.data?.items[0];
+      const own = row ? update.for(row) : undefined;
+      const outcome =
+        operation === 'update' ? own?.notice.outcome : creation.outcome;
       return (
         <>
           <span>Visible schema: {schema}</span>
-          <span>
-            Mutation:{' '}
-            {mutation.outcome?.kind ?? (mutation.busy ? 'busy' : 'idle')}
-          </span>
+          <span>Mutation: {outcome?.kind ?? 'idle'}</span>
           <input
             aria-label="Creation draft"
             value={creation.draft.title}
@@ -468,13 +468,14 @@ it.each(['update', 'create', 'draft'] as const)(
           <button
             disabled={
               operation === 'update'
-                ? !update.canMutate || list.state.kind !== 'ready'
+                ? !own?.canMutate || list.state.kind !== 'ready'
                 : !creation.canCreate
             }
             onClick={() => {
               if (operation === 'update' && list.state.kind === 'ready')
                 void update
-                  .update(list.state.data.items[0]!, { title: 'Mine' })
+                  .for(list.state.data.items[0]!)
+                  .update({ title: 'Mine' })
                   .then((value) => {
                     result = value;
                   });

@@ -45,7 +45,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function setup() {
+async function setup(extraRows = 0) {
   const f = fixture();
   const session = await f.login();
   runtimes.push(session.runtime);
@@ -55,7 +55,14 @@ async function setup() {
     'urn:title': [{ '@value': 'One' }],
     'urn:status': [{ '@id': 'urn:open' }],
   };
-  f.setQuery(async () => Response.json([one]));
+  const rows = [
+    one,
+    ...Array.from({ length: extraRows }, (_, i) => ({
+      ...one,
+      '@id': `urn:extra:${i}`,
+    })),
+  ];
+  f.setQuery(async () => Response.json(rows));
   let answer: () => Promise<Response> | Response = () =>
     new Response(null, { status: 204 });
   const writes: string[] = [];
@@ -64,8 +71,11 @@ async function setup() {
   const present = new Set<string>();
   f.setResource(async (url, init) => {
     if ((init?.method ?? 'GET') === 'GET')
-      return resourceIri(url) === 'urn:one'
-        ? Response.json(one, { headers: { etag: '"v1"' } })
+      return rows.some((row) => row['@id'] === resourceIri(url))
+        ? Response.json(
+            rows.find((row) => row['@id'] === resourceIri(url)),
+            { headers: { etag: '"v1"' } },
+          )
         : present.has(resourceIri(url))
           ? Response.json(
               { ...one, '@id': resourceIri(url) },
@@ -165,7 +175,7 @@ async function setup() {
       </TargetScreen>
     </SempodsProvider>,
   );
-  await waitFor(() => expect(api.rows).toHaveLength(1));
+  await waitFor(() => expect(api.rows).toHaveLength(1 + extraRows));
   await waitFor(() =>
     expect(api.mutate.for(api.rows[0]!).canMutate).toBe(true),
   );
@@ -190,14 +200,16 @@ it('a pending update blocks navigation while hidden and shows its outcome on rev
   act(() => {
     sent = s.api.mutate.for(row).update({ done: true });
   });
-  await waitFor(() => expect(s.api.mutate.busy).toBe(true));
+  await waitFor(() => expect(s.writes).toHaveLength(1));
   act(() => s.api.hide(true));
   // Still pending: a guarded change must wait for it.
   expect(await s.api.app.navigate(() => {})).toBe(false);
   await act(async () => held.resolve(new Response(null, { status: 202 })));
   expect(await sent).toMatchObject({ kind: 'unconfirmed' });
   act(() => s.api.hide(false));
-  await waitFor(() => expect(s.api.mutate.busy).toBe(false));
+  await waitFor(() =>
+    expect(s.api.mutate.for('urn:one').notice.outcome).not.toBeNull(),
+  );
   expect(s.api.mutate.unresolved).toEqual(['urn:one']);
   expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
     kind: 'unconfirmed',
@@ -255,34 +267,33 @@ it.each([
     act(() => {
       sent = s.api.mutate.for(row).update({ done: true });
     });
-    await waitFor(() => expect(s.api.mutate.busy).toBe(true));
+    await waitFor(() => expect(s.writes).toHaveLength(1));
     act(() => s.api.hide(true));
     await act(async () => held.resolve(new Response(null, { status })));
     expect(await sent).toMatchObject({ kind });
     act(() => s.api.hide(false));
-    await waitFor(() => expect(s.api.mutate.busy).toBe(false));
+    await waitFor(() =>
+      expect(s.api.mutate.for('urn:one').notice.outcome).not.toBeNull(),
+    );
     expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
       kind,
     });
   },
 );
 
-it('two hooks share a resource lane but keep their own latest write', async () => {
+it('two hooks share a resource lane and its checked recovery', async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   const row = s.api.rows[0]!;
-  await act(async () => {
-    await s.api.mutate.for(row).update({ done: true });
-  });
-  // The shared lane: the other hook sees the resource locked and unresolved.
+  await act(() => s.api.mutate.for(row).update({ done: true }));
   expect(s.api.other.for(row).canMutate).toBe(false);
   expect(s.api.other.unresolved).toEqual(['urn:one']);
-  // Its own latest write is none: its notice is empty and its acknowledge
-  // does not reach the first hook's write.
-  expect(s.api.other.notice.outcome).toBeNull();
-  act(() => s.api.other.acknowledge());
-  expect(s.api.mutate.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
-  expect(s.api.mutate.unresolved).toEqual(['urn:one']);
+  expect(s.api.other.for(row.iri).notice.outcome).toMatchObject({
+    kind: 'unconfirmed',
+  });
+  await act(() => s.api.other.for(row.iri).notice.onCheck());
+  act(() => s.api.other.for(row.iri).notice.onAcknowledge());
+  expect(s.api.mutate.unresolved).toEqual([]);
 });
 
 it('a remounted form shows its unconfirmed creation instead of allowing a resend', async () => {
@@ -330,7 +341,7 @@ it("a form lane is not a row: an unconfirmed creation is not in the rows' unreso
   });
   expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
   expect(s.api.mutate.unresolved).toEqual([]);
-  expect(s.api.mutate.canMutate).toBe(true);
+  expect(s.api.mutate.for(s.api.rows[0]!).canMutate).toBe(true);
 });
 
 it('a creation command kept from an earlier definition stays unusable', async () => {
@@ -343,29 +354,6 @@ it('a creation command kept from an earlier definition stays unusable', async ()
     expect(await kept.create()).toEqual({ kind: 'not-sent', reason: 'ended' });
   });
   expect(s.writes).toEqual([]);
-});
-
-it("another hook's later write to the same resource is not this hook's feedback", async () => {
-  const s = await setup();
-  // This hook's write is confirmed; the list reads again.
-  await act(async () => {
-    await s.api.mutate.for(s.api.rows[0]!).update({ done: true });
-  });
-  await waitFor(() =>
-    expect(s.api.other.for(s.api.rows[0]!).canMutate).toBe(true),
-  );
-  // The other hook writes the same resource and gets no answer.
-  s.answer(() => new Response(null, { status: 202 }));
-  await act(async () => {
-    // The fixture Pod still shows the task open, so this sends a write.
-    await s.api.other.for(s.api.rows[0]!).update({ done: true });
-  });
-  expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
-  expect(s.api.mutate.notice.outcome?.kind).not.toBe('unconfirmed');
-  // Acknowledging this hook's own write does not clear the other one.
-  act(() => s.api.mutate.acknowledge());
-  expect(s.api.other.unresolved).toEqual(['urn:one']);
-  expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
 });
 
 it('forms with their own id keep their own unconfirmed creations across a remount', async () => {
@@ -654,35 +642,6 @@ it('a creation acknowledged as present clears every form that shows it', async (
   expect(s.puts[1]).not.toBe(iri);
 });
 
-it("a write on a fresh lane after eviction is not an earlier hook's feedback", async () => {
-  const s = await setup();
-  // This hook's write is confirmed.
-  await act(async () => {
-    await s.api.mutate.for(s.api.rows[0]!).update({ done: true });
-  });
-  // The other hook writes enough resources to evict that settled lane.
-  s.answer(() => new Response(null, { status: 201 }));
-  await act(async () => {
-    for (let i = 0; i < 201; i++)
-      await s.api.other.create(`urn:new:${i}`, definition, {
-        title: `Task ${i}`,
-        done: false,
-      });
-  });
-  await waitFor(() =>
-    expect(s.api.other.for(s.api.rows[0]!).canMutate).toBe(true),
-  );
-  // It writes the first resource again, on a fresh lane, unanswered.
-  s.answer(() => new Response(null, { status: 202 }));
-  await act(async () => {
-    await s.api.other.for(s.api.rows[0]!).update({ done: true });
-  });
-  expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
-  expect(s.api.mutate.notice.outcome?.kind).not.toBe('unconfirmed');
-  act(() => s.api.mutate.acknowledge());
-  expect(s.api.other.unresolved).toEqual(['urn:one']);
-});
-
 it('an absence acknowledged from an earlier generation still holds the item for its retry', async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
@@ -823,21 +782,17 @@ it('a creation command kept from a definition stays unusable after going back to
 });
 
 it('a spent snapshot stays locked and shows its update after its lane is evicted', async () => {
-  const s = await setup();
+  const s = await setup(201);
   const old = s.api.rows[0]!;
   await act(async () => {
     expect(await s.api.mutate.for(old).update({ done: true })).toMatchObject({
       kind: 'saved',
     });
   });
-  // Enough other writes to evict that settled lane.
-  s.answer(() => new Response(null, { status: 201 }));
+  // Use real snapshots of other rows to evict the settled lane.
+  const others = s.api.rows.filter((row) => row.iri !== old.iri);
   await act(async () => {
-    for (let i = 0; i < 201; i++)
-      await s.api.other.create(`urn:new:${i}`, definition, {
-        title: `Task ${i}`,
-        done: false,
-      });
+    for (const row of others) await s.api.other.for(row).update({ done: true });
   });
   expect(s.api.mutate.for(old).canMutate).toBe(false);
   expect(s.api.mutate.for(old).data.done).toBe(true);

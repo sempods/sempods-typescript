@@ -202,7 +202,7 @@ a partial `change`, `create`, `canEdit`, `canCreate`, `outcome`, `notice` and
 `refused` (for an unusable [`context`](#creating-in-an-explicit-context)).
 
 - Make `initial` blank; equal inline values are fine. Keep `collection` stable;
-  a real definition change starts a fresh form. Bind inputs to
+  a change of definition or creation address starts a fresh form. Bind inputs to
   `!creation.canEdit` and submit to `!creation.canCreate`, and render
   `<UpdateNotice {...creation.notice} />`.
 - A pending or uncertain creation locks the draft (in `change` too). Its
@@ -219,6 +219,30 @@ a partial `change`, `create`, `canEdit`, `canCreate`, `outcome`, `notice` and
   navigation and asks before a Context, Pod or disconnect change.
 - Advanced clients may keep a portable `prepareCreation` command and retry the
   same IRI explicitly.
+
+#### Create at a known IRI
+
+Use exactly one of `collection` or `iri`. For a singleton or an externally
+assigned identifier, replace `collection` with the full subject IRI:
+
+```tsx
+const creation = useCreation(settings, {
+  initial: { title: '' },
+  iri: 'urn:example:my-settings',
+});
+```
+
+This is create-only, with the same draft, notice and retry flow. It never
+updates an existing resource; a taken IRI is `unconfirmed` and needs a check.
+Use a row update or editor to change an existing resource. A confirmed creation
+resets the form, but its next submission still uses that fixed IRI.
+
+Keep the address stable while the person is working. Changing it starts a new
+form; retained commands cannot target the new IRI. An unresolved command stays
+with its old address and is shown again on returning to it. Forms of the same
+address and definition share pending work by default; use `id` for independent
+forms. `bindCreation(view, definition, draft, { iri })` offers the same address
+choice without React, while the host owns draft and recovery presentation.
 
 #### Several resources from one input
 
@@ -318,11 +342,12 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   lanes of a target, not the component: a pending or unresolved write keeps
   its outcome and leave guard while its row or whole screen is not rendered,
   hidden (React `<Activity mode="hidden">`) or mounted again, until it is
-  resolved or the target changes. `unresolved` lists those IRIs;
+  resolved or the target changes. `unresolved` lists only unconfirmed or
+  conflicting writes, not pending ones; it is not an availability check;
   `<UnresolvedNotices>` shows the notices of those without a row
   (`mutate.for(iri).notice` for one). New commands start only from a mounted,
   shown screen (`not-sent`, `ended` otherwise). All `useCreation` forms of a
-  collection share one creation: while it is pending, unconfirmed or held for
+  collection or fixed IRI share one creation: while it is pending, unconfirmed or held for
   a same-IRI retry after observed absence, each of them (also one shown again
   or mounted again) shows it, locked, and none sends another. Give forms that
   should create independently side by side an `id` each
@@ -331,13 +356,13 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   `onRemove`, as it was when asked, only after confirmation (a row read again
   meanwhile shows as a conflict). A quiet trash icon with a 44px target, named
   **Delete** or `label`; children replace the icon, `className` its look.
-- The hook-level `canMutate` checks access and whether any resource in the
-  shared target/definition group is pending or unresolved. `busy`, `outcome`,
-  `operation`, `notice` and `acknowledge` instead address the latest write
-  started by this hook instance; they are not an aggregate list status.
-  Use `mutate.for(item)` for row controls and `UnresolvedNotices` for missing rows.
-- `create(iri, body)` and the typed `create(iri, definition, draft)` remain;
-  forms use `useCreation`.
+- The hook returns only `{ for, unresolved }`, like `useContextUpdate`.
+  Use `row.canMutate` for each row's availability and `row.notice` for its
+  feedback. An IRI-only handle (`mutate.for(iri)`) exposes recovery and always
+  has `canMutate: false`, because there is no snapshot to write from.
+- Create with `useCreation`; pass `iri` instead of `collection` when its
+  identity is already known. Portable raw JSON-LD creation stays in
+  `client-sdk/edit.prepareCreation`; its caller owns the UI recovery lifecycle.
 - Failures keep `reason` and a structured `problem`: check `problem.status` for
   a refusal, and pass a present `problem.failure` to `describeFailure`.
   Unconfirmed writes carry no failure.
@@ -354,11 +379,14 @@ changed, so the draft or row is as before. Never resend on any other result.
 | `invalid`     | A creation draft the definition rejects       |
 | `ended`       | The hook unmounted or its target changed      |
 
-A sent command always resolves its outcome, also after a target change. The
-commands (`update`, `remove`, `create`, `acknowledge`, `useCreation`'s `change`
-and `create`, `useList`'s `reload` and `cancel`, `useSelection().select`) keep
-their identity per target and definition, so they fit effect dependencies; one
-kept from an earlier target acts on that target only.
+A sent command always resolves its outcome, also after a target change.
+Neither `useFieldUpdate` nor `useContextUpdate` guarantees stable identities
+for row wrappers or commands returned by `for(...)`; do not treat them as stable
+effect dependencies. A retained row command keeps its original target and
+snapshot and sends nothing once that target or hook lifetime has ended.
+`useCreation`'s `change` and `create`, `useList`'s `reload` and `cancel`, and
+`useSelection().select` retain their identities for their target and definition
+(and creation address/form ID, where applicable).
 
 ### Editing a form: useResourceEditor
 

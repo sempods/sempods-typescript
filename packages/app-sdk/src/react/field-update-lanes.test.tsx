@@ -96,10 +96,6 @@ async function setup() {
     commands.push([
       list.reload,
       list.cancel,
-      api.update,
-      api.remove,
-      api.create,
-      api.acknowledge,
       selection.select,
       creation.change,
       creation.create,
@@ -112,7 +108,7 @@ async function setup() {
           <li key={row.iri}>
             <button
               disabled={!api.for(row).canMutate}
-              onClick={() => void api.update(row, { done: true })}
+              onClick={() => void api.for(row).update({ done: true })}
             >
               {row.data.title}
             </button>
@@ -157,14 +153,15 @@ it('locks only the resource being written; another one writes meanwhile', async 
   act(() => button('One').click());
   await waitFor(() => expect(button('One').disabled).toBe(true));
   expect(button('Two').disabled).toBe(false);
-  // The list-wide availability stays as it was: false while any write runs.
-  expect(s.api().canMutate).toBe(false);
+  // Pending is not unresolved, and says nothing about another row.
+  expect(s.api().unresolved).toEqual([]);
   s.answer(() => new Response(null, { status: 204 }));
   act(() => button('Two').click());
   await waitFor(() => expect(s.patches).toEqual(['urn:one', 'urn:two']));
   await act(async () => held.resolve(new Response(null, { status: 204 })));
   await waitFor(() => expect(button('One').disabled).toBe(false));
-  expect(s.api().canMutate).toBe(true);
+  expect(Object.keys(s.api()).sort()).toEqual(['for', 'unresolved']);
+  expect(s.api().for('urn:one').canMutate).toBe(false);
 });
 
 it('keeps an unconfirmed write through lost read access while its row is gone', async () => {
@@ -208,7 +205,7 @@ it('sends nothing for a resource once the hook has unmounted', async () => {
   const api = s.api();
   const two = s.shown().find((row) => row.iri === 'urn:two')!;
   s.unmount();
-  expect(await api.update(two, { done: true })).toEqual({
+  expect(await api.for(two).update({ done: true })).toEqual({
     kind: 'not-sent',
     reason: 'ended',
   });
@@ -234,23 +231,24 @@ it('reports an unresolved write whose row was deleted, until acknowledged', asyn
   expect(s.api().unresolved).toEqual([]);
 });
 
-it('acknowledges the write that a retained result just made', async () => {
+it('checks and acknowledges a row through a retained hook result', async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   await waitFor(() => expect(button('One').disabled).toBe(false));
   const api = s.api();
   const one = s.shown().find((row) => row.iri === 'urn:one')!;
   await act(async () => {
-    expect(await api.update(one, { done: true })).toMatchObject({
+    expect(await api.for(one).update({ done: true })).toMatchObject({
       kind: 'unconfirmed',
     });
   });
-  act(() => api.acknowledge());
+  await act(() => api.for(one.iri).notice.onCheck());
+  act(() => api.for(one.iri).notice.onAcknowledge());
   expect(s.api().unresolved).toEqual([]);
   expect(button('One').disabled).toBe(false);
 });
 
-it('keeps the list-wide recovery when a write for another resource is refused', async () => {
+it('keeps row recovery when a write for another resource is refused', async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   await waitFor(() => expect(button('One').disabled).toBe(false));
@@ -262,18 +260,22 @@ it('keeps the list-wide recovery when a write for another resource is refused', 
   await waitFor(() => expect(button('Two').disabled).toBe(true));
   const two = s.shown().find((row) => row.iri === 'urn:two')!;
   await act(async () => {
-    expect(await s.api().update(two, { done: true })).toEqual({
+    expect(await s.api().for(two).update({ done: true })).toEqual({
       kind: 'not-sent',
       reason: 'unavailable',
     });
   });
   expect(s.patches).toEqual(['urn:one']);
-  expect(s.api().notice.outcome).toMatchObject({ kind: 'unconfirmed' });
-  expect(s.api().outcome).toMatchObject({ kind: 'unconfirmed' });
-  // The list-wide acknowledgement still addresses the unconfirmed write.
-  act(() => s.api().acknowledge());
+  expect(s.api().for('urn:one').notice.outcome).toMatchObject({
+    kind: 'unconfirmed',
+  });
+  expect(s.api().for('urn:one').notice.outcome).toMatchObject({
+    kind: 'unconfirmed',
+  });
+  await act(() => s.api().for('urn:one').notice.onCheck());
+  act(() => s.api().for('urn:one').notice.onAcknowledge());
   expect(s.api().unresolved).toEqual([]);
-  expect(s.api().notice.outcome).toBeNull();
+  expect(s.api().for('urn:one').notice.outcome).toBeNull();
 });
 
 it('does not write again from the snapshot a confirmed update was made from', async () => {
@@ -281,7 +283,7 @@ it('does not write again from the snapshot a confirmed update was made from', as
   await waitFor(() => expect(button('One').disabled).toBe(false));
   const one = s.shown().find((row) => row.iri === 'urn:one')!;
   await act(async () => {
-    expect(await s.api().update(one, { done: true })).toMatchObject({
+    expect(await s.api().for(one).update({ done: true })).toMatchObject({
       kind: 'saved',
     });
   });

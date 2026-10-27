@@ -282,7 +282,7 @@ it('warns when a real field change drops an unsaved draft; a pending write keeps
   const state = api.list.state;
   if (state.kind !== 'ready') throw new Error('fixture');
   act(() => {
-    void api.update.update(state.data.items[0]!, { done: true });
+    void api.update.for(state.data.items[0]!).update({ done: true });
     api.editor!.change({ title: 'Unsaved' });
   });
   act(() => api.setLanguage('de'));
@@ -332,7 +332,7 @@ it('R1: an inline definition shared by useList and useFieldUpdate updates and re
   );
   await waitFor(() => {
     expect(api.list.state.kind).toBe('ready');
-    expect(api.update.canMutate).toBe(true);
+    expect(api.update.for(api.list.data!.items[0]!).canMutate).toBe(true);
   });
   act(() => api.rerender());
   const ready = () => {
@@ -342,13 +342,13 @@ it('R1: an inline definition shared by useList and useFieldUpdate updates and re
   };
   let outcome: unknown;
   await act(async () => {
-    outcome = await api.update.update(ready(), { done: true });
+    outcome = await api.update.for(ready()).update({ done: true });
   });
   expect(outcome).toMatchObject({ kind: 'saved' });
   await waitFor(() => expect(api.list.state.kind).toBe('ready'));
   act(() => api.rerender());
   await act(async () => {
-    outcome = await api.update.remove(ready());
+    outcome = await api.update.for(ready()).remove();
   });
   expect(outcome).toMatchObject({ kind: 'removed' });
   expect(writes).toEqual(['PATCH', 'DELETE']);
@@ -428,7 +428,7 @@ it.each([
     expect(mutation).toBeUndefined();
     if (lifetime === 'provider remount') render(<Host phase="mutation" />);
     else mounted.rerender(<Host phase="mutation" />);
-    await waitFor(() => expect(mutation?.canMutate).toBe(true));
+    await waitFor(() => expect(mutation?.for(snapshot).canMutate).toBe(true));
     expect(mutationSource).toBe(source);
 
     const requests: { method: string; iri: string; ifMatch: string | null }[] =
@@ -445,8 +445,8 @@ it.each([
     await act(async () => {
       outcome =
         operation === 'update'
-          ? await mutation!.update(snapshot, { done: true })
-          : await mutation!.remove(snapshot);
+          ? await mutation!.for(snapshot).update({ done: true })
+          : await mutation!.for(snapshot).remove();
     });
     expect(outcome).toEqual({
       kind: operation === 'update' ? 'saved' : 'removed',
@@ -577,7 +577,7 @@ it('R4: a real definition change never offers the previous rows to the new updat
   if (state.kind !== 'ready') throw new Error('fixture');
   let outcome: unknown;
   await act(async () => {
-    outcome = await api.update.update(state.data.items[0]!, { done: true });
+    outcome = await api.update.for(state.data.items[0]!).update({ done: true });
   });
   expect(outcome).toMatchObject({ kind: 'saved' });
 });

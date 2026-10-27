@@ -20,7 +20,6 @@ import {
 import {
   updateFields,
   listSubjects,
-  newSubjectIri,
   isFieldDefinition,
   type fields,
   removeSnapshot,
@@ -33,7 +32,6 @@ import {
   type RemoveSnapshotOutcome,
   type CreateOutcome,
 } from '@sempods/client-sdk/edit';
-import type { JsonLd } from '@sempods/client-sdk';
 import { startupSettled } from '../authoring/app.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
@@ -61,6 +59,11 @@ import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
 import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
+import {
+  creationAddress,
+  creationIri,
+  type CreationTarget,
+} from '../authoring/creation.js';
 export type { MutationOutcome, NotSent } from '../authoring/lane.js';
 import {
   observeStarts,
@@ -848,12 +851,10 @@ const iriOf = (target: string | { readonly iri: string }) =>
  * `row.data` to show, `row.canMutate`, `row.notice` and `row.update(change)` /
  * `row.remove()`. Ticking one task leaves the others usable, and an unresolved
  * write stays (with its check and acknowledgement) also while its row is not
- * rendered, for example during lost read access. Hook-level `canMutate` is
- * false while any resource in the shared target/definition group is pending or
- * unresolved. `busy`, `outcome`, `operation`, `notice` and `acknowledge` instead
- * address the latest write started by this hook instance, not an aggregate list
- * status. The direct hook-level commands keep their identity for one target
- * and definition; `for(snapshot)` creates row command wrappers per call.
+ * rendered, for example during lost read access. Both row hooks expose only
+ * `for` and `unresolved`; pending writes are not in `unresolved`. Neither hook
+ * guarantees stable row-wrapper or command identities. A retained row command
+ * keeps its captured snapshot and target. Use `useCreation` for new resources.
  *
  * A success in the feedback retires when this hook or another creation,
  * row mutation or bound editor starts a write on the same target, and is not
@@ -882,91 +883,33 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     definition,
     'target',
   );
-  // This hook's own part: which resource it wrote last (its list-wide
-  // feedback), as its lane and that lane's write count, per group.
-  const mine = useMemo(
-    () => ({
-      latest: null as { readonly lane: Lane<D>; readonly write: number } | null,
-    }),
-    // `group` is the generation this mark belongs to.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [group],
-  );
   const starts = useStartCount(view);
   // Whether a resource without a lane of its own could be written now.
   const available = Boolean(group?.available(access.write));
   // One pass per lane change, with a stable `unresolved` between them.
-  const { unresolved, open } = useMemo(() => {
+  const unresolved = useMemo(() => {
     const unresolved: string[] = [];
-    let open = false;
     for (const lane of group?.lanes.values() ?? []) {
       if (lane.unresolved) unresolved.push(lane.iri);
-      if (lane.pending || lane.unresolved) open = true;
     }
-    return { unresolved, open };
+    return unresolved;
     // `version` changes with every lane change of `group`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group, version]);
-  // Another hook's later write to the same resource is not this hook's, also
-  // on a fresh lane for it after the earlier one was evicted.
-  const ownWrite = (mark: typeof mine.latest) =>
-    mark &&
-    group?.lanes.get(mark.lane.iri) === mark.lane &&
-    mark.lane.writes === mark.write
-      ? mark.lane
-      : null;
-  const latest = ownWrite(mine.latest);
-  // The commands keep their identity for this target and definition, so they
-  // fit effect dependencies; a retained one keeps writing to its own target.
-  const actions = useMemo(() => {
-    const run = (
-      iri: string,
-      operation: 'create' | 'update' | 'remove',
-      action: (target: BoundView) => Promise<MutationOutcome<D>>,
-      subject?: Snapshot<D>,
-      after?: D,
-    ): Promise<MutationOutcome<D> | NotSent> => {
-      if (!group) return Promise.resolve(notSent('unavailable'));
-      if (!shown.current) return Promise.resolve(notSent('ended'));
-      const lane = group.lane(iri);
-      // A refused write sends nothing and keeps the latest write's recovery.
-      const refused = lane.refusal(subject);
-      if (refused) return Promise.resolve(notSent(refused));
-      // Starting the write counts it synchronously, before any await.
-      const sent = lane.execute(operation, iri, action, subject, after);
-      mine.latest = { lane, write: lane.writes };
-      return sent;
-    };
-    return {
-      update: (snapshot: Snapshot<D>, change: Partial<D>) =>
-        run(
-          snapshot.iri,
-          'update',
-          (v) => updateFields(v, snapshot, definition, change),
-          snapshot,
-          changedData(snapshot.data, change),
-        ) as Promise<UpdateOutcome<D> | NotSent>,
-      remove: (snapshot: Snapshot<D>) =>
-        run(snapshot.iri, 'remove', (v) =>
-          removeSnapshot(v, snapshot, definition),
-        ) as Promise<RemoveSnapshotOutcome<D> | NotSent>,
-      create: (
-        ...args:
-          | [iri: string, body: JsonLd]
-          | [iri: string, definition: FieldDefinition<D>, draft: D]
-      ) =>
-        run(args[0], 'create', (v) =>
-          args.length === 3
-            ? prepareCreation(v, args[0], args[1], args[2]).run()
-            : prepareCreation(v, args[0], args[1]).run(),
-        ) as Promise<CreateOutcome | NotSent>,
-      acknowledge: () => {
-        ownWrite(mine.latest)?.acknowledge();
-      },
-    };
-    // `definition` belongs to `group` (same target and definition).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group, mine, shown]);
+  const run = (
+    iri: string,
+    operation: 'update' | 'remove',
+    action: (target: BoundView) => Promise<MutationOutcome<D>>,
+    subject?: Snapshot<D>,
+    after?: D,
+  ): Promise<MutationOutcome<D> | NotSent> => {
+    if (!group) return Promise.resolve(notSent('unavailable'));
+    if (!shown.current) return Promise.resolve(notSent('ended'));
+    const lane = group.lane(iri);
+    const refused = lane.refusal(subject);
+    if (refused) return Promise.resolve(notSent(refused));
+    return lane.execute(operation, iri, action, subject, after);
+  };
   function rowFor(item: Snapshot<D>): FieldUpdateRow<D>;
   function rowFor(item: string): FieldUpdateState<D>;
   function rowFor(
@@ -979,20 +922,30 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
       starts,
       typeof item === 'string' ? undefined : item,
     );
-    if (typeof item === 'string') return state;
+    if (typeof item === 'string') return { ...state, canMutate: false };
     return {
       ...state,
       data: spentData<D>(item) ?? item.data,
-      update: (change: Partial<D>) => actions.update(item, change),
-      remove: () => actions.remove(item),
+      update: (change: Partial<D>) =>
+        run(
+          item.iri,
+          'update',
+          (v) => updateFields(v, item, definition, change),
+          item,
+          changedData(item.data, change),
+        ) as Promise<UpdateOutcome<D> | NotSent>,
+      remove: () =>
+        run(item.iri, 'remove', (v) =>
+          removeSnapshot(v, item, definition),
+        ) as Promise<RemoveSnapshotOutcome<D> | NotSent>,
     } satisfies FieldUpdateRow<D>;
   }
   return {
     /**
      * One resource: whether it may be written now, its notice, what to show
      * and its commands. Other resources' writes do not lock it. Pass the
-     * list's snapshot; an IRI alone gives `canMutate` and `notice`, for
-     * example for a resource whose row is gone.
+     * list's snapshot; an IRI alone gives recovery via `notice`, for example
+     * for a resource whose row is gone. Its `canMutate` is always false.
      */
     for: rowFor,
     /**
@@ -1001,22 +954,6 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
      * for example deleted elsewhere, so their recovery stays reachable.
      */
     unresolved,
-    /** False while any resource's write is pending or unresolved. */
-    canMutate: available && !open,
-    /** This hook instance's latest write state; not an aggregate of all lanes. */
-    busy: latest?.state?.busy ?? false,
-    outcome: latest?.outcome(starts) ?? null,
-    operation: latest?.state?.operation ?? null,
-    notice: latest ? latest.notice(starts) : noNotice,
-    update: actions.update,
-    remove: actions.remove,
-    create: actions.create,
-    /**
-     * Explicit acknowledgement does not replay the command. Prefer notice for
-     * checked UI recovery. It reads the live latest lane, so a result kept
-     * across an awaited write acknowledges that write.
-     */
-    acknowledge: actions.acknowledge,
   };
 }
 
@@ -1031,7 +968,7 @@ export interface FieldUpdateNotice<D> {
 }
 /** One resource of `useFieldUpdate`, from `for(iri)`. */
 export interface FieldUpdateState<D> {
-  /** Whether this resource may be written now. */
+  /** Whether this snapshot may be written now; false for an IRI-only handle. */
   readonly canMutate: boolean;
   readonly notice: FieldUpdateNotice<D>;
 }
@@ -1107,7 +1044,9 @@ function useExplicitView(context: string | undefined) {
  * `await create()` for each item, and stop at the first result that is not
  * `created`. Both actions use the hook's latest state, so one handler may keep
  * calling them across awaits. Each confirmed creation resets the draft; the
- * next item captures a fresh IRI. The item that stopped stays in the draft, or
+ * next item captures a fresh IRI with `collection`. With `iri`, every new
+ * creation uses that exact IRI and never overwrites an existing resource.
+ * The item that stopped stays in the draft, or
  * may exist if the target lifetime ended (see `create`); never resubmit it
  * from the input.
  *
@@ -1119,9 +1058,8 @@ function useExplicitView(context: string | undefined) {
  */
 export function useCreation<D extends object>(
   definition: FieldDefinition<D>,
-  options: {
+  options: CreationTarget & {
     readonly initial: D;
-    readonly collection: string;
     /**
      * Create in this Context instead of the selected one, through
      * `runtime.bindContext`. The draft and its target stay when another
@@ -1131,7 +1069,8 @@ export function useCreation<D extends object>(
     /**
      * Forms with the same `id` share one creation: while it is pending,
      * unconfirmed or held for a retry, each of them shows it and none sends
-     * another. By default all forms of the collection share it. Give forms
+     * another. By default all forms of the same collection or fixed IRI share it.
+     * Give forms
      * that should create independently, side by side, an `id` each.
      */
     readonly id?: string;
@@ -1150,12 +1089,13 @@ export function useCreation<D extends object>(
   );
   const writable = fixed ? explicitWrite : access.write;
   const { key: shape } = useDefinition(definition, 'useCreation');
-  // One generation per collection, form name and definition: a command
-  // captured for one is never sent from a form for another.
-  const key = `${options.collection} ${options.id ?? ''} ${shape}`;
+  // The address mode, address, form name and definition own the generation.
+  // Distinct tuples cannot collide; old commands never follow a changed IRI.
+  const address = creationAddress(options);
+  const key = JSON.stringify([...address, options.id ?? '', shape]);
   // The controller owns the creation lane of this form name, with the
   // captured creation and its recovery: every form of the name (by default all
-  // forms of the collection), also one hidden, shown again or remounted, shows
+  // forms of that address), also one hidden, shown again or remounted, shows
   // the same open creation and none sends it afresh. An explicit Context stays
   // through row changes and Context selection.
   const { group, shown } = useLaneGroup(
@@ -1203,7 +1143,7 @@ export function useCreation<D extends object>(
     if (!resetWarning.current) return;
     resetWarning.current = false;
     warn(
-      'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
+      'useCreation: the field definition or creation address changed and the unsaved creation draft was reset.',
     );
   }, [state]);
   // What the form shows, derived: the lane's open creation (locked), or its
@@ -1295,7 +1235,7 @@ export function useCreation<D extends object>(
               now.draft,
               prepareCreation(
                 view,
-                newSubjectIri(view, options.collection),
+                creationIri(view, options),
                 definition,
                 now.draft,
               ),

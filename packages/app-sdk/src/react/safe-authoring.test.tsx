@@ -18,7 +18,7 @@ import {
   type EditDefinition,
   type ResourceEditor as Editor,
 } from '@sempods/client-sdk/edit';
-import { SdkError, type JsonLd, type PodFetch } from '@sempods/client-sdk';
+import { type JsonLd, type PodFetch } from '@sempods/client-sdk';
 import {
   fixture,
   catalogue,
@@ -167,7 +167,7 @@ async function setup(
     return (
       <>
         <UpdateNotice {...creation.notice} />
-        <UpdateNotice {...mutation.notice} />
+        <UpdateNotice {...mutation.for('urn:one').notice} />
         {withEditor && editor && (
           <ResourceEditor editor={editor}>
             {(draft, change) => (
@@ -230,8 +230,8 @@ it.each(['unconfirmed', 'changed-on-pod'] as const)(
         ? new Response(null, { status: 202 })
         : response;
     });
-    await act(() => f.api.mutation.update(item, { title: 'Mine' }));
-    expect(f.api.mutation.outcome).toMatchObject({
+    await act(() => f.api.mutation.for(item).update({ title: 'Mine' }));
+    expect(f.api.mutation.for('urn:one').notice.outcome).toMatchObject({
       kind,
       current: { iri: item.iri },
     });
@@ -243,26 +243,31 @@ it.each(['unconfirmed', 'changed-on-pod'] as const)(
         name: 'I have checked the pod',
       }) as HTMLButtonElement;
     await waitFor(() => expect(button().disabled).toBe(false));
-    const compared = f.api.mutation.notice.current;
-    const oldNotice = f.api.mutation.notice;
+    const compared = f.api.mutation.for('urn:one').notice.current;
+    const oldNotice = f.api.mutation.for('urn:one').notice;
 
     f.setCatalogue(async () => catalogue([work, personal], []));
     await act(() => f.runtime.loadContexts(f.id));
-    expect(f.api.mutation.notice.checked).toBe(true);
-    expect(f.api.mutation.notice.current).toEqual(compared);
+    expect(f.api.mutation.for('urn:one').notice.checked).toBe(true);
+    expect(f.api.mutation.for('urn:one').notice.current).toEqual(compared);
     expect(button().disabled).toBe(false);
 
     f.setCatalogue(async () => catalogue([personal], []));
     await act(() => f.runtime.loadContexts(f.id));
     expect(f.runtime.bind(f.id)).toBe(f.view);
-    expect(f.api.mutation.notice).toMatchObject({
+    expect(f.api.mutation.for('urn:one').notice).toMatchObject({
       checked: false,
       current: undefined,
       unreadable: false,
     });
-    expect(f.api.mutation.outcome).toMatchObject({ kind, current: undefined });
+    expect(f.api.mutation.for('urn:one').notice.outcome).toMatchObject({
+      kind,
+      current: undefined,
+    });
     if (kind === 'unconfirmed')
-      expect(f.api.mutation.outcome).toMatchObject({ desiredObserved: false });
+      expect(f.api.mutation.for('urn:one').notice.outcome).toMatchObject({
+        desiredObserved: false,
+      });
     expect(button().disabled).toBe(true);
     expect(
       screen.queryByRole('region', { name: 'Current on the pod' }),
@@ -270,11 +275,11 @@ it.each(['unconfirmed', 'changed-on-pod'] as const)(
     const get = vi.fn(f.resource);
     f.setResource(get);
     await act(async () =>
-      expect(await f.api.mutation.notice.onCheck()).toBe(false),
+      expect(await f.api.mutation.for('urn:one').notice.onCheck()).toBe(false),
     );
     expect(get).not.toHaveBeenCalled();
     act(() => oldNotice.onAcknowledge());
-    expect(f.api.mutation.outcome?.kind).toBe(kind);
+    expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe(kind);
     await act(async () => {
       const leaving = f.api.app.selectContext(personal);
       expect(f.api.app.getSnapshot().confirmingLeave).toBe(true);
@@ -284,15 +289,15 @@ it.each(['unconfirmed', 'changed-on-pod'] as const)(
 
     f.setCatalogue(async () => catalogue());
     await act(() => f.runtime.loadContexts(f.id));
-    expect(f.api.mutation.notice.checked).toBe(false);
-    expect(f.api.mutation.notice.current).toBeUndefined();
-    act(() => f.api.mutation.notice.onAcknowledge());
-    expect(f.api.mutation.outcome?.kind).toBe(kind);
+    expect(f.api.mutation.for('urn:one').notice.checked).toBe(false);
+    expect(f.api.mutation.for('urn:one').notice.current).toBeUndefined();
+    act(() => f.api.mutation.for('urn:one').notice.onAcknowledge());
+    expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe(kind);
     await act(async () =>
-      expect(await f.api.mutation.notice.onCheck()).toBe(true),
+      expect(await f.api.mutation.for('urn:one').notice.onCheck()).toBe(true),
     );
-    act(() => f.api.mutation.notice.onAcknowledge());
-    expect(f.api.mutation.outcome).toBeNull();
+    act(() => f.api.mutation.for('urn:one').notice.onAcknowledge());
+    expect(f.api.mutation.for('urn:one').notice.outcome).toBeNull();
   },
 );
 
@@ -436,9 +441,11 @@ it('#121: a write settling after read loss retains uncertainty without compariso
     entered.resolve();
     return gate.promise;
   });
-  let pending!: ReturnType<typeof f.api.mutation.update>;
+  let pending!: Promise<unknown>;
   await act(async () => {
-    pending = f.api.mutation.update(state.data.items[0]!, { title: 'Mine' });
+    pending = f.api.mutation
+      .for(state.data.items[0]!)
+      .update({ title: 'Mine' });
     await entered.promise;
   });
   f.setCatalogue(async () => catalogue([personal], []));
@@ -453,8 +460,8 @@ it('#121: a write settling after read loss retains uncertainty without compariso
       desiredObserved: false,
     });
   });
-  expect(f.api.mutation.notice.checked).toBe(false);
-  expect(f.api.mutation.outcome).toMatchObject({
+  expect(f.api.mutation.for('urn:one').notice.checked).toBe(false);
+  expect(f.api.mutation.for('urn:one').notice.outcome).toMatchObject({
     kind: 'unconfirmed',
     current: undefined,
   });
@@ -493,14 +500,16 @@ it.each([401, 403] as const)(
     );
     await act(async () => {
       expect(
-        await f.api.mutation.update(state.data.items[0]!, { title: 'Mine' }),
+        await f.api.mutation
+          .for(state.data.items[0]!)
+          .update({ title: 'Mine' }),
       ).toEqual({
         kind: 'not-saved',
         reason: 'refused',
         problem: { kind: 'refused', status },
       });
     });
-    expect(f.api.mutation.notice.outcome).toMatchObject({
+    expect(f.api.mutation.for('urn:one').notice.outcome).toMatchObject({
       problem: { kind: 'refused', status },
     });
     act(() => f.api.creation.change({ title: 'New' }));
@@ -516,29 +525,6 @@ it.each([401, 403] as const)(
     });
   },
 );
-
-it('#122: the hook retains a structured exception while capturing a command before dispatch', async () => {
-  const f = await setup();
-  const body: JsonLd = {
-    get '@id'() {
-      throw new SdkError(
-        { code: 'invalid-argument', argument: 'iri' },
-        'capture failed',
-      );
-    },
-  };
-  await act(async () => {
-    expect(await f.api.mutation.create('urn:new', body)).toEqual({
-      kind: 'not-created',
-      reason: 'failure',
-      problem: {
-        kind: 'failure',
-        failure: { code: 'invalid-argument', argument: 'iri' },
-      },
-    });
-  });
-  expect(f.writes).toHaveLength(0);
-});
 
 it('locks the captured creation before rerender, saves typed data and refreshes lists automatically', async () => {
   const f = await setup();
@@ -621,16 +607,18 @@ it('row conflict blocks its lane and acknowledgement preserves an unrelated crea
   });
   act(() => f.api.creation.change({ title: 'Keep draft' }));
   await act(async () => {
-    await f.api.mutation.update(item, { done: true });
+    await f.api.mutation.for(item).update({ done: true });
   });
-  expect(f.api.mutation.outcome?.kind).toBe('changed-on-pod');
-  expect(f.api.mutation.canMutate).toBe(false);
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe(
+    'changed-on-pod',
+  );
+  expect(f.api.mutation.for(f.api.list.data!.items[0]!).canMutate).toBe(false);
   await act(async () => {
-    expect(await f.api.mutation.notice.onCheck()).toBe(true);
+    expect(await f.api.mutation.for('urn:one').notice.onCheck()).toBe(true);
   });
-  act(() => f.api.mutation.notice.onAcknowledge());
+  act(() => f.api.mutation.for('urn:one').notice.onAcknowledge());
   expect(f.api.creation.draft.title).toBe('Keep draft');
-  expect(f.api.mutation.canMutate).toBe(true);
+  expect(f.api.mutation.for(f.api.list.data!.items[0]!).canMutate).toBe(true);
   expect(f.writes).toHaveLength(0);
 });
 it('guards selection and target changes, preserving drafts on cancellation and resetting A-B-A', async () => {
@@ -674,7 +662,7 @@ it('write loss disables mutations, retains drafts, and late old-target completio
   f.setCatalogue(async () => catalogue([work, personal], []));
   await act(() => f.runtime.loadContexts(f.id));
   expect(f.api.creation.canCreate).toBe(false);
-  expect(f.api.mutation.canMutate).toBe(false);
+  expect(f.api.mutation.for(f.api.list.data!.items[0]!).canMutate).toBe(false);
   expect(f.api.creation.draft.title).toBe('Before');
   f.setCatalogue(async () => catalogue([work, personal], [work, personal]));
   await act(() => f.runtime.loadContexts(f.id));
@@ -776,18 +764,20 @@ it('a late comparison cannot authorize acknowledgement of a newer uncertain muta
       : f.resource(url, init);
   f.setResource(uncertain);
   await act(async () => {
-    await f.api.mutation.remove(item);
+    await f.api.mutation.for(item).remove();
   });
   const gate = deferred<Response>();
   f.setResource(() => gate.promise);
   let comparing!: Promise<boolean>;
   act(() => {
-    comparing = f.api.mutation.notice.onCheck();
+    comparing = f.api.mutation.for('urn:one').notice.onCheck();
   });
-  act(() => f.api.mutation.acknowledge());
+  f.setResource(uncertain);
+  await act(() => f.api.mutation.for(item.iri).notice.onCheck());
+  act(() => f.api.mutation.for(item.iri).notice.onAcknowledge());
   f.setResource(uncertain);
   await act(async () => {
-    await f.api.mutation.remove(item);
+    await f.api.mutation.for(item).remove();
   });
   await act(async () => {
     gate.resolve(
@@ -795,9 +785,11 @@ it('a late comparison cannot authorize acknowledgement of a newer uncertain muta
     );
     expect(await comparing).toBe(false);
   });
-  act(() => f.api.mutation.notice.onAcknowledge());
-  expect(f.api.mutation.outcome?.kind).toBe('unconfirmed');
-  expect(f.api.mutation.canMutate).toBe(false);
+  act(() => f.api.mutation.for('urn:one').notice.onAcknowledge());
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe(
+    'unconfirmed',
+  );
+  expect(f.api.mutation.for(f.api.list.data!.items[0]!).canMutate).toBe(false);
 });
 
 it.each([
@@ -1302,7 +1294,7 @@ it('shows only the success of the last write on a target', async () => {
   });
   expect(shown('Created.')).toBe(1);
   await act(async () => {
-    await f.api.mutation.update(await firstRow(f), { done: true });
+    await f.api.mutation.for(await firstRow(f)).update({ done: true });
   });
   expect(f.api.creation.outcome).toBeNull();
   expect(shown('Created.')).toBe(0);
@@ -1315,13 +1307,15 @@ it('shows only the success of the last write on a target', async () => {
     target: { value: 'Renamed' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  await waitFor(() => expect(f.api.mutation.outcome).toBeNull());
+  await waitFor(() =>
+    expect(f.api.mutation.for('urn:one').notice.outcome).toBeNull(),
+  );
   await waitFor(() => expect(shown('Saved.')).toBe(1));
   await act(async () => {
-    await f.api.mutation.update(await firstRow(f), { done: false });
+    await f.api.mutation.for(await firstRow(f)).update({ done: false });
   });
   // The row's own success; the editor's earlier one retired.
-  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe('saved');
   expect(shown('Saved.')).toBe(1);
   expect(
     screen
@@ -1338,19 +1332,23 @@ it('a success never hides or settles an unresolved outcome on the same target', 
     'urn:status': [{ '@id': 'urn:done' }],
   });
   await act(async () => {
-    await f.api.mutation.update(item, { done: true });
+    await f.api.mutation.for(item).update({ done: true });
   });
-  expect(f.api.mutation.outcome?.kind).toBe('changed-on-pod');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe(
+    'changed-on-pod',
+  );
   act(() => f.api.creation.change({ title: 'New' }));
   await act(async () => {
     await f.api.creation.create();
   });
   expect(f.api.creation.outcome?.kind).toBe('created');
-  expect(f.api.mutation.outcome?.kind).toBe('changed-on-pod');
-  expect(f.api.mutation.canMutate).toBe(false);
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe(
+    'changed-on-pod',
+  );
+  expect(f.api.mutation.for(f.api.list.data!.items[0]!).canMutate).toBe(false);
   // A refused start retires nothing.
   await act(async () => {
-    await f.api.mutation.update(item, { done: false });
+    await f.api.mutation.for(item).update({ done: false });
   });
   expect(f.api.creation.outcome?.kind).toBe('created');
   expect(
@@ -1379,9 +1377,9 @@ it('an uncertain creation survives a later row success', async () => {
   });
   expect(f.api.creation.outcome?.kind).toBe('unconfirmed');
   await act(async () => {
-    await f.api.mutation.update(await firstRow(f), { done: true });
+    await f.api.mutation.for(await firstRow(f)).update({ done: true });
   });
-  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe('saved');
   expect(f.api.creation.outcome?.kind).toBe('unconfirmed');
   expect(f.api.creation.canCreate).toBe(false);
 });
@@ -1398,9 +1396,9 @@ it('keeps a failure and a success when no other write starts', async () => {
   });
   expect(f.api.creation.outcome?.kind).toBe('not-created');
   await act(async () => {
-    await f.api.mutation.update(await firstRow(f), { done: true });
+    await f.api.mutation.for(await firstRow(f)).update({ done: true });
   });
-  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe('saved');
   // A failure is not retired by another write.
   expect(f.api.creation.outcome?.kind).toBe('not-created');
   await act(async () => {
@@ -1411,7 +1409,7 @@ it('keeps a failure and a success when no other write starts', async () => {
   await act(async () => {
     await f.api.editor!.save();
   });
-  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe('saved');
 });
 it('does not show a success when another write started while it was pending', async () => {
   const f = await setup();
@@ -1428,22 +1426,22 @@ it('does not show a success when another write started while it was pending', as
   });
   await waitFor(() => expect(f.api.creation.busy).toBe(true));
   await act(async () => {
-    await f.api.mutation.update(item, { done: true });
+    await f.api.mutation.for(item).update({ done: true });
   });
-  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe('saved');
   await act(async () => {
     gate.resolve(new Response(null, { status: 201 }));
     expect((await creating)?.kind).toBe('created');
   });
   expect(f.api.creation.outcome).toBeNull();
   expect(f.api.creation.draft).toEqual(initial);
-  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe('saved');
   expect(shown('Created.')).toBe(0);
 });
 it('an editor delete retires a row success and a later creation retires it', async () => {
   const f = await setup('en', { withEditor: true });
   await act(async () => {
-    await f.api.mutation.update(await firstRow(f), { done: true });
+    await f.api.mutation.for(await firstRow(f)).update({ done: true });
   });
   expect(shown('Saved.')).toBe(1);
   await act(async () => {
@@ -1459,7 +1457,7 @@ it('an editor delete retires a row success and a later creation retires it', asy
     ).getByRole('button', { name: 'Delete' }),
   );
   await waitFor(() => expect(shown('Deleted.')).toBe(1));
-  expect(f.api.mutation.outcome).toBeNull();
+  expect(f.api.mutation.for('urn:one').notice.outcome).toBeNull();
   expect(shown('Saved.')).toBe(0);
   act(() => f.api.creation.change({ title: 'After delete' }));
   await act(async () => {
@@ -1488,9 +1486,9 @@ it('refreshes a list and retires its success after a write through an explicit h
   const f = await setup();
   const queries = () => f.count('/_system/sparql/query');
   await act(async () => {
-    await f.api.mutation.update(await firstRow(f), { done: true });
+    await f.api.mutation.for(await firstRow(f)).update({ done: true });
   });
-  expect(f.api.mutation.outcome?.kind).toBe('saved');
+  expect(f.api.mutation.for('urn:one').notice.outcome?.kind).toBe('saved');
   await waitFor(() => expect(f.api.list.state.kind).toBe('ready'));
   const before = queries();
   const editor = await explicitEditor(f);
@@ -1500,7 +1498,7 @@ it('refreshes a list and retires its success after a write through an explicit h
   });
   // The explicit write's start retired the row's success; its confirmation
   // refreshed the list of the selected handle.
-  expect(f.api.mutation.outcome).toBeNull();
+  expect(f.api.mutation.for('urn:one').notice.outcome).toBeNull();
   await waitFor(() => expect(queries()).toBe(before + 1));
   await waitFor(() => expect(listTitles(f)).toContain('From the overview'));
 });

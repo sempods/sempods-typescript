@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createFormatters } from '@sempods/app-sdk';
-import { SdkLocaleProvider, useSdkLocale } from '@sempods/app-sdk/react';
+import { fields, text } from '@sempods/client-sdk/edit';
+import {
+  SdkLocaleProvider,
+  useSdkLocale,
+  useCreation,
+  useFieldUpdate,
+} from '@sempods/app-sdk/react';
 
 function Task() {
   const [draft, setDraft] = useState('');
@@ -30,3 +36,25 @@ function App() {
 const host = document.getElementById('app');
 if (!host) throw new Error('Missing consumer mount point.');
 createRoot(host).render(<App />);
+
+// Compile the changed contract from installed declarations, not workspace paths.
+function CreationTypes() {
+  const definition = fields({ title: text('urn:title', { language: null }) });
+  useCreation(definition, { initial: { title: '' }, iri: 'urn:settings' });
+  useCreation(definition, { initial: { title: '' }, collection: 'tasks' });
+  // @ts-expect-error Exactly one creation address is required.
+  useCreation(definition, { initial: { title: '' } });
+  // @ts-expect-error A creation cannot choose both address modes.
+  useCreation(definition, {
+    initial: { title: '' },
+    iri: 'urn:settings',
+    collection: 'tasks',
+  });
+  const mutate = useFieldUpdate(definition);
+  // @ts-expect-error Creation is no longer a row-hook command.
+  void mutate.create;
+  // @ts-expect-error Availability belongs to a snapshot's row handle.
+  void mutate.canMutate;
+  return null;
+}
+void CreationTypes;

@@ -185,6 +185,8 @@ try {
   let overviewNoteWrites = 0;
   // Notes created in the overview Pod's second Context, by IRI.
   const overviewCreated = new Map();
+  let settingsBody;
+  const settingsWrites = [];
   // The one-click recipe's task, ticked in its own Context (#134, #136).
   let toggleTask = {
     status: 'https://schema.org/PotentialActionStatus',
@@ -598,6 +600,21 @@ try {
           url.searchParams.get('context'),
           base + '/_system/contexts/work',
         );
+        if (resourceIri(url) === 'urn:packed-settings') {
+          if (req.method === 'GET') {
+            json(settingsBody, 200, { etag: '"settings-v1"' });
+            return;
+          }
+          assert.equal(req.method, 'PUT');
+          assert.equal(req.headers['if-none-match'], '*');
+          const incoming = JSON.parse(body);
+          assert.equal(incoming['@id'], 'urn:packed-settings');
+          settingsWrites.push(incoming);
+          res.writeHead(settingsBody ? 412 : 201);
+          settingsBody ??= incoming;
+          res.end();
+          return;
+        }
         assert.equal(resourceIri(url), 'urn:fixture-task');
         if (req.method === 'GET') {
           json(task, 200, { etag: `"v${version}"` });
@@ -1206,6 +1223,42 @@ try {
   );
   const presetDraft = page.getByLabel('Preset draft');
   await presetDraft.waitFor();
+  await page.getByLabel('Settings title').fill('Original settings');
+  await page
+    .getByRole('button', { name: 'Create settings', exact: true })
+    .click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[aria-label="Settings outcome"]')?.textContent ===
+      'created',
+  );
+  await page.getByLabel('Settings title').fill('Must not overwrite');
+  await page
+    .getByRole('button', { name: 'Create settings', exact: true })
+    .click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[aria-label="Settings outcome"]')?.textContent ===
+      'unconfirmed',
+  );
+  assert.equal(settingsWrites.length, 2);
+  assert.deepEqual(settingsBody['https://schema.org/name'], [
+    { '@value': 'Original settings' },
+  ]);
+  await page
+    .getByRole('button', { name: 'Check current version', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'I have checked the pod', exact: true })
+    .click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[aria-label="Settings outcome"]')?.textContent ===
+      '',
+  );
+  console.log(
+    'Packed known-IRI creation: create-only write, existing resource preserved and checked recovery passed.',
+  );
   // Back to the plain page once startup has settled (it sets the address
   // again when it finishes), so the re-authorization below returns there.
   await page.evaluate(() =>
