@@ -116,17 +116,14 @@ export class LaneGroup<D> {
     return this.originals.has(key);
   }
   /**
-   * A pending or unresolved lane whose key starts with `prefix` and that no
-   * mounted form claims: what an earlier mount of a form left behind, for a
-   * remounted form to take over (check, acknowledge), never to resend.
+   * An outstanding lane (pending, unresolved or held for an explicit retry)
+   * whose key starts with `prefix` and that no mounted form claims: what an
+   * earlier mount of a form left behind, for a remounted form to take over
+   * (check, acknowledge, retry the held command), never to send afresh.
    */
   orphan(prefix: string): string | null {
     for (const [key, lane] of this.lanes)
-      if (
-        key.startsWith(prefix) &&
-        !this.owners.has(key) &&
-        (lane.pending || lane.unresolved)
-      )
+      if (key.startsWith(prefix) && !this.owners.has(key) && lane.outstanding())
         return key;
     return null;
   }
@@ -134,11 +131,11 @@ export class LaneGroup<D> {
   /** Drops the oldest settled, unguarded lanes beyond the bound: feedback only. */
   private evict() {
     let settled = [...this.lanes.values()].filter(
-      (lane) => !lane.pending && !lane.unresolved,
+      (lane) => !lane.outstanding(),
     ).length;
     for (const [iri, lane] of this.lanes) {
       if (settled <= SETTLED) break;
-      if (lane.pending || lane.unresolved) continue;
+      if (lane.outstanding()) continue;
       this.lanes.delete(iri);
       this.guards.get(lane)?.();
       this.guards.delete(lane);

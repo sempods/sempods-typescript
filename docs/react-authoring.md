@@ -285,7 +285,8 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   `<UnresolvedNotices>` shows the notices of those without a row
   (`mutate.for(iri).notice` for one). New commands start only from a mounted,
   shown screen (`not-sent`, `ended` otherwise). A remounted `useCreation`
-  form takes over a creation its earlier mount left pending or unconfirmed.
+  form takes over a creation its earlier mount left pending, unconfirmed or
+  held for a same-IRI retry after observed absence.
 - `RemoveButton` asks with `ResourceEditor`'s delete dialog and calls
   `onRemove`, as it was when asked, only after confirmation (a row read again
   meanwhile shows as a conflict). A quiet trash icon with a 44px target, named

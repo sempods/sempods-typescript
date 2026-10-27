@@ -128,7 +128,9 @@ All points:
   A guarded change now asks about such a write even when no screen shows it.
   A remounted `useCreation` form takes over a creation its earlier mount left
   pending or unconfirmed (check and acknowledge; it cannot be submitted again
-  meanwhile), and a hidden or unmounted form starts no new creation.
+  meanwhile), or held for a same-IRI retry after observed absence, and a
+  hidden or unmounted form starts no new creation. Changing `collection`
+  resets the draft like a definition change.
   A field definition change no longer drops a pending write (and no longer
   warns about it).
 - **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane

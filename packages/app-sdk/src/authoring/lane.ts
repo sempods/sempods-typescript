@@ -64,9 +64,11 @@ export class Lane<D> {
   writes = 0;
   /**
    * What the writing form needs to recover this write after it remounts, for
-   * example a creation's captured command and draft (opaque here).
+   * example a creation's captured command and draft (opaque here). `retry`
+   * holds it for an explicit retry after observed absence; a confirmed
+   * creation clears it.
    */
-  held: unknown = null;
+  held: { readonly retry: boolean } | null = null;
   /**
    * The snapshot a confirmed update was made from. It no longer shows the
    * resource, so it cannot be written again; the next read brings a fresh one.
@@ -100,6 +102,10 @@ export class Lane<D> {
   eligible() {
     return this.alive && this.holds();
   }
+  /** A write that still needs a form: pending, unresolved or held for a retry. */
+  outstanding() {
+    return this.pending || this.unresolved || Boolean(this.held?.retry);
+  }
   readable() {
     return this.eligible() && Boolean(this.view?.getSnapshot().read);
   }
@@ -131,9 +137,10 @@ export class Lane<D> {
       scope,
       unconfirmed: () => this.uncertain,
       blocked: () => this.pending,
-      dirty: () => this.unresolved,
+      dirty: () => this.unresolved || Boolean(this.held?.retry),
       discard: () => {
         this.unresolved = false;
+        this.held = null;
         this.uncertain = false;
         this.version++;
         this.checked = false;
@@ -209,6 +216,8 @@ export class Lane<D> {
     this.unresolved =
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     this.uncertain = outcome.kind === 'unconfirmed';
+    // Created: no form holds it for a retry any more, whichever sent it.
+    if (outcome.kind === 'created') this.held = null;
     this.state = { operation, outcome, busy: false, start };
     this.notify();
     if (succeeded(outcome)) changed(view);

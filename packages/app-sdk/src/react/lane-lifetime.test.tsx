@@ -80,6 +80,7 @@ async function setup() {
     late: ReturnType<typeof useCreation<Task>> | null;
     showLate: (shown: boolean) => void;
     note: (noted?: boolean) => void;
+    collect: (collection: string) => void;
     mount: (mounted: boolean) => void;
   };
   // The same type with one more field: another definition for the form.
@@ -93,7 +94,9 @@ async function setup() {
   );
   function Screen() {
     const [noted, setNoted] = useState(false);
+    const [collection, collect] = useState('tasks');
     api.note = (next = true) => setNoted(next);
+    api.collect = collect;
     const list = useList(definition);
     api.mutate = useFieldUpdate(definition);
     api.other = useFieldUpdate(definition);
@@ -101,7 +104,7 @@ async function setup() {
       (noted ? withNote : definition) as typeof definition,
       {
         initial: { title: '', done: false },
-        collection: 'tasks',
+        collection,
       },
     );
     // A second form for the same collection and definition.
@@ -486,4 +489,117 @@ it('an absence acknowledged by a form that took the lane over holds the original
     expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
   });
   expect(s.puts).toEqual([iri, iri]);
+});
+
+it('a remounted form recovers a creation it acknowledged absent before unmounting', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.outcome).toBeNull());
+  act(() => s.api.mount(false));
+  act(() => s.api.mount(true));
+  // The held item comes back for its same-IRI retry, not a blank form.
+  await waitFor(() => expect(s.api.creation.draft.title).toBe('New'));
+  expect(s.api.creation.canEdit).toBe(false);
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toEqual([iri, iri]);
+});
+
+it('a form shown again after another one completed its retry is usable', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  act(() => s.api.hide(true));
+  act(() => s.api.showLate(true));
+  await waitFor(() =>
+    expect(s.api.late?.outcome).toMatchObject({ kind: 'unconfirmed' }),
+  );
+  // The other form checks, finds it absent, acknowledges and retries.
+  await act(async () => {
+    expect(await s.api.late!.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.late!.notice.onAcknowledge());
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.late!.create()).toMatchObject({ kind: 'created' });
+  });
+  // Shown again: the item exists, so the original form starts afresh.
+  act(() => s.api.hide(false));
+  await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
+  expect(s.api.creation.canEdit).toBe(true);
+  act(() => s.api.creation.change({ title: 'Next' }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toHaveLength(3);
+  expect(s.puts.slice(0, 2)).toEqual([iri, iri]);
+  expect(s.puts[2]).not.toBe(iri);
+});
+
+it("a form for another collection never sends the earlier collection's command", async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  act(() => s.api.collect('notes'));
+  await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
+  // Its own lane is free: the earlier collection's write stays unresolved.
+  expect(s.api.creation.canEdit).toBe(true);
+  act(() => s.api.creation.change({ title: 'Note' }));
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toHaveLength(2);
+  expect(s.puts[1]).not.toBe(iri);
+});
+
+it("a form that takes its lane back during another one's retry is usable once it is created", async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  act(() => s.api.hide(true));
+  act(() => s.api.showLate(true));
+  await waitFor(() =>
+    expect(s.api.late?.outcome).toMatchObject({ kind: 'unconfirmed' }),
+  );
+  await act(async () => {
+    expect(await s.api.late!.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.late!.notice.onAcknowledge());
+  const held = deferred<Response>();
+  s.answer(() => held.promise);
+  let sent!: Promise<unknown>;
+  act(() => {
+    sent = s.api.late!.create();
+  });
+  await waitFor(() => expect(s.api.late?.busy).toBe(true));
+  // Shown again while the retry is pending: the original takes its lane back.
+  act(() => s.api.hide(false));
+  await waitFor(() => expect(s.api.creation.busy).toBe(true));
+  await act(async () => held.resolve(new Response(null, { status: 201 })));
+  expect(await sent).toMatchObject({ kind: 'created' });
+  await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
+  expect(s.api.creation.canEdit).toBe(true);
 });

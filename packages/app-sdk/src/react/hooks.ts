@@ -837,13 +837,15 @@ function useMutation<D>(
     lane: id,
     /** The form's recovery data kept with its lane (see `Lane.held`). */
     held: () => live()?.held ?? null,
-    hold: (value: unknown) => {
+    hold: (value: { readonly retry: boolean } | null) => {
       // Clearing never starts a lane of its own.
       if (value === null) {
         const lane = live();
         if (lane) lane.held = null;
       } else if (group) group.lane(id).held = value;
     },
+    /** Whether this form's lane exists (it may have been evicted or retired). */
+    known: lane !== null,
     busy: lane?.state?.busy ?? false,
     unresolved: lane?.unresolved ?? false,
     canMutate: lane ? lane.canMutate(writable) : available,
@@ -1169,7 +1171,10 @@ export function useCreation<D extends object>(
   const explicit = useExplicitView(options.context);
   const selected = useView();
   const view = options.context === undefined ? selected : explicit.view;
-  const { key } = useDefinition(definition, 'useCreation');
+  const { key: shape } = useDefinition(definition, 'useCreation');
+  // One generation per collection and definition: a command captured for one
+  // collection is never sent from a form for another.
+  const key = `${options.collection} ${shape}`;
   const mutation = useMutation(
     definition,
     options.context === undefined ? undefined : explicit.view,
@@ -1190,7 +1195,7 @@ export function useCreation<D extends object>(
       JSON.stringify(state.draft) !== JSON.stringify(options.initial)
     )
       warn(
-        'useCreation: the field definition changed and the unsaved creation draft was reset.',
+        'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
       );
     const next = { view, key, draft: copy(options.initial) };
     current.current = next;
@@ -1231,6 +1236,22 @@ export function useCreation<D extends object>(
     else command.current = { ...kept, state: next };
     current.current = next;
     if (held !== kept) restoredFor.current = mutation.lane;
+    setState(next);
+  }
+  // The lane no longer holds this form's command: a form that took it over
+  // meanwhile (while this one was hidden) created or discarded the item, so
+  // it is no longer this form's to send.
+  const mine = command.current;
+  if (
+    mine &&
+    mine.state === current.current &&
+    mutation.known &&
+    !mutation.busy &&
+    kept?.creation !== mine.creation
+  ) {
+    const next = { view, key, draft: copy(initial.current) };
+    command.current = null;
+    current.current = next;
     setState(next);
   }
   const draft = current.current.draft;
