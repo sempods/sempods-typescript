@@ -1,4 +1,10 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import {
   removeSnapshot,
   updateFields,
@@ -14,21 +20,23 @@ import {
   type ContextEditorProblem,
 } from '../authoring/contexts.js';
 import {
-  isSpent,
+  changedData,
   notSent,
   spentData,
   type MutationOutcome,
   type NotSent,
 } from '../authoring/lane.js';
-import { lanesOf } from '../authoring/lanes.js';
+import { lanesOf, type LaneGroup } from '../authoring/lanes.js';
 import {
+  activeCatalogue,
   shallowEqual,
   useAppFacts,
   useContextDiscovery,
   useController,
+  useWriteGate,
 } from './app.js';
 import {
-  noNotice,
+  laneState,
   useCommandToken,
   useDefinition,
   type FieldUpdateRow,
@@ -50,6 +58,34 @@ export interface ContextUpdateState<D> extends FieldUpdateState<D> {
 /** One overview row of `useContextUpdate`, from `for(item)`. */
 export interface ContextUpdateRow<D>
   extends ContextUpdateState<D>, FieldUpdateRow<D> {}
+
+/** A row's Context of the active connection, as a row reads it. */
+interface Target<D> {
+  readonly view: BoundView | null;
+  readonly group: LaneGroup<D> | null;
+  readonly problem: ContextEditorProblem | null;
+  /** The view's write access as this render read it. */
+  readonly write: boolean;
+  readonly writable: boolean;
+}
+/**
+ * The Context's view of the active connection (cached by the runtime: the same
+ * view `usePodList` read the rows from), `'refused'` for a configuration
+ * refusal, `null` while there is none.
+ */
+function bindOrRefuse(
+  app: ReturnType<typeof useController>,
+  activeId: string | null,
+  context: string,
+): BoundView | 'refused' | null {
+  if (!activeId) return null;
+  try {
+    return app.runtime.bindContext(activeId, context);
+  } catch (error) {
+    if (!(error instanceof RuntimeError)) throw error;
+    return error.problem === 'configuration' ? 'refused' : null;
+  }
+}
 
 /**
  * One-click updates and removals of overview rows, each in its own Context:
@@ -73,45 +109,68 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   const { key, definition } = useDefinition(input, 'useContextUpdate');
   const app = useController();
   useContextDiscovery(true);
-  const { activeId, catalogue } = useAppFacts((s) => {
-    const connection = s.connections.find((c) => c.id === s.activeId);
-    const active =
-      connection?.session.kind === 'active' ||
-      connection?.session.kind === 'renewing';
-    return {
-      activeId: active ? connection.id : null,
-      catalogue: active ? connection.catalogue : undefined,
-      // Row availability waits for a guarded change or its prompt; render
-      // again once it ends.
-      changing: s.changing,
-      confirmingLeave: s.confirmingLeave,
-    };
-  }, shallowEqual);
+  const { activeId, catalogue } = useAppFacts(activeCatalogue, shallowEqual);
+  // Row availability reads the guarded-change state while rendering.
+  useWriteGate();
   const store = lanesOf(app);
   const name = `rows ${key}`;
-  const watch = useCallback(
-    (listener: () => void) => store.watch(name, 'explicit', listener),
-    [store, name],
+  const channel = store.channel(name, 'explicit');
+  const changes = useSyncExternalStore(
+    channel.subscribe,
+    channel.getVersion,
+    channel.getVersion,
   );
-  const version = () => store.version(name, 'explicit');
-  const changes = useSyncExternalStore(watch, version, version);
   // Commands start only while this screen is shown, for this connection and
   // definition; one kept from an earlier one never again.
   const shown = useCommandToken(activeId, key);
 
-  /** The Context's view of the active connection, or why there is none. */
-  const bind = (context: string): BoundView | 'refused' | null => {
-    if (!activeId) return null;
-    try {
-      // Cached by the runtime: the same view `usePodList` read the rows from.
-      return app.runtime.bindContext(activeId, context);
-    } catch (error) {
-      if (!(error instanceof RuntimeError)) throw error;
-      return error.problem === 'configuration' ? 'refused' : null;
-    }
+  // What a row needs of its Context, once per Context and render.
+  const contexts = new Map<string, Target<D>>();
+  const target = (context: string): Target<D> => {
+    let found = contexts.get(context);
+    if (found) return found;
+    const view = bindOrRefuse(app, activeId, context);
+    const bound = view && view !== 'refused' ? view : null;
+    const problem = contextProblem(catalogue, context, view === 'refused');
+    const write = Boolean(bound?.getSnapshot().write);
+    found = {
+      view: bound,
+      group: bound ? store.group(bound, name, definition, 'explicit') : null,
+      problem,
+      write,
+      writable: write && problem === null,
+    };
+    contexts.set(context, found);
+    return found;
   };
-  const groupOf = (view: BoundView) =>
-    store.group(view, name, definition, 'explicit');
+  // Write access lives in each Context's view: render again when one of the
+  // views this render's rows read changes (rows are read after this hook, so
+  // their Contexts are known once it commits).
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const subscribed = useRef(new Map<BoundView, () => void>());
+  useEffect(() => {
+    const read = [...contexts.values()];
+    const want = new Set(read.flatMap((c) => (c.view ? [c.view] : [])));
+    for (const [view, stop] of subscribed.current)
+      if (!want.has(view)) {
+        stop();
+        subscribed.current.delete(view);
+      }
+    for (const view of want)
+      if (!subscribed.current.has(view))
+        subscribed.current.set(view, view.subscribe(rerender));
+    // Changed between rendering and subscribing.
+    if (read.some((c) => c.view && c.write !== c.view.getSnapshot().write))
+      rerender();
+  });
+  useEffect(() => {
+    const own = subscribed.current;
+    return () => {
+      own.forEach((stop) => stop());
+      own.clear();
+    };
+  }, []);
+
   const run = (
     context: string,
     iri: string,
@@ -121,14 +180,14 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     after?: D,
   ): Promise<MutationOutcome<D> | NotSent> => {
     if (!shown.current) return Promise.resolve(notSent('ended'));
-    const view = bind(context);
+    const view = bindOrRefuse(app, activeId, context);
     if (!view || view === 'refused')
       return Promise.resolve(notSent('unavailable'));
-    const lane = groupOf(view).lane(iri);
     // A refused write sends nothing and keeps the resource's recovery.
-    const refused = lane.refusal(subject);
-    if (refused) return Promise.resolve(notSent(refused));
-    return lane.execute(operation, iri, action, subject, after);
+    return store
+      .group(view, name, definition, 'explicit')
+      .lane(iri)
+      .execute(operation, iri, action, subject, after);
   };
 
   function rowFor(item: PodListItem<D>): ContextUpdateRow<D>;
@@ -138,22 +197,18 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   ): ContextUpdateState<D> | ContextUpdateRow<D> {
     const { context } = item;
     const snapshot = 'snapshot' in item ? item.snapshot : undefined;
-    const iri = snapshot ? snapshot.iri : (item as ContextResource).iri;
-    const view = bind(context);
-    const bound = view && view !== 'refused' ? view : null;
-    const group = bound ? groupOf(bound) : null;
-    const lane = group?.lanes.get(iri);
-    const problem = contextProblem(catalogue, context, view === 'refused');
-    const writable = Boolean(bound?.getSnapshot().write) && problem === null;
+    const iri = 'snapshot' in item ? item.snapshot.iri : item.iri;
+    const { view, group, problem, writable } = target(context);
     const state: ContextUpdateState<D> = {
       context,
       problem,
-      canMutate: lane
-        ? lane.canMutate(writable, snapshot)
-        : // A spent snapshot stays locked, also once its lane was evicted.
-          Boolean(group?.available(writable)) &&
-          !(snapshot && isSpent(snapshot)),
-      notice: lane && bound ? lane.notice(startCount(bound)) : noNotice,
+      ...laneState<D>(
+        group?.lanes.get(iri),
+        writable,
+        Boolean(group?.available(writable)),
+        view ? startCount(view) : 0,
+        snapshot,
+      ),
     };
     if (!snapshot) return state;
     return {
@@ -167,12 +222,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
           'update',
           (v) => updateFields(v, snapshot, definition, change),
           snapshot,
-          {
-            ...snapshot.data,
-            ...Object.fromEntries(
-              Object.entries(change).filter(([, value]) => value !== undefined),
-            ),
-          },
+          changedData(snapshot.data, change),
         ) as Promise<UpdateOutcome<D> | NotSent>,
       remove: () =>
         run(
@@ -187,7 +237,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   // Stable between lane changes, so it fits effect dependencies.
   const unresolved = useMemo(
     () =>
-      store.groups<D>(name, 'explicit').flatMap((group) =>
+      channel.held<D>().flatMap((group) =>
         [...group.lanes.values()]
           .filter((lane) => lane.unresolved)
           .map((lane): ContextResource => ({
@@ -197,7 +247,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
       ),
     // `changes` moves with every lane change of these groups.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, name, changes, activeId],
+    [channel, changes, activeId],
   );
   return {
     /**

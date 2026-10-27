@@ -44,10 +44,12 @@ import {
   useController,
   useView,
   useWorkflowAccess,
+  useWriteGate,
 } from './app.js';
 import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
+  changedData,
   isSpent,
   notSent,
   spentData,
@@ -771,8 +773,28 @@ function useLaneGroup<D, L extends Lane<D> = Lane<D>>(
     group?.getVersion ?? noVersion,
     group?.getVersion ?? noVersion,
   );
+  useWriteGate();
   const shown = useCommandToken(group);
   return { group, version, shown };
+}
+/**
+ * Internal: one resource's availability and notice, shared by the row hooks.
+ * Without a lane of its own, `available` decides; a spent snapshot stays
+ * locked, also once its lane was evicted.
+ */
+export function laneState<D>(
+  lane: Lane<D> | undefined,
+  writable: boolean,
+  available: boolean,
+  starts: number,
+  snapshot?: object,
+): FieldUpdateState<D> {
+  return {
+    canMutate: lane
+      ? lane.canMutate(writable, snapshot)
+      : available && !(snapshot && isSpent(snapshot)),
+    notice: lane ? lane.notice(starts) : noNotice,
+  };
 }
 /** Notice props for a resource this hook has not written yet. */
 export const noNotice = Object.freeze({
@@ -887,12 +909,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
           'update',
           (v) => updateFields(v, snapshot, definition, change),
           snapshot,
-          {
-            ...snapshot.data,
-            ...Object.fromEntries(
-              Object.entries(change).filter(([, value]) => value !== undefined),
-            ),
-          },
+          changedData(snapshot.data, change),
         ) as Promise<UpdateOutcome<D> | NotSent>,
       remove: (snapshot: Snapshot<D>) =>
         run(snapshot.iri, 'remove', (v) =>
@@ -920,17 +937,13 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   function rowFor(
     item: Snapshot<D> | string,
   ): FieldUpdateState<D> | FieldUpdateRow<D> {
-    const lane = group?.lanes.get(iriOf(item));
-    const state: FieldUpdateState<D> = {
-      canMutate: lane
-        ? lane.canMutate(
-            access.write,
-            typeof item === 'string' ? undefined : item,
-          )
-        : // Also a spent snapshot whose lane was evicted stays locked.
-          available && (typeof item === 'string' || !isSpent(item)),
-      notice: lane?.notice(starts) ?? noNotice,
-    };
+    const state = laneState<D>(
+      group?.lanes.get(iriOf(item)),
+      access.write,
+      available,
+      starts,
+      typeof item === 'string' ? undefined : item,
+    );
     if (typeof item === 'string') return state;
     return {
       ...state,

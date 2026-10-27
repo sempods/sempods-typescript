@@ -1,7 +1,7 @@
 import type { FieldDefinition } from '@sempods/client-sdk/edit';
 import type { AppController } from './app.js';
 import type { BoundView } from '../runtime/view.js';
-import { notify, observeStarts } from './changes.js';
+import { notify, observeStarts, startCount } from './changes.js';
 import { Lane, type LaneScope } from './lane.js';
 
 /** At most this many settled, unguarded lanes stay per group for feedback. */
@@ -34,12 +34,10 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     readonly scope: LaneScope,
     /** The connection the group was created for. */
     private readonly connection: string | null,
-    /** The store's part: it follows started groups by name. */
-    private readonly owner: {
-      readonly start: () => void;
-      readonly change: () => void;
-      readonly drop: () => void;
-    },
+    /** The groups of this scope and key across views (see `LaneChannel`). */
+    private readonly channel: LaneChannel,
+    /** Leaves the store's lookup once it retired. */
+    private readonly drop: () => void,
     /** The kind of lane this group holds (`Lane`, or `CreationLane`). */
     private readonly make: LaneKind<D, L>,
   ) {}
@@ -66,7 +64,7 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     // A write that settled may bring the group over its bound.
     this.evict();
     notify([...this.listeners]);
-    this.owner.change();
+    this.channel.changed();
   };
   /**
    * Whether a resource without a lane of its own could be written now, given
@@ -125,8 +123,9 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
    * retire a shown success) while it has lanes.
    */
   private start() {
-    this.owner.start();
+    this.channel.groups.add(this as unknown as LaneGroup<unknown>);
     this.readable = this.view.getSnapshot().read;
+    let starts = startCount(this.view);
     const follow = () => {
       if (!this.holds()) return this.retire();
       const readable = this.view.getSnapshot().read;
@@ -139,7 +138,13 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     this.stops.push(
       this.app.subscribe(follow),
       this.view.subscribe(follow),
-      observeStarts(this.view, this.changed),
+      observeStarts(this.view, () => {
+        const before = starts;
+        starts = startCount(this.view);
+        // Only a success shown until now changes: it retires.
+        if ([...this.lanes.values()].some((lane) => lane.showsSuccess(before)))
+          this.changed();
+      }),
     );
   }
 
@@ -159,7 +164,8 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     this.guards.forEach((unregister) => unregister());
     this.guards.clear();
     this.stops.splice(0).forEach((stop) => stop());
-    this.owner.drop();
+    this.channel.groups.delete(this as unknown as LaneGroup<unknown>);
+    this.drop();
     return true;
   }
 }
@@ -168,6 +174,35 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
 export type LaneKind<D, L extends Lane<D>> = new (
   ...args: ConstructorParameters<typeof Lane<D>>
 ) => L;
+
+/**
+ * Internal: the started groups of one scope and key across views, for a hook
+ * writing to many targets (one group per Context): it subscribes once and is
+ * told about every lane change of each. Groups leave when they retire, so
+ * nothing here keeps a replaced view alive.
+ */
+export class LaneChannel {
+  readonly groups = new Set<LaneGroup<unknown>>();
+  private readonly listeners = new Set<() => void>();
+  private version = 0;
+  readonly subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  readonly getVersion = () => this.version;
+  changed() {
+    this.version++;
+    notify([...this.listeners]);
+  }
+  /** Its groups whose target still holds. */
+  held<D>(): readonly LaneGroup<D>[] {
+    return [...this.groups].filter((group) =>
+      group.holds(),
+    ) as unknown as LaneGroup<D>[];
+  }
+}
 
 /** Internal: the lane groups of one controller, by view, scope and definition. */
 export interface LaneStore {
@@ -178,14 +213,8 @@ export interface LaneStore {
     scope: LaneScope,
     kind?: LaneKind<D, L>,
   ): LaneGroup<D, L>;
-  /**
-   * The groups of one scope and key across views that have lanes, for a hook
-   * writing to many targets (one group per Context).
-   */
-  groups<D>(key: string, scope: LaneScope): readonly LaneGroup<D>[];
-  /** Notified on every lane change of those groups; `version` changes too. */
-  watch(key: string, scope: LaneScope, listener: () => void): () => void;
-  version(key: string, scope: LaneScope): number;
+  /** The started groups of one scope and key across views. */
+  channel(key: string, scope: LaneScope): LaneChannel;
 }
 
 const stores = new WeakMap<AppController, LaneStore>();
@@ -201,24 +230,11 @@ export function lanesOf(app: AppController): LaneStore {
     BoundView,
     Map<string, LaneGroup<unknown, Lane<unknown>>>
   >();
-  // Started groups by name: they leave when they retire, so nothing else
-  // keeps a replaced view alive here.
-  const named = new Map<
-    string,
-    {
-      readonly groups: Set<LaneGroup<unknown, Lane<unknown>>>;
-      readonly listeners: Set<() => void>;
-      version: number;
-    }
-  >();
+  const channels = new Map<string, LaneChannel>();
   const channel = (name: string) => {
-    let entry = named.get(name);
-    if (!entry)
-      named.set(
-        name,
-        (entry = { groups: new Set(), listeners: new Set(), version: 0 }),
-      );
-    return entry;
+    let found = channels.get(name);
+    if (!found) channels.set(name, (found = new LaneChannel()));
+    return found;
   };
   store = {
     group<D, L extends Lane<D> = Lane<D>>(
@@ -241,41 +257,16 @@ export function lanesOf(app: AppController): LaneStore {
         app,
         scope,
         app.getSnapshot().activeId,
-        {
-          start: () => {
-            channel(name).groups.add(entry());
-          },
-          change: () => {
-            const c = channel(name);
-            c.version++;
-            notify([...c.listeners]);
-          },
-          drop: () => {
-            if (byKey.get(name) === group) byKey.delete(name);
-            channel(name).groups.delete(entry());
-          },
+        channel(name),
+        () => {
+          if (byKey.get(name) === group) byKey.delete(name);
         },
         kind,
       );
-      const entry = () => group as unknown as LaneGroup<unknown, Lane<unknown>>;
-      byKey.set(name, entry());
+      byKey.set(name, group as unknown as LaneGroup<unknown, Lane<unknown>>);
       return group;
     },
-    groups<D>(key: string, scope: LaneScope) {
-      return [...(named.get(`${scope} ${key}`)?.groups ?? [])].filter((g) =>
-        g.holds(),
-      ) as unknown as LaneGroup<D>[];
-    },
-    watch(key: string, scope: LaneScope, listener: () => void) {
-      const c = channel(`${scope} ${key}`);
-      c.listeners.add(listener);
-      return () => {
-        c.listeners.delete(listener);
-      };
-    },
-    version(key: string, scope: LaneScope) {
-      return named.get(`${scope} ${key}`)?.version ?? 0;
-    },
+    channel: (key: string, scope: LaneScope) => channel(`${scope} ${key}`),
   };
   stores.set(app, store);
   return store;

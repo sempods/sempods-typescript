@@ -117,6 +117,25 @@ export function useAppFacts<T>(
   };
   return useSyncExternalStore(app.subscribe, read, read);
 }
+/**
+ * Internal: whether no guarded change or its prompt holds writes back, as a
+ * subscribed value: lanes read it from the snapshot while rendering, so a
+ * hook using them renders again once a change ends.
+ */
+export function useWriteGate() {
+  return useAppFacts((s) => !s.changing && !s.confirmingLeave);
+}
+/** Internal: the active connection, while signed in, and its catalogue. */
+export function activeCatalogue(s: AppSnapshot) {
+  const connection = s.connections.find((c) => c.id === s.activeId);
+  const active =
+    connection?.session.kind === 'active' ||
+    connection?.session.kind === 'renewing';
+  return {
+    activeId: active ? connection.id : null,
+    catalogue: active ? connection.catalogue : undefined,
+  };
+}
 /** Pass one runtime created outside render. The provider consumes its single initializer. */
 export function SempodsProvider({
   runtime,

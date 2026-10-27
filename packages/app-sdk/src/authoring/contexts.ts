@@ -12,8 +12,11 @@ export type ContextEditorProblem =
 
 /**
  * Internal: why a Context of the active connection is not available here, by
- * the runtime's own authority. While the catalogue is not known yet, access
- * is not decided either (`null`); a failed refresh keeps the earlier listing.
+ * the runtime's own authority, for rows already read (`usePodList`,
+ * `useContextUpdate`). While the catalogue is not known yet, access is not
+ * decided either (`null`); a failed refresh keeps the earlier listing.
+ * `useContextEditor` opens a target afresh and needs a successful listing, so
+ * it decides by its own, stricter rule.
  */
 export function contextProblem(
   catalogue: CatalogueFact | undefined,

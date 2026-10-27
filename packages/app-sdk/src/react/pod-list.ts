@@ -15,6 +15,7 @@ import {
 import { shownData } from '../authoring/load.js';
 import { observePodWrites, observeWrites } from '../authoring/changes.js';
 import {
+  activeCatalogue,
   shallowEqual,
   useAppFacts,
   useContextDiscovery,
@@ -102,16 +103,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
   if (!type) throw new TypeError('usePodList needs a definition with a type.');
   const app = useController();
   useContextDiscovery(true);
-  const { activeId, catalogue } = useAppFacts((s) => {
-    const connection = s.connections.find((c) => c.id === s.activeId);
-    const active =
-      connection?.session.kind === 'active' ||
-      connection?.session.kind === 'renewing';
-    return {
-      activeId: active ? connection.id : null,
-      catalogue: active ? connection.catalogue : undefined,
-    };
-  }, shallowEqual);
+  const { activeId, catalogue } = useAppFacts(activeCatalogue, shallowEqual);
   // Which Contexts hold the type; GRAPH names them, the Pod decides access.
   const discovery = usePodLoad(
     (pod, signal) =>
