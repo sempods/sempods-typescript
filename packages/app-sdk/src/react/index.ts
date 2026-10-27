@@ -35,6 +35,13 @@ export type {
   MutationOutcome,
   NotSent,
 } from './hooks.js';
+export { usePodList } from './pod-list.js';
+export type {
+  PodList,
+  PodListContext,
+  PodListData,
+  PodListItem,
+} from './pod-list.js';
 export {
   AccessNotice,
   CallbackNotice,

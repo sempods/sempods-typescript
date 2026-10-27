@@ -161,6 +161,10 @@ All points:
   replace `language === 'de' ? … : …` in components. `useContexts()` returns
   `canShare`, `share()` and a localized `shareProblem`; replace app code that
   called `useApp().authorize` with its own error state.
+- **`usePodList`.** A new hook lists one type from every readable Context of
+  the Pod as real snapshots, with a state, problem and retry per Context and a
+  `complete` flag; `LoadNotice` names partially read overviews (new optional
+  message `partialRead`). Nothing existing changes.
 - **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
   question before it calls `onRemove`, for a delete in a list row with
   `useFieldUpdate`'s `remove`, shown as a quiet trash icon. Nothing existing

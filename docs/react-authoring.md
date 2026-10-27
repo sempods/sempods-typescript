@@ -119,6 +119,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Switch between Contexts](#apps-that-switch-contexts)                | `useContexts` (React)                                         | Mount outside `TargetScreen`                                                 |
 | [Create in another Context](#creating-in-an-explicit-context)        | `useCreation` with `context` (React), `bindCreation` (app)    | The Context IRI; one hook per Context                                        |
 | [Read across the Pod](#pod-overviews-with-contexts-on-demand)        | `usePodLoad` (React)                                          | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
+| [One type across Contexts](#pod-overviews-with-contexts-on-demand)   | `usePodList` + `LoadNotice` (React)                           | A `fields()` definition with a `type`                                        |
 | [Edit a Pod-overview row](#editing-an-overview-row)                  | `useContextEditor`, `ResourceEditor` (React)                  | The row's subject and `GRAPH` Context                                        |
 | [Read arbitrary resources](#read-arbitrary-resources)                | `useLoad` (React)                                             | A `ViewRead`; `key` for its inputs                                           |
 | [Custom connection controls](#custom-layouts-without-appaccess)      | `useApp`, `useAppState`, `useConnections` (React)             | Guarded actions only                                                         |
@@ -487,6 +488,36 @@ or `construct`; `useAppState().pod` is the same active `BoundPod`.
 
 The [overview recipe](../examples/todo/recipes/pod-overview.tsx) combines a Pod
 SELECT, a later Context-bound creation form and editing a row.
+
+For items of one type, `usePodList(definition)` does the reading across
+Contexts. The definition needs a `type`:
+
+```tsx
+const overview = usePodList(taskFields);
+// overview.data?.items: [{ context, snapshot }] from every readable Context
+// overview.contexts: [{ context, name, state, problem, retry }] per Context
+// overview.complete: false until every Context that holds the type was read
+<LoadNotice {...overview} />; // also "1 of 3 lists could not be read" + retry
+```
+
+- It asks the Pod once which Contexts hold the type
+  (`SELECT DISTINCT ?graph`). It then lists each one the catalogue marks
+  readable with `listSubjects`, at most four at a time, so the items are real
+  snapshots of their own Context.
+- Unlike `usePodLoad`, it demands the catalogue, because readability decides
+  which Contexts it reads. The load costs 1 catalogue request, 1 discovery
+  query and 1 read per Context.
+- A Context that fails, is not readable here (`problem: 'unreadable'`,
+  `'discovery-failed'` or `'refused'`) or lost read access does not hide the
+  others. Its items leave the list, `complete` turns false, and `LoadNotice`
+  names how many are missing, with a retry of just those.
+- A confirmed write of this app re-reads its Context. A write anywhere on the
+  Pod, such as the first item created in another Context, also runs the
+  discovery again. Back in the tab or app, everything reads again. Items other
+  apps add to a new Context appear then, or after `reload()`.
+- Changing a row in one click is still done per row through
+  [editing an overview row](#editing-an-overview-row); the row's
+  `context` and `snapshot.iri` are its target.
 
 ### Editing an overview row
 

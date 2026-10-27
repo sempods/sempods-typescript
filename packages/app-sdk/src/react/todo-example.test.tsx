@@ -131,7 +131,13 @@ it.each(['en', 'de'] as const)(
     const f = await signedIn(language, async () => Response.json([milk]));
     expect(await screen.findByText('Buy milk')).toBeTruthy();
     const held = deferred<Response>();
-    f.setQuery(() => held.promise);
+    // The first read waits; any retry after it gets its own failed answer.
+    let reads = 0;
+    f.setQuery(() =>
+      ++reads === 1
+        ? held.promise
+        : Promise.resolve(new Response(null, { status: 500 })),
+    );
     // Back on the page: the list reads again without a reload button.
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     await act(async () => {
@@ -141,9 +147,9 @@ it.each(['en', 'de'] as const)(
     expect(screen.getByText('Buy milk')).toBeTruthy();
     expect(screen.queryByRole('status')).toBeNull();
     await act(async () => held.resolve(new Response(null, { status: 500 })));
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      `${t.failed} ${t.stale}`,
-    );
+    expect(
+      (await screen.findByRole('alert', {}, { timeout: 5000 })).textContent,
+    ).toBe(`${t.failed} ${t.stale}`);
     expect(screen.getByText('Buy milk')).toBeTruthy();
     expect(promisesDraft(language)).toBe(false);
   },

@@ -210,6 +210,15 @@ export interface SdkMessages {
    * the type (added in 0.6.0); `createLocale` fills it.
    */
   readonly skipped?: (count: number, format: Formatters) => string;
+  /**
+   * An overview across Contexts that could read only some of them, shown by
+   * `LoadNotice` with a retry. Optional in the type; `createLocale` fills it.
+   */
+  readonly partialRead?: (
+    failed: number,
+    total: number,
+    format: Formatters,
+  ) => string;
   readonly errors: FailureMessages;
 }
 
@@ -304,6 +313,8 @@ export const englishMessages: SdkMessages = {
       one: 'One entry cannot be shown.',
       other: `${format.number(count)} entries cannot be shown.`,
     }),
+  partialRead: (failed, total, format) =>
+    `${format.number(failed)} of ${format.number(total)} lists could not be read; the others are shown.`,
   errors: {
     'invalid-pod-url': () => 'Enter a valid pod URL.',
     'invalid-argument': () =>
@@ -445,6 +456,8 @@ export const germanMessages: SdkMessages = {
       one: 'Ein Eintrag kann nicht angezeigt werden.',
       other: `${format.number(count)} Einträge können nicht angezeigt werden.`,
     }),
+  partialRead: (failed, total, format) =>
+    `${format.number(failed)} von ${format.number(total)} Listen konnten nicht gelesen werden; die übrigen werden angezeigt.`,
   errors: {
     'invalid-pod-url': () => 'Gib eine gültige Pod-URL ein.',
     'invalid-argument': () =>

@@ -50,6 +50,7 @@ it.each([
       'useList',
       'useLoad',
       'useMessages',
+      'usePodList',
       'usePodLoad',
       'useResourceEditor',
       'useSdkLocale',
