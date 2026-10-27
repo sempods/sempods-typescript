@@ -823,6 +823,15 @@ function useMutation<D>(
           ? ('ended' as const)
           : group.lane(id).refusal(),
     acknowledge: () => live()?.acknowledge(),
+    /** The form's recovery data kept with its lane (see `Lane.held`). */
+    held: () => live()?.held ?? null,
+    hold: (value: unknown) => {
+      // Clearing never starts a lane of its own.
+      if (value === null) {
+        const lane = live();
+        if (lane) lane.held = null;
+      } else if (group) group.lane(id).held = value;
+    },
     busy: lane?.state?.busy ?? false,
     unresolved: lane?.unresolved ?? false,
     canMutate: lane ? lane.canMutate(writable) : available,
@@ -1180,12 +1189,30 @@ export function useCreation<D extends object>(
     creation: Creation;
     retry: boolean;
   } | null>(null);
+  // A remounted form that took over an earlier mount's lane restores that
+  // exact draft and captured command, so an explicit retry after observed
+  // absence reuses the same IRI and body, never a fresh one.
+  const kept = mutation.held() as typeof command.current;
+  if (
+    !command.current &&
+    kept &&
+    kept.state.view === view &&
+    kept.state.key === key &&
+    (mutation.unresolved || kept.retry)
+  ) {
+    const next = { view, key, draft: kept.state.draft };
+    kept.state = next;
+    command.current = kept;
+    current.current = next;
+    setState(next);
+  }
   const draft = current.current.draft;
   const reset = () => {
     if (current.current.view !== view || current.current.key !== key) return;
     const next = { view, key, draft: copy(initial.current) };
     current.current = next;
     command.current = null;
+    mutation.hold(null);
     setState(next);
   };
   useDraftGuard(
@@ -1255,6 +1282,8 @@ export function useCreation<D extends object>(
             submitted.draft,
           ),
         };
+      // Kept with the lane: a remounted form can recover it.
+      mutation.hold(command.current);
       const captured = command.current.creation;
       const outcome = await mutation.execute('create', captured.iri, () =>
         captured.run(),

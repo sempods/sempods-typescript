@@ -59,12 +59,14 @@ async function setup() {
   let answer: () => Promise<Response> | Response = () =>
     new Response(null, { status: 204 });
   const writes: string[] = [];
+  const puts: string[] = [];
   f.setResource(async (url, init) => {
     if ((init?.method ?? 'GET') === 'GET')
       return resourceIri(url) === 'urn:one'
         ? Response.json(one, { headers: { etag: '"v1"' } })
         : new Response(null, { status: 404 });
     writes.push(init?.method ?? '');
+    if (init?.method === 'PUT') puts.push(resourceIri(url));
     return answer();
   });
   const api = {} as {
@@ -135,6 +137,7 @@ async function setup() {
     ...f,
     api,
     writes,
+    puts,
     answer: (next: typeof answer) => {
       answer = next;
     },
@@ -352,4 +355,31 @@ it('two forms remounting together each take over their own unconfirmed creation'
   act(() => s.api.creation.notice.onAcknowledge());
   await waitFor(() => expect(s.api.creation.outcome).toBeNull());
   expect(s.api.second.outcome).toMatchObject({ kind: 'unconfirmed' });
+});
+
+it('a remounted form retries its absent creation under the same IRI, not a fresh one', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  expect(s.puts).toHaveLength(1);
+  act(() => s.api.mount(false));
+  act(() => s.api.mount(true));
+  // The draft and captured command come back with the lane.
+  await waitFor(() => expect(s.api.creation.draft.title).toBe('New'));
+  // The Pod does not have it (404): absence is observed, then acknowledged.
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.canCreate).toBe(true));
+  expect(s.api.creation.draft.title).toBe('New');
+  // The explicit retry sends the same IRI again.
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toEqual([s.puts[0], s.puts[0]]);
 });

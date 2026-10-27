@@ -63,6 +63,11 @@ export class Lane<D> {
   /** Counts the writes started on this lane, by any hook. */
   writes = 0;
   /**
+   * What the writing form needs to recover this write after it remounts, for
+   * example a creation's captured command and draft (opaque here).
+   */
+  held: unknown = null;
+  /**
    * The snapshot a confirmed update was made from. It no longer shows the
    * resource, so it cannot be written again; the next read brings a fresh one.
    */
