@@ -45,6 +45,17 @@ export const isSpent = (snapshot: object) => spentSnapshots.has(snapshot);
 export const spentData = <D>(snapshot: object) =>
   spentSnapshots.get(snapshot)?.after as D | undefined;
 
+/**
+ * What a snapshot shows once `change` is confirmed: its fields with the given
+ * ones laid over (`undefined` changes nothing, as in `updateFields`).
+ */
+export const changedData = <D>(data: D, change: Partial<D>): D => ({
+  ...data,
+  ...Object.fromEntries(
+    Object.entries(change).filter(([, value]) => value !== undefined),
+  ),
+});
+
 /** Keep the write outcome while dropping observations made under lost read access. */
 export function withoutComparison<D>(
   outcome: MutationOutcome<D> | null,
@@ -269,6 +280,14 @@ export class Lane<D> {
     } catch {
       return false;
     }
+  }
+  /** Whether a success shows at this start count of its target. */
+  showsSuccess(starts: number) {
+    return Boolean(
+      this.state &&
+      succeeded(this.state.outcome) &&
+      this.state.start === starts,
+    );
   }
   /** Its outcome as shown; a success retires once another write started on the target. */
   outcome(starts: number) {

@@ -44,10 +44,12 @@ import {
   useController,
   useView,
   useWorkflowAccess,
+  useWriteGate,
 } from './app.js';
 import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
+  changedData,
   isSpent,
   notSent,
   spentData,
@@ -55,6 +57,7 @@ import {
   type MutationOutcome,
   type NotSent,
 } from '../authoring/lane.js';
+import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 export type { MutationOutcome, NotSent } from '../authoring/lane.js';
@@ -453,14 +456,8 @@ export interface ContextTarget {
 /** Where `useContextEditor` stands; see the hook for each phase. */
 export type ContextEditorPhase =
   'idle' | 'loading' | 'unavailable' | 'ready' | 'retired';
-/** Why `useContextEditor` reports `unavailable`. */
-export type ContextEditorProblem =
-  /** The catalogue does not list the Context as readable. */
-  | 'unreadable'
-  /** The catalogue could not be loaded. */
-  | 'discovery-failed'
-  /** The runtime refused the binding, for example another Context than an exact preset's. */
-  | 'refused';
+/** Why `useContextEditor` reports `unavailable` (texts: `contextProblems`). */
+export type { ContextEditorProblem };
 /** What `useContextEditor` returns: the opened target, its phase and, while ready, its editor. */
 export interface ContextEditor<D, U = D> {
   /** The opened target, kept while retired so the app can name it. */
@@ -719,6 +716,40 @@ export function useContextEditor<D>(
   );
 }
 /**
+ * Internal: a token that is true while the calling hook's screen is mounted
+ * and shown and `generation` is its current one, so commands start only then
+ * and a command kept from an earlier generation never again, also back on
+ * an equal one (A, B, A). Layout effects set it, so a child's effects, also
+ * right after mounting or a change, may already start commands.
+ */
+export function useCommandToken(...generation: readonly unknown[]) {
+  const committed = useRef<{
+    mounted: boolean;
+    token: object | null;
+  }>({ mounted: false, token: null });
+  useLayoutEffect(() => {
+    const own = committed.current;
+    own.mounted = true;
+    return () => {
+      own.mounted = false;
+    };
+  }, []);
+  const shown = useMemo(() => {
+    const token = {
+      get current(): boolean {
+        return committed.current.mounted && committed.current.token === token;
+      },
+    };
+    return token;
+    // `generation` starts a new one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, generation);
+  useLayoutEffect(() => {
+    committed.current.token = shown;
+  }, [shown]);
+  return shown;
+}
+/**
  * The controller's lane group for one target, subscribed (`version` changes
  * with each of its lane changes), and a token that is true while this hook's
  * screen is mounted and shown and this group is its current one: commands
@@ -742,36 +773,31 @@ function useLaneGroup<D, L extends Lane<D> = Lane<D>>(
     group?.getVersion ?? noVersion,
     group?.getVersion ?? noVersion,
   );
-  const committed = useRef<{
-    mounted: boolean;
-    token: object | null;
-  }>({ mounted: false, token: null });
-  useLayoutEffect(() => {
-    const own = committed.current;
-    own.mounted = true;
-    return () => {
-      own.mounted = false;
-    };
-  }, []);
-  // One token per hook generation, not per group: back on a group it left
-  // (A, B, A), a command kept from the first A stays ended.
-  const shown = useMemo(() => {
-    const token = {
-      get current(): boolean {
-        return committed.current.mounted && committed.current.token === token;
-      },
-    };
-    return token;
-    // `group` starts a new generation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group]);
-  useLayoutEffect(() => {
-    committed.current.token = shown;
-  }, [shown]);
+  useWriteGate();
+  const shown = useCommandToken(group);
   return { group, version, shown };
 }
+/**
+ * Internal: one resource's availability and notice, shared by the row hooks.
+ * Without a lane of its own, `available` decides; a spent snapshot stays
+ * locked, also once its lane was evicted.
+ */
+export function laneState<D>(
+  lane: Lane<D> | undefined,
+  writable: boolean,
+  available: boolean,
+  starts: number,
+  snapshot?: object,
+): FieldUpdateState<D> {
+  return {
+    canMutate: lane
+      ? lane.canMutate(writable, snapshot)
+      : available && !(snapshot && isSpent(snapshot)),
+    notice: lane ? lane.notice(starts) : noNotice,
+  };
+}
 /** Notice props for a resource this hook has not written yet. */
-const noNotice = Object.freeze({
+export const noNotice = Object.freeze({
   outcome: null,
   checked: false,
   current: undefined,
@@ -883,12 +909,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
           'update',
           (v) => updateFields(v, snapshot, definition, change),
           snapshot,
-          {
-            ...snapshot.data,
-            ...Object.fromEntries(
-              Object.entries(change).filter(([, value]) => value !== undefined),
-            ),
-          },
+          changedData(snapshot.data, change),
         ) as Promise<UpdateOutcome<D> | NotSent>,
       remove: (snapshot: Snapshot<D>) =>
         run(snapshot.iri, 'remove', (v) =>
@@ -916,17 +937,13 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   function rowFor(
     item: Snapshot<D> | string,
   ): FieldUpdateState<D> | FieldUpdateRow<D> {
-    const lane = group?.lanes.get(iriOf(item));
-    const state: FieldUpdateState<D> = {
-      canMutate: lane
-        ? lane.canMutate(
-            access.write,
-            typeof item === 'string' ? undefined : item,
-          )
-        : // Also a spent snapshot whose lane was evicted stays locked.
-          available && (typeof item === 'string' || !isSpent(item)),
-      notice: lane?.notice(starts) ?? noNotice,
-    };
+    const state = laneState<D>(
+      group?.lanes.get(iriOf(item)),
+      access.write,
+      available,
+      starts,
+      typeof item === 'string' ? undefined : item,
+    );
     if (typeof item === 'string') return state;
     return {
       ...state,

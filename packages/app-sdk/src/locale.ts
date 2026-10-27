@@ -1,3 +1,4 @@
+import type { ContextEditorProblem } from './authoring/contexts.js';
 import { sdkFailure, type SdkFailure } from '@sempods/client-sdk';
 
 export type Language = 'en' | 'de';
@@ -219,6 +220,12 @@ export interface SdkMessages {
     total: number,
     format: Formatters,
   ) => string;
+  /**
+   * Why a Context is not available here (`ContextEditorProblem`), for a row
+   * of `useContextUpdate` or `useContextEditor`. Optional in the type;
+   * `createLocale` fills it.
+   */
+  readonly contextProblems?: Readonly<Record<ContextEditorProblem, string>>;
   readonly errors: FailureMessages;
 }
 
@@ -315,6 +322,11 @@ export const englishMessages: SdkMessages = {
     }),
   partialRead: (failed, total, format) =>
     `${format.number(failed)} of ${format.number(total)} lists could not be read; the others are shown.`,
+  contextProblems: {
+    unreadable: 'This Context is not available to this app. Review access.',
+    'discovery-failed': 'Access to Contexts could not be checked. Try again.',
+    refused: 'This app does not work with that Context.',
+  },
   errors: {
     'invalid-pod-url': () => 'Enter a valid pod URL.',
     'invalid-argument': () =>
@@ -458,6 +470,13 @@ export const germanMessages: SdkMessages = {
     }),
   partialRead: (failed, total, format) =>
     `${format.number(failed)} von ${format.number(total)} Listen konnten nicht gelesen werden; die übrigen werden angezeigt.`,
+  contextProblems: {
+    unreadable:
+      'Dieser Kontext ist für diese App nicht verfügbar. Prüfe den Zugriff.',
+    'discovery-failed':
+      'Der Zugriff auf Kontexte konnte nicht geprüft werden. Versuche es erneut.',
+    refused: 'Diese App arbeitet nicht mit diesem Kontext.',
+  },
   errors: {
     'invalid-pod-url': () => 'Gib eine gültige Pod-URL ein.',
     'invalid-argument': () =>

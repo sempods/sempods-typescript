@@ -1,28 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
 import {
   AppAccess,
-  ResourceEditor,
+  LoadNotice,
   SempodsProvider,
-  useApp,
-  useAppState,
-  useContextEditor,
-  usePodLoad,
+  UnresolvedNotices,
+  UpdateNotice,
+  useContextUpdate,
+  usePodList,
   useSdkLocale,
-  type ContextEditorProblem,
-  type ContextTarget,
 } from '@sempods/app-sdk/react';
 
 const schema = 'https://schema.org/';
-// GRAPH names each row's Context; OPTIONAL keeps rows without a status.
-const query = `SELECT ?item ?graph ?title ?status WHERE {
-  GRAPH ?graph {
-    ?item a <${schema}Action> .
-    OPTIONAL { ?item <${schema}name> ?title }
-    OPTIONAL { ?item <${schema}actionStatus> ?status }
-  }
-} LIMIT 100`;
 const task = fields(
   {
     title: text(schema + 'name', { language: null }),
@@ -34,213 +24,50 @@ const task = fields(
   { type: schema + 'Action' },
 );
 
-/** Why a row cannot be changed here. */
-const unavailable: Record<ContextEditorProblem, string> = {
-  unreadable: "This task's Context is not available for changes.",
-  'discovery-failed': 'Access to Contexts could not be checked; try again.',
-  refused: 'This app does not change tasks in that Context.',
-};
-
 /**
- * One click ticks a task on an overview row, in the row's own Context. The
- * SELECT row is only a pointer: `useContextEditor` binds that Context, reads
- * the task fresh there, and the change is saved once against the version it
- * read (If-Match). The selection and any draft elsewhere stay as they are.
- *
- * Nothing is shown as changed before the Pod confirms it, and nothing is
- * resent. A refusal, a conflict or a lost answer keeps the editor open with
- * its own recovery controls; closing it runs under the leave policy.
+ * One click ticks a task on an overview row, in the row's own Context, like a
+ * row of the TODO list: `usePodList` reads the tasks of every readable Context
+ * as snapshots, `useContextUpdate` writes one of them against the version the
+ * list read (If-Match). Rows in several Contexts can be ticked at once, the
+ * selection stays as it is, and nothing is shown as changed before the Pod
+ * confirms it or resent: a conflict or a lost answer shows its notice with
+ * its own recovery. Place inside a `SempodsProvider`, for example with
+ * `contextSelection="on-demand"`.
  */
-function useDoneToggle(onSaved: () => void) {
-  const edit = useContextEditor(task);
-  const [intent, setIntent] = useState<{
-    readonly target: ContextTarget;
-    readonly done: boolean;
-  } | null>(null);
-  // The change needs a decision: show the editor instead of a quiet tick.
-  const [stuck, setStuck] = useState(false);
-  const started = useRef<object | null>(null);
-  const latest = useRef(edit);
-  latest.current = edit;
-  const editor = edit.editor;
-  const target = edit.target;
-  // Confirmed (here or through the recovery editor): close and reload.
-  const finish = useRef(async () => {});
-  finish.current = async () => {
-    if (await latest.current.close()) {
-      setIntent(null);
-      setStuck(false);
-      onSaved();
-    }
-  };
-  useEffect(() => {
-    if (!intent || !editor || started.current === intent) return;
-    if (
-      target?.subject !== intent.target.subject ||
-      target.context !== intent.target.context
-    )
-      return;
-    started.current = intent;
-    void (async () => {
-      const loaded = await editor.loaded;
-      if (loaded.phase !== 'ready') {
-        setStuck(true); // Not found, offline or blocked: the editor says which.
-        return;
-      }
-      editor.change({ done: intent.done });
-      // Already as wanted: nothing to write.
-      const outcome = editor.state.dirty ? await editor.save() : null;
-      if (outcome && outcome.kind !== 'saved') {
-        setStuck(true);
-        return;
-      }
-      await finish.current();
-    })();
-  }, [intent, editor, target]);
-  // Unavailable, or retired because another Pod was chosen: never silent.
-  const blocked = edit.problem !== null || edit.phase === 'retired';
-  return {
-    edit,
-    pending: intent && !stuck && !blocked ? intent.target : null,
-    stuck: Boolean(intent) && (stuck || blocked),
-    finish: () => void finish.current(),
-    async toggle(row: ContextTarget, done: boolean) {
-      if (intent) return;
-      setStuck(false);
-      setIntent({ target: row, done });
-      if (!(await edit.open(row))) setIntent(null);
-    },
-    async dismiss() {
-      if (await edit.close()) {
-        setIntent(null);
-        setStuck(false);
-      }
-    },
-  };
-}
-
-/** Place inside a `SempodsProvider`, for example with `contextSelection="on-demand"`. */
 export function TasksOverview() {
-  // retain: the rows stay visible while the overview reloads after a change.
-  const { state, data, reload } = usePodLoad(
-    (pod, signal) => pod.sparql.select(query, { signal }),
-    { retain: true },
-  );
-  const { connections, activeId } = useAppState();
-  const app = useApp();
-  const { messages: m, error } = useSdkLocale();
-  const toggle = useDoneToggle(() => void reload());
-  const connection = connections.find((c) => c.id === activeId);
-  const catalogue = connection?.catalogue;
-  // On demand, nothing loads the catalogue for an overview; the boxes need its
-  // rights, so ask for it once the session is active.
-  const discover =
-    connection?.session.kind === 'active' && catalogue?.kind === 'unknown'
-      ? connection.id
-      : null;
-  useEffect(() => {
-    if (discover) app.refreshContexts(discover).catch(() => {});
-  }, [app, discover]);
-  // Catalogue rights only disable the box; the Pod still decides on save.
-  const writable = (context: string) =>
-    catalogue?.kind === 'ready' &&
-    catalogue.contexts.some((c) => c.iri === context && c.writable);
-  // The current rows, or the kept ones while reloading or after a failed refresh.
-  const rows = data?.rows ?? null;
+  const list = usePodList(task);
+  const overview = useContextUpdate(task);
+  const { messages: m } = useSdkLocale();
   return (
     <section aria-label="Tasks across my Pod">
       <h1>Tasks across my Pod</h1>
-      {state.kind === 'failed' && (
-        <p role="alert">
-          {error(state.error)}
-          {state.previous ? ' The list below may be out of date.' : ''}
-        </p>
-      )}
-      {rows ? (
-        <ul>
-          {rows.map((row, index) => {
-            const item = row.item?.type === 'iri' ? row.item.value : null;
-            const graph = row.graph?.type === 'iri' ? row.graph.value : null;
-            const title =
-              row.title?.type === 'literal' ? row.title.value : item;
-            const done =
-              row.status?.type === 'iri' &&
-              row.status.value === schema + 'CompletedActionStatus';
-            const saving =
-              toggle.pending?.subject === item &&
-              toggle.pending?.context === graph;
-            return (
-              <li key={index}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={done}
-                    disabled={
-                      !item ||
-                      !graph ||
-                      !writable(graph) ||
-                      toggle.pending !== null ||
-                      toggle.stuck
-                    }
-                    onChange={(event) =>
-                      item &&
-                      graph &&
-                      void toggle.toggle(
-                        { subject: item, context: graph },
-                        event.target.checked,
-                      )
-                    }
-                  />
-                  {title ?? 'Unsupported task'}
-                </label>
-                {saving && <span role="status"> Saving…</span>}
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        state.kind !== 'failed' && (
-          <p role="status">
-            {state.kind === 'loading'
-              ? m.controls.loading
-              : state.kind === 'cancelled'
-                ? 'Loading the tasks was cancelled.'
-                : 'The tasks cannot be read right now.'}
-          </p>
-        )
-      )}
-      <button onClick={() => void reload()} disabled={state.kind === 'loading'}>
-        Reload tasks
-      </button>
-      {toggle.stuck && toggle.edit.target && (
-        <section aria-label="Finish the change">
-          {toggle.edit.phase === 'retired' ? (
-            <p role="status">
-              Another Pod was chosen; this task was not changed.
-            </p>
-          ) : toggle.edit.problem ? (
-            <p role="alert">{unavailable[toggle.edit.problem]}</p>
-          ) : (
-            <ResourceEditor
-              editor={toggle.edit.editor}
-              quiet
-              onChanged={toggle.finish}
-            >
-              {(draft, change) => (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={draft.done}
-                    onChange={(event) => change({ done: event.target.checked })}
-                  />
-                  {draft.title}
-                </label>
+      <LoadNotice {...list} />
+      <ul>
+        {list.data?.items.map((item) => {
+          const row = overview.for(item);
+          return (
+            <li key={`${item.context} ${item.snapshot.iri}`}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={row.data.done}
+                  disabled={!row.canMutate}
+                  onChange={(event) =>
+                    void row.update({ done: event.target.checked })
+                  }
+                />
+                {row.data.title}
+              </label>
+              {row.problem && (
+                <p role="status">{m.contextProblems![row.problem]}</p>
               )}
-            </ResourceEditor>
-          )}
-          <button onClick={() => void toggle.dismiss()}>Close</button>
-        </section>
-      )}
+              <UpdateNotice {...row.notice} />
+            </li>
+          );
+        })}
+      </ul>
+      {/* A write whose row is gone, for example deleted elsewhere. */}
+      <UnresolvedNotices of={overview} shown={list.data?.items} />
     </section>
   );
 }

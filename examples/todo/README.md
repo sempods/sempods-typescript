@@ -16,8 +16,8 @@ and `src/style.css` into its `src/`, and render `<TodoApp runtime={runtime} />`
 from your entry with the runtime configuration shown in `src/main.tsx`. The
 shipped `package.json` names the exact SDK version the sources belong to.
 `recipes/pod-overview.tsx` (a Pod overview with on-demand Contexts, plus
-creating and editing in an explicit Context), `recipes/overview-toggle.tsx` (ticking a task on an overview row in
-its own Context with one click) and `recipes/task-with-note.tsx` (one input
+creating and editing in an explicit Context), `recipes/overview-toggle.tsx` (ticking tasks on overview rows in
+their own Contexts with one click, through `usePodList` and `useContextUpdate`) and `recipes/task-with-note.tsx` (one input
 written into a shared and a personal Context) are further copyable screens.
 
 Open `http://127.0.0.1:5173/`. The app uses only the SDK's standard UI:

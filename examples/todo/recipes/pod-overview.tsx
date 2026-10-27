@@ -12,7 +12,6 @@ import {
   usePodLoad,
   useSdkLocale,
   useWorkflowAccess,
-  type ContextEditorProblem,
   type ContextTarget,
 } from '@sempods/app-sdk/react';
 
@@ -27,13 +26,6 @@ const note = fields(
     type: 'urn:Note',
   },
 );
-
-/** Why a row cannot be edited here. */
-const unavailable: Record<ContextEditorProblem, string> = {
-  unreadable: "This note's Context is not available for editing.",
-  'discovery-failed': 'Access to Contexts could not be checked; try again.',
-  refused: 'This app does not edit notes in that Context.',
-};
 
 function Overview({
   onEdit,
@@ -167,7 +159,7 @@ function Content() {
       {edit.target && edit.phase !== 'retired' && (
         <section aria-label="Edit note">
           {edit.problem ? (
-            <p role="alert">{unavailable[edit.problem]}</p>
+            <p role="alert">{m.contextProblems![edit.problem]}</p>
           ) : (
             <ResourceEditor editor={edit.editor}>
               {(draft, change) => (

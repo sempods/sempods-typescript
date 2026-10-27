@@ -15,19 +15,19 @@ import {
 import { shownData } from '../authoring/load.js';
 import { observePodWrites, observeWrites } from '../authoring/changes.js';
 import {
+  activeCatalogue,
   shallowEqual,
   useAppFacts,
   useContextDiscovery,
   useController,
 } from './app.js';
 import { catalogueLists } from '../runtime/binding.js';
-import { contextName } from './names.js';
 import {
-  useDefinition,
-  useOnVisible,
-  usePodLoad,
+  contextProblem,
   type ContextEditorProblem,
-} from './hooks.js';
+} from '../authoring/contexts.js';
+import { contextName } from './names.js';
+import { useDefinition, useOnVisible, usePodLoad } from './hooks.js';
 
 /** One item of an overview: a snapshot read in its own Context. */
 export interface PodListItem<D> {
@@ -103,16 +103,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
   if (!type) throw new TypeError('usePodList needs a definition with a type.');
   const app = useController();
   useContextDiscovery(true);
-  const { activeId, catalogue } = useAppFacts((s) => {
-    const connection = s.connections.find((c) => c.id === s.activeId);
-    const active =
-      connection?.session.kind === 'active' ||
-      connection?.session.kind === 'renewing';
-    return {
-      activeId: active ? connection.id : null,
-      catalogue: active ? connection.catalogue : undefined,
-    };
-  }, shallowEqual);
+  const { activeId, catalogue } = useAppFacts(activeCatalogue, shallowEqual);
   // Which Contexts hold the type; GRAPH names them, the Pod decides access.
   const discovery = usePodLoad(
     (pod, signal) =>
@@ -138,7 +129,6 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
     catalogue !== undefined && 'contexts' in catalogue
       ? catalogue.contexts
       : undefined;
-  const evidence = listed !== undefined;
   const readable = (iri: string) =>
     catalogue !== undefined && catalogueLists(catalogue, iri);
   const labels = catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
@@ -257,15 +247,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
 
   const contexts: PodListContext<D>[] = graphs.map((iri) => {
     const entry = loaders?.get(iri);
-    // While the catalogue is not known yet, access is not decided either.
-    const problem: ContextEditorProblem | null =
-      entry === 'refused'
-        ? 'refused'
-        : readable(iri) || (!evidence && catalogue?.kind !== 'failed')
-          ? null
-          : catalogue?.kind === 'failed'
-            ? 'discovery-failed'
-            : 'unreadable';
+    const problem = contextProblem(catalogue, iri, entry === 'refused');
     return {
       context: iri,
       name: contextName(iri, labels),

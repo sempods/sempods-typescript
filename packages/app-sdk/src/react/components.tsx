@@ -7,8 +7,10 @@ import type {
 import {
   useStartCount,
   type FieldUpdate,
+  type FieldUpdateNotice,
   type MutationOutcome,
 } from './hooks.js';
+import type { ContextResource, ContextUpdate } from './context-update.js';
 import { useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure, type SdkMessages } from '../locale.js';
@@ -166,27 +168,55 @@ export function UpdateNotice({
 /**
  * The notices of unresolved writes whose row is not shown, for example a task
  * deleted elsewhere or filtered out, so their check and acknowledgement stay
- * reachable: `<UnresolvedNotices of={mutate} shown={list.data?.items} />`.
+ * reachable: `<UnresolvedNotices of={mutate} shown={list.data?.items} />`,
+ * or for an overview `<UnresolvedNotices of={overview} shown={list.data?.items} />`
+ * with `useContextUpdate` and `usePodList`.
  */
-export function UnresolvedNotices<D>({
-  of,
-  shown,
-}: {
-  readonly of: Pick<FieldUpdate<D>, 'unresolved' | 'for'>;
-  /** The rows on screen; their notices show with them. */
-  readonly shown: readonly { readonly iri: string }[] | undefined;
-}) {
-  const rows = new Set(shown?.map((row) => row.iri));
+export function UnresolvedNotices<D>(
+  props:
+    | {
+        readonly of: Pick<FieldUpdate<D>, 'unresolved' | 'for'>;
+        /** The rows on screen; their notices show with them. */
+        readonly shown: readonly { readonly iri: string }[] | undefined;
+      }
+    | {
+        readonly of: Pick<ContextUpdate<D>, 'unresolved' | 'for'>;
+        /** The overview items on screen; their notices show with them. */
+        readonly shown:
+          | readonly {
+              readonly context: string;
+              readonly snapshot: { readonly iri: string };
+            }[]
+          | undefined;
+      },
+) {
+  // One key per resource: its IRI, or its Context and IRI in an overview.
+  const entries = (props.of.unresolved as readonly Unresolved[]).map(
+    (entry) => ({ entry, key: keyOf(entry) }),
+  );
+  const rows = new Set(
+    (props.shown ?? []).map((row) =>
+      'snapshot' in row
+        ? keyOf({ context: row.context, iri: row.snapshot.iri })
+        : row.iri,
+    ),
+  );
+  const notice = props.of.for as (entry: Unresolved) => {
+    readonly notice: FieldUpdateNotice<D>;
+  };
   return (
     <>
-      {of.unresolved
-        .filter((iri) => !rows.has(iri))
-        .map((iri) => (
-          <UpdateNotice key={iri} {...of.for(iri).notice} />
+      {entries
+        .filter(({ key }) => !rows.has(key))
+        .map(({ entry, key }) => (
+          <UpdateNotice key={key} {...notice(entry).notice} />
         ))}
     </>
   );
 }
+type Unresolved = string | ContextResource;
+const keyOf = (entry: Unresolved) =>
+  typeof entry === 'string' ? entry : `${entry.context} ${entry.iri}`;
 /**
  * What a read is doing when its data does not say it: loading before any
  * data, a failed refresh (its error, a note when kept data is still shown,

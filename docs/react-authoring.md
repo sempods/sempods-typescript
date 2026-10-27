@@ -120,6 +120,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Create in another Context](#creating-in-an-explicit-context)        | `useCreation` with `context` (React), `bindCreation` (app)    | The Context IRI; one hook per Context                                        |
 | [Read across the Pod](#pod-overviews-with-contexts-on-demand)        | `usePodLoad` (React)                                          | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
 | [One type across Contexts](#pod-overviews-with-contexts-on-demand)   | `usePodList` + `LoadNotice` (React)                           | A `fields()` definition with a `type`                                        |
+| [One-click overview rows](#one-click-overview-rows)                  | `useContextUpdate` (React)                                    | The same definition as `usePodList`                                          |
 | [Edit a Pod-overview row](#editing-an-overview-row)                  | `useContextEditor`, `ResourceEditor` (React)                  | The row's subject and `GRAPH` Context                                        |
 | [Read arbitrary resources](#read-arbitrary-resources)                | `useLoad` (React)                                             | A `ViewRead`; `key` for its inputs                                           |
 | [Custom connection controls](#custom-layouts-without-appaccess)      | `useApp`, `useAppState`, `useConnections` (React)             | Guarded actions only                                                         |
@@ -524,9 +525,53 @@ const overview = usePodList(taskFields);
   Pod, such as the first item created in another Context, also runs the
   discovery again. Back in the tab or app, everything reads again. Items other
   apps add to a new Context appear then, or after `reload()`.
-- Changing a row in one click is still done per row through
-  [editing an overview row](#editing-an-overview-row); the row's
-  `context` and `snapshot.iri` are its target.
+- Its rows are changed in one click with
+  [`useContextUpdate`](#one-click-overview-rows), or edited in full through
+  [editing an overview row](#editing-an-overview-row).
+
+### One-click overview rows
+
+`useContextUpdate(definition)` is to `usePodList` what `useFieldUpdate` is to
+`useList`: each row is written in its own Context, from the snapshot the list
+read.
+
+```tsx
+const list = usePodList(taskFields);
+const overview = useContextUpdate(taskFields);
+list.data?.items.map((item) => {
+  const row = overview.for(item); // { data, context, canMutate, notice, problem, update, remove }
+  return (
+    <li key={`${item.context} ${item.snapshot.iri}`}>
+      <input
+        type="checkbox"
+        checked={row.data.done}
+        disabled={!row.canMutate}
+        onChange={(e) => void row.update({ done: e.target.checked })}
+      />
+      {row.data.title}
+      <UpdateNotice {...row.notice} />
+    </li>
+  );
+});
+<UnresolvedNotices of={overview} shown={list.data?.items} />;
+```
+
+- Row semantics match `useFieldUpdate`: `changed-on-pod`, `unconfirmed` with
+  check and acknowledgement, a confirmed update shown at once on a locked
+  (spent) snapshot until the list reads again. Nothing is resent.
+- Each resource has its own write lane, owned by the app controller per
+  Context: rows in several Contexts can be written at once, and an
+  unresolved write keeps its notice and leave guard while its row is not
+  rendered or the screen is hidden. `unresolved` lists `{ context, iri }`;
+  `for({ context, iri })` gives the notice of one whose row is gone.
+- The SDK binds each Context, demands the catalogue and knows the write rights;
+  the selected Context and its drafts stay as they are. `row.problem` says why
+  a Context is not available here, with SDK texts in
+  `messages.contextProblems`.
+- The guards survive row navigation and Context selection; connection actions
+  ask first. Another active connection retires them.
+
+See the [one-click recipe](../examples/todo/recipes/overview-toggle.tsx).
 
 ### Editing an overview row
 
@@ -590,12 +635,9 @@ function Notes() {
 - A subject in several Contexts gives one row per Context, each with only its
   part: offer "Edit in Home", "Edit in Work"; never merge them.
 
-A one-click change (ticking a task) uses the same hook without showing it:
-`open`, await `editor.loaded`, `change`, `save` once, close after `saved`,
-reload the overview. Refusals, conflicts and unconfirmed answers keep the
-editor open with recovery; nothing shows as changed before the Pod confirms.
-See the [one-click recipe](../examples/todo/recipes/overview-toggle.tsx), which
-uses `usePodLoad(read, { retain: true })`.
+For a one-click change (ticking a task) use
+[`useContextUpdate`](#one-click-overview-rows) instead; `problem` has SDK
+texts in `messages.contextProblems`.
 
 ### Read arbitrary resources
 

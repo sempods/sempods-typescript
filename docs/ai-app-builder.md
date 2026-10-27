@@ -200,11 +200,15 @@ Settle early which Contexts the app works with:
   `useCreation` per Context with `context`, one after the other, as in the
   [task-with-note recipe](../examples/todo/recipes/task-with-note.tsx). There is
   no transaction across Contexts.
-- **Edit Pod-overview rows:** a row is a read-only pointer. Pass its subject and
-  `GRAPH` Context to `open` of `useContextEditor(definition)`; render `editor`
-  while `phase` is `ready` and `problem` while it is `unavailable`. For a
-  one-click change drive the same editor (`change`, then one `save`) as the
-  [one-click recipe](../examples/todo/recipes/overview-toggle.tsx) does. See
+- **Change Pod-overview rows in one click** (tick a task): next to
+  `usePodList`, `useContextUpdate(definition).for(item)` gives each row `data`,
+  `canMutate`, `notice`, `problem` and `update`/`remove`, like a TODO row; add
+  `<UnresolvedNotices of={overview} shown={list.data?.items} />`. See the
+  [one-click recipe](../examples/todo/recipes/overview-toggle.tsx) and
+  [one-click overview rows](react-authoring.md#one-click-overview-rows).
+- **Edit Pod-overview rows in full:** pass the row's subject and Context to
+  `open` of `useContextEditor(definition)`; render `editor` while `phase` is
+  `ready` and `messages.contextProblems[problem]` while it is `unavailable`. See
   the [overview recipe](../examples/todo/recipes/pod-overview.tsx) and
   [editing an overview row](react-authoring.md#editing-an-overview-row).
 
