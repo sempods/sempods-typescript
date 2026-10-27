@@ -777,13 +777,19 @@ function useMutation<D>(
     if (!group) return;
     shown.current = true;
     const release = group.own(id);
+    // Claimed at once, so a form remounting alongside takes another one.
+    let reserved: (() => void) | undefined;
     if (!group.lanes.has(id)) {
       const orphan = group.orphan('form ');
-      if (orphan) adopt({ group, key: orphan });
+      if (orphan) {
+        reserved = group.own(orphan);
+        adopt({ group, key: orphan });
+      }
     }
     return () => {
       shown.current = false;
       release();
+      reserved?.();
     };
   }, [group, id, shown]);
   const starts = useStartCount(view);

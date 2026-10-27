@@ -71,6 +71,7 @@ async function setup() {
     mutate: ReturnType<typeof useFieldUpdate<Task>>;
     other: ReturnType<typeof useFieldUpdate<Task>>;
     creation: ReturnType<typeof useCreation<Task>>;
+    second: ReturnType<typeof useCreation<Task>>;
     rows: readonly Snapshot<Task>[];
     app: ReturnType<typeof useApp>;
     hide: (hidden: boolean) => void;
@@ -99,6 +100,11 @@ async function setup() {
         collection: 'tasks',
       },
     );
+    // A second form for the same collection and definition.
+    api.second = useCreation(definition, {
+      initial: { title: '', done: false },
+      collection: 'tasks',
+    });
     api.rows = list.data?.items ?? api.rows ?? [];
     return null;
   }
@@ -320,4 +326,30 @@ it("another hook's later write to the same resource is not this hook's feedback"
   act(() => s.api.mutate.acknowledge());
   expect(s.api.other.unresolved).toEqual(['urn:one']);
   expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
+});
+
+it('two forms remounting together each take over their own unconfirmed creation', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => {
+    s.api.creation.change({ title: 'First' });
+    s.api.second.change({ title: 'Second' });
+  });
+  await act(async () => {
+    await s.api.creation.create();
+    await s.api.second.create();
+  });
+  act(() => s.api.mount(false));
+  act(() => s.api.mount(true));
+  await waitFor(() => {
+    expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
+    expect(s.api.second.outcome).toMatchObject({ kind: 'unconfirmed' });
+  });
+  // Distinct lanes: acknowledging one after a check leaves the other.
+  await act(async () => {
+    await s.api.creation.notice.onCheck();
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.outcome).toBeNull());
+  expect(s.api.second.outcome).toMatchObject({ kind: 'unconfirmed' });
 });
