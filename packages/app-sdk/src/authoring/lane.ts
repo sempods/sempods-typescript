@@ -65,10 +65,16 @@ export class Lane<D> {
   /**
    * What the writing form needs to recover this write after it remounts, for
    * example a creation's captured command and draft (opaque here). `retry`
-   * holds it for an explicit retry after observed absence; a confirmed
-   * creation clears it.
+   * holds it for an explicit retry after observed absence. Once the item is
+   * settled (created, or discarded on leave) it is marked `settled` and let
+   * go, so every form that shows it starts afresh.
    */
-  held: { readonly retry: boolean } | null = null;
+  held: { readonly retry: boolean; settled: boolean } | null = null;
+  /** The held item is settled: no form holds it for a retry any more. */
+  settle() {
+    if (this.held) this.held.settled = true;
+    this.held = null;
+  }
   /**
    * The snapshot a confirmed update was made from. It no longer shows the
    * resource, so it cannot be written again; the next read brings a fresh one.
@@ -140,7 +146,7 @@ export class Lane<D> {
       dirty: () => this.unresolved || Boolean(this.held?.retry),
       discard: () => {
         this.unresolved = false;
-        this.held = null;
+        this.settle();
         this.uncertain = false;
         this.version++;
         this.checked = false;
@@ -217,7 +223,7 @@ export class Lane<D> {
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     this.uncertain = outcome.kind === 'unconfirmed';
     // Created: no form holds it for a retry any more, whichever sent it.
-    if (outcome.kind === 'created') this.held = null;
+    if (outcome.kind === 'created') this.settle();
     this.state = { operation, outcome, busy: false, start };
     this.notify();
     if (succeeded(outcome)) changed(view);

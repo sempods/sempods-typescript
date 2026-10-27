@@ -60,11 +60,18 @@ async function setup() {
     new Response(null, { status: 204 });
   const writes: string[] = [];
   const puts: string[] = [];
+  // Created resources the fixture Pod has, beyond `urn:one`.
+  const present = new Set<string>();
   f.setResource(async (url, init) => {
     if ((init?.method ?? 'GET') === 'GET')
       return resourceIri(url) === 'urn:one'
         ? Response.json(one, { headers: { etag: '"v1"' } })
-        : new Response(null, { status: 404 });
+        : present.has(resourceIri(url))
+          ? Response.json(
+              { ...one, '@id': resourceIri(url) },
+              { headers: { etag: '"v1"' } },
+            )
+          : new Response(null, { status: 404 });
     writes.push(init?.method ?? '');
     if (init?.method === 'PUT') puts.push(resourceIri(url));
     return answer();
@@ -159,6 +166,7 @@ async function setup() {
     api,
     writes,
     puts,
+    present,
     answer: (next: typeof answer) => {
       answer = next;
     },
@@ -608,4 +616,32 @@ it("a form shown during another one's retry is usable once it is created", async
   expect(await sent).toMatchObject({ kind: 'created' });
   await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
   expect(s.api.creation.canEdit).toBe(true);
+});
+
+it('a creation acknowledged as present clears every form that shows it', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0]!;
+  act(() => s.api.showLate(true));
+  await waitFor(() => expect(s.api.late?.draft.title).toBe('Mine'));
+  // The Pod has it after all: one form checks and acknowledges.
+  s.present.add(iri);
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.late?.draft.title).toBe(''));
+  expect(s.api.creation.draft.title).toBe('');
+  // The other form never sends the acknowledged item again.
+  act(() => s.api.late!.change({ title: 'Next' }));
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.late!.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toHaveLength(2);
+  expect(s.puts[1]).not.toBe(iri);
 });

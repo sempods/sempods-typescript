@@ -808,15 +808,11 @@ function useMutation<D>(
     acknowledge: () => live()?.acknowledge(),
     /** The form's recovery data kept with its lane (see `Lane.held`). */
     held: () => live()?.held ?? null,
-    hold: (value: { readonly retry: boolean } | null) => {
-      // Clearing never starts a lane of its own.
-      if (value === null) {
-        const lane = live();
-        if (lane) lane.held = null;
-      } else if (group) group.lane(id).held = value;
+    hold: (value: { readonly retry: boolean; settled: boolean }) => {
+      if (group) group.lane(id).held = value;
     },
-    /** Whether the lane exists (it may have been evicted or retired). */
-    known: lane !== null,
+    /** The held item is settled; never starts a lane of its own. */
+    settle: () => live()?.settle(),
     busy: lane?.state?.busy ?? false,
     unresolved: lane?.unresolved ?? false,
     canMutate: lane ? lane.canMutate(writable) : available,
@@ -1115,6 +1111,8 @@ interface HeldCreation<D> {
   readonly draft: D;
   readonly creation: Creation;
   retry: boolean;
+  /** Created, acknowledged or discarded: no form sends it any more. */
+  settled: boolean;
 }
 /**
  * Owns the draft, leave guard and captured command for one intended creation.
@@ -1211,14 +1209,8 @@ export function useCreation<D extends object>(
     command.current = { state: next, held: kept };
     current.current = next;
     setState(next);
-  } else if (
-    holding &&
-    mine.held.retry &&
-    mutation.known &&
-    !mutation.busy &&
-    kept !== mine.held
-  ) {
-    // Another form of this name created or discarded the held item.
+  } else if (holding && mine.held.settled) {
+    // Another form of this name created, acknowledged or discarded the item.
     const next = { view, key, draft: copy(initial.current) };
     command.current = null;
     current.current = next;
@@ -1229,8 +1221,10 @@ export function useCreation<D extends object>(
     if (current.current.view !== view || current.current.key !== key) return;
     const next = { view, key, draft: copy(initial.current) };
     current.current = next;
+    // Settled for every form that shows it, also when the lane holds no more.
+    if (command.current) command.current.held.settled = true;
     command.current = null;
-    mutation.hold(null);
+    mutation.settle();
     setState(next);
   };
   useDraftGuard(
@@ -1297,6 +1291,7 @@ export function useCreation<D extends object>(
             key,
             draft: submitted.draft,
             retry: false,
+            settled: false,
             creation: prepareCreation(
               view,
               newSubjectIri(view, options.collection),
