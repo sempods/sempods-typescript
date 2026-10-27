@@ -45,6 +45,21 @@ export function withoutComparison<D>(
   return outcome;
 }
 
+/** Which guarded changes leave a lane (see `LeaveGuard.scope`). */
+export type LaneScope = 'target' | 'explicit';
+
+/**
+ * What a form keeps with its lane to recover a write after it remounts, for
+ * example a creation's captured command and draft. `retry` holds it for an
+ * explicit retry after observed absence; once the item is settled (created,
+ * acknowledged or discarded) it is marked `settled`, so every form that shows
+ * it starts afresh.
+ */
+export interface Held {
+  retry: boolean;
+  settled: boolean;
+}
+
 /**
  * Internal: one mutation lane for one target. It captures its subject per
  * write; a retired lane (target or definition changed) never updates again.
@@ -59,21 +74,14 @@ export class Lane<D> {
   iri = '';
   version = 0;
   uncertain = false;
-  alive = true;
   /** Counts the writes started on this lane, by any hook. */
   writes = 0;
-  /**
-   * What the writing form needs to recover this write after it remounts, for
-   * example a creation's captured command and draft (opaque here). `retry`
-   * holds it for an explicit retry after observed absence. Once the item is
-   * settled (created, or discarded on leave) it is marked `settled` and let
-   * go, so every form that shows it starts afresh.
-   */
-  held: { readonly retry: boolean; settled: boolean } | null = null;
-  /** The held item is settled: no form holds it for a retry any more. */
-  settle() {
-    if (this.held) this.held.settled = true;
-    this.held = null;
+  /** The writing form's recovery data (see `Held`), opaque otherwise. */
+  held: Held | null = null;
+  /** That item is settled; the lane lets it go if it still holds it. */
+  settle(held: Held | null = this.held) {
+    if (held) held.settled = true;
+    if (this.held === held) this.held = null;
   }
   /**
    * The snapshot a confirmed update was made from. It no longer shows the
@@ -97,7 +105,7 @@ export class Lane<D> {
   } | null = null;
 
   constructor(
-    readonly view: BoundView | null,
+    readonly view: BoundView,
     private readonly definition: FieldDefinition<D>,
     private readonly app: AppController,
     /** Whether the lane's target is still the one it writes to. */
@@ -105,20 +113,24 @@ export class Lane<D> {
     private readonly notify: () => void,
   ) {}
 
+  /** Its group retires for good once its target no longer holds. */
   eligible() {
-    return this.alive && this.holds();
+    return this.holds();
   }
   /** A write that still needs a form: pending, unresolved or held for a retry. */
   outstanding() {
     return this.pending || this.unresolved || Boolean(this.held?.retry);
   }
   readable() {
-    return this.eligible() && Boolean(this.view?.getSnapshot().read);
+    return this.eligible() && this.view.getSnapshot().read;
   }
   isChecked() {
     return this.readable() && this.checked;
   }
-  /** Read access was lost: observations made under it no longer count. */
+  /**
+   * Read access was lost: observations made under it no longer count. Its
+   * group notifies once for all of its lanes.
+   */
   loseRead() {
     this.version++;
     this.checked = false;
@@ -129,16 +141,14 @@ export class Lane<D> {
         ...this.state,
         outcome: withoutComparison(this.state.outcome),
       };
-    this.notify();
   }
   /** The target or definition changed: the lane never updates again. */
   retire() {
-    this.alive = false;
     this.version++;
     this.checked = false;
     this.absent = false;
   }
-  guard(scope: 'target' | 'explicit'): LeaveGuard {
+  guard(scope: LaneScope): LeaveGuard {
     return {
       scope,
       unconfirmed: () => this.uncertain,
@@ -150,26 +160,21 @@ export class Lane<D> {
         this.uncertain = false;
         this.version++;
         this.checked = false;
-        if (this.alive) {
+        if (this.eligible()) {
           this.state = null;
           this.notify();
         }
       },
     };
   }
-  /** Whether a write may start now; `execute` sends nothing otherwise. */
-  startable(subject?: object) {
-    return this.refusal(subject) === null;
-  }
   /** Why a write would send nothing now, or `null` when it may start. */
   refusal(subject?: object): NotSent['reason'] | null {
-    const view = this.view;
-    if (!view || !this.eligible()) return view ? 'ended' : 'unavailable';
+    if (!this.eligible()) return 'ended';
     if (this.pending) return 'busy';
     if (this.unresolved) return 'unresolved';
     if (subject !== undefined && subject === this.spent) return 'stale';
     if (
-      !view.getSnapshot().write ||
+      !this.view.getSnapshot().write ||
       this.app.getSnapshot().changing ||
       this.app.getSnapshot().confirmingLeave
     )
@@ -187,7 +192,7 @@ export class Lane<D> {
   ): Promise<MutationOutcome<D> | NotSent> {
     const view = this.view;
     const refused = this.refusal(subject);
-    if (!view || refused) return notSent(refused ?? 'unavailable');
+    if (refused) return notSent(refused);
     const version = ++this.version;
     this.writes++;
     this.pending = true;
@@ -241,7 +246,7 @@ export class Lane<D> {
   }
   async check() {
     const view = this.view;
-    if (!view || !this.readable() || !this.unresolved) return false;
+    if (!this.readable() || !this.unresolved) return false;
     this.checked = false;
     this.absent = false;
     this.evidence = null;
@@ -283,7 +288,6 @@ export class Lane<D> {
   /** Whether this lane may write now, given the target's write access. */
   canMutate(writable: boolean, subject?: object) {
     return Boolean(
-      this.view &&
       writable &&
       (subject === undefined || subject !== this.spent) &&
       this.eligible() &&

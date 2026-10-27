@@ -49,11 +49,12 @@ import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
   notSent,
+  type Held,
   type Lane,
   type MutationOutcome,
   type NotSent,
 } from '../authoring/lane.js';
-import { lanesOf, type LaneGroup } from '../authoring/lanes.js';
+import { lanesOf, type LaneScope } from '../authoring/lanes.js';
 export type { MutationOutcome, NotSent } from '../authoring/lane.js';
 import {
   observeStarts,
@@ -716,6 +717,36 @@ export function useContextEditor<D>(
   );
 }
 /**
+ * The controller's lane group for one target, subscribed (`version` changes
+ * with each of its lane changes), and a token that is true while this hook's
+ * screen is mounted and shown: commands start only then, and a command kept
+ * from an earlier group (another target or definition) never again.
+ */
+function useLaneGroup<D>(
+  view: BoundView | null,
+  key: string,
+  definition: FieldDefinition<D>,
+  scope: LaneScope,
+) {
+  const app = useController();
+  const group = view ? lanesOf(app).group(view, key, definition, scope) : null;
+  const version = useSyncExternalStore(
+    group?.subscribe ?? noopSubscribe,
+    group?.getVersion ?? noVersion,
+    group?.getVersion ?? noVersion,
+  );
+  // `group` is the generation this token belongs to.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const shown = useMemo(() => ({ current: false }), [group]);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, [shown]);
+  return { group, version, shown };
+}
+/**
  * One mutation lane. Captures target/subject; stale completions never update a
  * new lane. `explicit` is a view bound to an explicit Context (`null` while it
  * binds); without it the lane follows the selected view.
@@ -730,7 +761,6 @@ function useMutation<D>(
 ) {
   const selected = useView();
   const view = explicit === undefined ? selected : explicit;
-  const app = useController();
   const access = useWorkflowAccess();
   const ownWrite = useSyncExternalStore(
     explicit?.subscribe ?? noopSubscribe,
@@ -741,49 +771,20 @@ function useMutation<D>(
   const { key } = useDefinition(definition, 'useFieldUpdate');
   // The controller owns this form's lane, so a creation that settles while the
   // form is hidden keeps its outcome and guard; an explicit Context stays
-  // through row changes and Context selection.
-  const group = view
-    ? lanesOf(app).group(
-        view,
-        `forms ${forms} ${key}`,
-        definition,
-        explicit === undefined ? 'target' : 'explicit',
-      )
-    : null;
-  useSyncExternalStore(
-    group?.subscribe ?? noopSubscribe,
-    group?.getVersion ?? noVersion,
-    group?.getVersion ?? noVersion,
+  // through row changes and Context selection. One lane per form name: every
+  // form of that name (by default all forms of the collection) shows the same
+  // creation, also one that remounted or was hidden meanwhile, so none can
+  // send it afresh. Commands look it up live: a create in the same event may
+  // have just started it.
+  const { group, shown } = useLaneGroup(
+    view,
+    `forms ${forms} ${name} ${key}`,
+    definition,
+    explicit === undefined ? 'target' : 'explicit',
   );
-  // One lane per form name: every form of that name (by default all forms
-  // of the collection) shows the same creation, also a form that remounted
-  // or was hidden meanwhile, so none can send it afresh. Commands look it up
-  // live: a create in the same event may have just started it.
-  const id = `form ${name}`;
-  const lane = group?.lanes.get(id) ?? null;
-  const live = () => group?.lanes.get(id);
-  // Commands start only while this form is mounted and shown; writes already
-  // sent settle in the controller either way. One token per generation
-  // (group and lane): a command kept from an earlier definition or target
-  // never becomes usable again.
-  // `group` and `id` are the generation this token belongs to.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => ({ current: false }), [group, id]);
-  useEffect(() => {
-    if (!group) return;
-    shown.current = true;
-    return () => {
-      shown.current = false;
-    };
-  }, [group, shown]);
+  const lane = group?.lanes.get('form') ?? null;
+  const live = () => group?.lanes.get('form');
   const starts = useStartCount(view);
-  const available = Boolean(
-    view &&
-    writable &&
-    group?.holds() &&
-    !app.getSnapshot().changing &&
-    !app.getSnapshot().confirmingLeave,
-  );
   return {
     execute: (
       operation: 'create' | 'update' | 'remove',
@@ -794,7 +795,7 @@ function useMutation<D>(
         ? Promise.resolve(notSent('unavailable'))
         : !shown.current
           ? Promise.resolve(notSent('ended'))
-          : group.lane(id).execute(operation, iri, action),
+          : group.lane('form').execute(operation, iri, action),
     editable: () =>
       shown.current &&
       Boolean(group?.holds()) &&
@@ -805,18 +806,23 @@ function useMutation<D>(
         ? ('unavailable' as const)
         : !shown.current
           ? ('ended' as const)
-          : group.lane(id).refusal(),
+          : group.lane('form').refusal(),
     acknowledge: () => live()?.acknowledge(),
     /** The form's recovery data kept with its lane (see `Lane.held`). */
     held: () => live()?.held ?? null,
-    hold: (value: { readonly retry: boolean; settled: boolean }) => {
-      if (group) group.lane(id).held = value;
+    hold: (value: Held) => {
+      if (group) group.lane('form').held = value;
     },
-    /** The held item is settled; never starts a lane of its own. */
-    settle: () => live()?.settle(),
+    /** That item is settled; never starts a lane of its own. */
+    settle: (held: Held) => {
+      held.settled = true;
+      live()?.settle(held);
+    },
     busy: lane?.state?.busy ?? false,
     unresolved: lane?.unresolved ?? false,
-    canMutate: lane ? lane.canMutate(writable) : available,
+    canMutate: lane
+      ? lane.canMutate(writable)
+      : Boolean(group?.available(writable)),
     outcome: lane?.outcome(starts) ?? null,
     operation: lane?.state?.operation ?? null,
     notice: lane ? lane.notice(starts) : noNotice,
@@ -865,46 +871,41 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   // The same instance as useList's snapshots (see canonicalOf).
   const definition = canonicalOf(input, definitionKey(input));
   const view = useView();
-  const app = useController();
   const access = useWorkflowAccess();
   const { key } = useDefinition(definition, 'useFieldUpdate');
   // The controller owns the lanes of this target and definition: a write keeps
   // its outcome and leave guard while this screen is hidden or remounts.
-  const group = view
-    ? lanesOf(app).group(view, `rows ${key}`, definition, 'target')
-    : null;
-  useSyncExternalStore(
-    group?.subscribe ?? noopSubscribe,
-    group?.getVersion ?? noVersion,
-    group?.getVersion ?? noVersion,
+  const { group, version, shown } = useLaneGroup(
+    view,
+    `rows ${key}`,
+    definition,
+    'target',
   );
-  // This hook's own part: whether its screen is shown (commands start only
-  // then) and which resource it wrote last (its list-wide feedback).
-  const own = useRef<{
-    readonly group: LaneGroup<D> | null;
-    active: boolean;
-    /** This hook's latest write: its lane and that lane's write count. */
-    latest: { readonly lane: Lane<D>; readonly write: number } | null;
-  }>({ group, active: false, latest: null });
-  if (own.current.group !== group)
-    own.current = { group, active: own.current.active, latest: null };
-  const mine = own.current;
-  useEffect(() => {
-    mine.active = true;
-    return () => {
-      mine.active = false;
-    };
-  }, [mine]);
+  // This hook's own part: which resource it wrote last (its list-wide
+  // feedback), as its lane and that lane's write count, per group.
+  const mine = useMemo(
+    () => ({
+      latest: null as { readonly lane: Lane<D>; readonly write: number } | null,
+    }),
+    // `group` is the generation this mark belongs to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [group],
+  );
   const starts = useStartCount(view);
-  const all = group ? [...group.lanes.values()] : [];
   // Whether a resource without a lane of its own could be written now.
-  const available = Boolean(
-    view &&
-    access.write &&
-    group?.holds() &&
-    !app.getSnapshot().changing &&
-    !app.getSnapshot().confirmingLeave,
-  );
+  const available = Boolean(group?.available(access.write));
+  // One pass per lane change, with a stable `unresolved` between them.
+  const { unresolved, open } = useMemo(() => {
+    const unresolved: string[] = [];
+    let open = false;
+    for (const lane of group?.lanes.values() ?? []) {
+      if (lane.unresolved) unresolved.push(lane.iri);
+      if (lane.pending || lane.unresolved) open = true;
+    }
+    return { unresolved, open };
+    // `version` changes with every lane change of `group`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group, version]);
   // Another hook's later write to the same resource is not this hook's, also
   // on a fresh lane for it after the earlier one was evicted.
   const ownWrite = (mark: typeof mine.latest) =>
@@ -925,7 +926,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
       after?: D,
     ): Promise<MutationOutcome<D> | NotSent> => {
       if (!group) return Promise.resolve(notSent('unavailable'));
-      if (!mine.active) return Promise.resolve(notSent('ended'));
+      if (!shown.current) return Promise.resolve(notSent('ended'));
       const lane = group.lane(iri);
       // A refused write sends nothing and keeps the latest write's recovery.
       const refused = lane.refusal(subject);
@@ -969,7 +970,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     };
     // `definition` belongs to `group` (same target and definition).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group, mine]);
+  }, [group, mine, shown]);
   function rowFor(item: Snapshot<D>): FieldUpdateRow<D>;
   function rowFor(item: string): FieldUpdateState<D>;
   function rowFor(
@@ -1009,9 +1010,9 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
      * and acknowledged. Show `for(iri).notice` for those whose rows are gone,
      * for example deleted elsewhere, so their recovery stays reachable.
      */
-    unresolved: all.filter((l) => l.unresolved).map((l) => l.iri),
+    unresolved,
     /** False while any resource's write is pending or unresolved. */
-    canMutate: available && all.every((l) => !l.pending && !l.unresolved),
+    canMutate: available && !open,
     /** The latest write's state and feedback, for a single shared notice. */
     busy: latest?.state?.busy ?? false,
     outcome: latest?.outcome(starts) ?? null,
@@ -1109,14 +1110,9 @@ function useExplicitView(context: string | undefined) {
   };
 }
 /** A captured creation, kept with its lane (see `Lane.held`). */
-interface HeldCreation<D> {
-  readonly view: BoundView;
-  readonly key: string;
+interface HeldCreation<D> extends Held {
   readonly draft: D;
   readonly creation: Creation;
-  retry: boolean;
-  /** Created, acknowledged or discarded: no form sends it any more. */
-  settled: boolean;
 }
 /**
  * Owns the draft, leave guard and captured command for one intended creation.
@@ -1179,6 +1175,21 @@ export function useCreation<D extends object>(
     draft: copy(options.initial),
   }));
   const current = useRef(state);
+  // The form's submitted state and the creation captured for it. The
+  // creation is kept with the lane, so every form of this name (also one
+  // shown again or remounted) recovers the same IRI and body for a retry.
+  const command = useRef<{
+    state: typeof state;
+    held: HeldCreation<D>;
+  } | null>(null);
+  // The draft, its ref and the form's command change together.
+  const replace = (draft: D, held: HeldCreation<D> | null = null) => {
+    const next = { view, key, draft };
+    current.current = next;
+    command.current = held && { state: next, held };
+    setState(next);
+  };
+  current.current = state;
   if (state.view !== view || state.key !== key) {
     if (
       state.view === view &&
@@ -1187,49 +1198,28 @@ export function useCreation<D extends object>(
       warn(
         'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
       );
-    const next = { view, key, draft: copy(options.initial) };
-    current.current = next;
-    setState(next);
-  } else current.current = state;
-  // The form's submitted state and the creation captured for it. The
-  // creation is kept with the lane, so every form of this name (also one
-  // shown again or remounted) recovers the same IRI and body for a retry.
-  const command = useRef<{
-    state: typeof state;
-    held: HeldCreation<D>;
-  } | null>(null);
+    replace(copy(options.initial));
+  }
+  // The lane is this form's generation, so what it holds is this form's.
   const kept = mutation.held() as HeldCreation<D> | null;
   const mine = command.current;
   const holding = mine !== null && mine.state === current.current;
   if (
     kept &&
     !(holding && mine.held === kept) &&
-    kept.view === view &&
-    kept.key === key &&
     (mutation.unresolved || kept.retry)
-  ) {
+  )
     // The lane's open creation: show its draft, locked, and retry exactly it.
-    const next = { view, key, draft: kept.draft };
-    command.current = { state: next, held: kept };
-    current.current = next;
-    setState(next);
-  } else if (holding && mine.held.settled) {
+    replace(kept.draft, kept);
+  else if (holding && mine.held.settled)
     // Another form of this name created, acknowledged or discarded the item.
-    const next = { view, key, draft: copy(initial.current) };
-    command.current = null;
-    current.current = next;
-    setState(next);
-  }
+    replace(copy(initial.current));
   const draft = current.current.draft;
   const reset = () => {
     if (current.current.view !== view || current.current.key !== key) return;
-    const next = { view, key, draft: copy(initial.current) };
-    current.current = next;
-    // Settled for every form that shows it, also when the lane holds no more.
-    if (command.current) command.current.held.settled = true;
-    command.current = null;
-    mutation.settle();
-    setState(next);
+    // Settled for every form that shows it.
+    if (command.current) mutation.settle(command.current.held);
+    replace(copy(initial.current));
   };
   useDraftGuard(
     JSON.stringify(draft) !== JSON.stringify(options.initial),
@@ -1262,14 +1252,7 @@ export function useCreation<D extends object>(
       )
         return;
       mutation.acknowledge();
-      const next = {
-        view,
-        key,
-        draft: copy({ ...current.current.draft, ...patch }),
-      };
-      current.current = next;
-      command.current = null;
-      setState(next);
+      replace(copy({ ...current.current.draft, ...patch }));
     },
     /**
      * Sends the current draft under its captured IRI and resolves its outcome
@@ -1291,8 +1274,6 @@ export function useCreation<D extends object>(
         command.current = {
           state: submitted,
           held: {
-            view,
-            key,
             draft: submitted.draft,
             retry: false,
             settled: false,

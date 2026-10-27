@@ -13,7 +13,8 @@ const starts = new WeakMap<
   object,
   { count: number; readonly listeners: Set<() => void> }
 >();
-function notify(entries: Iterable<() => void>) {
+/** Calls each listener; one that throws does not stop the others. */
+export function notify(entries: Iterable<() => void>) {
   for (const listener of entries) {
     try {
       listener();

@@ -1,13 +1,13 @@
 import type { FieldDefinition } from '@sempods/client-sdk/edit';
 import type { AppController } from './app.js';
 import type { BoundView } from '../runtime/view.js';
-import { Lane } from './lane.js';
+import { notify } from './changes.js';
+import { Lane, type LaneScope } from './lane.js';
 
 /** At most this many settled, unguarded lanes stay per group for feedback. */
 const SETTLED = 200;
 
-/** Which guarded changes leave a group's lanes (see `LeaveGuard.scope`). */
-export type LaneScope = 'target' | 'explicit';
+export type { LaneScope } from './lane.js';
 
 /**
  * Internal: the write lanes of one target and one definition, owned by the
@@ -56,8 +56,16 @@ export class LaneGroup<D> {
   readonly getVersion = () => this.version;
   private readonly changed = () => {
     this.version++;
-    for (const listener of [...this.listeners]) listener();
+    notify([...this.listeners]);
   };
+  /**
+   * Whether a resource without a lane of its own could be written now, given
+   * the target's write access (`Lane.canMutate` for one with a lane).
+   */
+  available(writable: boolean) {
+    const app = this.app.getSnapshot();
+    return writable && this.holds() && !app.changing && !app.confirmingLeave;
+  }
 
   /**
    * The lane of one resource, created by a command (never while rendering).
@@ -88,6 +96,7 @@ export class LaneGroup<D> {
 
   /** Drops the oldest settled, unguarded lanes beyond the bound: feedback only. */
   private evict() {
+    if (this.lanes.size <= SETTLED) return;
     let settled = [...this.lanes.values()].filter(
       (lane) => !lane.outstanding(),
     ).length;
@@ -107,9 +116,11 @@ export class LaneGroup<D> {
     const follow = () => {
       if (!this.holds()) return this.retire();
       const readable = this.view.getSnapshot().read;
-      if (this.readable && !readable)
-        this.lanes.forEach((lane) => lane.loseRead());
+      const lost = this.readable && !readable;
       this.readable = readable;
+      if (!lost) return;
+      this.lanes.forEach((lane) => lane.loseRead());
+      this.changed();
     };
     this.stops.push(this.app.subscribe(follow), this.view.subscribe(follow));
   }
