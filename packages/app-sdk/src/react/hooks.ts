@@ -682,18 +682,27 @@ export function useContextEditor<D>(
       // controller cancels the prompt if another one becomes active meanwhile.
       const connection = app.getSnapshot().activeId;
       if (!connection) return Promise.resolve(false);
+      const opened = (): ContextLaneState => ({
+        lane: {
+          target: { subject: target.subject, context: target.context },
+          connection,
+        },
+        binding: null,
+        activated: false,
+        retired: false,
+      });
+      // Nothing is open here, and the controller still keeps this row's editor
+      // (this hook remounted): returning to it leaves nothing, so it does not
+      // ask, and a pending save does not block it.
+      if (
+        !liveLane(now, connection) &&
+        editorsOf(app).retains(target.context, target.subject, 'connection')
+      ) {
+        apply(opened);
+        return Promise.resolve(true);
+      }
       const result = app
-        .navigate(() =>
-          apply(() => ({
-            lane: {
-              target: { subject: target.subject, context: target.context },
-              connection,
-            },
-            binding: null,
-            activated: false,
-            retired: false,
-          })),
-        )
+        .navigate(() => apply(opened))
         .finally(() => {
           if (opening.current?.result === result) opening.current = null;
         });

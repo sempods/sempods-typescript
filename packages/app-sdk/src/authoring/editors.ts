@@ -16,6 +16,9 @@ const busy = (editor: ResourceEditor<unknown>) =>
     (editor.state.dirty || editor.state.review !== null));
 
 interface Entry {
+  readonly view: BoundView;
+  readonly iri: string;
+  readonly scope: LeaveGuard['scope'];
   readonly editor: ResourceEditor<unknown>;
   holders: number;
   /** Whether its target is still the one it edits. */
@@ -50,9 +53,18 @@ export interface EditorStore {
     target: EditorTarget,
   ): {
     readonly editor: ResourceEditor<D>;
-    /** Gives it back; `discard` disposes it at once (another definition). */
+    /**
+     * Gives it back; `discard` disposes it at once (another definition), also
+     * when called again after it was given back.
+     */
     readonly release: (discard?: boolean) => void;
   };
+  /**
+   * Whether an editor for this Context, subject and scope is kept for the
+   * active connection, for example one a remounted `useContextEditor`
+   * reopens: returning to it leaves nothing. It binds nothing.
+   */
+  retains(context: string, iri: string, scope: LeaveGuard['scope']): boolean;
 }
 
 const stores = new WeakMap<AppController, EditorStore>();
@@ -60,13 +72,17 @@ export function editorsOf(app: AppController): EditorStore {
   let store = stores.get(app);
   if (store) return store;
   const entries = new Map<string, Entry>();
-  const ids = new WeakMap<BoundView, number>();
-  let views = 0;
-  const idOf = (view: BoundView) => {
-    let id = ids.get(view);
-    if (id === undefined) ids.set(view, (id = ++views));
+  // Views and custom definitions by identity: a `fields()` definition is
+  // keyed by its structure, any other mapping only matches itself.
+  const ids = new WeakMap<object, number>();
+  let objects = 0;
+  const idOf = (value: object) => {
+    let id = ids.get(value);
+    if (id === undefined) ids.set(value, (id = ++objects));
     return id;
   };
+  const nameOf = (view: BoundView, iri: string, scope: LeaveGuard['scope']) =>
+    `${idOf(view)} ${scope ?? 'local'} ${iri}`;
   const remove = (name: string) => {
     const entry = entries.get(name);
     if (!entry) return;
@@ -90,7 +106,9 @@ export function editorsOf(app: AppController): EditorStore {
       scope: LeaveGuard['scope'],
       target: EditorTarget,
     ) {
-      const name = `${idOf(view)} ${scope ?? 'local'} ${key} ${iri}`;
+      const shape =
+        key === 'custom' ? `custom ${idOf(definition as object)}` : key;
+      const name = `${nameOf(view, iri, scope)} ${shape}`;
       let entry = entries.get(name);
       if (entry) {
         // Most recently claimed last, for the bound.
@@ -138,6 +156,9 @@ export function editorsOf(app: AppController): EditorStore {
           }),
         ];
         entry = {
+          view,
+          iri,
+          scope,
           editor: editor as ResourceEditor<unknown>,
           holders: 0,
           holds,
@@ -155,9 +176,10 @@ export function editorsOf(app: AppController): EditorStore {
       return {
         editor: own.editor as ResourceEditor<D>,
         release: (discard = false) => {
-          if (released) return;
-          released = true;
-          own.holders--;
+          if (!released) {
+            released = true;
+            own.holders--;
+          } else if (!discard) return;
           if (entries.get(name) !== own) return;
           const abandoned =
             'discarded' in own && own.discarded === own.editor.state.draft;
@@ -166,6 +188,15 @@ export function editorsOf(app: AppController): EditorStore {
           else trim();
         },
       };
+    },
+    retains(context: string, iri: string, scope: LeaveGuard['scope']) {
+      return [...entries.values()].some(
+        (entry) =>
+          entry.view.contextIri === context &&
+          entry.iri === iri &&
+          entry.scope === scope &&
+          entry.holds(),
+      );
     },
   };
   stores.set(app, store);

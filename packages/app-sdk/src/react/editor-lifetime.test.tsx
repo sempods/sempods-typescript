@@ -79,9 +79,25 @@ async function setup() {
     app: ReturnType<typeof useApp>;
     hide: (hidden: boolean) => void;
     mount: (mounted: boolean) => void;
+    note: (noted: boolean) => void;
+    copies: ResourceEditor<unknown>[];
   };
+  // The same type with one more field: another definition for the editor.
+  const withNote = fields(
+    {
+      title: text('urn:title', { language: null }),
+      done: flag('urn:status', { on: 'urn:done', off: 'urn:open' }),
+      note: text('urn:note', { language: null, optional: true }),
+    },
+    { type: 'urn:Task' },
+  );
   function Screen() {
-    api.editor = useResourceEditor('urn:one', definition);
+    const [noted, setNoted] = useState(false);
+    api.note = setNoted;
+    api.editor = useResourceEditor(
+      'urn:one',
+      (noted ? withNote : definition) as typeof definition,
+    );
     return null;
   }
   function Host() {
@@ -105,6 +121,12 @@ async function setup() {
   );
   await waitFor(() => expect(api.editor?.state.phase).toBe('ready'));
   return {
+    render: (ui: React.ReactElement) =>
+      render(
+        <SempodsProvider runtime={session.runtime}>
+          <TargetScreen>{ui}</TargetScreen>
+        </SempodsProvider>,
+      ),
     ...f,
     api,
     writes,
@@ -186,4 +208,49 @@ it('a clean editor shown again is the same one, with its data', async () => {
   expect(s.api.editor?.state.draft?.title).toBe('One');
   // The same editor: shown again, it does not read afresh.
   expect(s.api.editor).toBe(before);
+});
+
+it('another definition for the same subject discards the earlier editor and its guard', async () => {
+  const s = await setup();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  act(() => s.api.editor!.change({ title: 'Changed' }));
+  act(() => s.api.note(true));
+  await waitFor(() => expect(s.api.editor?.state.phase).toBe('ready'));
+  // Nothing is left to ask about: the discarded draft is gone.
+  expect(await s.api.app.navigate(() => {})).toBe(true);
+  // Back on the first definition, a fresh editor without that draft.
+  act(() => s.api.note(false));
+  await waitFor(() => expect(s.api.editor?.state.phase).toBe('ready'));
+  expect(s.api.editor?.state.draft?.title).toBe('One');
+});
+
+it('custom definitions of one subject get editors of their own', async () => {
+  const s = await setup();
+  // Copies are custom definitions: each mapping only matches itself.
+  const plain = { ...definition };
+  const marked = {
+    ...definition,
+    read: (body: JsonLd) => ({ ...definition.read(body), title: 'Marked' }),
+  };
+  const seen: ResourceEditor<{ title: string }>[] = [];
+  function Copy({ of }: { readonly of: typeof definition }) {
+    const editor = useResourceEditor('urn:one', of);
+    if (editor) seen.push(editor as never);
+    return null;
+  }
+  s.render(
+    <>
+      <Copy of={plain as typeof definition} />
+      <Copy of={marked as typeof definition} />
+    </>,
+  );
+  await waitFor(() =>
+    expect(seen.map((e) => e.state.draft?.title)).toContain('Marked'),
+  );
+  const editors = new Set(seen);
+  expect(editors.size).toBe(2);
+  expect([...editors].map((e) => e.state.draft?.title).sort()).toEqual([
+    'Marked',
+    'One',
+  ]);
 });

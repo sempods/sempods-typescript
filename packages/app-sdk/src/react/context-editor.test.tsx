@@ -859,3 +859,18 @@ it('needs a successful listing for a row opened after a failed catalogue refresh
   await act(() => f.runtime.loadContexts(f.id));
   await waitFor(() => expect(title().value).toBe('A at work'));
 });
+
+it('a remounted editor reopens its kept row without asking, with its draft', async () => {
+  const f = await returned();
+  notes(f);
+  const { rerender } = render(ui(f.runtime));
+  await open('Edit urn:a in work');
+  await waitFor(() => expect(title().value).toBe('A at work'));
+  fireEvent.change(title(), { target: { value: 'Unfinished' } });
+  // The screen goes and comes back; the controller kept the editor.
+  rerender(ui(f.runtime, <></>));
+  rerender(ui(f.runtime));
+  fireEvent.click(screen.getByText('Edit urn:a in work'));
+  await waitFor(() => expect(title().value).toBe('Unfinished'));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+});
