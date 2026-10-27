@@ -1,0 +1,185 @@
+// @vitest-environment jsdom
+/**
+ * Write lanes across hiding and remounting (#156). React 19.2 `<Activity
+ * mode="hidden">` cleans up effects but keeps state; a lane's lifetime should
+ * follow its target, not its component. `it.fails` marks today's defects;
+ * the controller-owned lane store turns them into ordinary tests.
+ */
+import { webcrypto } from 'node:crypto';
+import { Activity, useState } from 'react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { fields, flag, text, type Snapshot } from '@sempods/client-sdk/edit';
+import type { JsonLd } from '@sempods/client-sdk';
+import {
+  SempodsProvider,
+  TargetScreen,
+  useApp,
+  useCreation,
+  useFieldUpdate,
+  useList,
+} from './index.js';
+import type { BrowserRuntime } from '../runtime/types.js';
+import { deferred, fixture, resourceIri } from '../runtime/fixture.test.js';
+
+type Task = { readonly title: string; readonly done: boolean };
+const definition = fields(
+  {
+    title: text('urn:title', { language: null }),
+    done: flag('urn:status', { on: 'urn:done', off: 'urn:open' }),
+  },
+  { type: 'urn:Task' },
+);
+const runtimes: BrowserRuntime[] = [];
+beforeEach(async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubGlobal(
+    'ArrayBuffer',
+    (await webcrypto.subtle.digest('SHA-256', new Uint8Array())).constructor,
+  );
+});
+afterEach(() => {
+  cleanup();
+  runtimes.splice(0).forEach((r) => r.dispose());
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+async function setup() {
+  const f = fixture();
+  const session = await f.login();
+  runtimes.push(session.runtime);
+  const one: JsonLd = {
+    '@id': 'urn:one',
+    '@type': ['urn:Task'],
+    'urn:title': [{ '@value': 'One' }],
+    'urn:status': [{ '@id': 'urn:open' }],
+  };
+  f.setQuery(async () => Response.json([one]));
+  let answer: () => Promise<Response> | Response = () =>
+    new Response(null, { status: 204 });
+  f.setResource(async (url, init) => {
+    if ((init?.method ?? 'GET') === 'GET')
+      return resourceIri(url) === 'urn:one'
+        ? Response.json(one, { headers: { etag: '"v1"' } })
+        : new Response(null, { status: 404 });
+    return answer();
+  });
+  const api = {} as {
+    mutate: ReturnType<typeof useFieldUpdate<Task>>;
+    creation: ReturnType<typeof useCreation<Task>>;
+    rows: readonly Snapshot<Task>[];
+    app: ReturnType<typeof useApp>;
+    hide: (hidden: boolean) => void;
+    mount: (mounted: boolean) => void;
+  };
+  function Screen() {
+    const list = useList(definition);
+    api.mutate = useFieldUpdate(definition);
+    api.creation = useCreation(definition, {
+      initial: { title: '', done: false },
+      collection: 'tasks',
+    });
+    api.rows = list.data?.items ?? api.rows ?? [];
+    return null;
+  }
+  function Host() {
+    const [hidden, hide] = useState(false);
+    const [mounted, mount] = useState(true);
+    api.app = useApp();
+    api.hide = hide;
+    api.mount = mount;
+    return (
+      <Activity mode={hidden ? 'hidden' : 'visible'}>
+        {mounted && <Screen />}
+      </Activity>
+    );
+  }
+  render(
+    <SempodsProvider runtime={session.runtime}>
+      <TargetScreen>
+        <Host />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(api.rows).toHaveLength(1));
+  await waitFor(() =>
+    expect(api.mutate.for(api.rows[0]!).canMutate).toBe(true),
+  );
+  return {
+    ...f,
+    api,
+    answer: (next: typeof answer) => {
+      answer = next;
+    },
+  };
+}
+
+it.fails(
+  'a pending update blocks navigation while hidden and shows its outcome on reveal',
+  async () => {
+    const s = await setup();
+    const held = deferred<Response>();
+    s.answer(() => held.promise);
+    const row = s.api.rows[0]!;
+    let sent!: Promise<unknown>;
+    act(() => {
+      sent = s.api.mutate.for(row).update({ done: true });
+    });
+    await waitFor(() => expect(s.api.mutate.busy).toBe(true));
+    act(() => s.api.hide(true));
+    // Still pending: a guarded change must wait for it.
+    expect(await s.api.app.navigate(() => {})).toBe(false);
+    await act(async () => held.resolve(new Response(null, { status: 202 })));
+    expect(await sent).toMatchObject({ kind: 'unconfirmed' });
+    act(() => s.api.hide(false));
+    await waitFor(() => expect(s.api.mutate.busy).toBe(false));
+    expect(s.api.mutate.unresolved).toEqual(['urn:one']);
+    expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
+      kind: 'unconfirmed',
+    });
+  },
+);
+
+it.fails(
+  'a creation that settles while hidden leaves the form usable on reveal',
+  async () => {
+    const s = await setup();
+    const held = deferred<Response>();
+    s.answer(() => held.promise);
+    act(() => s.api.creation.change({ title: 'New' }));
+    let sent!: Promise<unknown>;
+    act(() => {
+      sent = s.api.creation.create();
+    });
+    await waitFor(() => expect(s.api.creation.busy).toBe(true));
+    act(() => s.api.hide(true));
+    await act(async () => held.resolve(new Response(null, { status: 201 })));
+    expect(await sent).toMatchObject({ kind: 'created' });
+    act(() => s.api.hide(false));
+    await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
+    expect(s.api.creation.busy).toBe(false);
+    expect(s.api.creation.canEdit).toBe(true);
+  },
+);
+
+it.fails(
+  'an unconfirmed outcome survives unmounting and remounting its screen',
+  async () => {
+    const s = await setup();
+    s.answer(() => new Response(null, { status: 202 }));
+    const row = s.api.rows[0]!;
+    await act(async () => {
+      expect(await s.api.mutate.for(row).update({ done: true })).toMatchObject({
+        kind: 'unconfirmed',
+      });
+    });
+    act(() => s.api.mount(false));
+    act(() => s.api.mount(true));
+    await waitFor(() => expect(s.api.rows).toHaveLength(1));
+    expect(s.api.mutate.unresolved).toEqual(['urn:one']);
+    expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
+      kind: 'unconfirmed',
+    });
+  },
+);

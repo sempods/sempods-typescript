@@ -48,8 +48,13 @@ import {
 } from './app.js';
 import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
-import { Lane, notSent, type MutationOutcome, type NotSent } from './lane.js';
-export type { MutationOutcome, NotSent } from './lane.js';
+import {
+  Lane,
+  notSent,
+  type MutationOutcome,
+  type NotSent,
+} from '../authoring/lane.js';
+export type { MutationOutcome, NotSent } from '../authoring/lane.js';
 import {
   observeStarts,
   observeWrites,
