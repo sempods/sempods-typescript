@@ -645,3 +645,59 @@ it('a creation acknowledged as present clears every form that shows it', async (
   expect(s.puts).toHaveLength(2);
   expect(s.puts[1]).not.toBe(iri);
 });
+
+it("a write on a fresh lane after eviction is not an earlier hook's feedback", async () => {
+  const s = await setup();
+  // This hook's write is confirmed.
+  await act(async () => {
+    await s.api.mutate.for(s.api.rows[0]!).update({ done: true });
+  });
+  // The other hook writes enough resources to evict that settled lane.
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    for (let i = 0; i < 201; i++)
+      await s.api.other.create(`urn:new:${i}`, definition, {
+        title: `Task ${i}`,
+        done: false,
+      });
+  });
+  await waitFor(() =>
+    expect(s.api.other.for(s.api.rows[0]!).canMutate).toBe(true),
+  );
+  // It writes the first resource again, on a fresh lane, unanswered.
+  s.answer(() => new Response(null, { status: 202 }));
+  await act(async () => {
+    await s.api.other.for(s.api.rows[0]!).update({ done: true });
+  });
+  expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
+  expect(s.api.mutate.notice.outcome?.kind).not.toBe('unconfirmed');
+  act(() => s.api.mutate.acknowledge());
+  expect(s.api.other.unresolved).toEqual(['urn:one']);
+});
+
+it('an absence acknowledged from an earlier generation still holds the item for its retry', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  const notice = s.api.creation.notice;
+  await act(async () => {
+    expect(await notice.onCheck()).toBe(true);
+  });
+  // The form moves to another definition before the kept handler acknowledges.
+  act(() => s.api.note(true));
+  await waitFor(() => expect(s.api.creation.outcome).toBeNull());
+  act(() => notice.onAcknowledge());
+  // Back again: the item is held for the same-IRI retry, not a blank form.
+  act(() => s.api.note(false));
+  await waitFor(() => expect(s.api.creation.draft.title).toBe('New'));
+  expect(s.api.creation.canEdit).toBe(false);
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toEqual([iri, iri]);
+});

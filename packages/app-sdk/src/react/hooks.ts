@@ -49,6 +49,7 @@ import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
   notSent,
+  type Lane,
   type MutationOutcome,
   type NotSent,
 } from '../authoring/lane.js';
@@ -882,8 +883,8 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   const own = useRef<{
     readonly group: LaneGroup<D> | null;
     active: boolean;
-    /** This hook's latest write: its resource and that lane's write count. */
-    latest: { readonly iri: string; readonly write: number } | null;
+    /** This hook's latest write: its lane and that lane's write count. */
+    latest: { readonly lane: Lane<D>; readonly write: number } | null;
   }>({ group, active: false, latest: null });
   if (own.current.group !== group)
     own.current = { group, active: own.current.active, latest: null };
@@ -904,11 +905,14 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     !app.getSnapshot().changing &&
     !app.getSnapshot().confirmingLeave,
   );
-  // Another hook's later write to the same resource is not this hook's.
-  const ownWrite = (mark: typeof mine.latest) => {
-    const lane = mark ? group?.lanes.get(mark.iri) : undefined;
-    return lane && lane.writes === mark!.write ? lane : null;
-  };
+  // Another hook's later write to the same resource is not this hook's, also
+  // on a fresh lane for it after the earlier one was evicted.
+  const ownWrite = (mark: typeof mine.latest) =>
+    mark &&
+    group?.lanes.get(mark.lane.iri) === mark.lane &&
+    mark.lane.writes === mark.write
+      ? mark.lane
+      : null;
   const latest = ownWrite(mine.latest);
   // The commands keep their identity for this target and definition, so they
   // fit effect dependencies; a retained one keeps writing to its own target.
@@ -928,7 +932,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
       if (refused) return Promise.resolve(notSent(refused));
       // Starting the write counts it synchronously, before any await.
       const sent = lane.execute(operation, iri, action, subject, after);
-      mine.latest = { iri, write: lane.writes };
+      mine.latest = { lane, write: lane.writes };
       return sent;
     };
     return {
@@ -1333,9 +1337,10 @@ export function useCreation<D extends object>(
         // Absence is only an observation: the original write may still land.
         // Preserve its exact command/draft for an explicit create-only retry.
         const absent = mutation.absent();
-        // Held with the lane, so every form of this name holds it too.
-        if (absent && command.current?.state === current.current)
-          command.current.held.retry = true;
+        // On the command held with the acknowledged lane, so every form of
+        // this name holds it too, also one of a later generation going back.
+        const kept = mutation.held() as HeldCreation<D> | null;
+        if (absent && kept) kept.retry = true;
         mutation.acknowledge();
         if (!absent) reset();
       },
