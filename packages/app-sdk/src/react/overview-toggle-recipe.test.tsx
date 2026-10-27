@@ -11,7 +11,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { memo, useReducer, type ReactElement } from 'react';
+import { Activity, memo, useReducer, useState, type ReactElement } from 'react';
 import { OverviewToggleExample } from '../../../../examples/todo/recipes/overview-toggle.js';
 import {
   SempodsProvider,
@@ -56,6 +56,7 @@ type Task = { title: string; status: string; version: number };
  */
 async function overview({
   readOnly = false,
+  personalReadable = true,
   ui = (runtime: BrowserRuntime): ReactElement => (
     <OverviewToggleExample runtime={runtime} />
   ),
@@ -63,7 +64,9 @@ async function overview({
 } = {}) {
   const f = await returnedSession((r) => void runtimes.push(r));
   f.setCatalogue(async () =>
-    catalogue([work, personal], readOnly ? [work] : [work, personal]),
+    personalReadable
+      ? catalogue([work, personal], readOnly ? [work] : [work, personal])
+      : catalogue([work], [work]),
   );
   const tasks = new Map<string, Map<string, Task>>([
     [
@@ -122,6 +125,10 @@ async function overview({
       iri,
       ifMatch: new Headers(init?.headers).get('if-match'),
     });
+    if (init?.method === 'DELETE') {
+      tasks.get(context)?.delete(iri);
+      return new Response(null, { status: 204 });
+    }
     await control.held;
     if (control.status === 412) {
       // Someone else changed the task since it was read.
@@ -144,7 +151,8 @@ async function overview({
       name,
     }) as HTMLInputElement;
   await waitFor(() => expect(box('Buy milk').disabled).toBe(false));
-  await waitFor(() => expect(screen.queryByText('Call Ann')).not.toBeNull());
+  if (personalReadable)
+    await waitFor(() => expect(screen.queryByText('Call Ann')).not.toBeNull());
   return { ...f, tasks, writes, reads, control, select, box };
 }
 
@@ -384,4 +392,119 @@ it('offers its rows again once a guarded change that re-rendered them ends', asy
   await act(async () => held.resolve());
   expect(await moved).toBe(true);
   await waitFor(() => expect(f.box('Buy milk').disabled).toBe(false));
+});
+
+/** Rows written through `useContextUpdate`, with what a test needs of it. */
+function harness() {
+  const api = {} as {
+    app: ReturnType<typeof useApp>;
+    overview: ReturnType<
+      typeof useContextUpdate<{
+        readonly title: string;
+        readonly done: boolean;
+      }>
+    >;
+    hide: (hidden: boolean) => void;
+  };
+  function Rows() {
+    api.app = useApp();
+    const list = usePodList(task);
+    const overview = (api.overview = useContextUpdate(task));
+    return (
+      <ul>
+        {list.data?.items.map((item) => {
+          const row = overview.for(item);
+          return (
+            <li key={`${item.context} ${item.snapshot.iri}`}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={row.data.done}
+                  disabled={!row.canMutate}
+                  onChange={(e) => void row.update({ done: e.target.checked })}
+                />
+                {row.data.title}
+              </label>
+              <button onClick={() => void row.remove()}>
+                Remove {row.data.title}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+  function Host() {
+    const [hidden, hide] = useState(false);
+    api.hide = hide;
+    return (
+      <Activity mode={hidden ? 'hidden' : 'visible'}>
+        <Rows />
+      </Activity>
+    );
+  }
+  return {
+    api,
+    ui: (runtime: BrowserRuntime) => (
+      <SempodsProvider runtime={runtime} contextSelection="on-demand">
+        <Host />
+      </SempodsProvider>
+    ),
+  };
+}
+
+it('removes a row in its own Context with one conditional delete', async () => {
+  const h = harness();
+  const f = await overview({ ui: h.ui });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Buy milk' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('checkbox', { name: 'Buy milk' })).toBeNull(),
+  );
+  expect(f.writes).toEqual([{ context: work, iri: 'urn:a', ifMatch: '"t1"' }]);
+  expect(f.box('Call Ann')).toBeTruthy();
+});
+
+it('gives a resource without its row only its notice and problem', async () => {
+  const h = harness();
+  await overview({ ui: h.ui, personalReadable: false });
+  const state = h.api.overview.for({ context: personal, iri: 'urn:b' });
+  expect(state).toMatchObject({
+    context: personal,
+    problem: 'unreadable',
+    canMutate: false,
+    notice: { outcome: null },
+  });
+  expect('update' in state).toBe(false);
+  // A Context it may use has no problem, and still nothing to write from.
+  expect(h.api.overview.for({ context: work, iri: 'urn:a' })).toMatchObject({
+    problem: null,
+    canMutate: false,
+  });
+});
+
+it('a tick that settles while the overview is hidden shows on reveal', async () => {
+  const h = harness();
+  const f = await overview({ ui: h.ui });
+  const held = deferred<void>();
+  f.control.held = held.promise;
+  fireEvent.click(f.box('Buy milk'));
+  await waitFor(() => expect(f.writes).toHaveLength(1));
+  act(() => h.api.hide(true));
+  await act(async () => held.resolve());
+  act(() => h.api.hide(false));
+  await waitFor(() => expect(f.box('Buy milk').checked).toBe(true));
+  expect(f.writes).toHaveLength(1);
+});
+
+it('follows a change of write access in a Context', async () => {
+  const h = harness();
+  const f = await overview({ ui: h.ui });
+  await waitFor(() => expect(f.box('Call Ann').disabled).toBe(false));
+  // The catalogue now lists personal as read-only.
+  f.setCatalogue(async () => catalogue([work, personal], [work]));
+  await act(async () => {
+    await h.api.app.refreshContexts(f.id);
+  });
+  await waitFor(() => expect(f.box('Call Ann').disabled).toBe(true));
+  expect(f.box('Buy milk').disabled).toBe(false);
 });

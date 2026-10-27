@@ -2078,13 +2078,10 @@ try {
   });
   let releaseToggle;
   const heldToggle = new Promise((resolve) => (releaseToggle = resolve));
-  await page.route(
-    (url) => toggleList(url),
-    async (route) => {
-      await heldToggle;
-      await route.continue();
-    },
-  );
+  await page.route(toggleList, async (route) => {
+    await heldToggle;
+    await route.continue();
+  });
   const toggleReload = page.waitForRequest((request) =>
     toggleList(new URL(request.url())),
   );
@@ -2099,7 +2096,7 @@ try {
   );
   releaseToggle();
   await toggleReloaded;
-  await page.unroute((url) => toggleList(url));
+  await page.unroute(toggleList);
   await page.waitForFunction(() => {
     const box = document.querySelector('ul input[type="checkbox"]');
     return box?.checked === true && box.disabled === false;
