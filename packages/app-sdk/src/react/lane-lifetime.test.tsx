@@ -457,3 +457,33 @@ it('back on a definition it left, a form recovers its unconfirmed creation under
   });
   expect(s.puts).toEqual([iri, iri]);
 });
+
+it('an absence acknowledged by a form that took the lane over holds the original for its retry', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  act(() => s.api.hide(true));
+  act(() => s.api.showLate(true));
+  await waitFor(() =>
+    expect(s.api.late?.outcome).toMatchObject({ kind: 'unconfirmed' }),
+  );
+  // The other form checks, finds it absent and acknowledges.
+  await act(async () => {
+    expect(await s.api.late!.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.late!.notice.onAcknowledge());
+  // Shown again: the original holds its item for the same-IRI retry.
+  act(() => s.api.hide(false));
+  await waitFor(() => expect(s.api.late?.draft.title).toBe(''));
+  expect(s.api.creation.canEdit).toBe(false);
+  expect(s.api.creation.draft.title).toBe('Mine');
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
+  });
+  expect(s.puts).toEqual([iri, iri]);
+});

@@ -1342,8 +1342,14 @@ export function useCreation<D extends object>(
         // Absence is only an observation: the original write may still land.
         // Preserve its exact command/draft for an explicit create-only retry.
         const absent = mutation.absent();
-        if (absent && command.current?.state === current.current)
+        if (absent && command.current?.state === current.current) {
           command.current.retry = true;
+          // Also on the command kept with the lane, so the form that started
+          // it, shown again, holds the item for this retry too.
+          const shared = mutation.held() as typeof command.current;
+          if (shared && shared.creation === command.current.creation)
+            shared.retry = true;
+        }
         mutation.acknowledge();
         if (!absent) reset();
       },
