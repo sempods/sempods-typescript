@@ -32,6 +32,19 @@ export interface NotSent {
 export const notSent = (reason: NotSent['reason']): NotSent =>
   Object.freeze({ kind: 'not-sent', reason });
 
+/**
+ * Snapshots a confirmed update was made from, with what they show after it.
+ * They no longer show the resource, so they cannot be written again; the next
+ * read brings fresh ones. Kept apart from the lanes, whose feedback may be
+ * evicted, for exactly as long as the snapshot itself lives.
+ */
+const spentSnapshots = new WeakMap<object, { readonly after: unknown }>();
+/** Whether a confirmed update was made from this snapshot. */
+export const isSpent = (snapshot: object) => spentSnapshots.has(snapshot);
+/** What a spent snapshot shows after its confirmed update, if known. */
+export const spentData = <D>(snapshot: object) =>
+  spentSnapshots.get(snapshot)?.after as D | undefined;
+
 /** Keep the write outcome while dropping observations made under lost read access. */
 export function withoutComparison<D>(
   outcome: MutationOutcome<D> | null,
@@ -66,13 +79,6 @@ export class Lane<D> {
   private retired = false;
   /** Counts the writes started on this lane, by any hook. */
   writes = 0;
-  /**
-   * The snapshot a confirmed update was made from. It no longer shows the
-   * resource, so it cannot be written again; the next read brings a fresh one.
-   */
-  spent: object | null = null;
-  /** What the spent snapshot shows after the confirmed update. */
-  spentData: D | null = null;
   state: {
     outcome: MutationOutcome<D> | null;
     operation: 'create' | 'update' | 'remove';
@@ -156,7 +162,7 @@ export class Lane<D> {
     if (!this.eligible()) return 'ended';
     if (this.pending) return 'busy';
     if (this.unresolved) return 'unresolved';
-    if (subject !== undefined && subject === this.spent) return 'stale';
+    if (subject !== undefined && isSpent(subject)) return 'stale';
     if (
       !this.view.getSnapshot().write ||
       this.app.getSnapshot().changing ||
@@ -202,8 +208,7 @@ export class Lane<D> {
     // Sent: the caller always learns what happened, also after the target ended.
     if (!this.eligible()) return outcome;
     if (outcome.kind === 'saved' && subject) {
-      this.spent = subject;
-      this.spentData = after ?? null;
+      spentSnapshots.set(subject, { after });
     }
     // A result may contain a read made before access was lost and regained.
     if (this.version !== version || !this.readable())
@@ -276,7 +281,7 @@ export class Lane<D> {
   canMutate(writable: boolean, subject?: object) {
     return Boolean(
       writable &&
-      (subject === undefined || subject !== this.spent) &&
+      (subject === undefined || !isSpent(subject)) &&
       this.eligible() &&
       !this.pending &&
       !this.unresolved &&

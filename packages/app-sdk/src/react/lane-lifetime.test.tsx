@@ -807,3 +807,44 @@ it('a retry without an answer stays held for another same-IRI attempt', async ()
   });
   expect(s.puts).toEqual([iri, iri, iri]);
 });
+
+it('a creation command kept from a definition stays unusable after going back to it', async () => {
+  const s = await setup();
+  const kept = s.api.creation;
+  act(() => s.api.note(true));
+  await waitFor(() => expect(s.api.creation).not.toBe(kept));
+  act(() => s.api.note(false));
+  await waitFor(() => expect(s.api.creation.canEdit).toBe(true));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    expect(await kept.create()).toEqual({ kind: 'not-sent', reason: 'ended' });
+  });
+  expect(s.writes).toEqual([]);
+});
+
+it('a spent snapshot stays locked and shows its update after its lane is evicted', async () => {
+  const s = await setup();
+  const old = s.api.rows[0]!;
+  await act(async () => {
+    expect(await s.api.mutate.for(old).update({ done: true })).toMatchObject({
+      kind: 'saved',
+    });
+  });
+  // Enough other writes to evict that settled lane.
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    for (let i = 0; i < 201; i++)
+      await s.api.other.create(`urn:new:${i}`, definition, {
+        title: `Task ${i}`,
+        done: false,
+      });
+  });
+  expect(s.api.mutate.for(old).canMutate).toBe(false);
+  expect(s.api.mutate.for(old).data.done).toBe(true);
+  await act(async () => {
+    expect(await s.api.mutate.for(old).update({ done: false })).toEqual({
+      kind: 'not-sent',
+      reason: 'stale',
+    });
+  });
+});

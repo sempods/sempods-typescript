@@ -58,6 +58,8 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
   readonly getVersion = () => this.version;
   private readonly changed = () => {
     this.version++;
+    // A write that settled may bring the group over its bound.
+    this.evict();
     notify([...this.listeners]);
   };
   /**

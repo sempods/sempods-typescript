@@ -155,3 +155,19 @@ it('a discard after its target changed still clears the outcome and notifies', (
   expect(lane.state).toBeNull();
   expect(notified).toBe(1);
 });
+
+it('keeps the bound also when writes started together settle later', () => {
+  const f = fakes();
+  const group = lanesOf(f.app).group(f.view, 'k', definition, 'explicit');
+  // Each one unresolved at once, so creating the next evicts nothing.
+  const lanes = Array.from({ length: 205 }, (_, i) => {
+    const lane = group.lane(`urn:${i}`);
+    lane.unresolved = true;
+    return lane;
+  });
+  expect(group.lanes.size).toBe(205);
+  lanes.forEach((lane) => lane.acknowledge());
+  expect(group.lanes.size).toBe(200);
+  expect(f.guards.size).toBe(200);
+  expect(group.lanes.has('urn:0')).toBe(false);
+});

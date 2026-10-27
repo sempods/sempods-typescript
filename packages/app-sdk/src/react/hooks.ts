@@ -48,17 +48,14 @@ import {
 import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
+  isSpent,
   notSent,
+  spentData,
   type Lane,
   type MutationOutcome,
   type NotSent,
 } from '../authoring/lane.js';
-import {
-  lanesOf,
-  type LaneGroup,
-  type LaneKind,
-  type LaneScope,
-} from '../authoring/lanes.js';
+import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 export type { MutationOutcome, NotSent } from '../authoring/lane.js';
 import {
@@ -747,8 +744,8 @@ function useLaneGroup<D, L extends Lane<D> = Lane<D>>(
   );
   const committed = useRef<{
     mounted: boolean;
-    group: LaneGroup<D, L> | null;
-  }>({ mounted: false, group: null });
+    token: object | null;
+  }>({ mounted: false, token: null });
   useLayoutEffect(() => {
     const own = committed.current;
     own.mounted = true;
@@ -756,17 +753,21 @@ function useLaneGroup<D, L extends Lane<D> = Lane<D>>(
       own.mounted = false;
     };
   }, []);
-  useLayoutEffect(() => {
-    committed.current.group = group;
-  }, [group]);
-  const shown = useMemo(
-    () => ({
-      get current() {
-        return committed.current.mounted && committed.current.group === group;
+  // One token per hook generation, not per group: back on a group it left
+  // (A, B, A), a command kept from the first A stays ended.
+  const shown = useMemo(() => {
+    const token = {
+      get current(): boolean {
+        return committed.current.mounted && committed.current.token === token;
       },
-    }),
-    [group],
-  );
+    };
+    return token;
+    // `group` starts a new generation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group]);
+  useLayoutEffect(() => {
+    committed.current.token = shown;
+  }, [shown]);
   return { group, version, shown };
 }
 /** Notice props for a resource this hook has not written yet. */
@@ -922,16 +923,14 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
             access.write,
             typeof item === 'string' ? undefined : item,
           )
-        : available,
+        : // Also a spent snapshot whose lane was evicted stays locked.
+          available && (typeof item === 'string' || !isSpent(item)),
       notice: lane?.notice(starts) ?? noNotice,
     };
     if (typeof item === 'string') return state;
     return {
       ...state,
-      data:
-        lane && lane.spent === item && lane.spentData
-          ? lane.spentData
-          : item.data,
+      data: spentData<D>(item) ?? item.data,
       update: (change: Partial<D>) => actions.update(item, change),
       remove: () => actions.remove(item),
     } satisfies FieldUpdateRow<D>;
