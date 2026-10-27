@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
-  AppShell,
+  AppAccess,
   SempodsProvider,
   useApp,
   useAppState,
@@ -54,6 +54,26 @@ function Draft() {
     </>
   );
 }
+/** The standard composition with a replacement connection view. */
+function Shell({ children }: { readonly children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const { messages } = useSdkLocale();
+  return (
+    <main>
+      <header>
+        <button aria-expanded={open} onClick={() => setOpen(!open)}>
+          {messages.controls.dataAccess}
+        </button>
+      </header>
+      <AppAccess
+        appName="sempods TODO"
+        open={open}
+        components={{ Connections: Picker }}
+      />
+      {children}
+    </main>
+  );
+}
 function App() {
   const [language, setLanguage] = useState<'en' | 'de'>('en');
   return (
@@ -67,9 +87,9 @@ function App() {
       }}
     >
       <button onClick={() => setLanguage('de')}>German</button>
-      <AppShell components={{ Connections: Picker }}>
+      <Shell>
         <Draft />
-      </AppShell>
+      </Shell>
     </SempodsProvider>
   );
 }

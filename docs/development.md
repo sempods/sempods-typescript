@@ -1,8 +1,9 @@
 # Development and package evidence
 
-Node is pinned in `.node-version` (24.15.0, the supported minimum) and pnpm in `package.json` (11.1.2).
-Tool dependencies have exact versions; `pnpm-lock.yaml` is committed. Node's
-current minimum is tested, not a claim to support every future environment.
+Node is pinned in `.node-version` (the supported minimum) and pnpm in `package.json`.
+Tool dependencies have exact versions; `pnpm-lock.yaml` is committed. CI tests
+only that minimum Node version; newer versions are expected to work but are not
+tested.
 
 ## Commands
 
@@ -10,15 +11,22 @@ current minimum is tested, not a claim to support every future environment.
 pnpm install --frozen-lockfile
 pnpm exec playwright install chromium
 pnpm build
+pnpm format:check
+pnpm lint
 pnpm typecheck
 pnpm check:docs
 pnpm test
+pnpm test:publish
 pnpm test:consumers
 pnpm test:runtime
 pnpm test:todo
-pnpm build:examples
 pnpm check
 ```
+
+`pnpm check` runs format, lint, docs, typecheck, unit, publish, consumer, runtime
+and TODO checks in that order. `pnpm build:examples` bundles the examples for
+manual runs; it is not part of `pnpm check`, because `typecheck` already compiles
+them.
 
 Linux CI uses `playwright install --with-deps chromium` and the same aggregate
 check. CI reads `.node-version`; libraries emit ESM plus declarations with plain
@@ -27,6 +35,10 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
 
 ## What the checks establish
 
+- `format:check` and `lint`: Prettier and ESLint over packages, scripts, tests and
+  examples.
+- `test:publish`: runs `scripts/publish-packages.mjs` against a fake npm registry
+  (fresh, resumed, conflicting and failing releases); nothing is sent to npm.
 - `check:docs`: offline local Markdown file/heading validation, including agent and
   skill files, plus reachability from README and AGENTS. Regression fixtures prove
   failures for missing targets/anchors and isolated documents, valid unstaged moves,
@@ -100,47 +112,39 @@ and page traffic stay on loopback. Chromium is the automated browser target; see
 The runnable TODO/Node examples and React authoring layer are described in
 [React/headless authoring](react-authoring.md).
 
-React regressions also exercise suspended and abandoned renders: the visible
-screen retains its read inputs, creation draft and unconfirmed-write guard;
-a later committed render can adopt new inputs. These supplement StrictMode
-checks, which alone do not exercise an interrupted update.
-
-`test:todo` includes a full Chromium run with back/forward caching enabled. The actual TODO
-entry survives repeated native cache restores, signs in afterwards and restores
-its durable session/Context before creating another task. It also bundles the
-verbatim quickstart from the installed package and checks a network read failure,
-its explanation and successful explicit retry. These remain loopback fixtures.
-
-`test:todo` installs packed SDKs and compiles the actual examples. The shell-free
-TODO covers EN/DE sign-in, 320px light/dark presentation, explicit context choice,
-creation and guarded management with a retained draft. The unchanged AppShell entry and
-custom layouts retain the full CRUD, conflict/unknown-outcome, guard,
-keyboard/mobile and second-tab checks, plus the shared Node domain/edit path.
-`test:todo` also checks AppShell, editor and recovery controls without an app
+`test:todo` installs packed SDKs and compiles the actual examples. The TODO's
+standard screen covers EN/DE sign-in, 320px light/dark presentation, explicit
+context choice, creation and guarded management with a retained draft, and the
+full CRUD, conflict/unknown-outcome, guard, keyboard/mobile and second-tab
+checks, plus the shared Node domain/edit path.
+It also enables native BFCache in full Chromium and checks repeated returns,
+sign-in afterwards, saved session/Context restoration and exactly one creation
+after return. The verbatim quickstart from the installed package is bundled and
+checked for an explained network read failure, explicit retry and recovered data.
+The remaining browser scenarios keep their isolated Headless Shell setup.
+`test:todo` also checks the standard screen, editor and recovery controls without an app
 stylesheet at 320/375px in EN/DE and light/dark, including host-controlled color schemes, transparent embedded surfaces, inherited token overrides,
 44px targets, keyboard focus, and isolation from app-owned list styling.
 `test:runtime` also covers packed `AppAccess` one/set/free Pod choices, keyboard
 sign-in and focus recovery, a provider answering `login_required` (specific EN/DE
 cause without the provider's text, cleared by selecting another Pod or
 disconnecting), and the widget host with retained drafts/uncertain
-writes. With one permitted Pod and Contexts on demand, a Pod with slow discovery
-shows that `AppAccess` passes only through its loading status after the callback
-and during restore before hiding, while an ended session and missing required
-scopes show their recovery views directly. A delayed Context catalogue, in
-`'required'` mode and on demand under a mounted `TargetScreen`, passes only
-through the loading status before hiding when a preset Context settles the
-target, and ends at the Context chooser or the catalogue failure view
-otherwise. These are Chromium fixture checks, not live-Pod or installed-PWA
+writes. EN/DE retry cases check native `inert`: failed re-authorization preparation
+keeps retry/error feedback visible without moving focus to the host control.
+With one permitted Pod and Contexts on demand, slow discovery keeps `AppAccess`
+in its loading state (after the callback and during restore) until it hides; an
+ended session or missing required scopes show their recovery view at once. When
+the Context catalogue is slow (in `'required'` mode, or on demand under a mounted
+`TargetScreen`), only the loading state shows: it hides if a preset Context
+settles the target, otherwise the Context chooser or the catalogue failure view
+appears. These are Chromium fixture checks, not live-Pod or installed-PWA
 evidence. See [browser runtime](browser-runtime.md) for the implemented API and
 its limits.
 
-No implementation/test command publishes packages. Both SDK packages are
-publishable; the workspace root and examples stay private. Publishing is a
-separate maintainer action: a version tag runs the publish workflow
-(`scripts/publish-packages.mjs`, npm provenance). Code is licensed under
-Apache-2.0 and documentation under CC BY 4.0 (see LICENSE and NOTICE); preserve
-per-package PROVENANCE.md. See [contributing](contributing.md) for the change
-workflow and [migration](migration.md) for app upgrade guidance.
+No implementation or test command publishes packages; both SDK packages are
+publishable, the workspace root and examples stay private, and a version tag runs
+the [publish workflow](../.github/workflows/publish.yml). Preserve per-package
+PROVENANCE.md.
 
 Runtime Pod-reader regressions cover catalogue-free direct binding/SELECT/CONSTRUCT,
 independent read revisions through Context changes, session/grant invalidation,
@@ -150,8 +154,8 @@ responses, including manage-only grants/revocations for cached, failed and pendi
 label attempts while Pod reads remain valid. Packed React-free declarations include `BoundPod` and `AppSnapshot.pod`;
 the Chromium runtime consumer verifies bound SELECT/CONSTRUCT with no dataset
 parameters and no accompanying catalogue requests. These are client/runtime
-fixture checks; [#40](https://github.com/sempods/sempods-typescript/issues/40)
-recorded the scale evidence described below.
+fixture checks; scale evidence against a local reference server is recorded in
+[#40](https://github.com/sempods/sempods-typescript/issues/40).
 
 React/headless on-demand regressions cover catalogue/description-free startup,
 restore, reads and recovery (including preset/remembered targets and saved Pods),
@@ -195,3 +199,28 @@ Pod/label regressions and the packed Chromium runtime also run with
 listener cleanup, and controller regressions keep unexpected binding defects
 visible. Removing an API in Chromium is compatibility regression evidence, not
 a test on an older Safari/iOS device.
+
+## Authoring and example evidence
+
+These notes back the [React/headless authoring guide](react-authoring.md); they
+are fixture evidence, not live Kotlin compatibility or independent usability
+evidence.
+
+- `pnpm test:todo` installs packed SDKs outside the workspace, typechecks and
+  bundles both examples, and drives the standard screen through real loopback
+  PKCE redirects, CRUD, conflict and unknown outcomes, guarded selection, EN/DE,
+  keyboard, mobile width and a busy second tab. It also runs the Node CRUD loop.
+  Unit and React tests cover access and draft preservation, lifecycle and
+  cancellation.
+- [React tests](../packages/app-sdk/src/react/safe-authoring.test.tsx) run the
+  guide's several-resources-from-one-input handler against fixtures, including
+  a target change during a creation; keep the test and the guide in step.
+- The packed browser test runs the
+  [overview recipe](../examples/todo/recipes/pod-overview.tsx) with installed
+  archives, including an edit beside a creation draft in another Context.
+  Evidence on a deployed Pod and in a real browser is tracked in
+  [#52](https://github.com/sempods/sempods-typescript/issues/52).
+- TODO and Node share portable field definitions, typed lists, captured
+  creation commands and partial changes. Live Pod evidence belongs to the
+  quickstart validation; the provisional Action profile does not settle the
+  outstanding task-vocabulary or mixed-Action collection decisions.

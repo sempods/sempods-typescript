@@ -54,7 +54,7 @@ const schema = 'https://schema.org/';
 
 export const task = fields(
   {
-    title: text(`${schema}name`, { language: null }),
+    title: text(`${schema}name`, { language: null, trim: true }),
     done: flag(`${schema}actionStatus`, {
       on: `${schema}CompletedActionStatus`,
       off: `${schema}PotentialActionStatus`,
@@ -66,14 +66,12 @@ export const task = fields(
 
 ## 3. The app: `src/App.tsx`
 
-The `AppAccess` composition below needs 0.3.0 or newer. For an older installed
-version, use the reference shipped with that exact version.
-
 ```tsx
 import { useRef, useState } from 'react';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
+  LoadNotice,
   ResourceEditor,
   SempodsProvider,
   TargetScreen,
@@ -121,13 +119,18 @@ function AppContent() {
       {connections.length > 0 && (
         <button
           ref={focusTarget}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
+          aria-haspopup="dialog"
+          onClick={() => setOpen(true)}
         >
           {messages.controls.dataAccess}
         </button>
       )}
-      <AppAccess appName="My tasks" open={open} focusTarget={focusTarget} />
+      <AppAccess
+        appName="My tasks"
+        open={open}
+        onClose={() => setOpen(false)}
+        focusTarget={focusTarget}
+      />
       <TargetScreen>
         <Tasks />
       </TargetScreen>
@@ -136,22 +139,53 @@ function AppContent() {
 }
 
 function Tasks() {
-  const { messages, error } = useSdkLocale();
   const list = useList(task);
   const creation = useCreation(task, {
     initial: { title: '', done: false },
     collection: 'tasks',
   });
-  const update = useFieldUpdate(task);
+  // One hook for the list; each row gets its part with `mutate.for(item)`.
+  const mutate = useFieldUpdate(task);
   const { selected, select } = useSelection();
   const editor = useResourceEditor(selected, task);
 
   return (
     <section>
+      <LoadNotice {...list} />
+      {list.data?.items.map((item) => {
+        const row = mutate.for(item);
+        return (
+          <div key={item.iri}>
+            <input
+              type="checkbox"
+              aria-label={`Complete ${row.data.title}`}
+              checked={row.data.done}
+              disabled={!row.canMutate}
+              onChange={() => void row.update({ done: !row.data.done })}
+            />
+            <button onClick={() => void select(item.iri)}>
+              {row.data.title}
+            </button>
+            {/* The changed row is the confirmation; problems show here. */}
+            <UpdateNotice {...row.notice} quiet />
+          </div>
+        );
+      })}
+      {selected && (
+        <ResourceEditor editor={editor} onClose={() => select(null)}>
+          {(draft, change) => (
+            <input
+              aria-label="Task title"
+              value={draft.title}
+              onChange={(event) => change({ title: event.target.value })}
+            />
+          )}
+        </ResourceEditor>
+      )}
+      <UpdateNotice {...creation.notice} quiet />
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          creation.change({ title: creation.draft.title.trim() });
           void creation.create();
         }}
       >
@@ -163,104 +197,60 @@ function Tasks() {
         />
         <button disabled={!creation.canCreate}>Add</button>
       </form>
-      <UpdateNotice {...creation.notice} />
-      <UpdateNotice {...update.notice} />
-      {list.state.kind === 'failed' && (
-        <p role="alert">{error(list.state.error)}</p>
-      )}
-      {list.state.kind === 'loading' && (
-        <p role="status">{messages.controls.loading}</p>
-      )}
-      {list.state.kind === 'cancelled' && (
-        <p role="status">Loading was cancelled.</p>
-      )}
-      {list.state.kind === 'unavailable' && (
-        <p role="status">Tasks cannot be read right now.</p>
-      )}
-      <button
-        onClick={() => void list.reload()}
-        disabled={list.state.kind === 'loading'}
-      >
-        Reload tasks
-      </button>
-      {list.state.kind === 'ready' && list.state.data.skipped > 0 && (
-        <p>Unsupported entries: {list.state.data.skipped}</p>
-      )}
-      {list.state.kind === 'ready' &&
-        list.state.data.items.map((item) => (
-          <p key={item.iri}>
-            <input
-              type="checkbox"
-              aria-label={`Complete ${item.data.title}`}
-              checked={item.data.done}
-              disabled={!update.canMutate}
-              onChange={() =>
-                void update.update(item, { done: !item.data.done })
-              }
-            />
-            <button onClick={() => void select(item.iri)}>
-              {item.data.title}
-            </button>
-          </p>
-        ))}
-      {selected && (
-        <ResourceEditor editor={editor}>
-          {(draft, change) => (
-            <input
-              aria-label="Task title"
-              value={draft.title}
-              onChange={(event) => change({ title: event.target.value })}
-            />
-          )}
-        </ResourceEditor>
-      )}
     </section>
   );
 }
 ```
 
 `useCreation` owns the draft, its leave guard and one captured creation command.
-`useSelection` asks before replacing a dirty editor. `canCreate`/`canMutate`
-reflect access and pending recovery, and `canCreate` also a valid draft: a blank
+`useSelection` asks before replacing a dirty editor. `mutate.for(item)` gives
+each row what to show (`data`, with a confirmed tick at once), its lock
+(`canMutate`, so a tick locks only its row), its notice and its commands.
+`canCreate` and `row.canMutate` reflect access and pending recovery, and `canCreate` also a valid draft: a blank
 title keeps Add disabled without app code. The input also locks while creation is
-pending or uncertain. `UpdateNotice` checks the captured subject without replay
-before acknowledgement. A success notice retires once another of these writes on
+pending or uncertain. When an outcome is unclear, `UpdateNotice` lets the person
+check the Pod's current version before acknowledging; nothing is resent. A success notice retires once another of these writes on
 the target starts, so the notices show the last action; unresolved outcomes stay until
 acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
-[TODO example](../examples/todo/src/app.tsx) adds EN/DE and a custom layout.
+[TODO example](../examples/todo/src/app.tsx) adds an icon and a header menu
+with the language switch.
 
-A failed list read shows the SDK's translated explanation. After restoring the
-connection, choose **Reload tasks** to try the read again; a failure is never
-shown as an empty list. This button only reads data, so it cannot repeat a write.
+`LoadNotice` explains a failed read and offers **Try again**. A failure is never
+shown as an empty list. The retry only reads data, so it cannot repeat a write.
 
-Replace Vite's demo styles in `src/index.css` with a simple baseline for your
-app content. AppAccess supplies its own scoped login/recovery styles:
+Replace Vite's demo styles in `src/index.css`. AppAccess, the editor and the
+notices style themselves from the `--sempods-*` tokens; set them once so your
+own elements match (the [TODO example's styles](../examples/todo/src/style.css)
+add a checkbox list, text buttons and the input row):
 
 ```css
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  color: light-dark(#173740, #e8eee9);
-  background: light-dark(#f6faf9, #191b1a);
+  --sempods-bg: light-dark(#fff, #111315);
+  --sempods-text: light-dark(#1f2933, #e5e7eb);
+  --sempods-muted: light-dark(#6b7280, #9ca3af);
+  --sempods-line: light-dark(#e5e7eb, #2d3138);
+  --sempods-accent: light-dark(#1f2933, #e5e7eb);
+  --sempods-on-accent: light-dark(#fff, #111315);
+  font:
+    400 1rem/1.5 system-ui,
+    sans-serif;
+  color: var(--sempods-text);
+  background: var(--sempods-bg);
 }
 body {
   margin: 0;
 }
 main {
-  max-width: 760px;
+  max-width: 640px;
   margin: auto;
   padding: 16px;
 }
 button,
-input,
-select {
+input {
   font: inherit;
-  margin: 0.25rem;
-  padding: 0.4rem;
-}
-input[type='checkbox'] {
-  accent-color: #176354;
+  min-height: 44px;
 }
 ```
 
@@ -270,7 +260,7 @@ input[type='checkbox'] {
 npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open `http://127.0.0.1:5173/`, enter your Pod URL and sign in on the Pod. Grant
+Open `http://127.0.0.1:5173/`, enter the Pod address and sign in on the Pod. Grant
 a context, choose it, then add, complete and rename tasks. Open the app on a
 second device or in a private window: when both rename the same task, the editor
 shows both versions; when one renames and the other completes, both changes stay.
@@ -324,5 +314,4 @@ session across reloads and renews it. The editor saves conditionally and keeps
 your draft during conflicts. List updates check that what you clicked is still
 current. An answer lost on the network is shown as "not confirmed" and never sent
 again silently. See [React authoring](react-authoring.md) and the full
-[TODO example](../examples/todo/src/app.tsx) for custom layouts, messages and
-recovery details.
+[TODO example](../examples/todo/src/app.tsx) for messages and recovery details.

@@ -54,7 +54,12 @@ import {
   selectedTarget,
 } from './binding.js';
 import { bindPod } from './pod-binding.js';
-import { loadCatalogue, loadSelectedLabel, resetLabels } from './catalogue.js';
+import {
+  loadCatalogue,
+  loadContextLabels,
+  loadSelectedLabel,
+  resetLabels,
+} from './catalogue.js';
 import { browserPreferences, createContextMemory } from './context-memory.js';
 
 import { assertCredentialRecipient, type Entry } from './connection.js';
@@ -76,7 +81,16 @@ export function createBrowserRuntime(
     identity.redirectUri,
     options.development === 'loopback-http',
   );
-  const returnTo = safeReturnTo(options.returnTo ?? '/', identity.redirectUri);
+  // A string is checked once; a function each time a sign-in starts, so the
+  // address the person is on then (a deep link) survives the sign-in.
+  const configuredReturnTo = options.returnTo ?? '/';
+  const fixedReturnTo =
+    typeof configuredReturnTo === 'string'
+      ? safeReturnTo(configuredReturnTo, identity.redirectUri)
+      : undefined;
+  const returnTo = () =>
+    fixedReturnTo ??
+    safeReturnTo((configuredReturnTo as () => string)(), identity.redirectUri);
   const namespace = JSON.stringify([
     identity.kind,
     identity.kind === 'did-web' ? identity.clientId : identity.redirectUri,
@@ -509,12 +523,15 @@ export function createBrowserRuntime(
     return e.revalidation;
   }
 
+  /** Counts the browser's `online` events, so a restoration knows it missed one. */
+  let onlineEvents = 0;
   /** Restores one saved signed-in Pod; publishes its own outcome (`active`/`ended`). */
   async function restore(
     e: Entry,
     saved: Extract<SessionRecord, { kind: 'ready' }>,
   ) {
     const generation = e.generation;
+    const events = onlineEvents;
     try {
       const pod = await discoverPod(e.pod.podUrl, {
         ...protocol,
@@ -526,18 +543,46 @@ export function createBrowserRuntime(
       install(e, saved.credentials);
     } catch (error) {
       if (eligible(e, generation)) {
+        // An unreachable or failing Pod is not a logout: the saved session
+        // stays and is restored again, also once the browser is back online.
+        const restorable = transientBeforeClaim(error);
+        if (restorable) e.restorable = saved;
         e.view = {
           ...e.view,
           session: Object.freeze({
             kind: 'ended',
             problem: runtimeProblem(error),
             ...runtimeFailure(error),
+            ...(restorable ? { restorable: true as const } : {}),
           }),
         };
         publish();
+        // The browser came back online while this attempt was under way: its
+        // retry found the session still restoring, so try once more now.
+        if (restorable && onlineEvents !== events) void retryRestore(e);
       }
     }
   }
+  /** Restores a session whose restoration found its Pod unreachable; no-op otherwise. */
+  async function retryRestore(e: Entry) {
+    const saved = e.restorable;
+    const session = e.view.session;
+    if (!saved || session.kind !== 'ended' || !session.restorable) return;
+    delete e.restorable;
+    e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+    publish();
+    await restore(e, saved);
+  }
+  // Coming back online restores every session that could not reach its Pod.
+  const page = globalThis as {
+    addEventListener?: (type: string, listener: () => void) => void;
+    removeEventListener?: (type: string, listener: () => void) => void;
+  };
+  const online = () => {
+    onlineEvents++;
+    for (const e of entries.values()) void retryRestore(e);
+  };
+  page.addEventListener?.('online', online);
   /**
    * Resumes the session a denied (`callback`) or abandoned re-authorization
    * started from, and publishes it. Returns false, changing nothing, when the
@@ -699,7 +744,9 @@ export function createBrowserRuntime(
     };
     let callback = false;
     let attempted: string | undefined;
-    let destination = returnTo;
+    // A callback without a matching attempt never calls a function form: on
+    // the callback route it would name the callback itself.
+    let destination = fixedReturnTo ?? '/';
     try {
       const location = new URL(
         (options.location ?? (() => window.location.href))(),
@@ -938,6 +985,8 @@ export function createBrowserRuntime(
         e.lifetime = new AbortController();
         e.generation = crypto.randomUUID();
       }
+      // An unsafe return address rejects before any request or change.
+      const destination = returnTo();
       // Prepare while the current session keeps working: if discovery,
       // registration or persisting the attempt fails, nothing was reset.
       const before = e.generation;
@@ -954,7 +1003,7 @@ export function createBrowserRuntime(
           generation,
           pod,
           client,
-          returnTo,
+          returnTo: destination,
           scopes: requested,
         },
         Date.now(),
@@ -1085,6 +1134,11 @@ export function createBrowserRuntime(
         throw error;
       }
     },
+    async loadContextLabels(id, iris) {
+      const e = get(id);
+      ready(e);
+      return loadContextLabels(e, { eligible, publish }, iris);
+    },
     selectContext(id, iri) {
       const e = get(id);
       ready(e);
@@ -1172,9 +1226,13 @@ export function createBrowserRuntime(
         );
       return view;
     },
+    async retryRestore(id) {
+      await retryRestore(get(id));
+    },
     dispose() {
       disposed = true;
       initialized = false;
+      page.removeEventListener?.('online', online);
       for (const e of entries.values()) {
         delete e.credentials;
         delete e.credential;

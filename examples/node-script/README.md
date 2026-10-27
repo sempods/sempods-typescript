@@ -8,7 +8,9 @@ pnpm build
 pnpm build:examples
 ```
 
-Provide your own delegated access token through `SEMPODS_TOKEN` in the environment;
+Provide your own delegated access token, obtained as in the
+[client-sdk OAuth steps](../../packages/client-sdk/README.md#portable-oauth-steps),
+through `SEMPODS_TOKEN` in the environment;
 then run (replace the example Pod/context/IRI):
 
 ```sh

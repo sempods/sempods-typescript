@@ -1,13 +1,13 @@
 # Build a widget, let the host own the session
 
-A dashboard can show a task list beside a quick-add form without using AppShell.
+A dashboard can show a task list beside a quick-add form, each without its own sign-in UI.
 The list reads the selected context; the form creates a task there. A confirmed
 creation refreshes the list. Both use one host session and one leave policy.
 
 Start with the [widget source](../examples/todo/widgets/index.tsx). It is an
 app-owned example library, not another SDK package or a published npm product.
 It exposes `TaskListWidget` and `QuickAddWidget`, uses public SDK imports only,
-and reuses the [access-panel recipe](../examples/todo/recipes/sign-in.tsx).
+and keeps its content gate (`AccessPanel`) in the same file.
 Its Action vocabulary matches the TODO subset; it does not treat every RDF
 Action as a task. Copy the widget directory and its referenced recipe with their
 relative layout, then adapt the private field mapping to your domain.
@@ -60,7 +60,7 @@ The host must render on the callback route too.
 
 `AppAccess` uses the preset/allowed Pods and the existing guarded `useApp().connect()`
 path. It reuses a matching connection, and sign-in occurs only after a click.
-You can replace those controls through the [authoring API](react-authoring.md#standard-ui-for-one-known-pod).
+You can replace those controls through the [authoring API](react-authoring.md#replacing-the-connection-view).
 Widgets neither create a runtime/provider nor repeat connection matching,
 login, callback, refresh, storage or service-worker code.
 
@@ -138,9 +138,9 @@ does not import client-sdk directly, it need not declare that peer. If it import
 React DOM, declare/externalize that peer too.
 
 Externalize root imports **and subpaths**: `@sempods/app-sdk/react`,
-`@sempods/client-sdk/edit`, `react/jsx-runtime`, and their package roots. The
-test uses esbuild's `packages: 'external'`, retaining these imports and bundling
-only the widget/recipe code. Keep field definitions private, or annotate exported
+`@sempods/client-sdk/edit`, `react/jsx-runtime`, and their package roots. For
+example, esbuild's `packages: 'external'` keeps these imports and bundles only
+your widget code. Keep field definitions private, or annotate exported
 definitions with public SDK types when emitting library declarations; do not
 expose inferred implementation-only brands in your library API.
 
@@ -151,10 +151,10 @@ For a linked development library, check bundler resolution as well: symlinks can
 produce two module instances even with the same version. React requires provider
 and consumer to use the very same [context object](https://react.dev/reference/react/useContext#caveats).
 
-The test deliberately builds a widget against a second app-sdk copy. Its hooks
-fail with `SempodsProvider is required` despite the host provider. The correct
-fix is shared package resolution, not a nested provider or a second runtime.
-Duplicate modules do not bypass the browser's lease.
+If widget hooks fail with `SempodsProvider is required` although the host renders
+a provider, the widget resolved a second app-sdk copy. Fix the package
+resolution; do not nest a provider or create a second runtime. Duplicate modules
+do not bypass the browser's lease.
 
 ## Embedding profiles and limits
 
@@ -188,7 +188,7 @@ tests cover the individual helpers; this consumer tests their composition.
 
 The host uses `AppAccess` for startup/callback/login presentation plus a stable
 runtime/provider, target lifetime and layout. The widget content gate (`AccessPanel`
-in the recipe) remains app-owned and distinct from the SDK's `AppAccess` surface.
+in the widget source) remains app-owned and distinct from the SDK's `AppAccess` surface.
 A general removal/reload guard,
 independent targets, per-widget scope composition and isolated iframe login need
 explicit contracts before more public names. This automated evidence does not

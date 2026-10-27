@@ -1,3 +1,4 @@
+import type { ContextEditorProblem } from './authoring/contexts.js';
 import { sdkFailure, type SdkFailure } from '@sempods/client-sdk';
 
 export type Language = 'en' | 'de';
@@ -101,6 +102,12 @@ export interface UiMessages {
    * (added in 0.6.0); `createLocale` fills it from the language defaults.
    */
   readonly leaving?: string;
+  /**
+   * A saved session whose Pod could not be reached at startup (offline): it is
+   * kept and restored again once back online; `retry` tries at once. Optional
+   * in the type (added in 0.6.0); `createLocale` fills it.
+   */
+  readonly unreachable?: string;
 
   /*
    * Management (added in 0.6.0; optional in the type, `createLocale` fills
@@ -144,6 +151,16 @@ export interface UiMessages {
   readonly leave: string;
   readonly retry: string;
   readonly cancel: string;
+  /*
+   * Reading (added in 0.6.0; optional in the type, `createLocale` fills
+   * them): `LoadNotice` for a cancelled or unavailable read and for data kept
+   * from before a failed refresh.
+   */
+  readonly loadCancelled?: string;
+  readonly loadUnavailable?: string;
+  readonly stale?: string;
+  /** Closes the management dialog (`AppAccess` with `onClose`). Added in 0.6.0. */
+  readonly close?: string;
   readonly failure: string;
   readonly current: string;
   readonly notPresent: string;
@@ -189,6 +206,26 @@ export interface SdkMessages {
     scopes: readonly string[],
     format: Formatters,
   ) => string;
+  /**
+   * Entries a list read but cannot show, shown by `LoadNotice`. Optional in
+   * the type (added in 0.6.0); `createLocale` fills it.
+   */
+  readonly skipped?: (count: number, format: Formatters) => string;
+  /**
+   * An overview across Contexts that could read only some of them, shown by
+   * `LoadNotice` with a retry. Optional in the type; `createLocale` fills it.
+   */
+  readonly partialRead?: (
+    failed: number,
+    total: number,
+    format: Formatters,
+  ) => string;
+  /**
+   * Why a Context is not available here (`ContextEditorProblem`), for a row
+   * of `useContextUpdate` or `useContextEditor`. Optional in the type;
+   * `createLocale` fills it.
+   */
+  readonly contextProblems?: Readonly<Record<ContextEditorProblem, string>>;
   readonly errors: FailureMessages;
 }
 
@@ -206,10 +243,12 @@ export const englishMessages: SdkMessages = {
     disconnectFailed:
       'Sign-out was not saved on this device. Try signing out again.',
     leaving: 'Opening your Pod’s sign-in…',
+    unreachable:
+      'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
 
     contextAccess: 'Available to this app',
-    canRead: 'This app can read',
-    canChange: 'This app can read and change',
+    canRead: 'Read only',
+    canChange: 'Read and write',
     connectAnother: 'Connect another Pod',
     refresh: 'Check again',
     busy: 'Open in another tab. Close that tab and reload here.',
@@ -242,6 +281,10 @@ export const englishMessages: SdkMessages = {
     leave: 'Discard and continue',
     retry: 'Try again',
     cancel: 'Cancel',
+    loadCancelled: 'Loading was cancelled.',
+    loadUnavailable: 'This cannot be read right now.',
+    stale: 'What is shown may be out of date.',
+    close: 'Close',
     failure: 'The operation could not be completed.',
     current: 'Current on the pod',
     notPresent: 'This resource is not currently present on the pod.',
@@ -272,6 +315,18 @@ export const englishMessages: SdkMessages = {
   reviewAccess: 'Review access',
   missingScopes: (scopes, format) =>
     `Review required feature access: ${format.list(scopes)}.`,
+  skipped: (count, format) =>
+    format.plural(count, {
+      one: 'One entry cannot be shown.',
+      other: `${format.number(count)} entries cannot be shown.`,
+    }),
+  partialRead: (failed, total, format) =>
+    `${format.number(failed)} of ${format.number(total)} lists could not be read; the others are shown.`,
+  contextProblems: {
+    unreadable: 'This Context is not available to this app. Review access.',
+    'discovery-failed': 'Access to Contexts could not be checked. Try again.',
+    refused: 'This app does not work with that Context.',
+  },
   errors: {
     'invalid-pod-url': () => 'Enter a valid pod URL.',
     'invalid-argument': () =>
@@ -333,10 +388,12 @@ export const germanMessages: SdkMessages = {
     disconnectFailed:
       'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.',
     leaving: 'Die Anmeldung deines Pods wird geöffnet…',
+    unreachable:
+      'Der Pod ist gerade nicht erreichbar. Du bleibst angemeldet; die App verbindet sich wieder, sobald das Netz zurück ist.',
 
     contextAccess: 'Für diese App verfügbar',
-    canRead: 'Diese App kann lesen',
-    canChange: 'Diese App kann lesen und ändern',
+    canRead: 'Nur lesen',
+    canChange: 'Lesen und schreiben',
     connectAnother: 'Weiteren Pod verbinden',
     refresh: 'Erneut prüfen',
     busy: 'In einem anderen Tab geöffnet. Schließe diesen Tab und lade hier neu.',
@@ -370,6 +427,10 @@ export const germanMessages: SdkMessages = {
     leave: 'Verwerfen und fortfahren',
     retry: 'Erneut versuchen',
     cancel: 'Abbrechen',
+    loadCancelled: 'Das Laden wurde abgebrochen.',
+    loadUnavailable: 'Das kann gerade nicht gelesen werden.',
+    stale: 'Die Anzeige ist vielleicht nicht aktuell.',
+    close: 'Schließen',
     failure: 'Die Aktion konnte nicht abgeschlossen werden.',
     current: 'Aktuell auf dem Pod',
     notPresent: 'Diese Ressource ist aktuell nicht auf dem Pod vorhanden.',
@@ -402,6 +463,20 @@ export const germanMessages: SdkMessages = {
   reviewAccess: 'Zugriff prüfen',
   missingScopes: (scopes, format) =>
     `Prüfe den Zugriff auf benötigte Funktionen: ${format.list(scopes)}.`,
+  skipped: (count, format) =>
+    format.plural(count, {
+      one: 'Ein Eintrag kann nicht angezeigt werden.',
+      other: `${format.number(count)} Einträge können nicht angezeigt werden.`,
+    }),
+  partialRead: (failed, total, format) =>
+    `${format.number(failed)} von ${format.number(total)} Listen konnten nicht gelesen werden; die übrigen werden angezeigt.`,
+  contextProblems: {
+    unreadable:
+      'Dieser Kontext ist für diese App nicht verfügbar. Prüfe den Zugriff.',
+    'discovery-failed':
+      'Der Zugriff auf Kontexte konnte nicht geprüft werden. Versuche es erneut.',
+    refused: 'Diese App arbeitet nicht mit diesem Kontext.',
+  },
   errors: {
     'invalid-pod-url': () => 'Gib eine gültige Pod-URL ein.',
     'invalid-argument': () =>
@@ -451,8 +526,9 @@ export const germanMessages: SdkMessages = {
 };
 
 export interface LocaleOptions {
-  readonly locale?: string;
-  readonly language?: Language;
+  /** `undefined` is the same as leaving it out: the browser's languages. */
+  readonly locale?: string | undefined;
+  readonly language?: Language | undefined;
   readonly timeZone?: string;
   readonly direction?: Direction;
   /** Partial overrides; `errors` overrides individual failure codes only. */

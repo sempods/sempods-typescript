@@ -9,7 +9,6 @@ import {
 } from 'react';
 import {
   RuntimeError,
-  bindResourceEditor,
   createViewLoader,
   type BoundView,
   type BoundPod,
@@ -23,18 +22,17 @@ import {
   newSubjectIri,
   isFieldDefinition,
   type fields,
-  type Creation,
   removeSnapshot,
   prepareCreation,
   type EditDefinition,
   type FieldDefinition,
   type ResourceEditor,
   type Snapshot,
-  type CreateOutcome,
   type UpdateOutcome,
   type RemoveSnapshotOutcome,
+  type CreateOutcome,
 } from '@sempods/client-sdk/edit';
-import { sdkFailure, type JsonLd } from '@sempods/client-sdk';
+import type { JsonLd } from '@sempods/client-sdk';
 import { startupSettled } from '../authoring/app.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
@@ -45,17 +43,39 @@ import {
   useController,
   useView,
   useWorkflowAccess,
+  useWriteGate,
 } from './app.js';
+import { shownData } from '../authoring/load.js';
+import { useCommands } from './commands.js';
 import {
-  changed,
+  changedData,
+  isSpent,
+  notSent,
+  spentData,
+  type Lane,
+  type MutationOutcome,
+  type NotSent,
+} from '../authoring/lane.js';
+import type { ContextEditorProblem } from '../authoring/contexts.js';
+import { editorsOf } from '../authoring/editors.js';
+import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
+import { CreationLane, type Captured } from '../authoring/creation-lane.js';
+export type { MutationOutcome, NotSent } from '../authoring/lane.js';
+import {
   observeStarts,
   observeWrites,
   startCount,
-  started,
-  succeeded,
 } from '../authoring/changes.js';
 
 const noopSubscribe = () => () => {};
+/** Event handlers and subscriptions observe inputs only once React commits them. */
+function useCommitted<T>(value: T) {
+  const current = useRef(value);
+  useLayoutEffect(() => {
+    current.current = value;
+  }, [value]);
+  return current;
+}
 /** Internal: the number of writes started on this target, for feedback lifetime. */
 export function useStartCount(view: BoundView | null | undefined) {
   const subscribe = useCallback(
@@ -66,19 +86,29 @@ export function useStartCount(view: BoundView | null | undefined) {
   const read = () => (view ? startCount(view) : 0);
   return useSyncExternalStore(subscribe, read, read);
 }
+/**
+ * Internal: calls `reload` when the page becomes visible again (back in the
+ * tab or app), unless `skip()` says not to, for example while a read is
+ * running and will answer anyway. Both are read when the page shows.
+ */
+export function useOnVisible(reload: () => void, skip: () => boolean) {
+  const latest = useCommitted({ reload, skip });
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !latest.current.skip())
+        latest.current.reload();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [latest]);
+}
 const loading = Object.freeze({ kind: 'loading' as const });
+const noVersion = () => 0;
 const unavailable = Object.freeze({ kind: 'unavailable' as const });
 /** Reported in the console: a lost draft or write guard is an app bug. */
 function warn(message: string) {
   console.warn(`[@sempods/app-sdk] ${message}`);
-}
-/** Active operations see only inputs from a committed render. */
-function useCommitted<T>(value: T) {
-  const current = useRef(value);
-  useLayoutEffect(() => {
-    current.current = value;
-  }, [value]);
-  return current;
 }
 /** Structure of a `fields()` definition; `null` for any other definition. */
 function definitionKey(definition: unknown): string | null {
@@ -120,7 +150,8 @@ function canonicalOf<T>(definition: T, key: string | null): T {
   canonical.set(key, definition);
   return definition;
 }
-function useDefinition<T>(input: T, hook: string) {
+/** Internal: the stable key and canonical instance of a definition (see above). */
+export function useDefinition<T>(input: T, hook: string) {
   const structure = definitionKey(input);
   const definition = canonicalOf(input, structure);
   const latest = useRef(definition);
@@ -134,14 +165,14 @@ function useDefinition<T>(input: T, hook: string) {
       );
     }
     latest.current = definition;
-  }, [definition, hook, key]);
+  }, [definition, key, hook]);
   return { key, latest, definition };
 }
 /**
  * Runs `read` for the current target. A new target gets a fresh loader; the
  * latest committed `read` is used on each (re)load, so an inline function never loops.
  * Suspended or abandoned renders never replace the active read inputs.
- * Call `reload()` after changing what `read` returns.
+ * Pass `key` for inputs such as a search term: a new value reads again.
  */
 export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
   const { state, reload, cancel } = useBoundLoad(
@@ -150,7 +181,7 @@ export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
     loading,
     options,
   );
-  return { state, reload, cancel };
+  return { state, data: shownData(state), reload, cancel };
 }
 /**
  * `retain`: a reload of the same target keeps the last data visible as
@@ -162,13 +193,19 @@ export function useLoad<T>(read: ViewRead<T>, options: LoadOptions = {}) {
  */
 export interface LoadOptions {
   readonly retain?: boolean;
+  /**
+   * What the read depends on besides the target, for example a search term.
+   * A changed value (compared with `Object.is`) reads again without the kept
+   * data, which belongs to the old inputs. Use a string or number.
+   */
+  readonly key?: unknown;
 }
 /**
  * Loads the active BoundPod using the same cancellable/bounded loader as useLoad.
  * Context/catalogue/label changes do not reload it. Changed Pod/session/grants
  * retire obsolete results; no catalogue or Context fallback is requested.
  * No reader means unavailable after startup completes or fails. Inline callbacks do not loop:
- * call reload after changing the query or other read inputs.
+ * pass `key` for the query's inputs, and a new value reads again.
  */
 export function usePodLoad<T>(read: PodRead<T>, options: LoadOptions = {}) {
   const { pod, startup, startupError } = useAppState();
@@ -178,13 +215,13 @@ export function usePodLoad<T>(read: PodRead<T>, options: LoadOptions = {}) {
     startupSettled({ startup, startupError }) ? unavailable : loading,
     options,
   );
-  return { state, reload, cancel };
+  return { state, data: shownData(state), reload, cancel };
 }
 function useBoundLoad<T, H extends BoundView | BoundPod>(
   view: H | null,
   read: (handle: H, signal: AbortSignal) => ReturnType<ViewRead<T>>,
   empty: LoadState<T> = loading,
-  { retain = false }: LoadOptions = {},
+  { retain = false, key }: LoadOptions = {},
 ) {
   const latest = useCommitted(read);
   // The loader reads it at each (re)load.
@@ -211,11 +248,20 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     return () => loader.dispose();
   }, [view, latest]);
   const loader = active?.view === view ? active.loader : null;
-  const state: LoadState<T> = useSyncExternalStore(
+  const loaded: LoadState<T> = useSyncExternalStore(
     loader?.subscribe ?? noopSubscribe,
     loader?.getSnapshot ?? (() => empty),
     loader?.getSnapshot ?? (() => empty),
   );
+  // The key whose read the loader's state belongs to; a newer key shows
+  // loading until its own read starts, never the old inputs' data.
+  const inputs = useRef({ loader, key });
+  const state =
+    loader &&
+    inputs.current.loader === loader &&
+    !Object.is(inputs.current.key, key)
+      ? loading
+      : loaded;
   const reload = useCallback(async () => {
     await loader?.reload();
     return loader?.getSnapshot();
@@ -225,17 +271,23 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
     await loader?.reload({ fresh: true });
     return loader?.getSnapshot();
   }, [loader]);
-  return {
-    state,
-    reload,
-    restart,
-    cancel: () => loader?.cancel(),
-  };
+  const cancel = useCallback(() => loader?.cancel(), [loader]);
+  // Changed read inputs: a fresh read for this loader (a new one reads anyway).
+  useEffect(() => {
+    const before = inputs.current;
+    inputs.current = { loader, key };
+    if (before.loader === loader && !Object.is(before.key, key)) void restart();
+  }, [loader, key, restart]);
+  return { state, reload, restart, cancel };
 }
 /**
- * A typed list, refreshed after this bound target's own confirmed mutations.
- * With `retain` (see `LoadOptions`) those refreshes and `reload()` keep the
- * rows visible as `state.previous`.
+ * A typed list, refreshed after this bound target's own confirmed mutations
+ * and when the page becomes visible again (back in the tab or app), so other
+ * devices' changes appear without a reload button. Those refreshes and
+ * `reload()` keep the rows visible (`retain`, see
+ * `LoadOptions`, on by default; `retain: false` shows only `loading`).
+ * `data` is what to render: the current rows, or the kept ones while
+ * `loading` or after a failed refresh; `LoadNotice` says which.
  */
 export function useList<D>(
   definition: FieldDefinition<D>,
@@ -260,7 +312,7 @@ export function useList<D>(
     [listKey, latest, type],
   );
   const load = useBoundLoad(view, read, loading, {
-    retain: options.retain ?? false,
+    retain: options.retain ?? true,
   });
   // Until the read for a changed definition or type has started, the rows on
   // screen belong to the previous definition and cannot be mutated with the
@@ -279,7 +331,7 @@ export function useList<D>(
     shown.current = read;
     void restart();
   }, [read, restart]);
-  const [scope, setScope] = useState(() => ({ view, read, cancelled: false }));
+  const [scope, setScope] = useState({ view, read, cancelled: false });
   if (scope.view !== view || scope.read !== read)
     setScope({ view, read, cancelled: false });
   useEffect(() => {
@@ -288,16 +340,27 @@ export function useList<D>(
       if (!scope.cancelled) void reload();
     });
   }, [view, reload, scope]);
+  // Back in the tab or app, other devices may have changed the list. A read
+  // still running answers that already: it is joined, not aborted.
+  const shownState = useCommitted(state);
+  useOnVisible(
+    () => void reload(),
+    () => !view || scope.cancelled || shownState.current.kind === 'loading',
+  );
+  const { cancel } = load;
+  const reloadList = useCallback(() => {
+    scope.cancelled = false;
+    return reload();
+  }, [scope, reload]);
+  const cancelList = useCallback(() => {
+    scope.cancelled = true;
+    cancel();
+  }, [scope, cancel]);
   return {
     state,
-    reload: () => {
-      scope.cancelled = false;
-      return reload();
-    },
-    cancel: () => {
-      scope.cancelled = true;
-      load.cancel();
-    },
+    data: shownData(state),
+    reload: reloadList,
+    cancel: cancelList,
   };
 }
 /** Identity/target and row changes create new editors; access and locale changes do not. */
@@ -344,13 +407,18 @@ function useBoundEditor<D>(
     editor: ResourceEditor<D>;
   } | null>(null);
   const previous = useRef<typeof active>(null);
+  // Releases the current editor; with `true`, disposes it (another definition).
+  const discarding = useRef<((discard?: boolean) => void) | null>(null);
   useEffect(() => {
     const before = previous.current;
-    if (
-      before &&
+    // Another definition for the same subject starts a fresh editor.
+    const redefined =
+      before !== null &&
       before.view === view &&
       before.iri === iri &&
-      before.key !== key &&
+      before.key !== key;
+    if (
+      redefined &&
       (before.editor.state.dirty ||
         before.editor.state.phase === 'saving' ||
         before.editor.state.review !== null)
@@ -358,28 +426,28 @@ function useBoundEditor<D>(
       warn(
         `${hook}: the field definition changed for the same subject; its unsaved draft, pending write or open review was discarded.`,
       );
+    if (redefined) discarding.current?.(true);
+    discarding.current = null;
     if (!view || !iri) {
       previous.current = null;
       setActive(null);
       return;
     }
-    const editor = bindResourceEditor(view, iri, latest.current);
-    const unregister = app.register({
+    // The controller owns the editor: hiding (`<Activity>`) or remounting
+    // this screen keeps its draft, pending write, review and leave guard.
+    const { editor, release } = editorsOf(app).claim(
+      view,
+      iri,
+      key,
+      latest.current,
       scope,
-      unconfirmed: () => editor.state.review?.kind === 'unconfirmed',
-      dirty: () =>
-        editor.state.phase !== 'deleted' &&
-        (editor.state.dirty || editor.state.review !== null),
-      blocked: () => editor.state.phase === 'saving',
-      discard: () => editor.discard(),
-    });
+      scope === 'connection' ? 'explicit' : 'selected',
+    );
     const next = { view, iri, key, editor };
     previous.current = next;
     setActive(next);
-    return () => {
-      unregister();
-      editor.dispose();
-    };
+    discarding.current = release;
+    return () => release();
     // `key` stands for the definition (see useDefinition); `latest` is its ref.
     // `hook` only names the caller in a warning.
   }, [view, iri, key, app, latest, hook, scope]);
@@ -402,14 +470,8 @@ export interface ContextTarget {
 /** Where `useContextEditor` stands; see the hook for each phase. */
 export type ContextEditorPhase =
   'idle' | 'loading' | 'unavailable' | 'ready' | 'retired';
-/** Why `useContextEditor` reports `unavailable`. */
-export type ContextEditorProblem =
-  /** The catalogue does not list the Context as readable. */
-  | 'unreadable'
-  /** The catalogue could not be loaded. */
-  | 'discovery-failed'
-  /** The runtime refused the binding, for example another Context than an exact preset's. */
-  | 'refused';
+/** Why `useContextEditor` reports `unavailable` (texts: `contextProblems`). */
+export type { ContextEditorProblem };
 /** What `useContextEditor` returns: the opened target, its phase and, while ready, its editor. */
 export interface ContextEditor<D, U = D> {
   /** The opened target, kept while retired so the app can name it. */
@@ -629,18 +691,27 @@ export function useContextEditor<D>(
       // controller cancels the prompt if another one becomes active meanwhile.
       const connection = app.getSnapshot().activeId;
       if (!connection) return Promise.resolve(false);
+      const opened = (): ContextLaneState => ({
+        lane: {
+          target: { subject: target.subject, context: target.context },
+          connection,
+        },
+        binding: null,
+        activated: false,
+        retired: false,
+      });
+      // Nothing is open here, and the controller still keeps this row's editor
+      // (this hook remounted): returning to it leaves nothing, so it does not
+      // ask, and a pending save does not block it.
+      if (
+        !liveLane(now, connection) &&
+        editorsOf(app).retains(target.context, target.subject, 'connection')
+      ) {
+        apply(opened);
+        return Promise.resolve(true);
+      }
       const result = app
-        .navigate(() =>
-          apply(() => ({
-            lane: {
-              target: { subject: target.subject, context: target.context },
-              connection,
-            },
-            binding: null,
-            activated: false,
-            retired: false,
-          })),
-        )
+        .navigate(() => apply(opened))
         .finally(() => {
           if (opening.current?.result === result) opening.current = null;
         });
@@ -667,307 +738,355 @@ export function useContextEditor<D>(
     [target, phase, problem, editor, open, close],
   );
 }
-export type MutationOutcome<D> =
-  UpdateOutcome<D> | RemoveSnapshotOutcome<D> | CreateOutcome;
-
-/** Keep the write outcome while dropping observations made under lost read access. */
-function withoutComparison<D>(
-  outcome: MutationOutcome<D> | null,
-): MutationOutcome<D> | null {
-  if (outcome?.kind === 'changed-on-pod')
-    return { ...outcome, current: undefined };
-  if (outcome?.kind === 'unconfirmed')
-    return 'current' in outcome
-      ? { ...outcome, current: undefined, desiredObserved: false }
-      : { kind: 'unconfirmed' };
-  return outcome;
-}
-/** One mutation lane. Captures target/subject; stale completions never update a new lane. */
-function useMutation<D>(definition: FieldDefinition<D>) {
-  const view = useView();
-  const app = useController();
-  const access = useWorkflowAccess();
-  const { key } = useDefinition(definition, 'useFieldUpdate');
-  // A render can prepare a new lane without retiring the committed one.
-  const makeLane = () => ({
-    view,
-    key,
-    pending: false,
-    unresolved: false,
-    checked: false,
-    absent: false,
-    iri: '',
-    version: 0,
-    uncertain: false,
-    alive: true,
-  });
-  const [lane, setLane] = useState(makeLane);
-  if (lane.view !== view || lane.key !== key) setLane(makeLane());
-  const current = useRef(lane);
-  const [state, setState] = useState<{
-    lane: typeof lane;
-    outcome: MutationOutcome<D> | null;
-    operation: 'create' | 'update' | 'remove';
-    busy: boolean;
-    /** The target's start count at this lane's own start. */
-    start: number;
-  } | null>(null);
-  const [evidence, setEvidence] = useState<{
-    lane: typeof lane;
-    version: number;
-    value: D | null;
-    /** Present, but the definition cannot read it. */
-    unreadable: boolean;
-  } | null>(null);
+/**
+ * Internal: a token that is true while the calling hook's screen is mounted
+ * and shown and `generation` is its current one, so commands start only then
+ * and a command kept from an earlier generation never again, also back on
+ * an equal one (A, B, A). Layout effects set it, so a child's effects, also
+ * right after mounting or a change, may already start commands.
+ */
+export function useCommandToken(...generation: readonly unknown[]) {
+  const committed = useRef<{
+    mounted: boolean;
+    token: object | null;
+  }>({ mounted: false, token: null });
   useLayoutEffect(() => {
-    const before = current.current;
-    if (
-      before !== lane &&
-      before.view === view &&
-      (before.pending || before.unresolved)
-    )
-      warn(
-        'The field definition changed while a write was pending or unresolved; its guard and feedback were dropped.',
-      );
-    current.current = lane;
-  }, [lane, view]);
-  // Suspense temporarily disconnects layout effects when hiding a mounted
-  // screen. Its commands and guards must keep their ordinary mount lifetime.
-  useEffect(() => {
-    lane.alive = true;
-    let readable = true;
-    const followAccess = () => {
-      const next = view?.getSnapshot().read ?? false;
-      if (readable && !next) {
-        lane.version++;
-        lane.checked = false;
-        lane.absent = false;
-        setEvidence((before) => (before?.lane === lane ? null : before));
-        setState((before) =>
-          before?.lane === lane
-            ? { ...before, outcome: withoutComparison(before.outcome) }
-            : before,
-        );
-      }
-      readable = next;
-    };
-    const unsubscribe = view?.subscribe(followAccess);
-    followAccess();
-    const unregister = app.register({
-      scope: 'target',
-      unconfirmed: () => lane.uncertain,
-      blocked: () => lane.pending,
-      dirty: () => lane.unresolved,
-      discard: () => {
-        lane.unresolved = false;
-        lane.uncertain = false;
-        lane.version++;
-        lane.checked = false;
-        if (current.current === lane) setState(null);
-      },
-    });
+    const own = committed.current;
+    own.mounted = true;
     return () => {
-      lane.alive = false;
-      lane.version++;
-      lane.checked = false;
-      lane.absent = false;
-      unsubscribe?.();
-      unregister();
+      own.mounted = false;
     };
-  }, [app, lane, view]);
-  const starts = useStartCount(view);
-  const visible = state?.lane === lane ? state : null;
-  // Another write started on this target since this lane's own start retires
-  // its success; failures and unresolved outcomes stay.
-  const outcome =
-    visible && !(succeeded(visible.outcome) && visible.start !== starts)
-      ? visible.outcome
-      : null;
-  const eligible = () =>
-    lane.alive && current.current === lane && app.getSnapshot().view === view;
-  const readable = () => eligible() && Boolean(view?.getSnapshot().read);
-  const checked = () => readable() && lane.checked;
-  async function execute(
-    operation: 'create' | 'update' | 'remove',
-    iri: string,
-    action: (target: BoundView) => Promise<MutationOutcome<D>>,
-  ) {
-    if (
-      !view ||
-      !eligible() ||
-      lane.pending ||
-      lane.unresolved ||
-      !view.getSnapshot().write ||
-      app.getSnapshot().changing ||
-      app.getSnapshot().confirmingLeave
-    )
-      return;
-    const version = ++lane.version;
-    lane.pending = true;
-    lane.checked = false;
-    lane.absent = false;
-    lane.iri = iri;
-    const start = started(view);
-    setState({ lane, operation, outcome: null, busy: true, start });
-    let outcome: MutationOutcome<D>;
-    try {
-      outcome = await action(view);
-    } catch (error) {
-      const problem = { kind: 'failure' as const, failure: sdkFailure(error) };
-      outcome =
-        operation === 'create'
-          ? { kind: 'not-created', reason: 'failure', problem }
-          : operation === 'remove'
-            ? { kind: 'not-removed', reason: 'failure', problem }
-            : { kind: 'not-saved', reason: 'failure', problem };
-    }
-    lane.pending = false;
-    if (!eligible()) return;
-    // A result may contain a read made before access was lost and regained.
-    if (lane.version !== version || !readable())
-      outcome = withoutComparison(outcome)!;
-    lane.unresolved =
-      outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
-    lane.uncertain = outcome.kind === 'unconfirmed';
-    setState({ lane, operation, outcome, busy: false, start });
-    if (succeeded(outcome)) changed(view);
-    return outcome;
-  }
-  const acknowledge = () => {
-    if (!eligible() || lane.pending) return;
-    lane.unresolved = false;
-    lane.uncertain = false;
-    lane.version++;
-    lane.checked = false;
-    lane.absent = false;
-    setState(null);
-  };
-  const check = async () => {
-    if (!view || !readable() || !lane.unresolved) return false;
-    lane.checked = false;
-    lane.absent = false;
-    setEvidence(null);
-    const version = ++lane.version;
-    try {
-      const read = await view.subjects.get(lane.iri);
-      if (!readable() || !lane.unresolved || lane.version !== version)
-        return false;
-      if (read.kind !== 'ok' && read.kind !== 'not-found') return false;
-      let value: D | null = null;
-      let unreadable = false;
-      if (read.kind === 'ok')
-        try {
-          value = definition.read(read.body);
-        } catch {
-          // Still evidence of presence: settling must not depend on mapping it.
-          unreadable = true;
-        }
-      if (!readable() || !lane.unresolved || lane.version !== version)
-        return false;
-      setEvidence({ lane, version, value, unreadable });
-      lane.absent = read.kind === 'not-found';
-      lane.checked = true;
-      changed(view);
-      return checked();
-    } catch {
-      return false;
-    }
-  };
-  return {
-    execute,
-    editable: () => eligible() && !lane.pending && !lane.unresolved,
-    acknowledge,
-    busy: visible?.busy ?? false,
-    unresolved: lane.unresolved,
-    canMutate: Boolean(
-      view &&
-      access.write &&
-      lane.alive &&
-      app.getSnapshot().view === view &&
-      !lane.pending &&
-      !lane.unresolved &&
-      !app.getSnapshot().changing &&
-      !app.getSnapshot().confirmingLeave,
-    ),
-    outcome,
-    operation: visible?.operation ?? null,
-    notice: {
-      outcome,
-      /** A successful comparison under uninterrupted read access to this lane. */
-      checked: checked(),
-      current:
-        checked() &&
-        evidence?.lane === lane &&
-        evidence.version === lane.version &&
-        !evidence.unreadable
-          ? evidence.value
-          : undefined,
-      unreadable:
-        checked() &&
-        evidence?.lane === lane &&
-        evidence.version === lane.version &&
-        evidence.unreadable,
-      onCheck: check,
-      onAcknowledge: () => {
-        if (checked()) acknowledge();
+  }, []);
+  const shown = useMemo(() => {
+    const token = {
+      get current(): boolean {
+        return committed.current.mounted && committed.current.token === token;
       },
-    },
-    checked,
-    absent: () => checked() && lane.absent,
+    };
+    return token;
+    // `generation` starts a new one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, generation);
+  useLayoutEffect(() => {
+    committed.current.token = shown;
+  }, [shown]);
+  return shown;
+}
+/**
+ * The controller's lane group for one target, subscribed (`version` changes
+ * with each of its lane changes), and a token that is true while this hook's
+ * screen is mounted and shown and this group is its current one: commands
+ * start only then, and a command kept from an earlier group (another target
+ * or definition) never again. Layout effects set it, so a child's effects,
+ * also right after mounting or a group change, may already start commands.
+ */
+function useLaneGroup<D, L extends Lane<D> = Lane<D>>(
+  view: BoundView | null,
+  key: string,
+  definition: FieldDefinition<D>,
+  scope: LaneScope,
+  kind?: LaneKind<D, L>,
+) {
+  const app = useController();
+  const group = view
+    ? lanesOf(app).group(view, key, definition, scope, kind)
+    : null;
+  const version = useSyncExternalStore(
+    group?.subscribe ?? noopSubscribe,
+    group?.getVersion ?? noVersion,
+    group?.getVersion ?? noVersion,
+  );
+  useWriteGate();
+  const shown = useCommandToken(group);
+  return { group, version, shown };
+}
+/**
+ * Internal: one resource's availability and notice, shared by the row hooks.
+ * Without a lane of its own, `available` decides; a spent snapshot stays
+ * locked, also once its lane was evicted.
+ */
+export function laneState<D>(
+  lane: Lane<D> | undefined,
+  writable: boolean,
+  available: boolean,
+  starts: number,
+  snapshot?: object,
+): FieldUpdateState<D> {
+  return {
+    canMutate: lane
+      ? lane.canMutate(writable, snapshot)
+      : available && !(snapshot && isSpent(snapshot)),
+    notice: lane ? lane.notice(starts) : noNotice,
   };
 }
+/** Notice props for a resource this hook has not written yet. */
+export const noNotice = Object.freeze({
+  outcome: null,
+  checked: false,
+  current: undefined,
+  unreadable: false,
+  onCheck: async () => false,
+  onAcknowledge: () => {},
+});
+const iriOf = (target: string | { readonly iri: string }) =>
+  typeof target === 'string' ? target : target.iri;
 /**
  * Safe availability and standard recovery feedback for one-click row mutations.
  *
- * A success in `outcome`/`notice` retires when this hook or another creation,
+ * Each resource has its own write lane, owned by the app controller rather than
+ * by this hook or a row component, so hiding or remounting keeps it. `const row = mutate.for(item)` gives one row what it needs:
+ * `row.data` to show, `row.canMutate`, `row.notice` and `row.update(change)` /
+ * `row.remove()`. Ticking one task leaves the others usable, and an unresolved
+ * write stays (with its check and acknowledgement) also while its row is not
+ * rendered, for example during lost read access. `canMutate`, `outcome`,
+ * `notice` and `acknowledge` keep their list-wide meaning: false while any
+ * resource's write is pending or unresolved, and the latest write's feedback.
+ * The commands keep their identity for one target and definition.
+ *
+ * A success in the feedback retires when this hook or another creation,
  * row mutation or bound editor starts a write on the same target, and is not
  * shown if such a write started while it was pending. A failure
- * stays until this hook writes again; an unresolved outcome (`unconfirmed`,
- * `changed-on-pod`) stays until it is checked and acknowledged.
+ * stays until that resource is written again; an unresolved outcome
+ * (`unconfirmed`, `changed-on-pod`) stays until it is checked and acknowledged.
  * Losing read access clears comparison values (including `outcome.current`
- * and `desiredObserved`) and `notice.checked`. Regaining access needs a fresh
+ * and `desiredObserved`) and `checked`. Regaining access needs a fresh
  * check. Write-only loss retains comparison evidence; neither loss replays a write.
- * A new target or definition takes over only when its render commits; suspended
- * or abandoned renders keep the active command, outcome and leave guard intact.
  *
- * All mutation methods return `undefined` both when nothing was sent and when
- * the target lifetime ended before completion. It is not proof that no write
- * happened; stop a batch instead of resending its item on another target.
+ * A command that sends nothing resolves `{ kind: 'not-sent', reason }` (see
+ * `NotSent`). A sent one always resolves its outcome, also when the target
+ * changed meanwhile; then it is no longer shown or guarded here.
  */
 export function useFieldUpdate<D>(input: FieldDefinition<D>) {
-  // The same instance as useList's snapshots (see canonicalOf); the lane's
-  // useDefinition below reports a changing custom definition.
+  // The same instance as useList's snapshots (see canonicalOf).
   const definition = canonicalOf(input, definitionKey(input));
-  const mutation = useMutation(definition);
+  const view = useView();
+  const access = useWorkflowAccess();
+  const { key } = useDefinition(definition, 'useFieldUpdate');
+  // The controller owns the lanes of this target and definition: a write keeps
+  // its outcome and leave guard while this screen is hidden or remounts.
+  const { group, version, shown } = useLaneGroup(
+    view,
+    `rows ${key}`,
+    definition,
+    'target',
+  );
+  // This hook's own part: which resource it wrote last (its list-wide
+  // feedback), as its lane and that lane's write count, per group.
+  const mine = useMemo(
+    () => ({
+      latest: null as { readonly lane: Lane<D>; readonly write: number } | null,
+    }),
+    // `group` is the generation this mark belongs to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [group],
+  );
+  const starts = useStartCount(view);
+  // Whether a resource without a lane of its own could be written now.
+  const available = Boolean(group?.available(access.write));
+  // One pass per lane change, with a stable `unresolved` between them.
+  const { unresolved, open } = useMemo(() => {
+    const unresolved: string[] = [];
+    let open = false;
+    for (const lane of group?.lanes.values() ?? []) {
+      if (lane.unresolved) unresolved.push(lane.iri);
+      if (lane.pending || lane.unresolved) open = true;
+    }
+    return { unresolved, open };
+    // `version` changes with every lane change of `group`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group, version]);
+  // Another hook's later write to the same resource is not this hook's, also
+  // on a fresh lane for it after the earlier one was evicted.
+  const ownWrite = (mark: typeof mine.latest) =>
+    mark &&
+    group?.lanes.get(mark.lane.iri) === mark.lane &&
+    mark.lane.writes === mark.write
+      ? mark.lane
+      : null;
+  const latest = ownWrite(mine.latest);
+  // The commands keep their identity for this target and definition, so they
+  // fit effect dependencies; a retained one keeps writing to its own target.
+  const actions = useMemo(() => {
+    const run = (
+      iri: string,
+      operation: 'create' | 'update' | 'remove',
+      action: (target: BoundView) => Promise<MutationOutcome<D>>,
+      subject?: Snapshot<D>,
+      after?: D,
+    ): Promise<MutationOutcome<D> | NotSent> => {
+      if (!group) return Promise.resolve(notSent('unavailable'));
+      if (!shown.current) return Promise.resolve(notSent('ended'));
+      const lane = group.lane(iri);
+      // A refused write sends nothing and keeps the latest write's recovery.
+      const refused = lane.refusal(subject);
+      if (refused) return Promise.resolve(notSent(refused));
+      // Starting the write counts it synchronously, before any await.
+      const sent = lane.execute(operation, iri, action, subject, after);
+      mine.latest = { lane, write: lane.writes };
+      return sent;
+    };
+    return {
+      update: (snapshot: Snapshot<D>, change: Partial<D>) =>
+        run(
+          snapshot.iri,
+          'update',
+          (v) => updateFields(v, snapshot, definition, change),
+          snapshot,
+          changedData(snapshot.data, change),
+        ) as Promise<UpdateOutcome<D> | NotSent>,
+      remove: (snapshot: Snapshot<D>) =>
+        run(snapshot.iri, 'remove', (v) =>
+          removeSnapshot(v, snapshot, definition),
+        ) as Promise<RemoveSnapshotOutcome<D> | NotSent>,
+      create: (
+        ...args:
+          | [iri: string, body: JsonLd]
+          | [iri: string, definition: FieldDefinition<D>, draft: D]
+      ) =>
+        run(args[0], 'create', (v) =>
+          args.length === 3
+            ? prepareCreation(v, args[0], args[1], args[2]).run()
+            : prepareCreation(v, args[0], args[1]).run(),
+        ) as Promise<CreateOutcome | NotSent>,
+      acknowledge: () => {
+        ownWrite(mine.latest)?.acknowledge();
+      },
+    };
+    // `definition` belongs to `group` (same target and definition).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group, mine, shown]);
+  function rowFor(item: Snapshot<D>): FieldUpdateRow<D>;
+  function rowFor(item: string): FieldUpdateState<D>;
+  function rowFor(
+    item: Snapshot<D> | string,
+  ): FieldUpdateState<D> | FieldUpdateRow<D> {
+    const state = laneState<D>(
+      group?.lanes.get(iriOf(item)),
+      access.write,
+      available,
+      starts,
+      typeof item === 'string' ? undefined : item,
+    );
+    if (typeof item === 'string') return state;
+    return {
+      ...state,
+      data: spentData<D>(item) ?? item.data,
+      update: (change: Partial<D>) => actions.update(item, change),
+      remove: () => actions.remove(item),
+    } satisfies FieldUpdateRow<D>;
+  }
   return {
-    canMutate: mutation.canMutate,
-    busy: mutation.busy,
-    outcome: mutation.outcome,
-    operation: mutation.operation,
-    notice: mutation.notice,
-    update: (snapshot: Snapshot<D>, change: Partial<D>) =>
-      mutation.execute('update', snapshot.iri, (v) =>
-        updateFields(v, snapshot, definition, change),
-      ),
-    remove: (snapshot: Snapshot<D>) =>
-      mutation.execute('remove', snapshot.iri, (v) =>
-        removeSnapshot(v, snapshot, definition),
-      ),
-    create: (
-      ...args:
-        | [iri: string, body: JsonLd]
-        | [iri: string, definition: FieldDefinition<D>, draft: D]
-    ) =>
-      mutation.execute('create', args[0], (v) =>
-        args.length === 3
-          ? prepareCreation(v, args[0], args[1], args[2]).run()
-          : prepareCreation(v, args[0], args[1]).run(),
-      ),
-    /** Explicit acknowledgement does not replay the command. Prefer notice for checked UI recovery. */
-    acknowledge: mutation.acknowledge,
+    /**
+     * One resource: whether it may be written now, its notice, what to show
+     * and its commands. Other resources' writes do not lock it. Pass the
+     * list's snapshot; an IRI alone gives `canMutate` and `notice`, for
+     * example for a resource whose row is gone.
+     */
+    for: rowFor,
+    /**
+     * Resources whose write is unconfirmed or changed on the Pod, until checked
+     * and acknowledged. Show `for(iri).notice` for those whose rows are gone,
+     * for example deleted elsewhere, so their recovery stays reachable.
+     */
+    unresolved,
+    /** False while any resource's write is pending or unresolved. */
+    canMutate: available && !open,
+    /** The latest write's state and feedback, for a single shared notice. */
+    busy: latest?.state?.busy ?? false,
+    outcome: latest?.outcome(starts) ?? null,
+    operation: latest?.state?.operation ?? null,
+    notice: latest ? latest.notice(starts) : noNotice,
+    update: actions.update,
+    remove: actions.remove,
+    create: actions.create,
+    /**
+     * Explicit acknowledgement does not replay the command. Prefer notice for
+     * checked UI recovery. It reads the live latest lane, so a result kept
+     * across an awaited write acknowledges that write.
+     */
+    acknowledge: actions.acknowledge,
   };
 }
 
+/** `UpdateNotice` props for one resource's latest write. */
+export interface FieldUpdateNotice<D> {
+  readonly outcome: MutationOutcome<D> | null;
+  readonly checked: boolean;
+  readonly current: D | null | undefined;
+  readonly unreadable: boolean;
+  readonly onCheck: () => Promise<boolean>;
+  readonly onAcknowledge: () => void;
+}
+/** One resource of `useFieldUpdate`, from `for(iri)`. */
+export interface FieldUpdateState<D> {
+  /** Whether this resource may be written now. */
+  readonly canMutate: boolean;
+  readonly notice: FieldUpdateNotice<D>;
+}
+/** One resource of `useFieldUpdate`, from `for(snapshot)`. */
+export interface FieldUpdateRow<D> extends FieldUpdateState<D> {
+  /**
+   * What to show: the snapshot's values, with a confirmed update laid over
+   * until the list reads the resource again.
+   */
+  readonly data: D;
+  /** Updates the changed fields from this snapshot; see `useFieldUpdate`. */
+  update(change: Partial<D>): Promise<UpdateOutcome<D> | NotSent>;
+  /** Removes the version this snapshot shows. */
+  remove(): Promise<RemoveSnapshotOutcome<D> | NotSent>;
+}
+/** What `useFieldUpdate` returns. */
+export type FieldUpdate<D> = ReturnType<typeof useFieldUpdate<D>>;
+
+/**
+ * A view bound to an explicit Context of the active connection, as
+ * `useContextEditor` binds one: after startup settles, through
+ * `runtime.bindContext`. A configuration refusal (not a Context of this Pod,
+ * or not the preset's) is reported; while signed out it waits. It demands
+ * catalogue discovery, so its write access is known, but no selection.
+ */
+function useExplicitView(context: string | undefined) {
+  const app = useController();
+  const { activeId, ready } = useAppFacts(
+    (s) => ({
+      activeId: s.activeId,
+      ready: startupSettled(s) && s.pod !== null,
+    }),
+    shallowEqual,
+  );
+  const key =
+    context !== undefined && activeId ? `${activeId} ${context}` : null;
+  const [binding, setBinding] = useState<{
+    readonly key: string;
+    readonly view: BoundView | 'refused';
+  } | null>(null);
+  const current = binding?.key === key ? binding.view : null;
+  const bound = current === 'refused' ? null : current;
+  // A binding stays through access loss; a new authorization (for example a
+  // re-authorization resumed from the back/forward cache) retires it.
+  const live = useSyncExternalStore(
+    bound?.subscribe ?? noopSubscribe,
+    () => bound?.getSnapshot().current ?? true,
+    () => bound?.getSnapshot().current ?? true,
+  );
+  useEffect(() => {
+    if (!key || !ready || current === 'refused' || (current && live)) return;
+    try {
+      const view = app.runtime.bindContext(activeId!, context!);
+      if (view !== current) setBinding({ key, view });
+    } catch (error) {
+      if (!(error instanceof RuntimeError)) throw error;
+      if (error.problem === 'configuration')
+        setBinding({ key, view: 'refused' });
+      else if (error.problem !== 'disconnected') throw error;
+    }
+  }, [app, key, ready, current, live, activeId, context]);
+  useContextDiscovery(current !== null && current !== 'refused');
+  return {
+    view: current === 'refused' ? null : current,
+    refused: current === 'refused',
+  };
+}
 /**
  * Owns the draft, leave guard and captured command for one intended creation.
  *
@@ -988,22 +1107,76 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
  */
 export function useCreation<D extends object>(
   definition: FieldDefinition<D>,
-  options: { readonly initial: D; readonly collection: string },
+  options: {
+    readonly initial: D;
+    readonly collection: string;
+    /**
+     * Create in this Context instead of the selected one, through
+     * `runtime.bindContext`. The draft and its target stay when another
+     * Context is selected or a row opens; connection actions ask first.
+     */
+    readonly context?: string;
+    /**
+     * Forms with the same `id` share one creation: while it is pending,
+     * unconfirmed or held for a retry, each of them shows it and none sends
+     * another. By default all forms of the collection share it. Give forms
+     * that should create independently, side by side, an `id` each.
+     */
+    readonly id?: string;
+  },
 ) {
-  const view = useView();
-  const { key } = useDefinition(definition, 'useCreation');
-  const mutation = useMutation(definition);
+  const explicit = useExplicitView(options.context);
+  const selected = useView();
+  const fixed = options.context !== undefined;
+  const view = fixed ? explicit.view : selected;
+  const access = useWorkflowAccess();
+  // An explicit Context has its own write access.
+  const explicitWrite = useSyncExternalStore(
+    explicit.view?.subscribe ?? noopSubscribe,
+    () => explicit.view?.getSnapshot().write ?? false,
+    () => explicit.view?.getSnapshot().write ?? false,
+  );
+  const writable = fixed ? explicitWrite : access.write;
+  const { key: shape } = useDefinition(definition, 'useCreation');
+  // One generation per collection, form name and definition: a command
+  // captured for one is never sent from a form for another.
+  const key = `${options.collection} ${options.id ?? ''} ${shape}`;
+  // The controller owns the creation lane of this form name, with the
+  // captured creation and its recovery: every form of the name (by default all
+  // forms of the collection), also one hidden, shown again or remounted, shows
+  // the same open creation and none sends it afresh. An explicit Context stays
+  // through row changes and Context selection.
+  const { group, shown } = useLaneGroup(
+    view,
+    `forms ${key}`,
+    definition,
+    fixed ? 'explicit' : 'target',
+    CreationLane<D>,
+  );
+  const lane = group?.lanes.get('form') ?? null;
+  // Commands look the lane up live: a create in the same event may have just
+  // started it.
+  const live = () => group?.lanes.get('form');
+  const starts = useStartCount(view);
   const initial = useCommitted(options.initial);
   const copy = (draft: D) => Object.freeze({ ...draft });
+  // This form's own draft and the creation it last sent from it, if any.
   const [state, setState] = useState(() => ({
     view,
     key,
     draft: copy(options.initial),
+    sent: null as Captured<D> | null,
   }));
+  // The latest own state, ahead of rendering: a batch may call `change` and
+  // `create` again before the next render.
   const current = useRef(state);
-  if (state.view !== view || state.key !== key) {
-    const next = { view, key, draft: copy(options.initial) };
+  const replace = (draft: D, sent: Captured<D> | null = null) => {
+    const next = { view, key, draft, sent };
+    current.current = next;
     setState(next);
+  };
+  if (state.view !== view || state.key !== key) {
+    setState({ view, key, draft: copy(options.initial), sent: null });
   }
   useLayoutEffect(() => {
     const before = current.current;
@@ -1013,30 +1186,39 @@ export function useCreation<D extends object>(
       JSON.stringify(before.draft) !== JSON.stringify(initial.current)
     )
       warn(
-        'useCreation: the field definition changed and the unsaved creation draft was reset.',
+        'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
       );
     current.current = state;
   }, [state, initial]);
-  const command = useRef<{
-    state: typeof state;
-    creation: Creation;
-    retry: boolean;
-  } | null>(null);
-  const draft = state.draft;
+  // What the form shows, derived: the lane's open creation (locked), or its
+  // own draft, blank again once the creation it sent is settled.
+  const showing = (
+    of: CreationLane<D> | null | undefined,
+    blank?: D,
+    own = current.current,
+  ): { readonly draft: D; readonly captured: Captured<D> | null } => {
+    const open = of?.open() ?? null;
+    if (open) return { draft: open.draft, captured: open };
+    return own.sent?.settled
+      ? { draft: blank ?? copy(initial.current), captured: null }
+      : { draft: own.draft, captured: own.sent };
+  };
+  // One blank draft per own state, so `draft` keeps its identity.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const blank = useMemo(() => copy(options.initial), [state]);
+  const draft = showing(lane, blank, state).draft;
   const reset = () => {
     if (current.current.view !== view || current.current.key !== key) return;
-    const next = { view, key, draft: copy(initial.current) };
-    current.current = next;
-    command.current = null;
-    setState(next);
+    replace(copy(initial.current));
   };
   useDraftGuard(
     JSON.stringify(draft) !== JSON.stringify(options.initial),
     reset,
+    fixed ? 'explicit' : 'target',
   );
-  const retrying = () =>
-    command.current?.state === current.current && command.current.retry;
-  const canEdit = !mutation.busy && !mutation.unresolved && !retrying();
+  // Pending, unresolved or held for an explicit retry.
+  const locked = (of: CreationLane<D> | null | undefined) =>
+    Boolean(of?.outstanding());
   const valid = (value: D) => {
     try {
       return definition.valid?.(value) ?? true;
@@ -1044,96 +1226,107 @@ export function useCreation<D extends object>(
       return false;
     }
   };
-  return {
-    draft,
-    canEdit,
-    canCreate: mutation.canMutate && valid(draft),
-    busy: mutation.busy,
-    outcome: mutation.outcome,
+  // Both keep their identity for this target and definition.
+  const commands = useCommands([view, key], {
     /**
      * Applies at once, so a following `create()` submits this draft. Ignored
      * while a command is pending, unconfirmed or held for an explicit retry
      * (`canEdit` is false).
      */
     change: (patch: Partial<D>) => {
+      const of = live();
       if (
-        !mutation.editable() ||
-        retrying() ||
+        !shown.current ||
+        !group?.holds() ||
+        locked(of) ||
         current.current.view !== view ||
         current.current.key !== key
       )
         return;
-      mutation.acknowledge();
-      const next = {
-        view,
-        key,
-        draft: copy({ ...current.current.draft, ...patch }),
-      };
-      current.current = next;
-      command.current = null;
-      setState(next);
+      of?.acknowledge();
+      replace(copy({ ...showing(of).draft, ...patch }));
     },
     /**
-     * Sends the current draft under its captured IRI. `undefined` either means
-     * nothing was sent (no write access, an invalid draft, a pending or
-     * unconfirmed command or a guarded transition; the draft is kept) or that
-     * the target lifetime ended before the answer. In the second case the
-     * write may have landed and its result is retired; the two cannot be told
-     * apart here, so treat the item as possibly created.
+     * Sends the current draft under its captured IRI and resolves its outcome
+     * with that `iri`, also when the target changed meanwhile (then the
+     * notice is gone, but the item may exist; never resubmit it from the
+     * input). `not-sent` means nothing was sent and the draft is kept.
      */
-    create: async () => {
-      if (
-        !view ||
-        !mutation.canMutate ||
-        !valid(current.current.draft) ||
-        current.current.view !== view ||
-        current.current.key !== key
-      )
-        return;
-      const submitted = current.current;
-      if (command.current?.state !== submitted)
-        command.current = {
-          state: submitted,
-          retry: false,
-          creation: prepareCreation(
-            view,
-            newSubjectIri(view, options.collection),
-            definition,
-            submitted.draft,
-          ),
-        };
-      const captured = command.current.creation;
-      const outcome = await mutation.execute('create', captured.iri, () =>
-        captured.run(),
+    create: async (): Promise<
+      (CreateOutcome & { readonly iri: string }) | NotSent
+    > => {
+      if (!view || current.current.view !== view || current.current.key !== key)
+        return notSent(view ? 'ended' : 'unavailable');
+      if (!group) return notSent('unavailable');
+      if (!shown.current) return notSent('ended');
+      // Live: a batch may call this before the render after its last item.
+      const existing = live();
+      const refused = existing
+        ? existing.refusal()
+        : group.available(writable)
+          ? null
+          : 'unavailable';
+      if (refused) return notSent(refused);
+      const now = showing(existing);
+      if (!valid(now.draft)) return notSent('invalid');
+      const of = group.lane('form');
+      // The same item again (a retry, or after a failure) keeps its IRI and
+      // body; anything else is captured afresh.
+      const captured =
+        now.captured && of.captured === now.captured
+          ? now.captured
+          : of.capture(
+              now.draft,
+              prepareCreation(
+                view,
+                newSubjectIri(view, options.collection),
+                definition,
+                now.draft,
+              ),
+            );
+      replace(now.draft, captured);
+      const outcome = await of.execute('create', captured.creation.iri, () =>
+        captured.creation.run(),
       );
-      if (outcome?.kind === 'created' && current.current === submitted) reset();
-      return outcome;
+      if (outcome.kind === 'not-sent') return outcome;
+      // The captured IRI of every sent creation, for example to link a second
+      // creation to it; an unconfirmed one keeps it for its retry as well.
+      return {
+        ...(outcome as CreateOutcome),
+        iri: captured.creation.iri,
+      };
     },
-    notice: {
-      ...mutation.notice,
-      onAcknowledge: () => {
-        if (!mutation.checked()) return;
-        // Absence is only an observation: the original write may still land.
-        // Preserve its exact command/draft for an explicit create-only retry.
-        const absent = mutation.absent();
-        if (absent && command.current?.state === current.current)
-          command.current.retry = true;
-        mutation.acknowledge();
-        if (!absent) reset();
-      },
-    },
+  });
+  return {
+    draft,
+    canEdit: view !== null && !locked(lane),
+    canCreate:
+      (lane ? lane.canMutate(writable) : Boolean(group?.available(writable))) &&
+      valid(draft),
+    /**
+     * The `context` is not a Context of the active connection's Pod, or not
+     * the preset's: nothing is created there.
+     */
+    refused: explicit.refused,
+    busy: lane?.state?.busy ?? false,
+    outcome: lane?.outcome(starts) ?? null,
+    change: commands.change,
+    create: commands.create,
+    /** Its acknowledgement settles a present creation or holds an absent one. */
+    notice: lane ? lane.notice(starts) : noNotice,
   };
 }
 
 /**
  * App drafts survive row changes by default; choose `local` for drafts left by
- * row navigation, or `connection` for a draft bound to an explicit Context,
- * which survives a Context selection (see `LeaveGuard.scope`).
+ * row navigation, `connection` for a draft bound to an explicit Context, which
+ * survives a Context selection, or `explicit` for a draft at an explicit
+ * Context that also survives row navigation (see `LeaveGuard.scope`).
  */
 export function useDraftGuard(
   dirty: boolean,
   discard: () => void,
-  scope: 'local' | 'target' | 'connection' = 'target',
+  scope: 'local' | 'target' | 'connection' | 'explicit' = 'target',
 ) {
   const app = useController();
   const latest = useCommitted({ dirty, discard });

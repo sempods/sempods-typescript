@@ -2,8 +2,8 @@
 
 App authors can start with the [quickstart](quickstart.md) without changing this
 repository. This page is for changes to the reusable SDK, its examples or guides.
-Read [AGENTS.md](../AGENTS.md), then use [issue work](agents/issue-work.md)
-to agree on a bounded issue and check for overlapping work before editing.
+Before editing, open or pick a bounded issue and check open PRs for overlapping
+work.
 
 ## Keep the boundaries useful
 
@@ -50,7 +50,9 @@ Explain the concrete problem, resulting behavior, tests actually run and remaini
 limits. Keep unrelated refactoring separate. Have an independent reviewer check
 the current commit, including any updates after earlier approval. Keep unresolved
 findings and follow-up acceptance criteria in the repository's issue/review channel.
-The maintainer decides merging and release.
+The maintainer decides merging and release. Security reports follow the
+organisation’s [private reporting policy](https://github.com/sempods/.github/blob/main/SECURITY.md),
+not public issues.
 
 Code is licensed under Apache-2.0 and documentation under CC BY 4.0 (see
 [NOTICE](../NOTICE)); contributions are accepted under the same terms.
@@ -68,10 +70,6 @@ Questions and ideas are welcome in
 
 ## Release decisions
 
-Publication, versioning and supported-environment promises are maintainer
-decisions; do not infer them from a passing build. Before a release, check the
-package artifacts, required notices, docs navigation and migration notes.
-
-The [release procedure](agents/release.md) separates readiness, preparation and
-explicitly authorized publication. Security reports follow the organisation’s
-[private reporting policy](https://github.com/sempods/.github/blob/main/SECURITY.md).
+Versioning, publication and supported-environment promises are maintainer
+decisions, not consequences of a passing build; see the
+[release procedure](agents/release.md).

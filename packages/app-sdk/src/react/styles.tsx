@@ -1,5 +1,6 @@
 /** Internal shared baseline. Public tokens inherit from the host; no style registry.
- * Without them, the fallbacks are a calm neutral grey palette. */
+ * Without them, the fallbacks are a calm neutral grey palette. Actions read as
+ * text, as in AppAccess; the one main action of a surface is filled. */
 export function SdkStyles() {
   return (
     <style href="sempods-sdk" precedence="sempods">
@@ -8,41 +9,54 @@ export function SdkStyles() {
   );
 }
 const surfaces =
-  ':where([data-sempods-ui="access"], [data-sempods-ui="connections"], [data-sempods-ui="editor"], [data-sempods-ui="notice"])';
+  ':where([data-sempods-ui="access"], [data-sempods-ui="editor"], [data-sempods-ui="notice"], .sp-sdk-dialog)';
 const styles = `
 :where([data-sempods-ui]) {
-  --sp-bg:var(--sempods-bg,var(--sempods-access-bg,light-dark(#fff,#111315)));
-  --sp-text:var(--sempods-text,var(--sempods-access-text,light-dark(#1f2933,#e5e7eb)));
-  --sp-muted:var(--sempods-muted,var(--sempods-access-muted,light-dark(#6b7280,#9ca3af)));
-  --sp-line:var(--sempods-line,var(--sempods-access-line,light-dark(#e5e7eb,#2d3138)));
-  --sp-accent:var(--sempods-accent,var(--sempods-access-accent,light-dark(#1f2933,#e5e7eb)));
-  --sp-on-accent:var(--sempods-on-accent,var(--sempods-access-on-accent,light-dark(#fff,#111315)));
+  --sp-bg:var(--sempods-bg,light-dark(#fff,#111315));
+  --sp-text:var(--sempods-text,light-dark(#1f2933,#e5e7eb));
+  --sp-muted:var(--sempods-muted,light-dark(#6b7280,#9ca3af));
+  --sp-line:var(--sempods-line,light-dark(#e5e7eb,#2d3138));
+  --sp-accent:var(--sempods-accent,light-dark(#1f2933,#e5e7eb));
+  --sp-on-accent:var(--sempods-on-accent,light-dark(#fff,#111315));
   color:var(--sp-text); font:400 1rem/1.5 system-ui,sans-serif; overflow-wrap:anywhere;
 }
-:where([data-sempods-ui="shell"], [data-sempods-ui="access"]) { background:var(--sp-bg); }
+:where([data-sempods-ui="access"]) { background:var(--sp-bg); }
 ${surfaces} :where(.sp-sdk-actions) { display:flex; flex-wrap:wrap; gap:8px; }
+${surfaces} :where(.sp-sdk-end) { margin-inline-start:auto; }
 ${surfaces}, ${surfaces} * { box-sizing:border-box; }
-${surfaces} :where(button,input,select,textarea), :where([data-sempods-button]) { font:inherit; max-width:100%; min-width:0; min-height:44px; }
-${surfaces} :where(button), :where([data-sempods-button]) { font-weight:500; border:1px solid var(--sp-line); border-radius:5px; color:var(--sp-accent); background:var(--sp-bg); padding:10px 14px; cursor:pointer; }
-${surfaces} :where(input,select,textarea) { color:var(--sp-text); background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:4px; padding:10px; }
+${surfaces} :where(button,input,select,textarea) { font:inherit; max-width:100%; min-width:0; min-height:44px; }
+${surfaces} :where(button) { font-weight:500; border:0; border-radius:8px; color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }
+${surfaces} :where(button:hover:not(:disabled)) { background:color-mix(in srgb,var(--sp-accent) 8%,transparent); }
+${surfaces} :where(button.sp-sdk-primary) { color:var(--sp-on-accent); background:var(--sp-accent); }
+${surfaces} :where(input,select,textarea) { color:var(--sp-text); background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:8px; padding:10px 12px; }
 ${surfaces} :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { display:block; width:100%; margin-block:6px 14px; }
 ${surfaces} :where(input[type=checkbox],input[type=radio]) { width:24px; height:24px; min-height:24px; flex:none; vertical-align:middle; margin:0; margin-inline-end:10px; accent-color:var(--sp-accent); }
 ${surfaces} :where(label):has(input[type=checkbox],input[type=radio]) { display:inline-flex; align-items:center; min-height:44px; min-width:44px; cursor:pointer; }
-${surfaces} :where(:disabled), :where([data-sempods-button]:disabled) { opacity:.55; cursor:default; }
-${surfaces} :where(:focus-visible), :where([data-sempods-button]:focus-visible) { outline:2px solid var(--sp-accent); outline-offset:3px; }
+${surfaces} :where(:disabled) { opacity:.55; cursor:default; }
+${surfaces} :where(:focus-visible) { outline:2px solid var(--sp-accent); outline-offset:3px; }
+${surfaces} :where(input:not([type=checkbox]):not([type=radio]),select,textarea):where(:focus-visible) { outline-offset:-1px; }
 ${surfaces} :where(p) { margin-block:12px; }
 ${surfaces} :where(dl) { display:grid; gap:12px; margin:12px 0; }
 ${surfaces} :where(dt) { color:var(--sp-muted); font-size:.875rem; }
 ${surfaces} :where(dd) { margin:0; white-space:pre-wrap; }
 ${surfaces} :where(details) { color:var(--sp-muted); font-size:.875rem; margin-block:12px; }
 ${surfaces} :where(summary) { min-height:44px; padding-block:10px; cursor:pointer; }
+:where(.sp-sdk-dialog) { background:var(--sp-bg); border:0; border-radius:12px; padding:24px; max-width:min(420px,calc(100vw - 32px)); box-shadow:0 12px 32px rgb(0 0 0 / .2); }
+:where(.sp-sdk-dialog)::backdrop { background:rgb(0 0 0 / .45); }
+:where(.sp-sdk-dialog) :where(h2) { font-size:1.25rem; font-weight:600; margin:0 0 8px; }
+:where(.sp-sdk-dialog) :where(.sp-sdk-actions) { justify-content:flex-end; margin-top:20px; }
 :where([data-sempods-ui="notice"]) { margin-block:12px; }
 :where([data-sempods-ui="notice"][role=alert]) { border-inline-start:2px solid var(--sp-accent); padding-inline-start:12px; }
 :where([data-sempods-ui="editor"]) { margin-block:16px; }
+:where([data-sempods-ui="editor"]) :where(.sp-sdk-end) { color:var(--sp-muted); }
+:where([data-sempods-ui="editor"][data-inline]) { margin-block:4px; padding:8px; border-radius:12px; background:color-mix(in srgb,var(--sp-accent) 5%,transparent); }
+:where([data-sempods-ui="editor"][data-inline]) :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { margin-block:0 8px; }
 :where([data-sempods-ui="editor"]) > :where(section) { border-block:1px solid var(--sp-line); padding-block:12px; margin-block:16px; }
 :where([data-sempods-ui="editor"]) :where(h3) { font-size:1rem; font-weight:600; margin-block:16px 8px; }
 :where([data-sempods-ui="editor"]) > :where(section) > :where(button) { margin-block:4px; }
-:where([data-sempods-ui="shell"]) { max-width:900px; margin-inline:auto; padding:clamp(12px,4vw,32px); }
-:where([data-sempods-ui="shell"]) > header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
-:where([data-sempods-ui="shell"]) > header > h1 { font-size:1.75rem; font-weight:500; line-height:1.25; margin:0; }
+:where([data-sempods-ui="remove-button"]) { display:inline-grid; place-items:center; flex:none; box-sizing:border-box; min-width:44px; min-height:44px; padding:0 10px; border:0; border-radius:22px; color:var(--sp-muted); background:transparent; font-weight:500; cursor:pointer; }
+:where([data-sempods-ui="remove-button"]:hover:not(:disabled)) { color:var(--sp-text); background:color-mix(in srgb,var(--sp-accent) 8%,transparent); }
+:where([data-sempods-ui="remove-button"]:disabled) { opacity:.55; cursor:default; }
+:where([data-sempods-ui="remove-button"]:focus-visible) { outline:2px solid var(--sp-accent); outline-offset:3px; }
+:where([data-sempods-ui="remove-button"]) :where(svg) { width:20px; height:20px; }
 `;

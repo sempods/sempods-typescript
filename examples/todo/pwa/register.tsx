@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSdkLocale } from '@sempods/app-sdk/react';
+import { useMessages } from '@sempods/app-sdk/react';
 
 /**
  * Registers the app's service worker. Call it once from the app entry, never on
@@ -16,6 +16,17 @@ export function registerAppWorker(
   return navigator.serviceWorker.register(url).catch(() => undefined);
 }
 
+const text = {
+  en: {
+    ready:
+      'A new version is ready. It is used once every window of this app has been closed.',
+  },
+  de: {
+    ready:
+      'Eine neue Version ist bereit. Sie wird verwendet, sobald alle Fenster dieser App geschlossen sind.',
+  },
+};
+
 /**
  * Render beneath the app's actual locale provider so notices follow its language.
  * Keep it outside target/access gates: updates also matter while signed out.
@@ -29,7 +40,7 @@ export function NewVersionNotice({
   readonly registration: Promise<ServiceWorkerRegistration | undefined>;
 }) {
   const [ready, setReady] = useState(false);
-  const { language } = useSdkLocale();
+  const m = useMessages(text);
   useEffect(() => {
     let active = true;
     let stop = () => {};
@@ -64,11 +75,5 @@ export function NewVersionNotice({
     };
   }, [registration]);
   if (!ready) return null;
-  return (
-    <p role="status">
-      {language === 'de'
-        ? 'Eine neue Version ist bereit. Sie wird verwendet, sobald alle Fenster dieser App geschlossen sind.'
-        : 'A new version is ready. It is used once every window of this app has been closed.'}
-    </p>
-  );
+  return <p role="status">{m.ready}</p>;
 }

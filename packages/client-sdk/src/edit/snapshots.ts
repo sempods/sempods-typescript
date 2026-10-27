@@ -2,6 +2,7 @@ import type { JsonLd, WriteOptions, WriteResult } from '../results.js';
 import {
   isFieldDefinition,
   owned,
+  storedDraft,
   type Field,
   type FieldDefinition,
 } from './fields.js';
@@ -84,7 +85,8 @@ function capture<D>(
  * Snapshots from query nodes (for example `CONSTRUCT { ?s ?p ?o }`). The query
  * must return the fields' terms completely; strict per item, tolerant per list.
  * Nodes without an absolute IRI (blank nodes) are skipped: they cannot be
- * addressed by a later update or deletion.
+ * addressed by a later update or deletion. So are values the definition does
+ * not accept (`valid`): no update could write such a row back.
  * Deleting from a snapshot additionally needs the subject's whole description
  * in the target context; a projection makes `removeSnapshot` report a change.
  */
@@ -101,6 +103,11 @@ export function snapshots<D>(
   for (const node of nodes) {
     try {
       const snapshot = capture(source, definition, node);
+      // A row the definition does not accept (for example an empty required
+      // text) could not be written back by any update: skip it like an
+      // unreadable one. Conflict reads keep such values to compare them.
+      if (definition.valid && !definition.valid(snapshot.data))
+        throw new TypeError('The values are not valid.');
       if (ids.has(snapshot.iri)) throw new TypeError('Duplicate subject.');
       ids.add(snapshot.iri);
       items.push(snapshot);
@@ -311,6 +318,8 @@ export async function updateFields<D>(
     if (!(name in definition.fields))
       throw new TypeError(`Unknown field: ${name}`);
   let wanted: D | undefined;
+  // What the write was based on: values it leaves untouched stay as they were.
+  let onto: D | undefined;
   return conditional<D, UpdateOutcome<D>>(
     source,
     snapshot,
@@ -319,6 +328,7 @@ export async function updateFields<D>(
       seenAgain(proof, definition as FieldDefinition<unknown>, body, names),
     true,
     (now) => {
+      onto = now.snapshot.data;
       wanted = { ...now.snapshot.data, ...command };
       if (definition.valid && !definition.valid(wanted))
         throw new TypeError('The changed values are not valid.');
@@ -333,15 +343,20 @@ export async function updateFields<D>(
         options,
       );
     },
-    (now) =>
-      now.kind === 'ok' &&
-      wanted !== undefined &&
-      names.every((name) =>
+    (now) => {
+      if (now.kind !== 'ok' || wanted === undefined) return false;
+      // Compared as stored: a trimmed field is on the Pod without its spaces.
+      const desired = storedDraft(definition, wanted, onto) as Record<
+        string,
+        unknown
+      >;
+      return names.every((name) =>
         sameData(
           (now.snapshot.data as Record<string, unknown>)[name],
-          (wanted as Record<string, unknown>)[name],
+          desired[name],
         ),
-      ),
+      );
+    },
     {
       done: { kind: 'saved' },
       failed: (problem) => ({

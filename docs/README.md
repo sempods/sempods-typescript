@@ -7,7 +7,9 @@
 - [React/headless authoring](react-authoring.md), [widgets](widgets.md) and
   [browser runtime](browser-runtime.md).
 - [Pod overviews with Contexts on-demand](react-authoring.md#pod-overviews-with-contexts-on-demand)
-  and the [copyable overview recipe](../examples/todo/recipes/pod-overview.tsx).
+  and the copyable [overview](../examples/todo/recipes/pod-overview.tsx),
+  [one-click](../examples/todo/recipes/overview-toggle.tsx) and
+  [task-with-note](../examples/todo/recipes/task-with-note.tsx) recipes.
 - [TODO example](../examples/todo/README.md) and
   [Node example](../examples/node-script/README.md).
 

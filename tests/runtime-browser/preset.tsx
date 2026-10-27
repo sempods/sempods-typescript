@@ -3,10 +3,7 @@ import { useRef, useState } from 'react';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
-  AccessNotice,
-  AppShell,
   AppAccess,
-  ConnectionControls,
   ResourceEditor,
   SempodsProvider,
   TargetScreen,
@@ -44,7 +41,7 @@ const runtime = createBrowserRuntime({
           },
         }
       : {}),
-  ...(identity === 'access-one'
+  ...(identity === 'access-one' || identity.startsWith('access-focus-')
     ? { allowedPods: [podUrl] }
     : identity === 'access-set'
       ? { allowedPods: [podUrl, location.origin + '/bob'] }
@@ -55,7 +52,8 @@ const runtime = createBrowserRuntime({
           : {}),
   scopes: { required: ['tasks'], optional: ['ai'] },
   development: 'loopback-http',
-  returnTo: '/app?identity=' + identity,
+  // The address when a sign-in starts, so an in-app deep link survives it.
+  returnTo: () => location.pathname + location.search + location.hash,
 });
 window.addEventListener('pagehide', () => runtime.dispose());
 const task = fields({
@@ -135,17 +133,10 @@ function Evidence() {
         </output>
       </div>
       {signOutUI ? (
-        identity.includes('-controls-') ? (
-          <>
-            <ConnectionControls />
-            <AccessNotice />
-          </>
-        ) : (
-          <AppAccess
-            appName="Sign-out fixture"
-            open={state.connections.length > 0}
-          />
-        )
+        <AppAccess
+          appName="Sign-out fixture"
+          open={state.connections.length > 0}
+        />
       ) : modal ? (
         <ModalEvidence />
       ) : accessUI ? (
@@ -175,11 +166,28 @@ function Evidence() {
           </TargetScreen>
         </>
       ) : (
-        <AppShell title="Known Pod" mode="single">
+        <>
+          <h1>Known Pod</h1>
+          {state.connections.length > 0 && (
+            <button
+              ref={target}
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+            >
+              Pods & sharing
+            </button>
+          )}
+          <AppAccess
+            appName="Known Pod"
+            headingLevel={2}
+            mode="single"
+            open={open}
+            focusTarget={target}
+          />
           <TargetScreen>
             <Draft />
           </TargetScreen>
-        </AppShell>
+        </>
       )}
     </>
   );

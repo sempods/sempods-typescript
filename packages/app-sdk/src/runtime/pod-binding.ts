@@ -8,6 +8,7 @@ import type { Entry } from './connection.js';
 import type { BoundPod, BoundRead, ViewAccess } from './view.js';
 import { waitFor } from './wait.js';
 import { combineSignals } from './signals.js';
+import { observePod } from './binding.js';
 
 /** The production client remains the only protocol/renewal executor. */
 export function bindPod(
@@ -65,7 +66,7 @@ export function bindPod(
       combined.dispose();
     }
   }
-  return Object.freeze({
+  const reader = Object.freeze({
     key: JSON.stringify([e.view.id, subject, e.pod.podUrl, generation]),
     podUrl: e.pod.podUrl,
     getSnapshot,
@@ -86,4 +87,6 @@ export function bindPod(
         read((o) => pod.sparql.construct(query, o), options),
     }),
   } satisfies BoundPod);
+  observePod(reader, e);
+  return reader;
 }

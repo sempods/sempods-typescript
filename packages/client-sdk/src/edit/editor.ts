@@ -3,6 +3,7 @@ import {
   changedFields,
   isFieldDefinition,
   sameOwnedTerms,
+  storedDraft,
   withFields,
   type EditDefinition,
   type FieldDefinition,
@@ -128,7 +129,10 @@ export interface ResourceEditor<D, U = D> {
   refresh(): Promise<void>;
   /** Review: keep the draft and base the next save on the compared version. */
   continueFromCurrent(): void;
-  /** Losing read access clears server data but keeps the draft; call `refresh()` after regaining it. */
+  /**
+   * Losing read access clears server data but keeps the draft; call `refresh()`
+   * after regaining it. Unchanged access changes nothing and notifies no one.
+   */
   setAccess(access: EditAccess): void;
   /** Ignores late results. A dispatched write cannot be undone. */
   dispose(): void;
@@ -179,6 +183,8 @@ export function createResourceEditor<D>(
   let base: Base<D> | null = null;
   let draft: D | null = null;
   let review: Review<D> | null = null;
+  // What an unconfirmed write should have left on the Pod, as stored.
+  let expected: D | null = null;
   let compared: Compared<D> = null;
   let problem: EditProblem | null = null;
   const fieldwise = isFieldDefinition(definition) ? definition : null;
@@ -324,7 +330,8 @@ export function createResourceEditor<D>(
               current !== undefined &&
               (review.intent === 'remove'
                 ? current === null
-                : current !== null && sameData(current, review.mine)),
+                : current !== null &&
+                  sameData(current, expected ?? review.mine)),
           }
         : { ...review, current };
   }
@@ -398,6 +405,8 @@ export function createResourceEditor<D>(
     done: () => Promise<O>,
     reviewed: (kind: Review<D>['kind']) => O,
     failed: (reason: NotDone) => O,
+    /** `mine` as stored on the version written onto. */
+    stored: D | null = mine,
   ): Promise<O> {
     switch (result.kind) {
       case 'applied':
@@ -408,7 +417,7 @@ export function createResourceEditor<D>(
           result.kind === 'uncertain' ? 'unconfirmed' : 'changed-on-pod';
         // The write outcome survives read loss; only a fresh comparison is shown.
         if (guard.alive()) {
-          openReview(kind, intent, mine);
+          openReview(kind, intent, mine, stored);
           phase = 'review';
           if (access.read && guard.fresh()) {
             const fetched = await read();
@@ -434,8 +443,10 @@ export function createResourceEditor<D>(
     kind: Review<D>['kind'],
     intent: 'save' | 'remove',
     mine: D | null,
+    stored: D | null = mine,
   ) {
     compared = null;
+    expected = stored;
     review =
       kind === 'unconfirmed'
         ? { kind, intent, mine, current: undefined, desiredObserved: false }
@@ -578,7 +589,10 @@ export function createResourceEditor<D>(
                 (exact ||
                   (!dirty() &&
                     safely(() =>
-                      sameData(definition.read(fetched.body), mine),
+                      sameData(
+                        definition.read(fetched.body),
+                        storedDraft(definition, mine, onto.data),
+                      ),
                     )))
               ) {
                 const next = version(fetched);
@@ -606,6 +620,7 @@ export function createResourceEditor<D>(
             },
             () => ({ kind: 'review' }),
             (reason) => ({ kind: 'not-saved', reason }),
+            storedDraft(definition, mine, onto.data),
           );
         },
       );
@@ -684,6 +699,9 @@ export function createResourceEditor<D>(
     },
     setAccess(next) {
       if (disposed) return;
+      // Unchanged access is no new state: a question asked about the current
+      // state (such as a delete confirmation) stays valid.
+      if (next.read === access.read && next.write === access.write) return;
       const lost = access.read && !next.read;
       access = { read: next.read, write: next.write };
       if (lost) {

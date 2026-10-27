@@ -106,8 +106,10 @@ it('useApp exposes only the guarded actions, as one stable object', async () => 
     'authorize',
     'connect',
     'disconnect',
+    'loadContextLabels',
     'navigate',
     'refreshContexts',
+    'retryRestore',
     'selectConnection',
     'selectContext',
   ]);
@@ -244,7 +246,7 @@ it('an inline custom definition never loops, keeps its editor and warns once', a
   ).toHaveLength(1);
 });
 
-it('warns when a real field change drops a pending write or an unsaved draft (N3)', async () => {
+it('warns when a real field change drops an unsaved draft; a pending write keeps its lane (N3)', async () => {
   const f = await setup();
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   let release!: (response: Response) => void;
@@ -284,8 +286,10 @@ it('warns when a real field change drops a pending write or an unsaved draft (N3
     api.editor!.change({ title: 'Unsaved' });
   });
   act(() => api.setLanguage('de'));
+  // The pending write keeps its own lane and guard in the controller (#156),
+  // so only the editor's dropped draft warns.
   await waitFor(() => {
-    expect(warn).toHaveBeenCalledWith(
+    expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining('while a write was pending or unresolved'),
     );
     expect(warn).toHaveBeenCalledWith(
@@ -619,4 +623,41 @@ it('R5: the same fields in another order keep the editor and both drafts', async
   expect(api.editor).toBe(editor);
   expect(api.editor?.state.draft?.title).toBe('Unsaved edit');
   expect(api.creation.draft.title).toBe('Unsaved creation');
+});
+
+it('useLoad reads again when its key changes, without the old data', async () => {
+  const f = await setup();
+  let api!: {
+    load: ReturnType<typeof useLoad<string>>;
+    search: (term: string) => void;
+  };
+  // Every render's input and data: a new term never shows the old result.
+  const shown: [string, string | undefined][] = [];
+  function Screen() {
+    const [term, search] = useState('milk');
+    const load = useLoad(
+      async (view) => {
+        const r = await view.sparql.construct('CONSTRUCT {} WHERE {}');
+        return r.kind === 'ok'
+          ? { kind: 'ok', body: `results for ${term}` }
+          : r;
+      },
+      { key: term, retain: true },
+    );
+    api = { load, search };
+    shown.push([term, load.data]);
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <TargetScreen>
+        <Screen />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(api.load.data).toBe('results for milk'));
+  act(() => api.search('bread'));
+  // The kept data belonged to the old term: a fresh read, not a retained one.
+  await waitFor(() => expect(api.load.data).toBe('results for bread'));
+  expect(shown).not.toContainEqual(['bread', 'results for milk']);
 });

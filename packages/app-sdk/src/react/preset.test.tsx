@@ -18,13 +18,13 @@ import {
   catalogue,
 } from '../runtime/fixture.test.js';
 import {
-  AppShell,
   SempodsProvider,
-  ConnectionControls,
   AccessNotice,
   useApp,
   useAppState,
+  AppAccess,
 } from './index.js';
+import { TestShell } from './shell.test.js';
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto);
@@ -47,7 +47,7 @@ it.each(['en', 'de'] as const)(
     cleanups.push(() => f.runtime.dispose());
     const mounted = render(
       <SempodsProvider runtime={f.runtime} language={language}>
-        <AppShell mode="single">{null}</AppShell>
+        <TestShell mode="single">{null}</TestShell>
       </SempodsProvider>,
     );
     const button = await screen.findByRole('button', {
@@ -58,8 +58,8 @@ it.each(['en', 'de'] as const)(
     // Two copies consume the same controller and cannot launch two authorization flows.
     mounted.rerender(
       <SempodsProvider runtime={f.runtime} language={language}>
-        <ConnectionControls />
-        <ConnectionControls />
+        <AppAccess appName="Tasks" mode="single" />
+        <AppAccess appName="Tasks" mode="single" />
       </SempodsProvider>,
     );
     const buttons = screen.getAllByRole('button', {
@@ -91,7 +91,7 @@ it('shows configured-context absence without offering another context, and recov
   cleanups.push(() => runtime.dispose());
   render(
     <SempodsProvider runtime={runtime}>
-      <AppShell>{null}</AppShell>
+      <TestShell>{null}</TestShell>
     </SempodsProvider>,
   );
   await screen.findByText(
@@ -120,7 +120,7 @@ function Custom() {
     </>
   );
 }
-it('exposes the same preset and guarded default action without AppShell', async () => {
+it('exposes the same preset and guarded default action in a custom layout', async () => {
   const f = fixture({ preset: { podUrl: pod, contextIri: work } });
   cleanups.push(() => f.runtime.dispose());
   render(
@@ -145,7 +145,7 @@ it('retains explicit context choice for a preset without an exact context', asyn
   cleanups.push(() => session.runtime.dispose());
   render(
     <SempodsProvider runtime={session.runtime}>
-      <AppShell mode="single">{null}</AppShell>
+      <TestShell mode="single">{null}</TestShell>
     </SempodsProvider>,
   );
   await waitFor(() =>

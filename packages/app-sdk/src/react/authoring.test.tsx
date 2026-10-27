@@ -15,7 +15,6 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   fixture,
   catalogue,
-  pod,
   personal,
   work,
   deferred,
@@ -26,11 +25,10 @@ import { createBrowserRuntime } from '../runtime/runtime.js';
 import type { BrowserRuntime, StartupReport } from '../index.js';
 import {
   SempodsProvider,
-  AppShell,
   AppAccess,
-  ConnectionControls,
   ResourceEditor,
   useApp,
+  useAppState,
   useResourceEditor,
   useFieldUpdate,
   useDraftGuard,
@@ -38,6 +36,7 @@ import {
   CallbackNotice,
   TargetScreen,
 } from './index.js';
+import { TestShell } from './shell.test.js';
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto);
@@ -94,9 +93,9 @@ it('keeps a dirty editor across locale, equivalent props, write/read loss and re
       language={language}
       messages={{ controls: { save: language === 'en' ? 'Store' : 'Ablegen' } }}
     >
-      <AppShell>
+      <TestShell>
         <Form />
-      </AppShell>
+      </TestShell>
     </SempodsProvider>
   );
   const mounted = render(ui('en'));
@@ -126,9 +125,9 @@ it('replacement picker uses guarded actions and confirmation restores focus on c
   const f = await connected();
   render(
     <SempodsProvider runtime={f.runtime}>
-      <AppShell components={{ Connections: Picker }}>
+      <TestShell components={{ Connections: Picker }}>
         <Form />
-      </AppShell>
+      </TestShell>
     </SempodsProvider>,
   );
   await screen.findByDisplayValue('Original');
@@ -185,9 +184,9 @@ it('renders loading before startup and a localized busy notice without mounting 
   vi.spyOn(f.runtime, 'initialize').mockReturnValue(gate.promise);
   const mounted = render(
     <SempodsProvider runtime={f.runtime}>
-      <AppShell>
+      <TestShell>
         <p>Tasks mounted</p>
-      </AppShell>
+      </TestShell>
     </SempodsProvider>,
   );
   expect(screen.queryByText('Tasks mounted')).toBeNull();
@@ -199,9 +198,9 @@ it('renders loading before startup and a localized busy notice without mounting 
   expect(screen.queryByText('Tasks mounted')).toBeNull();
   mounted.rerender(
     <SempodsProvider runtime={f.runtime} language="de">
-      <AppShell>
+      <TestShell>
         <p>Tasks mounted</p>
-      </AppShell>
+      </TestShell>
     </SempodsProvider>,
   );
   expect(screen.getByRole('alert').textContent).toMatch(/Tab/);
@@ -219,7 +218,8 @@ it.each(['en', 'de'] as const)(
         <UpdateNotice outcome={{ kind: 'unconfirmed' }} />
       </SempodsProvider>,
     );
-    expect(screen.getByRole('status').textContent).toMatch(
+    // Uncertain outcomes are announced at once.
+    expect(screen.getByRole('alert').textContent).toMatch(
       language === 'en' ? /unconfirmed/i : /bestätigt/i,
     );
   },
@@ -255,7 +255,7 @@ it('requires a successful comparison and explicit acknowledgement of uncertain c
 });
 
 it.each(['en', 'de'] as const)(
-  'blocks shell and standalone controls when session storage is unavailable (%s)',
+  'blocks the standard composition when session storage is unavailable (%s)',
   async (language) => {
     const f = fixture({
       openStore: async () => {
@@ -265,10 +265,9 @@ it.each(['en', 'de'] as const)(
     cleanups.push(() => f.runtime.dispose());
     render(
       <SempodsProvider runtime={f.runtime} language={language}>
-        <AppShell>
+        <TestShell>
           <p>Tasks mounted</p>
-        </AppShell>
-        <ConnectionControls />
+        </TestShell>
       </SempodsProvider>,
     );
     const message = await screen.findByRole('alert');
@@ -276,13 +275,12 @@ it.each(['en', 'de'] as const)(
       language === 'en' ? /storage could not be opened/ : /Sitzungsspeicher/,
     );
     expect(screen.queryByText('Tasks mounted')).toBeNull();
+    // No sign-in can start without durable storage.
     expect(
-      (
-        screen.getByRole('button', {
-          name: language === 'en' ? 'Connect' : 'Verbinden',
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+      screen.queryByRole('button', {
+        name: language === 'en' ? 'Sign in' : 'Anmelden',
+      }),
+    ).toBeNull();
   },
 );
 
@@ -413,54 +411,84 @@ it.each([
   ['Save', 'Continue with my changes'],
   ['Delete', 'Discard changes'],
   ['Delete', 'Continue with my changes'],
-])('clears %s review feedback after %s', async (operation, recovery) => {
-  const f = await connected();
-  render(
-    <SempodsProvider runtime={f.runtime}>
-      <Form />
-    </SempodsProvider>,
-  );
-  await screen.findByDisplayValue('Original');
-  fireEvent.change(screen.getByLabelText('Title'), {
-    target: { value: 'Mine' },
-  });
-  const request = vi.fn(async (_url: string, init?: RequestInit) => {
-    if (init?.method === 'PATCH' || init?.method === 'DELETE')
-      return new Response(null, { status: 412 });
-    return Response.json(
-      { '@id': 'urn:item', 'urn:name': [{ '@value': 'Theirs' }] },
-      { headers: { etag: '"v2"' } },
+])(
+  'clears %s review feedback after %s',
+  async (operation, recovery) => {
+    const f = await connected();
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        <Form />
+      </SempodsProvider>,
     );
-  });
-  f.setResource(request);
-  fireEvent.click(screen.getByRole('button', { name: operation }));
-  // Delete asks first; the confirmation replaces the action row.
-  if (operation === 'Delete')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-  const changed = 'The pod has changed. Compare before continuing.';
-  // The first case runs the review path cold (about five times slower than the
-  // others locally), which exceeded the default second on loaded CI runners.
-  await screen.findByRole('alert', {}, { timeout: 5000 });
-  expect(screen.getByText(changed)).toBeTruthy();
-  await waitFor(() =>
-    expect((screen.getByText(recovery) as HTMLButtonElement).disabled).toBe(
-      false,
-    ),
-  );
-  fireEvent.click(screen.getByText(recovery));
-  expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.queryByText(changed)).toBeNull();
-  expect(
-    screen.getByDisplayValue(
-      recovery === 'Discard changes' ? 'Theirs' : 'Mine',
-    ),
-  ).toBeTruthy();
-  expect(
-    request.mock.calls.filter(
-      ([, init]) => init?.method === 'PATCH' || init?.method === 'DELETE',
-    ),
-  ).toHaveLength(1);
-});
+    await screen.findByDisplayValue('Original');
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Mine' },
+    });
+    const request = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH' || init?.method === 'DELETE')
+        return new Response(null, { status: 412 });
+      return Response.json(
+        { '@id': 'urn:item', 'urn:name': [{ '@value': 'Theirs' }] },
+        { headers: { etag: '"v2"' } },
+      );
+    });
+    f.setResource(request);
+    // A background refresh briefly disables saving and deleting (the editor
+    // is reading); act only once the control is enabled.
+    const enabled = async (button: HTMLElement) => {
+      await waitFor(() =>
+        expect((button as HTMLButtonElement).disabled).toBe(false),
+      );
+      return button;
+    };
+    fireEvent.click(
+      await enabled(screen.getByRole('button', { name: operation })),
+    );
+    // Delete asks first; the confirmation replaces the action row.
+    if (operation === 'Delete')
+      fireEvent.click(
+        await enabled(
+          within(screen.getByRole('alertdialog', asked)).getByRole('button', {
+            name: 'Delete',
+          }),
+        ),
+      );
+    // The write left: a lost click would otherwise surface only as a missing alert.
+    await waitFor(() =>
+      expect(
+        request.mock.calls.some(
+          ([, init]) => init?.method === 'PATCH' || init?.method === 'DELETE',
+        ),
+      ).toBe(true),
+    );
+    const changed = 'The pod has changed. Compare before continuing.';
+    // The first case runs the review path cold (about five times slower than the
+    // others locally); loaded CI runners have needed more than five seconds.
+    await screen.findByRole('alert', {}, { timeout: 12_000 });
+    expect(screen.getByText(changed)).toBeTruthy();
+    await waitFor(() =>
+      expect((screen.getByText(recovery) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByText(recovery));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(changed)).toBeNull();
+    expect(
+      screen.getByDisplayValue(
+        recovery === 'Discard changes' ? 'Theirs' : 'Mine',
+      ),
+    ).toBeTruthy();
+    expect(
+      request.mock.calls.filter(
+        ([, init]) => init?.method === 'PATCH' || init?.method === 'DELETE',
+      ),
+    ).toHaveLength(1);
+    // The alert wait above may take up to twelve seconds; the test needs room
+    // beyond it, or a loaded runner hits the test timeout first.
+  },
+  20_000,
+);
 
 const asked = { name: 'Delete this from the pod? This cannot be undone.' };
 /** Records conditional DELETEs; reads answer the current version. */
@@ -534,25 +562,25 @@ it.each([
     await screen.findByDisplayValue('Original');
     const remove = screen.getByRole('button', { name: text.remove });
     fireEvent.click(remove);
-    const ask = screen.getByRole('group', { name: text.ask });
+    const ask = screen.getByRole('alertdialog', { name: text.ask });
     const cancel = within(ask).getByRole('button', { name: text.cancel });
     expect(document.activeElement).toBe(cancel);
     fireEvent.click(cancel);
-    expect(screen.queryByRole('group', { name: text.ask })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: text.ask })).toBeNull();
     expect(document.activeElement).toBe(
       screen.getByRole('button', { name: text.remove }),
     );
     fireEvent.click(screen.getByRole('button', { name: text.remove }));
-    fireEvent.keyDown(screen.getByRole('group', { name: text.ask }), {
+    fireEvent.keyDown(screen.getByRole('alertdialog', { name: text.ask }), {
       key: 'Escape',
     });
-    expect(screen.queryByRole('group', { name: text.ask })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: text.ask })).toBeNull();
     expect(screen.getByDisplayValue('Original')).toBeTruthy();
     await act(async () => {});
     expect(deletes).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: text.remove }));
     const confirm = within(
-      screen.getByRole('group', { name: text.ask }),
+      screen.getByRole('alertdialog', { name: text.ask }),
     ).getByRole('button', { name: text.remove });
     fireEvent.click(confirm);
     // A second press reaches no confirmation and sends nothing more.
@@ -578,7 +606,7 @@ it('withdraws the delete question for an edit, a newer version and lost write ac
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Typed' },
   });
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   fireEvent.click(screen.getByText('Discard changes'));
   // A newer version adopted while asked withdraws the question; the next
   // confirmation deletes that version.
@@ -587,12 +615,12 @@ it('withdraws the delete question for an edit, a newer version and lost write ac
   pod.version = 2;
   await act(() => shownEditor!.refresh());
   await screen.findByDisplayValue('Newer');
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   // Lost write access withdraws it and disables Delete.
   ask();
   f.setCatalogue(async () => catalogue([work], []));
   await act(() => f.runtime.loadContexts(f.id));
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   expect(
     (screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement)
       .disabled,
@@ -608,7 +636,7 @@ it('withdraws the delete question for an edit, a newer version and lost write ac
   );
   ask();
   fireEvent.click(
-    within(screen.getByRole('group', asked)).getByRole('button', {
+    within(screen.getByRole('alertdialog', asked)).getByRole('button', {
       name: 'Delete',
     }),
   );
@@ -627,10 +655,10 @@ it('withdraws the delete question when the editor moves to another subject', asy
   const mounted = render(ui('urn:item'));
   await screen.findByDisplayValue('Original');
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-  expect(screen.getByRole('group', asked)).toBeTruthy();
+  expect(screen.getByRole('alertdialog', asked)).toBeTruthy();
   mounted.rerender(ui('urn:other'));
   await screen.findByDisplayValue('Original');
-  expect(screen.queryByRole('group', asked)).toBeNull();
+  expect(screen.queryByRole('alertdialog', asked)).toBeNull();
   expect(deletes).toEqual([]);
 });
 
@@ -663,7 +691,7 @@ it.each([
     await screen.findByDisplayValue('Original');
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     fireEvent.click(
-      within(screen.getByRole('group', asked)).getByRole('button', {
+      within(screen.getByRole('alertdialog', asked)).getByRole('button', {
         name: 'Delete',
       }),
     );
@@ -914,9 +942,9 @@ it.each([
     cleanups.push(() => returned.dispose());
     render(
       <SempodsProvider runtime={returned} language={language}>
-        <AppShell>
+        <TestShell>
           <p>Tasks mounted</p>
-        </AppShell>
+        </TestShell>
       </SempodsProvider>,
     );
     expect((await screen.findByRole('alert')).textContent).toBe(text);
@@ -931,9 +959,9 @@ it('names why connecting failed instead of a generic failure', async () => {
   cleanups.push(() => f.runtime.dispose());
   render(
     <SempodsProvider runtime={f.runtime}>
-      <AppShell>
+      <TestShell>
         <p>Tasks mounted</p>
-      </AppShell>
+      </TestShell>
     </SempodsProvider>,
   );
   await screen.findByText('Tasks mounted');
@@ -970,26 +998,35 @@ it.each([
         `${callback}?error=access_denied&state=${authorization.searchParams.get('state')}`,
     });
     cleanups.push(() => returned.dispose());
+    // A custom layout without AppAccess: its own recovery control.
+    function Recovery() {
+      const app = useApp();
+      const { activeId } = useAppState();
+      return (
+        <button onClick={() => void app.authorize(activeId!)}>
+          {language === 'en' ? 'Sign in' : 'Anmelden'}
+        </button>
+      );
+    }
     render(
       <SempodsProvider runtime={returned} language={language}>
         <main>
           <CallbackNotice />
-          <ConnectionControls />
+          <Recovery />
         </main>
       </SempodsProvider>,
     );
     expect((await screen.findByRole('alert')).textContent).toBe(text);
-    // The person can sign in again or connect another Pod right there.
-    expect(
+    // The person can sign in again right there.
+    const navigations = f.navigate.mock.calls.length;
+    fireEvent.click(
       screen.getByRole('button', {
         name: language === 'en' ? 'Sign in' : 'Anmelden',
       }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole('button', {
-        name: language === 'en' ? 'Connect' : 'Verbinden',
-      }),
-    ).toBeTruthy();
+    );
+    await waitFor(() =>
+      expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+    );
   },
 );
 
@@ -1063,7 +1100,7 @@ it('shows the no-contexts message when the Pod grants no readable context', asyn
   f.setCatalogue(async () => catalogue([], []));
   render(
     <SempodsProvider runtime={session.runtime}>
-      <ConnectionControls />
+      <AppAccess appName="Tasks" open />
     </SempodsProvider>,
   );
   await act(async () => {
@@ -1075,121 +1112,6 @@ it('shows the no-contexts message when the Pod grants no readable context', asyn
   expect(
     (screen.getByLabelText('Data context') as HTMLSelectElement).disabled,
   ).toBe(true);
-});
-
-it.each([
-  [
-    'en',
-    'Change sharing',
-    'Sign out',
-    'Signing out only applies to this device.',
-  ],
-  [
-    'de',
-    'Freigabe ändern',
-    'Abmelden',
-    'Die Abmeldung gilt nur für dieses Gerät.',
-  ],
-] as const)(
-  'an active connection offers to update access rather than to sign in (%s)',
-  async (language, label, signOut, note) => {
-    const f = fixture();
-    const session = await f.login();
-    cleanups.push(() => session.runtime.dispose());
-    render(
-      <SempodsProvider runtime={session.runtime} language={language}>
-        <ConnectionControls />
-      </SempodsProvider>,
-    );
-    const button = await screen.findByRole('button', { name: label });
-    expect(
-      screen.queryByRole('button', {
-        name: language === 'en' ? 'Sign in' : 'Anmelden',
-      }),
-    ).toBeNull();
-    const local = screen.getByRole('button', { name: signOut });
-    expect(
-      document.getElementById(local.getAttribute('aria-describedby')!)
-        ?.textContent,
-    ).toBe(note);
-    // It still re-authorizes the same connection.
-    await act(async () => button.click());
-    await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
-  },
-);
-
-it('AppShell preserves title/style/content and hides management until explicitly opened', async () => {
-  const f = await connected();
-  render(
-    <SempodsProvider runtime={f.runtime}>
-      <AppShell title="My notebook" style={{ maxWidth: 480 }}>
-        <Form />
-      </AppShell>
-    </SempodsProvider>,
-  );
-  await screen.findByDisplayValue('Original');
-  expect(
-    screen.getByRole('heading', { level: 1, name: 'My notebook' }),
-  ).toBeTruthy();
-  expect(screen.getByRole('main').style.maxWidth).toBe('480px');
-  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
-  const field = screen.getByLabelText('Title');
-  fireEvent.change(field, { target: { value: 'Mounted draft' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
-  expect(
-    screen.getByRole('heading', { level: 2, name: 'Pods & sharing' }),
-  ).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Check access' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Pods & sharing' }));
-  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
-  expect(screen.getByLabelText('Title')).toBe(field);
-  expect((field as HTMLInputElement).value).toBe('Mounted draft');
-});
-
-it('standalone ConnectionControls shows readable names while preserving exact values and full addresses', async () => {
-  const f = await connected();
-  render(
-    <SempodsProvider runtime={f.runtime}>
-      <ConnectionControls podNames={{ [pod]: 'Personal Pod' }} />
-    </SempodsProvider>,
-  );
-  await screen.findByRole('option', { name: 'work' });
-  expect(
-    (screen.getByRole('option', { name: 'work' }) as HTMLOptionElement).value,
-  ).toBe(work);
-  expect(screen.getByRole('option', { name: 'Personal Pod' })).toBeTruthy();
-  const details = screen.getByText('Full addresses').closest('details')!;
-  expect(details.textContent).toContain(work);
-  expect(details.textContent).toContain(personal);
-  expect(details.textContent).toContain(pod);
-  const exactAddresses = () =>
-    [...details.querySelectorAll('p, dd')].filter(
-      (entry) => entry.textContent === work,
-    );
-  expect(exactAddresses()).toHaveLength(1);
-  // An unavailable selected context still needs its full address outside the readable list.
-  f.setCatalogue(async () => catalogue([personal], []));
-  await act(() => f.runtime.loadContexts(f.id));
-  expect(exactAddresses()).toHaveLength(1);
-});
-
-it('distinguishes an unconnected preset from a same-named active Pod and exposes both addresses', async () => {
-  const other = 'https://pod.example/bob';
-  const f = fixture({ preset: { podUrl: other } });
-  const session = await f.login();
-  cleanups.push(() => session.runtime.dispose());
-  render(
-    <SempodsProvider runtime={session.runtime}>
-      <ConnectionControls podNames={{ [pod]: 'Shared', [other]: 'Shared' }} />
-    </SempodsProvider>,
-  );
-  await screen.findByRole('option', { name: `Shared · ${pod}` });
-  const signIn = screen.getByRole('button', { name: 'Sign in' });
-  expect(signIn.parentElement!.textContent).toContain(`Shared · ${other}`);
-  const details = screen.getByText('Full addresses').closest('details')!;
-  expect(
-    [...details.querySelectorAll('dd')].map((entry) => entry.textContent),
-  ).toEqual(expect.arrayContaining([pod, other]));
 });
 
 it.each(['access', 'connections'] as const)(
@@ -1225,7 +1147,7 @@ it.each(['access', 'connections'] as const)(
         {kind === 'access' ? (
           <AppAccess appName="Notes" open />
         ) : (
-          <ConnectionControls />
+          <AppAccess appName="Tasks" open />
         )}
         <Form />
       </SempodsProvider>,
@@ -1248,9 +1170,6 @@ it.each(['access', 'connections'] as const)(
     ).toBe(work);
     expect(screen.getByLabelText('Title')).toBe(field);
     expect((field as HTMLInputElement).value).toBe('Unsaved');
-    const details = screen.getByText('Full addresses').closest('details')!;
-    expect(details.textContent).toContain(work);
-    expect(details.textContent).toContain(personal);
     labels = { [work]: 'Arbeit' };
     await act(() => f.runtime.loadContexts(f.id));
     // Unchanged catalogue authority reuses the selected label; no sweep or refresh.
@@ -1312,4 +1231,24 @@ it('keeps a connection-scoped app draft through a Context selection without aski
   );
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(discard).not.toHaveBeenCalled();
+});
+
+it('keeps the delete question through a view notification that leaves access unchanged', async () => {
+  const f = await connected();
+  const { deletes } = deletions(f);
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Form />
+    </SempodsProvider>,
+  );
+  await screen.findByDisplayValue('Original');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  const ask = screen.getByRole('alertdialog', asked);
+  // An unchanged catalogue reload notifies the view without changing access.
+  await act(async () => {
+    await f.runtime.loadContexts(f.id);
+  });
+  expect(screen.getByRole('alertdialog', asked)).toBe(ask);
+  fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(deletes).toEqual(['"v1"']));
 });

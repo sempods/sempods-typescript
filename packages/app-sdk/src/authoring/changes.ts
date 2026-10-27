@@ -1,5 +1,5 @@
-import type { BoundView } from '../runtime/view.js';
-import { observationOf } from '../runtime/binding.js';
+import type { BoundPod, BoundView } from '../runtime/view.js';
+import { observationOf, podObservationOf } from '../runtime/binding.js';
 
 // Consumers of one bound target observe its own writes: one Context of one
 // connection's authorization lifetime, across its selected and explicit
@@ -13,7 +13,8 @@ const starts = new WeakMap<
   object,
   { count: number; readonly listeners: Set<() => void> }
 >();
-function notify(entries: Iterable<() => void>) {
+/** Calls each listener; one that throws does not stop the others. */
+export function notify(entries: Iterable<() => void>) {
   for (const listener of entries) {
     try {
       listener();
@@ -33,8 +34,23 @@ export function observeWrites(view: BoundView, listener: () => void) {
     entries.delete(listener);
   };
 }
+// A confirmed write anywhere on a Pod, for overviews that discover which
+// Contexts hold a type: the first item in another Context changes that set.
+// Keyed like Context observation: one connection's authorization lifetime.
+const podListeners = new WeakMap<object, Set<() => void>>();
+/** Observes this app's confirmed writes in any Context of the reader's Pod. */
+export function observePodWrites(pod: BoundPod, listener: () => void) {
+  const target = podObservationOf(pod);
+  let entries = podListeners.get(target);
+  if (!entries) podListeners.set(target, (entries = new Set()));
+  entries.add(listener);
+  return () => {
+    entries.delete(listener);
+  };
+}
 export function changed(view: BoundView) {
   notify(listeners.get(observationOf(view)) ?? []);
+  notify(podListeners.get(podObservationOf(view)) ?? []);
 }
 function startsOf(view: BoundView) {
   const target = observationOf(view);

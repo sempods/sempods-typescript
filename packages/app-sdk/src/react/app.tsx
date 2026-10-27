@@ -3,7 +3,6 @@ import {
   Fragment,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useSyncExternalStore,
   useState,
@@ -19,21 +18,31 @@ import {
   type LocaleOptions,
 } from '../index.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
+import { ConfirmDialog } from './confirm.js';
+import { useCommands } from './commands.js';
+import { knownContexts } from './access-presentation.js';
+import { contextName, distinctName } from './names.js';
 const Context = createContext<{
   readonly controller: AppController;
   readonly actions: AppActions;
   readonly retainContext: () => () => void;
   /** Catalogue discovery for an explicit target; asks for no selection. */
   readonly retainDiscovery: () => () => void;
+  /** An app-owned Context switch (`useContexts`) selects instead of AppAccess. */
+  readonly retainSwitch: () => () => void;
 } | null>(null);
 /**
  * Whether any Context demand exists, apart from the stable owner above: a
  * demand change re-renders only the hooks that read it, not every editor host.
  */
-const Demand = createContext({ selection: false, discovery: false });
+const Demand = createContext({
+  selection: false,
+  discovery: false,
+  switching: false,
+});
 /**
  * Guarded user actions for custom screens and replacement controls. Each
- * guarded action (all except `refreshContexts`) resolves `false`, discarding
+ * guarded action (all except `refreshContexts`, `loadContextLabels` and `retryRestore`) resolves `false`, discarding
  * nothing, if the connection that was active when the person was asked stops
  * being active outside a guarded action.
  */
@@ -54,6 +63,17 @@ export interface AppActions {
   disconnect(id: string): Promise<boolean>;
   /** Reload a connection's context catalogue (access facts). */
   refreshContexts(id: string): Promise<unknown>;
+  /**
+   * Read the labels of at most 20 explicitly named readable Contexts into
+   * `catalogue.labels`, for example for a list menu; see
+   * `BrowserRuntime.loadContextLabels`. Display text only; not guarded.
+   */
+  loadContextLabels(id: string, iris: readonly string[]): Promise<void>;
+  /**
+   * Restore a saved session again after its Pod was unreachable
+   * (`session.restorable`); see `BrowserRuntime.retryRestore`. Not guarded.
+   */
+  retryRestore(id: string): Promise<void>;
   /** Run local row/page navigation under the same leave policy. */
   navigate(action: () => void | Promise<void>): Promise<boolean>;
 }
@@ -97,6 +117,25 @@ export function useAppFacts<T>(
   };
   return useSyncExternalStore(app.subscribe, read, read);
 }
+/**
+ * Internal: whether no guarded change or its prompt holds writes back, as a
+ * subscribed value: lanes read it from the snapshot while rendering, so a
+ * hook using them renders again once a change ends.
+ */
+export function useWriteGate() {
+  return useAppFacts((s) => !s.changing && !s.confirmingLeave);
+}
+/** Internal: the active connection, while signed in, and its catalogue. */
+export function activeCatalogue(s: AppSnapshot) {
+  const connection = s.connections.find((c) => c.id === s.activeId);
+  const active =
+    connection?.session.kind === 'active' ||
+    connection?.session.kind === 'renewing';
+  return {
+    activeId: active ? connection.id : null,
+    catalogue: active ? connection.catalogue : undefined,
+  };
+}
 /** Pass one runtime created outside render. The provider consumes its single initializer. */
 export function SempodsProvider({
   runtime,
@@ -125,6 +164,9 @@ export function SempodsProvider({
       authorize: (id: string) => controller.authorize(id),
       disconnect: (id: string) => controller.disconnect(id),
       refreshContexts: (id: string) => runtime.loadContexts(id),
+      loadContextLabels: (id: string, iris: readonly string[]) =>
+        runtime.loadContextLabels(id, iris),
+      retryRestore: (id: string) => runtime.retryRestore(id),
       navigate: (action: () => void | Promise<void>) =>
         controller.navigate(action),
     });
@@ -134,17 +176,20 @@ export function SempodsProvider({
   const retainContext = useRetain(setDemands);
   const [discoveries, setDiscoveries] = useState(0);
   const retainDiscovery = useRetain(setDiscoveries);
+  const [switches, setSwitches] = useState(0);
+  const retainSwitch = useRetain(setSwitches);
   // Only whether any demand exists reaches consumers: another retain or
   // release does not re-render every SDK hook.
   const selection = demands > 0;
   const discovery = discoveries > 0;
+  const switching = switches > 0;
   const value = useMemo(
-    () => ({ ...owner, retainContext, retainDiscovery }),
-    [owner, retainContext, retainDiscovery],
+    () => ({ ...owner, retainContext, retainDiscovery, retainSwitch }),
+    [owner, retainContext, retainDiscovery, retainSwitch],
   );
   const demand = useMemo(
-    () => ({ selection, discovery }),
-    [selection, discovery],
+    () => ({ selection, discovery, switching }),
+    [selection, discovery, switching],
   );
   const app = owner.controller;
   useEffect(() => {
@@ -234,6 +279,154 @@ export function useContextDiscovery(active: boolean) {
 export function useDiscoveryDemand() {
   return useContext(Demand).discovery;
 }
+/** Internal: whether the app renders its own Context switch (`useContexts`). */
+export function useSwitchDemand() {
+  return useContext(Demand).switching;
+}
+
+/** A readable Context as an app's switch shows it. */
+export interface ContextChoice {
+  readonly iri: string;
+  /** Its label, else a readable last path segment; duplicates add the IRI. */
+  readonly name: string;
+  /** Whether this app may change data there, not only read it. */
+  readonly writable: boolean;
+}
+/**
+ * The readable Contexts of the active connection for an app-owned switch, such
+ * as a list switch in the header. It loads the catalogue in both modes, reads
+ * the labels of up to 20 Contexts once, and keeps known Contexts during a
+ * reload. Without a remembered or preset Context it selects one itself, the
+ * first writable, else the first readable, so `AppAccess` offers no chooser of
+ * its own; management then names only the selected Context. `select` runs
+ * under the leave policy and resolves `false` when refused or not selectable.
+ */
+export function useContexts() {
+  const value = useContext(Context);
+  if (!value) throw new Error('SempodsProvider is required.');
+  useDemand(true, 'discovery');
+  const { retainSwitch, actions } = value;
+  useEffect(() => retainSwitch(), [retainSwitch]);
+  const { connection, preset } = useAppFacts(
+    (s) => ({
+      connection: s.connections.find((c) => c.id === s.activeId),
+      preset: s.preset,
+    }),
+    shallowEqual,
+  );
+  const active =
+    connection?.session.kind === 'active' ||
+    connection?.session.kind === 'renewing';
+  const catalogue = active ? connection.catalogue : undefined;
+  // An exact preset keeps the app in its one Context.
+  const fixed =
+    preset?.podUrl === connection?.podUrl ? preset?.contextIri : undefined;
+  const contexts = useMemo(() => {
+    const readable = (knownContexts(catalogue) ?? []).filter(
+      (entry) => entry.readable && (!fixed || entry.iri === fixed),
+    );
+    const labels =
+      catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
+    const iris = readable.map((entry) => entry.iri);
+    const label = (iri: string) => contextName(iri, labels);
+    // Equal labels add the short name ("Tasks · work"); names that are still
+    // equal after that, whatever made them so, add the IRI.
+    const candidate = new Map(
+      iris.map((iri) => {
+        const plain = contextName(iri, undefined);
+        const shared = iris.some(
+          (other) => other !== iri && label(other) === label(iri),
+        );
+        return [
+          iri,
+          shared && label(iri) !== plain
+            ? `${label(iri)} · ${plain}`
+            : label(iri),
+        ];
+      }),
+    );
+    return readable.map((entry): ContextChoice => ({
+      iri: entry.iri,
+      name: distinctName(entry.iri, iris, (iri) => candidate.get(iri)!),
+      writable: entry.writable,
+    }));
+  }, [catalogue, fixed]);
+  const id = active ? connection.id : null;
+  const selectedIri = active ? connection.selectedContext : null;
+  // Labels for the names, once per set of Contexts (display text only).
+  const labelled =
+    catalogue?.kind === 'ready'
+      ? contexts
+          .slice(0, 20)
+          .map((entry) => entry.iri)
+          .join(' ')
+      : '';
+  useEffect(() => {
+    if (id && labelled)
+      void actions.loadContextLabels(id, labelled.split(' ')).catch(() => {});
+  }, [actions, id, labelled]);
+  // The runtime already chose a remembered or preset Context when it could.
+  const fallback =
+    catalogue?.kind === 'ready' && !selectedIri
+      ? (contexts.find((entry) => entry.writable) ?? contexts[0])?.iri
+      : undefined;
+  useEffect(() => {
+    if (fallback) void actions.selectContext(fallback).catch(() => {});
+  }, [actions, fallback]);
+  const select = useCallback(
+    async (iri: string) => {
+      if (iri === selectedIri) return true;
+      try {
+        return await actions.selectContext(iri);
+      } catch {
+        return false;
+      }
+    },
+    [actions, selectedIri],
+  );
+  const retry = useCallback(async () => {
+    if (id) await actions.refreshContexts(id).catch(() => {});
+  }, [actions, id]);
+  const { error } = useSdkLocale();
+  // A failure before the Pod's consent page, kept for its connection only.
+  const [shareFailure, setShareFailure] = useState<{
+    readonly id: string;
+    readonly cause: unknown;
+  } | null>(null);
+  const share = useCallback(async () => {
+    if (!id) return false;
+    setShareFailure(null);
+    try {
+      return await actions.authorize(id);
+    } catch (cause) {
+      setShareFailure({ id, cause });
+      return false;
+    }
+  }, [actions, id]);
+  return {
+    contexts,
+    selected: contexts.find((entry) => entry.iri === selectedIri) ?? null,
+    select,
+    /** Signed in, but no Contexts known yet. */
+    loading:
+      active && !knownContexts(catalogue) && catalogue?.kind !== 'failed',
+    /** The catalogue failed; known Contexts may still show. */
+    failed: catalogue?.kind === 'failed',
+    retry,
+    /** Whether `share` can ask the Pod now (a signed-in connection). */
+    canShare: id !== null,
+    /**
+     * Asks the Pod to share more Contexts with this app: its consent page
+     * opens, and the catalogue reloads on return. Runs under the leave policy.
+     */
+    share,
+    /** Why the last `share` failed before reaching the Pod, in the UI language. */
+    shareProblem:
+      shareFailure && shareFailure.id === id ? error(shareFailure.cause) : null,
+  };
+}
+/** What `useContexts` returns. */
+export type ContextList = ReturnType<typeof useContexts>;
 function useDemand(active: boolean, kind: 'selection' | 'discovery') {
   const value = useContext(Context);
   if (!value) throw new Error('SempodsProvider is required.');
@@ -286,85 +479,33 @@ export function useWorkflowAccess() {
       })) ?? [],
   };
 }
-/**
- * A native modal dialog in the browser's top layer: it stays visible and
- * operable above an app's own `showModal()` dialog, while the guarded content
- * (including that dialog) is inert.
- */
+/** Asks before a guarded transition discards a draft or unresolved write. */
 function LeaveConfirmation() {
   const app = useController();
   const { confirmingLeave, unconfirmedLeave } = useAppState();
   const m = useSdkLocale().messages.controls;
-  const dialog = useRef<HTMLDialogElement>(null);
-  const stay = useRef<HTMLButtonElement>(null);
   const [failed, setFailed] = useState(false);
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    if (!confirmingLeave || !element) return;
-    setFailed(false);
-    const previous = element.ownerDocument.activeElement as HTMLElement | null;
-    // Environments without top-layer support (jsdom) still show it in place.
-    if (typeof element.showModal === 'function') {
-      if (!element.open) element.showModal();
-    } else element.setAttribute('open', '');
-    stay.current?.focus();
-    return () => {
-      if (typeof element.close === 'function') element.close();
-      else element.removeAttribute('open');
-      previous?.focus();
-    };
-  }, [confirmingLeave]);
+  const [asked, setAsked] = useState(confirmingLeave);
+  if (asked !== confirmingLeave) {
+    setAsked(confirmingLeave);
+    if (confirmingLeave) setFailed(false);
+  }
   if (!confirmingLeave) return failed ? <p role="alert">{m.failure}</p> : null;
   return (
-    <dialog
-      ref={dialog}
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="sempods-leave-title"
-      data-sempods-ui="leave"
-      style={{
-        background: 'white',
-        color: '#172b32',
-        border: 0,
-        padding: 24,
-        maxWidth: 'min(420px, calc(100vw - 32px))',
-        borderRadius: 12,
-      }}
-      onCancel={(e) => {
-        // Escape and other close requests keep the draft, as Stay does.
-        e.preventDefault();
-        app.cancelLeave();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          app.cancelLeave();
-        }
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          const buttons = e.currentTarget.querySelectorAll('button');
-          const target = e.target === buttons[0] ? buttons[1] : buttons[0];
-          target?.focus();
-        }
+    <ConfirmDialog
+      open
+      ui="leave"
+      title={m.leaveTitle}
+      cancel={m.stay}
+      confirm={m.leave}
+      onCancel={() => app.cancelLeave()}
+      onConfirm={() => {
+        void app.confirmLeave().catch(() => setFailed(true));
       }}
     >
-      <style href="sempods-leave" precedence="sempods">
-        {'[data-sempods-ui="leave"]::backdrop { background:#0009; }'}
-      </style>
-      <h2 id="sempods-leave-title">{m.leaveTitle}</h2>
       <p>{unconfirmedLeave ? m.leaveUnconfirmed : m.leaveBody}</p>
       {failed && <p role="alert">{m.failure}</p>}
-      <button ref={stay} onClick={() => app.cancelLeave()}>
-        {m.stay}
-      </button>{' '}
-      <button
-        onClick={() => {
-          void app.confirmLeave().catch(() => setFailed(true));
-        }}
-      >
-        {m.leave}
-      </button>
-    </dialog>
+    </ConfirmDialog>
   );
 }
 
@@ -385,8 +526,7 @@ export function useSelection<T = string>() {
   const view = useView();
   const [state, setState] = useState({ view, selected: null as T | null });
   if (state.view !== view) setState({ view, selected: null });
-  return {
-    selected: state.view === view ? state.selected : null,
+  const { select } = useCommands([app, view], {
     select: (selected: T | null) => {
       if (!view || app.getSnapshot().view !== view)
         return Promise.resolve(false);
@@ -396,5 +536,6 @@ export function useSelection<T = string>() {
         if (app.getSnapshot().view === view) setState({ view, selected });
       });
     },
-  };
+  });
+  return { selected: state.view === view ? state.selected : null, select };
 }

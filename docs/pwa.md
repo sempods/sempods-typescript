@@ -14,7 +14,7 @@ What “PWA-ready” means here:
   no queue of changes: a write that may have reached the Pod is never sent again
   automatically, so the SDK's “not confirmed” recovery stays the only path.
 
-Installed apps are experimental in 0.5 (see
+Installed apps are experimental (see
 [supported environments](../README.md#supported-environments)): sign-in returns
 to the app in the same window, and that return must land in the storage that
 holds the sign-in attempt. Check your target devices with the list at the end.
@@ -171,8 +171,8 @@ Open `http://127.0.0.1:5173/`, reload once (the worker controls pages opened
 after its installation), sign in and add a task. In the browser's developer
 tools, the application panel should list the manifest and an active worker;
 the cache should contain only built files. Switch the network off and reload:
-the app opens, and your Pod connection is still listed; reads fail until the
-network returns.
+the app opens, says the Pod cannot be reached and keeps you signed in. Switch the
+network on: the session restores without a reload or a new sign-in.
 
 ## Without Vite
 
@@ -231,13 +231,13 @@ sent elsewhere. Host or CDN logs should not keep full callback URLs.
 
 ## What people see
 
-| Situation                            | Behaviour                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| No network at start                  | The app opens from the cache; the stored connection remains; context lists and reads fail visibly |
-| Network lost while saving            | The editor shows “not confirmed”; nothing is resent automatically                                 |
-| New version downloaded               | A notice; the new version starts after all windows of the app are closed                          |
-| Second window of the same app        | It reports that the app is open elsewhere, when both share the same browser storage               |
-| Browser cleared site data or storage | The person signs in again; the SDK never falls back to a memory-only session                      |
+| Situation                            | Behaviour                                                                                                                                                       |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No network at start                  | The app opens from the cache; the person stays signed in, sees that the Pod cannot be reached and can **Try again**; the session restores by itself once online |
+| Network lost while saving            | The editor shows “not confirmed”; nothing is resent automatically                                                                                               |
+| New version downloaded               | A notice; the new version starts after all windows of the app are closed                                                                                        |
+| Second window of the same app        | It reports that the app is open elsewhere, when both share the same browser storage                                                                             |
+| Browser cleared site data or storage | The person signs in again; the SDK never falls back to a memory-only session                                                                                    |
 
 A missing network is not a logout or a revoked permission, and the app should
 not present it as one. Whether an installed app and a browser tab share storage
@@ -251,7 +251,8 @@ Record the device, operating system, browser and version for each:
 - [ ] Install the app, open it from the home screen or app list, sign in. Does
       the Pod's sign-in return into the installed app and complete there?
 - [ ] Reload and reopen the installed app: still signed in, same context.
-- [ ] Offline start: the app opens; going online again restores reads.
+- [ ] Offline start: the app opens without signing out; going online again
+      restores the session without a reload.
 - [ ] Deploy a new version: the notice appears; after closing and reopening,
       the new version runs and the session remains.
 - [ ] Open the installed app and a browser tab of it at the same time.
@@ -264,8 +265,8 @@ finding. Do not work around it by moving tokens or sign-in state between apps.
 ## Not covered yet
 
 An immediate “reload to update” button is deliberately missing. It needs a
-page-level leave check: `useApp().navigate()` asks only about local drafts, while
-a creation draft or an unconfirmed creation belongs to the target and would be
-lost by a reload. Background
+page-level leave check: `useApp().navigate()` does not ask about target-scoped
+drafts, such as a creation draft or an unconfirmed creation, which a reload would
+lose. Background
 sync, push notifications and offline write queues are out of scope; the last
 would conflict with “never resend an uncertain write”.

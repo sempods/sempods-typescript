@@ -6,8 +6,19 @@ automatic conversion of legacy app data or stored credentials.
 
 ## From 0.5.1 to 0.6.0
 
-The minor changes defaults and adds options; upgrade both packages together.
-Check these points:
+This minor release changes some defaults and result types and adds options;
+upgrade both packages together.
+
+**Needs action in most apps:** check mutation results for
+`{ kind: 'not-sent', reason }` where code tested for `undefined`; replace `AppShell`/`ConnectionControls` with
+`AppAccess`; pin `language="en" locale="en"` if the UI must stay English in
+other browsers; add `problem` to hand-built failure outcomes; handle the
+session kind `leaving` in exhaustive switches; drop app-side `valid` filters
+over list items; compare creation outcomes with `toMatchObject` (they now
+carry `iri`); find editor and dialog buttons by name, not position. The other
+points add options or change the look.
+
+All points:
 
 - **Edit failure details.** Hand-built `UpdateOutcome`, `RemoveSnapshotOutcome`
   and `CreateOutcome` failures now need `problem`, for example
@@ -20,10 +31,12 @@ Check these points:
   `locale` or `language` alone keeps its previous meaning; `createLocale` and
   `resolveLocale` are unchanged and read no browser globals.
 - **Cancelling a re-authorization keeps the session.** When the provider
-  answers a signed-in connection's re-authorization with `access_denied`, or
-  the person comes back without a callback, the earlier session resumes while
-  it is still valid: the report says `interaction: 'cancelled'` and
-  `resumed: true`, and the connection stays `active`. Every other failure
+  answers a signed-in connection's re-authorization with `access_denied`, the
+  earlier session resumes while it is still valid: the report says
+  `interaction: 'cancelled'` and `resumed: true`, and the connection stays
+  `active`. When the person comes back without a callback (back navigation, an
+  abandoned attempt), it resumes the same way during startup, with
+  `interaction: 'none'` and the connection going `restoring` → `active`. Every other failure
   still ends it; a successful narrower grant replaces the earlier one. Code
   that treated a cancelled callback as "signed out" checks the connection's
   session instead.
@@ -32,7 +45,8 @@ Check these points:
   `signed-out` until the page unloads, and keeps its catalogue, selection and
   grants. Its handles no longer dispatch. Switches over `session.kind` add a
   `leaving` case: keep the current screen and offer no sign-in. The SDK
-  components show `controls.leaving` (optional in `UiMessages`).
+  components show `controls.leaving` (optional in `UiMessages`) instead of a
+  sign-in action, and `AccessNotice` shows nothing: no access was lost.
 - **Neutral denial wording.** A provider's `access_denied` does not say whether
   the person cancelled or declined, so `controls.signInCancelled` and
   `errors.oauth` for `denied` now say that no access was granted and suggest
@@ -42,6 +56,44 @@ Check these points:
   provider's `error_description` is still never shown or interpreted. Tests
   that match the old texts need the new ones; pass `messages.controls` to keep
   your own.
+- **Offline start keeps the session.** When restoring a saved session cannot
+  reach its Pod (offline, `5xx`, `408`, `429`), the connection ends with
+  `restorable: true` instead of looking signed out. `AppAccess` shows
+  `controls.unreachable` (optional in `UiMessages`)
+  with **Try again** instead of **Sign in**; coming back online restores the
+  session by itself. Custom controls check `session.restorable` and call
+  `runtime.retryRestore(id)` or `useApp().retryRestore(id)`. Test doubles that
+  implement `BrowserRuntime` add the method.
+- **Deep links through sign-in.** `returnTo` also accepts a function, called
+  when each sign-in or re-authorization starts, so a person who navigated to
+  `/items/add` inside the app returns there after the callback. A string keeps
+  its meaning. The result is checked like a string; an unsafe address rejects
+  the sign-in with a `configuration` error.
+- **`AppShell` and `ConnectionControls` are removed.** Both predate `AppAccess`.
+  Replace `AppShell` with your own header and a **Pods & sharing** button
+  beside `AppAccess`:
+
+  ```tsx
+  const [open, setOpen] = useState(false);
+  <header>
+    <h1>My tasks</h1>
+    <button aria-expanded={open} onClick={() => setOpen(!open)}>
+      {useSdkLocale().messages.controls.dataAccess}
+    </button>
+  </header>
+  <AppAccess appName="My tasks" headingLevel={2} open={open} />
+  <TargetScreen>{/* your screen */}</TargetScreen>
+  ```
+
+  Replace standalone `ConnectionControls` with `AppAccess open`, or with your
+  own controls over the guarded `useApp()` actions next to `CallbackNotice`
+  and `AccessNotice`. The replacement slot stays: `AppAccess`
+  `components={{ Connections }}` now types its props as `ConnectionsProps`
+  (was `ConnectionControlsProps`). The CSS aliases `--sempods-access-bg`,
+  `-text`, `-muted`, `-line` and `-accent` are removed; use the `--sempods-*`
+  names. The TODO example no longer ships the known-Pod sign-in recipe: use
+  `AppAccess` with a `preset` (and `podAddress="hidden"` for one permitted Pod).
+
 - **Stored sessions.** 0.6 reads records of 0.5. A re-authorization written by
   0.6 holds the earlier session; downgrading to 0.5 is not supported.
 - **Leave confirmation in the top layer.** The provider's "Discard unsaved
@@ -52,19 +104,147 @@ Check these points:
   working. Without top-layer support (for example jsdom) it renders in place.
 - **`AppAccess` description.** The new optional `description` prop shows a
   short line under the app name on the sign-in screen; it is display only.
-- **Lists can keep their rows while reloading.** `useList`, `useLoad` and
-  `usePodLoad` accept `{ retain: true }`; `createViewLoader` takes the same
-  option as a third argument. With it, `LoadState`'s `loading` and `failed`
-  carry the last data as `previous`. Without it nothing changes. Code that
-  builds `LoadState` values itself still compiles; exhaustive checks over
-  `kind` are unchanged.
+- **Lists keep their rows while reloading.** `useList` now does this by
+  default: its `loading` and failed `state` carry the last rows as `previous`,
+  and its new `data` is what to render (current or kept rows). Pass
+  `retain: false` for the 0.5 behaviour. `useLoad` and `usePodLoad` accept
+  `{ retain: true }`; `createViewLoader` takes the same option as a third
+  argument. Code that builds `LoadState` values itself still compiles;
+  exhaustive checks over `kind` are unchanged.
+- **Management as a dialog, with fewer details.** `AppAccess` takes
+  `onClose`: with `open` it shows management as a native modal dialog (title,
+  **Close**, Escape, a click beside it) that checks the access again when it
+  opens, so it has no **Check access**. Replace an app-owned dialog around
+  `AppAccess` with `open={open} onClose={() => setOpen(false)}`. Management in
+  general no longer shows the app icon or **Full addresses**, names one
+  readable, selected Context instead of offering a choice, and shows the chosen
+  Context's access instead of the **Available to this app** list, which remains
+  only where there is no selection (on-demand management). Tests that looked
+  for those elements in management need updating.
+- **Write lanes belong to the controller (#156).** A pending or unresolved
+  write of `useFieldUpdate` or `useCreation` keeps its outcome and leave guard
+  while its screen is unmounted, remounted or hidden by `<Activity>`; before,
+  unmounting dropped it, and hiding let a guarded change pass a pending write.
+  A guarded change now asks about such a write even when no screen shows it.
+  `useCreation` forms of one collection now share one creation: while it is
+  pending, unconfirmed or held for a same-IRI retry, every such form (also
+  one remounted or shown again) shows it, locked, and none sends another; a
+  hidden or unmounted form starts no new creation. Two forms of the same
+  collection that should create independently need a new `id` option each.
+  Changing `collection` or `id` resets the draft like a definition change.
+  A field definition change no longer drops a pending write (and no longer
+  warns about it).
+- **Editors belong to the controller.** `useResourceEditor` and
+  `useContextEditor` keep their editor's draft, pending save, review and leave
+  guard while the screen is hidden by `<Activity>` or remounted, and return the
+  same editor; before, hiding or unmounting disposed it, dropped the draft,
+  ignored a pending save's outcome and let a guarded change pass it. A guarded
+  change now asks about unsaved editor work even when no screen shows it. A
+  definition change for the same subject still starts a fresh editor (and
+  warns about discarded work).
+- **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane
+  per resource; new `mutate.for(item)` returns a row's `data` (with a
+  confirmed update shown at once), `canMutate`, `notice`, `update(change)` and
+  `remove()`, and an unresolved write survives its row being unmounted;
+  `unresolved` lists the IRIs that still need a check, so an app can show
+  `mutate.for(iri).notice` for a row that left the list. After a confirmed
+  update, the snapshot it was made from stays locked until the list reads
+  again.
+  `canMutate`, `outcome`, `notice` and `acknowledge` keep their list-wide
+  meaning. A write for another resource is no longer refused while one is
+  pending or unresolved; apps that disable on `canMutate` behave as before.
+- **Mutation results are never `undefined` (needs action).** `update`,
+  `remove` and `create` of `useFieldUpdate`, and `useCreation`'s `create`,
+  resolve `{ kind: 'not-sent', reason }` when they send nothing
+  (`unavailable`, `busy`, `unresolved`, `stale`, `invalid`, `ended`) and
+  otherwise the sent write's outcome, also when the target ended meanwhile (it
+  was `undefined`). Replace checks for `undefined`. A batch stops at the first
+  result that is not `created`; only an item not sent because the target
+  `ended` returns to the input.
+- **Stable commands, more types, `data` on loads.** Hook commands keep their
+  identity for one target and definition. New exported types: `FieldUpdate`,
+  `FieldUpdateRow`, `FieldUpdateState`, `FieldUpdateNotice`, `NotSent`,
+  `ContextList`. `useLoad` and `usePodLoad` return `data` like `useList`.
+  `locale` and `language` accept `undefined` (same as leaving them out).
+- **Smaller conveniences.** `<UnresolvedNotices of={mutate} shown={items} />`
+  renders the notices of unresolved writes whose row is gone; `useLoad` and
+  `usePodLoad` take `key` (a changed value reads again, without kept data);
+  `<AccessNotice only="write" />` says only that the target is read-only;
+  `text(…, { trim: true })` stores values without outer whitespace in creation
+  and update (remove app-side `.trim()` before `create()`); `DraftOf` also
+  takes a definition (`type Task = DraftOf<typeof taskFields>`).
+- **Problems are announced at once.** `UpdateNotice` and `ResourceEditor`
+  render failures, conflicts and unconfirmed outcomes with `role="alert"`
+  (confirmed successes keep `role="status"`); tests that found them by the
+  `status` role look for `alert`.
+- **App texts and sharing.** `useMessages({ en, de })` returns the app's own
+  texts in the provider's language (German, when given, needs every key);
+  replace `language === 'de' ? … : …` in components. `useContexts()` returns
+  `canShare`, `share()` and a localized `shareProblem`; replace app code that
+  called `useApp().authorize` with its own error state.
+- **`usePodList`.** A new hook lists one type from every readable Context of
+  the Pod as real snapshots, with a state, problem and retry per Context and a
+  `complete` flag; `LoadNotice` names partially read overviews (new optional
+  message `partialRead`). Nothing existing changes.
+- **`useContextUpdate` (#158).** A new hook writes `usePodList` rows in one
+  click, each in its own Context, with `useFieldUpdate`'s row semantics and a
+  controller-owned lane per resource; `UnresolvedNotices` accepts it. Replace a
+  hand-written `useContextEditor` toggle (open, wait, change, save, close) with
+  `overview.for(item).update(change)`. New optional message `contextProblems`
+  holds SDK texts for `ContextEditorProblem`; drop the app's own map. Nothing
+  existing changes.
+- **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
+  question before it calls `onRemove`, for a delete in a list row with
+  `useFieldUpdate`'s `remove`, shown as a quiet trash icon. Nothing existing
+  changes.
+- **Calmer SDK controls.** Fields in SDK surfaces have an 8px radius and their
+  focus ring on the border; `ResourceEditor`'s **Delete** uses the muted
+  colour; with `onClose` the editor is a card with a tinted background and
+  padding. Apps that drew their own card around an inline editor can drop it;
+  screenshot baselines need updating.
+- **Creating in an explicit Context.** `useCreation` takes `context` to create
+  in a Context other than the selected one, reports `refused`, and resolves every sent `create()` with the captured
+  `iri` (tests comparing the outcome with `toEqual` need the `iri` or
+  `toMatchObject`).
+  `bindCreation` is the headless counterpart. `useDraftGuard` and leave guards
+  accept the scope `explicit` (survives row navigation and Context selection).
+  The [task-with-note recipe](../examples/todo/recipes/task-with-note.tsx)
+  writes one input into two Contexts.
+- **`useContexts()`.** A hook for apps that switch between Contexts in their
+  own UI (a list switch): readable Contexts with names and access, the
+  selected one, a guarded `select`, catalogue state with `retry`, and a default
+  selection (first writable) when nothing is remembered or preset. While it is
+  mounted, `AppAccess` shows no chooser and management names only the selected
+  Context. Replace app-written catalogue, label and selection code with it.
+- **`LoadNotice`.** `<LoadNotice {...list} />` renders a read's loading,
+  failure, cancelled and unavailable states with a retry, a note for kept rows
+  after a failed refresh, and the count of entries it cannot show, in the SDK's
+  languages. It replaces app-written branches over `list.state.kind`.
+- **Lists skip values the definition does not accept.** `listSubjects` and
+  `snapshots` (client SDK) count a subject whose values fail the definition's
+  `valid` (for example an empty required text) in `skipped` instead of
+  returning it: no update could write such a row back. Remove app-side filters
+  such as `items.filter((item) => definition.valid(item.data))`.
+- **`ResourceEditor` `onClose`, Enter and the action order.** With `onClose`
+  (pass the guarded `() => select(null)`) the editor works in place: Cancel or
+  Escape discards and closes, and a confirmed save or delete closes it. In
+  every editor Enter in a text field saves, actions read as text with Save
+  filled, Delete moves to the end and asks in a modal dialog (role
+  `alertdialog`, as the leave confirmation; it was an inline `group`), and both
+  dialogs follow the `--sempods-*` tokens, including dark mode; tests that find buttons by position
+  should find them by name.
+- **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
+  `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,
+  readable Contexts into `catalogue.labels`, for example for a list menu.
+  Nothing changes without the call: only the selected Context's label loads
+  automatically. Test doubles that implement `BrowserRuntime` add the method.
 - **Quiet success.** `UpdateNotice` and `ResourceEditor` accept `quiet` to show
   nothing for a confirmed save, creation or deletion; problems and unconfirmed
   outcomes still show.
-- **Management shows the connected Pod first.** With `open`, `AppAccess` lists
-  the connected Pod, its readable Contexts with **This app can read** / **This
-  app can read and change**, then the actions and **Full addresses**; signing in
-  to another Pod moved to a collapsed **Connect another Pod** at the end.
+- **Management shows the connected Pod first.** With `open`, `AppAccess`
+  starts with the connected Pod and its access (see "Management as a dialog"
+  above for what it no longer shows); signing in to another Pod moved to a
+  collapsed **Connect another Pod** at the end.
   End-to-end tests that fill **Pod address** in management first expand that
   section. New message keys `controls.contextAccess`, `canRead`, `canChange`
   and `connectAnother` are optional in `UiMessages`.
@@ -77,7 +257,7 @@ Check these points:
 
 ## From 0.5.0 to 0.5.1
 
-The patch keeps public APIs, message keys and result shapes. Check these points:
+The patch keeps public APIs, existing message keys and result shapes. Check these points:
 
 - **AppAccess wording.** The default EN/DE texts name one action once:
   **Pod address** / **Pod-Adresse** (`controls.yourPod`), **Pods & sharing** /
@@ -219,7 +399,7 @@ New in 0.5:
 - `AppAccess` accepts `podAddress="hidden"` to omit the Pod address from
   signing in when the runtime permits exactly one Pod. It defaults to
   `'visible'`, so existing apps are unchanged; see
-  [login composition](react-authoring.md#login-without-an-app-frame).
+  [login composition](react-authoring.md#sign-in-and-pod-addresses).
 
 ## From 0.3 to 0.4
 
@@ -376,20 +556,16 @@ subjects as strings; no app code needs to change. Browser support is unchanged.
    old and new app interoperability before using existing personal data. Test a
    clean install and a returning browser separately.
 
-The portable OAuth API has changed during the preview: `prepareAuthorization`
-uses protocol input with optional development options; browser session envelopes,
-attempt lifetime and return navigation belong to app-sdk. Use the
-[client reference](../packages/client-sdk/README.md) for the current portable API,
-and the runtime for browser applications. Avoid adapting an old auth flow by
-casting its objects to new types.
+Use the [client reference](../packages/client-sdk/README.md) for the portable
+OAuth API and the runtime for browser applications. Do not adapt an old auth flow
+by casting its objects to new types.
 
 ## Know what persists
 
 The runtime stores validated, versioned session records in IndexedDB and uses Web
 Locks for one active runtime per configuration. The current namespace uses identity
 kind plus the did:web client ID, or the dynamic redirect URI. Display-name changes
-are not a new namespace. There is no automatic migration from the earlier
-configuration-derived preview namespace. Unsupported or corrupt records are
+are not a new namespace. Unsupported or corrupt records are
 reported as unreadable and retained; they are not silently converted or erased.
 See [the runtime contract](browser-runtime.md) for details.
 
@@ -416,7 +592,7 @@ notes so recovery can be deliberate.
 | Unreadable record                                 | Record only its safe reported status and SDK version; investigate compatibility before clearing anything    |
 | Unconfirmed data write                            | Use the editor/update recovery on the original resource; session reconnection is not proof the write failed |
 
-Use guarded Disconnect to remove a readable connection and its stored secret
+Use guarded **Sign out** (`disconnect`) to remove a readable connection and its stored secret
 material; it does not revoke server grants or delete Pod data. If unreadable state
 makes a full browser site-data reset necessary, first preserve unsaved work and
 obtain the person's agreement: clearing site data can remove every app's local

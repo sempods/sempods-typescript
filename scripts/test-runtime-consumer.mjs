@@ -81,6 +81,14 @@ try {
     join(root, 'examples/todo/recipes/pod-overview.tsx'),
     join(temp, 'pod-overview.tsx'),
   );
+  await cp(
+    join(root, 'examples/todo/recipes/overview-toggle.tsx'),
+    join(temp, 'overview-toggle.tsx'),
+  );
+  await cp(
+    join(root, 'examples/todo/recipes/task-with-note.tsx'),
+    join(temp, 'task-with-note.tsx'),
+  );
   await writeFile(
     join(temp, 'tsconfig.json'),
     JSON.stringify({
@@ -156,7 +164,8 @@ try {
   let consent;
   let refreshes = 0;
   let overviewRefuse = false;
-  let delayedOffline = false;
+  /** A failing discovery status for the delayed Pod: 503 is transient, 404 is not. */
+  let delayedOffline = 0;
   let delayedScope = 'tasks';
   let slowCatalogueFailing = false;
   // The expiring Pod issues short-lived tokens and refuses them after expiry,
@@ -176,6 +185,22 @@ try {
   let overviewNoteWrites = 0;
   // Notes created in the overview Pod's second Context, by IRI.
   const overviewCreated = new Map();
+  // The one-click recipe's task, ticked in its own Context (#134, #136).
+  let toggleTask = {
+    status: 'https://schema.org/PotentialActionStatus',
+    version: 1,
+  };
+  const toggleWrites = [];
+  // The task-with-note recipe's creations, and whether notes are refused.
+  const splitCreated = [];
+  let splitRefuseNotes = false;
+  let toggleConflict = false;
+  const toggleBody = () => ({
+    '@id': 'urn:toggle-task',
+    '@type': ['https://schema.org/Action'],
+    'https://schema.org/name': [{ '@value': 'Buy milk' }],
+    'https://schema.org/actionStatus': [{ '@id': toggleTask.status }],
+  });
   /** The subject IRI a `/_system/resources/` URL addresses. */
   const resourceIri = (url) =>
     Buffer.from(url.pathname.split('/').at(-1), 'base64url').toString();
@@ -233,7 +258,9 @@ try {
         });
         if (
           url.searchParams.get('identity') === 'overview' ||
-          url.searchParams.get('identity') === 'expiring'
+          url.searchParams.get('identity') === 'expiring' ||
+          url.searchParams.get('identity') === 'toggle' ||
+          url.searchParams.get('identity') === 'split'
         ) {
           res.end(
             '<html><div id="app"></div><script type="module" src="/overview.js"></script></html>',
@@ -294,7 +321,7 @@ try {
       // readable only after a delay, both after the callback and on restore.
       if (name === 'delayed' && url.pathname.includes('/.well-known/')) {
         if (delayedOffline) {
-          res.writeHead(503);
+          res.writeHead(delayedOffline);
           res.end();
           return;
         }
@@ -402,7 +429,11 @@ try {
           access_token: token(
             base,
             client,
-            name === 'widgets-pod' || name === 'overview-pod' || expiring
+            name === 'widgets-pod' ||
+              name === 'overview-pod' ||
+              name === 'toggle-pod' ||
+              name === 'split-pod' ||
+              expiring
               ? ''
               : name === 'delayed'
                 ? delayedScope
@@ -435,23 +466,84 @@ try {
           ['http://www.w3.org/ns/sparql-service-description#namedGraph']: [
             { '@id': base + '/_system/contexts/work' },
             // The overview Pod's second Context holds a note in another Context.
-            ...(name === 'overview-pod'
+            ...(name === 'overview-pod' || name === 'split-pod'
               ? [{ '@id': base + '/_system/contexts/notes' }]
               : []),
           ],
           ['https://schema.sempods.org/readableContext']: [
             { '@id': base + '/_system/contexts/work' },
-            ...(name === 'overview-pod'
+            ...(name === 'overview-pod' || name === 'split-pod'
               ? [{ '@id': base + '/_system/contexts/notes' }]
               : []),
           ],
           ['https://schema.sempods.org/writableContext']: [
             { '@id': base + '/_system/contexts/work' },
-            ...(name === 'overview-pod'
+            ...(name === 'overview-pod' || name === 'split-pod'
               ? [{ '@id': base + '/_system/contexts/notes' }]
               : []),
           ],
         });
+        return;
+      }
+      if (
+        name === 'toggle-pod' &&
+        url.pathname.includes('/_system/resources/')
+      ) {
+        assert.equal(req.headers.cookie, undefined);
+        assert.ok(req.headers.authorization?.startsWith('Bearer '));
+        assert.equal(
+          url.searchParams.get('context'),
+          base + '/_system/contexts/work',
+        );
+        assert.equal(resourceIri(url), 'urn:toggle-task');
+        if (req.method === 'GET') {
+          json(toggleBody(), 200, { etag: `"t${toggleTask.version}"` });
+          return;
+        }
+        assert.equal(req.method, 'PATCH');
+        toggleWrites.push(req.headers['if-match']);
+        if (toggleConflict) {
+          // Another writer changed the task since it was read.
+          toggleTask = { ...toggleTask, version: toggleTask.version + 1 };
+          json({}, 412);
+          return;
+        }
+        if (req.headers['if-match'] !== `"t${toggleTask.version}"`) {
+          json({}, 412);
+          return;
+        }
+        toggleTask = {
+          status: body.includes('CompletedActionStatus')
+            ? 'https://schema.org/CompletedActionStatus'
+            : 'https://schema.org/PotentialActionStatus',
+          version: toggleTask.version + 1,
+        };
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (
+        name === 'split-pod' &&
+        url.pathname.includes('/_system/resources/')
+      ) {
+        // Only creations, each exactly once; notes may be refused.
+        assert.equal(req.headers.cookie, undefined);
+        assert.equal(req.method, 'PUT');
+        assert.equal(req.headers['if-none-match'], '*');
+        const iri = resourceIri(url);
+        const context = url.searchParams.get('context');
+        assert.equal(
+          splitCreated.some((created) => created.iri === iri),
+          false,
+        );
+        if (splitRefuseNotes && context === base + '/_system/contexts/notes') {
+          res.writeHead(403);
+          res.end();
+          return;
+        }
+        splitCreated.push({ iri, context, body: JSON.parse(body) });
+        res.writeHead(201);
+        res.end();
         return;
       }
       if (
@@ -556,6 +648,34 @@ try {
             );
             return;
           }
+        }
+        if (name === 'toggle-pod') {
+          const context = url.searchParams.get('default-graph-uri');
+          if (!context) {
+            // The overview's discovery of Contexts that hold the type.
+            json(
+              {
+                head: { vars: ['graph'] },
+                results: {
+                  bindings: [
+                    {
+                      graph: {
+                        type: 'uri',
+                        value: base + '/_system/contexts/work',
+                      },
+                    },
+                  ],
+                },
+              },
+              200,
+              { 'content-type': 'application/sparql-results+json' },
+            );
+            return;
+          }
+          // One Context's list of tasks, as snapshots.
+          assert.equal(context, base + '/_system/contexts/work');
+          json([toggleBody()]);
+          return;
         }
         if (name === 'overview-pod' || name === 'expiring-pod') {
           assert.equal(url.search, '');
@@ -1072,10 +1192,25 @@ try {
   await presetSignIn.waitFor();
   assert.equal(await page.getByLabel('Pod URL').count(), 0);
   const beforePreset = exchanges;
+  // In-app navigation to a deep link before signing in: `returnTo` as a
+  // function brings the person back there after the callback.
+  await page.evaluate(() =>
+    window.history.pushState(null, '', '/app?identity=preset&view=add#new'),
+  );
   await Promise.all([page.waitForURL('**/callback?**'), presetSignIn.click()]);
-  await page.waitForURL('**/app?identity=preset');
+  await page.waitForURL(
+    (url) =>
+      url.pathname === '/app' &&
+      url.search === '?identity=preset&view=add' &&
+      url.hash === '#new',
+  );
   const presetDraft = page.getByLabel('Preset draft');
   await presetDraft.waitFor();
+  // Back to the plain page once startup has settled (it sets the address
+  // again when it finishes), so the re-authorization below returns there.
+  await page.evaluate(() =>
+    window.history.replaceState(null, '', '/app?identity=preset'),
+  );
   assert.equal(exchanges, beforePreset + 1);
   assert.ok(
     await page.evaluate(
@@ -1121,9 +1256,9 @@ try {
   );
   assert.equal(exchanges, beforePreset + 2);
   console.log(
-    'Packed preset React app: one-click PKCE, exact context, guarded reauthorization, connection reuse and durable reload passed.',
+    'Packed preset React app: one-click PKCE returning to an in-app deep link (returnTo function), exact context, guarded reauthorization, connection reuse and durable reload passed.',
   );
-  for (const surface of ['access', 'controls']) {
+  for (const surface of ['access']) {
     for (const language of ['en', 'de']) {
       const appUrl =
         origin + '/app?identity=signout-' + surface + '-' + language;
@@ -1200,7 +1335,7 @@ try {
     }
   }
   console.log(
-    'Packed sign-out: AppAccess and ConnectionControls with AccessNotice show failed IndexedDB writes once in EN/DE, allow explicit retry and stay signed out after reload.',
+    'Packed sign-out: AppAccess shows failed IndexedDB writes once in EN/DE, allow explicit retry and stay signed out after reload.',
   );
   // The SDK's leave confirmation over an app's own modal dialog (#102): a
   // native top-layer dialog, visible and operable above it, for a dirty editor
@@ -1367,9 +1502,9 @@ try {
     await page
       .getByRole('button', { name: 'Check access', exact: true })
       .waitFor();
-    await page.getByText('Full addresses', { exact: true }).click();
+    // Management names the Pod and still shows its address under the name.
     await page
-      .locator('[data-sempods-access] details')
+      .locator('[data-sempods-access]')
       .getByText(origin + '/alice', { exact: true })
       .waitFor();
     assert.ok(
@@ -1386,7 +1521,90 @@ try {
       });
   }
   console.log(
-    'Packed AppAccess: one/set/free Pod UI, Pod address omitted only for one permitted Pod with podAddress="hidden" and kept in Full addresses, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+    'Packed AppAccess: one/set/free Pod UI, Pod address omitted only for one permitted Pod with podAddress="hidden" and kept in management, readable contexts, explicit keyboard sign-in, hidden usable controls, management, 320px light/dark passed.',
+  );
+  // A declined re-authorization leaves a usable session and one retry. Native
+  // inert removes focus while that retry prepares; a preparation failure must
+  // not send focus to the host while the retry and its error remain visible.
+  for (const language of ['en', 'de']) {
+    const identity = 'access-focus-' + language;
+    const de = language === 'de';
+    await page.goto(origin + '/app?identity=' + identity);
+    await Promise.all([
+      page.waitForURL('**/callback?**'),
+      page
+        .getByRole('button', { name: de ? 'Anmelden' : 'Sign in', exact: true })
+        .click(),
+    ]);
+    await page.waitForURL('**/app?identity=' + identity);
+    const picker = page.getByLabel(de ? 'Datenkontext' : 'Data context', {
+      exact: true,
+    });
+    await picker.focus();
+    await picker.selectOption(origin + '/alice/_system/contexts/work');
+    await page.getByLabel('Preset draft').waitFor();
+    const region = page.getByRole('region', {
+      name: de ? 'Pods & Freigaben' : 'Pods & sharing',
+      exact: true,
+    });
+    await region.waitFor({ state: 'hidden' });
+    const host = page.getByRole('button', {
+      name: 'Pods & sharing',
+      exact: true,
+    });
+    assert.equal(
+      await host.evaluate((el) => el === document.activeElement),
+      true,
+    );
+    await host.click();
+    const retry = region.getByRole('button', {
+      name: de ? 'Freigabe ändern' : 'Change sharing',
+      exact: true,
+    });
+    consent = 'deny';
+    await Promise.all([page.waitForURL('**/callback?**'), retry.click()]);
+    await page.waitForURL('**/app?identity=' + identity);
+    await retry.waitFor();
+    await page.getByLabel('Preset draft').waitFor();
+    await host.evaluate((el) => {
+      window.hostFocusCount = 0;
+      el.addEventListener('focus', () => window.hostFocusCount++);
+    });
+    let failPreparation;
+    const preparing = new Promise((resolve) => {
+      failPreparation = resolve;
+    });
+    await page.route(aliceMetadata, async (route) => {
+      await preparing;
+      await route.fulfill({ status: 503, body: 'Discovery unavailable' });
+    });
+    await retry.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-sempods-access]')?.closest('[inert]'),
+    );
+    await page.waitForFunction(() => document.activeElement === document.body);
+    failPreparation();
+    await region.getByRole('alert').waitFor();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('[data-sempods-access]')?.closest('[inert]'),
+    );
+    assert.equal(await region.isVisible(), true);
+    assert.equal(await retry.isEnabled(), true);
+    assert.equal(
+      await page.evaluate(() => window.hostFocusCount),
+      0,
+      'A visible retry failure must not focus the host (' + language + ')',
+    );
+    assert.equal(
+      await host.evaluate((el) => el === document.activeElement),
+      false,
+    );
+    await page.unroute(aliceMetadata);
+  }
+  console.log(
+    'Packed AppAccess focus (EN/DE): hidden recovery returns to the host; native inert during a failed re-authorization retry does not focus the host while retry/error stay visible.',
   );
   // A Pod whose provider answers login_required: the specific cause (EN/DE),
   // shown once and without a kept-draft claim, until the person acts.
@@ -1478,11 +1696,24 @@ try {
   await page.reload();
   await settled('hidden');
   assert.deepEqual(await accessTrace(), ['loading', 'hidden']);
-  delayedOffline = true;
+  // An unreachable Pod keeps the session: Try again restores it, no sign-in.
+  delayedOffline = 503;
+  await page.reload();
+  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
+  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  assert.equal(
+    await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
+    0,
+  );
+  delayedOffline = 0;
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await settled('hidden');
+  // A discovery that fails for good ends the session; it asks to sign in.
+  delayedOffline = 404;
   await page.reload();
   await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
   assert.deepEqual(await accessTrace(), ['loading', 'connection']);
-  delayedOffline = false;
+  delayedOffline = 0;
   delayedScope = '';
   await Promise.all([
     page.waitForURL('**/callback?**'),
@@ -1493,7 +1724,7 @@ try {
   assert.deepEqual(await accessTrace(), ['loading', 'connection']);
   delayedScope = 'tasks';
   console.log(
-    'Packed AppAccess, one Pod on demand: loading status only (no Full addresses) from callback and restore until the delayed Pod reader is readable, then hidden; ended session and missing required scopes show recovery directly passed.',
+    'Packed AppAccess, one Pod on demand: loading status only (no Full addresses) from callback and restore until the delayed Pod reader is readable, then hidden; an unreachable Pod offers Try again and restores, an ended session and missing required scopes show recovery directly passed.',
   );
   // A demanded Context catalogue that answers after a delay: with a preset
   // Context the target settles by itself, so sign-in and restore show only the
@@ -1810,6 +2041,160 @@ try {
   assert.equal(expiredRejections, probes);
   console.log(
     'Packed short-lived tokens: renewal before dispatch for Pods refusing expired tokens with or without a challenge, no expired token sent, refused renewal ends in a visible sign-in and recovers passed.',
+  );
+  // The one-click recipe (#158): a task ticked in its own Context through
+  // `usePodList` and `useContextUpdate`, kept in every frame while it reloads.
+  const toggleList = (url) =>
+    url.pathname === '/toggle-pod/_system/sparql/query' &&
+    url.searchParams.has('default-graph-uri');
+  await page.goto(origin + '/app?identity=toggle');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=toggle');
+  const milk = page
+    .locator('ul')
+    .getByRole('checkbox', { name: 'Buy milk', exact: true });
+  const milkState = () =>
+    page.evaluate(() => {
+      const box = document.querySelector('ul input[type="checkbox"]');
+      return box && { checked: box.checked, disabled: box.disabled };
+    });
+  await page.waitForFunction(
+    () =>
+      document.querySelector('ul input[type="checkbox"]')?.disabled === false,
+  );
+  await page.evaluate(() => {
+    window.__toggleEmpty = 0;
+    window.__toggleObserver = new window.MutationObserver(() => {
+      if (!document.querySelector('ul input[type="checkbox"]'))
+        window.__toggleEmpty++;
+    });
+    window.__toggleObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  });
+  let releaseToggle;
+  const heldToggle = new Promise((resolve) => (releaseToggle = resolve));
+  await page.route(toggleList, async (route) => {
+    await heldToggle;
+    await route.continue();
+  });
+  const toggleReload = page.waitForRequest((request) =>
+    toggleList(new URL(request.url())),
+  );
+  await milk.click();
+  await toggleReload;
+  // Saved once with the read version. The confirmed tick shows at once; the
+  // snapshot it was made from stays locked until the list reads again.
+  assert.deepEqual(toggleWrites, ['"t1"']);
+  assert.deepEqual(await milkState(), { checked: true, disabled: true });
+  const toggleReloaded = page.waitForResponse((response) =>
+    toggleList(new URL(response.url())),
+  );
+  releaseToggle();
+  await toggleReloaded;
+  await page.unroute(toggleList);
+  await page.waitForFunction(() => {
+    const box = document.querySelector('ul input[type="checkbox"]');
+    return box?.checked === true && box.disabled === false;
+  });
+  assert.equal(
+    await page.evaluate(() => {
+      window.__toggleObserver.disconnect();
+      return window.__toggleEmpty;
+    }),
+    0,
+  );
+  // A conflict shows the row's notice with its comparison: nothing is resent
+  // beyond the single rebase, and the box stays as the Pod last confirmed.
+  toggleConflict = true;
+  await milk.click();
+  const changed = page
+    .locator('ul li')
+    .filter({ hasText: 'The pod has changed. Compare before continuing.' });
+  await changed.waitFor();
+  assert.deepEqual(toggleWrites, ['"t1"', '"t2"', '"t3"']);
+  assert.deepEqual(await milkState(), { checked: true, disabled: true });
+  toggleConflict = false;
+  await changed
+    .getByRole('button', { name: 'Check current version', exact: true })
+    .click();
+  await changed
+    .getByRole('button', { name: 'I have checked the pod', exact: true })
+    .click();
+  // Checked and acknowledged: the row is usable again and a new tick writes
+  // against the current version.
+  await page.waitForFunction(
+    () =>
+      document.querySelector('ul input[type="checkbox"]')?.disabled === false,
+  );
+  await milk.click();
+  await page.waitForFunction(() => {
+    const box = document.querySelector('ul input[type="checkbox"]');
+    return box?.checked === false && box.disabled === false;
+  });
+  assert.equal(toggleWrites.length, 4);
+  assert.equal(toggleTask.status, 'https://schema.org/PotentialActionStatus');
+  console.log(
+    'Packed one-click overview recipe: usePodList with useContextUpdate, tick in its own Context with one If-Match write, overview kept in every frame while reloading, conflict notice with check and acknowledgement and no resend, recovered tick passed.',
+  );
+  // The task-with-note recipe (#149): one input written into two Contexts.
+  await page.goto(origin + '/app?identity=split');
+  await Promise.all([
+    page.waitForURL('**/callback?**'),
+    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+  ]);
+  await page.waitForURL(origin + '/app?identity=split');
+  const splitContexts = origin + '/split-pod/_system/contexts/';
+  // A label wrapping its field names it with the field's text, so the
+  // fields are found as elements.
+  const recipe = page.getByRole('region', {
+    name: 'New task with a private note',
+  });
+  const taskInput = recipe.locator('input');
+  const noteInput = recipe.locator('textarea');
+  const linkOf = (created) =>
+    created.body['https://schema.org/about']?.[0]?.['@id'];
+  await taskInput.fill('Buy milk');
+  await noteInput.fill('Oat, not cow');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector('textarea')?.value === '',
+  );
+  assert.deepEqual(
+    splitCreated.map((created) => created.context),
+    [splitContexts + 'work', splitContexts + 'notes'],
+  );
+  assert.equal(linkOf(splitCreated[1]), splitCreated[0].iri);
+  // A refused note keeps the created task; the retry sends only the note.
+  splitRefuseNotes = true;
+  await taskInput.fill('Call mum');
+  await noteInput.fill('Ask about the weekend');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page
+    .getByText('The task is saved; its private note is not yet.', {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(splitCreated.length, 3);
+  assert.equal(await noteInput.inputValue(), 'Ask about the weekend');
+  splitRefuseNotes = false;
+  await page
+    .getByRole('button', { name: 'Save the note again', exact: true })
+    .click();
+  await page.waitForFunction(
+    () => document.querySelector('textarea')?.value === '',
+  );
+  assert.deepEqual(
+    splitCreated.slice(2).map((created) => created.context),
+    [splitContexts + 'work', splitContexts + 'notes'],
+  );
+  assert.equal(linkOf(splitCreated[3]), splitCreated[2].iri);
+  console.log(
+    'Packed task-with-note recipe: one input into a shared and a personal Context with a link, a refused note keeps the created task and its retry sends only the note passed.',
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);

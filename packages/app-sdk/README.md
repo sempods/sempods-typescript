@@ -1,8 +1,9 @@
 # @sempods/app-sdk
 
-Connect a browser app to sempods without putting login, tokens or write recovery
-in every screen. The runtime owns durable sessions and target access; authoring
-helpers keep drafts, conditional edits and recovery attached to that target.
+Build a browser app on a person's Pod without writing sign-in, tokens or
+conflict handling yourself. The runtime keeps the session and the access to the
+chosen data area (a Context); the hooks and components keep drafts, safe edits
+and their recovery attached to it.
 
 Choose the entry that fits your UI:
 
@@ -58,12 +59,12 @@ screen and access-management controls, follow the complete
 
 `AppAccess` provides login, context choice and recovery without a mandatory app
 frame. It hides when access is usable, including read-only access. The app owns
-its layout and a way to reopen data-access management. Optional `AppShell` adds a
-title and management control. Use `useList`, `useCreation`, `useFieldUpdate` and
-`useResourceEditor` for data screens, with `ResourceEditor` and `UpdateNotice`
-for editing feedback. See
-[React/headless authoring](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md)
-and the runnable [TODO example](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/README.md).
+its layout and a **Pods & sharing** button that opens management (`open`). The
+[API table](https://github.com/sempods/sempods-typescript/blob/v0.5.0/docs/react-authoring.md#api-at-a-glance)
+maps each screen task (lists, creation, row updates, editors, notices) to its
+hook or component; the runnable
+[TODO example](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/README.md)
+uses them together.
 
 ## Connection and target choices
 
@@ -87,8 +88,8 @@ See [browser runtime](https://github.com/sempods/sempods-typescript/blob/v0.5.0/
 for startup outcomes, restrictions and recovery limits.
 
 If **Sign out** cannot be saved on this device, the connection stays locally
-blocked and exposes an ended session with `saved: false`. `AppAccess` and
-`ConnectionControls` explain the failure and offer signing out again. The
+blocked and exposes an ended session with `saved: false`. `AppAccess` explains
+the failure and offers signing out again. The
 guarded action's Boolean says whether it ran; the retained fact tells custom
 controls that a retry is needed. Successful retry removes the connection.
 
@@ -108,9 +109,18 @@ and `usePodLoad`. Startup and read recovery then request no catalogue. Mount
 **Check access** retries failed discovery explicitly. Preset/remembered targets
 still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
 
+An app that switches Contexts in its own UI, such as a list switch, uses
+`useContexts()`: readable Contexts with names and access, a guarded `select`,
+catalogue state and a default selection; `AppAccess` then shows no chooser.
+
+`useCreation(definition, { initial, collection, context })` creates in an
+explicit Context instead of the selected one; `bindCreation` does the same
+without React. Its draft stays across Context selection and row navigation.
+
 Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
-validated Context's label is fetched; cached labels never gate selection or
-reads. `useContextEditor` edits an overview row in the Context its `GRAPH`
+validated Context's label is fetched automatically; `loadContextLabels(id, iris)`
+on the runtime or `useApp()` reads up to 20 more on demand. Labels never gate
+selection or reads. `useContextEditor` edits an overview row in the Context its `GRAPH`
 binding names, without changing the selection; the
 [copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.5.0/examples/todo/recipes/pod-overview.tsx)
 shows it.

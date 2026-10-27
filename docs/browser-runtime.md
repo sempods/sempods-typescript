@@ -61,8 +61,24 @@ requires HTTPS.
 
 Call `initialize()` once at startup, including on the callback route. Repeated
 calls share one promise and one report. The runtime scrubs callback parameters
-and restores the configured same-origin return location. The host router decides
+and restores the return location stored with the sign-in. The host router decides
 what to render; the runtime does not render login or recovery UI.
+
+`returnTo` names that location: a same-origin path with optional query and hash,
+never the callback path, `//` or OAuth response parameters. A string is checked
+when the runtime is created and used for every sign-in. To keep deep links, pass
+a function instead: it is called each time a sign-in or re-authorization starts,
+and its result is checked the same way.
+
+```ts
+// A person on /items/add?list=groceries signs in and returns there.
+returnTo: () => location.pathname + location.search + location.hash,
+```
+
+An unsafe result rejects that sign-in with a `configuration` error before any
+request. A callback without a matching attempt returns to the string, or to `/`
+for a function. The app's router then shows the page, for example opening an
+add dialog for `/items/add`; Context selection and drafts follow the usual rules.
 
 The report separates interaction (`none`, `completed`, `cancelled`, `failed`)
 from storage (`durable`, `unavailable`, `busy`). Interaction describes the
@@ -93,8 +109,8 @@ its binding:
 | A successful answer                                                         | The new grant replaces the earlier one, also when narrower; never a merge |
 
 Resuming sends no token request and consumes the attempt: a replayed callback
-then fails with `attempt` while the session stays. A first sign-in's denial
-stays signed out. A resume that cannot be stored keeps the attempt, and the next
+then fails with `attempt` while the session stays. A denied first sign-in ends
+its connection with `denied`, as above. A resume that cannot be stored keeps the attempt, and the next
 start resumes it. A refresh claimed before the re-authorization began is not
 kept, so its refresh token is never sent twice. Records written by SDK 0.5 have
 no earlier session and end as before; records written by 0.6 are not supported
@@ -111,8 +127,16 @@ callback's code claim and exchange, nor keep callback parameters in the address
 bar. Disconnect/dispose still prevent late restoration from publishing
 credentials.
 
+A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` during
+discovery) is not a sign-out: the connection ends with that problem and
+`restorable: true`, and the saved session is kept. The runtime restores it again
+when the browser fires `online`, and `retryRestore(id)` tries at once; both go
+through `restoring` to `active` without a token request or a new sign-in. Any
+other restoration failure, such as a changed binding, ends the session.
+
 Configured callback URLs may retain application query parameters, but may not
-contain OAuth response keys (`code`, `response`, `state`, `error`, `iss`).
+contain authorization-response keys (`code`, `state`, `iss`, `error`,
+`error_description`, `error_uri`, `response`).
 Application query keys must be unique, including after percent decoding. Invalid
 configuration is rejected before registration/navigation.
 
@@ -159,14 +183,14 @@ A failed durable retirement keeps the connection locally blocked: disconnect
 returns `blocked-locally` and waiting connects reject with `RuntimeError('storage')`.
 Offer an explicit disconnect retry; do not claim the saved session was removed.
 Disposing the runtime while a connect waits makes it reject with
-`RuntimeError('disconnected')`, without starting new discovery. An explicit
-`connect(preset.podUrl)` has the same reuse behavior. This action alone does not sign in. After startup is
-durable and restoration of the connection has finished, use
-`beginAuthorization(connection.id)` to sign in or update access. React and
-headless authoring consumers use the guarded `app.connect()` action, which does
-both and prefers an already active matching connection. With neither a preset nor
-a sole allowed Pod, omitting the URL is a configuration error. Failed preparation leaves a reusable connection, so a
-retry does not create duplicates.
+`RuntimeError('disconnected')`, without starting new discovery.
+`connect(preset.podUrl)` reuses the same way. Connecting alone does not sign in:
+once startup storage is durable and the connection has finished restoring, call
+`beginAuthorization(connection.id)` to sign in or change sharing. React and
+headless authoring use the guarded `app.connect()`, which does both and prefers
+an already active matching connection. Without a preset or a sole allowed Pod,
+`connect()` needs a URL; omitting it is a configuration error. A failed
+preparation leaves the connection reusable, so a retry creates no duplicate.
 
 An exact configured context takes precedence over a remembered choice for that
 Pod. A fresh successful catalogue must list it as readable before a view can be
@@ -232,10 +256,8 @@ automatically. Other permitted sessions restore independently. The identity-base
 storage namespace and single-tab lease remain unchanged when the policy changes.
 
 `AppAccess` presents one/set/free Pod configuration directly, including the
-finite picker. See [login composition](react-authoring.md#login-without-an-app-frame).
-Legacy `ConnectionControls` still uses `preset` for presentation; combine it with
-`allowedPods` for that UI's single-Pod preset path. Custom controls can read
-`useAppState().allowedPods` too.
+finite picker. See [sign-in composition](react-authoring.md#sign-in-and-pod-addresses).
+Custom controls can read `useAppState().allowedPods` too.
 Configure the policy once outside rendering and use the existing guarded actions
 for Pod/context switches; replacing the runtime first requires settling drafts
 and unresolved operations, as with presets.
@@ -270,20 +292,26 @@ Snapshots contain session, feature-scope and catalogue facts, never credentials.
 `requestedScopes`, `grantedScopes` and `missingRequiredScopes` remain distinct.
 Missing required features block bound operations; a missing optional feature
 does not. The catalogue supplies context rights separately from token scopes.
-The runtime reads a registry description only for the currently selected,
-validated Context, including an explicitly selected, preset or remembered target.
-It publishes `catalogue.labels`: exact IRI → `rdfs:label` (SPS-CTX-032).
-Other picker entries use immediate IRI/derived-name fallbacks, even with a small
-catalogue. No catalogue size triggers a description sweep. Labels are display
-text only, never identities or grants, and never block selection or data reads.
-Pending attempts coalesce; completed successes, absence and failures are cached
-within the connection/access lifetime. Unchanged catalogue reloads and
-reselection reuse that cache; failures retain the fallback without automatic
-retry. Selection changes abort pending label reads and ignore stale responses.
-Revoked/changed Context rights discard that label's authority; changed grants,
-session end or a new authorization generation clear the cache. An unchanged
-credential renewal does not itself refresh labels.
 There is no automatic consent redirect after a refusal.
+
+The runtime reads a registry description automatically only for the selected,
+validated Context (explicit, preset or remembered) and publishes its `rdfs:label`
+in `catalogue.labels`, keyed by exact IRI (SPS-CTX-032). Other picker entries
+show the IRI or a derived name at once; no catalogue size triggers more reads. To
+name other Contexts, for example in a list menu, call
+`loadContextLabels(id, iris)`: up to 20 IRIs per call (more reject with
+`RuntimeError('configuration')` before any request). Only Contexts the ready
+catalogue lists as readable are read, four at a time. The call resolves once its
+reads settle or are dropped; labels arrive through the snapshot. Labels are
+display text only, never identities or grants, and never block selection or data
+reads. Concurrent requests for one Context share one read. Every result (label,
+absence, failure) is cached for the connection's access lifetime: unchanged
+catalogue reloads and reselection reuse it, and failures keep the fallback
+without automatic retry. A selection change drops only the previous selection's
+own pending read, not reads that `loadContextLabels` started or joined. Changed
+rights for a Context drop its label; changed grants, session end or a new
+authorization clear the cache. An unchanged credential renewal does not refresh
+labels.
 
 Select one readable context explicitly. Empty selection does not mean all or
 a default context. A writable target is an application requirement derived
@@ -297,7 +325,7 @@ handles share it: a save that was already under way through an editor on the
 old handle still refreshes lists on the new one when it is confirmed.
 Pending reads resolve promptly as `invalidated` after target/access changes;
 caller cancellation is `cancelled`. The shared loader (`createViewLoader`,
-used by `useLoad` and `usePodLoad`) owns the bounded silent retry. Writes preserve their original client result, including
+used by `useLoad`, `useList` and `usePodLoad`) owns the bounded silent retry. Writes preserve their original client result, including
 an already confirmed `refused 401` or `applied` result after a target change.
 
 A bound 403 triggers one shared catalogue reload for concurrent refusals.
@@ -405,8 +433,9 @@ Context-view `403` recovery retains its existing behavior.
 
 `createAppController(runtime).getSnapshot().pod` exposes the active connection's
 Pod reader whenever its session is signed in, also while startup still settles.
-It is `null` without an active connection, or while that connection restores, is
-signed out or has ended. The snapshot's Context `view`, by contrast, stays `null`
+It is `null` without an active connection, or unless that connection's session is
+`active` or `renewing` (so also while it restores, is leaving, is signed out or
+has ended). The snapshot's Context `view`, by contrast, stays `null`
 until `startup` or `startupError` is set: on a callback page, saved sessions
 restore while the returning sign-in is still being redeemed, and no Context
 screen may start on a connection that sign-in is about to replace. Changing the
@@ -432,8 +461,6 @@ The storage/lock namespace is the identity kind plus the did:web `clientId`, or
 for dynamic identities the `redirectUri`. Display name, object property order and
 scope policy do not affect it. Restored grants are evaluated against the current
 required scopes; the original requested scopes remain continuity evidence.
-This replaces the unreleased prototype's configuration-derived namespace;
-there is no automatic migration of that private prototype's stored records.
 
 A did:web app may move its callback route within its identity (same host and
 DID path prefix). Signed-in sessions, refresh claims and disconnected records
@@ -468,13 +495,15 @@ Connecting a second Pod preserves the first session.
 Discovery retains `authorization_response_iss_parameter_supported`. When true,
 every success or error callback must carry the exact issuer. An empty, duplicate
 or foreign `iss` is rejected. When the server does not announce support, an absent
-`iss` is accepted for compatibility; a present one is still checked. The owner
-accepted the residual mix-up risk for that compatibility case. sempods-kotlin
+`iss` is accepted for compatibility; a present one is still checked. This
+compatibility case keeps a residual mix-up risk (RFC 9207). sempods-kotlin
 announces support, so its callbacks use the strict path. The announcement is also
 part of the saved discovery binding, preventing silent changes on resume.
 
-Abandoned authorization and interrupted claimed records are retained with an
-explicit `interrupted` session problem; an expired authorization reports `expired`.
+A first sign-in left without a callback, an abandoned re-authorization whose
+earlier session cannot resume, and interrupted claimed records are retained with
+an explicit `interrupted` session problem; an expired authorization reports
+`expired`.
 Neither is dispatched or silently retried on startup. Call `beginAuthorization(id)`
 for an explicit new attempt, or `disconnect(id)` to durably remove its secret
 material and hide the connection. Until one of those actions, a retained
@@ -528,8 +557,8 @@ connection's handles and navigate; a failed preparation leaves the connection
 exactly as it was. Between the stored attempt and the page unloading, the
 connection reports `session.kind: 'leaving'` (with the earlier `subject` for a
 re-authorization) and keeps its catalogue, selection and grants for display:
-no request of the earlier session is dispatched, `bind` and `bindPod` throw
-`disconnected`, and the SDK components show a status instead of a sign-in. A
+no request of the earlier session is dispatched, `bind`, `bindContext` and
+`bindPod` throw `disconnected`, and the SDK components show a status instead of a sign-in. A
 page restored from the back/forward cache with its runtime still alive resumes
 the earlier session as above; a host that disposes the runtime on `pagehide`
 recreates it, and its startup resumes it. After the session ended (for example a failed
@@ -555,7 +584,7 @@ connection. The fact survives UI remounts and remains during explicit retries;
 a successful retry removes the connection. It is not persisted across reloads:
 the saved session may still restore. Offer **Sign out** again, not a reload.
 A late exchange cannot resurrect the locally blocked connection.
-`AppAccess` and `ConnectionControls` show this failure next to **Sign out** in
+`AppAccess` shows this failure next to **Sign out** in
 EN/DE (`controls.disconnectFailed`). The ordinary hint notes that sign-out applies
 only to this device: it neither revokes sharing on the Pod, deletes Pod data nor
 signs out at the Pod's provider. `dispose()` releases memory/locks while
@@ -576,10 +605,7 @@ App-sdk owns `SessionBinding` and its storage envelope: configuration and connec
 IDs, generation, record version, attempt timestamps, the ten-minute authorization
 lifetime and the same-origin return location. Its session parser validates that
 envelope before claiming an attempt. These types/parsers are internal; neither
-client consumers nor ordinary browser apps need them. The split retains the current
-version-1 record shape and needs no storage migration. It does not revive records
-from the earlier namespace described above. The incidental `record` helper is not
-public API.
+client consumers nor ordinary browser apps need them.
 
 A client context or runtime `BoundView` can be passed directly to
 `createResourceEditor` from `@sempods/client-sdk/edit`. The consuming UI owns target
@@ -589,8 +615,9 @@ integration tests exercise it with the runtime-bound editor.
 
 ## Evidence and limits
 
-`pnpm test` covers persistence, callback, refresh and invalidation races with
-deterministic transports and the production client. `pnpm test:runtime` installs packed SDKs outside
+In the SDK repository, `pnpm test` covers persistence, callback, refresh and
+invalidation races with deterministic transports and the production client.
+`pnpm test:runtime` installs packed SDKs outside
 the workspace and runs Chromium with real redirects, PKCE exchanges, IndexedDB and
 Web Locks against a loopback server. It checks sequential multi-Pod, reload,
 did:web without DCR, reactive refresh, renewal of expired short-lived tokens
@@ -619,7 +646,8 @@ so the callback must land in the storage that holds the attempt; the runtime nev
 transfers attempts or tokens between storage containers. See
 [supported environments](../README.md#supported-environments).
 
-Owner live validation remains follow-up work. React/AppShell and localized
+Sign-in against a deployed Pod in a real browser is not yet recorded as evidence.
+React `AppAccess` and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
 checks. Multi-tab concurrent operation, revocation and anonymous reading are not
 implemented here.

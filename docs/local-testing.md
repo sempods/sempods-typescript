@@ -86,6 +86,7 @@ version, app origin and browser. Keep credentials and private data out of report
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Connect and consent                            | Sign-in occurs on the Pod/provider; the callback returns to the app; context choice is explicit                                                                                             |
 | Cancel sign-in                                 | Visible cancellation/failure; existing connections and drafts remain usable where eligible                                                                                                  |
+| Cancel **Change sharing**                      | The earlier session resumes with the same context and data; the app says that sharing was not changed and offers **Change sharing** as the one action                                       |
 | Create, list, complete, reopen, rename, delete | Correct resource in the selected context; list updates after confirmed writes; deletion checks the version the person saw                                                                   |
 | Reload                                         | Accepted connection restores; the last readable context is selected again; no app-owned token handling                                                                                      |
 | Change target with a draft                     | Leaving requires confirmation; cancelled navigation preserves the draft                                                                                                                     |
@@ -122,8 +123,8 @@ the access it holds, and the consent screen cannot show the difference. The
 [architecture decisions](decisions.md#read-only-is-the-apps-choice-not-a-grant)
 explain why the SDK has no read-only mode.
 
-**No write path.** For an overview, `usePodLoad` with
-`contextSelection="on-demand"` receives a `BoundPod`, which offers only
+**No write path.** For an overview, `usePodLoad` (typically with
+`contextSelection="on-demand"` on the provider) receives a `BoundPod`, which offers only
 `sparql.select` and `sparql.construct`: no write operation exists on it. Context
 reads through `useLoad` or `useList` are reads too, but every `BoundView`, for
 example from `useView`, `useAppState().view` or `useLoad`'s read function, also
@@ -148,7 +149,7 @@ contexts it reads in the app's notes.
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Connect and consent               | Only the contexts the app reads are granted; an on-demand overview loads without a context choice                                       |
 | Loading, empty and failed         | Loading, an empty result and a failed read look different; a refused or failed read never shows as empty                                |
-| Read access only                  | Where the Pod lets you grant read access alone, the app works fully; `AppShell` may show its read-only notice, which is expected        |
+| Read access only                  | Where the Pod lets you grant read access alone, the app works fully; a read-only notice (`AccessNotice`) is expected                    |
 | Remove read access, Context reads | For `useLoad`/`useList`, displayed data is cleared after revalidation; no fallback to another context                                   |
 | Remove read access, Pod overview  | A `usePodLoad` result stays on screen; after `reload()` it no longer contains that Context's data                                       |
 | No writes                         | The browser's network panel over a full session shows no `PUT`, `PATCH` or `DELETE`; `POST` only for queries, sign-in and token renewal |

@@ -3,7 +3,7 @@ import { createBrowserRuntime } from '@sempods/app-sdk';
 import { UpdateNotice } from '@sempods/app-sdk/react';
 import { TodoApp } from './examples/todo/src/app.js';
 
-// Existing AppShell usage, deliberately without any app stylesheet.
+// The standard TODO screen, deliberately without any app stylesheet.
 const runtime = createBrowserRuntime({
   identity: {
     kind: 'dynamic',
@@ -14,7 +14,7 @@ const runtime = createBrowserRuntime({
   development: 'loopback-http',
 });
 createRoot(document.getElementById('root')!).render(
-  <TodoApp runtime={runtime} legacy>
+  <TodoApp runtime={runtime}>
     <UpdateNotice
       outcome={{ kind: 'unconfirmed' }}
       current={{ title: 'Long comparison text '.repeat(15) }}

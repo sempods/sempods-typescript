@@ -1,14 +1,16 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
+  AccessNotice,
+  LoadNotice,
   UpdateNotice,
   useAppState,
   useCreation,
   useList,
+  useMessages,
   useSdkLocale,
   useWorkflowAccess,
 } from '@sempods/app-sdk/react';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
-import { AccessPanel } from '../recipes/sign-in.js';
 
 const schema = 'https://schema.org/';
 
@@ -32,6 +34,61 @@ export interface WidgetProps {
   readonly fallback?: WidgetFallback | undefined;
 }
 
+/** Keep this region mounted for its target lifetime. Eligibility is a view fact. */
+function AccessPanel({
+  podUrl,
+  children,
+  recovery,
+  fallback = 'hidden',
+}: {
+  readonly podUrl: string;
+  readonly children: ReactNode;
+  readonly recovery?: ReactNode;
+  readonly fallback?: 'hidden' | 'disabled' | { readonly content: ReactNode };
+}) {
+  const access = useWorkflowAccess();
+  const readable =
+    access.connection?.podUrl === podUrl && access.current && access.read;
+  const notice = useRef<HTMLDivElement>(null);
+  const focusInside = useRef(false);
+  const { messages } = useSdkLocale();
+  useEffect(() => {
+    if (!readable && focusInside.current) {
+      notice.current?.focus();
+      focusInside.current = false;
+    }
+  }, [readable]);
+  return (
+    <>
+      <div ref={notice} tabIndex={-1} aria-label={messages.reviewAccess}>
+        {access.connection?.podUrl === podUrl ? (
+          <AccessNotice />
+        ) : (
+          <p role="status">{messages.controls.noTarget}</p>
+        )}
+        {recovery}
+        {!readable && typeof fallback === 'object' && fallback.content}
+      </div>
+      <div
+        hidden={!readable && fallback !== 'disabled'}
+        inert={!readable}
+        onFocusCapture={() => {
+          focusInside.current = true;
+        }}
+        onBlurCapture={(event) => {
+          if (
+            event.relatedTarget &&
+            !event.currentTarget.contains(event.relatedTarget)
+          )
+            focusInside.current = false;
+        }}
+      >
+        {children}
+      </div>
+    </>
+  );
+}
+
 function Frame({
   children,
   recovery,
@@ -53,52 +110,44 @@ function Frame({
   );
 }
 
+const labels = {
+  en: {
+    tasks: 'Tasks',
+    empty: 'No tasks yet.',
+    quickAdd: 'Quick add',
+    newTask: 'New task',
+    add: 'Add',
+  },
+  de: {
+    tasks: 'Aufgaben',
+    empty: 'Noch keine Aufgaben.',
+    quickAdd: 'Schnellerfassung',
+    newTask: 'Neue Aufgabe',
+    add: 'Hinzufügen',
+  },
+};
+
 /** Read-only list: the host's write grant is not required to display tasks. */
 export function TaskListWidget({ fallback }: WidgetProps) {
-  const { state } = useList(taskFields);
-  const { language, error } = useSdkLocale();
-  const source = state.kind === 'ready' ? state.data : undefined;
-  const items = source?.items.filter((item) => taskFields.valid!(item.data));
-  const list =
-    source && items
-      ? { items, skipped: source.skipped + source.items.length - items.length }
-      : undefined;
+  // Rows the definition cannot show are already skipped and counted.
+  const list = useList(taskFields);
+  const m = useMessages(labels);
+  const items = list.data?.items;
   return (
-    <section aria-label={language === 'de' ? 'Aufgaben' : 'Tasks'}>
-      <h2>{language === 'de' ? 'Aufgaben' : 'Tasks'}</h2>
+    <section aria-label={m.tasks}>
+      <h2>{m.tasks}</h2>
       <Frame fallback={fallback}>
-        {state.kind === 'failed' ? (
-          <p role="alert">{error(state.error)}</p>
-        ) : null}
-        {state.kind !== 'ready' && state.kind !== 'failed' ? (
-          <p role="status">
-            {language === 'de' ? 'Wird geladen…' : 'Loading…'}
-          </p>
-        ) : null}
-        {list && (
-          <>
-            {list.items.length === 0 && (
-              <p>
-                {language === 'de' ? 'Noch keine Aufgaben.' : 'No tasks yet.'}
-              </p>
-            )}
-            <ul>
-              {list.items.map((item) => (
-                <li key={item.iri}>
-                  {item.data.title}
-                  {item.data.done ? ' ✓' : ''}
-                </li>
-              ))}
-            </ul>
-            {list.skipped > 0 && (
-              <p>
-                {language === 'de'
-                  ? 'Nicht unterstützte Einträge'
-                  : 'Unsupported entries'}
-                : {list.skipped}
-              </p>
-            )}
-          </>
+        <LoadNotice {...list} />
+        {items?.length === 0 && <p>{m.empty}</p>}
+        {items && (
+          <ul>
+            {items.map((item) => (
+              <li key={item.iri}>
+                {item.data.title}
+                {item.data.done ? ' ✓' : ''}
+              </li>
+            ))}
+          </ul>
         )}
       </Frame>
     </section>
@@ -112,10 +161,10 @@ export function QuickAddWidget({ fallback }: WidgetProps) {
     collection: 'tasks',
   });
   const access = useWorkflowAccess();
-  const { language } = useSdkLocale();
+  const m = useMessages(labels);
   return (
-    <section aria-label={language === 'de' ? 'Schnellerfassung' : 'Quick add'}>
-      <h2>{language === 'de' ? 'Schnellerfassung' : 'Quick add'}</h2>
+    <section aria-label={m.quickAdd}>
+      <h2>{m.quickAdd}</h2>
       <Frame
         fallback={fallback}
         recovery={<UpdateNotice {...creation.notice} />}
@@ -127,7 +176,7 @@ export function QuickAddWidget({ fallback }: WidgetProps) {
           }}
         >
           <label>
-            {language === 'de' ? 'Neue Aufgabe' : 'New task'}
+            {m.newTask}
             <input
               value={creation.draft.title}
               disabled={!access.write || !creation.canEdit}
@@ -136,9 +185,7 @@ export function QuickAddWidget({ fallback }: WidgetProps) {
               }
             />
           </label>
-          <button disabled={!creation.canCreate}>
-            {language === 'de' ? 'Hinzufügen' : 'Add'}
-          </button>
+          <button disabled={!creation.canCreate}>{m.add}</button>
         </form>
       </Frame>
     </section>

@@ -1,31 +1,26 @@
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ComponentType,
-  type ReactNode,
-} from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
   RemoveOutcome,
 } from '@sempods/client-sdk/edit';
-import { useStartCount, type MutationOutcome } from './hooks.js';
 import {
-  useApp,
-  useAppState,
-  useContextDemand,
-  useWorkflowAccess,
-} from './app.js';
+  useStartCount,
+  type FieldUpdate,
+  type FieldUpdateNotice,
+  type MutationOutcome,
+} from './hooks.js';
+import type { ContextResource, ContextUpdate } from './context-update.js';
+import { useAppState, useWorkflowAccess } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { describeFailure, type SdkMessages } from '../locale.js';
 import type { SessionFact } from '../runtime/types.js';
-import { AppAccess } from './access.js';
+import { shownData, type LoadState } from '../authoring/load.js';
+import { knownContexts } from './access-presentation.js';
 import { SdkStyles } from './styles.js';
+import { ConfirmDialog } from './confirm.js';
 import { startCount, succeeded } from '../authoring/changes.js';
 import { editorTarget } from '../authoring/editor.js';
-import { contextName, podName, distinctName } from './names.js';
 
 function Notice({
   children,
@@ -115,10 +110,15 @@ export function UpdateNotice({
                 : m.notSaved;
   const uncertain =
     outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
+  const success =
+    outcome.kind === 'saved' ||
+    outcome.kind === 'created' ||
+    outcome.kind === 'removed';
   return (
     <section data-sempods-ui="notice">
       <SdkStyles />
-      <p role="status">{text}</p>
+      {/* Problems and uncertain outcomes are announced at once. */}
+      <p role={success ? 'status' : 'alert'}>{text}</p>
       {uncertain && (current !== undefined || unreadable) && (
         <section aria-label={m.current}>
           <h3>{m.current}</h3>
@@ -166,6 +166,159 @@ export function UpdateNotice({
   );
 }
 /**
+ * The notices of unresolved writes whose row is not shown, for example a task
+ * deleted elsewhere or filtered out, so their check and acknowledgement stay
+ * reachable: `<UnresolvedNotices of={mutate} shown={list.data?.items} />`,
+ * or for an overview `<UnresolvedNotices of={overview} shown={list.data?.items} />`
+ * with `useContextUpdate` and `usePodList`.
+ */
+export function UnresolvedNotices<D>(
+  props:
+    | {
+        readonly of: Pick<FieldUpdate<D>, 'unresolved' | 'for'>;
+        /** The rows on screen; their notices show with them. */
+        readonly shown: readonly { readonly iri: string }[] | undefined;
+      }
+    | {
+        readonly of: Pick<ContextUpdate<D>, 'unresolved' | 'for'>;
+        /** The overview items on screen; their notices show with them. */
+        readonly shown:
+          | readonly {
+              readonly context: string;
+              readonly snapshot: { readonly iri: string };
+            }[]
+          | undefined;
+      },
+) {
+  // One key per resource: its IRI, or its Context and IRI in an overview.
+  const entries = (props.of.unresolved as readonly Unresolved[]).map(
+    (entry) => ({ entry, key: keyOf(entry) }),
+  );
+  const rows = new Set(
+    (props.shown ?? []).map((row) =>
+      'snapshot' in row
+        ? keyOf({ context: row.context, iri: row.snapshot.iri })
+        : row.iri,
+    ),
+  );
+  const notice = props.of.for as (entry: Unresolved) => {
+    readonly notice: FieldUpdateNotice<D>;
+  };
+  return (
+    <>
+      {entries
+        .filter(({ key }) => !rows.has(key))
+        .map(({ entry, key }) => (
+          <UpdateNotice key={key} {...notice(entry).notice} />
+        ))}
+    </>
+  );
+}
+type Unresolved = string | ContextResource;
+const keyOf = (entry: Unresolved) =>
+  typeof entry === 'string' ? entry : `${entry.context} ${entry.iri}`;
+/**
+ * What a read is doing when its data does not say it: loading before any
+ * data, a failed refresh (its error, a note when kept data is still shown,
+ * and a retry), a cancelled or unavailable read (with a retry) and list
+ * entries that cannot be shown. Renders nothing for ready data otherwise.
+ * Takes the result of `useList`, `useLoad`, `usePodLoad` or `usePodList`:
+ * `<LoadNotice {...list} />`. For `usePodList` it also says how many of the
+ * Contexts could not be read, with a retry of just those.
+ */
+export function LoadNotice({
+  state,
+  reload,
+  contexts,
+}: {
+  readonly state: LoadState<unknown>;
+  readonly reload?: () => unknown;
+  /** Per-Context reads of an overview (`usePodList`). */
+  readonly contexts?: readonly {
+    readonly state: LoadState<unknown>;
+    readonly problem: unknown;
+    readonly retry: () => void;
+  }[];
+}) {
+  const { messages: m, error, format } = useSdkLocale();
+  const c = m.controls;
+  const shown = shownData(state);
+  const skipped =
+    shown !== null &&
+    typeof shown === 'object' &&
+    'skipped' in shown &&
+    typeof shown.skipped === 'number'
+      ? shown.skipped
+      : 0;
+  // Contexts an overview found but could not read: the others are shown.
+  const missing =
+    contexts?.filter(
+      (context) =>
+        context.problem !== null ||
+        context.state.kind === 'failed' ||
+        context.state.kind === 'cancelled' ||
+        context.state.kind === 'unavailable',
+    ) ?? [];
+  const partial =
+    missing.length > 0 && shown !== undefined ? (
+      <section data-sempods-ui="notice">
+        <SdkStyles />
+        <p role="alert">
+          {m.partialRead!(missing.length, contexts!.length, format)}
+        </p>
+        <div className="sp-sdk-actions">
+          <button onClick={() => missing.forEach((context) => context.retry())}>
+            {c.retry}
+          </button>
+        </div>
+      </section>
+    ) : null;
+  const unshown =
+    skipped > 0 ? <Notice>{m.skipped!(skipped, format)}</Notice> : null;
+  // An overview whose first reads have not all answered is still loading,
+  // also when some rows show; a background refresh of shown rows is not.
+  const starting =
+    contexts?.some(
+      (context) =>
+        context.state.kind === 'loading' &&
+        shownData(context.state) === undefined,
+    ) ?? false;
+  if (state.kind === 'loading')
+    return shown === undefined ? (
+      <Notice>{c.loading}</Notice>
+    ) : (
+      <>
+        {starting && <Notice>{c.loading}</Notice>}
+        {partial}
+        {unshown}
+      </>
+    );
+  if (state.kind === 'ready')
+    return (
+      <>
+        {partial}
+        {unshown}
+      </>
+    );
+  const text =
+    state.kind === 'failed'
+      ? `${error(state.error)}${shown === undefined ? '' : ` ${c.stale}`}`
+      : state.kind === 'cancelled'
+        ? c.loadCancelled
+        : c.loadUnavailable;
+  return (
+    <section data-sempods-ui="notice">
+      <SdkStyles />
+      <p role={state.kind === 'failed' ? 'alert' : 'status'}>{text}</p>
+      {reload && (
+        <div className="sp-sdk-actions">
+          <button onClick={() => void reload()}>{c.retry}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+/**
  * Why an ended session is unusable. An interrupted sign-in is found at startup,
  * before any draft. Next to a sign-in action, which navigates away, an expired
  * session keeps none either, and the protocol cause is shown when kept.
@@ -175,6 +328,7 @@ export function endedMessage(
   m: SdkMessages,
   signingIn = false,
 ) {
+  if (session.restorable) return m.controls.unreachable ?? m.controls.readLost;
   if (signingIn && session.failure)
     return describeFailure(m.errors, session.failure);
   return session.problem === 'interrupted' ||
@@ -184,14 +338,28 @@ export function endedMessage(
 }
 /**
  * Explains current access limitations. Failed sign-out retry advice belongs
- * beside the action in ConnectionControls or custom controls.
+ * beside the action in AppAccess or custom controls. While the page
+ * leaves for a sign-in (`leaving`) nothing was lost, so it shows nothing.
  */
-export function AccessNotice() {
+export function AccessNotice({
+  only,
+}: {
+  /**
+   * `write`: only say that the target is read-only, for an app that renders
+   * `AppAccess`, which already explains the other states.
+   */
+  readonly only?: 'write';
+} = {}) {
   const access = useWorkflowAccess();
   const { preset } = useAppState();
   const { messages: m, format } = useSdkLocale();
   const c = access.connection;
+  if (only === 'write')
+    return access.read && !access.write ? (
+      <Notice>{m.controls.readOnly}</Notice>
+    ) : null;
   if (!c) return <Notice>{m.controls.noTarget}</Notice>;
+  if (c.session.kind === 'leaving') return null;
   if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
     return (
       <Notice>
@@ -203,8 +371,8 @@ export function AccessNotice() {
   if (c.missingRequiredScopes.length)
     return <Notice>{m.missingScopes(c.missingRequiredScopes, format)}</Notice>;
   if (c.catalogue.kind === 'failed') return <Notice>{m.catalogueError}</Notice>;
-  if (c.catalogue.kind !== 'ready')
-    return <Notice>{m.cataloguePending}</Notice>;
+  // A reload that still has the earlier Contexts is not unknown access.
+  if (!knownContexts(c.catalogue)) return <Notice>{m.cataloguePending}</Notice>;
   if (!c.selectedContext)
     return (
       <Notice>
@@ -217,266 +385,9 @@ export function AccessNotice() {
   if (!access.write) return <Notice>{m.controls.readOnly}</Notice>;
   return null;
 }
-export interface ConnectionControlsProps {
-  readonly mode?: 'single' | 'multiple';
-  /** Optional app-supplied display names keyed by exact Pod URL. Never identities. */
-  readonly podNames?: Readonly<Record<string, string>>;
-}
-/** All selectors and connection actions use the same leave policy as custom composition. */
-export function ConnectionControls({
-  mode = 'multiple',
-  podNames,
-}: ConnectionControlsProps) {
-  const app = useApp();
-  const state = useAppState();
-  const { messages: m, error } = useSdkLocale();
-  const controls = m.controls;
-  const disconnectId = useId();
-  const [url, setUrl] = useState('');
-  const [busy, setBusy] = useState(false);
-  const inFlight = useRef(false);
-  // The cause decides the message: an invalid URL, discovery, a denied login.
-  const [failure, setFailure] = useState<{ readonly cause: unknown } | null>(
-    null,
-  );
-  const connection = state.connections.find((c) => c.id === state.activeId);
-  const disconnectFailed =
-    connection?.session.kind === 'ended' && connection.session.saved === false;
-  const disconnectHint = disconnectFailed
-    ? controls.disconnectFailed
-    : controls.disconnectHint;
-  const action = async (task: () => Promise<unknown>) => {
-    if (inFlight.current || state.changing || state.confirmingLeave) return;
-    inFlight.current = true;
-    setBusy(true);
-    setFailure(null);
-    try {
-      await task();
-    } catch (cause) {
-      setFailure({ cause });
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  };
-  const active =
-    connection?.session.kind === 'active' ||
-    connection?.session.kind === 'renewing';
-  const fixedContext =
-    state.preset?.podUrl === connection?.podUrl
-      ? state.preset?.contextIri
-      : undefined;
-  const displayedContext = connection?.selectedContext ?? fixedContext;
-  const leaving = connection?.session.kind === 'leaving';
-  const unavailable =
-    busy ||
-    leaving ||
-    !state.startup ||
-    state.startup.storage !== 'durable' ||
-    Boolean(state.startupError) ||
-    state.changing ||
-    state.confirmingLeave;
-  // Only readable contexts can be selected; none at all is its own message.
-  const readable =
-    connection?.catalogue.kind === 'ready'
-      ? connection.catalogue.contexts.filter((c) => c.readable)
-      : [];
-  const podUrls = [
-    ...new Set([
-      ...state.connections.map((entry) => entry.podUrl),
-      ...(state.preset ? [state.preset.podUrl] : []),
-    ]),
-  ];
-  const podLabel = (url: string) =>
-    distinctName(url, podUrls, (value) => podName(value, podNames));
-  const labels =
-    connection?.catalogue.kind !== 'unknown'
-      ? connection?.catalogue.labels
-      : undefined;
-  const contextLabel = (iri: string) =>
-    distinctName(
-      iri,
-      readable.map((entry) => entry.iri),
-      (value) => contextName(value, labels),
-    );
-  return (
-    <section data-sempods-ui="connections" aria-label={controls.choosePod}>
-      <SdkStyles />
-      {state.preset && connection?.podUrl !== state.preset.podUrl && (
-        <div>
-          <span style={{ overflowWrap: 'anywhere' }}>
-            {podLabel(state.preset.podUrl)}
-          </span>{' '}
-          <button
-            disabled={unavailable}
-            onClick={() => void action(() => app.connect())}
-          >
-            {controls.signIn}
-          </button>
-        </div>
-      )}
-      {!state.preset &&
-        (mode === 'multiple' || state.connections.length === 0) && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void action(() => app.connect(url));
-            }}
-            style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}
-          >
-            <label>
-              {controls.podUrl}
-              <input
-                type="url"
-                required
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://pod.example/alice"
-              />
-            </label>
-            <button disabled={unavailable}>{controls.connect}</button>
-          </form>
-        )}
-      {state.connections.length > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            flexWrap: 'wrap',
-            alignItems: 'end',
-          }}
-        >
-          <label>
-            {m.activePod}
-            <select
-              aria-label={m.activePod}
-              value={state.activeId ?? ''}
-              disabled={busy}
-              onChange={(e) =>
-                void action(() => app.selectConnection(e.target.value))
-              }
-            >
-              <option value="" disabled>
-                {controls.choosePod}
-              </option>
-              {state.connections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {podLabel(c.podUrl)}
-                  {state.connections.filter(
-                    (other) => other.podUrl === c.podUrl,
-                  ).length > 1
-                    ? ` · ${state.connections.indexOf(c) + 1}`
-                    : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          {active && !fixedContext && (
-            <label>
-              {m.dataContext}
-              <select
-                aria-label={m.dataContext}
-                value={connection?.selectedContext ?? ''}
-                disabled={
-                  busy ||
-                  connection?.catalogue.kind !== 'ready' ||
-                  readable.length === 0
-                }
-                onChange={(e) =>
-                  void action(() => app.selectContext(e.target.value))
-                }
-              >
-                <option value="" disabled>
-                  {m.chooseContext}
-                </option>
-                {readable.map((c) => (
-                  <option key={c.iri} value={c.iri}>
-                    {contextLabel(c.iri)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {active && fixedContext && (
-            <p style={{ overflowWrap: 'anywhere' }}>
-              {m.dataContext}: {contextLabel(fixedContext)}
-            </p>
-          )}
-          {active &&
-            !fixedContext &&
-            connection?.catalogue.kind === 'ready' &&
-            readable.length === 0 && <p role="status">{m.noContexts}</p>}
-          {leaving && (
-            <p role="status">{controls.leaving ?? controls.loading}</p>
-          )}
-          {connection && (
-            <>
-              <button
-                disabled={
-                  unavailable || connection.session.kind === 'restoring'
-                }
-                onClick={() => void action(() => app.authorize(connection.id))}
-              >
-                {active ? controls.updateAccess : controls.signIn}
-              </button>
-              {active && (
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void action(() => app.refreshContexts(connection.id))
-                  }
-                >
-                  {controls.refresh}
-                </button>
-              )}
-              <button
-                disabled={busy}
-                aria-describedby={disconnectHint ? disconnectId : undefined}
-                onClick={() => void action(() => app.disconnect(connection.id))}
-              >
-                {controls.disconnect}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {connection && disconnectHint && (
-        <p id={disconnectId} role={disconnectFailed ? 'alert' : undefined}>
-          {disconnectHint}
-        </p>
-      )}
-      {(connection || state.preset) && (
-        <details>
-          <summary>{controls.addresses}</summary>
-          <dl>
-            {podUrls.map((url) => (
-              <div key={url}>
-                <dt>{podLabel(url)}</dt>
-                <dd>{url}</dd>
-              </div>
-            ))}
-          </dl>
-          {displayedContext &&
-            !readable.some((entry) => entry.iri === displayedContext) && (
-              <p>{displayedContext}</p>
-            )}
-          <dl>
-            {readable.map((entry) => (
-              <div key={entry.iri}>
-                <dt>{contextLabel(entry.iri)}</dt>
-                <dd>{entry.iri}</dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      )}
-      {failure && <p role="alert">{error(failure.cause)}</p>}
-    </section>
-  );
-}
 /**
  * The outcome of a returning sign-in that failed or was cancelled, with its
- * protocol cause when the runtime kept one. AppShell renders it; custom
+ * protocol cause when the runtime kept one. AppAccess renders it; custom
  * layouts place it themselves. It clears once the person selects another
  * connection, disconnects one or starts a sign-in (`callbackNotice`).
  * Renders nothing otherwise.
@@ -502,63 +413,6 @@ export function CallbackNotice() {
           ? describeFailure(messages.errors, state.startup.failure)
           : messages.controls.failure}
     </Notice>
-  );
-}
-/** Optional app frame: title/management, AppAccess, then startup-gated content.
- * Existing title/style/replacement controls remain supported. Controls now hide
- * with usable access; mode is passed through and is presentation, not Pod policy.
- * Uses inline scoped --sempods-* styling; see the CSP note in the authoring guide.
- */
-export function AppShell({
-  children,
-  title = 'sempods',
-  mode = 'multiple',
-  components = {},
-  style,
-}: {
-  readonly children: ReactNode;
-  readonly title?: string;
-  readonly mode?: 'single' | 'multiple';
-  readonly components?: {
-    readonly Connections?: ComponentType<ConnectionControlsProps>;
-  };
-  readonly style?: React.CSSProperties;
-}) {
-  const [open, setOpen] = useState(false);
-  const state = useAppState();
-  const target = useRef<HTMLButtonElement>(null);
-  const { messages, direction } = useSdkLocale();
-  const access = useWorkflowAccess();
-  const contextRequired = useContextDemand(false);
-  return (
-    <main dir={direction} data-sempods-ui="shell" style={style}>
-      <SdkStyles />
-      <header>
-        <h1>{title}</h1>
-        <button
-          ref={target}
-          data-sempods-button=""
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          {messages.controls.dataAccess}
-        </button>
-      </header>
-      <AppAccess
-        appName={title}
-        headingLevel={2}
-        open={open}
-        focusTarget={target}
-        mode={mode}
-        components={components}
-      />
-      {!open &&
-        contextRequired &&
-        access.read &&
-        !access.write &&
-        access.connection?.catalogue.kind === 'ready' && <AccessNotice />}
-      {state.startup?.storage === 'durable' && !state.startupError && children}
-    </main>
   );
 }
 /**
@@ -610,8 +464,8 @@ function Comparison({
   );
 }
 /** Default save/delete/review UI; children supply only domain fields.
- * Delete asks in place first: only the confirmation sends one conditional
- * DELETE of the version shown. Any later editor state (an edit, a read, another
+ * Delete asks first in a modal dialog, like the leave confirmation: only its
+ * Delete sends one conditional DELETE of the version shown. Any later editor state (an edit, a read, another
  * subject) withdraws the question; cancel or Escape keeps draft and target.
  * Success feedback retires with any later editor state and, for an editor from
  * `useResourceEditor`, when another write on the same target starts.
@@ -624,9 +478,18 @@ export function ResourceEditor<D, U = D>({
   onChanged,
   labels,
   quiet = false,
+  onClose,
 }: {
   /** As for `UpdateNotice`: no message for a confirmed save or delete. */
   readonly quiet?: boolean;
+  /**
+   * An editor that opens in place, for example in a list row: Cancel (or
+   * Escape) discards and closes, and a confirmed save or delete closes it, as
+   * the changed row is the confirmation. Refusals, conflicts and unconfirmed
+   * answers keep it open. Pass the guarded selection reset,
+   * `() => select(null)`.
+   */
+  readonly onClose?: () => unknown;
   readonly editor: Editor<D, U> | null;
   readonly children: (draft: D, change: (draft: U) => void) => ReactNode;
   readonly onChanged?: () => void;
@@ -643,28 +506,14 @@ export function ResourceEditor<D, U = D>({
   } | null>(null);
   // The editor state the person was asked about; any newer state withdraws it.
   const [confirming, setConfirming] = useState<Editor<D>['state'] | null>(null);
-  const question = useId();
   const removeButton = useRef<HTMLButtonElement>(null);
-  const cancelButton = useRef<HTMLButtonElement>(null);
-  const returnFocus = useRef(false);
   const view = editor ? editorTarget(editor) : undefined;
   const starts = useStartCount(view);
   const asking =
     confirming !== null && confirming === editor?.state && confirming.canRemove;
-  useEffect(() => {
-    if (asking) cancelButton.current?.focus();
-    else if (returnFocus.current) {
-      returnFocus.current = false;
-      removeButton.current?.focus();
-    }
-  }, [asking]);
   if (!editor || editor.state.phase === 'loading')
     return <Notice>{m.loading}</Notice>;
   const state = editor.state;
-  const keep = () => {
-    returnFocus.current = true;
-    setConfirming(null);
-  };
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
     // A bound editor counts its own start synchronously in `action()`.
     const pending = action();
@@ -679,17 +528,54 @@ export function ResourceEditor<D, U = D>({
         : { editor, state: editor.state, outcome: result, start },
     );
     if (succeeded(result)) onChanged?.();
+    // Edits made while saving stay open (closing would ask about them).
+    if (
+      result.kind === 'removed' ||
+      (result.kind === 'saved' && !editor.state.dirty)
+    )
+      onClose?.();
+  };
+  const save = () => {
+    if (editor.state.canSave) void act(() => editor.save());
+  };
+  // An explicit Cancel is the decision to discard; switching rows still asks.
+  const cancel = () => {
+    if (editor.state.canDiscard) editor.discard();
+    void onClose?.();
   };
   return (
-    <section data-sempods-ui="editor">
+    <section
+      data-sempods-ui="editor"
+      // In place (a list row): a quiet card, see SdkStyles.
+      data-inline={onClose ? '' : undefined}
+    >
       <SdkStyles />
       {state.draft !== null && state.phase !== 'deleted' && (
-        <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+        <fieldset
+          style={{ border: 0, padding: 0, margin: 0 }}
+          onKeyDown={(event) => {
+            // Enter in a text field saves; Escape cancels an editor in place.
+            // Both belong to an active IME composition first.
+            if (event.nativeEvent.isComposing) return;
+            const field = event.target as HTMLElement;
+            if (
+              event.key === 'Enter' &&
+              field instanceof HTMLInputElement &&
+              !['checkbox', 'radio', 'button', 'submit'].includes(field.type)
+            ) {
+              event.preventDefault();
+              save();
+            } else if (event.key === 'Escape' && onClose) {
+              event.preventDefault();
+              cancel();
+            }
+          }}
+        >
           {children(state.draft, editor.change)}
         </fieldset>
       )}
       {state.problem && (
-        <p role="status">
+        <p role="alert">
           {state.problem.kind === 'refused' ||
           state.problem.kind === 'unavailable'
             ? m.readLost
@@ -721,56 +607,49 @@ export function ResourceEditor<D, U = D>({
           </button>
         </section>
       )}
-      {asking ? (
-        <div
-          role="group"
-          aria-labelledby={question}
-          onKeyDown={(event) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            keep();
-          }}
+      <div className="sp-sdk-actions">
+        <button
+          className="sp-sdk-primary"
+          disabled={!state.canSave}
+          onClick={save}
         >
-          <p id={question}>{m.confirmRemove ?? m.remove}</p>
-          <div className="sp-sdk-actions">
-            <button
-              onClick={() => {
-                // Withdrawn first: a second press cannot send another DELETE.
-                setConfirming(null);
-                if (editor.state === confirming)
-                  void act(() => editor.remove());
-              }}
-            >
-              {m.remove}
-            </button>
-            <button ref={cancelButton} onClick={keep}>
-              {m.cancel}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="sp-sdk-actions">
-          <button
-            disabled={!state.canSave}
-            onClick={() => void act(() => editor.save())}
-          >
-            {m.save}
-          </button>
-          <button
-            ref={removeButton}
-            disabled={!state.canRemove}
-            onClick={() => setConfirming(state)}
-          >
-            {m.remove}
-          </button>
+          {m.save}
+        </button>
+        {onClose ? (
+          <button onClick={cancel}>{m.cancel}</button>
+        ) : (
           <button disabled={!state.canDiscard} onClick={() => editor.discard()}>
             {m.discard}
           </button>
-          {state.phase === 'blocked' && (
-            <button onClick={() => void editor.refresh()}>{m.refresh}</button>
-          )}
-        </div>
-      )}
+        )}
+        {state.phase === 'blocked' && (
+          <button onClick={() => void editor.refresh()}>{m.refresh}</button>
+        )}
+        <button
+          ref={removeButton}
+          className="sp-sdk-end"
+          disabled={!state.canRemove}
+          onClick={() => setConfirming(state)}
+        >
+          {m.remove}
+        </button>
+      </div>
+      {/* Only the dialog's Delete sends one conditional DELETE. */}
+      <ConfirmDialog
+        open={asking}
+        ui="remove"
+        returnFocus={removeButton}
+        cancel={m.cancel}
+        confirm={m.remove}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          // Withdrawn first: a second press cannot send another DELETE.
+          setConfirming(null);
+          if (editor.state === confirming) void act(() => editor.remove());
+        }}
+      >
+        <p>{m.confirmRemove ?? m.remove}</p>
+      </ConfirmDialog>
       {!state.review && (
         <UpdateNotice
           quiet={quiet}
@@ -787,3 +666,90 @@ export function ResourceEditor<D, U = D>({
     </section>
   );
 }
+
+/**
+ * A delete button that asks first, with the dialog and texts of
+ * `ResourceEditor`'s Delete: only the dialog's Delete calls `onRemove`, once,
+ * as it was when the question opened. A row read again meanwhile does not
+ * change what is removed, so a conditional delete of the version shown reports
+ * a newer one as a conflict.
+ * Pass the hook's check and command, for example
+ * `disabled={!row.canMutate}` and `onRemove={row.remove}` for `row = mutate.for(item)`;
+ * the outcome shows where the hook's notice is. A button that becomes disabled
+ * while asking withdraws the question. Without children it is a quiet trash
+ * icon with a 44px target, named Delete or `label`; `className` overrides its
+ * look.
+ */
+export function RemoveButton({
+  onRemove,
+  disabled = false,
+  label,
+  className,
+  children,
+}: {
+  readonly onRemove: () => unknown;
+  readonly disabled?: boolean;
+  /** Accessible name and tooltip, for example `Delete: ${title}`; the icon defaults to Delete. */
+  readonly label?: string;
+  readonly className?: string;
+  /** The button's content instead of the trash icon, for example a text. */
+  readonly children?: ReactNode;
+}) {
+  const m = useSdkLocale().messages.controls;
+  // The action asked about, captured when the question opens.
+  const [asking, setAsking] = useState<{
+    readonly remove: () => unknown;
+  } | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  // Withdrawn for good: enabled again later, it does not reopen.
+  if (asking && disabled) setAsking(null);
+  // The icon shows for absent content (`undefined` or `null`), and then needs a name.
+  const content = children ?? null;
+  const name = label ?? (content === null ? m.remove : undefined);
+  return (
+    <>
+      <SdkStyles />
+      <button
+        ref={button}
+        type="button"
+        data-sempods-ui="remove-button"
+        className={className}
+        aria-label={name}
+        title={name}
+        disabled={disabled}
+        onClick={() => setAsking({ remove: onRemove })}
+      >
+        {content ?? trash}
+      </button>
+      <ConfirmDialog
+        open={asking !== null}
+        ui="remove"
+        returnFocus={button}
+        cancel={m.cancel}
+        confirm={m.remove}
+        onCancel={() => setAsking(null)}
+        onConfirm={() => {
+          // Withdrawn first: a second press cannot remove again.
+          setAsking(null);
+          if (asking) void asking.remove();
+        }}
+      >
+        <p>{m.confirmRemove ?? m.remove}</p>
+      </ConfirmDialog>
+    </>
+  );
+}
+
+const trash = (
+  <svg
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3" />
+  </svg>
+);

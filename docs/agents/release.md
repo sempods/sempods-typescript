@@ -14,7 +14,9 @@ version and commit. Use the [contributor rules](../contributing.md).
   ESM entry points, optional React boundaries, licences and provenance.
 - Review public export/contract changes and migration notes. Version 0.x may change
   APIs between minor versions; patches preserve compatibility. Check release-pinned
-  URLs in package READMEs when preparing the next version; `pnpm check:docs`
+  URLs in package READMEs, the install commands in `docs/quickstart.md` and
+  `docs/hackathon.md`, and the SDK pins in `examples/todo/widgets/package.json`
+  when preparing the next version; `pnpm check:docs`
   requires repository file/directory links there to name that package’s `v<version>`.
 - `pnpm build` writes app-sdk's app-author reference (`docs/` and `examples/` in
   the package) from the maintained sources with `scripts/package-docs.mjs`;
@@ -23,7 +25,8 @@ version and commit. Use the [contributor rules](../contributing.md).
   path is a contract: moving or renaming it needs a migration note.
 - Run `pnpm check` on the exact release candidate. Pack both packages with pnpm into
   a fresh directory and inspect contents and `npm publish --dry-run` output.
-  Record artifact contents/integrity separately from archive byte identity.
+  Compare packages by their extracted file contents, as the publisher does, not by
+  tarball checksum; archive metadata can differ between packs.
 - Prepare concise release notes and the release PR with tested environments and
   unverified live/device cases. An approved older commit is not current approval.
 

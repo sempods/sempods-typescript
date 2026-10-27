@@ -37,10 +37,19 @@ export type SessionFact =
        * not persisted across reloads. Absence makes no claim about persistence.
        */
       readonly saved?: false;
+      /**
+       * The saved session is kept: restoring it failed only because its Pod
+       * could not be reached (offline, `5xx`, `408`, `429`). The runtime
+       * restores it again when the browser comes back online, or on
+       * `retryRestore(id)`. This is not a sign-out; offer a retry, not a
+       * sign-in.
+       */
+      readonly restorable?: true;
     };
 /**
  * Registry labels (`rdfs:label`, SPS-CTX-032) keyed by exact context IRI, read
- * only for the selected, validated Context in the background. Display text only: absent while
+ * in the background for the selected, validated Context and for readable
+ * Contexts named in `loadContextLabels`. Display text only: absent while
  * unread, for contexts without a label and after a failed read; never an
  * identity or a grant.
  */
@@ -135,7 +144,17 @@ export interface BrowserRuntimeOptions {
    */
   readonly allowedPods?: readonly string[];
   readonly identity: ClientIdentity;
-  readonly returnTo?: string;
+  /**
+   * Where the app returns after a sign-in: a same-origin path with optional
+   * query and hash (default `/`), never the callback path, `//` or OAuth
+   * response parameters. A string is checked when the runtime is created. A
+   * function, such as `() => location.pathname + location.search + location.hash`,
+   * is called each time a sign-in or re-authorization starts, so a deep link
+   * reached by in-app navigation survives the sign-in; an unsafe result rejects
+   * that start with a `configuration` error before any request. A callback
+   * without a matching attempt returns to the string, or to `/` for a function.
+   */
+  readonly returnTo?: string | (() => string);
   readonly scopes?: FeatureScopes;
   readonly development?: 'loopback-http';
   readonly fetch?: PodOptions['fetch'];
@@ -190,6 +209,30 @@ export interface BrowserRuntime {
     id: string,
     options?: { readonly signal?: AbortSignal },
   ): Promise<BoundRead<CatalogueResult>>;
+  /**
+   * Reads registry labels for Contexts the app names explicitly, for example
+   * the entries of its own list menu, and publishes them in `catalogue.labels`.
+   * Without this call only the selected Context's label is read.
+   *
+   * At most 20 IRIs per call (more reject with RuntimeError (configuration)
+   * before any request). Only Contexts the ready catalogue lists as readable
+   * are read; others are ignored. Labels are display text, never identities or
+   * grants, and never block selection or reads. Cached, coalesced and
+   * invalidated like the selected label: a failure or absent label keeps the
+   * IRI/name fallback without automatic retry, and changed rights, grants,
+   * session end or a new authorization drop them. A selection change does not
+   * abort them, also when the call joined the selected Context's read in
+   * flight. Resolves once every read it started or joined settled or was
+   * dropped; the labels arrive through the snapshot.
+   */
+  loadContextLabels(id: string, iris: readonly string[]): Promise<void>;
+  /**
+   * Tries again to restore a saved session whose restoration could not reach
+   * its Pod (`session.restorable`), as coming back online does automatically.
+   * The connection reports `restoring`, then `active` or `ended` again. Does
+   * nothing for any other session; never starts a sign-in.
+   */
+  retryRestore(id: string): Promise<void>;
   selectContext(id: string, iri: string): void;
   bind(id: string): BoundView;
   /**

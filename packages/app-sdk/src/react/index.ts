@@ -1,6 +1,6 @@
-export { SdkLocaleProvider, useSdkLocale } from './locale.js';
+export { SdkLocaleProvider, useMessages, useSdkLocale } from './locale.js';
 export { AppAccess } from './access.js';
-export type { AppAccessProps } from './access.js';
+export type { AppAccessProps, ConnectionsProps } from './access.js';
 export {
   SempodsProvider,
   TargetScreen,
@@ -8,10 +8,11 @@ export {
   useApp,
   useAppState,
   useConnections,
+  useContexts,
   useView,
   useWorkflowAccess,
 } from './app.js';
-export type { AppActions } from './app.js';
+export type { AppActions, ContextChoice, ContextList } from './app.js';
 export {
   useLoad,
   usePodLoad,
@@ -27,14 +28,34 @@ export type {
   ContextEditorPhase,
   ContextEditorProblem,
   ContextTarget,
+  FieldUpdate,
+  FieldUpdateNotice,
+  FieldUpdateRow,
+  FieldUpdateState,
   MutationOutcome,
+  NotSent,
 } from './hooks.js';
+export { usePodList } from './pod-list.js';
+export { useContextUpdate } from './context-update.js';
+export type {
+  ContextResource,
+  ContextUpdate,
+  ContextUpdateRow,
+  ContextUpdateState,
+} from './context-update.js';
+export type {
+  PodList,
+  PodListContext,
+  PodListData,
+  PodListItem,
+} from './pod-list.js';
 export {
-  AppShell,
-  ConnectionControls,
   AccessNotice,
   CallbackNotice,
+  LoadNotice,
+  RemoveButton,
   ResourceEditor,
+  UnresolvedNotices,
   UpdateNotice,
 } from './components.js';
-export type { ConnectionControlsProps, FieldLabels } from './components.js';
+export type { FieldLabels } from './components.js';

@@ -4,16 +4,13 @@ import { TodoApp } from './app.js';
 import './style.css';
 
 function mount() {
-  const url = new URL(location.href);
   const runtime = createBrowserRuntime({
     identity: {
       kind: 'dynamic',
       name: 'sempods TODO',
       redirectUri: location.origin + '/callback',
     },
-    returnTo: ['/custom', '/legacy'].includes(url.pathname)
-      ? url.pathname
-      : '/',
+    returnTo: '/',
     development: 'loopback-http',
   });
   const root = createRoot(document.getElementById('root')!);
