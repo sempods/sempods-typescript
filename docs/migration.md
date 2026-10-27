@@ -121,6 +121,19 @@ All points:
   Context's access instead of the **Available to this app** list, which remains
   only where there is no selection (on-demand management). Tests that looked
   for those elements in management need updating.
+- **Write lanes belong to the controller (#156).** A pending or unresolved
+  write of `useFieldUpdate` or `useCreation` keeps its outcome and leave guard
+  while its screen is unmounted, remounted or hidden by `<Activity>`; before,
+  unmounting dropped it, and hiding let a guarded change pass a pending write.
+  A guarded change now asks about such a write even when no screen shows it.
+  `useCreation` forms of one collection now share one creation: while it is
+  pending, unconfirmed or held for a same-IRI retry, every such form (also
+  one remounted or shown again) shows it, locked, and none sends another; a
+  hidden or unmounted form starts no new creation. Two forms of the same
+  collection that should create independently need a new `id` option each.
+  Changing `collection` or `id` resets the draft like a definition change.
+  A field definition change no longer drops a pending write (and no longer
+  warns about it).
 - **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane
   per resource; new `mutate.for(item)` returns a row's `data` (with a
   confirmed update shown at once), `canMutate`, `notice`, `update(change)` and

@@ -277,10 +277,19 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
 - After a confirmed update `row.data` shows the new values while the list
   reads again; until then the row stays locked (`update` would resolve
   `not-sent`, `stale`).
-- No hook per row: unmounting a row would drop its unresolved write. In the
-  list hook an unresolved write and its leave guard survive while the row is
-  not rendered. `unresolved` lists those IRIs; `<UnresolvedNotices>` shows the
-  notices of those without a row (`mutate.for(iri).notice` for one).
+- One hook for the list, not one per row. The app controller owns the write
+  lanes of a target, not the component: a pending or unresolved write keeps
+  its outcome and leave guard while its row or whole screen is not rendered,
+  hidden (React `<Activity mode="hidden">`) or mounted again, until it is
+  resolved or the target changes. `unresolved` lists those IRIs;
+  `<UnresolvedNotices>` shows the notices of those without a row
+  (`mutate.for(iri).notice` for one). New commands start only from a mounted,
+  shown screen (`not-sent`, `ended` otherwise). All `useCreation` forms of a
+  collection share one creation: while it is pending, unconfirmed or held for
+  a same-IRI retry after observed absence, each of them (also one shown again
+  or mounted again) shows it, locked, and none sends another. Give forms that
+  should create independently side by side an `id` each
+  (`useCreation(fields, { initial, collection, id: 'quick-add' })`).
 - `RemoveButton` asks with `ResourceEditor`'s delete dialog and calls
   `onRemove`, as it was when asked, only after confirmation (a row read again
   meanwhile shows as a conflict). A quiet trash icon with a 44px target, named

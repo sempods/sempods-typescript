@@ -32,6 +32,19 @@ export interface NotSent {
 export const notSent = (reason: NotSent['reason']): NotSent =>
   Object.freeze({ kind: 'not-sent', reason });
 
+/**
+ * Snapshots a confirmed update was made from, with what they show after it.
+ * They no longer show the resource, so they cannot be written again; the next
+ * read brings fresh ones. Kept apart from the lanes, whose feedback may be
+ * evicted, for exactly as long as the snapshot itself lives.
+ */
+const spentSnapshots = new WeakMap<object, { readonly after: unknown }>();
+/** Whether a confirmed update was made from this snapshot. */
+export const isSpent = (snapshot: object) => spentSnapshots.has(snapshot);
+/** What a spent snapshot shows after its confirmed update, if known. */
+export const spentData = <D>(snapshot: object) =>
+  spentSnapshots.get(snapshot)?.after as D | undefined;
+
 /** Keep the write outcome while dropping observations made under lost read access. */
 export function withoutComparison<D>(
   outcome: MutationOutcome<D> | null,
@@ -44,6 +57,9 @@ export function withoutComparison<D>(
       : { kind: 'unconfirmed' };
   return outcome;
 }
+
+/** Which guarded changes leave a lane (see `LeaveGuard.scope`). */
+export type LaneScope = 'target' | 'explicit';
 
 /**
  * Internal: one mutation lane for one target. It captures its subject per
@@ -59,14 +75,10 @@ export class Lane<D> {
   iri = '';
   version = 0;
   uncertain = false;
-  alive = true;
-  /**
-   * The snapshot a confirmed update was made from. It no longer shows the
-   * resource, so it cannot be written again; the next read brings a fresh one.
-   */
-  spent: object | null = null;
-  /** What the spent snapshot shows after the confirmed update. */
-  spentData: D | null = null;
+  /** Its group retired: it never updates again (`holds` may only pause). */
+  private retired = false;
+  /** Counts the writes started on this lane, by any hook. */
+  writes = 0;
   state: {
     outcome: MutationOutcome<D> | null;
     operation: 'create' | 'update' | 'remove';
@@ -82,24 +94,32 @@ export class Lane<D> {
   } | null = null;
 
   constructor(
-    readonly view: BoundView | null,
+    readonly view: BoundView,
     private readonly definition: FieldDefinition<D>,
     private readonly app: AppController,
     /** Whether the lane's target is still the one it writes to. */
     private readonly holds: () => boolean,
-    private readonly notify: () => void,
+    protected readonly notify: () => void,
   ) {}
 
+  /** Its group retires for good once its target no longer holds. */
   eligible() {
-    return this.alive && this.holds();
+    return this.holds();
+  }
+  /** A write that still needs its recovery: never evicted while it does. */
+  outstanding() {
+    return this.pending || this.unresolved;
   }
   readable() {
-    return this.eligible() && Boolean(this.view?.getSnapshot().read);
+    return this.eligible() && this.view.getSnapshot().read;
   }
   isChecked() {
     return this.readable() && this.checked;
   }
-  /** Read access was lost: observations made under it no longer count. */
+  /**
+   * Read access was lost: observations made under it no longer count. Its
+   * group notifies once for all of its lanes.
+   */
   loseRead() {
     this.version++;
     this.checked = false;
@@ -110,16 +130,15 @@ export class Lane<D> {
         ...this.state,
         outcome: withoutComparison(this.state.outcome),
       };
-    this.notify();
   }
   /** The target or definition changed: the lane never updates again. */
   retire() {
-    this.alive = false;
+    this.retired = true;
     this.version++;
     this.checked = false;
     this.absent = false;
   }
-  guard(scope: 'target' | 'explicit'): LeaveGuard {
+  guard(scope: LaneScope): LeaveGuard {
     return {
       scope,
       unconfirmed: () => this.uncertain,
@@ -130,26 +149,22 @@ export class Lane<D> {
         this.uncertain = false;
         this.version++;
         this.checked = false;
-        if (this.alive) {
+        // Also once its target changed: a leave discards after its action.
+        if (!this.retired) {
           this.state = null;
           this.notify();
         }
       },
     };
   }
-  /** Whether a write may start now; `execute` sends nothing otherwise. */
-  startable(subject?: object) {
-    return this.refusal(subject) === null;
-  }
   /** Why a write would send nothing now, or `null` when it may start. */
   refusal(subject?: object): NotSent['reason'] | null {
-    const view = this.view;
-    if (!view || !this.eligible()) return view ? 'ended' : 'unavailable';
+    if (!this.eligible()) return 'ended';
     if (this.pending) return 'busy';
     if (this.unresolved) return 'unresolved';
-    if (subject !== undefined && subject === this.spent) return 'stale';
+    if (subject !== undefined && isSpent(subject)) return 'stale';
     if (
-      !view.getSnapshot().write ||
+      !this.view.getSnapshot().write ||
       this.app.getSnapshot().changing ||
       this.app.getSnapshot().confirmingLeave
     )
@@ -167,8 +182,9 @@ export class Lane<D> {
   ): Promise<MutationOutcome<D> | NotSent> {
     const view = this.view;
     const refused = this.refusal(subject);
-    if (!view || refused) return notSent(refused ?? 'unavailable');
+    if (refused) return notSent(refused);
     const version = ++this.version;
+    this.writes++;
     this.pending = true;
     this.checked = false;
     this.absent = false;
@@ -192,8 +208,7 @@ export class Lane<D> {
     // Sent: the caller always learns what happened, also after the target ended.
     if (!this.eligible()) return outcome;
     if (outcome.kind === 'saved' && subject) {
-      this.spent = subject;
-      this.spentData = after ?? null;
+      spentSnapshots.set(subject, { after });
     }
     // A result may contain a read made before access was lost and regained.
     if (this.version !== version || !this.readable())
@@ -201,10 +216,15 @@ export class Lane<D> {
     this.unresolved =
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     this.uncertain = outcome.kind === 'unconfirmed';
+    this.onOutcome(outcome);
     this.state = { operation, outcome, busy: false, start };
     this.notify();
     if (succeeded(outcome)) changed(view);
     return outcome;
+  }
+  /** A sent write's outcome arrived, before it is shown (for subclasses). */
+  protected onOutcome(outcome: MutationOutcome<D>): void {
+    void outcome;
   }
   acknowledge() {
     if (!this.eligible() || this.pending) return;
@@ -218,7 +238,7 @@ export class Lane<D> {
   }
   async check() {
     const view = this.view;
-    if (!view || !this.readable() || !this.unresolved) return false;
+    if (!this.readable() || !this.unresolved) return false;
     this.checked = false;
     this.absent = false;
     this.evidence = null;
@@ -260,9 +280,8 @@ export class Lane<D> {
   /** Whether this lane may write now, given the target's write access. */
   canMutate(writable: boolean, subject?: object) {
     return Boolean(
-      this.view &&
       writable &&
-      (subject === undefined || subject !== this.spent) &&
+      (subject === undefined || !isSpent(subject)) &&
       this.eligible() &&
       !this.pending &&
       !this.unresolved &&
