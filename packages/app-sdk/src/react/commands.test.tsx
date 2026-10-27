@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { Suspense, startTransition, useState } from 'react';
+import { Suspense, startTransition, useLayoutEffect, useState } from 'react';
 import {
   act,
   cleanup,
@@ -11,6 +11,23 @@ import { afterEach, expect, it } from 'vitest';
 import { useCommands } from './commands.js';
 
 afterEach(cleanup);
+
+it('a child layout effect calls the command from the same commit', () => {
+  const seen: number[] = [];
+  function Child({ run, value }: { run: () => number; value: number }) {
+    useLayoutEffect(() => {
+      seen.push(run());
+    }, [run, value]);
+    return null;
+  }
+  function Parent({ value }: { value: number }) {
+    const { run } = useCommands(['same'], { run: () => value });
+    return <Child run={run} value={value} />;
+  }
+  const { rerender } = render(<Parent value={0} />);
+  rerender(<Parent value={1} />);
+  expect(seen).toEqual([0, 1]);
+});
 
 it.each([false, true])(
   'commands keep committed inputs through suspension (new generation: %s)',

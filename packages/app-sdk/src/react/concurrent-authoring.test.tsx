@@ -46,6 +46,135 @@ function suspendedRender() {
   return { promise, resolve };
 }
 
+it('a child layout draft change is kept for a parent layout creation', async () => {
+  const f = fixture();
+  const session = await f.login();
+  cleanups.push(() => session.runtime.dispose());
+  const definition = fields({ title: text('urn:title', { language: null }) });
+  const sent: unknown[] = [];
+  f.setResource(async (_, init) => {
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(null, { status: 201 });
+  });
+  let outcome: unknown;
+  function Child({
+    change,
+    revision,
+  }: {
+    change: (patch: { title: string }) => void;
+    revision: number;
+  }) {
+    useLayoutEffect(() => {
+      if (revision === 1) change({ title: 'From child' });
+    }, [change, revision]);
+    return null;
+  }
+  function Parent() {
+    const [revision, setRevision] = useState(0);
+    const creation = useCreation(definition, {
+      initial: { title: '' },
+      collection: 'tasks',
+    });
+    const { create } = creation;
+    useLayoutEffect(() => {
+      if (revision === 1)
+        void create().then((result) => {
+          outcome = result;
+        });
+    }, [create, revision]);
+    return (
+      <>
+        <Child change={creation.change} revision={revision} />
+        <button
+          onClick={() => {
+            creation.change({ title: 'Before child' });
+            setRevision(1);
+          }}
+        >
+          Prepare draft
+        </button>
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={session.runtime}>
+      <TargetScreen>
+        <Parent />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  fireEvent.click(await screen.findByText('Prepare draft'));
+  await waitFor(() => expect(outcome).toMatchObject({ kind: 'created' }));
+  expect(sent).toEqual([
+    expect.objectContaining({
+      'urn:title': [{ '@value': 'From child' }],
+    }),
+  ]);
+});
+
+it.each(['context', 'pod'] as const)(
+  'a child layout effect reloads %s data with the same commit inputs and retention',
+  async (kind) => {
+    const f = fixture();
+    const session = await f.login();
+    cleanups.push(() => session.runtime.dispose());
+    const reads: string[] = [];
+    const gate = suspendedRender();
+    let delay = false;
+    const useRead = kind === 'context' ? useLoad<string> : usePodLoad<string>;
+    function Child({
+      reload,
+      query,
+    }: {
+      reload: () => unknown;
+      query: string;
+    }) {
+      useLayoutEffect(() => {
+        if (query === 'B') void reload();
+      }, [reload, query]);
+      return null;
+    }
+    function Parent() {
+      const [query, setQuery] = useState('A');
+      const load = useRead(
+        async () => {
+          reads.push(query);
+          if (delay) await gate.promise;
+          return { kind: 'ok', body: query };
+        },
+        { retain: query === 'A' },
+      );
+      return (
+        <>
+          <Child reload={load.reload} query={query} />
+          <button onClick={() => setQuery('B')}>Next query</button>
+          <span>
+            Data: {load.state.kind === 'ready' ? load.data : load.state.kind}
+          </span>
+          <span>
+            Previous: {'previous' in load.state ? load.state.previous : 'none'}
+          </span>
+        </>
+      );
+    }
+    render(
+      <SempodsProvider runtime={session.runtime}>
+        <TargetScreen>
+          <Parent />
+        </TargetScreen>
+      </SempodsProvider>,
+    );
+    await screen.findByText('Data: A');
+    delay = true;
+    fireEvent.click(screen.getByText('Next query'));
+    await screen.findByText('Data: loading');
+    expect(reads).toEqual(['A', 'B']);
+    expect(screen.getByText('Previous: none')).toBeTruthy();
+    await act(async () => gate.resolve());
+    await screen.findByText('Data: B');
+  },
+);
+
 it.each(['draft', 'unconfirmed'] as const)(
   'Suspense hiding and revealing a mounted creation preserves its %s and guard',
   async (operation) => {

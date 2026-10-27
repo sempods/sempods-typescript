@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { useInsertionEffect, useMemo, useState } from 'react';
 
 type Commands = Record<string, (...args: never[]) => unknown>;
 
@@ -18,7 +18,8 @@ export function useCommands<C extends Commands>(
     current.generation.length === generation.length &&
     current.generation.every((value, i) => Object.is(value, generation[i]));
   if (!same) setCurrent({ generation, commands });
-  useLayoutEffect(() => {
+  // Publish before child layout effects; this only swaps the callback table.
+  useInsertionEffect(() => {
     current.commands = commands;
   }, [current, commands]);
   return useMemo(

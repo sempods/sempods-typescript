@@ -675,6 +675,7 @@ function Resource({ iri }: { readonly iri: string }) {
 - `key` (a string or number) names the read's inputs: a new value reads again
   without the old data. The latest committed inline `read` is used on every
   (re)load; suspended or abandoned renders never replace the active inputs.
+  Reloads from a child layout effect also use that commit's inputs and options.
 - A CONSTRUCT needs no wrapping:
   `useLoad((view, signal) => view.sparql.construct(query, { signal }))`.
 - `not-found` means absent or hidden in this Context; the two look the same.

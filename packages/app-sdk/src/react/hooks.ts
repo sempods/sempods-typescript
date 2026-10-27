@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useInsertionEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -68,10 +69,13 @@ import {
 } from '../authoring/changes.js';
 
 const noopSubscribe = () => () => {};
-/** Event handlers and subscriptions observe inputs only once React commits them. */
+/**
+ * Publish committed inputs before any descendant layout effect can call back.
+ * The insertion phase only updates refs: no state, notifications or DOM access.
+ */
 function useCommitted<T>(value: T) {
   const current = useRef(value);
-  useLayoutEffect(() => {
+  useInsertionEffect(() => {
     current.current = value;
   }, [value]);
   return current;
@@ -154,23 +158,29 @@ function canonicalOf<T>(definition: T, key: string | null): T {
 export function useDefinition<T>(input: T, hook: string) {
   const structure = definitionKey(input);
   const definition = canonicalOf(input, structure);
-  const latest = useRef(definition);
+  const latest = useCommitted(definition);
+  const previous = useRef(definition);
   const warned = useRef(false);
   const key = structure ?? 'custom';
   useLayoutEffect(() => {
-    if (key === 'custom' && latest.current !== definition && !warned.current) {
+    if (
+      key === 'custom' &&
+      previous.current !== definition &&
+      !warned.current
+    ) {
       warned.current = true;
       warn(
         `${hook}: a custom definition changed identity; the current editor or form keeps the one it started with. Keep custom definitions stable (module constant or useMemo), or remount for a different mapping.`,
       );
     }
-    latest.current = definition;
+    previous.current = definition;
   }, [definition, key, hook]);
   return { key, latest, definition };
 }
 /**
  * Runs `read` for the current target. A new target gets a fresh loader; the
  * latest committed `read` is used on each (re)load, so an inline function never loops.
+ * Committed inputs are available before descendant layout effects run.
  * Suspended or abandoned renders never replace the active read inputs.
  * Pass `key` for inputs such as a search term: a new value reads again.
  */
@@ -226,7 +236,7 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   const latest = useCommitted(read);
   // The loader reads it at each (re)load.
   const loaderOptions = useRef({ retain });
-  useLayoutEffect(() => {
+  useInsertionEffect(() => {
     loaderOptions.current.retain = retain;
   }, [retain]);
   const [active, setActive] = useState<{
@@ -1178,18 +1188,22 @@ export function useCreation<D extends object>(
   if (state.view !== view || state.key !== key) {
     setState({ view, key, draft: copy(options.initial), sent: null });
   }
-  useLayoutEffect(() => {
+  const resetWarning = useRef(false);
+  useInsertionEffect(() => {
     const before = current.current;
-    if (
+    resetWarning.current =
       before.view === state.view &&
       before.key !== state.key &&
-      JSON.stringify(before.draft) !== JSON.stringify(initial.current)
-    )
-      warn(
-        'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
-      );
+      JSON.stringify(before.draft) !== JSON.stringify(initial.current);
     current.current = state;
   }, [state, initial]);
+  useLayoutEffect(() => {
+    if (!resetWarning.current) return;
+    resetWarning.current = false;
+    warn(
+      'useCreation: the field definition or collection changed and the unsaved creation draft was reset.',
+    );
+  }, [state]);
   // What the form shows, derived: the lane's open creation (locked), or its
   // own draft, blank again once the creation it sent is settled.
   const showing = (
