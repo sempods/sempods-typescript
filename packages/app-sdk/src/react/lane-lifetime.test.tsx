@@ -77,6 +77,8 @@ async function setup() {
     rows: readonly Snapshot<Task>[];
     app: ReturnType<typeof useApp>;
     hide: (hidden: boolean) => void;
+    late: ReturnType<typeof useCreation<Task>> | null;
+    showLate: (shown: boolean) => void;
     note: () => void;
     mount: (mounted: boolean) => void;
   };
@@ -110,16 +112,30 @@ async function setup() {
     api.rows = list.data?.items ?? api.rows ?? [];
     return null;
   }
+  // Another form of the same collection, outside the hidden part.
+  function Late() {
+    api.late = useCreation(definition, {
+      initial: { title: '', done: false },
+      collection: 'tasks',
+    });
+    return null;
+  }
   function Host() {
     const [hidden, hide] = useState(false);
     const [mounted, mount] = useState(true);
+    const [late, showLate] = useState(false);
     api.app = useApp();
     api.hide = hide;
     api.mount = mount;
+    api.showLate = showLate;
+    if (!late) api.late = null;
     return (
-      <Activity mode={hidden ? 'hidden' : 'visible'}>
-        {mounted && <Screen />}
-      </Activity>
+      <>
+        <Activity mode={hidden ? 'hidden' : 'visible'}>
+          {mounted && <Screen />}
+        </Activity>
+        {late && <Late />}
+      </>
     );
   }
   render(
@@ -382,4 +398,36 @@ it('a remounted form retries its absent creation under the same IRI, not a fresh
     expect(await s.api.creation.create()).toMatchObject({ kind: 'created' });
   });
   expect(s.puts).toEqual([s.puts[0], s.puts[0]]);
+});
+
+it('a form shown again after hiding takes its lane back from one that took it over', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'Mine' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  // Hidden: another form of the collection takes the lane over meanwhile.
+  act(() => s.api.hide(true));
+  act(() => s.api.showLate(true));
+  await waitFor(() =>
+    expect(s.api.late?.outcome).toMatchObject({ kind: 'unconfirmed' }),
+  );
+  // Shown again: the original form has priority; the other one lets go.
+  act(() => s.api.hide(false));
+  await waitFor(() => expect(s.api.late?.outcome).toBeNull());
+  expect(s.api.late?.draft.title).toBe('');
+  expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
+  // The original still retries under its own IRI after observed absence.
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.canCreate).toBe(true));
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  expect(s.puts).toEqual([iri, iri]);
 });

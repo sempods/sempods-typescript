@@ -762,8 +762,18 @@ function useMutation<D>(
     readonly group: LaneGroup<D>;
     readonly key: string;
   } | null>(null);
+  // The form that started the lane claims it again: give it back.
+  if (
+    adopted &&
+    adopted.group === group &&
+    group.claimedByOriginal(adopted.key)
+  )
+    adopt(null);
+  const own = `form ${instance}`;
   const id =
-    adopted && adopted.group === group ? adopted.key : `form ${instance}`;
+    adopted && adopted.group === group && !group.claimedByOriginal(adopted.key)
+      ? adopted.key
+      : own;
   const lane = group?.lanes.get(id) ?? null;
   const live = () => group?.lanes.get(id);
   // Commands start only while this form is mounted and shown; writes already
@@ -776,7 +786,7 @@ function useMutation<D>(
   useEffect(() => {
     if (!group) return;
     shown.current = true;
-    const release = group.own(id);
+    const release = group.own(id, id === own);
     // Claimed at once, so a form remounting alongside takes another one.
     let reserved: (() => void) | undefined;
     if (!group.lanes.has(id)) {
@@ -791,7 +801,7 @@ function useMutation<D>(
       release();
       reserved?.();
     };
-  }, [group, id, shown]);
+  }, [group, id, own, shown]);
   const starts = useStartCount(view);
   const available = Boolean(
     view &&
@@ -823,6 +833,8 @@ function useMutation<D>(
           ? ('ended' as const)
           : group.lane(id).refusal(),
     acknowledge: () => live()?.acknowledge(),
+    /** Which lane this form writes through (its own, or one taken over). */
+    lane: id,
     /** The form's recovery data kept with its lane (see `Lane.held`). */
     held: () => live()?.held ?? null,
     hold: (value: unknown) => {
@@ -1192,6 +1204,15 @@ export function useCreation<D extends object>(
   // A remounted form that took over an earlier mount's lane restores that
   // exact draft and captured command, so an explicit retry after observed
   // absence reuses the same IRI and body, never a fresh one.
+  // The lane a command was restored for; giving that lane back drops it.
+  const restoredFor = useRef<string | null>(null);
+  if (restoredFor.current !== null && restoredFor.current !== mutation.lane) {
+    restoredFor.current = null;
+    const next = { view, key, draft: copy(initial.current) };
+    command.current = null;
+    current.current = next;
+    setState(next);
+  }
   const kept = mutation.held() as typeof command.current;
   if (
     !command.current &&
@@ -1200,10 +1221,11 @@ export function useCreation<D extends object>(
     kept.state.key === key &&
     (mutation.unresolved || kept.retry)
   ) {
+    // A copy: the original form, shown again, keeps its own command intact.
     const next = { view, key, draft: kept.state.draft };
-    kept.state = next;
-    command.current = kept;
+    command.current = { ...kept, state: next };
     current.current = next;
+    restoredFor.current = mutation.lane;
     setState(next);
   }
   const draft = current.current.draft;

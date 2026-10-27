@@ -25,6 +25,8 @@ export class LaneGroup<D> {
   private readonly stops: (() => void)[] = [];
   /** Lanes a mounted, shown form currently claims, with a count per key. */
   private readonly owners = new Map<string, number>();
+  /** Lanes claimed by the form that started them (their own key). */
+  private readonly originals = new Map<string, number>();
   private version = 0;
   private alive = true;
   private readable = false;
@@ -88,14 +90,30 @@ export class LaneGroup<D> {
     return lane;
   }
 
-  /** A mounted, shown form claims its lane; returns the release. */
-  own(key: string) {
-    this.owners.set(key, (this.owners.get(key) ?? 0) + 1);
-    return () => {
-      const count = (this.owners.get(key) ?? 1) - 1;
-      if (count > 0) this.owners.set(key, count);
-      else this.owners.delete(key);
+  /**
+   * A mounted, shown form claims its lane; returns the release. The form
+   * that started a lane (`original`) has priority: when it claims it again,
+   * for example shown again after `<Activity>` hid it, a form that took the
+   * lane over meanwhile is told to give it back.
+   */
+  own(key: string, original = false) {
+    const count = (map: Map<string, number>, by: number) => {
+      const next = (map.get(key) ?? 0) + by;
+      if (next > 0) map.set(key, next);
+      else map.delete(key);
     };
+    const taken = original && this.owners.has(key);
+    count(this.owners, 1);
+    if (original) count(this.originals, 1);
+    if (taken) this.changed();
+    return () => {
+      count(this.owners, -1);
+      if (original) count(this.originals, -1);
+    };
+  }
+  /** Whether the form that started this lane claims it now. */
+  claimedByOriginal(key: string) {
+    return this.originals.has(key);
   }
   /**
    * A pending or unresolved lane whose key starts with `prefix` and that no
