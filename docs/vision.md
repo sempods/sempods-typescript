@@ -9,6 +9,13 @@ This repository supplies reusable modules and working examples. New app projects
 especially those created with a coding assistant, start in
 [sempods-apps-template](https://github.com/sempods/sempods-apps-template).
 
+An app owner should be able to ask for “a Todo app” without knowing how to
+specify UI or SDK architecture. The template supplies the starting project and
+shared UI; the SDK supplies safe behavior and an installed authoring guide.
+Together they should help an assistant choose a purposeful layout, clear copy
+and complete interaction states, then inspect the rendered result. Examples
+teach behavior without making every app look like a technical demonstration.
+
 The TypeScript SDK makes this practical for people and coding assistants.
 `@sempods/app-sdk` is the ordinary app author's entry. Its default UI should make a
 first working slice easy; replacing that UI should preserve the same safe editing,

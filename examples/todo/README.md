@@ -41,7 +41,7 @@ Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
 or reopens a task (`useFieldUpdate`'s `for(item)`: a tick locks
 only its row), its title opens the editor below the list, a done task
 offers a delete button that asks first (`RemoveButton` with
-`mutate.remove(item)`), and the input at the bottom adds one. The list reads again when the page becomes visible
+`row.remove` from `mutate.for(item)`), and the input at the bottom adds one. The list reads again when the page becomes visible
 (no reload button) and keeps its rows while it reloads and after a failed
 refresh; `LoadNotice` says what the read does, with a retry. A new or changed row is its own
 confirmation (`UpdateNotice quiet`); refusals, conflicts and unconfirmed

@@ -1,10 +1,12 @@
 # React and headless authoring
 
 Build a sempods screen with `@sempods/app-sdk/react`, or the same behaviour
-without React. The [TODO screen](../examples/todo/src/app.tsx) and the
-[default screen skeleton](ai-app-builder.md#default-screen) combine the pieces
-of Part 2; the TODO's [domain functions](../examples/todo/src/domain.ts) hold
-its field definition.
+without React. Start with the [complete minimal screen](quickstart.md) when
+integrating the SDK; new apps start in
+[sempods-apps-template](https://github.com/sempods/sempods-apps-template).
+This guide is a task reference. The [TODO screen](../examples/todo/src/app.tsx)
+adds a list switch and app-owned presentation; its
+[domain functions](../examples/todo/src/domain.ts) hold the field definition.
 
 1. [Model and setup](#part-1-model-and-setup)
 2. [The core screen](#part-2-the-core-screen)
@@ -31,17 +33,40 @@ runtime ─ SempodsProvider ─ AppAccess        sign-in, choice, sharing, recov
 - **Selection**: the Context the app currently works in; `AppAccess` or
   `useContexts()` choose it. With `contextSelection: 'on-demand'` an app works
   across Contexts and selects one only where a screen needs it.
-- **Target**: the active connection plus the selected Context and its access.
-  Hooks inside `TargetScreen` read and write the target; when it changes, their
-  drafts and reads are replaced (after asking about unsaved work).
+- **Target**: the current connection and Context for a screen. Its access can
+  change without replacing the screen or discarding its draft.
 - **Preset**: a Pod (and optionally a Context) the app suggests or fixes.
-- **Guard scope**: which changes ask about a draft before discarding it: row
-  navigation, a Context selection, or a connection change (see
-  [selection and draft lifetime](#selection-and-draft-lifetime)).
 - **Write outcomes**: `saved`/`created`/`removed`; `not-saved` and its
   siblings (refused or failed; nothing changed); `changed-on-pod` (someone
   changed it first: compare, then decide); `unconfirmed` (the answer was lost:
   check the Pod, never resend blindly). `UpdateNotice` renders all of them.
+
+### State ownership and lifetime
+
+An ordinary app creates the runtime and provider once, then composes the
+screen. The provider creates the controller; the screen does not need another
+store for SDK drafts or write recovery.
+
+| Owner                                    | What it keeps                                                                                                          |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Browser runtime                          | Connections, session persistence, access evidence and bound read/write handles                                         |
+| App controller (created by the provider) | Resource-editor drafts, pending/unresolved resource writes, captured creations and their recovery, guarded transitions |
+| React screen                             | Selection, filters, other app-local state and a creation form's own unsent draft                                       |
+
+| Change                                                               | What happens                                                                                                                                                                                           |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Rerender, language or visual change                                  | Keep the runtime/provider and target stable; drafts and recovery stay                                                                                                                                  |
+| Same-target read/write access loss                                   | Keep the screen mounted. Server data/comparison evidence follows read access; drafts and unresolved outcomes stay. Writes follow current eligibility                                                   |
+| Temporarily hide a screen with Suspense or Activity                  | React state is retained. Controller-owned editors and writes remain; show their recovery when the screen is visible again                                                                              |
+| Unmount a screen, then mount it under the same controller and target | Resource editors and captured pending/unresolved writes return. App-local state, row selection and an unsent creation draft do not; do not use arbitrary unmounting as guarded navigation              |
+| Guarded row, Context or connection change                            | Ask about the work being left; pending writes block relevant changes. `TargetScreen` resets local state for a new target. Explicit-Context flows have their own [scope](#selection-and-draft-lifetime) |
+| Dispose/replace the host, reload or leave the page                   | In-memory drafts and recovery end. Saved sessions can restore; browser navigation is not the SDK's guarded navigation                                                                                  |
+
+Render row notices with the row and `UnresolvedNotices` below the list.
+An editor for a selected resource must remain reachable even if its list row
+disappears. The [quickstart](quickstart.md#3-the-app-srcapptsx) shows both.
+For precise scopes and custom navigation, see
+[selection and draft lifetime](#selection-and-draft-lifetime).
 
 ### Runtime and provider
 
@@ -240,8 +265,8 @@ Parts for different Contexts use one hook per Context, as the
 
 ### Updating and deleting rows: useFieldUpdate
 
-`useFieldUpdate(definition)` keeps one write lane per resource, held by the
-hook. Use one hook for the list and give each row `mutate.for(item)`, as the
+`useFieldUpdate(definition)` exposes the controller's write state per resource.
+Use one hook for the list and give each row `mutate.for(item)`, as the
 [TODO example's `TaskRow`](../examples/todo/src/app.tsx) does:
 
 ```tsx
@@ -295,9 +320,11 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   `onRemove`, as it was when asked, only after confirmation (a row read again
   meanwhile shows as a conflict). A quiet trash icon with a 44px target, named
   **Delete** or `label`; children replace the icon, `className` its look.
-- The hook-level `canMutate` (write access, nothing pending or unresolved in
-  the list), `outcome`, `notice` and `acknowledge` describe the whole list and
-  its latest write.
+- The hook-level `canMutate` checks access and whether any resource in the
+  shared target/definition group is pending or unresolved. `busy`, `outcome`,
+  `operation`, `notice` and `acknowledge` instead address the latest write
+  started by this hook instance; they are not an aggregate list status.
+  Use `mutate.for(item)` for row controls and `UnresolvedNotices` for missing rows.
 - `create(iri, body)` and the typed `create(iri, definition, draft)` remain;
   forms use `useCreation`.
 - Failures keep `reason` and a structured `problem`: check `problem.status` for

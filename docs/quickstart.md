@@ -1,49 +1,47 @@
-# Quickstart: from an empty folder to a task in your Pod
+# Quickstart: integrate the SDK into a React app
 
-This is the shortest path to a working sempods app in the browser: login,
-context choice, a task list, one-click completion and safe editing. It uses the
-published SDK packages, Vite and React.
-For the idea behind the example, start with [build your own app](build-your-app.md);
-for AI assistance, supply [the app-builder instructions](ai-app-builder.md).
-For several personal apps in one repository, with setup and updates handled by
-your assistant, start from the
-[sempods apps template](https://github.com/sempods/sempods-apps-template)
-instead.
+For a **new app with a coding assistant**, start in
+[sempods-apps-template](https://github.com/sempods/sempods-apps-template).
+It owns setup, the app host and updates. Give the assistant the
+[app-builder instructions](ai-app-builder.md), which it also reads from the
+installed SDK.
+
+For **SDK integration in an existing React project**, this is the complete
+minimal reference: login, Context choice, a list, creation, row updates and
+safe editing with recovery. It uses published packages; the optional Vite
+setup below gives you an empty project to try it in. The example teaches
+behavior, while the app owns its visual design. See
+[build your app](build-your-app.md) for the data model.
 
 You need Node 24.15 or newer (Node 24 LTS), and a sempods Pod with a context you may grant
 to an app. No feature scopes are needed for data: the person grants context
 access when consenting (SPS-AUTH-024).
 
-## 1. Create the app and install the SDK
+## 1. Install the SDK
+
+In an existing React/TypeScript app, install the two matching SDK packages.
+To try the example in an empty Vite project first:
 
 ```sh
 npm create vite@latest my-tasks -- --template react-ts --no-immediate
 cd my-tasks
 npm install
-npm install --save-exact @sempods/app-sdk@0.5.0 @sempods/client-sdk@0.5.0
 ```
 
 `--no-immediate` keeps Vite from installing and starting its demo server right
 away, so you can install the SDK first.
+
+In the app directory:
+
+```sh
+npm install --save-exact @sempods/app-sdk@0.5.0 @sempods/client-sdk@0.5.0
+```
 
 Both packages are released together with one version, and app-sdk depends on
 exactly that client-sdk version. Name the same explicit version for both, saved
 exactly, and commit the lockfile: two unversioned installs can pick different
 versions while a release is in progress and add a second, nested client-sdk.
 To upgrade, change both to the next shared version at once.
-
-### Trying unreleased SDK changes
-
-From a checkout of the SDK repository (using the pnpm version in its
-`package.json`), pack both packages and install the archives in your app instead:
-
-```sh
-pnpm install --frozen-lockfile && pnpm build
-pnpm --filter @sempods/client-sdk pack --pack-destination ../sempods-packages
-pnpm --filter @sempods/app-sdk pack --pack-destination ../sempods-packages
-```
-
-Then, in the app, `npm install` both `.tgz` files from that directory.
 
 ## 2. Describe your data once: `src/tasks.ts`
 
@@ -75,6 +73,7 @@ import {
   ResourceEditor,
   SempodsProvider,
   TargetScreen,
+  UnresolvedNotices,
   UpdateNotice,
   useCreation,
   useFieldUpdate,
@@ -140,6 +139,7 @@ function AppContent() {
 
 function Tasks() {
   const list = useList(task);
+  const items = list.data?.items;
   const creation = useCreation(task, {
     initial: { title: '', done: false },
     collection: 'tasks',
@@ -152,7 +152,12 @@ function Tasks() {
   return (
     <section>
       <LoadNotice {...list} />
-      {list.data?.items.map((item) => {
+      {list.state.kind === 'ready' &&
+        items?.length === 0 &&
+        list.data?.skipped === 0 && (
+          <p>No tasks yet. Add your first task below.</p>
+        )}
+      {items?.map((item) => {
         const row = mutate.for(item);
         return (
           <div key={item.iri}>
@@ -171,6 +176,7 @@ function Tasks() {
           </div>
         );
       })}
+      <UnresolvedNotices of={mutate} shown={items} />
       {selected && (
         <ResourceEditor editor={editor} onClose={() => select(null)}>
           {(draft, change) => (
@@ -218,6 +224,10 @@ with the language switch.
 
 `LoadNotice` explains a failed read and offers **Try again**. A failure is never
 shown as an empty list. The retry only reads data, so it cannot repeat a write.
+`UnresolvedNotices` keeps comparison and acknowledgement available if a row
+with an unresolved write disappears, for example after another app deletes it.
+The editor also stays outside the row loop so its draft and recovery remain
+reachable when the selected row disappears.
 
 Replace Vite's demo styles in `src/index.css`. AppAccess, the editor and the
 notices style themselves from the `--sempods-*` tokens; set them once so your
@@ -306,6 +316,18 @@ To make the app installable and open offline, follow [the PWA guide](pwa.md).
 Remove `development: 'loopback-http'`, build (`npm run build`), and serve
 `dist/` over HTTPS so that `/callback` also returns `index.html`. A loopback
 `did:web` identifier is refused outside development (SPS-AUTH-006).
+
+## Trying unreleased SDK changes
+
+From an SDK checkout (using its pinned pnpm version), pack both packages:
+
+```sh
+pnpm install --frozen-lockfile && pnpm build
+pnpm --filter @sempods/client-sdk pack --pack-destination ../sempods-packages
+pnpm --filter @sempods/app-sdk pack --pack-destination ../sempods-packages
+```
+
+Then, in the app, `npm install` both `.tgz` files from that directory.
 
 ## What the SDK does for you
 

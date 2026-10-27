@@ -1,4 +1,4 @@
-# Hackathon: your sempods app at a glance
+# Hackathon: a checklist after setup
 
 Build one useful interaction: a reading list, a shared task board, your own
 research notebook. Your frontend owns the screen; app-sdk supplies login,
@@ -6,18 +6,22 @@ connections and safe editing. People keep their data in their Pod.
 
 ## Start here
 
-Follow the [quickstart](quickstart.md) to create a Vite React/TypeScript app
-(Node 24.15 or newer). Install the matching pair:
+Start a new app in
+[sempods-apps-template](https://github.com/sempods/sempods-apps-template),
+or integrate the SDK into an existing React app with the
+[quickstart](quickstart.md). Their setup instructions own the dependencies;
+keep the matching exact SDK versions and lockfile.
 
-```sh
-npm install --save-exact @sempods/app-sdk@0.5.0 @sempods/client-sdk@0.5.0
-```
+The template reads the installed
+`node_modules/@sempods/app-sdk/docs/ai-app-builder.md`; give your assistant the
+same entry in a custom project. Describe the first useful interaction in your
+own words. You do not need to prescribe a layout or component library: the
+[AI guide](ai-app-builder.md#make-the-first-draft-feel-like-a-product) asks the
+assistant to make and inspect a coherent first design.
 
-Commit the lockfile. Point your coding assistant to
-`node_modules/@sempods/app-sdk/docs/ai-app-builder.md`: the package ships its
-guides and examples at the installed version. To try unreleased SDK changes, use the quickstart's
-[packed SDK archives](quickstart.md#trying-unreleased-sdk-changes). To ship it
-as an installable app, add the [PWA setup](pwa.md).
+To try unreleased SDK changes, use the quickstart's
+[packed SDK archives](quickstart.md#trying-unreleased-sdk-changes). To make it
+installable, add the [PWA setup](pwa.md).
 Use a dedicated test context and synthetic data; follow
 [local or hosted Pod testing](local-testing.md) for setup.
 
@@ -31,7 +35,8 @@ uses them together. For the first hour you need:
 - `fields` and `text` (with `trim: true`) for your data;
 - `useList` with `<LoadNotice {...list} />`, `useCreation`, and one
   `useFieldUpdate` per list with `mutate.for(item)` per row;
-- `UpdateNotice` for every write's outcome.
+- `UpdateNotice` for every write's outcome, and `UnresolvedNotices` for recovery
+  when the corresponding row disappears.
 
 ## Avoid the common traps
 
@@ -55,20 +60,11 @@ uses them together. For the first hour you need:
   Leave session tokens to the SDK; keep hosting/provider keys out of source,
   logs and AI prompts. UI language does not change RDF text language.
 
-## Give this to your AI assistant
+## Before your demo
 
-After installing the SDK, paste:
-
-> Build a sempods frontend for [idea + first useful interaction]. First read
-> node_modules/@sempods/app-sdk/docs/ai-app-builder.md and its linked guides.
-> Use app-sdk and the quickstart's matching, exact package versions. My test Pod
-> is [URL / not ready]; use synthetic data in a dedicated context. Propose a small
-> screen/data plan, then implement one working slice with standard SDK guards and
-> recovery UI. Verify installed APIs rather than guessing. Report build/test
-> results and untested live flows. Prepare deployment for [domain / undecided];
-> leave publication and changes to real data under my control.
-
-Before your demo, run the app build and the
+Run the app build and the
 [end-to-end walkthrough](local-testing.md#walk-through-one-complete-app).
-The [AI entry guide](ai-app-builder.md) is the full instruction set; keep it
-and its references available for the next session.
+Inspect the actual screen at phone and desktop widths, including empty,
+populated and recovery states. Keep the app's purpose, visual choices and data
+mapping in its notes; distinguish browser-fixture checks from live Pod and
+installed-device evidence.
