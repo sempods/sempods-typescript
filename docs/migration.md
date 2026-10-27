@@ -134,6 +134,14 @@ All points:
   Changing `collection` or `id` resets the draft like a definition change.
   A field definition change no longer drops a pending write (and no longer
   warns about it).
+- **Editors belong to the controller.** `useResourceEditor` and
+  `useContextEditor` keep their editor's draft, pending save, review and leave
+  guard while the screen is hidden by `<Activity>` or remounted, and return the
+  same editor; before, hiding or unmounting disposed it, dropped the draft,
+  ignored a pending save's outcome and let a guarded change pass it. A guarded
+  change now asks about unsaved editor work even when no screen shows it. A
+  definition change for the same subject still starts a fresh editor (and
+  warns about discarded work).
 - **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane
   per resource; new `mutate.for(item)` returns a row's `data` (with a
   confirmed update shown at once), `canMutate`, `notice`, `update(change)` and
