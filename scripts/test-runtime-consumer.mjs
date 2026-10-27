@@ -650,27 +650,31 @@ try {
           }
         }
         if (name === 'toggle-pod') {
-          assert.equal(url.search, '');
-          json(
-            {
-              head: { vars: ['item', 'graph', 'title', 'status'] },
-              results: {
-                bindings: [
-                  {
-                    item: { type: 'uri', value: 'urn:toggle-task' },
-                    graph: {
-                      type: 'uri',
-                      value: base + '/_system/contexts/work',
+          const context = url.searchParams.get('default-graph-uri');
+          if (!context) {
+            // The overview's discovery of Contexts that hold the type.
+            json(
+              {
+                head: { vars: ['graph'] },
+                results: {
+                  bindings: [
+                    {
+                      graph: {
+                        type: 'uri',
+                        value: base + '/_system/contexts/work',
+                      },
                     },
-                    title: { type: 'literal', value: 'Buy milk' },
-                    status: { type: 'uri', value: toggleTask.status },
-                  },
-                ],
+                  ],
+                },
               },
-            },
-            200,
-            { 'content-type': 'application/sparql-results+json' },
-          );
+              200,
+              { 'content-type': 'application/sparql-results+json' },
+            );
+            return;
+          }
+          // One Context's list of tasks, as snapshots.
+          assert.equal(context, base + '/_system/contexts/work');
+          json([toggleBody()]);
           return;
         }
         if (name === 'overview-pod' || name === 'expiring-pod') {
@@ -2038,10 +2042,11 @@ try {
   console.log(
     'Packed short-lived tokens: renewal before dispatch for Pods refusing expired tokens with or without a challenge, no expired token sent, refused renewal ends in a visible sign-in and recovers passed.',
   );
-  // The one-click recipe (#134): a task ticked in its own Context, and its
-  // overview kept visible in every frame while it reloads (#136).
-  const toggleQuery = (url) =>
-    url.pathname === '/toggle-pod/_system/sparql/query';
+  // The one-click recipe (#158): a task ticked in its own Context through
+  // `usePodList` and `useContextUpdate`, kept in every frame while it reloads.
+  const toggleList = (url) =>
+    url.pathname === '/toggle-pod/_system/sparql/query' &&
+    url.searchParams.has('default-graph-uri');
   await page.goto(origin + '/app?identity=toggle');
   await Promise.all([
     page.waitForURL('**/callback?**'),
@@ -2073,29 +2078,32 @@ try {
   });
   let releaseToggle;
   const heldToggle = new Promise((resolve) => (releaseToggle = resolve));
-  await page.route(toggleQuery, async (route) => {
-    await heldToggle;
-    await route.continue();
-  });
+  await page.route(
+    (url) => toggleList(url),
+    async (route) => {
+      await heldToggle;
+      await route.continue();
+    },
+  );
   const toggleReload = page.waitForRequest((request) =>
-    toggleQuery(new URL(request.url())),
+    toggleList(new URL(request.url())),
   );
   await milk.click();
   await toggleReload;
-  // Saved once with the read version; nothing is shown as ticked before the
-  // overview confirms it, and the row stays while the overview reloads.
+  // Saved once with the read version. The confirmed tick shows at once; the
+  // snapshot it was made from stays locked until the list reads again.
   assert.deepEqual(toggleWrites, ['"t1"']);
-  // The confirmed toggle is finished, so the box is usable again.
-  assert.deepEqual(await milkState(), { checked: false, disabled: false });
+  assert.deepEqual(await milkState(), { checked: true, disabled: true });
   const toggleReloaded = page.waitForResponse((response) =>
-    toggleQuery(new URL(response.url())),
+    toggleList(new URL(response.url())),
   );
   releaseToggle();
   await toggleReloaded;
-  await page.unroute(toggleQuery);
-  await page.waitForFunction(
-    () => document.querySelector('ul input[type="checkbox"]')?.checked === true,
-  );
+  await page.unroute((url) => toggleList(url));
+  await page.waitForFunction(() => {
+    const box = document.querySelector('ul input[type="checkbox"]');
+    return box?.checked === true && box.disabled === false;
+  });
   assert.equal(
     await page.evaluate(() => {
       window.__toggleObserver.disconnect();
@@ -2103,22 +2111,30 @@ try {
     }),
     0,
   );
-  // A conflict keeps the editor with its recovery; nothing is resent beyond
-  // the editor's single rebase, and the box stays as the Pod last confirmed.
+  // A conflict shows the row's notice with its comparison: nothing is resent
+  // beyond the single rebase, and the box stays as the Pod last confirmed.
   toggleConflict = true;
   await milk.click();
-  const finish = page.getByRole('region', { name: 'Finish the change' });
-  await finish
-    .getByText('The pod has changed. Compare before continuing.')
-    .waitFor();
+  const changed = page
+    .locator('ul li')
+    .filter({ hasText: 'The pod has changed. Compare before continuing.' });
+  await changed.waitFor();
   assert.deepEqual(toggleWrites, ['"t1"', '"t2"', '"t3"']);
   assert.deepEqual(await milkState(), { checked: true, disabled: true });
   toggleConflict = false;
-  await finish
-    .getByRole('button', { name: 'Continue with my changes', exact: true })
+  await changed
+    .getByRole('button', { name: 'Check current version', exact: true })
     .click();
-  await finish.getByRole('button', { name: 'Save', exact: true }).click();
-  await finish.waitFor({ state: 'detached' });
+  await changed
+    .getByRole('button', { name: 'I have checked the pod', exact: true })
+    .click();
+  // Checked and acknowledged: the row is usable again and a new tick writes
+  // against the current version.
+  await page.waitForFunction(
+    () =>
+      document.querySelector('ul input[type="checkbox"]')?.disabled === false,
+  );
+  await milk.click();
   await page.waitForFunction(() => {
     const box = document.querySelector('ul input[type="checkbox"]');
     return box?.checked === false && box.disabled === false;
@@ -2126,7 +2142,7 @@ try {
   assert.equal(toggleWrites.length, 4);
   assert.equal(toggleTask.status, 'https://schema.org/PotentialActionStatus');
   console.log(
-    'Packed one-click overview recipe: tick in its own Context with one If-Match write, overview kept in every frame while reloading, conflict review with no resend, recovered save closes and reloads passed.',
+    'Packed one-click overview recipe: usePodList with useContextUpdate, tick in its own Context with one If-Match write, overview kept in every frame while reloading, conflict notice with check and acknowledgement and no resend, recovered tick passed.',
   );
   // The task-with-note recipe (#149): one input written into two Contexts.
   await page.goto(origin + '/app?identity=split');

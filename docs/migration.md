@@ -178,6 +178,13 @@ All points:
   the Pod as real snapshots, with a state, problem and retry per Context and a
   `complete` flag; `LoadNotice` names partially read overviews (new optional
   message `partialRead`). Nothing existing changes.
+- **`useContextUpdate` (#158).** A new hook writes `usePodList` rows in one
+  click, each in its own Context, with `useFieldUpdate`'s row semantics and a
+  controller-owned lane per resource; `UnresolvedNotices` accepts it. Replace a
+  hand-written `useContextEditor` toggle (open, wait, change, save, close) with
+  `overview.for(item).update(change)`. New optional message `contextProblems`
+  holds SDK texts for `ContextEditorProblem`; drop the app's own map. Nothing
+  existing changes.
 - **`RemoveButton`.** A new component asks with `ResourceEditor`'s delete
   question before it calls `onRemove`, for a delete in a list row with
   `useFieldUpdate`'s `remove`, shown as a quiet trash icon. Nothing existing

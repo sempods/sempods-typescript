@@ -36,6 +36,13 @@ export type {
   NotSent,
 } from './hooks.js';
 export { usePodList } from './pod-list.js';
+export { useContextUpdate } from './context-update.js';
+export type {
+  ContextResource,
+  ContextUpdate,
+  ContextUpdateRow,
+  ContextUpdateState,
+} from './context-update.js';
 export type {
   PodList,
   PodListContext,

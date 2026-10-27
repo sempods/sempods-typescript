@@ -21,13 +21,12 @@ import {
   useController,
 } from './app.js';
 import { catalogueLists } from '../runtime/binding.js';
-import { contextName } from './names.js';
 import {
-  useDefinition,
-  useOnVisible,
-  usePodLoad,
+  contextProblem,
   type ContextEditorProblem,
-} from './hooks.js';
+} from '../authoring/contexts.js';
+import { contextName } from './names.js';
+import { useDefinition, useOnVisible, usePodLoad } from './hooks.js';
 
 /** One item of an overview: a snapshot read in its own Context. */
 export interface PodListItem<D> {
@@ -138,7 +137,6 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
     catalogue !== undefined && 'contexts' in catalogue
       ? catalogue.contexts
       : undefined;
-  const evidence = listed !== undefined;
   const readable = (iri: string) =>
     catalogue !== undefined && catalogueLists(catalogue, iri);
   const labels = catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
@@ -257,15 +255,7 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
 
   const contexts: PodListContext<D>[] = graphs.map((iri) => {
     const entry = loaders?.get(iri);
-    // While the catalogue is not known yet, access is not decided either.
-    const problem: ContextEditorProblem | null =
-      entry === 'refused'
-        ? 'refused'
-        : readable(iri) || (!evidence && catalogue?.kind !== 'failed')
-          ? null
-          : catalogue?.kind === 'failed'
-            ? 'discovery-failed'
-            : 'unreadable';
+    const problem = contextProblem(catalogue, iri, entry === 'refused');
     return {
       context: iri,
       name: contextName(iri, labels),
