@@ -49,18 +49,6 @@ export function withoutComparison<D>(
 export type LaneScope = 'target' | 'explicit';
 
 /**
- * What a form keeps with its lane to recover a write after it remounts, for
- * example a creation's captured command and draft. `retry` holds it for an
- * explicit retry after observed absence; once the item is settled (created,
- * acknowledged or discarded) it is marked `settled`, so every form that shows
- * it starts afresh.
- */
-export interface Held {
-  retry: boolean;
-  settled: boolean;
-}
-
-/**
  * Internal: one mutation lane for one target. It captures its subject per
  * write; a retired lane (target or definition changed) never updates again.
  * React hooks read its fields when rendering and re-render on `notify`; it
@@ -76,13 +64,6 @@ export class Lane<D> {
   uncertain = false;
   /** Counts the writes started on this lane, by any hook. */
   writes = 0;
-  /** The writing form's recovery data (see `Held`), opaque otherwise. */
-  held: Held | null = null;
-  /** That item is settled; the lane lets it go if it still holds it. */
-  settle(held: Held | null = this.held) {
-    if (held) held.settled = true;
-    if (this.held === held) this.held = null;
-  }
   /**
    * The snapshot a confirmed update was made from. It no longer shows the
    * resource, so it cannot be written again; the next read brings a fresh one.
@@ -110,16 +91,16 @@ export class Lane<D> {
     private readonly app: AppController,
     /** Whether the lane's target is still the one it writes to. */
     private readonly holds: () => boolean,
-    private readonly notify: () => void,
+    protected readonly notify: () => void,
   ) {}
 
   /** Its group retires for good once its target no longer holds. */
   eligible() {
     return this.holds();
   }
-  /** A write that still needs a form: pending, unresolved or held for a retry. */
+  /** A write that still needs its recovery: never evicted while it does. */
   outstanding() {
-    return this.pending || this.unresolved || Boolean(this.held?.retry);
+    return this.pending || this.unresolved;
   }
   readable() {
     return this.eligible() && this.view.getSnapshot().read;
@@ -153,10 +134,9 @@ export class Lane<D> {
       scope,
       unconfirmed: () => this.uncertain,
       blocked: () => this.pending,
-      dirty: () => this.unresolved || Boolean(this.held?.retry),
+      dirty: () => this.unresolved,
       discard: () => {
         this.unresolved = false;
-        this.settle();
         this.uncertain = false;
         this.version++;
         this.checked = false;
@@ -227,12 +207,15 @@ export class Lane<D> {
     this.unresolved =
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     this.uncertain = outcome.kind === 'unconfirmed';
-    // Created: no form holds it for a retry any more, whichever sent it.
-    if (outcome.kind === 'created') this.settle();
+    this.settled(outcome);
     this.state = { operation, outcome, busy: false, start };
     this.notify();
     if (succeeded(outcome)) changed(view);
     return outcome;
+  }
+  /** A sent write's outcome arrived, before it is shown (for subclasses). */
+  protected settled(outcome: MutationOutcome<D>): void {
+    void outcome;
   }
   acknowledge() {
     if (!this.eligible() || this.pending) return;

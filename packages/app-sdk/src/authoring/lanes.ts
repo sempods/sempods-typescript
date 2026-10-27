@@ -18,9 +18,9 @@ export type { LaneScope } from './lane.js';
  * selected view, an explicit view no longer current, or another active
  * connection); then its lanes never update again and their guards go.
  */
-export class LaneGroup<D> {
-  readonly lanes = new Map<string, Lane<D>>();
-  private readonly guards = new Map<Lane<D>, () => void>();
+export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
+  readonly lanes = new Map<string, L>();
+  private readonly guards = new Map<L, () => void>();
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
   private version = 0;
@@ -35,6 +35,8 @@ export class LaneGroup<D> {
     /** The connection the group was created for. */
     private readonly connection: string | null,
     private readonly drop: () => void,
+    /** The kind of lane this group holds (`Lane`, or `CreationLane`). */
+    private readonly make: LaneKind<D, L>,
   ) {}
 
   /** Whether its target is still the one its lanes write to. */
@@ -72,7 +74,7 @@ export class LaneGroup<D> {
    * Its guard is registered once and stays until the lane is evicted or the
    * group retires; an idle lane's guard asks about nothing.
    */
-  lane(iri: string): Lane<D> {
+  lane(iri: string): L {
     let lane = this.lanes.get(iri);
     if (lane) {
       // Most recently written last, for eviction.
@@ -81,7 +83,7 @@ export class LaneGroup<D> {
       return lane;
     }
     if (this.stops.length === 0) this.start();
-    lane = new Lane(
+    lane = new this.make(
       this.view,
       this.definition,
       this.app,
@@ -146,14 +148,20 @@ export class LaneGroup<D> {
   }
 }
 
+/** A lane class; one group key always holds one kind. */
+export type LaneKind<D, L extends Lane<D>> = new (
+  ...args: ConstructorParameters<typeof Lane<D>>
+) => L;
+
 /** Internal: the lane groups of one controller, by view, scope and definition. */
 export interface LaneStore {
-  group<D>(
+  group<D, L extends Lane<D> = Lane<D>>(
     view: BoundView,
     key: string,
     definition: FieldDefinition<D>,
     scope: LaneScope,
-  ): LaneGroup<D>;
+    kind?: LaneKind<D, L>,
+  ): LaneGroup<D, L>;
 }
 
 const stores = new WeakMap<AppController, LaneStore>();
@@ -165,22 +173,26 @@ const stores = new WeakMap<AppController, LaneStore>();
 export function lanesOf(app: AppController): LaneStore {
   let store = stores.get(app);
   if (store) return store;
-  const groups = new WeakMap<BoundView, Map<string, LaneGroup<unknown>>>();
+  const groups = new WeakMap<
+    BoundView,
+    Map<string, LaneGroup<unknown, Lane<unknown>>>
+  >();
   store = {
-    group<D>(
+    group<D, L extends Lane<D> = Lane<D>>(
       view: BoundView,
       key: string,
       definition: FieldDefinition<D>,
       scope: LaneScope,
+      kind: LaneKind<D, L> = Lane as unknown as LaneKind<D, L>,
     ) {
       let byKey = groups.get(view);
       if (!byKey) groups.set(view, (byKey = new Map()));
       const name = `${scope} ${key}`;
-      const known = byKey.get(name) as LaneGroup<D> | undefined;
+      const known = byKey.get(name) as LaneGroup<D, L> | undefined;
       if (known?.holds()) return known;
       // Its target changed before it noticed (it follows only with lanes).
       known?.expire();
-      const group: LaneGroup<D> = new LaneGroup(
+      const group: LaneGroup<D, L> = new LaneGroup(
         view,
         definition,
         app,
@@ -189,8 +201,9 @@ export function lanesOf(app: AppController): LaneStore {
         () => {
           if (byKey.get(name) === group) byKey.delete(name);
         },
+        kind,
       );
-      byKey.set(name, group as LaneGroup<unknown>);
+      byKey.set(name, group as unknown as LaneGroup<unknown, Lane<unknown>>);
       return group;
     },
   };

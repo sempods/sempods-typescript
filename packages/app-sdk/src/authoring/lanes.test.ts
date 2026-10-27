@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import { fields, text } from '@sempods/client-sdk/edit';
 import type { AppController, LeaveGuard } from './app.js';
 import type { BoundView } from '../runtime/view.js';
+import { CreationLane } from './creation-lane.js';
 import { lanesOf } from './lanes.js';
 
 const definition = fields({ title: text('urn:title', { language: null }) });
@@ -83,17 +84,44 @@ it('keeps at most 200 settled lanes and evicts the oldest first', () => {
   expect(f.guards.size).toBe(200);
 });
 
-it('keeps a lane held for an explicit retry: never evicted, guarded', () => {
+const created = { iri: 'urn:new', run: async () => ({ kind: 'created' }) };
+const creations = (f: ReturnType<typeof fakes>) =>
+  lanesOf(f.app).group(f.view, 'k', definition, 'explicit', CreationLane);
+
+it('keeps a creation held for a retry: never evicted, guarded until discarded', () => {
   const f = fakes();
-  const group = lanesOf(f.app).group(f.view, 'k', definition, 'explicit');
-  // Settled and acknowledged, but its form holds the item for a retry.
-  group.lane('form a').held = { retry: true, settled: false };
+  const group = creations(f);
+  const lane = group.lane('form a');
+  const captured = lane.capture({ title: 'New' }, created as never);
+  (captured as { retry: boolean }).retry = true;
   for (let i = 0; i < 205; i++) group.lane(`form ${i}`);
-  expect(group.lanes.has('form a')).toBe(true);
+  expect(group.lanes.get('form a')).toBe(lane);
   const guard = [...f.guards].find((g) => g.dirty());
   expect(guard).toBeDefined();
-  // Discarding it on leave lets it go.
+  // Discarding it on leave settles it.
   guard!.discard();
-  expect(group.lane('form a').held).toBeNull();
+  expect(lane.captured).toBeNull();
+  expect(captured.settled).toBe(true);
   expect(guard!.dirty()).toBe(false);
 });
+
+it.each([
+  ['absent', true, { retry: true, settled: false }, true],
+  ['present', false, { retry: false, settled: true }, false],
+] as const)(
+  'acknowledging a checked creation found %s holds or settles it',
+  (_, absent, flags, kept) => {
+    const f = fakes();
+    const lane = creations(f).lane('form');
+    const captured = lane.capture({ title: 'New' }, created as never);
+    // An unconfirmed write, checked against the Pod.
+    Object.assign(lane, { unresolved: true, checked: true, absent });
+    expect(lane.open()).toBe(captured);
+    lane.resolve();
+    expect(captured).toMatchObject(flags);
+    expect(lane.unresolved).toBe(false);
+    // The same object stays held for the retry, so every form shows it.
+    expect(lane.captured).toBe(kept ? captured : null);
+    expect(lane.open()).toBe(kept ? captured : null);
+  },
+);
