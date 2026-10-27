@@ -81,6 +81,10 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     return {
       activeId: active ? connection.id : null,
       catalogue: active ? connection.catalogue : undefined,
+      // Row availability waits for a guarded change or its prompt; render
+      // again once it ends.
+      changing: s.changing,
+      confirmingLeave: s.confirmingLeave,
     };
   }, shallowEqual);
   const store = lanesOf(app);

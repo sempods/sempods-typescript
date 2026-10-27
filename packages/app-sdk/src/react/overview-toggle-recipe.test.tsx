@@ -11,13 +11,14 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ReactElement } from 'react';
+import { memo, useReducer, type ReactElement } from 'react';
 import { OverviewToggleExample } from '../../../../examples/todo/recipes/overview-toggle.js';
 import {
   SempodsProvider,
   useApp,
   useContextUpdate,
   usePodList,
+  type PodListItem,
 } from './index.js';
 import { fields, flag, text } from '@sempods/client-sdk/edit';
 import type { BrowserRuntime } from '../runtime/types.js';
@@ -58,6 +59,7 @@ async function overview({
   ui = (runtime: BrowserRuntime): ReactElement => (
     <OverviewToggleExample runtime={runtime} />
   ),
+  ready = async () => {},
 } = {}) {
   const f = await returnedSession((r) => void runtimes.push(r));
   f.setCatalogue(async () =>
@@ -136,6 +138,7 @@ async function overview({
   });
   const select = vi.spyOn(f.runtime, 'selectContext');
   render(ui(f.runtime));
+  await ready();
   const box = (name: string) =>
     within(screen.getByRole('list')).getByRole('checkbox', {
       name,
@@ -310,4 +313,75 @@ it("an unresolved row's guard survives row navigation and Context selection, and
   fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }));
   expect(await left).toBe(false);
   expect(f.writes).toHaveLength(1);
+});
+
+it('offers its rows again once a guarded change that re-rendered them ends', async () => {
+  let app!: ReturnType<typeof useApp>;
+  // Apart from the rows: `useApp` renders again with the provider.
+  function Actions() {
+    app = useApp();
+    return null;
+  }
+  // The list's items, handed over without rendering the rows.
+  const shared = {
+    items: [] as readonly PodListItem<{
+      readonly title: string;
+      readonly done: boolean;
+    }>[],
+    render: () => {},
+  };
+  function List() {
+    shared.items = usePodList(task).data?.items ?? [];
+    return null;
+  }
+  // The rows on their own: only `useContextUpdate` (or `render`) renders them.
+  const Rows = memo(function Rows() {
+    const [, render] = useReducer((n: number) => n + 1, 0);
+    shared.render = render;
+    const overview = useContextUpdate(task);
+    return (
+      <ul>
+        {shared.items.map((item) => {
+          const row = overview.for(item);
+          return (
+            <li key={`${item.context} ${item.snapshot.iri}`}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={row.data.done}
+                  disabled={!row.canMutate}
+                  readOnly
+                />
+                {row.data.title}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  });
+  const f = await overview({
+    ui: (runtime) => (
+      <SempodsProvider runtime={runtime} contextSelection="on-demand">
+        <Actions />
+        <List />
+        <Rows />
+      </SempodsProvider>
+    ),
+    ready: async () => {
+      await waitFor(() => expect(shared.items).toHaveLength(2));
+      act(() => shared.render());
+    },
+  });
+  const held = deferred<void>();
+  let moved!: Promise<boolean>;
+  act(() => {
+    moved = app.navigate(() => held.promise);
+  });
+  // Rendered during the change, for example by a list reload: disabled.
+  act(() => shared.render());
+  expect(f.box('Buy milk').disabled).toBe(true);
+  await act(async () => held.resolve());
+  expect(await moved).toBe(true);
+  await waitFor(() => expect(f.box('Buy milk').disabled).toBe(false));
 });
