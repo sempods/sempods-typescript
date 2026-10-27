@@ -23,10 +23,6 @@ export class LaneGroup<D> {
   private readonly guards = new Map<Lane<D>, () => void>();
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
-  /** Lanes a mounted, shown form currently claims, with a count per key. */
-  private readonly owners = new Map<string, number>();
-  /** Lanes claimed by the form that started them (their own key). */
-  private readonly originals = new Map<string, number>();
   private version = 0;
   private alive = true;
   private readable = false;
@@ -88,44 +84,6 @@ export class LaneGroup<D> {
     this.guards.set(lane, this.app.register(lane.guard(this.scope)));
     this.evict();
     return lane;
-  }
-
-  /**
-   * A mounted, shown form claims its lane; returns the release. The form
-   * that started a lane (`original`) has priority: when it claims it again,
-   * for example shown again after `<Activity>` hid it, a form that took the
-   * lane over meanwhile is told to give it back.
-   */
-  own(key: string, original = false) {
-    const count = (map: Map<string, number>, by: number) => {
-      const next = (map.get(key) ?? 0) + by;
-      if (next > 0) map.set(key, next);
-      else map.delete(key);
-    };
-    const taken = original && this.owners.has(key);
-    count(this.owners, 1);
-    if (original) count(this.originals, 1);
-    if (taken) this.changed();
-    return () => {
-      count(this.owners, -1);
-      if (original) count(this.originals, -1);
-    };
-  }
-  /** Whether the form that started this lane claims it now. */
-  claimedByOriginal(key: string) {
-    return this.originals.has(key);
-  }
-  /**
-   * An outstanding lane (pending, unresolved or held for an explicit retry)
-   * whose key starts with `prefix` and that no mounted form claims: what an
-   * earlier mount of a form left behind, for a remounted form to take over
-   * (check, acknowledge, retry the held command), never to send afresh.
-   */
-  orphan(prefix: string): string | null {
-    for (const [key, lane] of this.lanes)
-      if (key.startsWith(prefix) && !this.owners.has(key) && lane.outstanding())
-        return key;
-    return null;
   }
 
   /** Drops the oldest settled, unguarded lanes beyond the bound: feedback only. */

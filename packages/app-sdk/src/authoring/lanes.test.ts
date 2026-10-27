@@ -83,18 +83,17 @@ it('keeps at most 200 settled lanes and evicts the oldest first', () => {
   expect(f.guards.size).toBe(200);
 });
 
-it('keeps a lane held for an explicit retry: adoptable, never evicted, guarded', () => {
+it('keeps a lane held for an explicit retry: never evicted, guarded', () => {
   const f = fakes();
   const group = lanesOf(f.app).group(f.view, 'k', definition, 'explicit');
   // Settled and acknowledged, but its form holds the item for a retry.
   group.lane('form a').held = { retry: true };
   for (let i = 0; i < 205; i++) group.lane(`form ${i}`);
   expect(group.lanes.has('form a')).toBe(true);
-  expect(group.orphan('form ')).toBe('form a');
   const guard = [...f.guards].find((g) => g.dirty());
   expect(guard).toBeDefined();
   // Discarding it on leave lets it go.
   guard!.discard();
   expect(group.lane('form a').held).toBeNull();
-  expect(group.orphan('form ')).toBeNull();
+  expect(guard!.dirty()).toBe(false);
 });

@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useId,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -725,6 +724,8 @@ function useMutation<D>(
   explicit: BoundView | null | undefined,
   /** Forms of one kind (a collection) share a group, apart from row lanes. */
   forms: string,
+  /** Forms of the same name share one lane (see `useCreation`'s `id`). */
+  name: string,
 ) {
   const selected = useView();
   const view = explicit === undefined ? selected : explicit;
@@ -753,55 +754,27 @@ function useMutation<D>(
     group?.getVersion ?? noVersion,
     group?.getVersion ?? noVersion,
   );
-  // One lane per form instance. A remounted form takes over a pending or
-  // unresolved lane its earlier mount left, to check and acknowledge it, so
-  // it cannot be submitted again meanwhile. Commands look it up live: a
-  // create in the same event may have just started it.
-  const instance = useId();
-  const [adopted, adopt] = useState<{
-    readonly group: LaneGroup<D>;
-    readonly key: string;
-  } | null>(null);
-  // The form that started the lane claims it again: give it back.
-  if (
-    adopted &&
-    adopted.group === group &&
-    group.claimedByOriginal(adopted.key)
-  )
-    adopt(null);
-  const own = `form ${instance}`;
-  const id =
-    adopted && adopted.group === group && !group.claimedByOriginal(adopted.key)
-      ? adopted.key
-      : own;
+  // One lane per form name: every form of that name (by default all forms
+  // of the collection) shows the same creation, also a form that remounted
+  // or was hidden meanwhile, so none can send it afresh. Commands look it up
+  // live: a create in the same event may have just started it.
+  const id = `form ${name}`;
   const lane = group?.lanes.get(id) ?? null;
   const live = () => group?.lanes.get(id);
   // Commands start only while this form is mounted and shown; writes already
-  // sent settle in the controller either way.
-  // One token per generation (group and lane): a command kept from an
-  // earlier definition or target never becomes usable again.
+  // sent settle in the controller either way. One token per generation
+  // (group and lane): a command kept from an earlier definition or target
+  // never becomes usable again.
   // `group` and `id` are the generation this token belongs to.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const shown = useMemo(() => ({ current: false }), [group, id]);
   useEffect(() => {
     if (!group) return;
     shown.current = true;
-    const release = group.own(id, id === own);
-    // Claimed at once, so a form remounting alongside takes another one.
-    let reserved: (() => void) | undefined;
-    if (!group.lanes.has(id)) {
-      const orphan = group.orphan('form ');
-      if (orphan) {
-        reserved = group.own(orphan);
-        adopt({ group, key: orphan });
-      }
-    }
     return () => {
       shown.current = false;
-      release();
-      reserved?.();
     };
-  }, [group, id, own, shown]);
+  }, [group, shown]);
   const starts = useStartCount(view);
   const available = Boolean(
     view &&
@@ -833,8 +806,6 @@ function useMutation<D>(
           ? ('ended' as const)
           : group.lane(id).refusal(),
     acknowledge: () => live()?.acknowledge(),
-    /** Which lane this form writes through (its own, or one taken over). */
-    lane: id,
     /** The form's recovery data kept with its lane (see `Lane.held`). */
     held: () => live()?.held ?? null,
     hold: (value: { readonly retry: boolean } | null) => {
@@ -844,7 +815,7 @@ function useMutation<D>(
         if (lane) lane.held = null;
       } else if (group) group.lane(id).held = value;
     },
-    /** Whether this form's lane exists (it may have been evicted or retired). */
+    /** Whether the lane exists (it may have been evicted or retired). */
     known: lane !== null,
     busy: lane?.state?.busy ?? false,
     unresolved: lane?.unresolved ?? false,
@@ -1137,6 +1108,14 @@ function useExplicitView(context: string | undefined) {
     refused: current === 'refused',
   };
 }
+/** A captured creation, kept with its lane (see `Lane.held`). */
+interface HeldCreation<D> {
+  readonly view: BoundView;
+  readonly key: string;
+  readonly draft: D;
+  readonly creation: Creation;
+  retry: boolean;
+}
 /**
  * Owns the draft, leave guard and captured command for one intended creation.
  *
@@ -1166,19 +1145,28 @@ export function useCreation<D extends object>(
      * Context is selected or a row opens; connection actions ask first.
      */
     readonly context?: string;
+    /**
+     * Forms with the same `id` share one creation: while it is pending,
+     * unconfirmed or held for a retry, each of them shows it and none sends
+     * another. By default all forms of the collection share it. Give forms
+     * that should create independently, side by side, an `id` each.
+     */
+    readonly id?: string;
   },
 ) {
   const explicit = useExplicitView(options.context);
   const selected = useView();
   const view = options.context === undefined ? selected : explicit.view;
   const { key: shape } = useDefinition(definition, 'useCreation');
-  // One generation per collection and definition: a command captured for one
-  // collection is never sent from a form for another.
-  const key = `${options.collection} ${shape}`;
+  const name = options.id ?? '';
+  // One generation per collection, form name and definition: a command
+  // captured for one is never sent from a form for another.
+  const key = `${options.collection} ${name} ${shape}`;
   const mutation = useMutation(
     definition,
     options.context === undefined ? undefined : explicit.view,
     options.collection,
+    name,
   );
   const initial = useRef(options.initial);
   initial.current = options.initial;
@@ -1201,54 +1189,36 @@ export function useCreation<D extends object>(
     current.current = next;
     setState(next);
   } else current.current = state;
+  // The form's submitted state and the creation captured for it. The
+  // creation is kept with the lane, so every form of this name (also one
+  // shown again or remounted) recovers the same IRI and body for a retry.
   const command = useRef<{
     state: typeof state;
-    creation: Creation;
-    retry: boolean;
+    held: HeldCreation<D>;
   } | null>(null);
-  // A remounted form that took over an earlier mount's lane restores that
-  // exact draft and captured command, so an explicit retry after observed
-  // absence reuses the same IRI and body, never a fresh one.
-  // The lane a command was restored for; giving that lane back drops it.
-  const restoredFor = useRef<string | null>(null);
-  if (restoredFor.current !== null && restoredFor.current !== mutation.lane) {
-    restoredFor.current = null;
-    const next = { view, key, draft: copy(initial.current) };
-    command.current = null;
-    current.current = next;
-    setState(next);
-  }
-  const kept = mutation.held() as typeof command.current;
-  // Also when the hook still holds a command of an earlier generation, for
-  // example back on a definition it left meanwhile.
-  const held = command.current;
+  const kept = mutation.held() as HeldCreation<D> | null;
+  const mine = command.current;
+  const holding = mine !== null && mine.state === current.current;
   if (
     kept &&
-    (!held || held.state !== current.current) &&
-    kept.state.view === view &&
-    kept.state.key === key &&
+    !(holding && mine.held === kept) &&
+    kept.view === view &&
+    kept.key === key &&
     (mutation.unresolved || kept.retry)
   ) {
-    const next = { view, key, draft: kept.state.draft };
-    // Its own command moves along; a form that took the lane over works on a
-    // copy, so the original form, shown again, keeps its command intact.
-    if (held === kept) kept.state = next;
-    else command.current = { ...kept, state: next };
+    // The lane's open creation: show its draft, locked, and retry exactly it.
+    const next = { view, key, draft: kept.draft };
+    command.current = { state: next, held: kept };
     current.current = next;
-    if (held !== kept) restoredFor.current = mutation.lane;
     setState(next);
-  }
-  // The lane no longer holds this form's command: a form that took it over
-  // meanwhile (while this one was hidden) created or discarded the item, so
-  // it is no longer this form's to send.
-  const mine = command.current;
-  if (
-    mine &&
-    mine.state === current.current &&
+  } else if (
+    holding &&
+    mine.held.retry &&
     mutation.known &&
     !mutation.busy &&
-    kept?.creation !== mine.creation
+    kept !== mine.held
   ) {
+    // Another form of this name created or discarded the held item.
     const next = { view, key, draft: copy(initial.current) };
     command.current = null;
     current.current = next;
@@ -1269,7 +1239,7 @@ export function useCreation<D extends object>(
     options.context === undefined ? 'target' : 'explicit',
   );
   const retrying = () =>
-    command.current?.state === current.current && command.current.retry;
+    command.current?.state === current.current && command.current.held.retry;
   const canEdit = !mutation.busy && !mutation.unresolved && !retrying();
   const valid = (value: D) => {
     try {
@@ -1322,17 +1292,22 @@ export function useCreation<D extends object>(
       if (command.current?.state !== submitted)
         command.current = {
           state: submitted,
-          retry: false,
-          creation: prepareCreation(
+          held: {
             view,
-            newSubjectIri(view, options.collection),
-            definition,
-            submitted.draft,
-          ),
+            key,
+            draft: submitted.draft,
+            retry: false,
+            creation: prepareCreation(
+              view,
+              newSubjectIri(view, options.collection),
+              definition,
+              submitted.draft,
+            ),
+          },
         };
-      // Kept with the lane: a remounted form can recover it.
-      mutation.hold(command.current);
-      const captured = command.current.creation;
+      // Kept with the lane: every form of this name can recover it.
+      mutation.hold(command.current.held);
+      const captured = command.current.held.creation;
       const outcome = await mutation.execute('create', captured.iri, () =>
         captured.run(),
       );
@@ -1363,14 +1338,9 @@ export function useCreation<D extends object>(
         // Absence is only an observation: the original write may still land.
         // Preserve its exact command/draft for an explicit create-only retry.
         const absent = mutation.absent();
-        if (absent && command.current?.state === current.current) {
-          command.current.retry = true;
-          // Also on the command kept with the lane, so the form that started
-          // it, shown again, holds the item for this retry too.
-          const shared = mutation.held() as typeof command.current;
-          if (shared && shared.creation === command.current.creation)
-            shared.retry = true;
-        }
+        // Held with the lane, so every form of this name holds it too.
+        if (absent && command.current?.state === current.current)
+          command.current.held.retry = true;
         mutation.acknowledge();
         if (!absent) reset();
       },

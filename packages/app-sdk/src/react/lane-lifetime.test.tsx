@@ -107,15 +107,17 @@ async function setup() {
         collection,
       },
     );
-    // A second form for the same collection and definition.
+    // A second form for the same collection and definition, independent.
     api.second = useCreation(definition, {
       initial: { title: '', done: false },
       collection: 'tasks',
+      id: 'second',
     });
     api.rows = list.data?.items ?? api.rows ?? [];
     return null;
   }
-  // Another form of the same collection, outside the hidden part.
+  // Another form of the same collection, outside the hidden part: it shares
+  // the creation of `creation` (no `id`).
   function Late() {
     api.late = useCreation(definition, {
       initial: { title: '', done: false },
@@ -267,7 +269,7 @@ it('two hooks share a resource lane but keep their own latest write', async () =
   expect(s.api.mutate.unresolved).toEqual(['urn:one']);
 });
 
-it('a remounted form takes over its unconfirmed creation instead of allowing a resend', async () => {
+it('a remounted form shows its unconfirmed creation instead of allowing a resend', async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   act(() => s.api.creation.change({ title: 'New' }));
@@ -350,7 +352,7 @@ it("another hook's later write to the same resource is not this hook's feedback"
   expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
 });
 
-it('two forms remounting together each take over their own unconfirmed creation', async () => {
+it('forms with their own id keep their own unconfirmed creations across a remount', async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   act(() => {
@@ -403,7 +405,7 @@ it('a remounted form retries its absent creation under the same IRI, not a fresh
   expect(s.puts).toEqual([s.puts[0], s.puts[0]]);
 });
 
-it('a form shown again after hiding takes its lane back from one that took it over', async () => {
+it("another form of the collection shows a hidden form's creation, and both recover it together", async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   act(() => s.api.creation.change({ title: 'Mine' }));
@@ -411,28 +413,32 @@ it('a form shown again after hiding takes its lane back from one that took it ov
     await s.api.creation.create();
   });
   const iri = s.puts[0];
-  // Hidden: another form of the collection takes the lane over meanwhile.
+  // Hidden: another form of the collection shows the same creation, locked.
   act(() => s.api.hide(true));
   act(() => s.api.showLate(true));
   await waitFor(() =>
     expect(s.api.late?.outcome).toMatchObject({ kind: 'unconfirmed' }),
   );
-  // Shown again: the original form has priority; the other one lets go.
+  expect(s.api.late?.draft.title).toBe('Mine');
+  expect(s.api.late?.canCreate).toBe(false);
+  // Shown again: both show it; either one recovers it.
   act(() => s.api.hide(false));
-  await waitFor(() => expect(s.api.late?.outcome).toBeNull());
-  expect(s.api.late?.draft.title).toBe('');
   expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
-  // The original still retries under its own IRI after observed absence.
   await act(async () => {
     expect(await s.api.creation.notice.onCheck()).toBe(true);
   });
   act(() => s.api.creation.notice.onAcknowledge());
   await waitFor(() => expect(s.api.creation.canCreate).toBe(true));
+  expect(s.api.late?.draft.title).toBe('Mine');
+  expect(s.api.late?.canEdit).toBe(false);
   s.answer(() => new Response(null, { status: 201 }));
   await act(async () => {
     await s.api.creation.create();
   });
   expect(s.puts).toEqual([iri, iri]);
+  // Created: both forms start afresh.
+  await waitFor(() => expect(s.api.late?.draft.title).toBe(''));
+  expect(s.api.creation.draft.title).toBe('');
 });
 
 it('back on a definition it left, a form recovers its unconfirmed creation under the same IRI', async () => {
@@ -461,7 +467,7 @@ it('back on a definition it left, a form recovers its unconfirmed creation under
   expect(s.puts).toEqual([iri, iri]);
 });
 
-it('an absence acknowledged by a form that took the lane over holds the original for its retry', async () => {
+it('an absence acknowledged by another form of the collection holds the original for its retry', async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   act(() => s.api.creation.change({ title: 'Mine' }));
@@ -481,7 +487,7 @@ it('an absence acknowledged by a form that took the lane over holds the original
   act(() => s.api.late!.notice.onAcknowledge());
   // Shown again: the original holds its item for the same-IRI retry.
   act(() => s.api.hide(false));
-  await waitFor(() => expect(s.api.late?.draft.title).toBe(''));
+  await waitFor(() => expect(s.api.creation.canCreate).toBe(true));
   expect(s.api.creation.canEdit).toBe(false);
   expect(s.api.creation.draft.title).toBe('Mine');
   s.answer(() => new Response(null, { status: 201 }));
@@ -572,7 +578,7 @@ it("a form for another collection never sends the earlier collection's command",
   expect(s.puts[1]).not.toBe(iri);
 });
 
-it("a form that takes its lane back during another one's retry is usable once it is created", async () => {
+it("a form shown during another one's retry is usable once it is created", async () => {
   const s = await setup();
   s.answer(() => new Response(null, { status: 202 }));
   act(() => s.api.creation.change({ title: 'Mine' }));
@@ -595,7 +601,7 @@ it("a form that takes its lane back during another one's retry is usable once it
     sent = s.api.late!.create();
   });
   await waitFor(() => expect(s.api.late?.busy).toBe(true));
-  // Shown again while the retry is pending: the original takes its lane back.
+  // Shown again while the retry is pending: it shows that write as busy.
   act(() => s.api.hide(false));
   await waitFor(() => expect(s.api.creation.busy).toBe(true));
   await act(async () => held.resolve(new Response(null, { status: 201 })));
