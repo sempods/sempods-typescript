@@ -74,16 +74,31 @@ async function setup() {
     rows: readonly Snapshot<Task>[];
     app: ReturnType<typeof useApp>;
     hide: (hidden: boolean) => void;
+    note: () => void;
     mount: (mounted: boolean) => void;
   };
+  // The same type with one more field: another definition for the form.
+  const withNote = fields(
+    {
+      title: text('urn:title', { language: null }),
+      done: flag('urn:status', { on: 'urn:done', off: 'urn:open' }),
+      note: text('urn:note', { language: null, optional: true }),
+    },
+    { type: 'urn:Task' },
+  );
   function Screen() {
+    const [noted, setNoted] = useState(false);
+    api.note = () => setNoted(true);
     const list = useList(definition);
     api.mutate = useFieldUpdate(definition);
     api.other = useFieldUpdate(definition);
-    api.creation = useCreation(definition, {
-      initial: { title: '', done: false },
-      collection: 'tasks',
-    });
+    api.creation = useCreation(
+      (noted ? withNote : definition) as typeof definition,
+      {
+        initial: { title: '', done: false },
+        collection: 'tasks',
+      },
+    );
     api.rows = list.data?.items ?? api.rows ?? [];
     return null;
   }
@@ -270,4 +285,39 @@ it("a form lane is not a row: an unconfirmed creation is not in the rows' unreso
   expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
   expect(s.api.mutate.unresolved).toEqual([]);
   expect(s.api.mutate.canMutate).toBe(true);
+});
+
+it('a creation command kept from an earlier definition stays unusable', async () => {
+  const s = await setup();
+  act(() => s.api.creation.change({ title: 'New' }));
+  const kept = s.api.creation;
+  act(() => s.api.note());
+  await waitFor(() => expect(s.api.creation).not.toBe(kept));
+  await act(async () => {
+    expect(await kept.create()).toEqual({ kind: 'not-sent', reason: 'ended' });
+  });
+  expect(s.writes).toEqual([]);
+});
+
+it("another hook's later write to the same resource is not this hook's feedback", async () => {
+  const s = await setup();
+  // This hook's write is confirmed; the list reads again.
+  await act(async () => {
+    await s.api.mutate.for(s.api.rows[0]!).update({ done: true });
+  });
+  await waitFor(() =>
+    expect(s.api.other.for(s.api.rows[0]!).canMutate).toBe(true),
+  );
+  // The other hook writes the same resource and gets no answer.
+  s.answer(() => new Response(null, { status: 202 }));
+  await act(async () => {
+    // The fixture Pod still shows the task open, so this sends a write.
+    await s.api.other.for(s.api.rows[0]!).update({ done: true });
+  });
+  expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
+  expect(s.api.mutate.notice.outcome?.kind).not.toBe('unconfirmed');
+  // Acknowledging this hook's own write does not clear the other one.
+  act(() => s.api.mutate.acknowledge());
+  expect(s.api.other.unresolved).toEqual(['urn:one']);
+  expect(s.api.other.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
 });

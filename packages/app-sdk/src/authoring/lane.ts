@@ -60,6 +60,8 @@ export class Lane<D> {
   version = 0;
   uncertain = false;
   alive = true;
+  /** Counts the writes started on this lane, by any hook. */
+  writes = 0;
   /**
    * The snapshot a confirmed update was made from. It no longer shows the
    * resource, so it cannot be written again; the next read brings a fresh one.
@@ -169,6 +171,7 @@ export class Lane<D> {
     const refused = this.refusal(subject);
     if (!view || refused) return notSent(refused ?? 'unavailable');
     const version = ++this.version;
+    this.writes++;
     this.pending = true;
     this.checked = false;
     this.absent = false;

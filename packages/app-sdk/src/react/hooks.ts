@@ -768,7 +768,11 @@ function useMutation<D>(
   const live = () => group?.lanes.get(id);
   // Commands start only while this form is mounted and shown; writes already
   // sent settle in the controller either way.
-  const shown = useRef(false);
+  // One token per generation (group and lane): a command kept from an
+  // earlier definition or target never becomes usable again.
+  // `group` and `id` are the generation this token belongs to.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const shown = useMemo(() => ({ current: false }), [group, id]);
   useEffect(() => {
     if (!group) return;
     shown.current = true;
@@ -781,7 +785,7 @@ function useMutation<D>(
       shown.current = false;
       release();
     };
-  }, [group, id]);
+  }, [group, id, shown]);
   const starts = useStartCount(view);
   const available = Boolean(
     view &&
@@ -882,7 +886,8 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   const own = useRef<{
     readonly group: LaneGroup<D> | null;
     active: boolean;
-    latest: string | null;
+    /** This hook's latest write: its resource and that lane's write count. */
+    latest: { readonly iri: string; readonly write: number } | null;
   }>({ group, active: false, latest: null });
   if (own.current.group !== group)
     own.current = { group, active: own.current.active, latest: null };
@@ -903,7 +908,12 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     !app.getSnapshot().changing &&
     !app.getSnapshot().confirmingLeave,
   );
-  const latest = mine.latest ? (group?.lanes.get(mine.latest) ?? null) : null;
+  // Another hook's later write to the same resource is not this hook's.
+  const ownWrite = (mark: typeof mine.latest) => {
+    const lane = mark ? group?.lanes.get(mark.iri) : undefined;
+    return lane && lane.writes === mark!.write ? lane : null;
+  };
+  const latest = ownWrite(mine.latest);
   // The commands keep their identity for this target and definition, so they
   // fit effect dependencies; a retained one keeps writing to its own target.
   const actions = useMemo(() => {
@@ -920,8 +930,10 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
       // A refused write sends nothing and keeps the latest write's recovery.
       const refused = lane.refusal(subject);
       if (refused) return Promise.resolve(notSent(refused));
-      mine.latest = iri;
-      return lane.execute(operation, iri, action, subject, after);
+      // Starting the write counts it synchronously, before any await.
+      const sent = lane.execute(operation, iri, action, subject, after);
+      mine.latest = { iri, write: lane.writes };
+      return sent;
     };
     return {
       update: (snapshot: Snapshot<D>, change: Partial<D>) =>
@@ -952,7 +964,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
             : prepareCreation(v, args[0], args[1]).run(),
         ) as Promise<CreateOutcome | NotSent>,
       acknowledge: () => {
-        if (mine.latest) group?.lanes.get(mine.latest)?.acknowledge();
+        ownWrite(mine.latest)?.acknowledge();
       },
     };
     // `definition` belongs to `group` (same target and definition).
