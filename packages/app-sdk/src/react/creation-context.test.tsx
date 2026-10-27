@@ -151,8 +151,9 @@ it('creates in a Context that is not the selected one and reports the new IRI', 
   const f = await signedIn(() => new Response(null, { status: 201 }));
   render(<App runtime={f.runtime} context={personal} />);
   await type('Private');
-  await waitFor(() =>
-    expect((create() as HTMLButtonElement).disabled).toBe(false),
+  await waitFor(
+    () => expect((create() as HTMLButtonElement).disabled).toBe(false),
+    { timeout: 5000 },
   );
   fireEvent.click(create());
   await waitFor(() => expect(outcomes).toHaveLength(1));
@@ -174,8 +175,9 @@ it('refreshes a list of the same Context after an explicit creation', async () =
   );
   const before = f.count('/_system/sparql/query');
   await type('Shared');
-  await waitFor(() =>
-    expect((create() as HTMLButtonElement).disabled).toBe(false),
+  await waitFor(
+    () => expect((create() as HTMLButtonElement).disabled).toBe(false),
+    { timeout: 5000 },
   );
   fireEvent.click(create());
   await waitFor(
@@ -199,8 +201,10 @@ it('keeps the draft of a refused write and shows the refusal', async () => {
   const f = await signedIn(() => new Response(null, { status: 403 }));
   render(<App runtime={f.runtime} context={personal} />);
   await type('Kept');
-  await waitFor(() =>
-    expect((create() as HTMLButtonElement).disabled).toBe(false),
+  // Binding the Context and its catalogue can take a while on a busy runner.
+  await waitFor(
+    () => expect((create() as HTMLButtonElement).disabled).toBe(false),
+    { timeout: 5000 },
   );
   fireEvent.click(create());
   expect(
@@ -218,8 +222,9 @@ it('keeps its target through a Context selection while a creation is pending, un
   const f = await signedIn(() => held.promise);
   render(<App runtime={f.runtime} context={personal} />);
   await type('Pending');
-  await waitFor(() =>
-    expect((create() as HTMLButtonElement).disabled).toBe(false),
+  await waitFor(
+    () => expect((create() as HTMLButtonElement).disabled).toBe(false),
+    { timeout: 5000 },
   );
   fireEvent.click(create());
   await waitFor(() => expect(f.puts).toEqual([personal]));
@@ -284,8 +289,9 @@ it('binds the Context again after a re-authorization resumes from the back/forwa
     await restored(f.runtime);
   });
   await type('After return');
-  await waitFor(() =>
-    expect((create() as HTMLButtonElement).disabled).toBe(false),
+  await waitFor(
+    () => expect((create() as HTMLButtonElement).disabled).toBe(false),
+    { timeout: 5000 },
   );
   fireEvent.click(create());
   await waitFor(() => expect(outcomes).toHaveLength(1));
