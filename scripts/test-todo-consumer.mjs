@@ -1550,6 +1550,47 @@ try {
       .getByRole('button', { name: 'Pods & sharing', exact: true })
       .click();
     await page.getByRole('button', { name: 'Use work', exact: true }).click();
+    const beforeRemount = writes;
+    await page
+      .getByRole('button', { name: 'Open test editor', exact: true })
+      .click();
+    await page
+      .getByLabel('Retained editor draft', { exact: true })
+      .fill('Keep this editor draft');
+    await page
+      .getByRole('button', { name: 'Unmount test screen', exact: true })
+      .click();
+    await page
+      .getByLabel('Retained editor draft', { exact: true })
+      .waitFor({ state: 'detached' });
+    await page
+      .getByRole('button', { name: 'Mount test screen', exact: true })
+      .click();
+    assert.equal(
+      await page.getByLabel('Retained editor draft', { exact: true }).count(),
+      0,
+      'Remount does not automatically restore row selection',
+    );
+    await page
+      .getByRole('button', { name: 'Open test editor', exact: true })
+      .click();
+    await page.getByLabel('Retained editor draft', { exact: true }).waitFor();
+    assert.equal(
+      await page
+        .getByLabel('Retained editor draft', { exact: true })
+        .inputValue(),
+      'Keep this editor draft',
+    );
+    assert.equal(await page.getByRole('alertdialog').count(), 0);
+    assert.equal(
+      writes,
+      beforeRemount,
+      'Reopening must not save or replay a write',
+    );
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page
+      .getByLabel('Retained editor draft', { exact: true })
+      .waitFor({ state: 'detached' });
     await page.getByLabel('Custom draft').fill('Untouched');
     await page.getByText('Store my task', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'German', exact: true }).click();

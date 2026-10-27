@@ -3,12 +3,18 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
+  ResourceEditor,
   SempodsProvider,
+  TargetScreen,
   useApp,
   useAppState,
   useDraftGuard,
+  useList,
+  useResourceEditor,
+  useSelection,
   useSdkLocale,
 } from '@sempods/app-sdk/react';
+import { taskFields } from './examples/todo/src/domain.js';
 const runtime = createBrowserRuntime({
   identity: {
     kind: 'dynamic',
@@ -54,6 +60,47 @@ function Draft() {
     </>
   );
 }
+/** Exercises selection and controller-owned editor retention in a packed consumer. */
+function EditorProbe() {
+  const list = useList(taskFields);
+  const item = list.data?.items[0];
+  const { selected, select } = useSelection();
+  const editor = useResourceEditor(selected, taskFields);
+  return (
+    <>
+      <button
+        disabled={!item}
+        onClick={() => {
+          if (item) void select(item.iri);
+        }}
+      >
+        Open test editor
+      </button>
+      {selected && (
+        <ResourceEditor editor={editor} onClose={() => select(null)}>
+          {(draft, change) => (
+            <input
+              aria-label="Retained editor draft"
+              value={draft.title}
+              onChange={(event) => change({ title: event.target.value })}
+            />
+          )}
+        </ResourceEditor>
+      )}
+    </>
+  );
+}
+function RemountProbe() {
+  const [mounted, setMounted] = useState(true);
+  return (
+    <>
+      <button onClick={() => setMounted(!mounted)}>
+        {mounted ? 'Unmount test screen' : 'Mount test screen'}
+      </button>
+      <TargetScreen>{mounted && <EditorProbe />}</TargetScreen>
+    </>
+  );
+}
 /** The standard composition with a replacement connection view. */
 function Shell({ children }: { readonly children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -89,6 +136,7 @@ function App() {
       <button onClick={() => setLanguage('de')}>German</button>
       <Shell>
         <Draft />
+        <RemountProbe />
       </Shell>
     </SempodsProvider>
   );

@@ -1,5 +1,6 @@
 import type { EditDefinition, ResourceEditor } from '@sempods/client-sdk/edit';
 import type { AppController, LeaveGuard } from './app.js';
+import { navigateRetaining } from './app.js';
 import type { BoundView } from '../runtime/view.js';
 import { bindResourceEditor } from './editor.js';
 
@@ -20,6 +21,7 @@ interface Entry {
   readonly iri: string;
   readonly scope: LeaveGuard['scope'];
   readonly editor: ResourceEditor<unknown>;
+  readonly guard: LeaveGuard;
   holders: number;
   /** Whether its target is still the one it edits. */
   readonly holds: () => boolean;
@@ -65,6 +67,8 @@ export interface EditorStore {
    * reopens: returning to it leaves nothing. It binds nothing.
    */
   retains(context: string, iri: string, scope: LeaveGuard['scope']): boolean;
+  /** Reopen a selected resource, retaining only its own same-view editor guards. */
+  reopen(view: BoundView, iri: string, action: () => void): Promise<boolean>;
 }
 
 const stores = new WeakMap<AppController, EditorStore>();
@@ -128,7 +132,7 @@ export function editorsOf(app: AppController): EditorStore {
           );
         };
         const editor = bindResourceEditor(view, iri, definition);
-        const unregister = app.register({
+        const guard: LeaveGuard = {
           ...(scope ? { scope } : {}),
           unconfirmed: () => editor.state.review?.kind === 'unconfirmed',
           dirty: () =>
@@ -142,7 +146,8 @@ export function editorsOf(app: AppController): EditorStore {
             if (entry.holders === 0) remove(name);
             else entry.discarded = editor.state.draft;
           },
-        });
+        };
+        const unregister = app.register(guard);
         // Its target ended: it never updates again and its guard goes. A
         // released editor whose work settled counts towards the bound.
         const follow = () => {
@@ -160,6 +165,7 @@ export function editorsOf(app: AppController): EditorStore {
           iri,
           scope,
           editor: editor as ResourceEditor<unknown>,
+          guard,
           holders: 0,
           holds,
           stop: () => {
@@ -197,6 +203,20 @@ export function editorsOf(app: AppController): EditorStore {
           entry.scope === scope &&
           entry.holds(),
       );
+    },
+    reopen(view, iri, action) {
+      const retained = new Set(
+        [...entries.values()]
+          .filter(
+            (entry) =>
+              entry.view === view &&
+              entry.iri === iri &&
+              entry.scope === 'local' &&
+              entry.holds(),
+          )
+          .map((entry) => entry.guard),
+      );
+      return navigateRetaining(app, action, retained);
     },
   };
   stores.set(app, store);
