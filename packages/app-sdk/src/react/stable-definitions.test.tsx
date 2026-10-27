@@ -246,7 +246,7 @@ it('an inline custom definition never loops, keeps its editor and warns once', a
   ).toHaveLength(1);
 });
 
-it('warns when a real field change drops a pending write or an unsaved draft (N3)', async () => {
+it('warns when a real field change drops an unsaved draft; a pending write keeps its lane (N3)', async () => {
   const f = await setup();
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   let release!: (response: Response) => void;
@@ -286,8 +286,10 @@ it('warns when a real field change drops a pending write or an unsaved draft (N3
     api.editor!.change({ title: 'Unsaved' });
   });
   act(() => api.setLanguage('de'));
+  // The pending write keeps its own lane and guard in the controller (#156),
+  // so only the editor's dropped draft warns.
   await waitFor(() => {
-    expect(warn).toHaveBeenCalledWith(
+    expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining('while a write was pending or unresolved'),
     );
     expect(warn).toHaveBeenCalledWith(

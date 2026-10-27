@@ -1,7 +1,7 @@
 import {
   useEffect,
+  useId,
   useMemo,
-  useReducer,
   useState,
   useSyncExternalStore,
   useRef,
@@ -49,11 +49,11 @@ import {
 import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
-  Lane,
   notSent,
   type MutationOutcome,
   type NotSent,
 } from '../authoring/lane.js';
+import { lanesOf, type LaneGroup } from '../authoring/lanes.js';
 export type { MutationOutcome, NotSent } from '../authoring/lane.js';
 import {
   observeStarts,
@@ -91,6 +91,7 @@ export function useOnVisible(reload: () => void, skip: () => boolean) {
   }, []);
 }
 const loading = Object.freeze({ kind: 'loading' as const });
+const noVersion = () => 0;
 const unavailable = Object.freeze({ kind: 'unavailable' as const });
 /** Reported in the console: a lost draft or write guard is an app bug. */
 function warn(message: string) {
@@ -734,80 +735,57 @@ function useMutation<D>(
   );
   const writable = explicit === undefined ? access.write : ownWrite;
   const { key } = useDefinition(definition, 'useFieldUpdate');
-  const [, rerender] = useReducer((count: number) => count + 1, 0);
-  const current = useRef<{
-    readonly view: BoundView | null;
-    readonly key: string;
-    readonly lane: Lane<D>;
-  } | null>(null);
-  if (current.current?.view !== view || current.current.key !== key) {
-    const before = current.current;
-    // N3: a new definition for the same target starts a new lane; a pending or
-    // unresolved write of the old one loses its guard and feedback.
-    if (
-      before &&
-      before.view === view &&
-      (before.lane.pending || before.lane.unresolved)
-    )
-      warn(
-        'The field definition changed while a write was pending or unresolved; its guard and feedback were dropped.',
-      );
-    // The selected view must still be selected; an explicit one still current
-    // (same connection and authorization).
-    const lane: Lane<D> = new Lane(
-      view,
-      definition,
-      app,
-      () =>
-        current.current?.lane === lane &&
-        (explicit === undefined
-          ? app.getSnapshot().view === view
-          : Boolean(view?.getSnapshot().current)),
-      rerender,
-    );
-    current.current = { view, key, lane };
-  }
-  const lane = current.current.lane;
-  useEffect(() => {
-    lane.alive = true;
-    let readable = true;
-    const followAccess = () => {
-      const next = view?.getSnapshot().read ?? false;
-      if (readable && !next) lane.loseRead();
-      readable = next;
-    };
-    const unsubscribe = view?.subscribe(followAccess);
-    followAccess();
-    // An explicit Context stays through row changes and Context selection.
-    const unregister = app.register(
-      lane.guard(explicit === undefined ? 'target' : 'explicit'),
-    );
-    return () => {
-      lane.retire();
-      unsubscribe?.();
-      unregister();
-    };
-    // `explicit` only switches between the two kinds of lane, which `view` keys.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [app, lane, view]);
+  // The controller owns this form's lane, so a creation that settles while the
+  // form is hidden keeps its outcome and guard; an explicit Context stays
+  // through row changes and Context selection.
+  const group = view
+    ? lanesOf(app).group(
+        view,
+        key,
+        definition,
+        explicit === undefined ? 'target' : 'explicit',
+      )
+    : null;
+  useSyncExternalStore(
+    group?.subscribe ?? noopSubscribe,
+    group?.getVersion ?? noVersion,
+    group?.getVersion ?? noVersion,
+  );
+  // One lane per hook instance (it survives hiding, not remounting). Commands
+  // look it up live: a create in the same event may have just started it.
+  const id = `form ${useId()}`;
+  const lane = group?.lanes.get(id) ?? null;
+  const live = () => group?.lanes.get(id);
   const starts = useStartCount(view);
+  const available = Boolean(
+    view &&
+    writable &&
+    group?.holds() &&
+    !app.getSnapshot().changing &&
+    !app.getSnapshot().confirmingLeave,
+  );
   return {
     execute: (
       operation: 'create' | 'update' | 'remove',
       iri: string,
       action: (target: BoundView) => Promise<MutationOutcome<D>>,
-    ) => lane.execute(operation, iri, action),
-    editable: () => lane.eligible() && !lane.pending && !lane.unresolved,
-    refusal: () => lane.refusal(),
-    acknowledge: () => lane.acknowledge(),
-    busy: lane.state?.busy ?? false,
-    unresolved: lane.unresolved,
-    canMutate: lane.canMutate(writable),
-    outcome: lane.outcome(starts),
-    operation: lane.state?.operation ?? null,
-    notice: lane.notice(starts),
-    checked: () => lane.isChecked(),
-    absent: () => lane.isChecked() && lane.absent,
+    ): Promise<MutationOutcome<D> | NotSent> =>
+      group
+        ? group.lane(id).execute(operation, iri, action)
+        : Promise.resolve(notSent('unavailable')),
+    editable: () =>
+      Boolean(group?.holds()) && !live()?.pending && !live()?.unresolved,
+    refusal: () =>
+      group ? group.lane(id).refusal() : ('unavailable' as const),
+    acknowledge: () => live()?.acknowledge(),
+    busy: lane?.state?.busy ?? false,
+    unresolved: lane?.unresolved ?? false,
+    canMutate: lane ? lane.canMutate(writable) : available,
+    outcome: lane?.outcome(starts) ?? null,
+    operation: lane?.state?.operation ?? null,
+    notice: lane ? lane.notice(starts) : noNotice,
+    checked: () => live()?.isChecked() ?? false,
+    absent: () => (live()?.isChecked() ?? false) && Boolean(live()?.absent),
   };
 }
 /** Notice props for a resource this hook has not written yet. */
@@ -824,8 +802,8 @@ const iriOf = (target: string | { readonly iri: string }) =>
 /**
  * Safe availability and standard recovery feedback for one-click row mutations.
  *
- * Each resource has its own write lane, held by this hook rather than by a row
- * component. `const row = mutate.for(item)` gives one row what it needs:
+ * Each resource has its own write lane, owned by the app controller rather than
+ * by this hook or a row component, so hiding or remounting keeps it. `const row = mutate.for(item)` gives one row what it needs:
  * `row.data` to show, `row.canMutate`, `row.notice` and `row.update(change)` /
  * `row.remove()`. Ticking one task leaves the others usable, and an unresolved
  * write stays (with its check and acknowledgement) also while its row is not
@@ -854,91 +832,43 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
   const app = useController();
   const access = useWorkflowAccess();
   const { key } = useDefinition(definition, 'useFieldUpdate');
-  const [, rerender] = useReducer((count: number) => count + 1, 0);
-  // One set of lanes per target and definition; another one retires it.
-  const generation = useRef<{
-    readonly view: BoundView | null;
-    readonly key: string;
-    readonly lanes: Map<string, Lane<D>>;
-    readonly guards: Map<Lane<D>, () => void>;
-    latest: Lane<D> | null;
-    mounted: boolean;
-  } | null>(null);
-  if (generation.current?.view !== view || generation.current.key !== key) {
-    const before = generation.current;
-    if (
-      before &&
-      before.view === view &&
-      [...before.lanes.values()].some((l) => l.pending || l.unresolved)
-    )
-      warn(
-        'The field definition changed while a write was pending or unresolved; its guard and feedback were dropped.',
-      );
-    generation.current = {
-      view,
-      key,
-      lanes: new Map(),
-      guards: new Map(),
-      latest: null,
-      mounted: false,
-    };
-  }
-  const lanes = generation.current;
-  // A lane writes only while this hook is mounted for its target: a callback
-  // resuming after unmount reaches no guard or recovery UI.
-  const holds = () =>
-    generation.current === lanes &&
-    lanes.mounted &&
-    app.getSnapshot().view === view;
-  const register = (lane: Lane<D>) => {
-    if (!lanes.guards.has(lane))
-      lanes.guards.set(lane, app.register(lane.guard('target')));
-  };
-  const laneFor = (iri: string) => {
-    let lane = lanes.lanes.get(iri);
-    if (!lane) {
-      lane = new Lane(view, definition, app, holds, rerender);
-      lanes.lanes.set(iri, lane);
-      if (lanes.mounted) register(lane);
-    }
-    return lane;
-  };
+  // The controller owns the lanes of this target and definition: a write keeps
+  // its outcome and leave guard while this screen is hidden or remounts.
+  const group = view
+    ? lanesOf(app).group(view, key, definition, 'target')
+    : null;
+  useSyncExternalStore(
+    group?.subscribe ?? noopSubscribe,
+    group?.getVersion ?? noVersion,
+    group?.getVersion ?? noVersion,
+  );
+  // This hook's own part: whether its screen is shown (commands start only
+  // then) and which resource it wrote last (its list-wide feedback).
+  const own = useRef<{
+    readonly group: LaneGroup<D> | null;
+    active: boolean;
+    latest: string | null;
+  }>({ group, active: false, latest: null });
+  if (own.current.group !== group)
+    own.current = { group, active: own.current.active, latest: null };
+  const mine = own.current;
   useEffect(() => {
-    lanes.mounted = true;
-    for (const lane of lanes.lanes.values()) {
-      lane.alive = true;
-      register(lane);
-    }
-    let readable = true;
-    const followAccess = () => {
-      const next = view?.getSnapshot().read ?? false;
-      if (readable && !next) lanes.lanes.forEach((lane) => lane.loseRead());
-      readable = next;
-    };
-    const unsubscribe = view?.subscribe(followAccess);
-    followAccess();
+    mine.active = true;
     return () => {
-      lanes.mounted = false;
-      lanes.lanes.forEach((lane) => lane.retire());
-      lanes.guards.forEach((unregister) => unregister());
-      lanes.guards.clear();
-      unsubscribe?.();
+      mine.active = false;
     };
-    // `register` only reads `lanes` and `app`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [app, lanes, view]);
+  }, [mine]);
   const starts = useStartCount(view);
-  const all = [...lanes.lanes.values()];
+  const all = group ? [...group.lanes.values()] : [];
   // Whether a resource without a lane of its own could be written now.
   const available = Boolean(
     view &&
     access.write &&
-    generation.current === lanes &&
-    app.getSnapshot().view === view &&
+    group?.holds() &&
     !app.getSnapshot().changing &&
     !app.getSnapshot().confirmingLeave,
   );
-  const latest = lanes.latest;
+  const latest = mine.latest ? (group?.lanes.get(mine.latest) ?? null) : null;
   // The commands keep their identity for this target and definition, so they
   // fit effect dependencies; a retained one keeps writing to its own target.
   const actions = useMemo(() => {
@@ -949,12 +879,13 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
       subject?: Snapshot<D>,
       after?: D,
     ): Promise<MutationOutcome<D> | NotSent> => {
-      if (!lanes.mounted) return Promise.resolve(notSent('ended'));
-      const lane = laneFor(iri);
+      if (!group) return Promise.resolve(notSent('unavailable'));
+      if (!mine.active) return Promise.resolve(notSent('ended'));
+      const lane = group.lane(iri);
       // A refused write sends nothing and keeps the latest write's recovery.
       const refused = lane.refusal(subject);
       if (refused) return Promise.resolve(notSent(refused));
-      lanes.latest = lane;
+      mine.latest = iri;
       return lane.execute(operation, iri, action, subject, after);
     };
     return {
@@ -985,17 +916,19 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
             ? prepareCreation(v, args[0], args[1], args[2]).run()
             : prepareCreation(v, args[0], args[1]).run(),
         ) as Promise<CreateOutcome | NotSent>,
-      acknowledge: () => lanes.latest?.acknowledge(),
+      acknowledge: () => {
+        if (mine.latest) group?.lanes.get(mine.latest)?.acknowledge();
+      },
     };
-    // `laneFor` and `definition` belong to `lanes` (same target and definition).
+    // `definition` belongs to `group` (same target and definition).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lanes]);
+  }, [group, mine]);
   function rowFor(item: Snapshot<D>): FieldUpdateRow<D>;
   function rowFor(item: string): FieldUpdateState<D>;
   function rowFor(
     item: Snapshot<D> | string,
   ): FieldUpdateState<D> | FieldUpdateRow<D> {
-    const lane = lanes.lanes.get(iriOf(item));
+    const lane = group?.lanes.get(iriOf(item));
     const state: FieldUpdateState<D> = {
       canMutate: lane
         ? lane.canMutate(

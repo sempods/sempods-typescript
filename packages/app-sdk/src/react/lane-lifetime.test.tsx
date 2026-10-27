@@ -67,6 +67,7 @@ async function setup() {
   });
   const api = {} as {
     mutate: ReturnType<typeof useFieldUpdate<Task>>;
+    other: ReturnType<typeof useFieldUpdate<Task>>;
     creation: ReturnType<typeof useCreation<Task>>;
     rows: readonly Snapshot<Task>[];
     app: ReturnType<typeof useApp>;
@@ -76,6 +77,7 @@ async function setup() {
   function Screen() {
     const list = useList(definition);
     api.mutate = useFieldUpdate(definition);
+    api.other = useFieldUpdate(definition);
     api.creation = useCreation(definition, {
       initial: { title: '', done: false },
       collection: 'tasks',
@@ -115,9 +117,72 @@ async function setup() {
   };
 }
 
-it.fails(
-  'a pending update blocks navigation while hidden and shows its outcome on reveal',
-  async () => {
+it('a pending update blocks navigation while hidden and shows its outcome on reveal', async () => {
+  const s = await setup();
+  const held = deferred<Response>();
+  s.answer(() => held.promise);
+  const row = s.api.rows[0]!;
+  let sent!: Promise<unknown>;
+  act(() => {
+    sent = s.api.mutate.for(row).update({ done: true });
+  });
+  await waitFor(() => expect(s.api.mutate.busy).toBe(true));
+  act(() => s.api.hide(true));
+  // Still pending: a guarded change must wait for it.
+  expect(await s.api.app.navigate(() => {})).toBe(false);
+  await act(async () => held.resolve(new Response(null, { status: 202 })));
+  expect(await sent).toMatchObject({ kind: 'unconfirmed' });
+  act(() => s.api.hide(false));
+  await waitFor(() => expect(s.api.mutate.busy).toBe(false));
+  expect(s.api.mutate.unresolved).toEqual(['urn:one']);
+  expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
+    kind: 'unconfirmed',
+  });
+});
+
+it('a creation that settles while hidden leaves the form usable on reveal', async () => {
+  const s = await setup();
+  const held = deferred<Response>();
+  s.answer(() => held.promise);
+  act(() => s.api.creation.change({ title: 'New' }));
+  let sent!: Promise<unknown>;
+  act(() => {
+    sent = s.api.creation.create();
+  });
+  await waitFor(() => expect(s.api.creation.busy).toBe(true));
+  act(() => s.api.hide(true));
+  await act(async () => held.resolve(new Response(null, { status: 201 })));
+  expect(await sent).toMatchObject({ kind: 'created' });
+  act(() => s.api.hide(false));
+  await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
+  expect(s.api.creation.busy).toBe(false);
+  expect(s.api.creation.canEdit).toBe(true);
+});
+
+it('an unconfirmed outcome survives unmounting and remounting its screen', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  const row = s.api.rows[0]!;
+  await act(async () => {
+    expect(await s.api.mutate.for(row).update({ done: true })).toMatchObject({
+      kind: 'unconfirmed',
+    });
+  });
+  act(() => s.api.mount(false));
+  act(() => s.api.mount(true));
+  await waitFor(() => expect(s.api.rows).toHaveLength(1));
+  expect(s.api.mutate.unresolved).toEqual(['urn:one']);
+  expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
+    kind: 'unconfirmed',
+  });
+});
+
+it.each([
+  ['a success', 204, 'saved'],
+  ['a definite failure', 403, 'not-saved'],
+] as const)(
+  '%s that settles while hidden shows on reveal',
+  async (_, status, kind) => {
     const s = await setup();
     const held = deferred<Response>();
     s.answer(() => held.promise);
@@ -128,58 +193,30 @@ it.fails(
     });
     await waitFor(() => expect(s.api.mutate.busy).toBe(true));
     act(() => s.api.hide(true));
-    // Still pending: a guarded change must wait for it.
-    expect(await s.api.app.navigate(() => {})).toBe(false);
-    await act(async () => held.resolve(new Response(null, { status: 202 })));
-    expect(await sent).toMatchObject({ kind: 'unconfirmed' });
+    await act(async () => held.resolve(new Response(null, { status })));
+    expect(await sent).toMatchObject({ kind });
     act(() => s.api.hide(false));
     await waitFor(() => expect(s.api.mutate.busy).toBe(false));
-    expect(s.api.mutate.unresolved).toEqual(['urn:one']);
     expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
-      kind: 'unconfirmed',
+      kind,
     });
   },
 );
 
-it.fails(
-  'a creation that settles while hidden leaves the form usable on reveal',
-  async () => {
-    const s = await setup();
-    const held = deferred<Response>();
-    s.answer(() => held.promise);
-    act(() => s.api.creation.change({ title: 'New' }));
-    let sent!: Promise<unknown>;
-    act(() => {
-      sent = s.api.creation.create();
-    });
-    await waitFor(() => expect(s.api.creation.busy).toBe(true));
-    act(() => s.api.hide(true));
-    await act(async () => held.resolve(new Response(null, { status: 201 })));
-    expect(await sent).toMatchObject({ kind: 'created' });
-    act(() => s.api.hide(false));
-    await waitFor(() => expect(s.api.creation.draft.title).toBe(''));
-    expect(s.api.creation.busy).toBe(false);
-    expect(s.api.creation.canEdit).toBe(true);
-  },
-);
-
-it.fails(
-  'an unconfirmed outcome survives unmounting and remounting its screen',
-  async () => {
-    const s = await setup();
-    s.answer(() => new Response(null, { status: 202 }));
-    const row = s.api.rows[0]!;
-    await act(async () => {
-      expect(await s.api.mutate.for(row).update({ done: true })).toMatchObject({
-        kind: 'unconfirmed',
-      });
-    });
-    act(() => s.api.mount(false));
-    act(() => s.api.mount(true));
-    await waitFor(() => expect(s.api.rows).toHaveLength(1));
-    expect(s.api.mutate.unresolved).toEqual(['urn:one']);
-    expect(s.api.mutate.for('urn:one').notice.outcome).toMatchObject({
-      kind: 'unconfirmed',
-    });
-  },
-);
+it('two hooks share a resource lane but keep their own latest write', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  const row = s.api.rows[0]!;
+  await act(async () => {
+    await s.api.mutate.for(row).update({ done: true });
+  });
+  // The shared lane: the other hook sees the resource locked and unresolved.
+  expect(s.api.other.for(row).canMutate).toBe(false);
+  expect(s.api.other.unresolved).toEqual(['urn:one']);
+  // Its own latest write is none: its notice is empty and its acknowledge
+  // does not reach the first hook's write.
+  expect(s.api.other.notice.outcome).toBeNull();
+  act(() => s.api.other.acknowledge());
+  expect(s.api.mutate.notice.outcome).toMatchObject({ kind: 'unconfirmed' });
+  expect(s.api.mutate.unresolved).toEqual(['urn:one']);
+});

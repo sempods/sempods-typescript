@@ -408,7 +408,9 @@ it.each(['read-loss', 'target', 'connection', 'unmount', 'new-check'] as const)(
           { headers: { etag: '"late"' } },
         ),
       );
-      expect(await pending).toBe(false);
+      // An unmounted form's lane is kept by the controller (#156): its check
+      // may finish; every other change still ends it.
+      expect(await pending).toBe(change === 'unmount');
     });
     if (change === 'read-loss') {
       act(() => captured.onAcknowledge());
