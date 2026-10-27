@@ -339,6 +339,11 @@ supplies save, delete, discard and comparison controls around your inputs.
   **Cancel** instead of **Discard changes**, Cancel or Escape discards and
   closes, and a confirmed save or delete closes it; refusals, conflicts and
   unconfirmed answers keep it open. Switching rows or Contexts still asks.
+- The app controller owns the editor, not the component: hiding the screen
+  (`<Activity mode="hidden">`) or mounting it again keeps its draft, a pending
+  save with its outcome, an open review and its leave guard, and the same
+  editor comes back. A guarded change asks about unsaved work also while no
+  screen shows it. This holds for `useContextEditor`'s editor too.
 - Enter in a text field saves when Save is enabled; Delete is the last action.
   A checkbox's or radio's wrapping `<label>` is the 44px target. Labels and
   accessibility of custom fields stay the app's job.

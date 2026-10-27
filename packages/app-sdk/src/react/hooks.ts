@@ -9,7 +9,6 @@ import {
 } from 'react';
 import {
   RuntimeError,
-  bindResourceEditor,
   createViewLoader,
   type BoundView,
   type BoundPod,
@@ -58,6 +57,7 @@ import {
   type NotSent,
 } from '../authoring/lane.js';
 import type { ContextEditorProblem } from '../authoring/contexts.js';
+import { editorsOf } from '../authoring/editors.js';
 import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 export type { MutationOutcome, NotSent } from '../authoring/lane.js';
@@ -398,13 +398,18 @@ function useBoundEditor<D>(
     editor: ResourceEditor<D>;
   } | null>(null);
   const previous = useRef<typeof active>(null);
+  // Releases the current editor; with `true`, disposes it (another definition).
+  const discarding = useRef<((discard?: boolean) => void) | null>(null);
   useEffect(() => {
     const before = previous.current;
-    if (
-      before &&
+    // Another definition for the same subject starts a fresh editor.
+    const redefined =
+      before !== null &&
       before.view === view &&
       before.iri === iri &&
-      before.key !== key &&
+      before.key !== key;
+    if (
+      redefined &&
       (before.editor.state.dirty ||
         before.editor.state.phase === 'saving' ||
         before.editor.state.review !== null)
@@ -412,28 +417,28 @@ function useBoundEditor<D>(
       warn(
         `${hook}: the field definition changed for the same subject; its unsaved draft, pending write or open review was discarded.`,
       );
+    if (redefined) discarding.current?.(true);
+    discarding.current = null;
     if (!view || !iri) {
       previous.current = null;
       setActive(null);
       return;
     }
-    const editor = bindResourceEditor(view, iri, latest.current);
-    const unregister = app.register({
+    // The controller owns the editor: hiding (`<Activity>`) or remounting
+    // this screen keeps its draft, pending write, review and leave guard.
+    const { editor, release } = editorsOf(app).claim(
+      view,
+      iri,
+      key,
+      latest.current,
       scope,
-      unconfirmed: () => editor.state.review?.kind === 'unconfirmed',
-      dirty: () =>
-        editor.state.phase !== 'deleted' &&
-        (editor.state.dirty || editor.state.review !== null),
-      blocked: () => editor.state.phase === 'saving',
-      discard: () => editor.discard(),
-    });
+      scope === 'connection' ? 'explicit' : 'selected',
+    );
     const next = { view, iri, key, editor };
     previous.current = next;
     setActive(next);
-    return () => {
-      unregister();
-      editor.dispose();
-    };
+    discarding.current = release;
+    return () => release();
     // `key` stands for the definition (see useDefinition); `latest` is its ref.
     // `hook` only names the caller in a warning.
   }, [view, iri, key, app, latest, hook, scope]);
@@ -677,18 +682,27 @@ export function useContextEditor<D>(
       // controller cancels the prompt if another one becomes active meanwhile.
       const connection = app.getSnapshot().activeId;
       if (!connection) return Promise.resolve(false);
+      const opened = (): ContextLaneState => ({
+        lane: {
+          target: { subject: target.subject, context: target.context },
+          connection,
+        },
+        binding: null,
+        activated: false,
+        retired: false,
+      });
+      // Nothing is open here, and the controller still keeps this row's editor
+      // (this hook remounted): returning to it leaves nothing, so it does not
+      // ask, and a pending save does not block it.
+      if (
+        !liveLane(now, connection) &&
+        editorsOf(app).retains(target.context, target.subject, 'connection')
+      ) {
+        apply(opened);
+        return Promise.resolve(true);
+      }
       const result = app
-        .navigate(() =>
-          apply(() => ({
-            lane: {
-              target: { subject: target.subject, context: target.context },
-              connection,
-            },
-            binding: null,
-            activated: false,
-            retired: false,
-          })),
-        )
+        .navigate(() => apply(opened))
         .finally(() => {
           if (opening.current?.result === result) opening.current = null;
         });
