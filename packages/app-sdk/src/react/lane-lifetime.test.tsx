@@ -79,7 +79,7 @@ async function setup() {
     hide: (hidden: boolean) => void;
     late: ReturnType<typeof useCreation<Task>> | null;
     showLate: (shown: boolean) => void;
-    note: () => void;
+    note: (noted?: boolean) => void;
     mount: (mounted: boolean) => void;
   };
   // The same type with one more field: another definition for the form.
@@ -93,7 +93,7 @@ async function setup() {
   );
   function Screen() {
     const [noted, setNoted] = useState(false);
-    api.note = () => setNoted(true);
+    api.note = (next = true) => setNoted(next);
     const list = useList(definition);
     api.mutate = useFieldUpdate(definition);
     api.other = useFieldUpdate(definition);
@@ -420,6 +420,32 @@ it('a form shown again after hiding takes its lane back from one that took it ov
   expect(s.api.late?.draft.title).toBe('');
   expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
   // The original still retries under its own IRI after observed absence.
+  await act(async () => {
+    expect(await s.api.creation.notice.onCheck()).toBe(true);
+  });
+  act(() => s.api.creation.notice.onAcknowledge());
+  await waitFor(() => expect(s.api.creation.canCreate).toBe(true));
+  s.answer(() => new Response(null, { status: 201 }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  expect(s.puts).toEqual([iri, iri]);
+});
+
+it('back on a definition it left, a form recovers its unconfirmed creation under the same IRI', async () => {
+  const s = await setup();
+  s.answer(() => new Response(null, { status: 202 }));
+  act(() => s.api.creation.change({ title: 'New' }));
+  await act(async () => {
+    await s.api.creation.create();
+  });
+  const iri = s.puts[0];
+  // Away to another definition and back again.
+  act(() => s.api.note(true));
+  await waitFor(() => expect(s.api.creation.outcome).toBeNull());
+  act(() => s.api.note(false));
+  await waitFor(() => expect(s.api.creation.draft.title).toBe('New'));
+  expect(s.api.creation.outcome).toMatchObject({ kind: 'unconfirmed' });
   await act(async () => {
     expect(await s.api.creation.notice.onCheck()).toBe(true);
   });

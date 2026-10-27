@@ -1214,18 +1214,23 @@ export function useCreation<D extends object>(
     setState(next);
   }
   const kept = mutation.held() as typeof command.current;
+  // Also when the hook still holds a command of an earlier generation, for
+  // example back on a definition it left meanwhile.
+  const held = command.current;
   if (
-    !command.current &&
     kept &&
+    (!held || held.state !== current.current) &&
     kept.state.view === view &&
     kept.state.key === key &&
     (mutation.unresolved || kept.retry)
   ) {
-    // A copy: the original form, shown again, keeps its own command intact.
     const next = { view, key, draft: kept.state.draft };
-    command.current = { ...kept, state: next };
+    // Its own command moves along; a form that took the lane over works on a
+    // copy, so the original form, shown again, keeps its command intact.
+    if (held === kept) kept.state = next;
+    else command.current = { ...kept, state: next };
     current.current = next;
-    restoredFor.current = mutation.lane;
+    if (held !== kept) restoredFor.current = mutation.lane;
     setState(next);
   }
   const draft = current.current.draft;
