@@ -10,13 +10,10 @@ Upgrade both packages together. The last published version before 0.6.0 is
 0.5.0; there is no intermediate 0.5.1 release. See the
 [release notes and apps-template adoption steps](releases/0.6.0.md).
 
-After 0.6.0 is published:
-
 ```sh
 npm install --save-exact @sempods/app-sdk@0.6.0 @sempods/client-sdk@0.6.0
 ```
 
-Before publication, use the quickstart's [local package archives](quickstart.md#trying-unreleased-sdk-changes).
 Keep the lockfile and use the app-builder guide shipped with the installed SDK.
 For a template-managed repository, update the tooling's SDK pins and peers too;
 changing only an individual app's dependencies leaves its shared SDK inconsistent.
@@ -32,8 +29,11 @@ Start with these checks:
    reopens its retained draft. Give independent creation forms in one collection
    different `id` values.
 5. Check browser-language defaults, renamed controls and dialog roles in UI tests.
-   Pin `language="en" locale="en"` only if the app must remain English.
-6. Run the app's typecheck, tests and build. Exercise login, list reload, editing,
+   Confirm deletion inside the new `alertdialog`. Pin `language="en" locale="en"`
+   only if the app must remain English.
+6. Check `did:web` hosts against the stricter domain rules below. In custom
+   connection controls, offer a retry when signing out leaves `saved: false`.
+7. Run the app's typecheck, tests and build. Exercise login, list reload, editing,
    guarded navigation and recovery in its deployment environment.
 
 ### API and behavior changes
@@ -108,6 +108,22 @@ Start with these checks:
   `/items/add` inside the app returns there after the callback. A string keeps
   its meaning. The result is checked like a string; an unsafe address rejects
   the sign-in with a `configuration` error.
+- **`did:web` requires a domain host.** IP literals, single-label hosts and
+  `*.localhost`/`*.invalid` names now fail with `invalid-config` on `clientId`;
+  DNS label and total-name length limits are enforced too. Use a domain name
+  with a dot and a matching callback as described in the
+  [deployment guide](deployment.md). Only the exact hosts `localhost`,
+  `127.0.0.1` and `[::1]` remain exempt with `development: 'loopback-http'`.
+  Changing the app identity requires fresh sign-in; see
+  [what persists](#know-what-persists).
+- **Failed durable sign-out stays visible.** If `disconnect()` cannot persist
+  the sign-out, it still returns `{ kind: 'blocked-locally' }` and now keeps
+  `session: { kind: 'ended', problem: 'disconnected', saved: false }` on the
+  connection. Custom connection controls should show the failure and offer an
+  explicit retry through `useApp().disconnect(id)`; `AppAccess` does this by
+  default. The fact survives UI remounts and pending retries, but not a page
+  reload: the saved session may still restore. Do not claim that it was removed
+  or use reload as recovery. See the [runtime contract](browser-runtime.md).
 - **`AppShell` and `ConnectionControls` are removed.** Both predate `AppAccess`.
   Replace `AppShell` with your own header and a **Pods & sharing** button
   beside `AppAccess`:
@@ -270,10 +286,16 @@ Start with these checks:
   (pass the guarded `() => select(null)`) the editor works in place: Cancel or
   Escape discards and closes, and a confirmed save or delete closes it. In
   every editor Enter in a text field saves, actions read as text with Save
-  filled, Delete moves to the end and asks in a modal dialog (role
-  `alertdialog`, as the leave confirmation; it was an inline `group`), and both
-  dialogs follow the `--sempods-*` tokens, including dark mode; tests that find buttons by position
+  filled and Delete moves to the end; tests that find buttons by position
   should find them by name.
+- **Delete asks first.** In 0.5.0, `ResourceEditor`'s **Delete** sent the delete
+  immediately. It now opens a modal `alertdialog` with the
+  `controls.confirmRemove` question; only that dialog's **Delete** sends the
+  conditional `DELETE`. UI tests must press the editor's **Delete**, then
+  confirm inside the dialog. Cancelling sends nothing. The delete and leave
+  dialogs follow the `--sempods-*` tokens, including dark mode. Direct
+  `editor.remove()`, row mutation commands and custom delete buttons do not
+  gain a confirmation automatically; use `RemoveButton` or an app-owned prompt.
 - **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
   `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,
   readable Contexts into `catalogue.labels`, for example for a list menu.
