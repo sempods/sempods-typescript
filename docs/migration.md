@@ -4,20 +4,39 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
-## From 0.5.1 to 0.6.0
+## From 0.5.0 to 0.6.0
 
-This minor release changes some defaults and result types and adds options;
-upgrade both packages together.
+Upgrade both packages together. The last published version before 0.6.0 is
+0.5.0; there is no intermediate 0.5.1 release. See the
+[release notes and apps-template adoption steps](releases/0.6.0.md).
 
-**Needs action in most apps:** check mutation results for
-`{ kind: 'not-sent', reason }` where code tested for `undefined`; replace `AppShell`/`ConnectionControls` with
-`AppAccess`; pin `language="en" locale="en"` if the UI must stay English in
-other browsers; add `problem` to hand-built failure outcomes; handle the
-session kind `leaving` in exhaustive switches; drop app-side `valid` filters
-over list items; compare creation outcomes with `toMatchObject` (they now
-carry `iri`); find editor and dialog buttons by name, not position. Also replace direct row-hook commands and state as described below.
+```sh
+npm install --save-exact @sempods/app-sdk@0.6.0 @sempods/client-sdk@0.6.0
+```
 
-All points:
+Keep the lockfile and use the app-builder guide shipped with the installed SDK.
+For a template-managed repository, update the tooling's SDK pins and peers too;
+changing only an individual app's dependencies leaves its shared SDK inconsistent.
+
+Start with these checks:
+
+1. Replace `AppShell`/`ConnectionControls` with an app-owned layout and `AppAccess`.
+2. Move row commands and feedback to `mutate.for(item)`. Move direct creation to
+   `useCreation` with exactly one of `collection` and `iri`.
+3. Handle `{ kind: 'not-sent', reason }` instead of `undefined`. Update exhaustive
+   session switches for `leaving` and hand-built failure outcomes for `problem`.
+4. Keep editor recovery reachable after a remount; selecting the same subject
+   reopens its retained draft. Give independent creation forms in one collection
+   different `id` values.
+5. Check browser-language defaults, renamed controls and dialog roles in UI tests.
+   Confirm deletion inside the new `alertdialog`. Pin `language="en" locale="en"`
+   only if the app must remain English.
+6. Check `did:web` hosts against the stricter domain rules below. In custom
+   connection controls, offer a retry when signing out leaves `saved: false`.
+7. Run the app's typecheck, tests and build. Exercise login, list reload, editing,
+   guarded navigation and recovery in its deployment environment.
+
+### API and behavior changes
 
 - **One row mutation API (needs action).** `useFieldUpdate` now returns only
   `{ for, unresolved }`, matching `useContextUpdate`. Replace
@@ -89,6 +108,22 @@ All points:
   `/items/add` inside the app returns there after the callback. A string keeps
   its meaning. The result is checked like a string; an unsafe address rejects
   the sign-in with a `configuration` error.
+- **`did:web` requires a domain host.** IP literals, single-label hosts and
+  `*.localhost`/`*.invalid` names now fail with `invalid-config` on `clientId`;
+  DNS label and total-name length limits are enforced too. Use a domain name
+  with a dot and a matching callback as described in the
+  [deployment guide](deployment.md). Only the exact hosts `localhost`,
+  `127.0.0.1` and `[::1]` remain exempt with `development: 'loopback-http'`.
+  Changing the app identity requires fresh sign-in; see
+  [what persists](#know-what-persists).
+- **Failed durable sign-out stays visible.** If `disconnect()` cannot persist
+  the sign-out, it still returns `{ kind: 'blocked-locally' }` and now keeps
+  `session: { kind: 'ended', problem: 'disconnected', saved: false }` on the
+  connection. Custom connection controls should show the failure and offer an
+  explicit retry through `useApp().disconnect(id)`; `AppAccess` does this by
+  default. The fact survives UI remounts and pending retries, but not a page
+  reload: the saved session may still restore. Do not claim that it was removed
+  or use reload as recovery. See the [runtime contract](browser-runtime.md).
 - **`AppShell` and `ConnectionControls` are removed.** Both predate `AppAccess`.
   Replace `AppShell` with your own header and a **Pods & sharing** button
   beside `AppAccess`:
@@ -161,7 +196,10 @@ All points:
   ignored a pending save's outcome and let a guarded change pass it. A guarded
   change now asks about unsaved editor work even when no screen shows it. A
   definition change for the same subject still starts a fresh editor (and
-  warns about discarded work).
+  warns about discarded work). After a remount, `useSelection` still starts
+  empty; selecting the same subject reopens its retained draft or review without
+  asking to discard that editor. Other guards and pending-write restrictions
+  still apply. See [selection and draft lifetime](react-authoring.md#selection-and-draft-lifetime).
 - **Write lanes per resource in `useFieldUpdate`.** The hook keeps one lane
   per resource; new `mutate.for(item)` returns a row's `data` (with a
   confirmed update shown at once), `canMutate`, `notice`, `update(change)` and
@@ -248,10 +286,16 @@ All points:
   (pass the guarded `() => select(null)`) the editor works in place: Cancel or
   Escape discards and closes, and a confirmed save or delete closes it. In
   every editor Enter in a text field saves, actions read as text with Save
-  filled, Delete moves to the end and asks in a modal dialog (role
-  `alertdialog`, as the leave confirmation; it was an inline `group`), and both
-  dialogs follow the `--sempods-*` tokens, including dark mode; tests that find buttons by position
+  filled and Delete moves to the end; tests that find buttons by position
   should find them by name.
+- **Delete asks first.** In 0.5.0, `ResourceEditor`'s **Delete** sent the delete
+  immediately. It now opens a modal `alertdialog` with the
+  `controls.confirmRemove` question; only that dialog's **Delete** sends the
+  conditional `DELETE`. UI tests must press the editor's **Delete**, then
+  confirm inside the dialog. Cancelling sends nothing. The delete and leave
+  dialogs follow the `--sempods-*` tokens, including dark mode. Direct
+  `editor.remove()`, row mutation commands and custom delete buttons do not
+  gain a confirmation automatically; use `RemoveButton` or an app-owned prompt.
 - **Labels on explicit demand.** `runtime.loadContextLabels(id, iris)` and
   `useApp().loadContextLabels(id, iris)` read the labels of at most 20 named,
   readable Contexts into `catalogue.labels`, for example for a list menu.
@@ -274,10 +318,6 @@ All points:
   Context there mounts its Context flow, or offers its own guarded
   `selectContext` control.
 
-## From 0.5.0 to 0.5.1
-
-The patch keeps public APIs, existing message keys and result shapes. Check these points:
-
 - **AppAccess wording.** The default EN/DE texts name one action once:
   **Pod address** / **Pod-Adresse** (`controls.yourPod`), **Pods & sharing** /
   **Pods & Freigaben** (`controls.dataAccess`), **Change sharing** /
@@ -297,11 +337,6 @@ The patch keeps public APIs, existing message keys and result shapes. Check thes
 - **Complete catalogs still compile.** `controls.disconnectHint` and
   `controls.confirmRemove` are optional in `UiMessages`; `createLocale` fills
   them from the language defaults.
-- **Delete asks first.** `ResourceEditor`'s **Delete** now shows an in-editor
-  question (`controls.confirmRemove`) with **Delete** and **Cancel**; only the
-  confirmation sends the `DELETE`. End-to-end tests press **Delete** twice, the
-  second time inside the group named by that question. `editor.remove()`,
-  `useFieldUpdate` and custom delete buttons are unchanged.
 - **Compact checkboxes.** Checkboxes and radios inside SDK surfaces are 24px
   instead of 44px; a wrapping `<label>` keeps the 44px target. Wrap a bare
   checkbox in its label to keep a large target.

@@ -132,7 +132,7 @@ it.each(['en', 'de'] as const)(
 );
 
 it('keeps a complete 0.5.0 catalog source-compatible and fills keys added since', () => {
-  // A catalog written against 0.5.0 lacks keys added in a patch; it must still
+  // A catalog written against 0.5.0 lacks keys added in 0.6.0; it must still
   // type-check as the public SdkMessages and get the language default.
   const controls050 = Object.fromEntries(
     Object.entries(germanMessages.controls).filter(

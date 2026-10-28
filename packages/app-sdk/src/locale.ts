@@ -91,7 +91,7 @@ export interface UiMessages {
   readonly disconnect: string;
   /**
    * Shown with `disconnect`; an empty string shows no note. Optional in the
-   * type (added in 0.5.1) so a complete catalog written for 0.5.0 still
+   * type (added in 0.6.0) so a complete catalog written for 0.5.0 still
    * compiles; `createLocale` fills it from the language defaults.
    */
   readonly disconnectHint?: string;
@@ -129,7 +129,7 @@ export interface UiMessages {
   readonly remove: string;
   /**
    * Asked in the editor before `remove` sends anything. Optional in the type
-   * (added in 0.5.1) so a complete catalog written for 0.5.0 still compiles;
+   * (added in 0.6.0) so a complete catalog written for 0.5.0 still compiles;
    * `createLocale` fills it from the language defaults.
    */
   readonly confirmRemove?: string;

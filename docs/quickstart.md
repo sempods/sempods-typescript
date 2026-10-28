@@ -34,7 +34,7 @@ away, so you can install the SDK first.
 In the app directory:
 
 ```sh
-npm install --save-exact @sempods/app-sdk@0.5.0 @sempods/client-sdk@0.5.0
+npm install --save-exact @sempods/app-sdk@0.6.0 @sempods/client-sdk@0.6.0
 ```
 
 Both packages are released together with one version, and app-sdk depends on

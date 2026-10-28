@@ -30,6 +30,8 @@ references for the task at hand, not prerequisites to read in order.
 - [Local testing](local-testing.md), [deployment](deployment.md),
   [PWA](pwa.md) and [migration/recovery](migration.md).
 
+- [0.6.0 release notes and template adoption](releases/0.6.0.md).
+
 ## Understand and maintain the SDK
 
 - [Vision](vision.md), [architecture decisions](decisions.md),
