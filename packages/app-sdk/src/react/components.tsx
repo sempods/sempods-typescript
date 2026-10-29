@@ -479,6 +479,7 @@ export function ResourceEditor<D, U = D>({
   labels,
   quiet = false,
   onClose,
+  presentation,
 }: {
   /** As for `UpdateNotice`: no message for a confirmed save or delete. */
   readonly quiet?: boolean;
@@ -490,6 +491,16 @@ export function ResourceEditor<D, U = D>({
    * `() => select(null)`.
    */
   readonly onClose?: () => unknown;
+  /**
+   * How the editor is framed; it does not change what Cancel, Escape, save or
+   * delete do. `'card'` is the quiet tinted card, the default with `onClose`.
+   * `'plain'` has no frame and a fixed spacing: the fieldset's direct
+   * children stack 12px apart, SDK inputs keep no trailing margin and the
+   * actions start 24px below, for a routed screen or an app dialog that
+   * already frames the form. Omitted without `onClose`: the editor is
+   * unframed with the shared field spacing, as before.
+   */
+  readonly presentation?: 'card' | 'plain';
   readonly editor: Editor<D, U> | null;
   readonly children: (draft: D, change: (draft: U) => void) => ReactNode;
   readonly onChanged?: () => void;
@@ -547,7 +558,12 @@ export function ResourceEditor<D, U = D>({
     <section
       data-sempods-ui="editor"
       // In place (a list row): a quiet card, see SdkStyles.
-      data-inline={onClose ? '' : undefined}
+      data-inline={
+        (presentation ?? (onClose ? 'card' : undefined)) === 'card'
+          ? ''
+          : undefined
+      }
+      data-presentation={presentation === 'plain' ? 'plain' : undefined}
     >
       <SdkStyles />
       {state.draft !== null && state.phase !== 'deleted' && (

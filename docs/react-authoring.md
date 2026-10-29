@@ -405,6 +405,13 @@ supplies save, delete, discard and comparison controls around your inputs.
   **Cancel** instead of **Discard changes**, Cancel or Escape discards and
   closes, and a confirmed save or delete closes it; refusals, conflicts and
   unconfirmed answers keep it open. Switching rows or Contexts still asks.
+- `presentation` sets only the frame, never these semantics. `'card'` (the
+  default with `onClose`) is the quiet tinted card for a row. `'plain'` has no
+  frame, for a routed screen or an app dialog that frames the form already:
+  the fieldset's direct children stack 12px apart, SDK-styled inputs keep their
+  6px gap below a label text but no trailing margin, and the actions start 24px
+  below the last field, also after an app-owned control. Lay out a richer form
+  in one app grid as the fieldset's child; no SDK margin reaches into it.
 - The app controller owns the editor, not the component: hiding the screen
   (`<Activity mode="hidden">`) or mounting it again keeps its draft, a pending
   save with its outcome, an open review and its leave guard, and the same
@@ -899,7 +906,8 @@ validation, precedence, reload and foreign sessions.
 `CallbackNotice` share a scoped baseline: light and dark, 44px targets, visible
 focus, wrapping comparisons; no stylesheet import or UI framework. The app's
 own header, rows and controls stay unstyled. `ResourceEditor` styles its fields
-and actions; in place it is a quiet tinted card. `RemoveButton` brings its own
+and actions; in place it is a quiet tinted card, or unframed with
+`presentation="plain"`. `RemoveButton` brings its own
 icon look. Notices and editors are transparent; `AppAccess` keeps its themed
 background.
 
