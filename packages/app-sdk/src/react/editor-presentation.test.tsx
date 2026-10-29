@@ -210,8 +210,18 @@ it('Escape with changes asks first and never reaches the enclosing dialog', asyn
   const question = await screen.findByRole('alertdialog');
   expect(question.textContent).toContain('Discard unsaved changes?');
   expect(outerKeys).toEqual([]);
+  // Escape in the question keeps editing and stays out of the app dialog too.
+  fireEvent.keyDown(question, { key: 'Escape' });
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(outerKeys).toEqual([]);
+  expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+    'Changed',
+  );
+  fireEvent.keyDown(field, { key: 'Escape' });
   fireEvent.click(
-    within(question).getByRole('button', { name: 'Keep editing' }),
+    within(await screen.findByRole('alertdialog')).getByRole('button', {
+      name: 'Keep editing',
+    }),
   );
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
