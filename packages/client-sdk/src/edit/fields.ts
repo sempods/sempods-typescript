@@ -130,7 +130,8 @@ export interface FieldDefinition<D> extends EditDefinition<D> {
   readonly type?: string;
 }
 
-const TAG = /^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$/;
+/** A BCP 47 language tag's syntax, as RDF 1.1 accepts it. */
+export const LANGUAGE_TAG = /^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$/;
 
 function predicateOf(predicate: string): string {
   if (!EMBEDDABLE_IRI.test(predicate))
@@ -156,7 +157,7 @@ export function text(
   predicate: string,
   options: TextOptions & { readonly optional?: boolean },
 ): TextField {
-  if (options.language !== null && !TAG.test(options.language))
+  if (options.language !== null && !LANGUAGE_TAG.test(options.language))
     throw new TypeError(`Not a language tag: ${options.language}`);
   return Object.freeze({
     kind: 'text',
