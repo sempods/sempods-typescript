@@ -48,7 +48,9 @@ export type {
   AppController,
   AppControllerOptions,
   AppSnapshot,
+  ContextTarget,
   LeaveGuard,
+  TargetSelection,
 } from './authoring/app.js';
 export { createViewLoader } from './authoring/load.js';
 export type {

@@ -30,6 +30,65 @@ export interface LeaveGuard {
   dirty(): boolean;
   discard(): void;
 }
+/** A readable Context of one connection: what `selectTarget` selects. */
+export interface ContextTarget {
+  readonly connectionId: string;
+  readonly contextIri: string;
+}
+/**
+ * What `selectTarget` did:
+ * - `selected`: that connection is active with that Context, also when it
+ *   already was.
+ * - `declined`: the person stayed, or the prompt was cancelled.
+ * - `blocked`: a pending write, or another change preparing or asking.
+ * - `unavailable`: the target cannot be selected, before asking or because it
+ *   disappeared while the person was asked: no such `connection`, its
+ *   `session` is not signed in with the required access, its `catalogue` is
+ *   not loaded, the Context is `unlisted` as readable, or the `preset` names
+ *   another Context of that Pod.
+ */
+export type TargetSelection =
+  | { readonly kind: 'selected' }
+  | { readonly kind: 'declined' }
+  | { readonly kind: 'blocked' }
+  | {
+      readonly kind: 'unavailable';
+      readonly reason:
+        'connection' | 'session' | 'catalogue' | 'unlisted' | 'preset';
+    };
+type Unavailable = Extract<TargetSelection, { kind: 'unavailable' }>['reason'];
+type Availability = 'yes' | 'later' | 'gone';
+
+/** Why a target cannot be selected now, from the runtime's own facts. */
+export function targetProblem(
+  connections: readonly Connection[],
+  preset: PodPreset | undefined,
+  target: ContextTarget,
+): Unavailable | null {
+  const connection = connections.find((c) => c.id === target.connectionId);
+  if (!connection) return 'connection';
+  if (
+    (connection.session.kind !== 'active' &&
+      connection.session.kind !== 'renewing') ||
+    connection.missingRequiredScopes.length > 0
+  )
+    return 'session';
+  if (
+    connection.podUrl === preset?.podUrl &&
+    preset.contextIri !== undefined &&
+    target.contextIri !== preset.contextIri
+  )
+    return 'preset';
+  if (connection.catalogue.kind !== 'ready') return 'catalogue';
+  if (
+    !connection.catalogue.contexts.some(
+      (c) => c.iri === target.contextIri && c.readable,
+    )
+  )
+    return 'unlisted';
+  return null;
+}
+
 /** Whether controller startup has settled: `startup` or `startupError` is set. */
 export function startupSettled(
   snapshot: Pick<AppSnapshot, 'startup' | 'startupError'>,
@@ -137,6 +196,12 @@ export function createAppController(
         /** The connection that was active when the person was asked. */
         activeId: string | null;
         retained?: ReadonlySet<LeaveGuard>;
+        /**
+         * Whether the action's target can be selected: `gone` withdraws the
+         * prompt; `later` (a catalogue being read) keeps it, but confirming
+         * then runs nothing.
+         */
+        available?: () => Availability;
       }
     | undefined;
   let snapshot: AppSnapshot = {
@@ -166,7 +231,11 @@ export function createAppController(
     // stopping being active without a guarded action (a returning sign-in, a
     // removed connection) cancels it: nothing runs and no guard is discarded.
     // A prompt asked without any active connection is not about one.
-    if (pending && pending.activeId !== null && pending.activeId !== activeId) {
+    if (
+      pending &&
+      ((pending.activeId !== null && pending.activeId !== activeId) ||
+        pending.available?.() === 'gone')
+    ) {
       pending.resolve(false);
       pending = undefined;
     }
@@ -251,6 +320,7 @@ export function createAppController(
     action: () => void | Promise<void>,
     change: Change = 'connection',
     retained?: ReadonlySet<LeaveGuard>,
+    available?: () => Availability,
   ): Promise<boolean> {
     if (changing || pending || blocked(change)) return false;
     if (!leavingGuards(change, retained).some((g) => g.dirty())) {
@@ -271,6 +341,7 @@ export function createAppController(
         change,
         activeId,
         ...(retained ? { retained } : {}),
+        ...(available ? { available } : {}),
       };
       publish();
     });
@@ -334,6 +405,12 @@ export function createAppController(
       const intent = pending;
       if (!intent || blocked(intent.change)) return;
       pending = undefined;
+      // A target gone meanwhile: nothing runs and no guard is discarded.
+      if (intent.available && intent.available() !== 'yes') {
+        intent.resolve(false);
+        publish();
+        return;
+      }
       const leaving = leavingGuards(intent.change, intent.retained);
       changing = true;
       publish();
@@ -392,6 +469,68 @@ export function createAppController(
       return guard(() => {
         runtime.selectContext(id, iri);
       }, 'context');
+    },
+    /**
+     * One guarded switch to a readable Context of any signed-in connection,
+     * with at most one leave prompt. A change of Pod leaves guards as
+     * `selectConnection` does, the same Pod as `selectContext`. The Context
+     * is selected on the target connection before it becomes active, so no
+     * snapshot shows that Pod with its previous Context. A target that
+     * disappears while the person is asked (its connection, its sign-in or
+     * its listing) withdraws the prompt; a catalogue reload does not, but
+     * confirming before it is read again selects nothing (`unavailable`).
+     */
+    async selectTarget(target: ContextTarget): Promise<TargetSelection> {
+      const problem = () =>
+        targetProblem(runtime.getSnapshot(), runtime.preset, target);
+      const before = problem();
+      if (before) return { kind: 'unavailable', reason: before };
+      const { connectionId: id, contextIri: iri } = target;
+      const same = id === activeId;
+      if (
+        same &&
+        runtime.getSnapshot().find((c) => c.id === id)?.selectedContext === iri
+      )
+        return { kind: 'selected' };
+      const change: Change = same ? 'context' : 'connection';
+      if (changing || pending || blocked(change)) return { kind: 'blocked' };
+      let accepted: boolean;
+      try {
+        accepted = await guard(
+          () => {
+            const gone = problem();
+            if (gone) throw new RuntimeError('configuration');
+            runtime.selectContext(id, iri);
+            if (id !== activeId) {
+              activeId = id;
+              view = null;
+              callbackNotice = false;
+              publish();
+            }
+          },
+          change,
+          undefined,
+          () => {
+            const now = problem();
+            return now === null
+              ? 'yes'
+              : now === 'catalogue'
+                ? 'later'
+                : 'gone';
+          },
+        );
+      } catch (error) {
+        // The target went away between the check and the switch.
+        const gone = problem();
+        if (error instanceof RuntimeError && gone)
+          return { kind: 'unavailable', reason: gone };
+        throw error;
+      }
+      if (accepted) return { kind: 'selected' };
+      const after = problem();
+      return after
+        ? { kind: 'unavailable', reason: after }
+        : { kind: 'declined' };
     },
     /** Guarded like `selectConnection`. */
     connect(url = defaultPodUrl) {

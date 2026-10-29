@@ -51,6 +51,7 @@ it.each([
       'useList',
       'useLoad',
       'useMessages',
+      'usePodContexts',
       'usePodList',
       'usePodLoad',
       'useResourceEditor',

@@ -15,13 +15,18 @@ import {
   type AppController,
   type AppSnapshot,
   type BrowserRuntime,
+  type ContextTarget,
   type LocaleOptions,
+  type TargetSelection,
 } from '../index.js';
+import { targetProblem } from '../authoring/app.js';
+import type { CatalogueContext } from '@sempods/client-sdk';
+import type { CatalogueFact } from '../runtime/types.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog } from './confirm.js';
 import { useCommands } from './commands.js';
 import { knownContexts } from './access-presentation.js';
-import { contextName, distinctName } from './names.js';
+import { contextName, distinctName, podName } from './names.js';
 import { editorsOf } from '../authoring/editors.js';
 const Context = createContext<{
   readonly controller: AppController;
@@ -77,6 +82,11 @@ export interface AppActions {
   retryRestore(id: string): Promise<void>;
   /** Run local row/page navigation under the same leave policy. */
   navigate(action: () => void | Promise<void>): Promise<boolean>;
+  /**
+   * Select a readable Context of any signed-in connection in one guarded
+   * step, with at most one leave prompt; see `TargetSelection`.
+   */
+  selectTarget(target: ContextTarget): Promise<TargetSelection>;
 }
 /** Internal: the full controller for SDK hooks and components. */
 export function useController(): AppController {
@@ -170,6 +180,7 @@ export function SempodsProvider({
       retryRestore: (id: string) => runtime.retryRestore(id),
       navigate: (action: () => void | Promise<void>) =>
         controller.navigate(action),
+      selectTarget: (target: ContextTarget) => controller.selectTarget(target),
     });
     return { controller, actions };
   }, [runtime, contextSelection]);
@@ -322,36 +333,10 @@ export function useContexts() {
   // An exact preset keeps the app in its one Context.
   const fixed =
     preset?.podUrl === connection?.podUrl ? preset?.contextIri : undefined;
-  const contexts = useMemo(() => {
-    const readable = (knownContexts(catalogue) ?? []).filter(
-      (entry) => entry.readable && (!fixed || entry.iri === fixed),
-    );
-    const labels =
-      catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
-    const iris = readable.map((entry) => entry.iri);
-    const label = (iri: string) => contextName(iri, labels);
-    // Equal labels add the short name ("Tasks · work"); names that are still
-    // equal after that, whatever made them so, add the IRI.
-    const candidate = new Map(
-      iris.map((iri) => {
-        const plain = contextName(iri, undefined);
-        const shared = iris.some(
-          (other) => other !== iri && label(other) === label(iri),
-        );
-        return [
-          iri,
-          shared && label(iri) !== plain
-            ? `${label(iri)} · ${plain}`
-            : label(iri),
-        ];
-      }),
-    );
-    return readable.map((entry): ContextChoice => ({
-      iri: entry.iri,
-      name: distinctName(entry.iri, iris, (iri) => candidate.get(iri)!),
-      writable: entry.writable,
-    }));
-  }, [catalogue, fixed]);
+  const contexts = useMemo(
+    () => contextChoices(knownContexts(catalogue), catalogue, fixed),
+    [catalogue, fixed],
+  );
   const id = active ? connection.id : null;
   const selectedIri = active ? connection.selectedContext : null;
   // Labels for the names, once per set of Contexts (display text only).
@@ -428,6 +413,226 @@ export function useContexts() {
 }
 /** What `useContexts` returns. */
 export type ContextList = ReturnType<typeof useContexts>;
+
+/** The readable Contexts of one catalogue as a switch names them. */
+function contextChoices(
+  known: readonly CatalogueContext[] | undefined,
+  catalogue: CatalogueFact | undefined,
+  fixed: string | undefined,
+): ContextChoice[] {
+  const readable = (known ?? []).filter(
+    (entry) => entry.readable && (!fixed || entry.iri === fixed),
+  );
+  const labels = catalogue?.kind !== 'unknown' ? catalogue?.labels : undefined;
+  const iris = readable.map((entry) => entry.iri);
+  const label = (iri: string) => contextName(iri, labels);
+  // Equal labels add the short name ("Tasks · work"); names that are still
+  // equal after that, whatever made them so, add the IRI.
+  const candidate = new Map(
+    iris.map((iri) => {
+      const plain = contextName(iri, undefined);
+      const shared = iris.some(
+        (other) => other !== iri && label(other) === label(iri),
+      );
+      return [
+        iri,
+        shared && label(iri) !== plain
+          ? `${label(iri)} · ${plain}`
+          : label(iri),
+      ];
+    }),
+  );
+  return readable.map((entry) => ({
+    iri: entry.iri,
+    name: distinctName(entry.iri, iris, (iri) => candidate.get(iri)!),
+    writable: entry.writable,
+  }));
+}
+
+/**
+ * A readable Context of one connection in `usePodContexts`; as a
+ * `ContextTarget` it can be passed to `select` itself.
+ */
+export interface PodContextChoice extends ContextChoice, ContextTarget {
+  readonly connectionId: string;
+  /** The same as `iri`. */
+  readonly contextIri: string;
+  /** Stable across renders, for React keys: connection and Context. */
+  readonly key: string;
+  /**
+   * Whether `select` can choose it now: signed in with the required access,
+   * a loaded catalogue lists it as readable, and an exact preset allows it.
+   * Entries kept during a reload or after a failed one are not selectable.
+   */
+  readonly selectable: boolean;
+}
+/** One connection in `usePodContexts`, with its own state and retry. */
+export interface PodContextGroup {
+  readonly connectionId: string;
+  readonly podUrl: string;
+  /** `podNames[podUrl]`, else the address without its scheme. */
+  readonly name: string;
+  /**
+   * The session when it is not signed in (`signed-out`, `restoring`,
+   * `leaving`, `ended`), else its catalogue (`unknown`, `loading`, `ready`,
+   * `failed`); a renewing session reports its catalogue. An ended or
+   * restoring connection is not an empty one.
+   */
+  readonly status:
+    | 'signed-out'
+    | 'restoring'
+    | 'leaving'
+    | 'ended'
+    | 'unknown'
+    | 'loading'
+    | 'ready'
+    | 'failed';
+  /** Its saved session can be restored again (`retry`). */
+  readonly restorable?: true;
+  /** Readable Contexts, also those kept while reloading or after a failure. */
+  readonly choices: readonly PodContextChoice[];
+  /** Restores a restorable session, else reloads the catalogue. Not guarded. */
+  retry(): Promise<void>;
+}
+/** What `usePodContexts` returns. */
+export interface PodContextList {
+  readonly pods: readonly PodContextGroup[];
+  /** Every group's choices, in connection order. */
+  readonly choices: readonly PodContextChoice[];
+  /** The active connection's selected Context, when it is listed. */
+  readonly selected: PodContextChoice | null;
+  /** `useApp().selectTarget`: one guarded switch, at most one prompt. */
+  select(target: ContextTarget): Promise<TargetSelection>;
+}
+
+/**
+ * The readable Contexts of every connection for one app-owned chooser, such
+ * as "Shopping · alice" and "Shopping · bob". It discovers each signed-in
+ * connection's catalogue in both modes, reads the labels of up to 20
+ * Contexts per Pod once (not again on token renewal), keeps known entries
+ * during a reload and after a failure, and names equal names across Pods by
+ * their Pod. Unlike `useContexts` it never selects a Context by itself; a
+ * remembered or preset one is restored by the runtime. `AppAccess` offers no
+ * chooser of its own while this is mounted.
+ */
+export function usePodContexts(
+  options: { readonly podNames?: Readonly<Record<string, string>> } = {},
+): PodContextList {
+  const value = useContext(Context);
+  if (!value) throw new Error('SempodsProvider is required.');
+  useDemand(true, 'discovery');
+  const { retainSwitch, actions } = value;
+  useEffect(() => retainSwitch(), [retainSwitch]);
+  const { connections, activeId, preset } = useAppFacts(
+    (s) => ({
+      connections: s.connections,
+      activeId: s.activeId,
+      preset: s.preset,
+    }),
+    shallowEqual,
+  );
+  const { podNames } = options;
+  const names = podNames ? JSON.stringify(podNames) : '';
+  const pods = useMemo(() => {
+    const groups = connections.map((connection) => {
+      const signedIn =
+        connection.session.kind === 'active' ||
+        connection.session.kind === 'renewing';
+      const catalogue = signedIn ? connection.catalogue : undefined;
+      const fixed =
+        preset?.podUrl === connection.podUrl ? preset.contextIri : undefined;
+      // A failed reload keeps what was known, as a reload does.
+      const known =
+        catalogue && catalogue.kind !== 'unknown'
+          ? catalogue.contexts
+          : undefined;
+      return {
+        connection,
+        status: signedIn
+          ? connection.catalogue.kind
+          : (connection.session.kind as PodContextGroup['status']),
+        name: podName(connection.podUrl, podNames),
+        choices: contextChoices(known, catalogue, fixed),
+      };
+    });
+    // Names still equal across Pods add the Pod's name.
+    const all = groups.flatMap((g) => g.choices.map((c) => c.name));
+    return groups.map(({ connection, status, name, choices }) => ({
+      connectionId: connection.id,
+      podUrl: connection.podUrl,
+      name,
+      status,
+      ...('restorable' in connection.session && connection.session.restorable
+        ? { restorable: true as const }
+        : {}),
+      choices: choices.map((choice): PodContextChoice => ({
+        ...choice,
+        name:
+          all.filter((n) => n === choice.name).length > 1
+            ? `${choice.name} · ${name}`
+            : choice.name,
+        connectionId: connection.id,
+        contextIri: choice.iri,
+        key: `${connection.id}\n${choice.iri}`,
+        selectable:
+          targetProblem(connections, preset, {
+            connectionId: connection.id,
+            contextIri: choice.iri,
+          }) === null,
+      })),
+      retry: async () => {
+        try {
+          if (
+            'restorable' in connection.session &&
+            connection.session.restorable
+          )
+            await actions.retryRestore(connection.id);
+          else await actions.refreshContexts(connection.id);
+        } catch {
+          // The group's status shows the outcome.
+        }
+      },
+    }));
+    // `names` stands for `podNames`, which callers often pass inline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connections, preset, names, actions]);
+  // Discover every signed-in connection without a catalogue yet.
+  const undiscovered = pods
+    .filter((g) => g.status === 'unknown')
+    .map((g) => g.connectionId)
+    .join(' ');
+  useEffect(() => {
+    for (const id of undiscovered ? undiscovered.split(' ') : [])
+      void actions.refreshContexts(id).catch(() => {});
+  }, [actions, undiscovered]);
+  // Labels once per Pod and set of Contexts, never keyed by the session's
+  // renewal: the runtime's cache decides what an identity change refreshes.
+  const labelled = pods
+    .filter((g) => g.status === 'ready' && g.choices.length > 0)
+    .map(
+      (g) =>
+        g.connectionId +
+        '\t' +
+        g.choices
+          .slice(0, 20)
+          .map((c) => c.iri)
+          .join(' '),
+    )
+    .join('\n');
+  useEffect(() => {
+    for (const line of labelled ? labelled.split('\n') : []) {
+      const [id, iris] = line.split('\t') as [string, string];
+      void actions.loadContextLabels(id, iris.split(' ')).catch(() => {});
+    }
+  }, [actions, labelled]);
+  const choices = useMemo(() => pods.flatMap((g) => g.choices), [pods]);
+  const active = connections.find((c) => c.id === activeId);
+  const selected =
+    choices.find(
+      (c) => c.connectionId === activeId && c.iri === active?.selectedContext,
+    ) ?? null;
+  return { pods, choices, selected, select: actions.selectTarget };
+}
 function useDemand(active: boolean, kind: 'selection' | 'discovery') {
   const value = useContext(Context);
   if (!value) throw new Error('SempodsProvider is required.');

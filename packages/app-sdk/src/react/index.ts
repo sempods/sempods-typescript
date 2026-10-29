@@ -9,10 +9,18 @@ export {
   useAppState,
   useConnections,
   useContexts,
+  usePodContexts,
   useView,
   useWorkflowAccess,
 } from './app.js';
-export type { AppActions, ContextChoice, ContextList } from './app.js';
+export type {
+  AppActions,
+  ContextChoice,
+  ContextList,
+  PodContextChoice,
+  PodContextGroup,
+  PodContextList,
+} from './app.js';
 export {
   useLoad,
   usePodLoad,
