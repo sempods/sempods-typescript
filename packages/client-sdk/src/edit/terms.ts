@@ -6,6 +6,7 @@ export type Term = { readonly [key: string]: unknown };
 
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
 export const XSD_DATE_TIME = 'http://www.w3.org/2001/XMLSchema#dateTime';
+export const XSD_DATE = 'http://www.w3.org/2001/XMLSchema#date';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
 /** The resource or snapshot cannot be mapped to the definition; nothing is guessed. */
@@ -48,6 +49,15 @@ export function isDateTime(term: Term): boolean {
   return (
     typeof term['@value'] === 'string' &&
     term['@type'] === XSD_DATE_TIME &&
+    term['@language'] === undefined
+  );
+}
+
+/** An `xsd:date` literal with a string lexical form (valid or not). */
+export function isDate(term: Term): boolean {
+  return (
+    typeof term['@value'] === 'string' &&
+    term['@type'] === XSD_DATE &&
     term['@language'] === undefined
   );
 }

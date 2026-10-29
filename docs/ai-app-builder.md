@@ -121,7 +121,8 @@ needs them; preserve the minimal screen's recovery when adapting it.
   [runtime setup](react-authoring.md#runtime-and-provider).
 - **One data meaning.** Define the type, predicates, text language and status
   values from the domain, not just the example's names. Use `fields()` and
-  suitable helpers (`trim: true` for text, `dateTime` for instants). Keep original
+  suitable helpers (`trim: true` for text, `dateTime` for instants, `date` for
+  calendar days, shown with `format.dateOnly`). Keep original
   list snapshots; never reconstruct them from plain values. Preserve unknown
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;

@@ -8,6 +8,7 @@ export type {
   SaveOutcome,
 } from './editor.js';
 export {
+  date,
   dateTime,
   fields,
   flag,
@@ -16,6 +17,7 @@ export {
   isFieldDefinition,
 } from './fields.js';
 export type {
+  DateField,
   DateTimeField,
   DraftOf,
   EditDefinition,
