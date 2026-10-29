@@ -153,6 +153,48 @@ it('lists the type from every Context that holds it, each with its own state', a
   ]);
 });
 
+it("says per Context why entries were left out, and drops a failed Context's", async () => {
+  const f = await setup();
+  const blank = node('_:x', 'Blank');
+  f.tasks.get(work)!.set('_:x', blank);
+  f.tasks
+    .get(personal)!
+    .set('urn:b', { ...node('urn:b', 'Two'), 'urn:title': [] });
+  await waitFor(() => expect(f.api().list.complete).toBe(true));
+  const data = f.api().list.data!;
+  expect(data.skipped).toBe(2);
+  const records = {
+    [work]: { context: work, iri: null, reason: 'not-addressable', fields: [] },
+    [personal]: {
+      context: personal,
+      iri: 'urn:b',
+      reason: 'invalid',
+      fields: ['title'],
+    },
+  };
+  // In the overview's Context order.
+  expect(data.skippedRecords).toEqual(
+    f.api().list.contexts.map((c) => records[c.context]),
+  );
+  // A Context whose read failed contributes neither rows nor records.
+  f.failing.add(personal);
+  act(() =>
+    f
+      .api()
+      .list.contexts.find((c) => c.context === personal)!
+      .retry(),
+  );
+  await waitFor(() =>
+    expect(
+      f.api().list.contexts.find((c) => c.context === personal)?.state.kind,
+    ).toBe('failed'),
+  );
+  expect(f.api().list.data!.skippedRecords).toEqual([
+    { context: work, iri: null, reason: 'not-addressable', fields: [] },
+  ]);
+  expect(f.api().list.data!.skipped).toBe(1);
+});
+
 it('shows the readable part when one Context fails, and retries only that one', async () => {
   const f = await setup();
   f.tasks.get(personal)!.set('urn:b', node('urn:b', 'Call Ann'));

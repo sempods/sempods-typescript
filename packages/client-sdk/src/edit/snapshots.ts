@@ -1,5 +1,6 @@
 import type { JsonLd, WriteOptions, WriteResult } from '../results.js';
 import {
+  failingFields,
   isFieldDefinition,
   owned,
   storedDraft,
@@ -36,7 +37,42 @@ export interface SnapshotList<D> {
   readonly items: readonly Snapshot<D>[];
   /** Nodes that are not mappable subjects of this definition. */
   readonly skipped: number;
+  /**
+   * Why: the first 100 of them, in response order. Fewer records than
+   * `skipped` means the list was truncated.
+   */
+  readonly skippedRecords: readonly SkippedRecord[];
 }
+
+/**
+ * Why `snapshots()` (and so `listSubjects()`) left out one node. A technical
+ * diagnostic for an app's own check view, not UI text: it carries no values
+ * and suggests no repair.
+ */
+export interface SkippedRecord {
+  /**
+   * The node's `@id` when it is an absolute IRI; `null` for a blank node or a
+   * missing or relative identifier, which no later read or write could address.
+   */
+  readonly iri: string | null;
+  /**
+   * - `not-addressable`: no absolute IRI (`iri` is `null`).
+   * - `unreadable`: a field's terms do not map (ambiguous, not a flag value,
+   *   not exactly one IRI, malformed values).
+   * - `invalid`: the values map, but the definition rejects them (for example
+   *   an empty required text), so no update could write the row back.
+   * - `duplicate`: a second node for an IRI already listed.
+   */
+  readonly reason: 'not-addressable' | 'unreadable' | 'invalid' | 'duplicate';
+  /**
+   * Names of the definition's fields (keys of the `fields()` spec) behind
+   * `unreadable` or `invalid`, for the app's own labels; otherwise empty.
+   */
+  readonly fields: readonly string[];
+}
+
+/** At most this many `skippedRecords` per list. */
+const SKIPPED_RECORDS = 100;
 
 interface Evidence {
   readonly source: ResourceSource;
@@ -99,23 +135,50 @@ export function snapshots<D>(
     throw new TypeError('Snapshots need a definition created by fields().');
   const items: Snapshot<D>[] = [];
   const ids = new Set<string>();
+  const records: SkippedRecord[] = [];
   let skipped = 0;
+  const skip = (
+    iri: string | null,
+    reason: SkippedRecord['reason'],
+    names: readonly string[] = [],
+  ) => {
+    skipped++;
+    if (records.length < SKIPPED_RECORDS)
+      records.push(
+        Object.freeze({ iri, reason, fields: Object.freeze([...names]) }),
+      );
+  };
   for (const node of nodes) {
+    const id = node['@id'];
+    // Only an absolute IRI can be read and written again; blank nodes (`_:…`)
+    // and relative identifiers are not editable subjects.
+    if (typeof id !== 'string' || !ABSOLUTE_IRI.test(id)) {
+      skip(null, 'not-addressable');
+      continue;
+    }
+    let snapshot: Snapshot<D>;
     try {
-      const snapshot = capture(source, definition, node);
-      // A row the definition does not accept (for example an empty required
-      // text) could not be written back by any update: skip it like an
-      // unreadable one. Conflict reads keep such values to compare them.
-      if (definition.valid && !definition.valid(snapshot.data))
-        throw new TypeError('The values are not valid.');
-      if (ids.has(snapshot.iri)) throw new TypeError('Duplicate subject.');
-      ids.add(snapshot.iri);
-      items.push(snapshot);
+      snapshot = capture(source, definition, node);
     } catch {
-      skipped++;
+      skip(id, 'unreadable', failingFields(definition, node));
+      continue;
+    }
+    // A row the definition does not accept (for example an empty required
+    // text) could not be written back by any update: skip it like an
+    // unreadable one. Conflict reads keep such values to compare them.
+    if (definition.valid && !definition.valid(snapshot.data))
+      skip(id, 'invalid', failingFields(definition, node, snapshot.data));
+    else if (ids.has(id)) skip(id, 'duplicate');
+    else {
+      ids.add(id);
+      items.push(snapshot);
     }
   }
-  return Object.freeze({ items: Object.freeze(items), skipped });
+  return Object.freeze({
+    items: Object.freeze(items),
+    skipped,
+    skippedRecords: Object.freeze(records),
+  });
 }
 
 type Failed = {

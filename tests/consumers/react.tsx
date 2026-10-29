@@ -7,7 +7,11 @@ import {
   useSdkLocale,
   useCreation,
   useFieldUpdate,
+  useList,
+  usePodList,
+  type PodListSkipped,
 } from '@sempods/app-sdk/react';
+import type { SkippedRecord } from '@sempods/client-sdk/edit';
 
 function Task() {
   const [draft, setDraft] = useState('');
@@ -58,3 +62,22 @@ function CreationTypes() {
   return null;
 }
 void CreationTypes;
+
+// Skipped-entry diagnostics reach both standard list hooks (#187).
+function SkippedTypes() {
+  const definition = fields(
+    { title: text('urn:title', { language: null }) },
+    { type: 'urn:Task' },
+  );
+  const records: readonly SkippedRecord[] =
+    useList(definition).data?.skippedRecords ?? [];
+  const pod: readonly PodListSkipped[] =
+    usePodList(definition).data?.skippedRecords ?? [];
+  const reasons: readonly (
+    'not-addressable' | 'unreadable' | 'invalid' | 'duplicate'
+  )[] = records.map((r) => r.reason);
+  const where: readonly string[] = pod.map((r) => r.context);
+  const iri: string | null | undefined = records[0]?.iri;
+  return [reasons, where, iri];
+}
+void SkippedTypes;
