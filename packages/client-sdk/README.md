@@ -548,7 +548,9 @@ Several values in it, also under case-equivalent tags, set `ambiguous` and list
 all `values` to show; only an explicit `editTextVariant` replaces them all. A
 written value carries the lower-case tag; every other language, typed literal
 and IRI stays as it is. Like every custom definition it saves against the
-whole version that was read and never rebases.
+whole version that was read and never rebases. After a confirmed save an
+untouched draft follows the saved version, so removing the selected value
+shows the next variant in the order; typing made while saving stays.
 
 ## Scope and support
 

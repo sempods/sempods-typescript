@@ -606,6 +606,11 @@ export function createResourceEditor<D>(
                     draft,
                     next.data,
                   );
+                // A custom read may show the saved version differently from
+                // the submission (a removed language variant selects the next
+                // one): an untouched draft follows it, newer typing stays.
+                else if (draft !== null && sameData(draft, mine))
+                  draft = next.data;
                 phase = 'ready';
               } else if (fetched.kind === 'problem') {
                 problem = fetched.problem;
