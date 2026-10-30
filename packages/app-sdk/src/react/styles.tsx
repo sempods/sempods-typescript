@@ -51,6 +51,10 @@ ${surfaces} :where(summary) { min-height:44px; padding-block:10px; cursor:pointe
 :where([data-sempods-ui="editor"]) :where(.sp-sdk-end) { color:var(--sp-muted); }
 :where([data-sempods-ui="editor"][data-inline]) { margin-block:4px; padding:8px; border-radius:12px; background:color-mix(in srgb,var(--sp-accent) 5%,transparent); }
 :where([data-sempods-ui="editor"][data-inline]) :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { margin-block:0 8px; }
+:where([data-sempods-ui="editor"][data-presentation="plain"]) { margin-block:0; }
+:where([data-sempods-ui="editor"][data-presentation="plain"]) > :where(fieldset) { display:grid; gap:12px; min-inline-size:0; }
+:where([data-sempods-ui="editor"][data-presentation="plain"]) :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { margin-block:6px 0; }
+:where([data-sempods-ui="editor"][data-presentation="plain"]) > :where(.sp-sdk-actions) { margin-block-start:24px; }
 :where([data-sempods-ui="editor"]) > :where(section) { border-block:1px solid var(--sp-line); padding-block:12px; margin-block:16px; }
 :where([data-sempods-ui="editor"]) :where(h3) { font-size:1rem; font-weight:600; margin-block:16px 8px; }
 :where([data-sempods-ui="editor"]) > :where(section) > :where(button) { margin-block:4px; }

@@ -1591,6 +1591,50 @@ try {
     await page
       .getByLabel('Retained editor draft', { exact: true })
       .waitFor({ state: 'detached' });
+    // A plain editor on a routed screen: no card, a fixed field/action spacing
+    // that also holds after an app-owned last control, and onClose unchanged.
+    for (const width of [320, 375, 600, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page
+        .getByRole('button', { name: 'Open plain test editor', exact: true })
+        .click();
+      const plain = page.locator('[data-sempods-ui="editor"]');
+      const layout = await plain.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const field = element.querySelector('input').getBoundingClientRect();
+        const custom = [...element.querySelectorAll('button')]
+          .find((b) => b.textContent === 'Pick a day')
+          .getBoundingClientRect();
+        const actions = element
+          .querySelector('.sp-sdk-actions')
+          .getBoundingClientRect();
+        return {
+          inline: element.hasAttribute('data-inline'),
+          background: style.backgroundColor,
+          padding: style.paddingTop + ' ' + style.paddingLeft,
+          fieldGap: custom.top - field.bottom,
+          actionGap: actions.top - custom.bottom,
+          overflow:
+            document.documentElement.scrollWidth >
+            document.documentElement.clientWidth,
+        };
+      });
+      assert.deepEqual(layout, {
+        inline: false,
+        background: 'rgba(0, 0, 0, 0)',
+        padding: '0px 0px',
+        fieldGap: 12,
+        actionGap: 24,
+        overflow: false,
+      });
+      await page
+        .getByLabel('Retained editor draft', { exact: true })
+        .press('Escape');
+      await page
+        .getByLabel('Retained editor draft', { exact: true })
+        .waitFor({ state: 'detached' });
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.getByLabel('Custom draft').fill('Untouched');
     await page.getByText('Store my task', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'German', exact: true }).click();
