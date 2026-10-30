@@ -112,6 +112,7 @@ it('useApp exposes only the guarded actions, as one stable object', async () => 
     'retryRestore',
     'selectConnection',
     'selectContext',
+    'selectTarget',
   ]);
   const before = catalogueReads(f);
   await act(async () => {

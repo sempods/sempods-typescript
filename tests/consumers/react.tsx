@@ -5,12 +5,16 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   SdkLocaleProvider,
   useSdkLocale,
+  useApp,
   useCreation,
   useFieldUpdate,
   useList,
+  usePodContexts,
   usePodList,
+  type PodContextChoice,
   type PodListSkipped,
 } from '@sempods/app-sdk/react';
+import type { ContextTarget, TargetSelection } from '@sempods/app-sdk';
 import type { SkippedRecord } from '@sempods/client-sdk/edit';
 
 function Task() {
@@ -62,6 +66,29 @@ function CreationTypes() {
   return null;
 }
 void CreationTypes;
+
+// One guarded switch across Pods (#188).
+function PodContextTypes() {
+  const lists = usePodContexts({
+    podNames: { 'https://pod.example/bob': 'Bob' },
+  });
+  const first: PodContextChoice | undefined = lists.choices[0];
+  const target: ContextTarget | undefined = first;
+  const status: string | undefined = lists.pods[0]?.status;
+  const select: (t: ContextTarget) => Promise<TargetSelection> =
+    useApp().selectTarget;
+  void select;
+  void lists.select({ connectionId: 'id', contextIri: 'urn:c' }).then((r) => {
+    if (r.kind === 'unavailable') {
+      const reason:
+        'connection' | 'session' | 'catalogue' | 'unlisted' | 'preset' =
+        r.reason;
+      void reason;
+    }
+  });
+  return [target, status];
+}
+void PodContextTypes;
 
 // Skipped-entry diagnostics reach both standard list hooks (#187).
 function SkippedTypes() {

@@ -153,6 +153,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Open another item](#selection-useselection)                         | `useSelection` (React)                                        | Guarded `select(iri)`; `select(null)` closes                                 |
 | [Translate the app's texts](#app-texts-usemessages)                  | `useMessages` (React)                                         | One `{ en, de }` catalogue outside components                                |
 | [Switch between Contexts](#apps-that-switch-contexts)                | `useContexts` (React)                                         | Mount outside `TargetScreen`                                                 |
+| [Switch across Pods](#one-chooser-across-pods)                       | `usePodContexts` (React)                                      | Optional `podNames`; `select({ connectionId, contextIri })`                  |
 | [Create in another Context](#creating-in-an-explicit-context)        | `useCreation` with `context` (React), `bindCreation` (app)    | The Context IRI; one hook per Context                                        |
 | [Read across the Pod](#pod-overviews-with-contexts-on-demand)        | `usePodLoad` (React)                                          | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
 | [One type across Contexts](#pod-overviews-with-contexts-on-demand)   | `usePodList` + `LoadNotice` (React)                           | A `fields()` definition with a `type`                                        |
@@ -563,6 +564,56 @@ const lists = useContexts();
 
 The [TODO example](../examples/todo/src/app.tsx) puts the switch in its header,
 with a "read only" hint and **Share more lists**.
+
+#### One chooser across Pods
+
+With several connected Pods, `usePodContexts({ podNames })` lists every Pod's
+readable Contexts for one chooser, and `select({ connectionId, contextIri })`
+(also `useApp().selectTarget`) switches Pod and Context in one guarded step:
+
+```tsx
+function ListChooser() {
+  const lists = usePodContexts({ podNames: { [bobPod]: 'Bob' } });
+  return lists.pods.map((pod) => (
+    <section key={pod.connectionId} aria-label={pod.name}>
+      {pod.choices.map((choice) => (
+        <button
+          key={choice.key}
+          aria-pressed={lists.selected?.key === choice.key}
+          disabled={!choice.selectable}
+          onClick={() => void lists.select(choice)}
+        >
+          {choice.name}
+        </button>
+      ))}
+      {pod.status === 'failed' && (
+        <button onClick={() => void pod.retry()}>Try again</button>
+      )}
+    </section>
+  ));
+}
+```
+
+- `pods` keeps each connection's `status`: its session while it is not signed
+  in (`signed-out`, `restoring`, `leaving`, `ended`), else its catalogue
+  (`unknown`, `loading`, `ready`, `failed`). An ended or restoring Pod is not an
+  empty one; `retry()` restores a `restorable` session or reloads the catalogue.
+- Names work as in `useContexts`; names still equal across Pods add the Pod's
+  name ("Shopping · Bob"). `key` is stable for React keys. Known entries stay
+  while a catalogue reloads or after it failed, but only `selectable` ones
+  (signed in with the required access, listed as readable, allowed by an exact
+  preset) can be selected. Labels are read once per Pod, not again on token
+  renewal.
+- `select` resolves a `TargetSelection`: `selected`, `declined`, `blocked`
+  (a pending write or another change) or `unavailable` with a `reason`. It asks
+  at most once about drafts and unconfirmed writes; a Pod change leaves guards
+  as `selectConnection` does, the same Pod as `selectContext`. The Context is
+  selected on the target Pod before it becomes active, so no screen ever sees
+  that Pod with its previous, possibly writable, Context. A target whose Pod,
+  sign-in or listing disappears while the person is asked withdraws the
+  question and switches nothing.
+- Unlike `useContexts` it selects nothing by itself; the runtime restores a
+  remembered or preset Context. While mounted, `AppAccess` shows no chooser.
 
 ### Creating in an explicit Context
 

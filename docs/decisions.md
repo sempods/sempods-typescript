@@ -195,6 +195,9 @@ scopes say which changes leave a draft: row navigation keeps `target` guards, a
 Context selection keeps `connection` guards (drafts bound to an explicit
 Context), and connection actions leave all. A pending write blocks every change,
 except that a saving `connection` guard does not block a Context selection.
+Selecting a Context on another Pod (`selectTarget`) is one connection action
+with one prompt: it selects the Context on the inactive connection first and
+only then makes it active, so no intermediate target is writable.
 
 _Why:_ recovery should be the default behaviour of the building blocks, not
 code every app writes again.
