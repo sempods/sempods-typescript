@@ -192,6 +192,37 @@ of [`useLoad`](#load-states): `state`, `data`, `reload`, `cancel`.
 - `<LoadNotice {...list} />` covers what the rows do not: loading before any
   data, a failed refresh (noting kept rows), a cancelled or unavailable read,
   each with a retry, and entries the definition cannot show (`data.skipped`).
+- `data.skippedRecords` says why, for a separate check view rather than every
+  screen: the first 100 entries left out, each with its `iri` (`null` when it
+  has none an app could address), a `reason` (`not-addressable`, `unreadable`,
+  `invalid`, `duplicate`) and the names of the `fields` behind it. No values,
+  no UI text and no repair; the app words the report and decides any repair
+  as an explicit edit. `usePodList` adds each record's `context`.
+
+```tsx
+const why = { title: 'Title', done: 'Status' } as const;
+
+function SkippedReport() {
+  const list = useList(taskFields);
+  const records = list.data?.skippedRecords ?? [];
+  if (records.length === 0) return null;
+  return (
+    <ul aria-label="Entries this app cannot show">
+      {records.map((record, i) => (
+        <li key={i}>
+          {record.iri ?? 'An entry without an address'}:{' '}
+          {record.reason === 'duplicate'
+            ? 'listed twice'
+            : record.fields.map((f) => why[f as keyof typeof why]).join(', ') ||
+              record.reason}
+        </li>
+      ))}
+      {records.length < (list.data?.skipped ?? 0) && <li>…and more</li>}
+    </ul>
+  );
+}
+```
+
 - It reads again after a confirmed creation, row mutation or bound editor save
   or delete on the same target (same Context, connection, subject and
   authorization, through the selected view or a `runtime.bindContext` handle),

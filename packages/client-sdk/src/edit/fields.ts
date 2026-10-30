@@ -515,6 +515,29 @@ export function isFieldDefinition<D>(
   return generated.has(definition);
 }
 
+/**
+ * Names of the fields that cannot read their terms of `node`, or, given a
+ * draft, whose values `valid` rejects: why a list skipped a subject.
+ */
+export function failingFields<D>(
+  definition: FieldDefinition<D>,
+  node: JsonLd,
+  draft?: D,
+): readonly string[] {
+  return Object.entries(definition.fields as Record<string, Field>)
+    .filter(([name, field]) => {
+      if (draft !== undefined)
+        return !validField(field, (draft as Record<string, unknown>)[name]);
+      try {
+        readField(field, termsOf(node, field.predicate));
+        return false;
+      } catch {
+        return true;
+      }
+    })
+    .map(([name]) => name);
+}
+
 /** Names of the fields whose values differ between two drafts. */
 export function changedFields<D>(
   definition: FieldDefinition<D>,

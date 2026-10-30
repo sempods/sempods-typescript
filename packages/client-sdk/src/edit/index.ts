@@ -30,6 +30,7 @@ export type {
 export { removeSnapshot, snapshots, updateFields } from './snapshots.js';
 export type {
   RemoveSnapshotOutcome,
+  SkippedRecord,
   Snapshot,
   SnapshotList,
   UpdateOutcome,
