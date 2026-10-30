@@ -29,6 +29,10 @@ version and commit. Use the [contributor rules](../contributing.md).
   tarball checksum; archive metadata can differ between packs.
 - Prepare concise release notes and the release PR with tested environments and
   unverified live/device cases. An approved older commit is not current approval.
+- Release notes and the migration guide ship to every app owner, whose assistant
+  may act on them. Keep sempods-apps-template maintainer steps (starter pins,
+  peer ranges, UI-kit changes) out of them; record those on the template's
+  adoption issue or the release PR.
 
 ## Publish an authorized candidate
 

@@ -121,7 +121,11 @@ needs them; preserve the minimal screen's recovery when adapting it.
   [runtime setup](react-authoring.md#runtime-and-provider).
 - **One data meaning.** Define the type, predicates, text language and status
   values from the domain, not just the example's names. Use `fields()` and
-  suitable helpers (`trim: true` for text, `dateTime` for instants). Keep original
+  suitable helpers (`trim: true` for text, `dateTime` for instants, `date` for
+  calendar days). Show a day with `format.dateOnly` only for years 0001 to
+  9999 without a time zone; it throws or misreads other forms a `date`
+  accepts (`2026-10-05Z`, `-0044-03-15`, `0000-01-01`), so show those as
+  stored. Keep original
   list snapshots; never reconstruct them from plain values. Preserve unknown
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
@@ -157,8 +161,12 @@ Inspect the rendered app before handoff, not just its source. Check phone and
 desktop widths, the app's supported color modes, empty and populated views,
 and an editor or recovery state. Check hierarchy, alignment, readable text,
 contrast, touch targets, keyboard focus and horizontal overflow. Fix the issues
-found. Use isolated fixtures for sample states; do not insert demonstration
-records into a live Pod without authorization.
+found. The SDK has no public preview runtime. For sample states, keep the
+app's own parts (rows, headers, empty text) in components that take plain props
+and render those with sample data in an isolated preview; SDK-owned states
+(editor, recovery, access) need a test Context with synthetic data, see
+[local testing](local-testing.md). Do not insert demonstration records into a
+live Pod without authorization, and say which states were not inspected.
 
 Show the owner the actual first screen or a screenshot and describe the main
 interaction in everyday language. If browser inspection was unavailable, say

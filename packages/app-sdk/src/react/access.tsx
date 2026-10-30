@@ -921,7 +921,7 @@ const styles = `
 [data-sempods-access] input { border-width:0 0 1px; border-radius:0; padding-inline:0; }
 [data-sempods-access] select { appearance:none; border-width:0 0 1px; border-radius:0; padding:12px 24px 12px 0; cursor:pointer; background-image:linear-gradient(45deg,transparent 50%,var(--sp-muted) 50%),linear-gradient(135deg,var(--sp-muted) 50%,transparent 50%); background-position:calc(100% - 10px) 50%,calc(100% - 5px) 50%; background-size:5px 5px; background-repeat:no-repeat; }
 [data-sempods-access] input::placeholder { color:var(--sp-muted); opacity:1; }
-[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:5px; color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }
+[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:calc(var(--sp-radius) * .625); color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }
 [data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-on-accent); background:var(--sp-accent); }
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
 [data-sempods-access] :focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
@@ -936,7 +936,7 @@ const styles = `
 [data-sempods-access] .sp-access-description { margin:8px 0 0; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-actions { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:16px; }
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
-[data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:5px; padding:10px 12px; }
+[data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:calc(var(--sp-radius) * .625); padding:10px 12px; }
 [data-sempods-access] summary { min-height:44px; padding:10px; cursor:pointer; }
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
@@ -946,4 +946,8 @@ const styles = `
 .sp-access-dialog [data-sempods-access] { padding:8px 24px 24px; text-align:start; }
 .sp-access-dialog [data-sempods-access] .sp-access-content { max-width:none; }
 .sp-access-dialog [data-sempods-access] .sp-access-actions { justify-content:flex-start; margin-inline-start:-14px; }
+/* On a phone, management is a bottom sheet, like an app's own small-screen dialog. */
+@media (max-width:30rem) {
+  .sp-access-dialog { width:100%; max-width:none; margin:auto 0 0; max-height:calc(100dvh - 16px); border-end-start-radius:0; border-end-end-radius:0; padding-block-end:env(safe-area-inset-bottom); }
+}
 `;

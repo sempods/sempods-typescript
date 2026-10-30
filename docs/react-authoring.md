@@ -144,7 +144,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Start the browser session](#runtime-and-provider)                   | `createBrowserRuntime` (app)                                  | Identity, optional `preset`/`allowedPods`; one stable runtime outside render |
 | [Bind the UI](#runtime-and-provider)                                 | `SempodsProvider`, `TargetScreen` (React)                     | The runtime; your screen inside `TargetScreen`                               |
 | [Sign-in, Context choice, recovery](#appaccess-props)                | `AppAccess` (React)                                           | `appName`; a host button sets `open`                                         |
-| [Describe your data](#field-definitions)                             | `fields`, `text`, `flag`, `iri`, `dateTime` (edit)            | Type and predicate IRIs, explicit text language, `trim: true` for text       |
+| [Describe your data](#field-definitions)                             | `fields`, `text`, `flag`, `iri`, `dateTime`, `date` (edit)    | Type and predicate IRIs, explicit text language, `trim: true` for text       |
 | [Show a list](#lists-uselist-and-loadnotice)                         | `useList`, `LoadNotice` (React)                               | The definition; render `list.data?.items` and `<LoadNotice {...list} />`     |
 | [Add an item](#creating-usecreation)                                 | `useCreation` (React)                                         | `{ initial, collection }`; inputs to `canEdit`, submit to `canCreate`        |
 | [Update or delete a row](#updating-and-deleting-rows-usefieldupdate) | `useFieldUpdate`, `RemoveButton`, `UnresolvedNotices` (React) | One hook per list; `const row = mutate.for(item)` per row                    |
@@ -176,6 +176,10 @@ of trimming before `create()`.
   by itself, its latest value is used when an editor or form starts, and a
   changed identity is reported once in the console. Remount (for example with a
   `key`) to apply another custom mapping.
+- `text()` edits one fixed language. To show and edit whichever variant the app
+  prefers, define the custom mapping once at module level with the
+  [preferred-language recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant)
+  and use it with `useResourceEditor`.
 
 ### Lists: useList and LoadNotice
 
@@ -391,6 +395,14 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   Use `row.canMutate` for each row's availability and `row.notice` for its
   feedback. An IRI-only handle (`mutate.for(iri)`) exposes recovery and always
   has `canMutate: false`, because there is no snapshot to write from.
+- Several rows from one decision (**Clear done tasks**): capture the shown
+  rows' `row.remove` commands (typed `FieldUpdateRow<D>['remove']`), confirm
+  their number, then `await` one after the other and stop at the first result
+  that is not `removed`; never retry or resend the rest. Each command deletes
+  only the version its row showed, in its own target, and sends nothing once
+  that target or access changed. The
+  [clear-done recipe](../examples/todo/recipes/clear-done.tsx) reports partial
+  completion and leaves the stopped row's recovery to `UnresolvedNotices`.
 - Create with `useCreation`; pass `iri` instead of `collection` when its
   identity is already known. Portable raw JSON-LD creation stays in
   `client-sdk/edit.prepareCreation`; its caller owns the UI recovery lifecycle.
@@ -433,9 +445,21 @@ supplies save, delete, discard and comparison controls around your inputs.
   version shown. Cancel or Escape keeps draft and target; any newer editor state
   withdraws the question. Headless `editor.remove()` stays direct.
 - In place (for example in a row) pass `onClose={() => select(null)}`: it shows
-  **Cancel** instead of **Discard changes**, Cancel or Escape discards and
-  closes, and a confirmed save or delete closes it; refusals, conflicts and
-  unconfirmed answers keep it open. Switching rows or Contexts still asks.
+  **Cancel** instead of **Discard changes**, Cancel discards and closes, and a
+  confirmed save or delete closes it; refusals, conflicts and unconfirmed
+  answers keep it open. Escape closes too, but with unsaved changes it first
+  asks "Discard unsaved changes?", as closing the row, switching rows or
+  Contexts, or an enclosing app dialog's × does. The editor keeps that Escape
+  from reaching an enclosing dialog; Escape and Enter inside a nested dialog,
+  popover or portal in the fields (a date chooser) belong to it alone and
+  neither discard nor save the parent draft.
+- `presentation` sets only the frame, never these semantics. `'card'` (the
+  default with `onClose`) is the quiet tinted card for a row. `'plain'` has no
+  frame, for a routed screen or an app dialog that frames the form already:
+  the fieldset's direct children stack 12px apart, SDK-styled inputs keep their
+  6px gap below a label text but no trailing margin, and the actions start 24px
+  below the last field, also after an app-owned control. Lay out a richer form
+  in one app grid as the fieldset's child; no SDK margin reaches into it.
 - The app controller owns the editor, not the component: hiding the screen
   (`<Activity mode="hidden">`) or mounting it again keeps its draft, a pending
   save with its outcome, an open review and its leave guard, and the same
@@ -859,7 +883,8 @@ function AppContent() {
 
 - As a dialog (`onClose`) the app behind it is inert, a leave confirmation
   opens above it, and opening re-checks access (no **Check access**). Sign-in
-  and recovery stay inline.
+  and recovery stay inline. Up to 30rem wide it is a bottom sheet across the
+  screen's width, as small-screen app dialogs usually are; wider, it is centred.
 - It shows the Pod, then the Context and this app's access (**Read only** or
   **Read and write**); several Contexts appear in the **Data context** chooser
   (only in `'required'` mode or while a Context flow needs a selection),
@@ -930,7 +955,8 @@ validation, precedence, reload and foreign sessions.
 `CallbackNotice` share a scoped baseline: light and dark, 44px targets, visible
 focus, wrapping comparisons; no stylesheet import or UI framework. The app's
 own header, rows and controls stay unstyled. `ResourceEditor` styles its fields
-and actions; in place it is a quiet tinted card. `RemoveButton` brings its own
+and actions; in place it is a quiet tinted card, or unframed with
+`presentation="plain"`. `RemoveButton` brings its own
 icon look. Notices and editors are transparent; `AppAccess` keeps its themed
 background.
 
@@ -946,6 +972,9 @@ appearance in the app's CSS and keep page colours compatible (`light-dark()`):
 Theme with `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` (controls; the default is neutral grey) and
 `--sempods-on-accent`, on an ancestor or a component's `style`/`className`.
+`--sempods-font` sets the font family (default `system-ui, sans-serif`) and
+`--sempods-radius` the corner radius of controls (default `8px`); cards and
+dialogs use 1.5 times it, `0` makes every SDK surface square.
 React 19 [hoists the scoped sheets](https://react.dev/reference/react-dom/components/style);
 they need a CSP that allows inline styles, otherwise build presentation from
 the public hooks.

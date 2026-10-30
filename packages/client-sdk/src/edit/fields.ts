@@ -1,12 +1,14 @@
 import type { JsonLd } from '../results.js';
 import {
   hasLanguage,
+  isDate,
   isDateTime,
   isText,
   MappingError,
   sameData,
   sameTerms,
   termsOf,
+  XSD_DATE,
   XSD_DATE_TIME,
   type Term,
 } from './terms.js';
@@ -92,7 +94,33 @@ export interface DateTimeField<Optional extends boolean = boolean> {
    */
   readonly optional: Optional;
 }
-export type Field = TextField | FlagField | IriField | DateTimeField;
+/**
+ * At most one calendar day as an `xsd:date` literal, as its lexical form
+ * (`2026-10-05`): a day, not an instant, so no midnight and no time zone is
+ * invented. Other values of the predicate (including `xsd:dateTime`) are
+ * preserved and not read, so a `date` and a `dateTime` field may share a
+ * predicate; two `xsd:date` values are a mapping error.
+ *
+ * With `orDateTime`, the field owns both: one value that is either a day or an
+ * exact `xsd:dateTime` instant with a time zone, for a property such as a due
+ * date that may carry a time. Its draft is the lexical form; a value with a
+ * time (`T`) is written as `xsd:dateTime`, otherwise as `xsd:date`. A day and
+ * an instant side by side are a mapping error, as two values would be.
+ *
+ * Written values must be valid lexical forms (a real day, leap years
+ * included; an `xsd:date` may carry a time zone, an `xsd:dateTime` must);
+ * anything else, such as `2026-10` or `2026-02-30`, makes the draft invalid.
+ * Values are stored unchanged, never normalized. `Optional` works as in
+ * {@link TextField}.
+ */
+export interface DateField<Optional extends boolean = boolean> {
+  readonly kind: 'date';
+  readonly predicate: string;
+  readonly optional: Optional;
+  readonly orDateTime?: true;
+}
+export type Field =
+  TextField | FlagField | IriField | DateTimeField | DateField;
 
 // Only a field known to be required drafts `string`; unknown optionality
 // (`optional: boolean`) may read `null` and is typed so.
@@ -130,7 +158,8 @@ export interface FieldDefinition<D> extends EditDefinition<D> {
   readonly type?: string;
 }
 
-const TAG = /^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$/;
+/** A BCP 47 language tag's syntax, as RDF 1.1 accepts it. */
+export const LANGUAGE_TAG = /^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$/;
 
 function predicateOf(predicate: string): string {
   if (!EMBEDDABLE_IRI.test(predicate))
@@ -156,7 +185,7 @@ export function text(
   predicate: string,
   options: TextOptions & { readonly optional?: boolean },
 ): TextField {
-  if (options.language !== null && !TAG.test(options.language))
+  if (options.language !== null && !LANGUAGE_TAG.test(options.language))
     throw new TypeError(`Not a language tag: ${options.language}`);
   return Object.freeze({
     kind: 'text',
@@ -220,6 +249,31 @@ export function dateTime(
   });
 }
 
+/** A calendar day; also accepts an `xsd:dateTime` instant with `orDateTime`. */
+export function date(
+  predicate: string,
+  options: { readonly optional: true; readonly orDateTime?: boolean },
+): DateField<true>;
+export function date(
+  predicate: string,
+  options?: { readonly optional?: false; readonly orDateTime?: boolean },
+): DateField<false>;
+export function date(
+  predicate: string,
+  options: { readonly optional?: boolean; readonly orDateTime?: boolean } = {},
+): DateField {
+  return Object.freeze({
+    kind: 'date',
+    predicate: predicateOf(predicate),
+    optional: options.optional ?? false,
+    ...(options.orDateTime ? { orDateTime: true as const } : {}),
+  });
+}
+
+/** XSD 1.1 `date` lexical form; the time zone is optional. */
+const DATE =
+  /^-?(\d*(\d{4}))-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))?$/;
+
 /**
  * XSD 1.1 `dateTime` lexical form with a mandatory time zone. The pattern
  * checks the ranges of each part; the day of the month is checked below.
@@ -229,7 +283,15 @@ const DATE_TIME =
 const DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 function isZonedDateTime(value: string): boolean {
-  const match = DATE_TIME.exec(value);
+  return realDay(DATE_TIME.exec(value));
+}
+
+function isDateValue(value: string): boolean {
+  return realDay(DATE.exec(value));
+}
+
+/** Whether the matched year, month and day name a day of that calendar. */
+function realDay(match: RegExpExecArray | null): boolean {
   // A year of more than four digits has no leading zero.
   if (!match || (match[1]!.length > 4 && match[1]![0] === '0')) return false;
   const month = Number(match[3]);
@@ -248,6 +310,8 @@ function owns(field: Field, term: Term): boolean {
       return isText(term) && hasLanguage(term, field.language);
     case 'dateTime':
       return isDateTime(term);
+    case 'date':
+      return isDate(term) || (field.orDateTime === true && isDateTime(term));
     case 'flag':
     case 'iri':
       return true;
@@ -265,7 +329,8 @@ function readField(field: Field, terms: readonly Term[]): Value {
   const mine = owned(field, terms);
   switch (field.kind) {
     case 'text':
-    case 'dateTime': {
+    case 'dateTime':
+    case 'date': {
       if (mine.length > 1)
         throw new MappingError(
           field.predicate,
@@ -301,13 +366,19 @@ function writeField(
   if (readField(field, terms) === value) return terms;
   switch (field.kind) {
     case 'text':
-    case 'dateTime': {
+    case 'dateTime':
+    case 'date': {
       // Only an optional field reaches here with null: explicit removal.
       if (value === null) return terms.filter((t) => !owns(field, t));
       const index = terms.findIndex((t) => owns(field, t));
       if (index >= 0)
         return terms.map((t, i) =>
-          i === index ? { ...t, '@value': value } : t,
+          i !== index
+            ? t
+            : field.kind === 'date'
+              ? // A day may become an instant and back: its type follows.
+                { ...t, '@value': value, '@type': dateType(value as string) }
+              : { ...t, '@value': value },
         );
       return [...terms, ...freshTerms(field, value)];
     }
@@ -335,17 +406,33 @@ function validField(field: Field, value: unknown): boolean {
         (value === null && field.optional) ||
         (typeof value === 'string' && isZonedDateTime(value))
       );
+    case 'date':
+      return (
+        (value === null && field.optional) ||
+        (typeof value === 'string' &&
+          (isDateValue(value) ||
+            (field.orDateTime === true && isZonedDateTime(value))))
+      );
   }
+}
+
+/** The datatype a `date` field writes for a lexical form. */
+function dateType(value: string): string {
+  return value.includes('T') ? XSD_DATE_TIME : XSD_DATE;
 }
 
 /**
  * Whether two fields can own the same term. `flag` and `iri` own every value
- * of their predicate; `text` and `dateTime` own disjoint kinds of literals.
+ * of their predicate; `text`, `dateTime` and `date` own disjoint kinds of
+ * literals, except that a `date` with `orDateTime` also owns `xsd:dateTime`.
  */
 function overlaps(a: Field, b: Field): boolean {
   if (a.predicate !== b.predicate) return false;
   if (a.kind === 'flag' || a.kind === 'iri') return true;
   if (b.kind === 'flag' || b.kind === 'iri') return true;
+  const instant = (f: Field) =>
+    f.kind === 'dateTime' || (f.kind === 'date' && f.orDateTime === true);
+  if (instant(a) && instant(b)) return true;
   if (a.kind !== b.kind) return false;
   if (a.kind !== 'text' || b.kind !== 'text') return true;
   return a.language === null || b.language === null
@@ -591,5 +678,8 @@ function freshTerms(field: Field, value: Value): readonly Term[] {
     case 'dateTime':
       if (value === null) return [];
       return [{ '@value': value, '@type': XSD_DATE_TIME }];
+    case 'date':
+      if (value === null) return [];
+      return [{ '@value': value, '@type': dateType(value as string) }];
   }
 }

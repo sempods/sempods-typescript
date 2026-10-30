@@ -432,8 +432,15 @@ export async function renameWithEditor(
   literal as its lexical string, such as `2026-10-05T09:30:00+02:00`; a value
   without an explicit time zone, `Z` or `±hh:mm`, makes the draft invalid; it is
   stored unchanged, so the offset survives; untyped strings, other datatypes and
-  IRIs are preserved; `optional: true` as for `text`). Fields writing the same
-  terms are rejected; a `text` and a `dateTime` may share a predicate.
+  IRIs are preserved; `optional: true` as for `text`) and `date` (one calendar
+  day as an `xsd:date` lexical string, such as `2026-10-05`, never an invented
+  midnight instant; `2026-10` or `2026-02-30` makes the draft invalid; other
+  values, `xsd:dateTime` included, are preserved). `date(predicate, {
+orDateTime: true })` owns one value that is either a day or a zoned
+  `xsd:dateTime`, written with the datatype its lexical form names (a `T`
+  makes it an instant), so a planning date may carry a time. Fields writing the
+  same terms are rejected; `text`, `dateTime` and a plain `date` may share a
+  predicate, a `date` with `orDateTime` and a `dateTime` may not.
   Predicates, `fields({ type })`, `flag` IRIs and `iri` values must be absolute
   IRIs without whitespace, U+0000–U+0020, angle brackets, quotes, braces, pipe,
   caret, backslash or backtick, because they are embedded in SPARQL and Turtle:
@@ -493,8 +500,68 @@ export async function renameWithEditor(
   and `await` each `run()` before the next. Stop at the first result that is
   not `created` and leave the rest unsent; an `unconfirmed` item is retried
   only through its own creation, never under a new IRI.
-- Not implemented yet: preferred-language editing, `texts`, and merging two changes to
-  the same field.
+- Not implemented yet: a `fields()` field for preferred-language text (use the
+  recipe below), `texts`, and merging two changes to the same field.
+
+### Show and edit a preferred language variant
+
+`text()` edits one fixed language. To show whichever variant an app prefers
+(untagged, then German, then English, …) and edit exactly that one, compose a
+conservative `EditDefinition` from `selectTextVariant`, `editTextVariant` and
+`patchTextVariant`. The app owns the order; statement order never decides.
+Tags compare case-insensitively (`DE` is `de`), regional tags stay distinct
+(`de-*` ranks them, lexically within the range) and `'*'` takes any other tag.
+
+```ts
+import {
+  editTextVariant,
+  patchTextVariant,
+  selectTextVariant,
+  type EditDefinition,
+  type LanguageOrder,
+  type TextVariant,
+} from '@sempods/client-sdk/edit';
+
+const NAME = 'https://schema.org/name';
+const DESCRIPTION = 'https://schema.org/description';
+// The first `null` or plain tag is where a first value is written.
+const order: LanguageOrder = [null, 'de', 'de-*', 'en', 'en-*', '*'];
+
+export interface Labelled {
+  readonly name: TextVariant;
+  readonly description: TextVariant;
+}
+
+export const labelled: EditDefinition<Labelled> = {
+  read: (resource) => ({
+    name: selectTextVariant(resource, NAME, order),
+    description: selectTextVariant(resource, DESCRIPTION, order),
+  }),
+  // An untouched variant patches nothing, so editing the name never rewrites
+  // the description, even while it holds two values in one language.
+  patch: (resource, draft) => ({
+    ...patchTextVariant(resource, NAME, draft.name),
+    ...patchTextVariant(resource, DESCRIPTION, draft.description),
+  }),
+  valid: (draft) => !draft.name.ambiguous && Boolean(draft.name.value?.trim()),
+};
+
+/** An input's change: one value in the selected language, the rest kept. */
+export function renamed(draft: Labelled, name: string): Labelled {
+  return { ...draft, name: editTextVariant(draft.name, name) };
+}
+```
+
+`variant.language` is the selected tag in lower case (`null`: untagged).
+Several values in it, also under case-equivalent tags, set `ambiguous` and list
+all `values` to show; only an explicit `editTextVariant` replaces them all. A
+written value carries the lower-case tag; every other language, typed literal
+and IRI stays as it is. Like every custom definition it saves against the
+whole version that was read and never rebases. After a confirmed save an
+untouched draft follows the saved version, so removing the selected value
+shows the next variant in the order; typing made while saving stays.
+
+## Scope and support
 
 Discovered support is not a granted scope or context right. HTTPS is required;
 `development: 'loopback-http'` permits explicit local fixture/development use only.

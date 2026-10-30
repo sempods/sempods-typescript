@@ -86,7 +86,10 @@ export function ConfirmDialog({
       }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
+          // The answer to this question only: an enclosing app dialog that
+          // closes on Escape must not close with it.
           e.preventDefault();
+          e.stopPropagation();
           onCancel();
         }
         if (e.key === 'Tab') {
