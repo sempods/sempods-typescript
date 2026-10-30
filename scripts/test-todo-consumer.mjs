@@ -994,9 +994,49 @@ try {
         .evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
-    // Management is a modal dialog; the leave prompt opens above it.
+    // Font and corner radius follow two more tokens; cards scale with them.
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--sempods-radius', '0px');
+      document.documentElement.style.setProperty('--sempods-font', 'serif');
+    });
+    assert.deepEqual(
+      await save.evaluate((button) => {
+        const style = getComputedStyle(button);
+        return [style.borderTopLeftRadius, style.fontFamily];
+      }),
+      ['0px', 'serif'],
+    );
+    await page.evaluate(() => {
+      document.documentElement.style.removeProperty('--sempods-radius');
+      document.documentElement.style.removeProperty('--sempods-font');
+    });
+    assert.equal(
+      await save.evaluate(
+        (button) => getComputedStyle(button).borderTopLeftRadius,
+      ),
+      '8px',
+    );
+    // Management is a modal dialog; the leave prompt opens above it. On a
+    // phone it is a bottom sheet across the width.
     await menu(page, 'Pods & sharing');
     await page.getByRole('dialog', { name: 'Pods & sharing' }).waitFor();
+    assert.deepEqual(
+      await page
+        .getByRole('dialog', { name: 'Pods & sharing' })
+        .evaluate((dialog) => {
+          const box = dialog.getBoundingClientRect();
+          return [
+            Math.round(box.left),
+            Math.round(box.right),
+            Math.round(box.bottom),
+          ];
+        }),
+      await page.evaluate(() => [
+        0,
+        document.documentElement.clientWidth,
+        window.innerHeight,
+      ]),
+    );
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
@@ -1099,6 +1139,11 @@ try {
     const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
     const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
     assert.equal(await created.count(), 0);
+    // The label around a row's checkbox is its touch target, not a margin.
+    const target = await page
+      .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .evaluate((box) => box.closest('label').getBoundingClientRect());
+    assert.ok(target.width >= 44 && target.height >= 44);
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
       .click();
@@ -1119,11 +1164,18 @@ try {
     await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
     await draft.waitFor({ state: 'detached' });
     assert.equal(await saved.count(), 0);
-    // Escape discards an edit and closes the editor without writing.
+    // Escape asks before discarding an edit; Escape in the question stays.
     await page.getByRole('button', { name: 'Renamed', exact: true }).click();
     const beforeEscape = writes;
     await draft.fill('Escaped');
     await draft.press('Escape');
+    await page.getByRole('alertdialog').waitFor();
+    await page.keyboard.press('Escape');
+    assert.equal(await draft.inputValue(), 'Escaped');
+    await draft.press('Escape');
+    await page
+      .getByRole('button', { name: 'Discard and continue', exact: true })
+      .click();
     await page.getByRole('button', { name: 'Renamed', exact: true }).waitFor();
     assert.equal(writes, beforeEscape);
     await page.getByRole('button', { name: 'Renamed', exact: true }).click();
@@ -1591,6 +1643,50 @@ try {
     await page
       .getByLabel('Retained editor draft', { exact: true })
       .waitFor({ state: 'detached' });
+    // A plain editor on a routed screen: no card, a fixed field/action spacing
+    // that also holds after an app-owned last control, and onClose unchanged.
+    for (const width of [320, 375, 600, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page
+        .getByRole('button', { name: 'Open plain test editor', exact: true })
+        .click();
+      const plain = page.locator('[data-sempods-ui="editor"]');
+      const layout = await plain.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const field = element.querySelector('input').getBoundingClientRect();
+        const custom = [...element.querySelectorAll('button')]
+          .find((b) => b.textContent === 'Pick a day')
+          .getBoundingClientRect();
+        const actions = element
+          .querySelector('.sp-sdk-actions')
+          .getBoundingClientRect();
+        return {
+          inline: element.hasAttribute('data-inline'),
+          background: style.backgroundColor,
+          padding: style.paddingTop + ' ' + style.paddingLeft,
+          fieldGap: custom.top - field.bottom,
+          actionGap: actions.top - custom.bottom,
+          overflow:
+            document.documentElement.scrollWidth >
+            document.documentElement.clientWidth,
+        };
+      });
+      assert.deepEqual(layout, {
+        inline: false,
+        background: 'rgba(0, 0, 0, 0)',
+        padding: '0px 0px',
+        fieldGap: 12,
+        actionGap: 24,
+        overflow: false,
+      });
+      await page
+        .getByLabel('Retained editor draft', { exact: true })
+        .press('Escape');
+      await page
+        .getByLabel('Retained editor draft', { exact: true })
+        .waitFor({ state: 'detached' });
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.getByLabel('Custom draft').fill('Untouched');
     await page.getByText('Store my task', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'German', exact: true }).click();
