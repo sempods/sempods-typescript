@@ -4,20 +4,25 @@ import {
   createResourceEditor,
   date,
   dateTime,
+  editTextVariant,
   fields,
   flag,
   iri,
   MappingError,
+  patchTextVariant,
   prepareCreation,
   removeSnapshot,
+  selectTextVariant,
   snapshots,
   text,
   updateFields,
   type DateField,
   type DateTimeField,
+  type EditDefinition,
   type ResourceEditor,
   type ResourceSource,
   type TextField,
+  type TextVariant,
 } from './index.js';
 
 const NAME = 'https://schema.org/name';
@@ -2115,4 +2120,54 @@ it('adopts the current version silently after read access returns to an unchange
   await editor.refresh();
   expect(editor.state.phase).toBe('review');
   expect(editor.state.draft?.title).toBe('Mine');
+});
+
+describe('a custom definition whose selection moves on save (#192)', () => {
+  const named: EditDefinition<{ readonly name: TextVariant }> = {
+    read: (resource) => ({
+      name: selectTextVariant(resource, NAME, ['de', 'en']),
+    }),
+    patch: (resource, draft) => patchTextVariant(resource, NAME, draft.name),
+  };
+
+  it('follows the saved version after removing the selected variant', async () => {
+    const pod = memoryPod();
+    const editor = await opened(createResourceEditor(pod.source, TASK, named));
+    const { name } = editor.state.draft!;
+    expect(name.value).toBe('Milch kaufen');
+    editor.change({ name: editTextVariant(name, null) });
+    expect(await editor.save()).toEqual({ kind: 'saved' });
+    expect(titleOf(pod.body())).toEqual([
+      { '@value': 'Buy milk', '@language': 'en' },
+    ]);
+    expect(editor.state).toMatchObject({
+      phase: 'ready',
+      dirty: false,
+      canSave: false,
+      canDiscard: false,
+    });
+    expect(editor.state.draft!.name).toMatchObject({
+      language: 'en',
+      value: 'Buy milk',
+    });
+    editor.dispose();
+  });
+
+  it('keeps typing made while the removal was saving', async () => {
+    const pod = memoryPod();
+    const editor = await opened(createResourceEditor(pod.source, TASK, named));
+    const { name } = editor.state.draft!;
+    editor.change({ name: editTextVariant(name, null) });
+    pod.once('patch', async (real) => {
+      editor.change({ name: editTextVariant(name, 'Hafermilch kaufen') });
+      return real();
+    });
+    expect(await editor.save()).toEqual({ kind: 'saved' });
+    expect(editor.state.dirty).toBe(true);
+    expect(editor.state.draft!.name).toMatchObject({
+      language: 'de',
+      value: 'Hafermilch kaufen',
+    });
+    editor.dispose();
+  });
 });

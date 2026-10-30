@@ -15,10 +15,18 @@ the [quickstart](../../docs/quickstart.md), copy `src/domain.ts`, `src/app.tsx`
 and `src/style.css` into its `src/`, and render `<TodoApp runtime={runtime} />`
 from your entry with the runtime configuration shown in `src/main.tsx`. The
 shipped `package.json` names the exact SDK version the sources belong to.
+An app that already has a host (the template's starter, or any screen with its
+own `SempodsProvider`) does not render `TodoApp`: it brings a second provider
+and its own language state. Reuse `TaskScreen` and `TaskRow` inside the
+existing provider instead, and rename or scope the stylesheet's generic classes
+(`.menu`, `.composer`, `.title`, `.empty`) so they do not collide with the
+app's own.
 `recipes/pod-overview.tsx` (a Pod overview with on-demand Contexts, plus
 creating and editing in an explicit Context), `recipes/overview-toggle.tsx` (ticking tasks on overview rows in
-their own Contexts with one click, through `usePodList` and `useContextUpdate`) and `recipes/task-with-note.tsx` (one input
-written into a shared and a personal Context) are further copyable screens.
+their own Contexts with one click, through `usePodList` and `useContextUpdate`), `recipes/task-with-note.tsx` (one input
+written into a shared and a personal Context) and `recipes/clear-done.tsx`
+(deleting all done tasks after one confirmation, stopping safely at the first
+conflict, uncertain answer or changed target) are further copyable screens.
 
 Open `http://127.0.0.1:5173/`. The app uses only the SDK's standard UI:
 `AppAccess` for sign-in and recovery beside the app's own header and task

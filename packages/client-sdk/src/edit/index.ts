@@ -39,4 +39,10 @@ export type { CreateOutcome, Creation } from './create.js';
 export type { EditProblem, InvalidatedRead, ResourceSource } from './source.js';
 export { MappingError } from './terms.js';
 export { listSubjects } from './list.js';
+export {
+  editTextVariant,
+  patchTextVariant,
+  selectTextVariant,
+} from './variants.js';
+export type { LanguageOrder, TextVariant } from './variants.js';
 export type { ListResult, ListSource } from './list.js';

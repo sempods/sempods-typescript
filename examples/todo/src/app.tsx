@@ -86,7 +86,10 @@ function TaskScreen() {
   return (
     <section aria-label={m.tasks}>
       <LoadNotice {...list} />
-      {tasks?.length === 0 && <p className="empty">{m.empty}</p>}
+      {/* Empty only when confirmed: not on a failure, nor with skipped entries. */}
+      {(list.state.kind === 'ready' || list.state.kind === 'loading') &&
+        tasks?.length === 0 &&
+        list.data?.skipped === 0 && <p className="empty">{m.empty}</p>}
       <ul className="tasks">
         {tasks?.map((item) => (
           <TaskRow
@@ -152,13 +155,16 @@ function TaskRow({
   const task = row.data;
   return (
     <li className={task.done ? 'done' : undefined}>
-      <input
-        type="checkbox"
-        aria-label={`${m.done}: ${task.title}`}
-        checked={task.done}
-        disabled={!row.canMutate}
-        onChange={() => void row.update({ done: !task.done })}
-      />
+      {/* The wrapping label is the checkbox's 44px touch target. */}
+      <label className="check">
+        <input
+          type="checkbox"
+          aria-label={`${m.done}: ${task.title}`}
+          checked={task.done}
+          disabled={!row.canMutate}
+          onChange={() => void row.update({ done: !task.done })}
+        />
+      </label>
       {editing ?? (
         <button className="title" onClick={onOpen}>
           {task.title}
