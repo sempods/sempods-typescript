@@ -364,6 +364,14 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   Use `row.canMutate` for each row's availability and `row.notice` for its
   feedback. An IRI-only handle (`mutate.for(iri)`) exposes recovery and always
   has `canMutate: false`, because there is no snapshot to write from.
+- Several rows from one decision (**Clear done tasks**): capture the shown
+  rows' `row.remove` commands (typed `FieldUpdateRow<D>['remove']`), confirm
+  their number, then `await` one after the other and stop at the first result
+  that is not `removed`; never retry or resend the rest. Each command deletes
+  only the version its row showed, in its own target, and sends nothing once
+  that target or access changed. The
+  [clear-done recipe](../examples/todo/recipes/clear-done.tsx) reports partial
+  completion and leaves the stopped row's recovery to `UnresolvedNotices`.
 - Create with `useCreation`; pass `iri` instead of `collection` when its
   identity is already known. Portable raw JSON-LD creation stays in
   `client-sdk/edit.prepareCreation`; its caller owns the UI recovery lifecycle.
