@@ -176,6 +176,10 @@ of trimming before `create()`.
   by itself, its latest value is used when an editor or form starts, and a
   changed identity is reported once in the console. Remount (for example with a
   `key`) to apply another custom mapping.
+- `text()` edits one fixed language. To show and edit whichever variant the app
+  prefers, define the custom mapping once at module level with the
+  [preferred-language recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant)
+  and use it with `useResourceEditor`.
 
 ### Lists: useList and LoadNotice
 
