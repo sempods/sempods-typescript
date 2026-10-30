@@ -155,7 +155,7 @@ it.each(['en', 'de'] as const)(
   },
 );
 
-it('the TODO row becomes its editor: Escape cancels, Enter saves, delete closes', async () => {
+it('the TODO row becomes its editor: Escape asks about changes, Enter saves, delete closes', async () => {
   const rows = new Map<string, Record<string, unknown>>([[milk['@id'], milk]]);
   const f = await signedIn('en', async () => Response.json([...rows.values()]));
   const writes: string[] = [];
@@ -192,10 +192,30 @@ it('the TODO row becomes its editor: Escape cancels, Enter saves, delete closes'
     'Oat milk',
   );
   expect(writes).toEqual([]);
-  // Escape discards the change and shows the row again; nothing is written.
+  // Escape with a change asks first, like closing the row: staying keeps it.
   fireEvent.keyDown(field, { key: 'Escape' });
+  fireEvent.click(
+    within(await screen.findByRole('alertdialog')).getByRole('button', {
+      name: 'Keep editing',
+    }),
+  );
+  expect((screen.getByLabelText('Task') as HTMLInputElement).value).toBe(
+    'Oat milk',
+  );
+  // Discarding shows the row again; nothing is written.
+  fireEvent.keyDown(field, { key: 'Escape' });
+  fireEvent.click(
+    within(await screen.findByRole('alertdialog')).getByRole('button', {
+      name: 'Discard and continue',
+    }),
+  );
   expect(await screen.findByRole('button', { name: 'Buy milk' })).toBeTruthy();
   expect(screen.queryByLabelText('Task')).toBeNull();
+  // Without a change Escape closes at once.
+  field = await edit('Buy milk');
+  fireEvent.keyDown(field, { key: 'Escape' });
+  expect(await screen.findByRole('button', { name: 'Buy milk' })).toBeTruthy();
+  expect(screen.queryByRole('alertdialog')).toBeNull();
   // Enter saves; the confirmed save closes the editor and the row shows it.
   field = await edit('Buy milk');
   fireEvent.change(field, { target: { value: 'Oat milk' } });

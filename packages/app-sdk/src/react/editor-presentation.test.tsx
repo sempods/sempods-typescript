@@ -12,9 +12,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { fields, text } from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
+import { createPortal } from 'react-dom';
 import {
   ResourceEditor,
   SempodsProvider,
@@ -42,11 +44,13 @@ afterEach(() => {
   runtimes.splice(0).forEach((r) => r.dispose());
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  outerKeys.splice(0);
 });
 
 type Props = Pick<Parameters<typeof ResourceEditor>[0], 'presentation'> & {
   readonly closable: boolean;
 };
+const outerKeys: string[] = [];
 
 async function setup(props: Props) {
   const f = fixture();
@@ -99,6 +103,11 @@ async function setup(props: Props) {
               />
             </label>
             <div role="group" aria-label="Custom control" />
+            {/* A child chooser inside the fields, and one in a portal. */}
+            <div role="dialog" aria-label="Chooser">
+              <button>Close chooser</button>
+            </div>
+            {createPortal(<button>Portal chooser</button>, document.body)}
           </>
         )}
       </ResourceEditor>
@@ -107,7 +116,10 @@ async function setup(props: Props) {
   render(
     <SempodsProvider runtime={session.runtime}>
       <TargetScreen>
-        <Screen />
+        {/* An enclosing app dialog that closes on Escape. */}
+        <div role="dialog" onKeyDown={(e) => outerKeys.push(e.key)}>
+          <Screen />
+        </div>
       </TargetScreen>
     </SempodsProvider>,
   );
@@ -136,7 +148,6 @@ it('a plain editor keeps the close semantics of onClose without the card', async
   // onClose still decides the actions: Cancel, not Discard changes.
   expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull();
-  fireEvent.change(field, { target: { value: 'Changed' } });
   fireEvent.keyDown(field, { key: 'Escape' });
   await screen.findByText('Closed');
   expect(writes).toEqual([]);
@@ -187,4 +198,58 @@ it('a plain editor closes after a confirmed save', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   await screen.findByText('Closed');
   expect(writes).toEqual(['PATCH']);
+});
+
+it('Escape with changes asks first and never reaches the enclosing dialog', async () => {
+  const { field, writes } = await setup({
+    presentation: 'plain',
+    closable: true,
+  });
+  fireEvent.change(field, { target: { value: 'Changed' } });
+  fireEvent.keyDown(field, { key: 'Escape' });
+  const question = await screen.findByRole('alertdialog');
+  expect(question.textContent).toContain('Discard unsaved changes?');
+  expect(outerKeys).toEqual([]);
+  // Escape in the question keeps editing and stays out of the app dialog too.
+  fireEvent.keyDown(question, { key: 'Escape' });
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(outerKeys).toEqual([]);
+  expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+    'Changed',
+  );
+  fireEvent.keyDown(field, { key: 'Escape' });
+  fireEvent.click(
+    within(await screen.findByRole('alertdialog')).getByRole('button', {
+      name: 'Keep editing',
+    }),
+  );
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+    'Changed',
+  );
+  fireEvent.keyDown(field, { key: 'Escape' });
+  fireEvent.click(
+    within(await screen.findByRole('alertdialog')).getByRole('button', {
+      name: 'Discard and continue',
+    }),
+  );
+  await screen.findByText('Closed');
+  expect(writes).toEqual([]);
+});
+
+it('Escape in a nested chooser or a portal leaves the parent draft alone', async () => {
+  const { field, writes } = await setup({ closable: true });
+  fireEvent.change(field, { target: { value: 'Changed' } });
+  for (const name of ['Close chooser', 'Portal chooser'])
+    fireEvent.keyDown(screen.getByRole('button', { name }), { key: 'Escape' });
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Close chooser' }), {
+    key: 'Enter',
+  });
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+    'Changed',
+  );
+  expect(writes).toEqual([]);
+  // The chooser's own keys still reach the app around it.
+  expect(outerKeys).toEqual(['Escape', 'Escape', 'Enter']);
 });

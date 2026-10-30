@@ -161,13 +161,16 @@ function Tasks() {
         const row = mutate.for(item);
         return (
           <div key={item.iri}>
-            <input
-              type="checkbox"
-              aria-label={`Complete ${row.data.title}`}
-              checked={row.data.done}
-              disabled={!row.canMutate}
-              onChange={() => void row.update({ done: !row.data.done })}
-            />
+            {/* The wrapping label is the checkbox's 44px touch target. */}
+            <label className="check">
+              <input
+                type="checkbox"
+                aria-label={`Complete ${row.data.title}`}
+                checked={row.data.done}
+                disabled={!row.canMutate}
+                onChange={() => void row.update({ done: !row.data.done })}
+              />
+            </label>
             <button onClick={() => void select(item.iri)}>
               {row.data.title}
             </button>
@@ -263,6 +266,18 @@ button,
 input {
   font: inherit;
   min-height: 44px;
+}
+/* A margin is not part of a hit area; the label around a checkbox is. */
+.check {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.check input {
+  min-height: auto;
+  margin: 0;
 }
 ```
 

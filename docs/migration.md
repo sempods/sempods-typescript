@@ -8,7 +8,7 @@ automatic conversion of legacy app data or stored credentials.
 
 Upgrade both packages together. The last published version before 0.6.0 is
 0.5.0; there is no intermediate 0.5.1 release. See the
-[release notes and apps-template adoption steps](releases/0.6.0.md).
+[release notes](releases/0.6.0.md).
 
 ```sh
 npm install --save-exact @sempods/app-sdk@0.6.0 @sempods/client-sdk@0.6.0

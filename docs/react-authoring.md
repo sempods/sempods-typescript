@@ -402,9 +402,14 @@ supplies save, delete, discard and comparison controls around your inputs.
   version shown. Cancel or Escape keeps draft and target; any newer editor state
   withdraws the question. Headless `editor.remove()` stays direct.
 - In place (for example in a row) pass `onClose={() => select(null)}`: it shows
-  **Cancel** instead of **Discard changes**, Cancel or Escape discards and
-  closes, and a confirmed save or delete closes it; refusals, conflicts and
-  unconfirmed answers keep it open. Switching rows or Contexts still asks.
+  **Cancel** instead of **Discard changes**, Cancel discards and closes, and a
+  confirmed save or delete closes it; refusals, conflicts and unconfirmed
+  answers keep it open. Escape closes too, but with unsaved changes it first
+  asks "Discard unsaved changes?", as closing the row, switching rows or
+  Contexts, or an enclosing app dialog's × does. The editor keeps that Escape
+  from reaching an enclosing dialog; Escape and Enter inside a nested dialog,
+  popover or portal in the fields (a date chooser) belong to it alone and
+  neither discard nor save the parent draft.
 - `presentation` sets only the frame, never these semantics. `'card'` (the
   default with `onClose`) is the quiet tinted card for a row. `'plain'` has no
   frame, for a routed screen or an app dialog that frames the form already:
@@ -835,7 +840,8 @@ function AppContent() {
 
 - As a dialog (`onClose`) the app behind it is inert, a leave confirmation
   opens above it, and opening re-checks access (no **Check access**). Sign-in
-  and recovery stay inline.
+  and recovery stay inline. Up to 30rem wide it is a bottom sheet across the
+  screen's width, as small-screen app dialogs usually are; wider, it is centred.
 - It shows the Pod, then the Context and this app's access (**Read only** or
   **Read and write**); several Contexts appear in the **Data context** chooser
   (only in `'required'` mode or while a Context flow needs a selection),
@@ -923,6 +929,9 @@ appearance in the app's CSS and keep page colours compatible (`light-dark()`):
 Theme with `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
 `--sempods-accent` (controls; the default is neutral grey) and
 `--sempods-on-accent`, on an ancestor or a component's `style`/`className`.
+`--sempods-font` sets the font family (default `system-ui, sans-serif`) and
+`--sempods-radius` the corner radius of controls (default `8px`); cards and
+dialogs use 1.5 times it, `0` makes every SDK surface square.
 React 19 [hoists the scoped sheets](https://react.dev/reference/react-dom/components/style);
 they need a CSP that allows inline styles, otherwise build presentation from
 the public hooks.
