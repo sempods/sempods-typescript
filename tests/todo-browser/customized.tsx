@@ -66,24 +66,43 @@ function EditorProbe() {
   const item = list.data?.items[0];
   const { selected, select } = useSelection();
   const editor = useResourceEditor(selected, taskFields);
+  const [plain, setPlain] = useState(false);
   return (
     <>
       <button
         disabled={!item}
         onClick={() => {
+          setPlain(false);
           if (item) void select(item.iri);
         }}
       >
         Open test editor
       </button>
+      <button
+        disabled={!item}
+        onClick={() => {
+          setPlain(true);
+          if (item) void select(item.iri);
+        }}
+      >
+        Open plain test editor
+      </button>
       {selected && (
-        <ResourceEditor editor={editor} onClose={() => select(null)}>
+        <ResourceEditor
+          editor={editor}
+          onClose={() => select(null)}
+          presentation={plain ? 'plain' : undefined}
+        >
           {(draft, change) => (
-            <input
-              aria-label="Retained editor draft"
-              value={draft.title}
-              onChange={(event) => change({ title: event.target.value })}
-            />
+            <>
+              <input
+                aria-label="Retained editor draft"
+                value={draft.title}
+                onChange={(event) => change({ title: event.target.value })}
+              />
+              {/* An app-owned control as the last field, as in a date picker. */}
+              {plain && <button type="button">Pick a day</button>}
+            </>
           )}
         </ResourceEditor>
       )}

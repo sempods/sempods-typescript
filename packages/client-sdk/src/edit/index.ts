@@ -8,6 +8,7 @@ export type {
   SaveOutcome,
 } from './editor.js';
 export {
+  date,
   dateTime,
   fields,
   flag,
@@ -16,6 +17,7 @@ export {
   isFieldDefinition,
 } from './fields.js';
 export type {
+  DateField,
   DateTimeField,
   DraftOf,
   EditDefinition,
@@ -28,6 +30,7 @@ export type {
 export { removeSnapshot, snapshots, updateFields } from './snapshots.js';
 export type {
   RemoveSnapshotOutcome,
+  SkippedRecord,
   Snapshot,
   SnapshotList,
   UpdateOutcome,
@@ -37,4 +40,10 @@ export type { CreateOutcome, Creation } from './create.js';
 export type { EditProblem, InvalidatedRead, ResourceSource } from './source.js';
 export { MappingError } from './terms.js';
 export { listSubjects } from './list.js';
+export {
+  editTextVariant,
+  patchTextVariant,
+  selectTextVariant,
+} from './variants.js';
+export type { LanguageOrder, TextVariant } from './variants.js';
 export type { ListResult, ListSource } from './list.js';

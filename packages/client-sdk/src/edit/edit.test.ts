@@ -2,20 +2,27 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createPod, type JsonLd, type WriteResult } from '../index.js';
 import {
   createResourceEditor,
+  date,
   dateTime,
+  editTextVariant,
   fields,
   flag,
   iri,
   MappingError,
+  patchTextVariant,
   prepareCreation,
   removeSnapshot,
+  selectTextVariant,
   snapshots,
   text,
   updateFields,
+  type DateField,
   type DateTimeField,
+  type EditDefinition,
   type ResourceEditor,
   type ResourceSource,
   type TextField,
+  type TextVariant,
 } from './index.js';
 
 const NAME = 'https://schema.org/name';
@@ -1629,6 +1636,208 @@ describe('snapshot regressions', () => {
   });
 });
 
+describe('date fields', () => {
+  const DUE = 'https://schema.org/endDate';
+  const XSD = 'http://www.w3.org/2001/XMLSchema#';
+  const day = (value: string) => ({ '@value': value, '@type': `${XSD}date` });
+  const at = (value: string) => ({
+    '@value': value,
+    '@type': `${XSD}dateTime`,
+  });
+  const required = fields({ due: date(DUE) });
+  const optional = fields({ due: date(DUE, { optional: true }) });
+  const either = fields({
+    due: date(DUE, { optional: true, orDateTime: true }),
+  });
+
+  it('types its draft by optionality', () => {
+    expectTypeOf(date(DUE)).toEqualTypeOf<DateField<false>>();
+    expectTypeOf(required.read({ '@id': TASK })).toEqualTypeOf<{
+      readonly due: string;
+    }>();
+    expectTypeOf(optional.read({ '@id': TASK })).toEqualTypeOf<{
+      readonly due: string | null;
+    }>();
+  });
+
+  it('round-trips a calendar day unchanged, never as an instant', () => {
+    // 29 March 2026 is a DST change in much of Europe; no time is involved.
+    for (const value of ['2026-10-05', '2026-03-29', '2026-10-05Z']) {
+      const body = { '@id': TASK, [DUE]: [day(value)] };
+      expect(required.read(body)).toEqual({ due: value });
+      expect(required.valid!({ due: value })).toBe(true);
+      expect(required.patch(body, { due: value })).toEqual({});
+    }
+    expect(
+      required.patch(
+        { '@id': TASK, [DUE]: [day('2026-10-05')] },
+        { due: '2026-10-06' },
+      ),
+    ).toEqual({ [DUE]: [day('2026-10-06')] });
+  });
+
+  it('accepts real days only, leap years included', () => {
+    for (const value of [
+      '2024-02-29',
+      '2000-02-29',
+      '0000-01-01',
+      '-0044-03-15',
+      '2026-10-05+02:00',
+    ])
+      expect(required.valid!({ due: value })).toBe(true);
+    for (const value of [
+      '2023-02-29',
+      '1900-02-29',
+      '2026-02-30',
+      '2026-04-31',
+      '2026-13-01',
+      '2026-10',
+      '2026',
+      '26-10-05',
+      '2026-1-5',
+      '2026-10-05T00:00:00Z',
+      ' 2026-10-05',
+      '',
+    ])
+      expect(required.valid!({ due: value })).toBe(false);
+  });
+
+  it('reads only xsd:date literals and preserves every other value', () => {
+    const others = [
+      { '@value': '2026-10-05' },
+      at('2026-10-05T09:30:00Z'),
+      { '@id': 'https://example.org/later' },
+    ];
+    expect(optional.read({ '@id': TASK, [DUE]: others })).toEqual({
+      due: null,
+    });
+    expect(
+      optional.patch({ '@id': TASK, [DUE]: others }, { due: '2026-10-07' }),
+    ).toEqual({ [DUE]: [...others, day('2026-10-07')] });
+    expect(() =>
+      optional.read({
+        '@id': TASK,
+        [DUE]: [day('2026-10-05'), day('2026-10-06')],
+      }),
+    ).toThrow(MappingError);
+  });
+
+  it('shares a predicate with dateTime, but not with orDateTime', () => {
+    const both = fields({
+      day: date(DUE, { optional: true }),
+      instant: dateTime(DUE, { optional: true }),
+    });
+    const body = {
+      '@id': TASK,
+      [DUE]: [day('2026-10-05'), at('2026-10-05T09:30:00+02:00')],
+    };
+    expect(both.read(body)).toEqual({
+      day: '2026-10-05',
+      instant: '2026-10-05T09:30:00+02:00',
+    });
+    expect(() =>
+      fields({ due: date(DUE, { orDateTime: true }), at: dateTime(DUE) }),
+    ).toThrow(TypeError);
+    expect(() => fields({ a: date(DUE), b: date(DUE) })).toThrow(TypeError);
+  });
+
+  it('orDateTime: a day or an exact instant, each written with its own type', () => {
+    const instant = '2026-10-05T09:30:00.250-05:30';
+    const stored = { '@id': TASK, [DUE]: [at(instant)] };
+    expect(either.read(stored)).toEqual({ due: instant });
+    // Untouched, nothing is rewritten; the offset survives.
+    expect(either.patch(stored, { due: instant })).toEqual({});
+    // An instant becomes a day: the datatype follows the lexical form.
+    expect(either.patch(stored, { due: '2026-10-06' })).toEqual({
+      [DUE]: [day('2026-10-06')],
+    });
+    expect(
+      either.patch(
+        { '@id': TASK, [DUE]: [day('2026-10-05')] },
+        {
+          due: '2026-10-05T08:00:00Z',
+        },
+      ),
+    ).toEqual({ [DUE]: [at('2026-10-05T08:00:00Z')] });
+    expect(either.valid!({ due: '2026-10-05T08:00:00' })).toBe(false);
+    expect(either.valid!({ due: null })).toBe(true);
+    expect(() =>
+      either.read({
+        '@id': TASK,
+        [DUE]: [day('2026-10-05'), at('2026-10-05T08:00:00Z')],
+      }),
+    ).toThrow(MappingError);
+  });
+
+  it('creates a day as xsd:date and compares an uncertain creation by its lexical form', async () => {
+    const NEW = 'https://pod.example/alice/tasks/3';
+    const planned = fields(
+      {
+        title: text(NAME, { language: 'en' }),
+        due: date(DUE, { optional: true, orDateTime: true }),
+      },
+      { type: 'https://example.org/Task' },
+    );
+    const pod = memoryPod({});
+    const creation = prepareCreation(pod.source, NEW, planned, {
+      title: 'Plan',
+      due: '2026-10-05',
+    });
+    pod.once('put', async (real) => {
+      await real();
+      return lost;
+    });
+    expect(await creation.run()).toEqual({ kind: 'unconfirmed' });
+    expect(await creation.run()).toEqual({
+      kind: 'unconfirmed',
+      desiredObserved: true,
+    });
+    expect(pod.body(NEW)?.[DUE]).toEqual([day('2026-10-05')]);
+    // An absent optional day writes no term at all.
+    const OTHER = 'https://pod.example/alice/tasks/4';
+    await prepareCreation(pod.source, OTHER, planned, {
+      title: 'Later',
+      due: null,
+    }).run();
+    expect(pod.body(OTHER)?.[DUE]).toBeUndefined();
+  });
+
+  it('lists days as snapshots, updates one conditionally and skips an ambiguous one', async () => {
+    const OTHER = 'https://pod.example/alice/tasks/5';
+    const nodes = [
+      { '@id': TASK, [DUE]: [day('2026-10-05')] },
+      { '@id': OTHER, [DUE]: [day('2026-10-05'), at('2026-10-05T08:00:00Z')] },
+    ];
+    const pod = memoryPod({ [TASK]: nodes[0]!, [OTHER]: nodes[1]! });
+    const list = snapshots(pod.source, nodes, either);
+    expect(list.items.map((item) => item.data)).toEqual([
+      { due: '2026-10-05' },
+    ]);
+    expect(list.skipped).toBe(1);
+    expect(
+      await updateFields(pod.source, list.items[0]!, either, {
+        due: '2026-10-08',
+      }),
+    ).toEqual({ kind: 'saved' });
+    expect(pod.body()?.[DUE]).toEqual([day('2026-10-08')]);
+  });
+
+  it('edits a stored day through the editor with the usual conflict review', async () => {
+    const pod = memoryPod({
+      [TASK]: { '@id': TASK, [DUE]: [day('2026-10-05')] },
+    });
+    const editor = await opened(createResourceEditor(pod.source, TASK, either));
+    editor.change({ due: '2026-10-12' });
+    pod.write({ [DUE]: [day('2026-10-09')] });
+    expect(await editor.save()).toMatchObject({ kind: 'review' });
+    expect(editor.state.review).toMatchObject({
+      kind: 'changed-on-pod',
+      current: { due: '2026-10-09' },
+    });
+    editor.dispose();
+  });
+});
+
 describe('creation', () => {
   const NEW = 'https://pod.example/alice/tasks/2';
   const body = {
@@ -1911,4 +2120,54 @@ it('adopts the current version silently after read access returns to an unchange
   await editor.refresh();
   expect(editor.state.phase).toBe('review');
   expect(editor.state.draft?.title).toBe('Mine');
+});
+
+describe('a custom definition whose selection moves on save (#192)', () => {
+  const named: EditDefinition<{ readonly name: TextVariant }> = {
+    read: (resource) => ({
+      name: selectTextVariant(resource, NAME, ['de', 'en']),
+    }),
+    patch: (resource, draft) => patchTextVariant(resource, NAME, draft.name),
+  };
+
+  it('follows the saved version after removing the selected variant', async () => {
+    const pod = memoryPod();
+    const editor = await opened(createResourceEditor(pod.source, TASK, named));
+    const { name } = editor.state.draft!;
+    expect(name.value).toBe('Milch kaufen');
+    editor.change({ name: editTextVariant(name, null) });
+    expect(await editor.save()).toEqual({ kind: 'saved' });
+    expect(titleOf(pod.body())).toEqual([
+      { '@value': 'Buy milk', '@language': 'en' },
+    ]);
+    expect(editor.state).toMatchObject({
+      phase: 'ready',
+      dirty: false,
+      canSave: false,
+      canDiscard: false,
+    });
+    expect(editor.state.draft!.name).toMatchObject({
+      language: 'en',
+      value: 'Buy milk',
+    });
+    editor.dispose();
+  });
+
+  it('keeps typing made while the removal was saving', async () => {
+    const pod = memoryPod();
+    const editor = await opened(createResourceEditor(pod.source, TASK, named));
+    const { name } = editor.state.draft!;
+    editor.change({ name: editTextVariant(name, null) });
+    pod.once('patch', async (real) => {
+      editor.change({ name: editTextVariant(name, 'Hafermilch kaufen') });
+      return real();
+    });
+    expect(await editor.save()).toEqual({ kind: 'saved' });
+    expect(editor.state.dirty).toBe(true);
+    expect(editor.state.draft!.name).toMatchObject({
+      language: 'de',
+      value: 'Hafermilch kaufen',
+    });
+    editor.dispose();
+  });
 });

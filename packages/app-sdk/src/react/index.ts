@@ -56,6 +56,7 @@ export type {
   PodListContext,
   PodListData,
   PodListItem,
+  PodListSkipped,
 } from './pod-list.js';
 export {
   AccessNotice,

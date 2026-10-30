@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import {
   listSubjects,
   type FieldDefinition,
+  type SkippedRecord,
   type Snapshot,
   type SnapshotList,
 } from '@sempods/client-sdk/edit';
@@ -34,10 +35,19 @@ export interface PodListItem<D> {
   readonly context: string;
   readonly snapshot: Snapshot<D>;
 }
+/** One entry an overview cannot show, with the Context it was read in. */
+export interface PodListSkipped extends SkippedRecord {
+  readonly context: string;
+}
 /** The overview's items across Contexts, and the entries it cannot show. */
 export interface PodListData<D> {
   readonly items: readonly PodListItem<D>[];
   readonly skipped: number;
+  /**
+   * Why, as in `SnapshotList`: each Context's records in Context order, the
+   * first 100 in all. Fewer records than `skipped` means truncation.
+   */
+  readonly skippedRecords: readonly PodListSkipped[];
 }
 /** One Context that holds the type: its own read, problem and retry. */
 export interface PodListContext<D> {
@@ -280,6 +290,14 @@ export function usePodList<D>(definition: FieldDefinition<D>) {
             })),
           ),
           skipped: parts.reduce((sum, part) => sum + (part?.skipped ?? 0), 0),
+          skippedRecords: contexts
+            .flatMap((c, i) =>
+              (parts[i]?.skippedRecords ?? []).map((record) => ({
+                ...record,
+                context: c.context,
+              })),
+            )
+            .slice(0, 100),
         };
   const complete =
     discovery.state.kind === 'ready' &&
