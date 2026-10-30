@@ -432,8 +432,15 @@ export async function renameWithEditor(
   literal as its lexical string, such as `2026-10-05T09:30:00+02:00`; a value
   without an explicit time zone, `Z` or `±hh:mm`, makes the draft invalid; it is
   stored unchanged, so the offset survives; untyped strings, other datatypes and
-  IRIs are preserved; `optional: true` as for `text`). Fields writing the same
-  terms are rejected; a `text` and a `dateTime` may share a predicate.
+  IRIs are preserved; `optional: true` as for `text`) and `date` (one calendar
+  day as an `xsd:date` lexical string, such as `2026-10-05`, never an invented
+  midnight instant; `2026-10` or `2026-02-30` makes the draft invalid; other
+  values, `xsd:dateTime` included, are preserved). `date(predicate, {
+orDateTime: true })` owns one value that is either a day or a zoned
+  `xsd:dateTime`, written with the datatype its lexical form names (a `T`
+  makes it an instant), so a planning date may carry a time. Fields writing the
+  same terms are rejected; `text`, `dateTime` and a plain `date` may share a
+  predicate, a `date` with `orDateTime` and a `dateTime` may not.
   Predicates, `fields({ type })`, `flag` IRIs and `iri` values must be absolute
   IRIs without whitespace, U+0000–U+0020, angle brackets, quotes, braces, pipe,
   caret, backslash or backtick, because they are embedded in SPARQL and Turtle:
