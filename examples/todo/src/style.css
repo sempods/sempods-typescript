@@ -220,10 +220,19 @@ input:disabled {
   gap: 4px;
   border-bottom: 1px solid var(--sempods-line);
 }
-.tasks > li > input {
+/* A margin is not part of a hit area; the label around the checkbox is. */
+.tasks .check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  cursor: pointer;
+}
+.tasks .check > input {
   width: 22px;
   height: 22px;
-  margin: 11px;
+  margin: 0;
   accent-color: var(--sempods-accent);
   cursor: pointer;
 }
@@ -249,8 +258,8 @@ input:disabled {
   min-width: 0;
 }
 /* The checkbox stays level with the field inside the editor's card. */
-.tasks li:has(> [data-sempods-ui='editor']) > input {
-  margin-top: 23px;
+.tasks li:has(> [data-sempods-ui='editor']) > .check {
+  margin-top: 12px;
 }
 .empty {
   color: var(--sempods-muted);
