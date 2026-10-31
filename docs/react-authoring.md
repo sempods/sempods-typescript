@@ -1039,28 +1039,49 @@ until you set one:
 | `--sempods-secondary-text` | Text of the other actions (Cancel, text buttons)    | `--sempods-accent`    |
 | `--sempods-focus`          | Focus outline of SDK controls                       | `--sempods-accent`    |
 
-`--sempods-line` stays the separator colour, so a quiet separator no longer
-weakens field borders.
+Until you set `--sempods-field-line`, fields share the separator colour
+`--sempods-line`; set it when a quiet separator would leave field borders
+below 3:1 against the background.
 
 React 19 [hoists the scoped sheets](https://react.dev/reference/react-dom/components/style);
 they need a CSP that allows inline styles, otherwise build presentation from
-the public hooks. The sheets sit in the cascade layer `sempods`. React inserts
-them at the start of the head, so their statement `@layer base, sempods;` sets
-the order before the app's CSS loads: a reset in `base`, such as Tailwind 4's
-preflight, stays below the SDK, and layers the app declares later, such as
-Tailwind's `components` and `utilities`, win over it. App classes on or inside
-SDK surfaces therefore apply without importing utilities unlayered. To state
-the order in the app's own CSS too, declare it first:
+the public hooks.
+
+#### Cascade layer order
+
+The SDK's sheets sit in the cascade layer `sempods`. Declare the order at the
+top of the app's first stylesheet, before any other rule or import:
 
 ```css
 @layer theme, base, sempods, components, utilities;
 @import 'tailwindcss';
 ```
 
-Unlayered app rules win over every layer, the SDK's included: write global
-element rules (`button { … }`) in a layer or scope them to the app's own
-elements. The SDK's modal dialogs set `margin: auto` themselves, so a reset in
-`base` does not move them off centre.
+A reset in `base`, such as Tailwind 4's preflight, then stays below the SDK,
+and the app's classes in `components` and `utilities` apply on and inside SDK
+surfaces without importing utilities unlayered. The order is fixed by the
+first statement that names a layer. The SDK's sheet carries
+`@layer base, sempods;`, which yields the same order when React inserts it at
+the start of the head, ahead of the app's CSS. When the app's CSS comes first,
+for example because a framework hoists it as a sheet with its own precedence,
+the app's statement decides alone; without `sempods` in it, the SDK's layer
+ends up last, above the app's classes.
+
+Two kinds of app rules override every SDK rule, so keep element selectors
+(`button { … }`, `input { … }`, `*`) out of them or scope them to the app's
+own elements:
+
+- **Unlayered rules.** An unlayered reset (Tailwind 3's preflight,
+  normalize.css, Bootstrap's reboot, `* { margin: 0 }`) reaches AppAccess's
+  sign-in screen and dialogs. Move it into `base`; upgrading from 0.6.0 is
+  described in the [migration guide](migration.md#sdk-styles-in-a-cascade-layer).
+- **Layers after `sempods`.** `components`, `utilities` and any layer first
+  named after it, such as `@import 'app.css' layer(app)` or `@layer reset`,
+  win over the SDK, its base sheet included. Name such layers in the order
+  statement, a reset before `sempods`.
+
+The SDK's modal dialogs set `margin: auto` themselves, so a reset in `base`
+does not move them off centre.
 
 ### Replacing the connection view
 
