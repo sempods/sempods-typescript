@@ -139,6 +139,7 @@ export function editorsOf(app: AppController): EditorStore {
             editor.state.phase !== 'deleted' &&
             (editor.state.dirty || editor.state.review !== null),
           blocked: () => editor.state.phase === 'saving',
+          subscribe: (listener) => editor.subscribe(listener),
           discard: () => {
             editor.discard();
             const entry = entries.get(name);

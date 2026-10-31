@@ -29,6 +29,13 @@ export interface LeaveGuard {
   blocked(): boolean;
   dirty(): boolean;
   discard(): void;
+  /**
+   * Tells the controller that `dirty()` or `blocked()` may have changed, so
+   * the browser's leave prompt follows them (see
+   * `AppControllerOptions.unloadPrompt`). Without it, a guard is read again
+   * only when the controller itself changes or another guard reports.
+   */
+  subscribe?(listener: () => void): () => void;
 }
 /** A readable Context of one connection: what `selectTarget` selects. */
 export interface ContextTarget {
@@ -145,6 +152,16 @@ export interface AppSnapshot {
 export interface AppControllerOptions {
   /** Required preserves automatic catalogues; on-demand uses explicit discovery/Context flows. */
   readonly contextSelection?: 'required' | 'on-demand';
+  /**
+   * While started and a registered guard is dirty or blocked (a draft, a
+   * pending or unconfirmed write), the controller adds one `beforeunload`
+   * listener to `window`, so reloading, closing the tab, typing an address
+   * or going back past the app asks with the browser's own prompt. It
+   * removes the listener once nothing is left, so a clean page keeps its
+   * back/forward cache. `false` never adds it, for an app that keeps its
+   * drafts across reloads itself. Default `true`.
+   */
+  readonly unloadPrompt?: boolean;
 }
 
 type Navigation = (
@@ -179,7 +196,18 @@ export function createAppController(
     (runtime.allowedPods?.length === 1 ? runtime.allowedPods[0] : undefined);
   const listeners = new Set<() => void>();
   const guards = new Set<LeaveGuard>();
+  const unloadPrompt = options.unloadPrompt ?? true;
   let unsubscribe: (() => void) | undefined;
+  /** The guards a confirmed change leaves while its action runs. */
+  let discarding: ReadonlySet<LeaveGuard> | undefined;
+  let prompting = false;
+  // The browser's own prompt, whose text cannot be chosen. One function per
+  // controller, so another controller's removal leaves this one in place.
+  const askBeforeUnload = (event: BeforeUnloadEvent) => {
+    event.preventDefault();
+    // Older browsers prompt only for a set `returnValue`.
+    event.returnValue = '';
+  };
   let changing = false;
   let startVersion = 0;
   let startup: StartupReport | undefined;
@@ -283,6 +311,7 @@ export function createAppController(
       ),
       changing,
     });
+    followUnload();
     for (const listener of [...listeners]) {
       try {
         listener();
@@ -302,6 +331,25 @@ export function createAppController(
       )
         void runtime.loadContexts(connection.id).catch(() => {});
     }
+  }
+  /**
+   * One `beforeunload` listener while started and a guard holds unsaved work,
+   * none otherwise: a registered one can keep the page out of the back/forward
+   * cache. A confirmed change's own navigation (a sign-in) does not ask again
+   * about the guards it is discarding.
+   */
+  function followUnload() {
+    const ask =
+      unloadPrompt &&
+      unsubscribe !== undefined &&
+      typeof window !== 'undefined' &&
+      [...guards].some(
+        (g) => !discarding?.has(g) && (g.dirty() || g.blocked()),
+      );
+    if (ask === prompting) return;
+    prompting = ask;
+    if (ask) window.addEventListener('beforeunload', askBeforeUnload);
+    else window.removeEventListener('beforeunload', askBeforeUnload);
   }
   /** The guards a change leaves: asked about first, discarded once it ran. */
   function leavingGuards(change: Change, retained?: ReadonlySet<LeaveGuard>) {
@@ -388,11 +436,18 @@ export function createAppController(
       unsubscribe = undefined;
       pending?.resolve(false);
       pending = undefined;
+      followUnload();
     },
     register(guard: LeaveGuard) {
       guards.add(guard);
+      // Its own callback: guards sharing one subscription source (the lanes
+      // of a group) must not unsubscribe each other.
+      const stop = guard.subscribe?.(() => followUnload());
+      followUnload();
       return () => {
         guards.delete(guard);
+        stop?.();
+        followUnload();
       };
     },
     /**
@@ -412,6 +467,7 @@ export function createAppController(
         return;
       }
       const leaving = leavingGuards(intent.change, intent.retained);
+      discarding = new Set(leaving);
       changing = true;
       publish();
       try {
@@ -432,6 +488,7 @@ export function createAppController(
         intent.resolve(false);
         throw error;
       } finally {
+        discarding = undefined;
         changing = false;
         publish();
       }

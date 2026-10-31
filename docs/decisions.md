@@ -198,6 +198,11 @@ except that a saving `connection` guard does not block a Context selection.
 Selecting a Context on another Pod (`selectTarget`) is one connection action
 with one prompt: it selects the Context on the inactive connection first and
 only then makes it active, so no intermediate target is writable.
+Leaving the document is outside any router's reach, so the same guards drive
+the browser's own `beforeunload` prompt: one listener per controller, present
+only while a guard holds unsaved work, because a registered listener can keep
+a page out of the back/forward cache. Apps may opt out (`unloadPrompt`); draft
+persistence across reloads is not part of the SDK.
 
 _Why:_ recovery should be the default behaviour of the building blocks, not
 code every app writes again.
