@@ -60,7 +60,7 @@ store for SDK drafts or write recovery.
 | Temporarily hide a screen with Suspense or Activity                  | React state is retained. Controller-owned editors and writes remain; show their recovery when the screen is visible again                                                                                                      |
 | Unmount a screen, then mount it under the same controller and target | Resource-editor drafts and guards remain; opening the same subject again with the same definition reclaims them. Captured pending/unresolved writes return. App-local state, row selection and an unsent creation draft do not |
 | Guarded row, Context or connection change                            | Ask about the work being left; pending writes block relevant changes. `TargetScreen` resets local state for a new target. Explicit-Context flows have their own [scope](#selection-and-draft-lifetime)                         |
-| Dispose/replace the host, reload or leave the page                   | In-memory drafts and recovery end. Saved sessions can restore; browser navigation is not the SDK's guarded navigation                                                                                                          |
+| Dispose/replace the host, reload or leave the page                   | In-memory drafts and recovery end. Saved sessions can restore. The browser asks first while unsaved work is left ([leave prompt](#selection-and-draft-lifetime)); it is not the SDK's guarded navigation                       |
 
 Hidden Activity retains local state but disconnects effects, including an
 unsent creation form's draft guard. Keep that form outside the hidden boundary
@@ -112,8 +112,9 @@ const runtime = createBrowserRuntime({
   `runtime.initialize()` (no second session coordinator). Keep it stable:
   changing it is an application lifetime change; equal inline locale or message
   props never replace the runtime or an editor.
-- Keep `contextSelection` fixed for the provider's lifetime: changing it
-  replaces the controller and cancels a pending leave confirmation.
+- Keep `contextSelection` and `unloadPrompt` fixed for the provider's
+  lifetime: changing either replaces the controller and cancels a pending
+  leave confirmation.
 - The host calls `runtime.dispose()` at shutdown; unmounting the provider does
   not dispose it.
 - Serve the same app at the redirect path. Startup processes the callback and
@@ -1166,7 +1167,17 @@ Read state with `useAppState`, `useConnections` and `useView`.
   gone. A prompt whose connection stops being active (a returning sign-in, a
   removal) is cancelled: the action resolves `false`, nothing runs.
 - Content is inert during confirmation and action preparation. The policy
-  does not cover browser close or reload, or direct runtime calls.
+  does not cover direct runtime calls.
+- Leaving the document (reload, closing the tab, typing an address, Back past
+  the app's first entry) cannot be guarded or undone by the app. While any
+  guard has a dirty draft or a pending or unconfirmed write, the controller
+  registers one `beforeunload` listener, so the browser shows its own leave
+  prompt (its text cannot be chosen; browsers show it only after the person
+  interacted with the page). It removes the listener once nothing unsaved is
+  left, so a clean page keeps its back/forward cache. A confirmed connection
+  action that leaves the page itself, such as a sign-in, does not ask again.
+  Pass `unloadPrompt={false}` to `SempodsProvider` to opt out, for example
+  when the app keeps its drafts across reloads itself.
 - Until startup settles there is no Context view: `TargetScreen` renders
   nothing, while Pod reads work. Hooks outside it, such as `useCreation`, reset
   their draft when a view appears; disable their inputs while
@@ -1195,7 +1206,8 @@ from an absent grant, and the server decides each operation.
 - `createAppController(runtime, options?)` gives the same guarded policy;
   `start()` and `stop()` it. `register` guards (default `scope: 'local'`; the other
   scopes as in the tables above) and `unconfirmed()` for pending write-outcome
-  evidence.
+  evidence. Give a guard `subscribe(listener)` so the browser's leave prompt
+  follows its `dirty()` and `blocked()`; `{ unloadPrompt: false }` opts out.
   Block input while `changing` or `confirmingLeave`; close a custom prompt
   whenever `confirmingLeave` turns false. `view` is `null` until `startup` or
   `startupError` is set.

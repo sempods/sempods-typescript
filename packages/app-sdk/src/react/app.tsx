@@ -152,6 +152,7 @@ export function SempodsProvider({
   runtime,
   children,
   contextSelection = 'required',
+  unloadPrompt = true,
   ...locale
 }: LocaleOptions & {
   readonly runtime: BrowserRuntime;
@@ -165,9 +166,18 @@ export function SempodsProvider({
    * and cancels a pending leave confirmation; it is not a guarded mode switch.
    */
   readonly contextSelection?: 'required' | 'on-demand';
+  /**
+   * `false` keeps the browser's leave prompt away while a draft or write is
+   * unsaved (see `AppControllerOptions.unloadPrompt`). Keep fixed like
+   * `contextSelection`: changing it replaces the controller.
+   */
+  readonly unloadPrompt?: boolean;
 }) {
   const owner = useMemo(() => {
-    const controller = createAppController(runtime, { contextSelection });
+    const controller = createAppController(runtime, {
+      contextSelection,
+      unloadPrompt,
+    });
     const actions: AppActions = Object.freeze({
       selectConnection: (id: string) => controller.selectConnection(id),
       selectContext: (iri: string) => controller.selectContext(iri),
@@ -183,7 +193,7 @@ export function SempodsProvider({
       selectTarget: (target: ContextTarget) => controller.selectTarget(target),
     });
     return { controller, actions };
-  }, [runtime, contextSelection]);
+  }, [runtime, contextSelection, unloadPrompt]);
   const [demands, setDemands] = useState(0);
   const retainContext = useRetain(setDemands);
   const [discoveries, setDiscoveries] = useState(0);

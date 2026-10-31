@@ -592,11 +592,47 @@ try {
       .getByRole('button', { name: 'After cache restore', exact: true })
       .waitFor();
     assert.equal(writes, before + 1);
+    // An unsaved draft asks before the document goes (#201); the SDK's one
+    // `beforeunload` listener exists only while it is unsaved.
+    const cdp = await context.newCDPSession(page);
+    async function unloadListeners() {
+      const { result } = await cdp.send('Runtime.evaluate', {
+        expression: 'window',
+      });
+      const { listeners } = await cdp.send('DOMDebugger.getEventListeners', {
+        objectId: result.objectId,
+      });
+      return listeners.filter((l) => l.type === 'beforeunload').length;
+    }
+    assert.equal(await unloadListeners(), 0);
+    await page
+      .getByRole('button', { name: 'After cache restore', exact: true })
+      .click();
+    const draft = page.getByLabel('Task', { exact: true });
+    await draft.fill('Unsaved draft');
+    assert.equal(await unloadListeners(), 1);
+    const prompt = page.waitForEvent('dialog');
+    await page.close({ runBeforeUnload: true });
+    const dialog = await prompt;
+    assert.equal(dialog.type(), 'beforeunload');
+    await dialog.dismiss();
+    assert.equal(page.isClosed(), false);
+    assert.equal(await draft.inputValue(), 'Unsaved draft');
+    // Cancelling discards the draft: no listener, and the page still
+    // returns from the back/forward cache.
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await draft.waitFor({ state: 'detached' });
+    assert.equal(await unloadListeners(), 0);
+    await returnFromCache();
+    await page
+      .getByRole('button', { name: 'After cache restore', exact: true })
+      .waitFor();
+    assert.equal(writes, before + 1);
     assert.deepEqual(pageErrors, []);
     await context.close();
   }
   console.log(
-    'Packed TODO BFCache: repeated native restoration, sign-in, durable session/context restore and one creation after return passed.',
+    'Packed TODO BFCache: repeated native restoration, sign-in, durable session/context restore, one creation after return and the leave prompt only while a draft is unsaved passed.',
   );
   await browser.close();
   // Other scenarios retain their ordinary Playwright setup, including worker
