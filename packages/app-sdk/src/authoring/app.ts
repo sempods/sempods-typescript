@@ -440,7 +440,9 @@ export function createAppController(
     },
     register(guard: LeaveGuard) {
       guards.add(guard);
-      const stop = guard.subscribe?.(followUnload);
+      // Its own callback: guards sharing one subscription source (the lanes
+      // of a group) must not unsubscribe each other.
+      const stop = guard.subscribe?.(() => followUnload());
       followUnload();
       return () => {
         guards.delete(guard);

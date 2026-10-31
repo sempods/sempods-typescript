@@ -237,3 +237,34 @@ it('gives each controller its own listener', async () => {
   two.set({ dirty: false });
   expect(unload.asks()).toBe(false);
 });
+
+it('keeps following guards that share a subscription source when one of them goes', async () => {
+  const f = await connected();
+  const unload = watchUnload();
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  // Like the lanes of one group: one listener set for all of their guards.
+  const listeners = new Set<() => void>();
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+  let pending = false;
+  const evicted = app.register({
+    dirty: () => false,
+    blocked: () => false,
+    discard: vi.fn(),
+    subscribe,
+  });
+  app.register({
+    dirty: () => false,
+    blocked: () => pending,
+    discard: vi.fn(),
+    subscribe,
+  });
+  evicted();
+  pending = true;
+  listeners.forEach((listener) => listener());
+  expect(unload.asks()).toBe(true);
+});
