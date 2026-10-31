@@ -1026,9 +1026,41 @@ Theme with `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`
 `--sempods-font` sets the font family (default `system-ui, sans-serif`) and
 `--sempods-radius` the corner radius of controls (default `8px`); cards and
 dialogs use 1.5 times it, `0` makes every SDK surface square.
+
+A UI kit with its own action variants and field style maps them onto five more
+tokens; each defaults to the token in the last column, so the look stays the same
+until you set one:
+
+| Token                      | Styles                                              | Default               |
+| -------------------------- | --------------------------------------------------- | --------------------- |
+| `--sempods-field-line`     | Borders of fields; keep it at 3:1 to the background | `--sempods-line`      |
+| `--sempods-primary-bg`     | Fill of a surface's main action (Save, Confirm)     | `--sempods-accent`    |
+| `--sempods-primary-text`   | Text of the main action                             | `--sempods-on-accent` |
+| `--sempods-secondary-text` | Text of the other actions (Cancel, text buttons)    | `--sempods-accent`    |
+| `--sempods-focus`          | Focus outline of SDK controls                       | `--sempods-accent`    |
+
+`--sempods-line` stays the separator colour, so a quiet separator no longer
+weakens field borders.
+
 React 19 [hoists the scoped sheets](https://react.dev/reference/react-dom/components/style);
 they need a CSP that allows inline styles, otherwise build presentation from
-the public hooks.
+the public hooks. The sheets sit in the cascade layer `sempods`. React inserts
+them at the start of the head, so their statement `@layer base, sempods;` sets
+the order before the app's CSS loads: a reset in `base`, such as Tailwind 4's
+preflight, stays below the SDK, and layers the app declares later, such as
+Tailwind's `components` and `utilities`, win over it. App classes on or inside
+SDK surfaces therefore apply without importing utilities unlayered. To state
+the order in the app's own CSS too, declare it first:
+
+```css
+@layer theme, base, sempods, components, utilities;
+@import 'tailwindcss';
+```
+
+Unlayered app rules win over every layer, the SDK's included: write global
+element rules (`button { … }`) in a layer or scope them to the app's own
+elements. The SDK's modal dialogs set `margin: auto` themselves, so a reset in
+`base` does not move them off centre.
 
 ### Replacing the connection view
 

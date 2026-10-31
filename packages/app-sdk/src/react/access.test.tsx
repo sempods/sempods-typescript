@@ -781,6 +781,22 @@ it('preserves cancelled callback feedback and supports custom connection replace
     'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
   );
   expect(screen.getByText('Custom 1')).toBeTruthy();
+  // jsdom's cascade skips rules inside `@layer` blocks. Every SDK rule sits in
+  // the one `sempods` layer, so the same rules unlayered keep their cascade.
+  const unlayered = document.createElement('style');
+  unlayered.textContent = [
+    ...document.head.querySelectorAll<HTMLStyleElement>(
+      'style[data-precedence="sempods"]',
+    ),
+  ]
+    .flatMap((sheet) => [...(sheet.sheet?.cssRules ?? [])])
+    .flatMap((rule) =>
+      'cssRules' in rule ? [...(rule as CSSGroupingRule).cssRules] : [],
+    )
+    .map((rule) => rule.cssText)
+    .join('\n');
+  document.head.append(unlayered);
+  cleanups.push(() => unlayered.remove());
   // Centred access text gets a full outline, not a lone start border.
   const style = getComputedStyle(alert);
   expect(style.borderTopStyle).toBe('solid');
