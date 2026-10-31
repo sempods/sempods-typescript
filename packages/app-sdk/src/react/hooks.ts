@@ -1286,6 +1286,7 @@ export function useDraftGuard(
 ) {
   const app = useController();
   const latest = useCommitted({ dirty, discard });
+  const [listeners] = useState(() => new Set<() => void>());
   useEffect(
     () =>
       app.register({
@@ -1293,7 +1294,17 @@ export function useDraftGuard(
         dirty: () => latest.current.dirty,
         blocked: () => false,
         discard: () => latest.current.discard(),
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
       }),
-    [app, scope, latest],
+    [app, scope, latest, listeners],
   );
+  // Committed before effects run, so the controller reads the new value.
+  useEffect(() => {
+    for (const listener of [...listeners]) listener();
+  }, [dirty, listeners]);
 }

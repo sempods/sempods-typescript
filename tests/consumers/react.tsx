@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createFormatters } from '@sempods/app-sdk';
+import { createAppController, createFormatters } from '@sempods/app-sdk';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   SdkLocaleProvider,
+  SempodsProvider,
   useSdkLocale,
   useApp,
   useCreation,
@@ -14,7 +15,12 @@ import {
   type PodContextChoice,
   type PodListSkipped,
 } from '@sempods/app-sdk/react';
-import type { ContextTarget, TargetSelection } from '@sempods/app-sdk';
+import type {
+  BrowserRuntime,
+  ContextTarget,
+  LeaveGuard,
+  TargetSelection,
+} from '@sempods/app-sdk';
 import type { SkippedRecord } from '@sempods/client-sdk/edit';
 
 function Task() {
@@ -108,3 +114,25 @@ function SkippedTypes() {
   return [reasons, where, iri];
 }
 void SkippedTypes;
+
+// The browser's leave prompt is on by default; apps may opt out (#201).
+function UnloadPromptTypes(runtime: BrowserRuntime) {
+  const app = createAppController(runtime, { unloadPrompt: false });
+  const listeners = new Set<() => void>();
+  const guard: LeaveGuard = {
+    dirty: () => false,
+    blocked: () => false,
+    discard: () => {},
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  app.register(guard);
+  return (
+    <SempodsProvider runtime={runtime} unloadPrompt={false}>
+      {null}
+    </SempodsProvider>
+  );
+}
+void UnloadPromptTypes;
