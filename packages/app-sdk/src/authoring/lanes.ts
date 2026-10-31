@@ -97,7 +97,13 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
       this.changed,
     );
     this.lanes.set(iri, lane);
-    this.guards.set(lane, this.app.register(lane.guard(this.scope)));
+    this.guards.set(
+      lane,
+      this.app.register({
+        ...lane.guard(this.scope),
+        subscribe: this.subscribe,
+      }),
+    );
     this.evict();
     return lane;
   }
