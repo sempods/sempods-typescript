@@ -21,7 +21,7 @@ import {
 } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
-import { SdkStyles } from './styles.js';
+import { layered, SdkStyles } from './styles.js';
 import { useModalDialog } from './confirm.js';
 import { contextName, podName, distinctName } from './names.js';
 import {
@@ -254,7 +254,7 @@ export function AppAccess({
     >
       <SdkStyles />
       <style href="sempods-access" precedence="sempods">
-        {styles}
+        {layered(styles)}
       </style>
       <div className="sp-access-content">
         {(presentation.attention || open) && !asDialog && (
@@ -917,14 +917,14 @@ const styles = `
 [data-sempods-access] .sp-access-icon > * { width:100%; height:100%; object-fit:contain; }
 [data-sempods-access] p { overflow-wrap:anywhere; margin:12px 0; }
 [data-sempods-access] label { display:block; text-align:start; margin:18px 0; }
-[data-sempods-access] input, [data-sempods-access] select { display:block; width:100%; min-width:0; margin:8px 0; font:inherit; color:inherit; background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:4px; padding:12px; min-height:46px; }
+[data-sempods-access] input, [data-sempods-access] select { display:block; width:100%; min-width:0; margin:8px 0; font:inherit; color:inherit; background:var(--sp-bg); border:1px solid var(--sp-field-line); border-radius:4px; padding:12px; min-height:46px; }
 [data-sempods-access] input { border-width:0 0 1px; border-radius:0; padding-inline:0; }
 [data-sempods-access] select { appearance:none; border-width:0 0 1px; border-radius:0; padding:12px 24px 12px 0; cursor:pointer; background-image:linear-gradient(45deg,transparent 50%,var(--sp-muted) 50%),linear-gradient(135deg,var(--sp-muted) 50%,transparent 50%); background-position:calc(100% - 10px) 50%,calc(100% - 5px) 50%; background-size:5px 5px; background-repeat:no-repeat; }
 [data-sempods-access] input::placeholder { color:var(--sp-muted); opacity:1; }
-[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:calc(var(--sp-radius) * .625); color:var(--sp-accent); background:transparent; padding:10px 14px; cursor:pointer; }
-[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-on-accent); background:var(--sp-accent); }
+[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:calc(var(--sp-radius) * .625); color:var(--sp-secondary-text); background:transparent; padding:10px 14px; cursor:pointer; }
+[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-primary-text); background:var(--sp-primary-bg); }
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
-[data-sempods-access] :focus-visible { outline:2px solid var(--sp-accent); outline-offset:3px; }
+[data-sempods-access] :focus-visible { outline:2px solid var(--sp-focus); outline-offset:3px; }
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-contexts { list-style:none; margin:8px 0 16px; padding:0; text-align:start; }
 [data-sempods-access] .sp-access-contexts li { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; padding:8px 0; border-block-end:1px solid var(--sp-line); }

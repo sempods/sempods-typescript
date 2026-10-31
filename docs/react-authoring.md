@@ -1026,9 +1026,62 @@ Theme with `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`
 `--sempods-font` sets the font family (default `system-ui, sans-serif`) and
 `--sempods-radius` the corner radius of controls (default `8px`); cards and
 dialogs use 1.5 times it, `0` makes every SDK surface square.
+
+A UI kit with its own action variants and field style maps them onto five more
+tokens; each defaults to the token in the last column, so the look stays the same
+until you set one:
+
+| Token                      | Styles                                              | Default               |
+| -------------------------- | --------------------------------------------------- | --------------------- |
+| `--sempods-field-line`     | Borders of fields; keep it at 3:1 to the background | `--sempods-line`      |
+| `--sempods-primary-bg`     | Fill of a surface's main action (Save, Confirm)     | `--sempods-accent`    |
+| `--sempods-primary-text`   | Text of the main action                             | `--sempods-on-accent` |
+| `--sempods-secondary-text` | Text of the other actions (Cancel, text buttons)    | `--sempods-accent`    |
+| `--sempods-focus`          | Focus outline of SDK controls                       | `--sempods-accent`    |
+
+Until you set `--sempods-field-line`, fields share the separator colour
+`--sempods-line`; set it when a quiet separator would leave field borders
+below 3:1 against the background.
+
 React 19 [hoists the scoped sheets](https://react.dev/reference/react-dom/components/style);
 they need a CSP that allows inline styles, otherwise build presentation from
 the public hooks.
+
+#### Cascade layer order
+
+The SDK's sheets sit in the cascade layer `sempods`. Declare the order at the
+top of the app's first stylesheet, before any other rule or import:
+
+```css
+@layer theme, base, sempods, components, utilities;
+@import 'tailwindcss';
+```
+
+A reset in `base`, such as Tailwind 4's preflight, then stays below the SDK,
+and the app's classes in `components` and `utilities` apply on and inside SDK
+surfaces without importing utilities unlayered. The order is fixed by the
+first statement that names a layer. The SDK's sheet carries
+`@layer base, sempods;`, which yields the same order when React inserts it at
+the start of the head, ahead of the app's CSS. When the app's CSS comes first,
+for example because a framework hoists it as a sheet with its own precedence,
+the app's statement decides alone; without `sempods` in it, the SDK's layer
+ends up last, above the app's classes.
+
+Two kinds of app rules override every SDK rule, so keep element selectors
+(`button { … }`, `input { … }`, `*`) out of them or scope them to the app's
+own elements:
+
+- **Unlayered rules.** An unlayered reset (Tailwind 3's preflight,
+  normalize.css, Bootstrap's reboot, `* { margin: 0 }`) reaches AppAccess's
+  sign-in screen and dialogs. Move it into `base`; upgrading from 0.6.0 is
+  described in the [migration guide](migration.md#sdk-styles-in-a-cascade-layer).
+- **Layers after `sempods`.** `components`, `utilities` and any layer first
+  named after it, such as `@import 'app.css' layer(app)` or `@layer reset`,
+  win over the SDK, its base sheet included. Name such layers in the order
+  statement, a reset before `sempods`.
+
+The SDK's modal dialogs set `margin: auto` themselves, so a reset in `base`
+does not move them off centre.
 
 ### Replacing the connection view
 
