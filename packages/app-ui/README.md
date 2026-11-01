@@ -70,8 +70,10 @@ explains the order and which app rules still override SDK rules.
 - in `base`: borders without a colour class take the `border` role, the body
   takes `background` and `foreground`, and app links, buttons and fields get a
   solid focus outline;
-- unlayered: a solid 2px focus outline in the `ring` colour on the package's
-  components and calendar days.
+- in its own layer `app-ui-focus`, after Tailwind's utilities: a solid 2px
+  focus outline in the `ring` colour on the package's components and calendar
+  days. Name the layer in the order statement only to move it; an unlayered
+  app rule overrides it.
 
 ## The theme contract
 

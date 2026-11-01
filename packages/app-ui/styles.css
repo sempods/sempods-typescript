@@ -140,7 +140,6 @@
     --accent: light-dark(#eef0f3, #262a31);
     --accent-foreground: var(--foreground);
     --destructive: light-dark(#b42318, #f97066);
-    --destructive-foreground: light-dark(#ffffff, #111315);
     /* Decorative separators. Control boundaries use input, at 3:1. */
     --border: light-dark(#e5e7eb, #2d3138);
     --input: light-dark(#7a818c, #6b7280);
@@ -163,7 +162,6 @@
   :where(:root[data-actions='inverted']) {
     --action: var(--background);
     --action-foreground: var(--primary);
-    --action-border: var(--primary);
   }
   :where(:root[data-secondary='outline']) {
     --action-secondary: transparent;
@@ -173,7 +171,6 @@
   :where(:root[data-secondary='text']) {
     --action-secondary: transparent;
     --action-secondary-foreground: var(--primary);
-    --action-secondary-border: transparent;
   }
 
   /* 3. Bridge to the SDK. Its fields get the input role (3:1), its
@@ -226,13 +223,16 @@
 }
 
 /* 4. Focus. shadcn's ring is the ring colour at 50% opacity, which stays below
-   3:1 for mid-tone accents. Unlayered, so it wins over the components'
-   outline-hidden utilities; it reaches only components (data-slot) and the
-   calendar's days, not a dialog that holds the focus while it opens. */
-:where(
-  [data-slot]:not([role='dialog'], [role='alertdialog']),
-  [data-slot='calendar'] [role='gridcell'] > *
-):focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+   3:1 for mid-tone accents. The layer is first named here, after Tailwind's
+   utilities, so it wins over the components' outline-hidden; an app's
+   unlayered rule still wins over it. It reaches only components (data-slot)
+   and the calendar's days, not a dialog that holds the focus while it opens. */
+@layer app-ui-focus {
+  :where(
+    [data-slot]:not([role='dialog'], [role='alertdialog']),
+    [data-slot='calendar'] [role='gridcell'] > *
+  ):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
