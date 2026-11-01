@@ -498,13 +498,13 @@ const roundtripChecks = (page, origin) => {
     await page.goto(origin + '/?view=list');
     await page.getByRole('link', { name: title }).click();
     await page.getByLabel('Title', { exact: true }).waitFor();
-    await page.waitForTimeout(300);
+    await settle(page);
   }
   /** Opens the chooser, moves one day on and applies it, by keyboard. */
   async function chooseNextDay() {
     await trigger.click();
     await page.getByRole('grid').waitFor();
-    await page.waitForTimeout(200);
+    await settle(page);
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('Enter');
     await page.getByRole('button', { name: 'Apply', exact: true }).click();
@@ -540,7 +540,7 @@ const roundtripChecks = (page, origin) => {
       await openTask(PLUMBER);
       await trigger.click();
       await page.getByRole('grid').waitFor();
-      await page.waitForTimeout(200);
+      await settle(page);
       await page.keyboard.press('ArrowRight');
       await page.keyboard.press('Enter');
       await page.keyboard.press('Escape');
@@ -591,7 +591,7 @@ const roundtripChecks = (page, origin) => {
       await openTask(TRAIN);
       await trigger.click();
       await page.getByRole('grid').waitFor();
-      await page.waitForTimeout(200);
+      await settle(page);
       const startDay = await page.evaluate(() =>
         document.activeElement?.getAttribute('aria-label'),
       );
@@ -673,7 +673,7 @@ async function calendarTargets(page, origin, height, tab) {
   await trigger.focus();
   await page.keyboard.press('Enter');
   await page.getByRole('grid').waitFor();
-  await page.waitForTimeout(300);
+  await settle(page);
   const boxes = await page.evaluate(() => {
     const grid = document.querySelector('[role=grid]');
     const popup = grid.closest('[data-slot=popover-content]');
@@ -839,7 +839,7 @@ async function interaction({ browser, origin, engine }) {
       await trigger.focus();
       await page.keyboard.press('Enter');
       await page.getByRole('grid').waitFor();
-      await page.waitForTimeout(200);
+      await settle(page);
       const start = await focused(page);
       await page.keyboard.press('ArrowRight');
       await page.keyboard.press('PageDown');
