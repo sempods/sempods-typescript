@@ -128,8 +128,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     secondary variant × light and dark × 375 and 1280px, including hovered,
     pressed and focused controls.
 
-  WebKit on macOS moves the focus with Option+Tab, as Safari does by default
-  for buttons. These are fixture checks in browser engines, not evidence from
+  Sizes and contrast are measured with reduced motion, so a zoom or fade that
+  headless WebKit on Linux stretches over seconds cannot catch an overlay
+  halfway; the behaviour checks keep the animations, and one check proves
+  that reduced motion turns them off. WebKit on macOS moves the focus with
+  Option+Tab, as Safari does by default for buttons. These are fixture checks in browser engines, not evidence from
   a real Pod, iOS, an installed PWA or people.
 
 - `test:runtime`: a separate packed DOM-only consumer in Chromium, using native

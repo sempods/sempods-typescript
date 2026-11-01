@@ -689,6 +689,9 @@ async function focusItem(page, name) {
  * visible, focus back on the trigger.
  */
 async function calendarTargets(page, origin, height, tab) {
+  // Sizes as they settle, not halfway through the popover's zoom-in, which
+  // headless WebKit on Linux can stretch over seconds.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 375, height });
   await page.goto(origin + '/');
   await openTask(page);
@@ -765,6 +768,7 @@ async function calendarTargets(page, origin, height, tab) {
     await focusUntil(page, /Start considering/, focused),
   );
   await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   return {
     pass:
       boxes.actionsOnOpen &&
@@ -1045,6 +1049,31 @@ async function integration({ browser, origin }) {
       };
     }),
   );
+  results.push(
+    await attempt('reduced-motion', async () => {
+      // The header menu opens with its zoom-in, and without one when the
+      // person asks for reduced motion.
+      const animations = async (reducedMotion) => {
+        await page.emulateMedia({ reducedMotion });
+        await page.goto(origin + '/');
+        await page.getByRole('button', { name: 'Menu', exact: true }).click();
+        await page.getByRole('menu').waitFor();
+        const names = await page.evaluate(
+          () =>
+            getComputedStyle(
+              document.querySelector('[data-slot=dropdown-menu-content]'),
+            ).animationName,
+        );
+        await page.keyboard.press('Escape');
+        await hidden(page.getByRole('menu'));
+        return names;
+      };
+      const normal = await animations('no-preference');
+      const reduced = await animations('reduce');
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      return { pass: normal !== 'none' && reduced === 'none', normal, reduced };
+    }),
+  );
   await context.close();
   return results;
 }
@@ -1243,7 +1272,10 @@ async function contrast({ browser, origin, engine }) {
     }
     await context.close();
   }
-  const { context, page } = await newPage(browser);
+  // Colours as they settle, not halfway through a fade-in (see calendarTargets).
+  const { context, page } = await newPage(browser, {
+    reducedMotion: 'reduce',
+  });
   await context.addInitScript(contrastScript);
   await signIn(page, origin);
   // The reported blind spot: the task title made white on white must fail.
