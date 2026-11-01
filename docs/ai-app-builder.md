@@ -48,7 +48,9 @@ choose a composition for the task:
 
 - Choose a coherent visual direction yourself: type scale, spacing, restrained
   colors and a recognizable name/icon appropriate to the purpose. Reuse
-  `--sempods-*` tokens so SDK surfaces belong to the app. Preserve an existing
+  `--sempods-*` tokens so SDK surfaces belong to the app; with a UI kit, map
+  its field border, action and focus colours onto the
+  [SDK tokens](react-authoring.md#shared-sdk-appearance). Preserve an existing
   app's identity unless asked to change it.
 - Give each screen one clear primary action. Use alignment, whitespace and
   typography to make the hierarchy visible; introduce tabs, cards or menus

@@ -4,6 +4,37 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.6.0 to 0.7.0
+
+0.7.0 is not released yet; this section collects its upgrade steps.
+
+### SDK styles in a cascade layer
+
+**Breaking for apps with unlayered global CSS.** The SDK's sheets now sit in
+the cascade layer `sempods` (see
+[Shared SDK appearance](react-authoring.md#shared-sdk-appearance)), so app CSS
+in a later layer, such as Tailwind 4's `components` and `utilities`, applies
+on and inside SDK surfaces. In exchange, **every unlayered app rule now wins
+over every SDK rule.** Before 0.7.0, AppAccess's own rules
+(`[data-sempods-access] button`, `input`, `p`, `label`, `.sp-access-*`) beat an
+app's global element rules; now a reset such as an unlayered Tailwind 3
+preflight, normalize.css, Bootstrap's reboot or `* { margin: 0; padding: 0;
+border-width: 0 }` reaches the sign-in screen: its main button loses its fill,
+field borders disappear and spacing collapses. The other SDK surfaces already
+gave way to such rules.
+
+1. Declare the layer order at the top of the app's first stylesheet:
+   `@layer theme, base, sempods, components, utilities;` (drop the names the
+   app does not use).
+2. Put resets and global element rules (`button { … }`, `input { … }`, `*`)
+   into `base`, or scope them to the app's own elements (`.app button`).
+   Element rules in a layer after `sempods` override the SDK just as well.
+3. Check the sign-in screen, the Pods & sharing dialog, an editor and a
+   confirmation with the app's real stylesheet.
+
+Five optional tokens map a UI kit's field border, main and other actions and
+focus ring onto SDK surfaces; without them nothing changes.
+
 ## From 0.5.0 to 0.6.0
 
 Upgrade both packages together. The last published version before 0.6.0 is

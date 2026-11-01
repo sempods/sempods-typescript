@@ -849,6 +849,19 @@ try {
   console.log(
     'Packed default TODO: EN/DE login, 320px light/dark, explicit context, creation and guarded management with retained draft passed.',
   );
+  // A Tailwind 4 host stylesheet (#200): a preflight-like reset in `base`, a
+  // class in `utilities`, and no `sempods` in its order statement.
+  const tailwindHost = `@layer theme, base, components, utilities;
+@layer base {
+  *, ::after, ::before, ::backdrop { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
+  button, input { color: inherit; background-color: transparent; border-radius: 0; }
+  dialog { padding: 0; }
+}
+@layer utilities {
+  .host-fill { background-color: rgb(1, 2, 3); }
+  /* The app sizes its own icon button, which has no stylesheet here. */
+  .menu-button { width: 44px; height: 44px; }
+}`;
   for (const appearance of ['light', 'dark']) {
     tasks.clear();
     const context = await browser.newContext({
@@ -905,6 +918,75 @@ try {
           : 'rgba(0, 0, 0, 0)',
       );
     }
+    // AppAccess under the Tailwind host: the reset in `base` stays below the
+    // SDK, and the field, action and focus tokens reach the sign-in screen.
+    const address = page.getByLabel('Pod address');
+    const signInHost = await page.addStyleTag({ content: tailwindHost });
+    const signInLook = () =>
+      Promise.all([
+        initialSignIn.evaluate((button) => {
+          const style = getComputedStyle(button);
+          return [
+            style.backgroundColor,
+            style.color,
+            style.paddingTop,
+            style.paddingLeft,
+          ];
+        }),
+        address.evaluate((input) => {
+          const style = getComputedStyle(input);
+          return [
+            style.borderBottomWidth,
+            style.borderBottomColor,
+            style.paddingTop,
+          ];
+        }),
+      ]);
+    assert.deepEqual(await signInLook(), [
+      ['rgb(31, 41, 51)', 'rgb(255, 255, 255)', '10px', '14px'],
+      ['1px', 'rgb(229, 231, 235)', '12px'],
+    ]);
+    await page.evaluate(() => {
+      const root = document.documentElement.style;
+      root.setProperty('--sempods-field-line', 'rgb(11, 12, 13)');
+      root.setProperty('--sempods-primary-bg', 'rgb(10, 20, 30)');
+      root.setProperty('--sempods-primary-text', 'rgb(40, 50, 60)');
+      root.setProperty('--sempods-focus', 'rgb(100, 110, 120)');
+    });
+    assert.deepEqual(await signInLook(), [
+      ['rgb(10, 20, 30)', 'rgb(40, 50, 60)', '10px', '14px'],
+      ['1px', 'rgb(11, 12, 13)', '12px'],
+    ]);
+    await address.focus();
+    await page.keyboard.press('Tab');
+    assert.deepEqual(
+      await initialSignIn.evaluate((button) => [
+        button === document.activeElement,
+        getComputedStyle(button).outlineColor,
+      ]),
+      [true, 'rgb(100, 110, 120)'],
+    );
+    // As documented for 0.7.0: an unlayered app rule wins over the SDK.
+    const unlayered = await page.addStyleTag({
+      content: 'button { padding: 0; }',
+    });
+    assert.equal(
+      await initialSignIn.evaluate(
+        (button) => getComputedStyle(button).paddingTop,
+      ),
+      '0px',
+    );
+    await unlayered.evaluate((element) => element.remove());
+    await signInHost.evaluate((element) => element.remove());
+    await page.evaluate(() => {
+      for (const name of [
+        '--sempods-field-line',
+        '--sempods-primary-bg',
+        '--sempods-primary-text',
+        '--sempods-focus',
+      ])
+        document.documentElement.style.removeProperty(name);
+    });
     await page.getByLabel('Pod address').fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     // Both lists are labelled "Tasks": the switch adds their short names.
@@ -1052,8 +1134,101 @@ try {
       ),
       '8px',
     );
+    // A Tailwind 4 host (#200) without its own order statement: its reset in
+    // `base` stays below the SDK's layer, its classes in `utilities` above it.
+    const host = await page.addStyleTag({ content: tailwindHost });
+    assert.deepEqual(
+      await page.evaluate(() =>
+        [...document.styleSheets].flatMap((sheet) =>
+          [...sheet.cssRules]
+            .filter((rule) => rule.constructor.name === 'CSSLayerStatementRule')
+            .map((rule) => rule.nameList.join()),
+        ),
+      ),
+      ['base,sempods', 'base,sempods', 'theme,base,components,utilities'],
+    );
+    // The reset loses although the host names `base` without `sempods`: the
+    // SDK's statement put `base` first. With `@layer sempods` alone, `base`
+    // would follow it and win.
+    assert.deepEqual(
+      await save.evaluate((button) => {
+        const style = getComputedStyle(button);
+        return [style.paddingTop, style.paddingLeft, style.borderTopLeftRadius];
+      }),
+      ['10px', '14px', '8px'],
+    );
+    assert.deepEqual(
+      await field.evaluate((input) => {
+        const style = getComputedStyle(input);
+        return [style.borderTopWidth, style.borderTopColor, style.paddingLeft];
+      }),
+      [
+        '1px',
+        appearance === 'light' ? 'rgb(229, 231, 235)' : 'rgb(45, 49, 56)',
+        '12px',
+      ],
+    );
+    await save.evaluate((button) => button.classList.add('host-fill'));
+    assert.equal(
+      await save.evaluate((button) => getComputedStyle(button).backgroundColor),
+      'rgb(1, 2, 3)',
+    );
+    await save.evaluate((button) => button.classList.remove('host-fill'));
+    // Field boundaries follow --sempods-line until they get their own token.
+    const tokens = {
+      '--sempods-line': 'rgb(7, 8, 9)',
+      '--sempods-primary-bg': 'rgb(10, 20, 30)',
+      '--sempods-primary-text': 'rgb(40, 50, 60)',
+      '--sempods-secondary-text': 'rgb(70, 80, 90)',
+      '--sempods-focus': 'rgb(100, 110, 120)',
+    };
+    await page.evaluate((tokens) => {
+      for (const [name, value] of Object.entries(tokens))
+        document.documentElement.style.setProperty(name, value);
+    }, tokens);
+    assert.equal(
+      await field.evaluate((input) => getComputedStyle(input).borderTopColor),
+      'rgb(7, 8, 9)',
+    );
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty(
+        '--sempods-field-line',
+        'rgb(11, 12, 13)',
+      ),
+    );
+    assert.equal(
+      await field.evaluate((input) => getComputedStyle(input).borderTopColor),
+      'rgb(11, 12, 13)',
+    );
+    // An app's action variants reach the SDK's actions and focus ring.
+    assert.deepEqual(
+      await save.evaluate((button) => {
+        const style = getComputedStyle(button);
+        return [style.backgroundColor, style.color];
+      }),
+      ['rgb(10, 20, 30)', 'rgb(40, 50, 60)'],
+    );
+    assert.equal(
+      await page
+        .getByRole('button', { name: 'Check current version', exact: true })
+        .evaluate((button) => getComputedStyle(button).color),
+      'rgb(70, 80, 90)',
+    );
+    await field.focus();
+    await page.keyboard.press('Tab'); // Save.
+    assert.equal(
+      await save.evaluate((button) => getComputedStyle(button).outlineColor),
+      'rgb(100, 110, 120)',
+    );
+    await page.evaluate(
+      (names) => {
+        for (const name of names)
+          document.documentElement.style.removeProperty(name);
+      },
+      [...Object.keys(tokens), '--sempods-field-line'],
+    );
     // Management is a modal dialog; the leave prompt opens above it. On a
-    // phone it is a bottom sheet across the width.
+    // phone it is a bottom sheet across the width, also under the host's reset.
     await menu(page, 'Pods & sharing');
     await page.getByRole('dialog', { name: 'Pods & sharing' }).waitFor();
     assert.deepEqual(
@@ -1077,9 +1252,68 @@ try {
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
     await page.getByRole('alertdialog').waitFor();
+    // The reset's margin:0 does not move the confirmation off centre.
+    const [left, right, top, bottom] = await page
+      .getByRole('alertdialog')
+      .evaluate((dialog) => {
+        const box = dialog.getBoundingClientRect();
+        return [
+          box.left,
+          document.documentElement.clientWidth - box.right,
+          box.top,
+          window.innerHeight - box.bottom,
+        ];
+      });
+    assert.ok(left >= 15 && Math.abs(left - right) <= 1, `${left} ${right}`);
+    assert.ok(top > 15 && Math.abs(top - bottom) <= 1, `${top} ${bottom}`);
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
     await closeManagement(page);
+    // Above 30rem, management is a centred dialog, also under the reset; its
+    // text actions follow --sempods-secondary-text.
+    await page.setViewportSize({ width: 800, height: 800 });
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty(
+        '--sempods-secondary-text',
+        'rgb(70, 80, 90)',
+      ),
+    );
+    await menu(page, 'Pods & sharing');
+    const management = page.getByRole('dialog', { name: 'Pods & sharing' });
+    await management.waitFor();
+    const [wideLeft, wideRight, wideTop, wideBottom] =
+      await management.evaluate((dialog) => {
+        const box = dialog.getBoundingClientRect();
+        return [
+          box.left,
+          document.documentElement.clientWidth - box.right,
+          box.top,
+          window.innerHeight - box.bottom,
+        ];
+      });
+    assert.ok(
+      wideLeft > 100 && Math.abs(wideLeft - wideRight) <= 1,
+      `${wideLeft} ${wideRight}`,
+    );
+    assert.ok(
+      wideTop > 15 && Math.abs(wideTop - wideBottom) <= 1,
+      `${wideTop} ${wideBottom}`,
+    );
+    assert.equal(
+      await management
+        .getByRole('button', { name: 'Change sharing', exact: true })
+        .evaluate((button) => getComputedStyle(button).color),
+      'rgb(70, 80, 90)',
+    );
+    await closeManagement(page);
+    await page.evaluate(() =>
+      document.documentElement.style.removeProperty('--sempods-secondary-text'),
+    );
+    await page.setViewportSize({
+      width: appearance === 'light' ? 320 : 375,
+      height: 800,
+    });
+    await host.evaluate((element) => element.remove());
     await menu(page, german);
     await editor
       .getByRole('button', { name: 'Speichern', exact: true })
@@ -1103,7 +1337,7 @@ try {
     await context.close();
   }
   console.log(
-    'Packed SDK baseline without a stylesheet: standard TODO screen, editor, inherited tokens, app-content isolation, EN/DE, 320/375px light/dark, touch targets, focus and guarded drafts passed.',
+    'Packed SDK baseline without a stylesheet: standard TODO screen, editor, inherited tokens, app-content isolation, EN/DE, 320/375px light/dark, touch targets, focus, guarded drafts, and under a Tailwind 4 host its layer order, field/action/focus tokens, AppAccess and centred dialogs passed.',
   );
   {
     tasks.clear();
