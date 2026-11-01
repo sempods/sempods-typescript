@@ -19,7 +19,8 @@ references for the task at hand, not prerequisites to read in order.
 - [client-sdk](../packages/client-sdk/README.md): portable Pod requests, OAuth and editing.
 - [app-sdk](../packages/app-sdk/README.md): browser sessions, headless authoring and optional React.
 - [app-ui](../packages/app-ui/README.md): shadcn/ui components on React Aria, SDK-aware
-  adapters and the theme contract for Tailwind CSS 4.
+  adapters, a router over the app's address model and the theme contract for
+  Tailwind CSS 4.
 - [React/headless authoring](react-authoring.md), [widgets](widgets.md) and
   [browser runtime](browser-runtime.md).
 - [Pod overviews with Contexts on-demand](react-authoring.md#pod-overviews-with-contexts-on-demand)

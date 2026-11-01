@@ -96,9 +96,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   checks the app-ui tarball's files and its packed peer range (the same minor as
   app-sdk), installs them outside the workspace, compiles the reference screen
   in `tests/ui-browser` strictly against the packed declarations (React Aria's
-  included, `skipLibCheck` off). Its task dialog is the installed README's
-  `task-dialog.tsx` example as shipped, so every check below runs the
-  documented recipe; the screen also uses the README's stylesheet setup. It is
+  included, `skipLibCheck` off). Its task dialog and its address model are the
+  installed README's `task-dialog.tsx` and `places.ts` examples as shipped, so
+  every check below runs the documented recipe; the screen routes with the
+  package's `useNav` and uses the README's stylesheet setup. The README's other
+  TSX examples are compiled. It is
   built with Vite and Tailwind CSS 4. The
   app's CSS has no `@source` line and its Vite config no `optimizeDeps` hint;
   the build must contain classes that only the package's JavaScript uses. A
@@ -126,7 +128,23 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   - rendered contrast (`scripts/ui-contrast.js`): 19 controls that must pass or
     fail as stated, then five states × two palettes with every action and
     secondary variant × light and dark × 375 and 1280px, including hovered,
-    pressed and focused controls.
+    pressed and focused controls;
+  - the routing matrix of the template's routing spike (#114), 29 checks with
+    the package's router: a resource link, one with a named source Context and
+    an invalid legacy link keep their address through sign-in; direct entry,
+    plain and Ctrl/Cmd clicks on links, the action route and the menu route;
+    Close to the in-app opener, or in place to the start after a direct entry;
+    Back with a dirty draft, staying and discarding, and clean Back and
+    Forward; Forward and a second Back while the SDK's question is open, kept
+    and discarded; `history.go(±2)`; reload, then Back and Forward; legacy
+    links become canonical by replacement while invalid ones keep their error
+    page; the creation route wins over the resource pattern; unknown and
+    invalid addresses show explicit pages; links name the source Context, a
+    named source is read and written (the other Context's copy stays) also on
+    the action route and after reload, and an unreadable one is an explicit
+    error without an editor. Two more checks for a fragment link's entry:
+    staying after two entries back returns to the task screen, and Close
+    still returns to the opener.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay
