@@ -1,6 +1,6 @@
 # Architecture decisions
 
-The decisions that shape the two SDK packages, each with the reason behind it.
+The decisions that shape the SDK packages, each with the reason behind it.
 Details live in the package READMEs and guides; this page explains why the
 code is the way it is.
 
@@ -14,6 +14,24 @@ client-sdk, never the other way round.
 
 _Why:_ scripts, servers and agents need the protocol without browser storage or
 React; apps need sessions and UI on top of the same client, not a second one.
+
+## A UI kit beside the SDK, gated where the SDK changes
+
+`@sempods/app-ui` holds shadcn/ui components on React Aria Components, a few
+adapters (routed screen dialog, header menu, calendar-date chooser, action
+button) and the theme token contract. It depends on app-sdk's React entry and is
+released with it; app-sdk and client-sdk never depend on it and stay free of a
+UI framework. Apps own their palette, screens and copy, and take anything else
+from React Aria directly.
+
+_Why:_ a UI kit copied into every app drifts apart, and an update cannot reach
+a customised copy. The kit's correctness depends on SDK behaviour (Escape
+boundaries, the SDK's native `<dialog>` confirmations, editor close semantics),
+so its browser gate runs in this repository, where SDK changes originate. React
+Aria handles dismissal through its own overlay's events and so respects the
+SDK's boundaries, and its calendar works on `CalendarDate`, which matches the
+SDK's `date` field; Radix blocked the SDK confirmations. The comparison is in
+the template's spike, sempods/sempods-apps-template#120.
 
 ## The protocol stays pure; convenience lives in the SDK
 
