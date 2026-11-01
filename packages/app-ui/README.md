@@ -76,7 +76,8 @@ explains the order and which app rules still override SDK rules.
   app rule overrides it;
 - in the layer `app-ui-motion`: without entry and exit animations of popovers,
   menus and selects when the person asks for reduced motion
-  (`prefers-reduced-motion: reduce`).
+  (`prefers-reduced-motion: reduce`); other animations, such as a spinner,
+  keep running.
 
 ## The theme contract
 
@@ -316,7 +317,8 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   given.
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and submenus of checked choices
-  (`{ label, choices: [{ label, checked, onSelect }] }`). Arrow keys move,
+  (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
+  when their labels can repeat). Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
   returns to the button.
 - **`DateChooser`**: the calendar-date chooser for the SDK's `date` field. It

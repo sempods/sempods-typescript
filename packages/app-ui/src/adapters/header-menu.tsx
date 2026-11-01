@@ -13,6 +13,8 @@ import { useAdapterTexts } from './texts.js';
 
 /** One choice of a submenu; exactly one of them is usually `checked`. */
 export interface HeaderMenuChoice {
+  /** Tells choices apart; defaults to `label`, so give one when labels repeat. */
+  readonly id?: string;
   readonly label: string;
   readonly checked: boolean;
   readonly onSelect: () => void;
@@ -62,12 +64,12 @@ export function HeaderMenu({ label, items, icon = 'menu' }: HeaderMenuProps) {
                 selectionMode="single"
                 selectedKeys={item.choices
                   .filter((choice) => choice.checked)
-                  .map((choice) => choice.label)}
+                  .map((choice) => choice.id ?? choice.label)}
               >
                 {item.choices.map((choice) => (
                   <DropdownMenuItem
-                    key={choice.label}
-                    id={choice.label}
+                    key={choice.id ?? choice.label}
+                    id={choice.id ?? choice.label}
                     className="min-h-11"
                     onAction={choice.onSelect}
                   >
