@@ -3,8 +3,8 @@
 UI components for sempods apps built with React and Tailwind CSS 4:
 [shadcn/ui](https://ui.shadcn.com) components (style `aria-nova`) on
 [React Aria Components](https://react-spectrum.adobe.com/react-aria/), a few
-adapters that work with the SDK's editors and confirmations, and a theme token
-contract. The package is versioned and released together with
+adapters that work with the SDK's editors and confirmations, a router over the
+app's own address model, and a theme token contract. The package is versioned and released together with
 `@sempods/app-sdk`, so fixes reach an app through a dependency update instead
 of being copied into it.
 
@@ -160,18 +160,21 @@ purpose.
 ## Adapters
 
 A routed task dialog with an SDK editor, a date field and a menu in its
-heading, in English and German. The app's router supplies `subject` (the task
-in the address) and `leave`, which removes it from the address. The UI gate
-runs this file as written, as the reference screen's task dialog:
+heading, in English and German. The [router](#router) supplies `subject` (the
+task in the address), `context` (the source Context the address names) and
+`leave`, which closes the address. A source the app cannot read is an explicit
+error, never replaced by another Context. The UI gate runs this file as
+written, as the reference screen's task dialog:
 
 ```tsx
 // task-dialog.tsx
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import {
   ResourceEditor,
   useAppState,
   useContextEditor,
   useMessages,
+  useSdkLocale,
 } from '@sempods/app-sdk/react';
 import { date, fields, flag, text } from '@sempods/client-sdk/edit';
 import {
@@ -223,13 +226,17 @@ const texts = {
 export function TaskDialog({
   subject,
   context,
+  title,
   leave,
 }: {
   readonly subject: string | null;
   readonly context: string;
+  /** Another heading, for an action address of the task. */
+  readonly title?: ReactNode;
   readonly leave: () => void;
 }) {
   const t = useMessages(texts);
+  const { messages } = useSdkLocale();
   const edit = useContextEditor(taskFields);
   const { open, close } = edit;
   // While the SDK changes the target (`changing`), it opens no editor; the
@@ -240,16 +247,20 @@ export function TaskDialog({
     if (subject) void open({ subject, context });
     else void close();
   }, [subject, context, changing, open, close]);
-  // An editor still showing another subject is not this dialog's.
+  // An editor still showing another target is not this dialog's.
   const editor =
-    subject && edit.target?.subject === subject ? edit.editor : null;
+    subject &&
+    edit.target?.subject === subject &&
+    edit.target.context === context
+      ? edit.editor
+      : null;
   // The SDK asks before a dirty draft is discarded.
   const requestClose = async () => {
     if (await edit.close()) leave();
   };
   return (
     <ScreenDialog
-      title={t.details}
+      title={title ?? t.details}
       open={subject !== null}
       onRequestClose={() => void requestClose()}
       actions={
@@ -260,45 +271,50 @@ export function TaskDialog({
         />
       }
     >
-      <ResourceEditor
-        editor={editor}
-        quiet
-        onClose={() => void requestClose()}
-        labels={{
-          title: t.title,
-          description: t.description,
-          planned: t.planned,
-        }}
-      >
-        {(draft, change) => (
-          <div className="grid gap-5">
-            <label className="grid gap-1.5">
-              {t.title}
-              <Input
-                value={draft.title}
-                onChange={(e) => change({ ...draft, title: e.target.value })}
-                required
+      {edit.phase === 'unavailable' && edit.problem ? (
+        // A source Context the app cannot read: no editor, no other Context.
+        <p role="alert">{messages.contextProblems?.[edit.problem]}</p>
+      ) : (
+        <ResourceEditor
+          editor={editor}
+          quiet
+          onClose={() => void requestClose()}
+          labels={{
+            title: t.title,
+            description: t.description,
+            planned: t.planned,
+          }}
+        >
+          {(draft, change) => (
+            <div className="grid gap-5">
+              <label className="grid gap-1.5">
+                {t.title}
+                <Input
+                  value={draft.title}
+                  onChange={(e) => change({ ...draft, title: e.target.value })}
+                  required
+                />
+              </label>
+              <label className="grid gap-1.5">
+                {t.description}
+                <Textarea
+                  rows={2}
+                  value={draft.description ?? ''}
+                  onChange={(e) =>
+                    change({ ...draft, description: e.target.value })
+                  }
+                />
+              </label>
+              <DateChooser
+                label={t.planned}
+                value={draft.planned}
+                onChange={(planned) => change({ ...draft, planned })}
+                optional
               />
-            </label>
-            <label className="grid gap-1.5">
-              {t.description}
-              <Textarea
-                rows={2}
-                value={draft.description ?? ''}
-                onChange={(e) =>
-                  change({ ...draft, description: e.target.value })
-                }
-              />
-            </label>
-            <DateChooser
-              label={t.planned}
-              value={draft.planned}
-              onChange={(planned) => change({ ...draft, planned })}
-              optional
-            />
-          </div>
-        )}
-      </ResourceEditor>
+            </div>
+          )}
+        </ResourceEditor>
+      )}
     </ScreenDialog>
   );
 }
@@ -340,6 +356,310 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 The adapters' texts ("Menu", "No date", "Apply", "Remove date") follow the
 SDK provider's language (English or German) and can be passed as props.
 
+## Router
+
+`useNav(model)` routes an app over its own address model: the app says which
+places it has and how they map to addresses, the router moves through the
+browser history. Every switch, Back and Forward runs through the SDK's
+`navigate`, so an unsaved edit asks first; staying keeps the address, the
+screen, the draft and the history.
+
+- **`AddressModel<P>`**: `parse(pathname, search)` returns `{ place, canonical }`,
+  `format(place)` the address of a place (path and query, starting with the
+  app's path). An address in another form that the app knows, such as a legacy
+  link, names its canonical form, which replaces it in place. An unknown or
+  invalid address names itself, so its explicit page keeps the address the
+  person followed. The callback keeps its address: the runtime reads its
+  parameters.
+- **`useNav(model)`** returns the shown `place` and:
+  - `go(place, { replace })`: a new history entry, or in place;
+  - `close(fallback)`: back to the in-app place that opened the screen (kept
+    in `history.state`), or after a direct entry to `fallback` in place;
+  - `link(place)`: `href` and `onClick` for an `<a>`; a plain click switches
+    in place, Ctrl/Cmd-, Shift- and middle clicks open the address in the
+    browser as usual.
+- **`replaceUrl`**: pass it to `createBrowserRuntime`, so the address the
+  runtime returns to after sign-in is the one the app shows.
+
+Call `useNav` once, in the app's frame inside `SempodsProvider`, and pass
+`nav` down. While the SDK asks about a Back or Forward, further history moves
+start no second question; the answer applies to where the browser is when it
+comes. Leaving the document (Back past its first entry, reload, closing the
+tab) is not a router move: the SDK's `beforeunload` prompt covers it.
+
+An address model with a resource route (`tasks/<id>`), its action route
+(`tasks/<id>/postpone`), a literal route for the menu (`list`), a creation
+route that wins over the resource pattern, the source Context in the query,
+a legacy link and explicit not-found places. The UI gate runs this file as
+written, as the reference screen's addresses:
+
+```ts
+// places.ts
+import type { AddressModel } from '@sempods/app-ui';
+
+/** The app's path on the site (Vite's `base`), with a trailing slash. */
+const base = import.meta.env.BASE_URL;
+
+export type Place =
+  | { readonly kind: 'zen' }
+  | { readonly kind: 'list' }
+  | { readonly kind: 'new' }
+  /** `context`: the source Context the address names; never substituted. */
+  | {
+      readonly kind: 'task';
+      readonly subject: string;
+      readonly context?: string;
+      readonly action?: 'postpone';
+    }
+  | { readonly kind: 'callback' }
+  | { readonly kind: 'not-found'; readonly reason: 'unknown' | 'invalid' };
+
+const absolute = (value: string) => /^https?:\/\/\S+$/.test(value);
+
+/** A subject IRI as one path segment: UTF-8 in base64url. */
+const encode = (iri: string) =>
+  btoa(String.fromCharCode(...new TextEncoder().encode(iri)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+function decode(id: string): string | null {
+  if (!/^[\w-]+$/.test(id)) return null;
+  try {
+    const binary = atob(id.replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const iri = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return absolute(iri) ? iri : null;
+  } catch {
+    return null;
+  }
+}
+
+export const places: AddressModel<Place> = {
+  format(place) {
+    switch (place.kind) {
+      case 'zen':
+      case 'not-found':
+        return base;
+      case 'list':
+        return base + 'list';
+      case 'new':
+        return base + 'tasks/add';
+      case 'callback':
+        return base + 'callback';
+      case 'task': {
+        const action = place.action ? '/' + place.action : '';
+        const path = `${base}tasks/${encode(place.subject)}${action}`;
+        return place.context
+          ? `${path}?context=${encodeURIComponent(place.context)}`
+          : path;
+      }
+    }
+  },
+  parse(pathname, search) {
+    const here = pathname + search;
+    const known = (place: Place) => ({
+      place,
+      canonical: places.format(place),
+    });
+    const missing = (reason: 'unknown' | 'invalid') => ({
+      place: { kind: 'not-found', reason } as const,
+      canonical: here,
+    });
+    if (!(pathname + '/').startsWith(base)) return missing('unknown');
+    const path = pathname.slice(base.length).replace(/\/$/, '');
+    // The runtime reads the callback's parameters: it keeps its address.
+    if (path === 'callback')
+      return { place: { kind: 'callback' }, canonical: here };
+    const query = new URLSearchParams(search);
+    const context = query.get('context');
+    if (context !== null && !absolute(context)) return missing('invalid');
+    const task = (id: string, action?: 'postpone') => {
+      const subject = decode(id);
+      if (!subject) return missing('invalid');
+      return known({
+        kind: 'task',
+        subject,
+        ...(context ? { context } : {}),
+        ...(action ? { action } : {}),
+      });
+    };
+    // A legacy link to a task becomes its canonical address.
+    const legacy = query.get('task');
+    if (path === '' && legacy !== null) return task(legacy);
+    if (path === '') return known({ kind: 'zen' });
+    if (path === 'list') return known({ kind: 'list' });
+    // Literal routes win over the resource pattern sharing their prefix.
+    if (path === 'tasks/add' || path === 'tasks/new')
+      return known({ kind: 'new' });
+    const match = /^tasks\/([^/]+)(?:\/(postpone))?$/.exec(path);
+    if (match?.[1]) return task(match[1], match[2] ? 'postpone' : undefined);
+    return missing(path.startsWith('tasks/') ? 'invalid' : 'unknown');
+  },
+};
+```
+
+The frame: the menu switches the literal route, a list links to the resource
+route, a button opens the action route, the task dialog follows the address
+and edits the Context it names, and not-found places get an explicit page once
+the person is connected (a modal before that would block sign-in):
+
+```tsx
+// app.tsx
+import { createBrowserRuntime } from '@sempods/app-sdk';
+import {
+  AppAccess,
+  LoadNotice,
+  SempodsProvider,
+  TargetScreen,
+  useAppState,
+  useList,
+} from '@sempods/app-sdk/react';
+import {
+  ActionButton,
+  HeaderMenu,
+  ScreenDialog,
+  replaceUrl,
+  useNav,
+  type Nav,
+} from '@sempods/app-ui';
+import { places, type Place } from './places';
+import { TaskDialog, taskFields } from './task-dialog';
+
+const base = import.meta.env.BASE_URL;
+const runtime = createBrowserRuntime({
+  identity: {
+    kind: 'dynamic',
+    name: 'Focus',
+    redirectUri: location.origin + base + 'callback',
+  },
+  // Sign-in returns to the address it started from, a task link included,
+  // but never to the callback or outside the app.
+  returnTo: () => {
+    const address = location.pathname + location.search;
+    return address.startsWith(base) && !address.startsWith(base + 'callback')
+      ? address
+      : base;
+  },
+  replaceUrl,
+});
+
+export function App() {
+  return (
+    <SempodsProvider runtime={runtime}>
+      <Frame />
+    </SempodsProvider>
+  );
+}
+
+function Frame() {
+  const nav = useNav(places);
+  const { connections } = useAppState();
+  const list = nav.place.kind === 'list';
+  return (
+    <main>
+      {connections.length > 0 && (
+        <HeaderMenu
+          label="Menu"
+          items={[
+            {
+              label: 'View',
+              choices: [
+                {
+                  label: 'Zen',
+                  checked: !list,
+                  onSelect: () => nav.go({ kind: 'zen' }),
+                },
+                {
+                  label: 'List',
+                  checked: list,
+                  onSelect: () => nav.go({ kind: 'list' }),
+                },
+              ],
+            },
+          ]}
+        />
+      )}
+      <AppAccess appName="Focus" />
+      <TargetScreen>
+        <Tasks nav={nav} />
+      </TargetScreen>
+      {nav.place.kind === 'not-found' && connections.length > 0 && (
+        <ScreenDialog
+          title="Not found"
+          open
+          onRequestClose={() => nav.go({ kind: 'zen' }, { replace: true })}
+        >
+          <p>
+            {nav.place.reason === 'invalid'
+              ? 'This task link is not valid.'
+              : 'This address does not lead anywhere in Focus.'}
+          </p>
+        </ScreenDialog>
+      )}
+    </main>
+  );
+}
+
+function Tasks({ nav }: { readonly nav: Nav<Place> }) {
+  const list = useList(taskFields);
+  const { view } = useAppState();
+  if (!view) return null;
+  const { place } = nav;
+  // A link names the Context the list reads, so the address keeps its source.
+  const task = (subject: string, action?: 'postpone'): Place => ({
+    kind: 'task',
+    subject,
+    context: view.contextIri,
+    ...(action ? { action } : {}),
+  });
+  return (
+    <>
+      <LoadNotice {...list} />
+      <ul>
+        {list.data?.items.map((item) => (
+          <li key={item.iri}>
+            <a {...nav.link(task(item.iri))}>{item.data.title}</a>
+            <ActionButton
+              variant="secondary"
+              onPress={() => nav.go(task(item.iri, 'postpone'))}
+            >
+              Not today
+            </ActionButton>
+          </li>
+        ))}
+      </ul>
+      <TaskDialog
+        subject={place.kind === 'task' ? place.subject : null}
+        // The Context the address names; only an address without one uses
+        // the selected Context.
+        context={(place.kind === 'task' && place.context) || view.contextIri}
+        title={
+          place.kind === 'task' && place.action === 'postpone'
+            ? 'Not today'
+            : undefined
+        }
+        leave={() => {
+          nav.close({ kind: 'zen' });
+          void list.reload();
+        }}
+      />
+    </>
+  );
+}
+```
+
+Which Context a link names: a link from a list names the Context the list
+reads; a link derived from a task screen, such as "next task" or an action
+of the same task, names the source the current address names
+(`place.context`), not the selected Context, which may be another one. An
+address without a source edits the selected Context. A named source the app
+cannot read shows `useContextEditor`'s `unavailable` problem in the dialog,
+as above, and opens no editor in another Context.
+
+Host rules for the app's addresses (a rewrite to `index.html` for each
+resource pattern), the offline navigation allowlist and the bounded sign-in
+return come from the app template's tooling, not from this package.
+
 ## What is checked
 
 The packed browser gate builds a reference screen with Vite and Tailwind 4
@@ -349,8 +669,11 @@ confirmations, on Close, in menus and in the date chooser; focus trap and
 restore; Save after cancelled closes; closing right after opening; resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
 in three time zones; keyboard use of menus and the calendar; 44px targets; the
-cascade with the SDK's styles; and the rendered contrast of both palettes and
-all variants in light and dark mode. It uses a loopback fixture Pod: it is not
+cascade with the SDK's styles; the rendered contrast of both palettes and
+all variants in light and dark mode; and the router's 29-check matrix of
+links, direct and signed-out entry, Close, Back and Forward with a dirty
+draft, history moves while the SDK asks, reload, legacy links and the source
+Context. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
@@ -359,6 +682,8 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
   variants (see the bridge).
 - Contrast is measured for the states the gate reaches, not for every state an
   app can create; an app's own theme needs its own check.
+- The router does not protect leaving the document: Back past its first
+  entry, a reload or closing the tab is the SDK's `beforeunload` prompt.
 - The UI layer adds about 97 KB of gzipped JavaScript to an app (measured in
   the spike with the same components).
 
