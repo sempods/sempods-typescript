@@ -1,5 +1,5 @@
 name: Publish
-# Publishes both packages for a version tag, only in the public repository.
+# Publishes the three packages for a version tag, only in the public repository.
 # The maintainer creates the tag; an `npm` environment can require approval.
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     if: github.repository == 'sempods/sempods-typescript'
     runs-on: ubuntu-latest
     environment: npm
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,13 +30,13 @@ jobs:
           # the publisher's anonymous `npm view` would send. npm authenticates
           # `npm publish` through the trusted publisher (OIDC) instead.
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium webkit firefox
       - run: pnpm check
-      # The tag must name exactly the version both packages carry.
+      # The tag must name exactly the version every package carries.
       - run: |
           node -e '
             const tag = process.env.GITHUB_REF_NAME.replace(/^v/, "");
-            for (const name of ["client-sdk", "app-sdk"]) {
+            for (const name of ["client-sdk", "app-sdk", "app-ui"]) {
               const { version } = require(`./packages/${name}/package.json`);
               if (version !== tag) throw new Error(`${name} is ${version}, tag is ${tag}`);
             }'
@@ -47,12 +47,14 @@ jobs:
             if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1))))
               throw new Error(`npm ${process.argv[1]} cannot use trusted publishing`);
           ' "$(npm --version)"
-      # pnpm pack resolves workspace:* to the exact version. The script publishes
-      # client-sdk first and, on a rerun, skips a version that is already on the
-      # registry only if its contents equal the packed artifact. There is no npm
-      # token: npmjs.com trusts this workflow file in the `npm` environment.
+      # pnpm pack resolves workspace:* to the exact version (workspace:~ to the
+      # same minor). The script publishes client-sdk, app-sdk, then app-ui and,
+      # on a rerun, skips a version that is already on the registry only if its
+      # contents equal the packed artifact. There is no npm token: npmjs.com
+      # trusts this workflow file in the `npm` environment, per package.
       - run: |
           mkdir -p ../release
           pnpm --filter @sempods/client-sdk pack --pack-destination ../release
           pnpm --filter @sempods/app-sdk pack --pack-destination ../release
+          pnpm --filter @sempods/app-ui pack --pack-destination ../release
           node scripts/publish-packages.mjs ../release

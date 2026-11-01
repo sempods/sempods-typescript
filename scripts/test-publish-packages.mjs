@@ -23,7 +23,7 @@ const script = join(
 );
 const work = mkdtempSync(join(tmpdir(), 'publish-test-'));
 try {
-  // Two small tarballs shaped like the packed SDKs.
+  // Small tarballs shaped like the packed packages.
   const pack = (name, content, into) => {
     const root = join(work, 'src', `${name}-${content}`, 'package');
     mkdirSync(root, { recursive: true });
@@ -40,6 +40,7 @@ try {
   const local = join(work, 'local');
   pack('client-sdk', 'a', local);
   pack('app-sdk', 'a', local);
+  pack('app-ui', 'a', local);
 
   // Fake registry: a directory of published tarballs plus a call log.
   const registry = join(work, 'registry');
@@ -114,6 +115,7 @@ process.exit(2);
     /client-sdk@0\.1\.0 is already published with identical contents/,
   );
   assert.match(result.stdout, /app-sdk@0\.1\.0 published/);
+  assert.match(result.stdout, /app-ui@0\.1\.0 published/);
   assert.ok(!calls().includes('publish sempods-client-sdk-0.1.0.tgz'));
 
   // 3. A different artifact under the same version is never skipped.
@@ -127,7 +129,7 @@ process.exit(2);
   assert.match(result.stderr, /already published with different contents/);
   assert.ok(!calls().some((c) => c.startsWith('publish')));
 
-  // 4. A fresh release publishes both, client first.
+  // 4. A fresh release publishes all three in dependency order.
   reset();
   result = run();
   assert.equal(result.status, 0, result.stderr);
@@ -136,13 +138,14 @@ process.exit(2);
     [
       'publish sempods-client-sdk-0.1.0.tgz',
       'publish sempods-app-sdk-0.1.0.tgz',
+      'publish sempods-app-ui-0.1.0.tgz',
     ],
   );
   // 5. An empty answer (unmatched version) also counts as not yet published.
   reset();
   result = run({ KNOWN_PACKAGE: '1' });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(calls().filter((c) => c.startsWith('publish')).length, 2);
+  assert.equal(calls().filter((c) => c.startsWith('publish')).length, 3);
 
   // 6. A registry error other than "not found" never leads to a publication.
   reset();

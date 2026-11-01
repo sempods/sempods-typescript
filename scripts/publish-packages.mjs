@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Publishes the packed SDK tarballs in dependency order (client-sdk first).
+// Publishes the packed tarballs in dependency order: client-sdk, app-sdk,
+// then app-ui (whose peer is app-sdk).
 // Resumable: a version that is already on the registry is skipped only when
 // its published contents equal the local artifact byte for byte; any other
 // difference or npm error stops the release.
@@ -12,7 +13,7 @@ import { join, relative } from 'node:path';
 
 const directory = process.argv[2];
 if (!directory) fail('Usage: publish-packages.mjs <tarball-directory>');
-const order = ['client-sdk', 'app-sdk'];
+const order = ['client-sdk', 'app-sdk', 'app-ui'];
 const work = mkdtempSync(join(tmpdir(), 'sempods-publish-'));
 try {
   for (const name of order) {
