@@ -66,6 +66,57 @@ async function attempt(id, run, extra = {}) {
   }
 }
 
+/**
+ * Waits until no finite animation or transition runs (at most 5s), then for
+ * React to commit. Headless WebKit on Linux runs them far slower than their
+ * durations, so a fixed pause can catch a closing menu or a focus outline
+ * halfway; the end state is what the checks assert.
+ */
+async function settle(page) {
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .getAnimations()
+          .every(
+            (a) =>
+              a.playState !== 'running' ||
+              a.effect?.getTiming().iterations === Infinity,
+          ),
+      undefined,
+      { timeout: 5000, polling: 50 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(50);
+}
+
+/** Whether the element goes or comes within the time (default 10s). */
+const hidden = (locator, timeout = 10000) =>
+  locator
+    .first()
+    .waitFor({ state: 'hidden', timeout })
+    .then(
+      () => true,
+      () => false,
+    );
+const shown = (locator, timeout = 10000) =>
+  locator
+    .first()
+    .waitFor({ state: 'visible', timeout })
+    .then(
+      () => true,
+      () => false,
+    );
+/** Polls the focus description until it matches (at most 5s). */
+async function focusUntil(page, pattern, describe = focusInfo) {
+  let focus = await describe(page);
+  for (let end = Date.now() + 5000; !pattern.test(focus) && Date.now() < end;) {
+    await page.waitForTimeout(50);
+    focus = await describe(page);
+  }
+  return focus;
+}
+
 /** The focused element and the layer it sits in. */
 const focusInfo = (page) =>
   page.evaluate(() => {
@@ -89,7 +140,7 @@ const gateChecks = {
     await c.open();
     await c.dirty();
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    await shown(c.confirm, 3000);
     const s = await c.state();
     return { pass: s.dialogOpen && s.confirmOpen && s.draftKept, ...s };
   },
@@ -100,7 +151,8 @@ const gateChecks = {
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await c.confirm.waitFor({ timeout: 3000 });
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    await hidden(c.confirm);
+    await focusUntil(page, /@dialog$/);
     const s = await c.state();
     return {
       pass:
@@ -117,11 +169,11 @@ const gateChecks = {
     await c.dirty();
     await page.getByRole('button', { name: 'Close', exact: true }).focus();
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    await shown(c.confirm, 3000);
     const asked = await c.state();
     if (asked.confirmOpen) {
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(300);
+      await hidden(c.confirm);
     }
     const s = await c.state();
     return {
@@ -155,7 +207,7 @@ const gateChecks = {
       return Math.abs(r.left + r.width / 2 - innerWidth / 2) < 4;
     });
     await c.confirm.getByRole('button').first().click();
-    await page.waitForTimeout(300);
+    await hidden(c.confirm);
     const s = await c.state();
     return {
       pass:
@@ -177,10 +229,12 @@ const gateChecks = {
     await c.dirty();
     await page.getByRole('button', { name: 'Task menu' }).click();
     await page.getByRole('menu').waitFor();
+    // Opened completely, as a person sees it, before Escape.
+    await settle(page);
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    const menuOpen = !(await hidden(page.getByRole('menu')));
+    await focusUntil(page, /Task menu/);
     const s = await c.state();
-    const menuOpen = await page.getByRole('menu').isVisible();
     return {
       pass:
         !menuOpen && s.dialogOpen && s.draftKept && /Task menu/.test(s.focus),
@@ -194,10 +248,11 @@ const gateChecks = {
     await c.dirty();
     await page.getByRole('button', { name: /^Start considering:/ }).click();
     await page.getByRole('grid').waitFor();
+    await settle(page);
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    const gridOpen = !(await hidden(page.getByRole('grid')));
+    await focusUntil(page, /Start considering/);
     const s = await c.state();
-    const gridOpen = await page.getByRole('grid').isVisible();
     return {
       pass:
         !gridOpen &&
@@ -220,7 +275,7 @@ const gateChecks = {
       .catch(() => false);
     if (asked) {
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(300);
+      await hidden(c.confirm);
     }
     const s = await c.state();
     return { pass: asked && s.dialogOpen && !s.confirmOpen, asked, ...s };
@@ -257,7 +312,8 @@ const gateChecks = {
     await page.waitForTimeout(250);
     await c.title.focus();
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(500);
+    await hidden(c.dialog);
+    await focusUntil(page, /@page$/);
     const s = await c.state();
     return {
       pass: !s.dialogOpen && /^a"/.test(s.focus) && s.focus.endsWith('@page'),
@@ -271,9 +327,11 @@ const gateChecks = {
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await c.confirm.waitFor({ timeout: 3000 });
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
+    await hidden(c.confirm);
     await c.dialog.getByRole('button', { name: 'Save', exact: true }).click();
-    await c.dialog.waitFor({ state: 'detached', timeout: 5000 });
+    await c.dialog.waitFor({ state: 'detached', timeout: 10000 });
+    // The list reloads after the close.
+    await shown(page.locator('.zen-title', { hasText: EDIT }));
     const saved = await page.locator('.zen-title').first().textContent();
     const s = await c.state();
     return {
@@ -287,7 +345,9 @@ const gateChecks = {
     await page.locator('.zen-title').click();
     await c.title.waitFor();
     await page.getByRole('button', { name: 'Close', exact: true }).click();
-    await page.waitForTimeout(1500);
+    await c.dialog
+      .waitFor({ state: 'detached', timeout: 10000 })
+      .catch(() => {});
     const s = await c.state();
     return { pass: !s.dialogOpen && (await c.dialog.count()) === 0, ...s };
   },
@@ -313,11 +373,9 @@ const gateChecks = {
   'back-forward': async (c, page) => {
     await c.open();
     await page.goBack();
-    await page.waitForTimeout(500);
-    const back = await c.dialog.isVisible();
+    const back = !(await hidden(c.dialog));
     await page.goForward();
-    await page.waitForTimeout(500);
-    const forward = await c.title.isVisible();
+    const forward = await shown(c.title);
     return {
       pass: !back && forward,
       openAfterBack: back,
@@ -336,7 +394,8 @@ const gateChecks = {
       () => false,
     );
     if (asked) await c.confirm.getByRole('button').first().click();
-    await page.waitForTimeout(600);
+    await hidden(c.confirm);
+    await page.waitForTimeout(300);
     const s = await c.state();
     const kept = new URL(page.url()).search === address;
     return {
@@ -356,7 +415,7 @@ const gateChecks = {
       () => false,
     );
     if (asked) await c.confirm.getByRole('button').last().click();
-    await page.waitForTimeout(600);
+    await hidden(c.dialog);
     const s = await c.state();
     const left = !new URL(page.url()).searchParams.has('task');
     return {
@@ -381,7 +440,7 @@ async function gate({ browser, origin, engine }) {
     async open() {
       await page.locator('.zen-title').click();
       await c.title.waitFor();
-      await page.waitForTimeout(250);
+      await settle(page);
     },
     async dirty() {
       await c.title.click();
@@ -389,12 +448,15 @@ async function gate({ browser, origin, engine }) {
       await page.keyboard.type(EDIT);
     },
     async state() {
+      await settle(page);
       const dialogOpen = await c.dialog.isVisible();
       return {
         dialogOpen,
         confirmOpen: await c.confirm.isVisible(),
         draftKept: dialogOpen
-          ? (await c.title.inputValue()).endsWith(EDIT)
+          ? (
+              await c.title.inputValue({ timeout: 2000 }).catch(() => '')
+            ).endsWith(EDIT)
           : false,
         focus: await focusInfo(page),
       };
@@ -427,7 +489,7 @@ const roundtripChecks = (page, origin) => {
   const closed = () =>
     page
       .getByRole('dialog', { name: 'Details' })
-      .waitFor({ state: 'detached', timeout: 5000 })
+      .waitFor({ state: 'detached', timeout: 10000 })
       .then(
         () => true,
         () => false,
@@ -446,7 +508,7 @@ const roundtripChecks = (page, origin) => {
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('Enter');
     await page.getByRole('button', { name: 'Apply', exact: true }).click();
-    await page.waitForTimeout(200);
+    await hidden(page.getByRole('grid'));
   }
   return {
     // Select, Apply, Save; a fresh page reads the stored day back.
@@ -482,7 +544,7 @@ const roundtripChecks = (page, origin) => {
       await page.keyboard.press('ArrowRight');
       await page.keyboard.press('Enter');
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(300);
+      await hidden(page.getByRole('grid'));
       const shown = await trigger.getAttribute('aria-label');
       const saveEnabled = await page
         .getByRole('button', { name: 'Save', exact: true })
@@ -653,10 +715,10 @@ async function calendarTargets(page, origin, height, tab) {
   const applyVisible =
     !!applyBox && applyBox.y >= 0 && applyBox.y + applyBox.height <= height;
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(300);
+  await hidden(page.getByRole('grid'));
   const label = await trigger.getAttribute('aria-label');
-  const focusBack = await trigger.evaluate(
-    (el) => el === document.activeElement,
+  const focusBack = /Start considering/.test(
+    await focusUntil(page, /Start considering/, focused),
   );
   await page.setViewportSize({ width: 1280, height: 800 });
   return {
@@ -699,22 +761,23 @@ async function interaction({ browser, origin, engine }) {
         .getByRole('menuitemradio', { name: 'Zen' })
         .getAttribute('aria-checked');
       await page.keyboard.press('ArrowLeft');
-      await page.waitForTimeout(200);
-      const submenuClosedLeft = !(await page
-        .getByRole('menuitemradio', { name: 'List' })
-        .isVisible());
+      const submenuClosedLeft = await hidden(
+        page.getByRole('menuitemradio', { name: 'List' }),
+      );
       await page.keyboard.press('ArrowRight');
-      await page.waitForTimeout(200);
+      await shown(page.getByRole('menuitemradio', { name: 'List' }));
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(200);
+      await hidden(page.getByRole('menuitemradio', { name: 'List' }));
       const menuOpenAfterSubEscape = await page
         .getByRole('menuitem', { name: 'View' })
         .isVisible();
       if (menuOpenAfterSubEscape) {
         await page.keyboard.press('Escape');
-        await page.waitForTimeout(200);
+        await hidden(page.getByRole('menu'));
       }
-      const backOnTrigger = /Menu/.test(await focused(page));
+      const backOnTrigger = /Menu/.test(
+        await focusUntil(page, /Menu/, focused),
+      );
       await page.keyboard.press('Enter');
       await page.getByRole('menuitem', { name: 'View' }).waitFor();
       await focusItem(page, 'View');
@@ -722,9 +785,8 @@ async function interaction({ browser, origin, engine }) {
       await page.getByRole('menuitemradio', { name: 'List' }).waitFor();
       await focusItem(page, 'List');
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(300);
-      const listShown = await page.locator('.gate-list').isVisible();
-      const menuClosed = !(await page.getByRole('menu').count());
+      const menuClosed = await hidden(page.getByRole('menu'));
+      const listShown = await shown(page.locator('.gate-list'));
       await menu.click();
       await page.getByRole('menuitem', { name: 'View' }).hover();
       await page.keyboard.press('ArrowRight');
@@ -764,16 +826,18 @@ async function interaction({ browser, origin, engine }) {
       for (let i = 0; i < 6 && !/Apply/.test(await focused(page)); i++)
         await page.keyboard.press(tab);
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(300);
+      await hidden(page.getByRole('grid'));
       const label = await trigger.getAttribute('aria-label');
+      const after = await focusUntil(page, /Start considering/, focused);
       // The seed day is 28 Oct 2026: one day and one month later.
       return {
         pass:
           /28 October 2026/.test(start) &&
           /29 Nov 2026/.test(label ?? '') &&
-          /Start considering/.test(await focused(page)),
+          /Start considering/.test(after),
         start,
         label,
+        after,
       };
     },
     'calendar-targets-375x812': () => calendarTargets(page, origin, 812, tab),
@@ -829,14 +893,14 @@ async function interaction({ browser, origin, engine }) {
       await page
         .getByRole('button', { name: 'Remove date', exact: true })
         .click();
-      await page.waitForTimeout(200);
+      await hidden(page.getByRole('grid'));
       const label = await trigger.getAttribute('aria-label');
       const save = page.getByRole('button', { name: 'Save', exact: true });
       const saveEnabled = await save.isEnabled();
       await save.click();
       const closed = await page
         .getByRole('dialog', { name: 'Details' })
-        .waitFor({ state: 'detached', timeout: 5000 })
+        .waitFor({ state: 'detached', timeout: 10000 })
         .then(
           () => true,
           () => false,
@@ -1187,7 +1251,7 @@ async function contrast({ browser, origin, engine }) {
               });
               await page.goto(origin + '/' + query);
               await reach(page);
-              await page.waitForTimeout(300);
+              await settle(page);
               const measured = await page.evaluate(() => window.uiContrast());
               const tagged = (list, suffix) =>
                 list.map((m) => ({ ...m, what: `${m.what} ${suffix}` }));
@@ -1198,7 +1262,7 @@ async function contrast({ browser, origin, engine }) {
                     exact: true,
                   });
                   await target.hover();
-                  await page.waitForTimeout(200);
+                  await settle(page);
                   measured.push(
                     ...tagged(
                       await target.evaluate((el) => window.uiContrast(el)),
@@ -1207,7 +1271,7 @@ async function contrast({ browser, origin, engine }) {
                   );
                   // Pressed, released away from the button: nothing runs.
                   await page.mouse.down();
-                  await page.waitForTimeout(100);
+                  await settle(page);
                   measured.push(
                     ...tagged(
                       await target.evaluate((el) => window.uiContrast(el)),
@@ -1220,7 +1284,7 @@ async function contrast({ browser, origin, engine }) {
               const focus = [];
               for (let i = 0; i < 8; i++) {
                 await page.keyboard.press(tab);
-                await page.waitForTimeout(200);
+                await settle(page);
                 const f = await page.evaluate(() => window.uiFocusIndicator());
                 if (f && !focus.some((x) => x.what === f.what)) {
                   focus.push(f);

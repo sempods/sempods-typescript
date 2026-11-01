@@ -247,8 +247,8 @@ export const Complete = ({ onPress }: { readonly onPress: () => void }) => (
   controlled: Escape, Close and a press beside it call `onRequestClose`, and
   it closes only when `open` turns false, so it follows the route. A press in
   an SDK confirmation (a native `<dialog>`) does not count as a press beside
-  it. It has no entry animation, because WebKit kept a modal mounted that
-  closed during one. Close takes the SDK's "Close" text unless `closeLabel` is
+  it. It has no entry or exit animation, because WebKit kept a modal mounted
+  that closed during one: it goes as soon as it closes. Close takes the SDK's "Close" text unless `closeLabel` is
   given.
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and submenus of checked choices

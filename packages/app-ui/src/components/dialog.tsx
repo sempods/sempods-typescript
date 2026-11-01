@@ -36,8 +36,10 @@ function DialogClose({
   );
 }
 
-// No entry animation (spike #120): in WebKit, React Aria keeps a modal
-// closed during its entry animation mounted for good.
+// No entry or exit animation: React Aria unmounts a modal when its animation
+// ends, and WebKit kept a modal closed during its entry animation mounted for
+// good (spike #120); headless WebKit on Linux stalls the exit animation for
+// seconds. Without one, the modal goes as soon as it closes.
 function DialogOverlay({
   className,
   children,
@@ -50,7 +52,7 @@ function DialogOverlay({
     <ModalOverlayPrimitive
       data-slot="dialog-overlay"
       className={cn(
-        'fixed inset-0 isolate z-50 bg-black/10 duration-100 data-exiting:animate-out data-exiting:fade-out-0 supports-backdrop-filter:backdrop-blur-xs',
+        'fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
         className,
       )}
       {...props}
@@ -77,7 +79,7 @@ function Dialog({
       <ModalPrimitive
         data-slot="dialog-content"
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-exiting:animate-out data-exiting:fade-out-0 data-exiting:zoom-out-95 sm:max-w-sm',
+          'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm',
           className,
         )}
       >
