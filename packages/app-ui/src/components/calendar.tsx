@@ -154,7 +154,9 @@ function CalendarInner({
       {Array.from({ length: numberOfMonths }, (_, i) => (
         <div key={i} className="flex w-full flex-col gap-4">
           <div className="flex h-(--cell-size) w-full items-center justify-center gap-1 px-(--cell-size)">
-            {captionLayout === 'dropdown' ? (
+            {/* React Aria's month and year pickers follow the first visible
+                month only, so later months show their own heading. */}
+            {captionLayout === 'dropdown' && i === 0 ? (
               <>
                 <MonthDropdown format={headerFormat} />
                 <YearDropdown format={headerFormat} />

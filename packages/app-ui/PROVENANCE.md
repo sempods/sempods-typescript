@@ -21,6 +21,11 @@ Changes against the registry output:
   unmounts the modal only when that animation ends.
 - `calendar.tsx`: without the registry's `showWeekNumber` option, which only
   shifted the cells' rounding: React Aria renders no week-number column.
+- `calendar.tsx`: with `captionLayout="dropdown"` and several months, only
+  the first month gets the month and year pickers, which follow the first
+  visible month; later months show their own heading.
+- `select.tsx`: `SelectValue` keeps children it is given; the selected-text
+  fallback applies only without children.
 - All files: relative imports with `.js` extensions, no `"use client"`
   directive, Prettier formatting.
 

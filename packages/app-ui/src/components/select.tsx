@@ -62,10 +62,10 @@ function SelectValue<T extends object>({
       )}
       {...props}
     >
-      {typeof children === 'function'
-        ? children
-        : ({ selectedItems, selectedText, defaultChildren }) =>
-            selectedItems.length > 1 ? selectedText : defaultChildren}
+      {children === undefined
+        ? ({ selectedItems, selectedText, defaultChildren }) =>
+            selectedItems.length > 1 ? selectedText : defaultChildren
+        : children}
     </SelectValuePrimitive>
   );
 }
