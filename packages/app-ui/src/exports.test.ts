@@ -5,7 +5,7 @@
  */
 import { expect, it } from 'vitest';
 
-it('exports the adapters and the shadcn/ui components', async () => {
+it('exports the adapters, the router and the shadcn/ui components', async () => {
   expect(Object.keys(await import('./index.js')).sort()).toEqual([
     'ActionButton',
     'Button',
@@ -59,5 +59,7 @@ it('exports the adapters and the shadcn/ui components', async () => {
     'SelectValue',
     'Textarea',
     'buttonVariants',
+    'replaceUrl',
+    'useNav',
   ]);
 });

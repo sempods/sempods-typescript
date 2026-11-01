@@ -50,3 +50,17 @@ Pod and reference screen. It runs against the packed packages and a Vite
 production build instead of the spike's dev servers; the fixture Pod applies
 merge patches as RFC 7396 describes, and WebKit on macOS moves the focus with
 Option+Tab, as Safari does by default for buttons.
+
+## Router
+
+`src/router/nav.ts` is the template's own router
+(`packages/apps/skeleton/app/src/routes.ts` of sempods/sempods-apps-template,
+MIT No Attribution, same author) as extended and
+corrected in the template's routing spike (#114, branch
+`claude/120-ui-spike`, `spikes/120-ui/apps/authoring-own/src/sempods/router.tsx`):
+resource and action addresses through an app-owned address model, an
+opener-aware `close`, and one decision for history moves while the SDK asks.
+Changes against the spike: the history session starts on first use instead of
+at import, one popstate listener for all mounted frames, no decision for a
+move to the shown address, and `link` leaves clicks with a `target` to the
+browser.
