@@ -4,16 +4,19 @@ Reusable modules for apps and scripts that work with sempods data. Connect to a
 Pod, read Linked Data and edit it without losing someone else's changes. People
 keep their data in their Pod; your code supplies the interaction.
 
-This repository develops and publishes two packages:
+This repository develops and publishes three packages:
 
 | Package                                              | Use it for                                                                   | Runs in                      |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------- |
 | [@sempods/client-sdk](packages/client-sdk/README.md) | Protocol requests, portable OAuth, field definitions and conditional editing | Browser or Node              |
 | [@sempods/app-sdk](packages/app-sdk/README.md)       | Login, durable browser sessions, target selection and authoring helpers      | Browser, with optional React |
+| [@sempods/app-ui](packages/app-ui/README.md)         | UI components on React Aria and a theme contract, for Tailwind CSS 4 apps    | Browser, React 19            |
 
 `app-sdk` builds on `client-sdk`. Its root entry works without React;
-`@sempods/app-sdk/react` adds components and hooks. Both packages provide ESM and
-TypeScript declarations. The examples demonstrate their public APIs and serve as
+`@sempods/app-sdk/react` adds components and hooks. `app-ui` adds shadcn/ui
+components and adapters for SDK editors on top of app-sdk's React entry; app-sdk
+itself stays free of a UI framework. The packages provide ESM and TypeScript
+declarations. The examples demonstrate their public APIs and serve as
 executable integration checks.
 
 Starting a new app with a coding assistant? Use
@@ -57,7 +60,7 @@ Open `http://127.0.0.1:5173/` and connect a Pod with a test context. The
 app-owned header and task screen.
 The [Node example](examples/node-script/README.md) uses the same field definitions.
 
-Both packages are published on npm under Apache-2.0 (documentation: CC BY 4.0;
+The packages are published on npm under Apache-2.0 (documentation: CC BY 4.0;
 see [NOTICE](NOTICE)). Version 0.x may change APIs between minor versions.
 Automated checks cover installed packages and browser fixtures. Live-Pod,
 installed-device and independent app-author validation are separate evidence;
@@ -70,9 +73,10 @@ For 0.6.0, see the [release notes](docs/releases/0.6.0.md) and
 
 | Environment                  | Status in 0.6                                                                                                                                                                      |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node                         | 24.15 or newer (Node 24 LTS), ESM only (`engines` in both packages).                                                                                                               |
+| Node                         | 24.15 or newer (Node 24 LTS), ESM only (`engines` in every package).                                                                                                               |
 | Browser tab                  | Current browsers with IndexedDB and Web Locks. Automated browser checks run in Chromium.                                                                                           |
 | React                        | 19, for `@sempods/app-sdk/react` (optional peer).                                                                                                                                  |
+| UI kit                       | Not in 0.6; from the next release, `@sempods/app-ui` with React 19 and Tailwind CSS 4.1 or newer. Its browser gate runs in Chromium and WebKit, and in Firefox on Linux CI.        |
 | Installed PWA (experimental) | Desktop Chromium and Android are expected to work; iOS/iPadOS home-screen apps are unverified. Login returns to the app in the same window and must land in the app's own storage. |
 
 Support for installed apps is extended after device evidence. Until then, use a

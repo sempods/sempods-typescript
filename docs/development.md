@@ -9,7 +9,7 @@ tested.
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium webkit
 pnpm build
 pnpm format:check
 pnpm lint
@@ -20,16 +20,17 @@ pnpm test:publish
 pnpm test:consumers
 pnpm test:runtime
 pnpm test:todo
+pnpm test:ui
 pnpm check
 ```
 
-`pnpm check` runs format, lint, docs, typecheck, unit, publish, consumer, runtime
-and TODO checks in that order. `pnpm build:examples` bundles the examples for
+`pnpm check` runs format, lint, docs, typecheck, unit, publish, consumer, runtime,
+TODO and UI checks in that order. `pnpm build:examples` bundles the examples for
 manual runs; it is not part of `pnpm check`, because `typecheck` already compiles
 them.
 
-Linux CI uses `playwright install --with-deps chromium` and the same aggregate
-check. CI reads `.node-version`; libraries emit ESM plus declarations with plain
+Linux CI uses `playwright install --with-deps chromium webkit firefox` and the
+same aggregate check. CI reads `.node-version`; libraries emit ESM plus declarations with plain
 `tsc -b` project references. Exports resolve built files, with no source aliases.
 Tests are typechecked too. `skipLibCheck` is false throughout.
 
@@ -61,7 +62,7 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   tests, not live Kotlin interoperability evidence. Runtime scenarios also cover
   durable storage, callbacks, scope/identity continuity, refresh (including
   renewal before expiry) and target races.
-- `test:consumers`: packs both packages and installs their tarballs together in
+- `test:consumers`: packs client-sdk and app-sdk and installs their tarballs together in
   fresh directories outside the workspace. Checks packed file allowlists and
   rewritten workspace dependency, rejects linked workspace packages, and verifies
   that the plain installation contains neither React nor its types. The installed
@@ -89,6 +90,50 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   installed app-sdk reference, against packed SDKs. Chromium checks startup and, with a registration spy, verifies that
   importing the PWA `App` component registers no worker while the production
   entry registers exactly once. Native worker behavior is covered by `test:todo`.
+
+- `test:ui`: the browser gate of `@sempods/app-ui`
+  (`scripts/test-ui-consumer.mjs`). It packs client-sdk, app-sdk and app-ui,
+  checks the app-ui tarball's files and its packed peer range (the same minor as
+  app-sdk), installs them outside the workspace, compiles the reference screen
+  in `tests/ui-browser` strictly against the packed declarations (React Aria's
+  included, `skipLibCheck` off). Its task dialog is the installed README's
+  `task-dialog.tsx` example as shipped, so every check below runs the
+  documented recipe; the screen also uses the README's stylesheet setup. It is
+  built with Vite and Tailwind CSS 4. The
+  app's CSS has no `@source` line and its Vite config no `optimizeDeps` hint;
+  the build must contain classes that only the package's JavaScript uses. A
+  loopback fixture Pod (`scripts/ui-pod.mjs`) serves the build. Each browser
+  runs against its own Pod, side by side: Chromium and WebKit, plus Firefox on
+  Linux (`--browsers=` overrides; `--keep` leaves the build and a Pod running).
+  The checks (`scripts/ui-checks.mjs`, ported from the template's spike #120):
+  - the interop gate: Escape in a dirty field, in the SDK's leave and delete
+    confirmations, on Close and in the heading menu and date chooser; Close
+    then Cancel (question on top, centred, Tab kept); focus trap with the page
+    behind inert; focus restored to the opener; Save after a cancelled close;
+    closing the dialog, a menu and the date chooser right after opening;
+    1280 → 375 → 1280px with a draft; Back and
+    Forward, and Back with a dirty draft, staying and discarding;
+  - the calendar-date roundtrip with the SDK's `date` field in
+    Europe/Berlin, UTC+14 and UTC−11: stored `xsd:date` after Apply and Save,
+    nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`
+    kept until a day is applied;
+  - keyboard use of the header menu and the calendar, 44px calendar targets at
+    375 × 812 and 375 × 560 with Apply and Remove date visible as the chooser
+    opens, German texts and locale, removing an optional
+    date;
+  - the cascade: package classes win over the SDK's element rules inside an SDK
+    editor, and the token bridge reaches the SDK's own controls;
+  - rendered contrast (`scripts/ui-contrast.js`): 19 controls that must pass or
+    fail as stated, then five states × two palettes with every action and
+    secondary variant × light and dark × 375 and 1280px, including hovered,
+    pressed and focused controls.
+
+  Sizes and contrast are measured with reduced motion, so a zoom or fade that
+  headless WebKit on Linux stretches over seconds cannot catch an overlay
+  halfway; the behaviour checks keep the animations, and one check proves
+  that reduced motion turns them off. WebKit on macOS moves the focus with
+  Option+Tab, as Safari does by default for buttons. These are fixture checks in browser engines, not evidence from
+  a real Pod, iOS, an installed PWA or people.
 
 - `test:runtime`: a separate packed DOM-only consumer in Chromium, using native
   IndexedDB/Web Locks and real loopback Code + PKCE redirects/exchanges. Checks
@@ -154,7 +199,7 @@ appears. These are Chromium fixture checks, not live-Pod or installed-PWA
 evidence. See [browser runtime](browser-runtime.md) for the implemented API and
 its limits.
 
-No implementation or test command publishes packages; both SDK packages are
+No implementation or test command publishes packages; the three packages are
 publishable, the workspace root and examples stay private, and a version tag runs
 the [publish workflow](../.github/workflows/publish.yml). Preserve per-package
 PROVENANCE.md.

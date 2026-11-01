@@ -1044,6 +1044,10 @@ Until you set `--sempods-field-line`, fields share the separator colour
 `--sempods-line`; set it when a quiet separator would leave field borders
 below 3:1 against the background.
 
+On Tailwind CSS 4, [@sempods/app-ui](../packages/app-ui/README.md) sets all of
+these tokens from one palette and adds shadcn/ui components that work inside
+SDK editors and beside SDK confirmations.
+
 React 19 [hoists the scoped sheets](https://react.dev/reference/react-dom/components/style);
 they need a CSP that allows inline styles, otherwise build presentation from
 the public hooks.

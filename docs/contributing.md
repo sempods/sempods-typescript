@@ -7,10 +7,12 @@ work.
 
 ## Keep the boundaries useful
 
-The [architecture decisions](decisions.md) explain why there are two packages.
+The [architecture decisions](decisions.md) explain the package boundaries.
 `client-sdk` owns portable protocol and conditional editing; it must not depend
 on app-sdk, React or browser sessions. `app-sdk` owns browser coordination and
-headless authoring, with React isolated in `./react`. Keep one HTTP implementation
+headless authoring, with React isolated in `./react`. `app-ui` owns UI
+components and the theme contract on top of app-sdk's React entry; nothing
+else depends on it. Keep one HTTP implementation
 and one browser session coordinator. Ordinary screens should consume views and
 editing helpers, not credentials or request-retry mechanics.
 
@@ -27,11 +29,12 @@ Use the Node version in `.node-version` and the package manager in `package.json
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium webkit
 pnpm check
 ```
 
-On Linux, Playwright may need `--with-deps chromium`. See
+On Linux, Playwright may need `--with-deps`, and the UI gate also runs
+Firefox there (`pnpm exec playwright install --with-deps chromium webkit firefox`). See
 [development evidence](development.md) for each command's scope. Add meaningful
 regressions for changed behavior. Preserve package-boundary checks and packed
 consumer tests: a successful workspace build does not prove that an installed

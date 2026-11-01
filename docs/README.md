@@ -18,6 +18,8 @@ references for the task at hand, not prerequisites to read in order.
 
 - [client-sdk](../packages/client-sdk/README.md): portable Pod requests, OAuth and editing.
 - [app-sdk](../packages/app-sdk/README.md): browser sessions, headless authoring and optional React.
+- [app-ui](../packages/app-ui/README.md): shadcn/ui components on React Aria, SDK-aware
+  adapters and the theme contract for Tailwind CSS 4.
 - [React/headless authoring](react-authoring.md), [widgets](widgets.md) and
   [browser runtime](browser-runtime.md).
 - [Pod overviews with Contexts on-demand](react-authoring.md#pod-overviews-with-contexts-on-demand)
@@ -30,7 +32,8 @@ references for the task at hand, not prerequisites to read in order.
 - [Local testing](local-testing.md), [deployment](deployment.md),
   [PWA](pwa.md) and [migration/recovery](migration.md).
 
-- [0.6.0 release notes and template adoption](releases/0.6.0.md).
+- [0.6.0 release notes and template adoption](releases/0.6.0.md); notes for the
+  [next release](releases/0.7.0.md) in progress.
 
 ## Understand and maintain the SDK
 
@@ -40,6 +43,8 @@ references for the task at hand, not prerequisites to read in order.
   [provenance](../packages/client-sdk/PROVENANCE.md).
 - [app-sdk](../packages/app-sdk/README.md) and its
   [provenance](../packages/app-sdk/PROVENANCE.md).
+- [app-ui](../packages/app-ui/README.md) and its
+  [provenance](../packages/app-ui/PROVENANCE.md).
 - [Agent instruction map](agents/ai-instructions.md),
   [documentation strategy](agents/documentation-strategy.md),
   [issue work](agents/issue-work.md), [doc review](agents/doc-review.md),

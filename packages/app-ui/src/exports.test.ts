@@ -1,0 +1,63 @@
+/**
+ * The public runtime surface, as an explicit budget: any addition or removal
+ * is an API decision and must update this list (and the package README).
+ * Types are reviewed with the declarations.
+ */
+import { expect, it } from 'vitest';
+
+it('exports the adapters and the shadcn/ui components', async () => {
+  expect(Object.keys(await import('./index.js')).sort()).toEqual([
+    'ActionButton',
+    'Button',
+    'Calendar',
+    'DateChooser',
+    'Dialog',
+    'DialogClose',
+    'DialogDescription',
+    'DialogFooter',
+    'DialogHeader',
+    'DialogOverlay',
+    'DialogTitle',
+    'DialogTrigger',
+    'DropdownMenu',
+    'DropdownMenuGroup',
+    'DropdownMenuItem',
+    'DropdownMenuLabel',
+    'DropdownMenuSeparator',
+    'DropdownMenuShortcut',
+    'DropdownMenuSub',
+    'DropdownMenuSubContent',
+    'DropdownMenuSubTrigger',
+    'DropdownMenuTrigger',
+    'HeaderMenu',
+    'Input',
+    'InputGroup',
+    'InputGroupAddon',
+    'InputGroupButton',
+    'InputGroupInput',
+    'InputGroupText',
+    'InputGroupTextarea',
+    'LinkButton',
+    'Popover',
+    'PopoverDescription',
+    'PopoverHeader',
+    'PopoverTitle',
+    'PopoverTrigger',
+    'RangeCalendar',
+    'ScreenDialog',
+    'Select',
+    'SelectContent',
+    'SelectEmpty',
+    'SelectGroup',
+    'SelectInput',
+    'SelectItem',
+    'SelectLabel',
+    'SelectList',
+    'SelectPopover',
+    'SelectSeparator',
+    'SelectTrigger',
+    'SelectValue',
+    'Textarea',
+    'buttonVariants',
+  ]);
+});

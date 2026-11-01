@@ -9,7 +9,7 @@ jobs:
   packages:
     name: Packages and consumers
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -20,5 +20,6 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # The UI gate (pnpm test:ui) also runs in WebKit and, on Linux, Firefox.
+      - run: pnpm exec playwright install --with-deps chromium webkit firefox
       - run: pnpm check

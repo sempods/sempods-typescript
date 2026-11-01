@@ -6,6 +6,9 @@
     },
     {
       "path": "packages/app-sdk"
+    },
+    {
+      "path": "packages/app-ui"
     }
   ]
 }

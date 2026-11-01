@@ -1,0 +1,18 @@
+/* The app's own theme. Without data-theme the package's default palette
+   applies; "fresh" is a teal accent on cool neutrals. A theme changes only
+   palette roles; the package maps them to components and the SDK. */
+:root[data-theme='fresh'] {
+  --background: light-dark(#ffffff, #0e171d);
+  --foreground: light-dark(#11293a, #e1edf3);
+  --card: light-dark(#ffffff, #13202a);
+  --popover: light-dark(#ffffff, #152530);
+  --primary: light-dark(#0a6680, #5ec6e4);
+  --primary-foreground: light-dark(#ffffff, #06212b);
+  --secondary: light-dark(#e6f1f5, #1a2c37);
+  --muted: light-dark(#f1f6f8, #16242d);
+  --muted-foreground: light-dark(#58697a, #94a8b6);
+  --accent: light-dark(#e6f1f5, #1d313d);
+  --border: light-dark(#dce8ef, #22343f);
+  --input: light-dark(#6f8391, #688494);
+  --ring: light-dark(#0a6680, #5ec6e4);
+}

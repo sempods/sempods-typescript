@@ -6,5 +6,6 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["packages/**/*.test.ts", "packages/**/*.test.tsx"]
+  "include": ["packages/**/*.test.ts", "packages/**/*.test.tsx"],
+  "exclude": ["packages/app-ui/**"]
 }
