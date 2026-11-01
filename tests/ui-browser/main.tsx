@@ -60,9 +60,11 @@ const texts = {
  * an unsaved edit asks first, and staying keeps the view, its address and
  * the history (the shown entry's position is kept in history.state).
  */
-let shown = location.search;
-let position: number =
+/** The position of the shown history entry. */
+const statePosition = (): number =>
   (history.state as { position?: number } | null)?.position ?? 0;
+let shown = location.search;
+let position = statePosition();
 // Set while the router itself undoes a step, whose popstate it ignores.
 let undoing = false;
 const listeners = new Set<() => void>();
@@ -85,8 +87,7 @@ function useRoute() {
         return;
       }
       const to = location.search;
-      const target: number =
-        (history.state as { position?: number } | null)?.position ?? 0;
+      const target = statePosition();
       void navigate(() => {
         position = target;
         show(to);
@@ -229,7 +230,8 @@ function Tasks({
   const [index, setIndex] = useState(0);
   const { view: target } = useAppState();
   const items = (list.data?.items ?? []).filter((item) => !item.data.done);
-  const active = items[index % Math.max(items.length, 1)];
+  const at = index % Math.max(items.length, 1);
+  const active = items[at];
   const open = (iri: string) => route.go({ task: iri });
   const subject = route.params.get('task');
   return (
@@ -255,7 +257,7 @@ function Tasks({
         <section className="zen" aria-label={t.zen}>
           <div className="zen-task">
             <p className="zen-position" aria-live="polite">
-              {(index % items.length) + 1}/{items.length}
+              {at + 1}/{items.length}
             </p>
             <h2>
               <a

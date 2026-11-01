@@ -38,9 +38,9 @@ async function newPage(browser, options = {}) {
 }
 
 /** Signs in to the fixture Pod and chooses its "work" context. */
-async function signIn(page, origin, query = '') {
+async function signIn(page, origin) {
   await fetch(origin + '/__reset');
-  await page.goto(origin + '/' + query);
+  await page.goto(origin + '/');
   await page.getByLabel(/Pod address|Pod-Adresse/).fill(origin + '/alice');
   await page.getByRole('button', { name: /^(Sign in|Anmelden)$/ }).click();
   await page
@@ -90,23 +90,45 @@ async function settle(page) {
   await page.waitForTimeout(50);
 }
 
-/** Whether the element goes or comes within the time (default 10s). */
-const hidden = (locator, timeout = 10000) =>
-  locator
+/**
+ * Waits until the task dialog just opened shows its fields and has been open
+ * for 600ms. React Aria's useDialog focuses a dialog that has lost the focus
+ * again 500ms after it opened, for VoiceOver (react-aria
+ * `dialog/useDialog.mjs`); a menu or date chooser closed before then hands its
+ * focus to the dialog instead of to its button. People take longer than that,
+ * a script does not.
+ */
+async function dialogReady(page) {
+  const opened = Date.now();
+  await page
+    .getByRole('dialog', { name: 'Details' })
+    .getByRole('textbox')
     .first()
-    .waitFor({ state: 'hidden', timeout })
-    .then(
-      () => true,
-      () => false,
-    );
-const shown = (locator, timeout = 10000) =>
-  locator
-    .first()
-    .waitFor({ state: 'visible', timeout })
-    .then(
-      () => true,
-      () => false,
-    );
+    .waitFor();
+  await settle(page);
+  await page.waitForTimeout(Math.max(0, 600 - (Date.now() - opened)));
+}
+
+/** Opens the first task of the Zen view by pointer. */
+async function openTask(page) {
+  await page.locator('.zen-title').click();
+  await dialogReady(page);
+}
+
+/** Whether the element reaches the state within the time (default 10s). */
+const reaches =
+  (state) =>
+  (locator, timeout = 10000) =>
+    locator
+      .first()
+      .waitFor({ state, timeout })
+      .then(
+        () => true,
+        () => false,
+      );
+const hidden = reaches('hidden');
+const shown = reaches('visible');
+const gone = reaches('detached');
 /** Polls the focus description until it matches (at most 5s). */
 async function focusUntil(page, pattern, describe = focusInfo) {
   let focus = await describe(page);
@@ -269,10 +291,7 @@ const gateChecks = {
     await c.open();
     await c.dirty();
     await c.dialog.getByRole('button', { name: 'Delete', exact: true }).click();
-    const asked = await c.confirm
-      .waitFor({ timeout: 3000 })
-      .then(() => true)
-      .catch(() => false);
+    const asked = await shown(c.confirm, 3000);
     if (asked) {
       await page.keyboard.press('Escape');
       await hidden(c.confirm);
@@ -351,6 +370,26 @@ const gateChecks = {
     const s = await c.state();
     return { pass: !s.dialogOpen && (await c.dialog.count()) === 0, ...s };
   },
+  // A menu and a date chooser closed during their entry animation: they go
+  // (React Aria unmounts an overlay only when its exit animation ends).
+  'menu-close-right-after-open': async (c, page) => {
+    await c.open();
+    await page.getByRole('button', { name: 'Task menu' }).click();
+    await page.getByRole('menu').waitFor();
+    await page.keyboard.press('Escape');
+    const gone = await hidden(page.getByRole('menu'));
+    const s = await c.state();
+    return { pass: gone && s.dialogOpen, menuGone: gone, ...s };
+  },
+  'chooser-close-right-after-open': async (c, page) => {
+    await c.open();
+    await page.getByRole('button', { name: /^Start considering:/ }).click();
+    await page.getByRole('grid').waitFor();
+    await page.keyboard.press('Escape');
+    const gone = await hidden(page.getByRole('grid'));
+    const s = await c.state();
+    return { pass: gone && s.dialogOpen, chooserGone: gone, ...s };
+  },
   // Phone and desktop width while editing: no remount, the draft stays, full
   // screen on the phone.
   'resize-keeps-draft': async (c, page) => {
@@ -389,10 +428,7 @@ const gateChecks = {
     await c.dirty();
     const address = new URL(page.url()).search;
     await page.goBack();
-    const asked = await c.confirm.waitFor({ timeout: 3000 }).then(
-      () => true,
-      () => false,
-    );
+    const asked = await shown(c.confirm, 3000);
     if (asked) await c.confirm.getByRole('button').first().click();
     await hidden(c.confirm);
     await page.waitForTimeout(300);
@@ -410,10 +446,7 @@ const gateChecks = {
     await c.open();
     await c.dirty();
     await page.goBack();
-    const asked = await c.confirm.waitFor({ timeout: 3000 }).then(
-      () => true,
-      () => false,
-    );
+    const asked = await shown(c.confirm, 3000);
     if (asked) await c.confirm.getByRole('button').last().click();
     await hidden(c.dialog);
     const s = await c.state();
@@ -427,7 +460,10 @@ const gateChecks = {
   },
 };
 
-/** Stage 1 of the spike: the dialog around an SDK editor, 15 checks. */
+/**
+ * Stage 1 of the spike: the dialog around an SDK editor, its 15 checks plus
+ * menus and date choosers closed right after opening.
+ */
 async function gate({ browser, origin, engine }) {
   const tab = tabKey(engine);
   const { context, page, errors } = await newPage(browser);
@@ -437,11 +473,7 @@ async function gate({ browser, origin, engine }) {
     dialog: page.getByRole('dialog', { name: 'Details' }),
     confirm: page.getByRole('alertdialog'),
     title: page.getByLabel('Title', { exact: true }),
-    async open() {
-      await page.locator('.zen-title').click();
-      await c.title.waitFor();
-      await settle(page);
-    },
+    open: () => openTask(page),
     async dirty() {
       await c.title.click();
       await c.title.press('End');
@@ -486,19 +518,11 @@ async function stored(origin, title) {
 
 const roundtripChecks = (page, origin) => {
   const trigger = page.getByRole('button', { name: /^Start considering:/ });
-  const closed = () =>
-    page
-      .getByRole('dialog', { name: 'Details' })
-      .waitFor({ state: 'detached', timeout: 10000 })
-      .then(
-        () => true,
-        () => false,
-      );
-  async function openTask(title) {
+  const closed = () => gone(page.getByRole('dialog', { name: 'Details' }));
+  async function openNamed(title) {
     await page.goto(origin + '/?view=list');
     await page.getByRole('link', { name: title }).click();
-    await page.getByLabel('Title', { exact: true }).waitFor();
-    await settle(page);
+    await dialogReady(page);
   }
   /** Opens the chooser, moves one day on and applies it, by keyboard. */
   async function chooseNextDay() {
@@ -514,13 +538,13 @@ const roundtripChecks = (page, origin) => {
     // Select, Apply, Save; a fresh page reads the stored day back.
     async 'save-and-reread'() {
       const before = await stored(origin, PLUMBER);
-      await openTask(PLUMBER);
+      await openNamed(PLUMBER);
       await chooseNextDay();
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       const saved = await closed();
       const after = await stored(origin, PLUMBER);
       await page.reload();
-      await openTask(PLUMBER);
+      await openNamed(PLUMBER);
       const shown = await trigger.getAttribute('aria-label');
       return {
         pass:
@@ -537,7 +561,7 @@ const roundtripChecks = (page, origin) => {
     // A chooser closed without Apply changes neither draft nor data.
     async 'cancel-chooser'() {
       const before = await stored(origin, PLUMBER);
-      await openTask(PLUMBER);
+      await openNamed(PLUMBER);
       await trigger.click();
       await page.getByRole('grid').waitFor();
       await settle(page);
@@ -564,7 +588,7 @@ const roundtripChecks = (page, origin) => {
     // A day applied, then the edit cancelled: nothing is written.
     async 'cancel-edit'() {
       const before = await stored(origin, PLUMBER);
-      await openTask(PLUMBER);
+      await openNamed(PLUMBER);
       await chooseNextDay();
       const changed = /29 Oct 2026$/.test(
         (await trigger.getAttribute('aria-label')) ?? '',
@@ -588,7 +612,7 @@ const roundtripChecks = (page, origin) => {
     // xsd:date. The chooser starts at the day of the stored offset.
     async 'zoned-datetime'() {
       const before = await stored(origin, TRAIN);
-      await openTask(TRAIN);
+      await openNamed(TRAIN);
       await trigger.click();
       await page.getByRole('grid').waitFor();
       await settle(page);
@@ -601,7 +625,7 @@ const roundtripChecks = (page, origin) => {
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       await closed();
       const kept = await stored(origin, TRAIN + EDIT);
-      await openTask(TRAIN + EDIT);
+      await openNamed(TRAIN + EDIT);
       await chooseNextDay();
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       await closed();
@@ -667,7 +691,7 @@ async function focusItem(page, name) {
 async function calendarTargets(page, origin, height, tab) {
   await page.setViewportSize({ width: 375, height });
   await page.goto(origin + '/');
-  await page.locator('.zen-title').click();
+  await openTask(page);
   const trigger = page.getByRole('button', { name: /^Start considering:/ });
   await trigger.scrollIntoViewIfNeeded();
   await trigger.focus();
@@ -834,7 +858,7 @@ async function interaction({ browser, origin, engine }) {
     },
     // Focus starts on the chosen day; arrows, PageDown, Enter and Apply.
     async 'calendar-keyboard'() {
-      await page.locator('.zen-title').click();
+      await openTask(page);
       const trigger = page.getByRole('button', { name: /^Start considering:/ });
       await trigger.focus();
       await page.keyboard.press('Enter');
@@ -867,7 +891,7 @@ async function interaction({ browser, origin, engine }) {
     // adapters' and the SDK's texts.
     async 'calendar-german'() {
       await page.goto(origin + '/?lang=de');
-      await page.locator('.zen-title').click();
+      await openTask(page);
       await page.getByRole('button', { name: /^Vormerken ab:/ }).click();
       await page.getByRole('grid').waitFor();
       const { heading, firstDay } = await page.evaluate(() => {
@@ -907,8 +931,7 @@ async function interaction({ browser, origin, engine }) {
     },
     // Removing the date of the optional field leaves no value in the draft.
     async 'calendar-remove'() {
-      await page.goto(origin + '/');
-      await page.locator('.zen-title').click();
+      await openTask(page);
       const trigger = page.getByRole('button', { name: /^Start considering:/ });
       await trigger.click();
       await page
@@ -919,13 +942,7 @@ async function interaction({ browser, origin, engine }) {
       const save = page.getByRole('button', { name: 'Save', exact: true });
       const saveEnabled = await save.isEnabled();
       await save.click();
-      const closed = await page
-        .getByRole('dialog', { name: 'Details' })
-        .waitFor({ state: 'detached', timeout: 10000 })
-        .then(
-          () => true,
-          () => false,
-        );
+      const closed = await gone(page.getByRole('dialog', { name: 'Details' }));
       const after = await stored(origin, PLUMBER);
       return {
         pass:
@@ -960,14 +977,12 @@ async function interaction({ browser, origin, engine }) {
  */
 async function integration({ browser, origin }) {
   const { context, page } = await newPage(browser);
-  await signIn(page, origin, '?theme=fresh');
+  await signIn(page, origin);
   const results = [];
   results.push(
     await attempt('package-classes-in-sdk-editor', async () => {
       await page.goto(origin + '/?theme=fresh');
-      await page.locator('.zen-title').click();
-      const title = page.getByLabel('Title', { exact: true });
-      await title.waitFor();
+      await openTask(page);
       const styles = await page.evaluate(() => {
         const input = document.querySelector('[data-slot=input]');
         const trigger = [...document.querySelectorAll('button')].find((b) =>
@@ -1161,10 +1176,7 @@ const states = {
     await page.keyboard.press('ArrowRight');
     await page.getByRole('menuitemradio', { name: 'List' }).waitFor();
   },
-  async dialog(page) {
-    await page.locator('.zen-title').click();
-    await page.getByLabel('Title', { exact: true }).waitFor();
-  },
+  dialog: openTask,
   async date(page) {
     await states.dialog(page);
     await page.getByRole('button', { name: /^Start considering:/ }).click();

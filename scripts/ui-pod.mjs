@@ -92,6 +92,7 @@ function mergePatch(target, patch) {
 /** Starts the server for the built app in `dist`; resolves to its origin. */
 export async function startPod(dist) {
   const codes = new Map();
+  const files = new Map();
   let tasks;
   let version = 10;
   let registrations = 0;
@@ -114,9 +115,14 @@ export async function startPod(dist) {
       const file = normalize(url.pathname).replace(/^(\.\.[/\\])+/, '');
       const path = join(dist, extname(file) ? file : 'index.html');
       try {
-        const body = await readFile(path);
+        let body = files.get(path);
+        if (!body) files.set(path, (body = await readFile(path)));
         res.writeHead(200, {
           'content-type': types[extname(path)] ?? 'application/octet-stream',
+          // Built assets have content hashes in their names.
+          'cache-control': file.startsWith('/assets/')
+            ? 'max-age=31536000, immutable'
+            : 'no-cache',
         });
         return res.end(body);
       } catch {

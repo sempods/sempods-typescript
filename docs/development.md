@@ -110,7 +110,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     confirmations, on Close and in the heading menu and date chooser; Close
     then Cancel (question on top, centred, Tab kept); focus trap with the page
     behind inert; focus restored to the opener; Save after a cancelled close;
-    closing right after opening; 1280 → 375 → 1280px with a draft; Back and
+    closing the dialog, a menu and the date chooser right after opening;
+    1280 → 375 → 1280px with a draft; Back and
     Forward, and Back with a dirty draft, staying and discarding;
   - the calendar-date roundtrip with the SDK's `date` field in
     Europe/Berlin, UTC+14 and UTC−11: stored `xsd:date` after Apply and Save,

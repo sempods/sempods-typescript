@@ -9,7 +9,8 @@
 //        [--only=gate,roundtrip,interaction,integration,contrast]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   cp,
   mkdir,
@@ -40,6 +41,7 @@ for (const name of browsers)
   assert.ok(engines[name], `Unknown browser ${name}`);
 
 const root = process.cwd();
+const execute = promisify(execFile);
 const temp = await mkdtemp(join(tmpdir(), 'sempods-ui-'));
 const pods = [];
 try {
@@ -72,9 +74,15 @@ try {
       })
         .split('\n')
         .filter(Boolean);
-      assert.ok(files.includes('package/styles.css'));
-      assert.ok(files.includes('package/dist/index.js'));
-      assert.ok(files.includes('package/dist/index.d.ts'));
+      for (const file of [
+        'styles.css',
+        'dist/index.js',
+        'dist/index.d.ts',
+        'LICENSE',
+        'NOTICE',
+      ])
+        assert.ok(files.includes('package/' + file), `app-ui lacks ${file}`);
+      assert.equal(manifest.license, 'Apache-2.0');
       assert.deepEqual(
         files.filter(
           (f) =>
@@ -110,8 +118,9 @@ try {
   );
   const app = join(temp, 'app');
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
-  // The installed README's examples: its task dialog runs in the reference
-  // screen, and its stylesheet is the one the screen uses.
+  // The installed README's examples: its task dialog is the reference
+  // screen's, so the checks run it as shipped; other TSX examples are only
+  // compiled. Its stylesheet setup is the one the screen uses.
   const readme = await readFile(
     join(temp, 'node_modules/@sempods/app-ui/README.md'),
     'utf8',
@@ -120,8 +129,6 @@ try {
     [
       ...readme.matchAll(new RegExp('```' + lang + '\\n([\\s\\S]*?)```', 'g')),
     ].map((m) => m[1]);
-  // The README's task dialog is the reference screen's: the gate's checks run
-  // it as shipped. Other TSX examples are compiled.
   const examples = blocks('tsx');
   const dialog = examples.find((block) =>
     block.startsWith('// task-dialog.tsx'),
@@ -136,9 +143,9 @@ try {
     ?.split('\n')
     .filter((line) => line && !line.startsWith('/*'));
   assert.ok(documentedCss, 'the README has no stylesheet setup');
-  const appCss = (await readFile(join(app, 'index.css'), 'utf8')).split('\n');
+  const appCss = await readFile(join(app, 'index.css'), 'utf8');
   assert.deepEqual(
-    appCss.filter((line) => documentedCss.includes(line)),
+    appCss.split('\n').filter((line) => documentedCss.includes(line)),
     documentedCss,
     'the reference screen does not use the documented stylesheet setup',
   );
@@ -162,10 +169,6 @@ try {
       include: ['app/**/*.tsx'],
     }),
   );
-  execFileSync(join(temp, 'node_modules/.bin/tsc'), ['-p', temp], {
-    cwd: temp,
-    stdio: 'inherit',
-  });
   // The app's Vite config has only the Tailwind plugin: no optimizeDeps and
   // no alias; the app's CSS has no @source line for the package.
   await writeFile(
@@ -174,14 +177,22 @@ try {
 export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist', emptyOutDir: true }, logLevel: 'error' };
 `,
   );
-  assert.doesNotMatch(
-    await readFile(join(app, 'index.css'), 'utf8'),
-    /^\s*@source/m,
+  assert.doesNotMatch(appCss, /^\s*@source/m);
+  // Type checking and the build are independent.
+  await Promise.all(
+    [
+      ['tsc', '-p', temp],
+      ['vite', 'build'],
+    ].map(([tool, ...rest]) =>
+      execute(join(temp, 'node_modules/.bin', tool), rest, { cwd: temp }).catch(
+        (error) => {
+          process.stdout.write(error.stdout ?? '');
+          process.stderr.write(error.stderr ?? '');
+          throw error;
+        },
+      ),
+    ),
   );
-  execFileSync(join(temp, 'node_modules/.bin/vite'), ['build'], {
-    cwd: temp,
-    stdio: 'inherit',
-  });
   const dist = join(app, 'dist');
   const css = (
     await Promise.all(

@@ -9,33 +9,46 @@
 // them. The displayed value and the placeholder of fields count as text. This
 // measures the states a run reaches; it is not a complete accessibility
 // validation. Its controls in ui-checks.mjs check it against known failures.
+
+// A colour as the browser paints it, [r, g, b, alpha], through a 1px canvas;
+// each colour string is resolved once. `var`: the controls inject this file
+// into the same page more than once.
+var paint;
+var painted = new Map();
+function rgba(css) {
+  if (!css || css === 'transparent') return [0, 0, 0, 0];
+  if (!painted.has(css)) {
+    if (!paint) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      paint = canvas.getContext('2d', { willReadFrequently: true });
+      paint.globalCompositeOperation = 'copy';
+    }
+    paint.fillStyle = '#000';
+    paint.fillStyle = css;
+    paint.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = paint.getImageData(0, 0, 1, 1).data;
+    painted.set(css, [r, g, b, a / 255]);
+  }
+  return [...painted.get(css)];
+}
+/** `top` composited over the opaque `under`. */
+function over(top, under) {
+  const a = top[3];
+  return [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a)).concat(1);
+}
+function lum([r, g, b]) {
+  const f = (c) =>
+    (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+function ratio(a, b) {
+  const [l1, l2] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (l1 + 0.05) / (l2 + 0.05);
+}
+
 // `root` limits it to one element and its content (hover, pressed, focus).
 function uiContrast(root = document.body) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 1;
-  const g = canvas.getContext('2d', { willReadFrequently: true });
-  g.globalCompositeOperation = 'copy';
-  const rgba = (css) => {
-    if (!css || css === 'transparent') return [0, 0, 0, 0];
-    g.fillStyle = '#000';
-    g.fillStyle = css;
-    g.fillRect(0, 0, 1, 1);
-    const [r, gg, b, a] = g.getImageData(0, 0, 1, 1).data;
-    return [r, gg, b, a / 255];
-  };
-  const over = (top, under) => {
-    const a = top[3];
-    return [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a)).concat(1);
-  };
-  const lum = ([r, gg, b]) => {
-    const f = (c) =>
-      (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    return 0.2126 * f(r) + 0.7152 * f(gg) + 0.0722 * f(b);
-  };
-  const ratio = (a, b) => {
-    const [l1, l2] = [lum(a), lum(b)].sort((x, y) => y - x);
-    return (l1 + 0.05) / (l2 + 0.05);
-  };
   const hex = (c) =>
     '#' +
     c
@@ -106,19 +119,27 @@ function uiContrast(root = document.body) {
       ? document.querySelectorAll('body *')
       : [root, ...root.querySelectorAll('*')];
   for (const el of elements) {
+    // Only fields, icons and elements with their own text are measured; the
+    // costly visibility test comes after that.
+    const field = el.matches(
+      'input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=range]):not([type=color]), textarea',
+    );
+    const bounded = el.matches(
+      'input:not([type=checkbox]):not([type=radio]):not([type=hidden]), textarea, select',
+    );
+    const icon = el.tagName === 'svg';
+    const ownText = [...el.childNodes].some(
+      (n) => n.nodeType === 3 && n.textContent.trim(),
+    );
+    if (!(field || bounded || icon || ownText)) continue;
     if (!visible(el) || disabled(el)) continue;
     const s = getComputedStyle(el);
+    const size = parseFloat(s.fontSize);
+    const large = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
     // A field's value and placeholder are not text nodes; measure them as
     // painted on the field's own background.
-    if (
-      el.matches(
-        'input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=range]):not([type=color]), textarea',
-      )
-    ) {
+    if (field) {
       const bg = backdrop(el);
-      const size = parseFloat(s.fontSize);
-      const large =
-        size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
       if (el.value) {
         const c = rgba(s.color);
         c[3] *= opacity(el);
@@ -131,16 +152,10 @@ function uiContrast(root = document.body) {
         record('placeholder', el, over(c, bg), bg, large ? 3 : 4.5);
       }
     }
-    const ownText = [...el.childNodes].some(
-      (n) => n.nodeType === 3 && n.textContent.trim(),
-    );
     if (ownText && !el.closest('.sr-only')) {
       const bg = backdrop(el);
       const c = rgba(s.color);
       c[3] *= opacity(el);
-      const size = parseFloat(s.fontSize);
-      const large =
-        size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
       record(
         large ? 'text-large' : 'text',
         el,
@@ -149,7 +164,7 @@ function uiContrast(root = document.body) {
         large ? 3 : 4.5,
       );
     }
-    if (el.tagName === 'svg' && !el.closest('[aria-hidden="true"]:not(svg)')) {
+    if (icon && !el.closest('[aria-hidden="true"]:not(svg)')) {
       const host = el.closest(
         'button, a, [role=menuitem], [role=menuitemradio]',
       );
@@ -160,11 +175,7 @@ function uiContrast(root = document.body) {
         record('icon', host, over(c, bg), bg, 3);
       }
     }
-    if (
-      el.matches(
-        'input:not([type=checkbox]):not([type=radio]):not([type=hidden]), textarea, select',
-      )
-    ) {
+    if (bounded) {
       const bg = backdrop(el, false);
       const border = rgba(s.borderTopColor);
       if (parseFloat(s.borderTopWidth) > 0 && border[3] > 0)
@@ -192,17 +203,6 @@ function uiFocusIndicator() {
     el.matches('[role=dialog], [role=alertdialog], dialog')
   )
     return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 1;
-  const g = canvas.getContext('2d', { willReadFrequently: true });
-  g.globalCompositeOperation = 'copy';
-  const rgba = (css) => {
-    g.fillStyle = '#000';
-    g.fillStyle = css;
-    g.fillRect(0, 0, 1, 1);
-    const [r, gg, b, a] = g.getImageData(0, 0, 1, 1).data;
-    return [r, gg, b, a / 255];
-  };
   const s = getComputedStyle(el);
   let css = null;
   let source = '';
@@ -221,11 +221,6 @@ function uiFocusIndicator() {
         break;
       }
   }
-  const lum = ([r, gg, b]) => {
-    const f = (c) =>
-      (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    return 0.2126 * f(r) + 0.7152 * f(gg) + 0.0722 * f(b);
-  };
   let bg = [255, 255, 255, 1];
   for (let n = el.parentElement; n; n = n.parentElement) {
     const c = rgba(getComputedStyle(n).backgroundColor);
@@ -239,10 +234,7 @@ function uiFocusIndicator() {
     .slice(0, 32);
   if (!css)
     return { what: name, ratio: 0, pass: false, note: 'no visible indicator' };
-  const c = rgba(css);
-  const fg = [0, 1, 2].map((i) => c[i] * c[3] + bg[i] * (1 - c[3]));
-  const [l1, l2] = [lum(fg), lum(bg)].sort((x, y) => y - x);
-  const r = (l1 + 0.05) / (l2 + 0.05);
+  const r = ratio(over(rgba(css), bg), bg);
   return { what: name, source, ratio: Math.round(r * 100) / 100, pass: r >= 3 };
 }
 
