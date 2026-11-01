@@ -110,8 +110,8 @@ try {
   );
   const app = join(temp, 'app');
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
-  // The installed README's examples: its TSX compiles with the app below, and
-  // its stylesheet is the one the reference screen uses.
+  // The installed README's examples: its task dialog runs in the reference
+  // screen, and its stylesheet is the one the screen uses.
   const readme = await readFile(
     join(temp, 'node_modules/@sempods/app-ui/README.md'),
     'utf8',
@@ -120,10 +120,17 @@ try {
     [
       ...readme.matchAll(new RegExp('```' + lang + '\\n([\\s\\S]*?)```', 'g')),
     ].map((m) => m[1]);
+  // The README's task dialog is the reference screen's: the gate's checks run
+  // it as shipped. Other TSX examples are compiled.
   const examples = blocks('tsx');
-  assert.ok(examples.length > 0, 'the README has no TSX example');
+  const dialog = examples.find((block) =>
+    block.startsWith('// task-dialog.tsx'),
+  );
+  assert.ok(dialog, 'the README has no task-dialog.tsx example');
+  await writeFile(join(app, 'task-dialog.tsx'), dialog);
   for (const [i, example] of examples.entries())
-    await writeFile(join(app, `readme-${i}.tsx`), example);
+    if (example !== dialog)
+      await writeFile(join(app, `readme-${i}.tsx`), example);
   const documentedCss = blocks('css')
     .find((block) => block.includes("@import '@sempods/app-ui/styles.css'"))
     ?.split('\n')

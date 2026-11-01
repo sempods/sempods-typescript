@@ -2,7 +2,9 @@
 // Focus-like Zen view with a header menu (View submenu with checked choices),
 // a routed task dialog holding an SDK ResourceEditor, and a calendar-date
 // chooser inside the editor fields. Built with Vite and Tailwind 4 against
-// the packed packages; scripts/test-ui-consumer.mjs drives it.
+// the packed packages; scripts/test-ui-consumer.mjs drives it. The task
+// dialog, task-dialog.tsx, is the package README's example, which the test
+// writes next to this file as it is shipped.
 import {
   StrictMode,
   useCallback,
@@ -15,52 +17,17 @@ import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
   LoadNotice,
-  ResourceEditor,
   SempodsProvider,
   TargetScreen,
   useApp,
   useAppState,
-  useContextEditor,
   useList,
   useMessages,
   useSdkLocale,
 } from '@sempods/app-sdk/react';
-import {
-  date,
-  fields,
-  flag,
-  text,
-  type DraftOf,
-} from '@sempods/client-sdk/edit';
-import {
-  ActionButton,
-  DateChooser,
-  HeaderMenu,
-  Input,
-  ScreenDialog,
-  Textarea,
-} from '@sempods/app-ui';
+import { ActionButton, HeaderMenu } from '@sempods/app-ui';
+import { TaskDialog, taskFields } from './task-dialog';
 import './index.css';
-
-const schema = 'https://schema.org/';
-const taskFields = fields(
-  {
-    title: text(schema + 'name', { language: null, trim: true }),
-    description: text(schema + 'description', {
-      language: null,
-      trim: true,
-      optional: true,
-    }),
-    done: flag(schema + 'actionStatus', {
-      on: schema + 'CompletedActionStatus',
-      off: schema + 'PotentialActionStatus',
-    }),
-    // A calendar day that keeps an existing zoned xsd:dateTime unchanged.
-    planned: date(schema + 'startDate', { optional: true, orDateTime: true }),
-  },
-  { type: schema + 'Action' },
-);
-type TaskDraft = DraftOf<typeof taskFields>;
 
 const texts = {
   en: {
@@ -68,17 +35,10 @@ const texts = {
     view: 'View',
     zen: 'Zen',
     list: 'List',
-    details: 'Details',
-    close: 'Close',
-    taskMenu: 'Task menu',
-    check: 'Check',
     complete: 'Complete',
     notToday: 'Not today',
     previous: 'Previous task',
     next: 'Next task',
-    title: 'Title',
-    description: 'Description',
-    planned: 'Start considering',
     emptyZen: 'Enjoy your day.',
   },
   de: {
@@ -86,17 +46,10 @@ const texts = {
     view: 'Ansicht',
     zen: 'Zen',
     list: 'Liste',
-    details: 'Details',
-    close: 'Schließen',
-    taskMenu: 'Aufgabenmenü',
-    check: 'Prüfen',
     complete: 'Erledigen',
     notToday: 'Nicht heute',
     previous: 'Vorherige Aufgabe',
     next: 'Nächste Aufgabe',
-    title: 'Titel',
-    description: 'Beschreibung',
-    planned: 'Vormerken ab',
     emptyZen: 'Genieß deinen Tag.',
   },
 };
@@ -356,114 +309,15 @@ function Tasks({
       )}
       {target && (
         <TaskDialog
-          route={route}
           subject={subject}
           context={target.contextIri}
-          reload={list.reload}
+          leave={() => {
+            route.go({ task: null });
+            void list.reload();
+          }}
         />
       )}
     </>
-  );
-}
-
-function TaskDialog({
-  route,
-  subject,
-  context,
-  reload,
-}: {
-  readonly route: Route;
-  readonly subject: string | null;
-  readonly context: string;
-  readonly reload: () => unknown;
-}) {
-  const t = useMessages(texts);
-  const edit = useContextEditor(taskFields);
-  const { open, close: closeEditor } = edit;
-  const { changing } = useAppState();
-  const [checked, setChecked] = useState(0);
-  useEffect(() => {
-    if (changing) return;
-    if (subject) void open({ subject, context });
-    else void closeEditor();
-  }, [subject, context, changing, open, closeEditor]);
-  const editor =
-    subject && edit.target?.subject === subject ? edit.editor : null;
-  // Guarded: the SDK asks before a dirty draft is discarded.
-  const requestClose = async () => {
-    if (await edit.close()) {
-      route.go({ task: null });
-      void reload();
-    }
-  };
-  return (
-    <ScreenDialog
-      title={t.details}
-      closeLabel={t.close}
-      open={!!subject}
-      onRequestClose={() => void requestClose()}
-      actions={
-        <HeaderMenu
-          label={t.taskMenu}
-          icon="more"
-          items={[{ label: t.check, onSelect: () => setChecked((n) => n + 1) }]}
-        />
-      }
-    >
-      <output hidden data-testid="checked">
-        {checked}
-      </output>
-      <ResourceEditor
-        editor={editor}
-        quiet
-        onClose={() => void requestClose()}
-        labels={{
-          title: t.title,
-          description: t.description,
-          planned: t.planned,
-        }}
-      >
-        {(draft, change) => <TaskInputs draft={draft} change={change} />}
-      </ResourceEditor>
-    </ScreenDialog>
-  );
-}
-
-function TaskInputs({
-  draft,
-  change,
-}: {
-  readonly draft: TaskDraft;
-  readonly change: (draft: TaskDraft) => void;
-}) {
-  const t = useMessages(texts);
-  const update = (values: Partial<TaskDraft>) =>
-    change({ ...draft, ...values });
-  return (
-    <div className="task-fields">
-      <label>
-        {t.title}
-        <Input
-          value={draft.title}
-          onChange={(event) => update({ title: event.target.value })}
-          required
-        />
-      </label>
-      <label>
-        {t.description}
-        <Textarea
-          rows={2}
-          value={draft.description ?? ''}
-          onChange={(event) => update({ description: event.target.value })}
-        />
-      </label>
-      <DateChooser
-        label={t.planned}
-        value={draft.planned}
-        onChange={(planned) => update({ planned })}
-        optional
-      />
-    </div>
   );
 }
 

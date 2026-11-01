@@ -95,10 +95,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   (`scripts/test-ui-consumer.mjs`). It packs client-sdk, app-sdk and app-ui,
   checks the app-ui tarball's files and its packed peer range (the same minor as
   app-sdk), installs them outside the workspace, compiles the reference screen
-  in `tests/ui-browser` and the TSX examples of the installed README strictly
-  against the packed declarations (React Aria's included, `skipLibCheck` off),
-  checks that the screen uses the README's stylesheet setup and builds it with
-  Vite and Tailwind CSS 4. The
+  in `tests/ui-browser` strictly against the packed declarations (React Aria's
+  included, `skipLibCheck` off). Its task dialog is the installed README's
+  `task-dialog.tsx` example as shipped, so every check below runs the
+  documented recipe; the screen also uses the README's stylesheet setup. It is
+  built with Vite and Tailwind CSS 4. The
   app's CSS has no `@source` line and its Vite config no `optimizeDeps` hint;
   the build must contain classes that only the package's JavaScript uses. A
   loopback fixture Pod (`scripts/ui-pod.mjs`) serves the build. Each browser
@@ -116,7 +117,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`
     kept until a day is applied;
   - keyboard use of the header menu and the calendar, 44px calendar targets at
-    375 × 812 and 375 × 560, German texts and locale, removing an optional
+    375 × 812 and 375 × 560 with Apply and Remove date visible as the chooser
+    opens, German texts and locale, removing an optional
     date;
   - the cascade: package classes win over the SDK's element rules inside an SDK
     editor, and the token bridge reaches the SDK's own controls;

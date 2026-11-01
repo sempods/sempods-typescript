@@ -77,12 +77,4 @@
     border-bottom: 1px solid var(--border);
     color: var(--foreground);
   }
-  .task-fields {
-    display: grid;
-    gap: 20px;
-  }
-  .task-fields > label {
-    display: grid;
-    gap: 6px;
-  }
 }

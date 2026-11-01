@@ -153,29 +153,66 @@ purpose.
 
 ## Adapters
 
-A routed task dialog with an SDK editor, a date field and a menu in its heading.
-The app's router supplies `subject` (the task in the address) and `leave`:
+A routed task dialog with an SDK editor, a date field and a menu in its
+heading, in English and German. The app's router supplies `subject` (the task
+in the address) and `leave`, which removes it from the address. The UI gate
+runs this file as written, as the reference screen's task dialog:
 
 ```tsx
+// task-dialog.tsx
 import { useEffect } from 'react';
-import { ResourceEditor, useContextEditor } from '@sempods/app-sdk/react';
-import { date, fields, text } from '@sempods/client-sdk/edit';
 import {
-  ActionButton,
+  ResourceEditor,
+  useAppState,
+  useContextEditor,
+  useMessages,
+} from '@sempods/app-sdk/react';
+import { date, fields, flag, text } from '@sempods/client-sdk/edit';
+import {
   DateChooser,
   HeaderMenu,
   Input,
   ScreenDialog,
+  Textarea,
 } from '@sempods/app-ui';
 
 const schema = 'https://schema.org/';
-const task = fields(
+export const taskFields = fields(
   {
     title: text(schema + 'name', { language: null, trim: true }),
+    description: text(schema + 'description', {
+      language: null,
+      trim: true,
+      optional: true,
+    }),
+    done: flag(schema + 'actionStatus', {
+      on: schema + 'CompletedActionStatus',
+      off: schema + 'PotentialActionStatus',
+    }),
+    // A calendar day; an existing zoned xsd:dateTime stays as it is.
     planned: date(schema + 'startDate', { optional: true, orDateTime: true }),
   },
   { type: schema + 'Action' },
 );
+
+const texts = {
+  en: {
+    details: 'Details',
+    taskMenu: 'Task menu',
+    print: 'Print',
+    title: 'Title',
+    description: 'Description',
+    planned: 'Start considering',
+  },
+  de: {
+    details: 'Details',
+    taskMenu: 'Aufgabenmenü',
+    print: 'Drucken',
+    title: 'Titel',
+    description: 'Beschreibung',
+    planned: 'Vormerken ab',
+  },
+};
 
 export function TaskDialog({
   subject,
@@ -186,61 +223,83 @@ export function TaskDialog({
   readonly context: string;
   readonly leave: () => void;
 }) {
-  const edit = useContextEditor(task);
-  const { open } = edit;
+  const t = useMessages(texts);
+  const edit = useContextEditor(taskFields);
+  const { open, close } = edit;
+  // While the SDK changes the target (`changing`), it opens no editor; the
+  // effect runs again once the change has settled.
+  const { changing } = useAppState();
   useEffect(() => {
+    if (changing) return;
     if (subject) void open({ subject, context });
-  }, [subject, context, open]);
+    else void close();
+  }, [subject, context, changing, open, close]);
+  // An editor still showing another subject is not this dialog's.
+  const editor =
+    subject && edit.target?.subject === subject ? edit.editor : null;
   // The SDK asks before a dirty draft is discarded.
   const requestClose = async () => {
     if (await edit.close()) leave();
   };
   return (
     <ScreenDialog
-      title="Task"
+      title={t.details}
       open={subject !== null}
       onRequestClose={() => void requestClose()}
       actions={
         <HeaderMenu
           icon="more"
-          label="Task menu"
-          items={[{ label: 'Print', onSelect: () => window.print() }]}
+          label={t.taskMenu}
+          items={[{ label: t.print, onSelect: () => window.print() }]}
         />
       }
     >
       <ResourceEditor
-        editor={edit.target?.subject === subject ? edit.editor : null}
+        editor={editor}
+        quiet
         onClose={() => void requestClose()}
+        labels={{
+          title: t.title,
+          description: t.description,
+          planned: t.planned,
+        }}
       >
         {(draft, change) => (
-          <>
-            <label>
-              Title
+          <div className="grid gap-5">
+            <label className="grid gap-1.5">
+              {t.title}
               <Input
                 value={draft.title}
                 onChange={(e) => change({ ...draft, title: e.target.value })}
+                required
+              />
+            </label>
+            <label className="grid gap-1.5">
+              {t.description}
+              <Textarea
+                rows={2}
+                value={draft.description ?? ''}
+                onChange={(e) =>
+                  change({ ...draft, description: e.target.value })
+                }
               />
             </label>
             <DateChooser
-              label="Start considering"
+              label={t.planned}
               value={draft.planned}
               onChange={(planned) => change({ ...draft, planned })}
               optional
             />
-          </>
+          </div>
         )}
       </ResourceEditor>
     </ScreenDialog>
   );
 }
-
-/** A screen's main action: a 72px round button with an icon. */
-export const Complete = ({ onPress }: { readonly onPress: () => void }) => (
-  <ActionButton shape="round-lg" label="Complete" onPress={onPress}>
-    ✓
-  </ActionButton>
-);
 ```
+
+An app's own main action uses `ActionButton`, for example a 72px round button
+with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete}>`.
 
 - **`ScreenDialog`**: a routed screen as a modal, full screen below 640px and up
   to 42rem wide above, with a heading, optional `actions` and Close. It is
@@ -254,7 +313,9 @@ export const Complete = ({ onPress }: { readonly onPress: () => void }) => (
   menu of actions, separators (`null`) and submenus of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`). Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
-  returns to the button.
+  returns to the button. Inside a `ScreenDialog`, the menu and the date chooser
+  return the focus to their button themselves when React Aria's restore loses
+  the race against the dialog's focus containment.
 - **`DateChooser`**: the calendar-date chooser for the SDK's `date` field. It
   takes the field's draft value (`2026-10-29`, with `orDateTime` also a zoned
   date-time, or `null`) and returns a day as `YYYY-MM-DD`, or `null` with
@@ -264,7 +325,8 @@ export const Complete = ({ onPress }: { readonly onPress: () => void }) => (
   the draft. A stored date-time is shown in the SDK provider's time zone; the
   chooser starts at the day of its stored offset and replaces it only when a
   day is applied. Month names and the first weekday follow the SDK provider's
-  locale; days and month buttons are 44px targets.
+  locale; days and month buttons are 44px targets. Apply and Remove date stay
+  in a bar at the chooser's bottom edge, visible on a phone as it opens.
 - **`ActionButton`**: an app's own action in the theme's variants: `variant`
   `primary` (default), `secondary`, `ghost` or `destructive`; `shape` `pill`
   (56px high), `round` (56px) or `round-lg` (72px); `label` names an icon-only
