@@ -73,7 +73,10 @@ explains the order and which app rules still override SDK rules.
 - in its own layer `app-ui-focus`, after Tailwind's utilities: a solid 2px
   focus outline in the `ring` colour on the package's components and calendar
   days. Name the layer in the order statement only to move it; an unlayered
-  app rule overrides it.
+  app rule overrides it;
+- in the layer `app-ui-motion`: without entry and exit animations of popovers,
+  menus and selects when the person asks for reduced motion
+  (`prefers-reduced-motion: reduce`).
 
 ## The theme contract
 

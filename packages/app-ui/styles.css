@@ -8,7 +8,7 @@
  *   @import '@sempods/app-ui/styles.css';
  *   @import './theme.css';
  *
- * Four parts:
+ * Five parts:
  *   1. Palette roles: semantic colours with foreground pairs in light-dark(),
  *      named as in shadcn/ui. A theme changes only these values. The defaults
  *      here are a calm neutral palette; an app's theme.css overrides them.
@@ -17,6 +17,7 @@
  *      colour values, so a theme's checked contrast stays checked.
  *   3. The bridge to the SDK's --sempods-* tokens.
  *   4. A solid focus outline in the ring colour.
+ *   5. No overlay animations for people who ask for reduced motion.
  */
 
 /* The package's classes are in its built JavaScript, which Tailwind's
@@ -234,5 +235,17 @@
   ):focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+}
+
+/* 5. Motion. A person who asks for reduced motion gets popovers, menus and
+   selects without entry and exit animations; React Aria then mounts and
+   removes them at once. Its own layer, after Tailwind's utilities, wins over
+   the components' animate-in and animate-out. */
+@layer app-ui-motion {
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot] {
+      animation: none;
+    }
   }
 }
