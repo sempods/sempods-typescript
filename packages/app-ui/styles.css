@@ -1,0 +1,238 @@
+/*
+ * @sempods/app-ui: Tailwind CSS 4 integration and the theme token contract.
+ *
+ * Import it after Tailwind and before the app's own theme.css:
+ *
+ *   @layer theme, base, sempods, components, utilities;
+ *   @import 'tailwindcss';
+ *   @import '@sempods/app-ui/styles.css';
+ *   @import './theme.css';
+ *
+ * Four parts:
+ *   1. Palette roles: semantic colours with foreground pairs in light-dark(),
+ *      named as in shadcn/ui. A theme changes only these values. The defaults
+ *      here are a calm neutral palette; an app's theme.css overrides them.
+ *   2. Component variants: data-actions (solid, inverted) and data-secondary
+ *      (tonal, outline, text) on <html> map controls to roles, never to
+ *      colour values, so a theme's checked contrast stays checked.
+ *   3. The bridge to the SDK's --sempods-* tokens.
+ *   4. A solid focus outline in the ring colour.
+ */
+
+/* The package's classes are in its built JavaScript, which Tailwind's
+   automatic detection skips (node_modules). Relative to this file. */
+@source './dist';
+
+/* Entry and exit animations of popovers and menus. */
+@import 'tw-animate-css';
+
+/* State variants as in shadcn's tailwind.css (shadcn 4.23.0, MIT): they also
+   match React Aria's `data-*="true"` attributes. */
+@custom-variant data-open {
+  &:where([data-state='open']),
+  &:where([data-open]:not([data-open='false'])) {
+    @slot;
+  }
+}
+@custom-variant data-closed {
+  &:where([data-state='closed']),
+  &:where([data-closed]:not([data-closed='false'])) {
+    @slot;
+  }
+}
+@custom-variant data-checked {
+  &:where([data-state='checked']),
+  &:where([data-checked]:not([data-checked='false'])) {
+    @slot;
+  }
+}
+@custom-variant data-unchecked {
+  &:where([data-state='unchecked']),
+  &:where([data-unchecked]:not([data-unchecked='false'])) {
+    @slot;
+  }
+}
+@custom-variant data-selected {
+  &:where([data-selected='true']) {
+    @slot;
+  }
+}
+@custom-variant data-disabled {
+  &:where([data-disabled='true']),
+  &:where([data-disabled]:not([data-disabled='false'])) {
+    @slot;
+  }
+}
+@custom-variant data-active {
+  &:where([data-state='active']),
+  &:where([data-active]:not([data-active='false'])) {
+    @slot;
+  }
+}
+@custom-variant data-horizontal {
+  &:where([data-orientation='horizontal']) {
+    @slot;
+  }
+}
+@custom-variant data-vertical {
+  &:where([data-orientation='vertical']) {
+    @slot;
+  }
+}
+
+/* Roles as Tailwind colours (bg-primary, text-muted-foreground, …). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-action: var(--action);
+  --color-action-foreground: var(--action-foreground);
+  --color-action-border: var(--action-border);
+  --color-action-secondary: var(--action-secondary);
+  --color-action-secondary-foreground: var(--action-secondary-foreground);
+  --color-action-secondary-border: var(--action-secondary-border);
+  --font-heading: var(--font-sans);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Defaults in the lowest layer without specificity: any :root rule of the
+   app's theme.css wins, whatever its layer or order. */
+@layer theme {
+  /* 1. Palette roles. */
+  :where(:root) {
+    color-scheme: light dark;
+    --background: light-dark(#ffffff, #111315);
+    --foreground: light-dark(#1f2933, #e5e7eb);
+    --card: light-dark(#ffffff, #181b1f);
+    --card-foreground: var(--foreground);
+    --popover: light-dark(#ffffff, #1b1e23);
+    --popover-foreground: var(--foreground);
+    --primary: light-dark(#1f2933, #e5e7eb);
+    --primary-foreground: light-dark(#ffffff, #111315);
+    --secondary: light-dark(#eef0f3, #23272e);
+    --secondary-foreground: var(--foreground);
+    /* muted is a quiet surface and muted-foreground its text; the SDK's
+       --sempods-muted is that text colour. */
+    --muted: light-dark(#f3f4f6, #1d2026);
+    --muted-foreground: light-dark(#5f6672, #a1a7b0);
+    /* accent is the highlight surface of focused menu items. */
+    --accent: light-dark(#eef0f3, #262a31);
+    --accent-foreground: var(--foreground);
+    --destructive: light-dark(#b42318, #f97066);
+    --destructive-foreground: light-dark(#ffffff, #111315);
+    /* Decorative separators. Control boundaries use input, at 3:1. */
+    --border: light-dark(#e5e7eb, #2d3138);
+    --input: light-dark(#7a818c, #6b7280);
+    --ring: light-dark(#1f2933, #e5e7eb);
+    --radius: 0.625rem;
+  }
+
+  /* 2. Component variants. Actions: solid (the default) fills the primary
+     action; inverted gives it the page colour with a primary outline and
+     text, so it still stands out more than the secondary actions. Secondary
+     actions: tonal (the default), outline or text. */
+  :where(:root) {
+    --action: var(--primary);
+    --action-foreground: var(--primary-foreground);
+    --action-border: var(--primary);
+    --action-secondary: var(--secondary);
+    --action-secondary-foreground: var(--secondary-foreground);
+    --action-secondary-border: transparent;
+  }
+  :where(:root[data-actions='inverted']) {
+    --action: var(--background);
+    --action-foreground: var(--primary);
+    --action-border: var(--primary);
+  }
+  :where(:root[data-secondary='outline']) {
+    --action-secondary: transparent;
+    --action-secondary-foreground: var(--foreground);
+    --action-secondary-border: var(--input);
+  }
+  :where(:root[data-secondary='text']) {
+    --action-secondary: transparent;
+    --action-secondary-foreground: var(--primary);
+    --action-secondary-border: transparent;
+  }
+
+  /* 3. Bridge to the SDK. Its fields get the input role (3:1), its
+     separators the border role. The SDK's actions have no outline or tonal
+     surface, so its main action stays filled in the primary role and its
+     other actions stay primary text, whatever the variants. */
+  :where(:root) {
+    --sempods-bg: var(--background);
+    --sempods-text: var(--foreground);
+    --sempods-muted: var(--muted-foreground);
+    --sempods-line: var(--border);
+    --sempods-field-line: var(--input);
+    --sempods-accent: var(--primary);
+    --sempods-on-accent: var(--primary-foreground);
+    --sempods-primary-bg: var(--primary);
+    --sempods-primary-text: var(--primary-foreground);
+    --sempods-secondary-text: var(--primary);
+    --sempods-focus: var(--ring);
+    --sempods-font: var(--font-sans);
+    --sempods-radius: var(--radius);
+  }
+}
+
+@layer base {
+  /* shadcn's base: borders without a colour class take the border role. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  /* App elements; SDK surfaces bring their own focus style (--sempods-focus). */
+  :where(
+    a,
+    button,
+    input,
+    select,
+    textarea,
+    summary,
+    [tabindex]
+  ):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* 4. Focus. shadcn's ring is the ring colour at 50% opacity, which stays below
+   3:1 for mid-tone accents. Unlayered, so it wins over the components'
+   outline-hidden utilities; it reaches only components (data-slot) and the
+   calendar's days, not a dialog that holds the focus while it opens. */
+:where(
+  [data-slot]:not([role='dialog'], [role='alertdialog']),
+  [data-slot='calendar'] [role='gridcell'] > *
+):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

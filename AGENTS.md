@@ -16,7 +16,7 @@ The [documentation index](docs/README.md) routes to maintained guides and exampl
 
 Read scoped instructions on the path to each changed file:
 [client-sdk](packages/client-sdk/AGENTS.md), [app-sdk](packages/app-sdk/AGENTS.md),
-and [documentation](docs/AGENTS.md). Sibling scopes do not govern each other.
+[app-ui](packages/app-ui/AGENTS.md) and [documentation](docs/AGENTS.md). Sibling scopes do not govern each other.
 
 Use [issue work](docs/agents/issue-work.md) for implementation and
 [doc review](docs/agents/doc-review.md) when behavior, contracts or guides change.
