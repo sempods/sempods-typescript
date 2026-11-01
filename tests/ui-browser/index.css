@@ -1,0 +1,7 @@
+/* The app's stylesheet as the package README documents it: no @source line
+   for the package and no Vite hint; the package's styles.css brings both. */
+@layer theme, base, sempods, components, utilities;
+@import 'tailwindcss';
+@import '@sempods/app-ui/styles.css';
+@import './theme.css';
+@import './screen.css';

@@ -1,0 +1,1272 @@
+/* global document, getComputedStyle, innerWidth, window */
+// The checks of the UI gate (scripts/test-ui-consumer.mjs), ported from the
+// template's spike #120 (gate.mjs, roundtrip.mjs, interaction.mjs,
+// evidence.mjs and contrast-selftest.mjs on sempods-apps-template branch
+// claude/120-ui-spike). Each suite takes { browser, origin, engine } and
+// returns results of the form { id, pass, ... }.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const contrastScript = readFileSync(
+  join(import.meta.dirname, 'ui-contrast.js'),
+  'utf8',
+);
+const EDIT = ' (edited)';
+const xsd = 'http://www.w3.org/2001/XMLSchema#';
+const startDate = 'https://schema.org/startDate';
+const PLUMBER = 'Call the plumber about the kitchen tap';
+const TRAIN = 'Book train tickets to Leipzig';
+
+/**
+ * The key that moves the focus to the next control. WebKit on macOS follows
+ * Safari's default and skips buttons on Tab; Option+Tab reaches them.
+ */
+const tabKey = (engine) =>
+  engine === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab';
+
+async function newPage(browser, options = {}) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    locale: 'en-GB',
+    ...options,
+  });
+  context.setDefaultTimeout(10000);
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  return { context, page, errors };
+}
+
+/** Signs in to the fixture Pod and chooses its "work" context. */
+async function signIn(page, origin, query = '') {
+  await fetch(origin + '/__reset');
+  await page.goto(origin + '/' + query);
+  await page.getByLabel(/Pod address|Pod-Adresse/).fill(origin + '/alice');
+  await page.getByRole('button', { name: /^(Sign in|Anmelden)$/ }).click();
+  await page
+    .getByLabel(/Data context|Datenkontext/)
+    .selectOption({ label: 'work' });
+  await page
+    .locator('.zen-title, .gate-list a')
+    .first()
+    .waitFor({ timeout: 15000 });
+}
+
+/** Runs one check; an exception is a failure with its first line as note. */
+async function attempt(id, run, extra = {}) {
+  try {
+    return { id, ...extra, ...(await run()) };
+  } catch (error) {
+    return {
+      id,
+      ...extra,
+      pass: false,
+      note: 'error: ' + error.message.split('\n')[0],
+    };
+  }
+}
+
+/** The focused element and the layer it sits in. */
+const focusInfo = (page) =>
+  page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return 'body';
+    const name =
+      el.getAttribute('aria-label') ||
+      el.textContent?.trim().slice(0, 24) ||
+      '';
+    const layer = el.closest('[role=alertdialog]')
+      ? 'sdk-confirm'
+      : el.closest('[role=dialog]')
+        ? 'dialog'
+        : 'page';
+    return `${el.tagName.toLowerCase()}${name ? `"${name}"` : ''}@${layer}`;
+  });
+
+const gateChecks = {
+  // Escape in a dirty field asks first; the dialog and the draft stay.
+  'escape-field-dirty': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const s = await c.state();
+    return { pass: s.dialogOpen && s.confirmOpen && s.draftKept, ...s };
+  },
+  // Escape in the SDK confirmation closes only the confirmation.
+  'escape-in-sdk-confirm': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await c.confirm.waitFor({ timeout: 3000 });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const s = await c.state();
+    return {
+      pass:
+        s.dialogOpen &&
+        !s.confirmOpen &&
+        s.draftKept &&
+        s.focus.endsWith('@dialog'),
+      ...s,
+    };
+  },
+  // Escape with focus on the heading's Close asks through the guard.
+  'escape-on-close-button': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.getByRole('button', { name: 'Close', exact: true }).focus();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const asked = await c.state();
+    if (asked.confirmOpen) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+    }
+    const s = await c.state();
+    return {
+      pass: asked.confirmOpen && s.dialogOpen && s.draftKept && !s.confirmOpen,
+      asked: asked.confirmOpen,
+      ...s,
+    };
+  },
+  // Close by pointer, Cancel in the SDK question: everything stays; the
+  // question is on top, centred and keeps Tab.
+  'close-click-cancel': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await c.confirm.waitFor({ timeout: 3000 });
+    const top = await c.confirm.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        r.x + r.width / 2,
+        r.y + r.height / 2,
+      );
+      return !!hit && el.contains(hit);
+    });
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.press(c.tab);
+      await page.waitForTimeout(50);
+    }
+    const trapped = (await focusInfo(page)).endsWith('@sdk-confirm');
+    const centred = await c.confirm.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return Math.abs(r.left + r.width / 2 - innerWidth / 2) < 4;
+    });
+    await c.confirm.getByRole('button').first().click();
+    await page.waitForTimeout(300);
+    const s = await c.state();
+    return {
+      pass:
+        top &&
+        trapped &&
+        centred &&
+        s.dialogOpen &&
+        s.draftKept &&
+        !s.confirmOpen,
+      confirmOnTop: top,
+      confirmCentred: centred,
+      tabTrappedInConfirm: trapped,
+      ...s,
+    };
+  },
+  // Escape in the heading's menu closes only the menu.
+  'escape-heading-menu': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.getByRole('button', { name: 'Task menu' }).click();
+    await page.getByRole('menu').waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const s = await c.state();
+    const menuOpen = await page.getByRole('menu').isVisible();
+    return {
+      pass:
+        !menuOpen && s.dialogOpen && s.draftKept && /Task menu/.test(s.focus),
+      menuOpen,
+      ...s,
+    };
+  },
+  // Escape in the date chooser inside the editor fields closes only it.
+  'escape-date-chooser': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.getByRole('button', { name: /^Start considering:/ }).click();
+    await page.getByRole('grid').waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const s = await c.state();
+    const gridOpen = await page.getByRole('grid').isVisible();
+    return {
+      pass:
+        !gridOpen &&
+        s.dialogOpen &&
+        s.draftKept &&
+        !s.confirmOpen &&
+        /Start considering/.test(s.focus),
+      gridOpen,
+      ...s,
+    };
+  },
+  // Escape in the SDK delete question closes only that question.
+  'escape-delete-confirm': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await c.dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    const asked = await c.confirm
+      .waitFor({ timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    if (asked) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+    }
+    const s = await c.state();
+    return { pass: asked && s.dialogOpen && !s.confirmOpen, asked, ...s };
+  },
+  // Tab stays in the dialog; the page behind is inert or hidden.
+  'focus-trapped-in-dialog': async (c, page) => {
+    await c.open();
+    const seen = new Set();
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press(c.tab);
+      await page.waitForTimeout(50);
+      seen.add(await focusInfo(page));
+    }
+    const inert = await page.evaluate(() => {
+      const header = document.querySelector('.gate-header');
+      return (
+        !!header &&
+        (!!header.closest('[inert]') || !!header.closest('[aria-hidden=true]'))
+      );
+    });
+    const layers = new Set([...seen].map((f) => f.split('@')[1] ?? f));
+    return {
+      pass: !layers.has('page') && !layers.has('body') && inert,
+      focused: [...seen].join(' | '),
+      backgroundInertOrHidden: inert,
+    };
+  },
+  // A clean dialog opened by keyboard closes on Escape and returns focus to
+  // its opener. (WebKit does not focus a link on a mouse click.)
+  'escape-clean-restores-focus': async (c, page) => {
+    await page.locator('.zen-title').focus();
+    await page.keyboard.press('Enter');
+    await c.title.waitFor();
+    await page.waitForTimeout(250);
+    await c.title.focus();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+    const s = await c.state();
+    return {
+      pass: !s.dialogOpen && /^a"/.test(s.focus) && s.focus.endsWith('@page'),
+      ...s,
+    };
+  },
+  // After a cancelled close, an explicit Save still works.
+  'save-after-cancels': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await c.confirm.waitFor({ timeout: 3000 });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    await c.dialog.getByRole('button', { name: 'Save', exact: true }).click();
+    await c.dialog.waitFor({ state: 'detached', timeout: 5000 });
+    const saved = await page.locator('.zen-title').first().textContent();
+    const s = await c.state();
+    return {
+      pass: !s.dialogOpen && !!saved?.endsWith(EDIT),
+      savedTitle: saved,
+      ...s,
+    };
+  },
+  // Closed right after opening: it goes, nothing stays mounted.
+  'close-right-after-open': async (c, page) => {
+    await page.locator('.zen-title').click();
+    await c.title.waitFor();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.waitForTimeout(1500);
+    const s = await c.state();
+    return { pass: !s.dialogOpen && (await c.dialog.count()) === 0, ...s };
+  },
+  // Phone and desktop width while editing: no remount, the draft stays, full
+  // screen on the phone.
+  'resize-keeps-draft': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.setViewportSize({ width: 375, height: 760 });
+    await page.waitForTimeout(300);
+    const phone = await c.dialog.boundingBox();
+    const s1 = await c.state();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForTimeout(300);
+    const s = await c.state();
+    return {
+      pass: s1.draftKept && s.draftKept && !!phone && phone.width >= 370,
+      phoneWidth: phone?.width,
+      ...s,
+    };
+  },
+  // Back closes the routed dialog; Forward opens it again.
+  'back-forward': async (c, page) => {
+    await c.open();
+    await page.goBack();
+    await page.waitForTimeout(500);
+    const back = await c.dialog.isVisible();
+    await page.goForward();
+    await page.waitForTimeout(500);
+    const forward = await c.title.isVisible();
+    return {
+      pass: !back && forward,
+      openAfterBack: back,
+      openAfterForward: forward,
+    };
+  },
+  // Back with a dirty draft asks through the SDK's navigate; staying keeps
+  // the dialog, the draft and the address.
+  'back-dirty-stay': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    const address = new URL(page.url()).search;
+    await page.goBack();
+    const asked = await c.confirm.waitFor({ timeout: 3000 }).then(
+      () => true,
+      () => false,
+    );
+    if (asked) await c.confirm.getByRole('button').first().click();
+    await page.waitForTimeout(600);
+    const s = await c.state();
+    const kept = new URL(page.url()).search === address;
+    return {
+      pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen && kept,
+      asked,
+      addressKept: kept,
+      ...s,
+    };
+  },
+  // Back with a dirty draft, then discard: the dialog closes.
+  'back-dirty-discard': async (c, page) => {
+    await c.open();
+    await c.dirty();
+    await page.goBack();
+    const asked = await c.confirm.waitFor({ timeout: 3000 }).then(
+      () => true,
+      () => false,
+    );
+    if (asked) await c.confirm.getByRole('button').last().click();
+    await page.waitForTimeout(600);
+    const s = await c.state();
+    const left = !new URL(page.url()).searchParams.has('task');
+    return {
+      pass: asked && !s.dialogOpen && !s.confirmOpen && left,
+      asked,
+      left,
+      ...s,
+    };
+  },
+};
+
+/** Stage 1 of the spike: the dialog around an SDK editor, 15 checks. */
+async function gate({ browser, origin, engine }) {
+  const tab = tabKey(engine);
+  const { context, page, errors } = await newPage(browser);
+  await signIn(page, origin);
+  const c = {
+    tab,
+    dialog: page.getByRole('dialog', { name: 'Details' }),
+    confirm: page.getByRole('alertdialog'),
+    title: page.getByLabel('Title', { exact: true }),
+    async open() {
+      await page.locator('.zen-title').click();
+      await c.title.waitFor();
+      await page.waitForTimeout(250);
+    },
+    async dirty() {
+      await c.title.click();
+      await c.title.press('End');
+      await page.keyboard.type(EDIT);
+    },
+    async state() {
+      const dialogOpen = await c.dialog.isVisible();
+      return {
+        dialogOpen,
+        confirmOpen: await c.confirm.isVisible(),
+        draftKept: dialogOpen
+          ? (await c.title.inputValue()).endsWith(EDIT)
+          : false,
+        focus: await focusInfo(page),
+      };
+    },
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(gateChecks)) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(origin + '/');
+    await page.locator('.zen-title').waitFor();
+    await fetch(origin + '/__reset');
+    results.push(await attempt(id, () => run(c, page)));
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
+/** The start date as the fixture Pod stores it. */
+async function stored(origin, title) {
+  const tasks = await (await fetch(origin + '/__store')).json();
+  const task = tasks.find(
+    (t) => t.body['https://schema.org/name']?.[0]?.['@value'] === title,
+  );
+  return { value: task?.body[startDate]?.[0] ?? null, version: task?.version };
+}
+
+const roundtripChecks = (page, origin) => {
+  const trigger = page.getByRole('button', { name: /^Start considering:/ });
+  const closed = () =>
+    page
+      .getByRole('dialog', { name: 'Details' })
+      .waitFor({ state: 'detached', timeout: 5000 })
+      .then(
+        () => true,
+        () => false,
+      );
+  async function openTask(title) {
+    await page.goto(origin + '/?view=list');
+    await page.getByRole('link', { name: title }).click();
+    await page.getByLabel('Title', { exact: true }).waitFor();
+    await page.waitForTimeout(300);
+  }
+  /** Opens the chooser, moves one day on and applies it, by keyboard. */
+  async function chooseNextDay() {
+    await trigger.click();
+    await page.getByRole('grid').waitFor();
+    await page.waitForTimeout(200);
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await page.waitForTimeout(200);
+  }
+  return {
+    // Select, Apply, Save; a fresh page reads the stored day back.
+    async 'save-and-reread'() {
+      const before = await stored(origin, PLUMBER);
+      await openTask(PLUMBER);
+      await chooseNextDay();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      const saved = await closed();
+      const after = await stored(origin, PLUMBER);
+      await page.reload();
+      await openTask(PLUMBER);
+      const shown = await trigger.getAttribute('aria-label');
+      return {
+        pass:
+          saved &&
+          before.value?.['@value'] === '2026-10-28' &&
+          after.value?.['@value'] === '2026-10-29' &&
+          after.value?.['@type'] === xsd + 'date' &&
+          /29 Oct 2026$/.test(shown ?? ''),
+        before: before.value,
+        after: after.value,
+        shownAfterReload: shown,
+      };
+    },
+    // A chooser closed without Apply changes neither draft nor data.
+    async 'cancel-chooser'() {
+      const before = await stored(origin, PLUMBER);
+      await openTask(PLUMBER);
+      await trigger.click();
+      await page.getByRole('grid').waitFor();
+      await page.waitForTimeout(200);
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const shown = await trigger.getAttribute('aria-label');
+      const saveEnabled = await page
+        .getByRole('button', { name: 'Save', exact: true })
+        .isEnabled();
+      const after = await stored(origin, PLUMBER);
+      return {
+        pass:
+          /28 Oct 2026$/.test(shown ?? '') &&
+          !saveEnabled &&
+          after.version === before.version &&
+          after.value?.['@value'] === '2026-10-28',
+        shown,
+        saveEnabled,
+        after: after.value,
+      };
+    },
+    // A day applied, then the edit cancelled: nothing is written.
+    async 'cancel-edit'() {
+      const before = await stored(origin, PLUMBER);
+      await openTask(PLUMBER);
+      await chooseNextDay();
+      const changed = /29 Oct 2026$/.test(
+        (await trigger.getAttribute('aria-label')) ?? '',
+      );
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+      const gone = await closed();
+      const after = await stored(origin, PLUMBER);
+      return {
+        pass:
+          changed &&
+          gone &&
+          after.version === before.version &&
+          after.value?.['@value'] === '2026-10-28',
+        changed,
+        gone,
+        after: after.value,
+      };
+    },
+    // A stored zoned xsd:dateTime keeps its lexical value and datatype after a
+    // title edit and a cancelled chooser; applying a day replaces it with an
+    // xsd:date. The chooser starts at the day of the stored offset.
+    async 'zoned-datetime'() {
+      const before = await stored(origin, TRAIN);
+      await openTask(TRAIN);
+      await trigger.click();
+      await page.getByRole('grid').waitFor();
+      await page.waitForTimeout(200);
+      const startDay = await page.evaluate(() =>
+        document.activeElement?.getAttribute('aria-label'),
+      );
+      await page.keyboard.press('Escape');
+      const title = page.getByLabel('Title', { exact: true });
+      await title.fill(TRAIN + EDIT);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await closed();
+      const kept = await stored(origin, TRAIN + EDIT);
+      await openTask(TRAIN + EDIT);
+      await chooseNextDay();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await closed();
+      const replaced = await stored(origin, TRAIN + EDIT);
+      return {
+        pass:
+          before.value?.['@value'] === '2026-10-30T09:30:00+02:00' &&
+          before.value?.['@type'] === xsd + 'dateTime' &&
+          kept.value?.['@value'] === before.value['@value'] &&
+          kept.value?.['@type'] === before.value['@type'] &&
+          /30 October 2026/.test(startDay ?? '') &&
+          replaced.value?.['@value'] === '2026-10-31' &&
+          replaced.value?.['@type'] === xsd + 'date',
+        chooserStartsAt: startDay,
+        afterTitleEdit: kept.value,
+        afterApplyingADay: replaced.value,
+      };
+    },
+  };
+};
+
+/** Calendar-date persistence with the SDK's date field, in three zones. */
+async function roundtrip({ browser, origin }) {
+  const results = [];
+  for (const timezoneId of [
+    'Europe/Berlin',
+    'Pacific/Kiritimati',
+    'Pacific/Pago_Pago',
+  ]) {
+    const { context, page } = await newPage(browser, { timezoneId });
+    await signIn(page, origin);
+    for (const [id, run] of Object.entries(roundtripChecks(page, origin))) {
+      await fetch(origin + '/__reset');
+      results.push(await attempt(id, run, { timezoneId }));
+    }
+    await context.close();
+  }
+  return results;
+}
+
+const focused = (page) =>
+  page.evaluate(() => {
+    const el = document.activeElement;
+    return el && el !== document.body
+      ? `${el.getAttribute('role') ?? el.tagName.toLowerCase()} "${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30)}"`
+      : 'body';
+  });
+
+/** Moves the focus down a menu until it is on the named item. */
+async function focusItem(page, name) {
+  for (let i = 0; i < 6 && !new RegExp(name).test(await focused(page)); i++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(100);
+  }
+}
+
+/**
+ * The date chooser's targets on a phone, also on a short screen: days and
+ * month buttons at least 44 × 44px without overlap, no horizontal overflow,
+ * Apply reachable by Tab and visible, focus back on the trigger.
+ */
+async function calendarTargets(page, origin, height, tab) {
+  await page.setViewportSize({ width: 375, height });
+  await page.goto(origin + '/');
+  await page.locator('.zen-title').click();
+  const trigger = page.getByRole('button', { name: /^Start considering:/ });
+  await trigger.scrollIntoViewIfNeeded();
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('grid').waitFor();
+  await page.waitForTimeout(300);
+  const boxes = await page.evaluate(() => {
+    const grid = document.querySelector('[role=grid]');
+    const popup = grid.closest('[data-slot=popover-content]');
+    const days = [...grid.querySelectorAll('[role=gridcell] > *')].map((el) =>
+      el.getBoundingClientRect(),
+    );
+    const nav = [...popup.querySelectorAll('[slot=previous], [slot=next]')]
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0);
+    const overlap = (a, b) =>
+      a.x < b.x + b.width - 0.5 &&
+      b.x < a.x + a.width - 0.5 &&
+      a.y < b.y + b.height - 0.5 &&
+      b.y < a.y + a.height - 0.5;
+    let overlaps = 0;
+    for (let i = 0; i < days.length; i++)
+      for (let j = i + 1; j < days.length; j++)
+        if (overlap(days[i], days[j])) overlaps++;
+    const p = popup.getBoundingClientRect();
+    return {
+      dayMin: Math.min(...days.map((r) => Math.min(r.width, r.height))),
+      navMin: Math.min(...nav.map((r) => Math.min(r.width, r.height))),
+      navCount: nav.length,
+      overlaps,
+      horizontalOverflow:
+        document.scrollingElement.scrollWidth > innerWidth ||
+        p.left < 0 ||
+        p.right > innerWidth,
+    };
+  });
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  const apply = page.getByRole('button', { name: 'Apply', exact: true });
+  let reached = false;
+  for (let i = 0; i < 6 && !reached; i++) {
+    await page.keyboard.press(tab);
+    reached = await apply.evaluate((el) => el === document.activeElement);
+  }
+  const applyBox = await apply.boundingBox();
+  const applyVisible =
+    !!applyBox && applyBox.y >= 0 && applyBox.y + applyBox.height <= height;
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  const label = await trigger.getAttribute('aria-label');
+  const focusBack = await trigger.evaluate(
+    (el) => el === document.activeElement,
+  );
+  await page.setViewportSize({ width: 1280, height: 800 });
+  return {
+    pass:
+      boxes.dayMin >= 44 &&
+      boxes.navMin >= 44 &&
+      boxes.navCount === 2 &&
+      boxes.overlaps === 0 &&
+      !boxes.horizontalOverflow &&
+      reached &&
+      applyVisible &&
+      /29 Oct 2026/.test(label ?? '') &&
+      focusBack,
+    ...boxes,
+    applyReachedByTab: reached,
+    applyVisible,
+    label,
+    focusBack,
+  };
+}
+
+/** Keyboard use of the header menu and the date chooser; German texts. */
+async function interaction({ browser, origin, engine }) {
+  const tab = tabKey(engine);
+  const { context, page } = await newPage(browser);
+  await signIn(page, origin);
+  const checks = {
+    // Enter opens, ArrowRight opens View, ArrowLeft returns, Escape closes
+    // the submenu first, then the menu, with focus back on the button;
+    // choosing "List" closes the menu and checks it.
+    async 'menu-keyboard'() {
+      const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      await menu.focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('menuitem', { name: 'View' }).waitFor();
+      await focusItem(page, 'View');
+      await page.keyboard.press('ArrowRight');
+      await page.getByRole('menuitemradio', { name: 'Zen' }).waitFor();
+      const zenChecked = await page
+        .getByRole('menuitemradio', { name: 'Zen' })
+        .getAttribute('aria-checked');
+      await page.keyboard.press('ArrowLeft');
+      await page.waitForTimeout(200);
+      const submenuClosedLeft = !(await page
+        .getByRole('menuitemradio', { name: 'List' })
+        .isVisible());
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(200);
+      const menuOpenAfterSubEscape = await page
+        .getByRole('menuitem', { name: 'View' })
+        .isVisible();
+      if (menuOpenAfterSubEscape) {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(200);
+      }
+      const backOnTrigger = /Menu/.test(await focused(page));
+      await page.keyboard.press('Enter');
+      await page.getByRole('menuitem', { name: 'View' }).waitFor();
+      await focusItem(page, 'View');
+      await page.keyboard.press('ArrowRight');
+      await page.getByRole('menuitemradio', { name: 'List' }).waitFor();
+      await focusItem(page, 'List');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      const listShown = await page.locator('.gate-list').isVisible();
+      const menuClosed = !(await page.getByRole('menu').count());
+      await menu.click();
+      await page.getByRole('menuitem', { name: 'View' }).hover();
+      await page.keyboard.press('ArrowRight');
+      await page.getByRole('menuitemradio', { name: 'List' }).waitFor();
+      const listChecked = await page
+        .getByRole('menuitemradio', { name: 'List' })
+        .getAttribute('aria-checked');
+      return {
+        pass:
+          zenChecked === 'true' &&
+          submenuClosedLeft &&
+          backOnTrigger &&
+          listShown &&
+          menuClosed &&
+          listChecked === 'true',
+        zenChecked,
+        submenuClosedLeft,
+        menuOpenAfterSubEscape,
+        backOnTrigger,
+        listShown,
+        menuClosed,
+        listChecked,
+      };
+    },
+    // Focus starts on the chosen day; arrows, PageDown, Enter and Apply.
+    async 'calendar-keyboard'() {
+      await page.locator('.zen-title').click();
+      const trigger = page.getByRole('button', { name: /^Start considering:/ });
+      await trigger.focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('grid').waitFor();
+      await page.waitForTimeout(200);
+      const start = await focused(page);
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('PageDown');
+      await page.keyboard.press('Enter');
+      for (let i = 0; i < 6 && !/Apply/.test(await focused(page)); i++)
+        await page.keyboard.press(tab);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      const label = await trigger.getAttribute('aria-label');
+      // The seed day is 28 Oct 2026: one day and one month later.
+      return {
+        pass:
+          /28 October 2026/.test(start) &&
+          /29 Nov 2026/.test(label ?? '') &&
+          /Start considering/.test(await focused(page)),
+        start,
+        label,
+      };
+    },
+    'calendar-targets-375x812': () => calendarTargets(page, origin, 812, tab),
+    'calendar-targets-375x560': () => calendarTargets(page, origin, 560, tab),
+    // German: month names and Monday first through the SDK locale; the
+    // adapters' and the SDK's texts.
+    async 'calendar-german'() {
+      await page.goto(origin + '/?lang=de');
+      await page.locator('.zen-title').click();
+      await page.getByRole('button', { name: /^Vormerken ab:/ }).click();
+      await page.getByRole('grid').waitFor();
+      const { heading, firstDay } = await page.evaluate(() => {
+        const popup = document
+          .querySelector('[role=grid]')
+          ?.closest('[data-slot=popover-content]');
+        const header = popup?.querySelector('th');
+        return {
+          heading: popup?.textContent?.slice(0, 40),
+          firstDay: header?.getAttribute('aria-label') ?? header?.textContent,
+        };
+      });
+      const apply = await page
+        .getByRole('button', { name: 'Übernehmen', exact: true })
+        .count();
+      const remove = await page
+        .getByRole('button', { name: 'Datum entfernen', exact: true })
+        .count();
+      await page.keyboard.press('Escape');
+      const close = await page
+        .getByRole('button', { name: 'Schließen', exact: true })
+        .count();
+      const save = await page
+        .getByRole('button', { name: 'Speichern' })
+        .count();
+      return {
+        pass:
+          /Oktober/.test(heading ?? '') &&
+          /^(Mo|M$)/.test(firstDay?.trim() ?? '') &&
+          apply === 1 &&
+          remove === 1 &&
+          close === 1 &&
+          save > 0,
+        heading,
+        firstDay,
+      };
+    },
+    // Removing the date of the optional field leaves no value in the draft.
+    async 'calendar-remove'() {
+      await page.goto(origin + '/');
+      await page.locator('.zen-title').click();
+      const trigger = page.getByRole('button', { name: /^Start considering:/ });
+      await trigger.click();
+      await page
+        .getByRole('button', { name: 'Remove date', exact: true })
+        .click();
+      await page.waitForTimeout(200);
+      const label = await trigger.getAttribute('aria-label');
+      const save = page.getByRole('button', { name: 'Save', exact: true });
+      const saveEnabled = await save.isEnabled();
+      await save.click();
+      const closed = await page
+        .getByRole('dialog', { name: 'Details' })
+        .waitFor({ state: 'detached', timeout: 5000 })
+        .then(
+          () => true,
+          () => false,
+        );
+      const after = await stored(origin, PLUMBER);
+      return {
+        pass:
+          label === 'Start considering: No date' &&
+          closed &&
+          after.value === null,
+        label,
+        saveEnabled,
+        closed,
+        after: after.value,
+        dialogText: closed
+          ? undefined
+          : await page.getByRole('dialog').first().innerText(),
+      };
+    },
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(checks)) {
+    await page.goto(origin + '/');
+    await page.locator('.zen-title').waitFor();
+    await fetch(origin + '/__reset');
+    results.push(await attempt(id, run));
+  }
+  await context.close();
+  return results;
+}
+
+/**
+ * Tailwind and SDK cascade: the package's classes win over the SDK's element
+ * rules inside SDK surfaces (layer order), and the bridge reaches the SDK's
+ * own controls.
+ */
+async function integration({ browser, origin }) {
+  const { context, page } = await newPage(browser);
+  await signIn(page, origin, '?theme=fresh');
+  const results = [];
+  results.push(
+    await attempt('package-classes-in-sdk-editor', async () => {
+      await page.goto(origin + '/?theme=fresh');
+      await page.locator('.zen-title').click();
+      const title = page.getByLabel('Title', { exact: true });
+      await title.waitFor();
+      const styles = await page.evaluate(() => {
+        const input = document.querySelector('[data-slot=input]');
+        const trigger = [...document.querySelectorAll('button')].find((b) =>
+          b.getAttribute('aria-label')?.startsWith('Start considering:'),
+        );
+        const s = (el) => getComputedStyle(el);
+        return {
+          insideEditor: !!input?.closest('[data-sempods-ui=editor]'),
+          // Input: bg-transparent and rounded-lg (utilities) over the SDK's
+          // field background and radius.
+          inputBackground: s(input).backgroundColor,
+          // The outline Button: a 1px border (utilities) over the SDK's
+          // `border: 0` for buttons.
+          triggerBorder: s(trigger).borderTopWidth,
+          triggerHeight: s(trigger).height,
+        };
+      });
+      return {
+        pass:
+          styles.insideEditor &&
+          /^(rgba\(0, 0, 0, 0\)|transparent)$/.test(styles.inputBackground) &&
+          styles.triggerBorder === '1px' &&
+          styles.triggerHeight === '44px',
+        ...styles,
+      };
+    }),
+  );
+  results.push(
+    await attempt('sdk-bridge', async () => {
+      const values = await page.evaluate(() => {
+        const save = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent === 'Save',
+        );
+        const field = document.querySelector('[data-sempods-ui=editor]');
+        const probe = document.createElement('div');
+        document.body.append(probe);
+        const resolve = (v) => {
+          probe.style.color = `var(${v})`;
+          return getComputedStyle(probe).color;
+        };
+        const result = {
+          savePrimary: getComputedStyle(save).backgroundColor,
+          primary: resolve('--primary'),
+          fieldLine:
+            getComputedStyle(field).getPropertyValue('--sp-field-line'),
+          focus: getComputedStyle(field).getPropertyValue('--sp-focus'),
+          input: resolve('--input'),
+          ring: resolve('--ring'),
+        };
+        probe.remove();
+        return result;
+      });
+      return {
+        pass:
+          values.savePrimary === values.primary &&
+          values.primary !== 'rgba(0, 0, 0, 0)' &&
+          values.fieldLine.trim() !== '' &&
+          values.focus.trim() !== '',
+        ...values,
+      };
+    }),
+  );
+  await context.close();
+  return results;
+}
+
+// [label, expected pass, kind, markup]: known failures must fail and readable
+// cases must pass, or the checker's green result means nothing.
+const contrastFixtures = [
+  [
+    'text-white-on-white',
+    false,
+    'text',
+    '<p aria-label="fx" style="color:#fff">Invisible</p>',
+  ],
+  [
+    'text-readable',
+    true,
+    'text',
+    '<p aria-label="fx" style="color:#1f2933">Readable</p>',
+  ],
+  [
+    'text-transparent',
+    false,
+    'text',
+    '<p aria-label="fx" style="color:rgb(0 0 0 / .3)">Faint</p>',
+  ],
+  [
+    'text-oklch',
+    true,
+    'text',
+    '<p aria-label="fx" style="color:oklch(0.3 0.02 250)">Oklch</p>',
+  ],
+  [
+    'text-large-3to1',
+    true,
+    'text-large',
+    '<p aria-label="fx" style="color:#949494;font-size:24px">Large</p>',
+  ],
+  [
+    'text-small-3to1',
+    false,
+    'text',
+    '<p aria-label="fx" style="color:#949494;font-size:16px">Small</p>',
+  ],
+  [
+    'value-white-on-white',
+    false,
+    'field-value',
+    '<input aria-label="fx" value="Hidden" style="color:#fff;background:#fff;border:1px solid #767676">',
+  ],
+  [
+    'value-readable',
+    true,
+    'field-value',
+    '<input aria-label="fx" value="Shown" style="color:#1f2933;border:1px solid #767676">',
+  ],
+  [
+    'textarea-low',
+    false,
+    'field-value',
+    '<textarea aria-label="fx" style="color:#999;border:1px solid #767676">Grey</textarea>',
+  ],
+  [
+    'placeholder-low',
+    false,
+    'placeholder',
+    '<style>#ph1::placeholder{color:#ccc;opacity:1}</style><input id="ph1" aria-label="fx" placeholder="Hint" style="border:1px solid #767676">',
+  ],
+  [
+    'placeholder-readable',
+    true,
+    'placeholder',
+    '<style>#ph2::placeholder{color:#595959;opacity:1}</style><input id="ph2" aria-label="fx" placeholder="Hint" style="border:1px solid #767676">',
+  ],
+  [
+    'icon-low',
+    false,
+    'icon',
+    '<button aria-label="fx" style="border:0;background:#fff"><svg width="20" height="20" style="stroke:#ccc"><path d="M2 2L18 18" /></svg></button>',
+  ],
+  [
+    'icon-readable',
+    true,
+    'icon',
+    '<button aria-label="fx" style="border:0;background:#fff"><svg width="20" height="20" style="stroke:#333"><path d="M2 2L18 18" /></svg></button>',
+  ],
+  [
+    'boundary-low',
+    false,
+    'field-boundary',
+    '<input aria-label="fx" style="border:1px solid #eee;color:#000" value="x">',
+  ],
+  [
+    'boundary-readable',
+    true,
+    'field-boundary',
+    '<input aria-label="fx" style="border:1px solid #767676;color:#000" value="x">',
+  ],
+];
+const focusFixtures = [
+  [
+    'focus-ring-50-teal',
+    false,
+    '<button aria-label="fx" class="f" style="--c:rgb(10 102 128 / .5)">Teal ring</button>',
+  ],
+  [
+    'focus-outline-solid',
+    true,
+    '<button aria-label="fx" class="o">Solid</button>',
+  ],
+  [
+    'focus-outline-low',
+    false,
+    '<button aria-label="fx" class="l">Low</button>',
+  ],
+];
+const fixtureCss = `<style>body{margin:16px;background:#fff;color:#000;font:16px system-ui}
+.f:focus-visible{outline:none;box-shadow:0 0 0 3px var(--c)}
+.o:focus-visible{outline:2px solid #1f2933;outline-offset:2px}
+.l:focus-visible{outline:2px solid #ddd;outline-offset:2px}</style>`;
+
+// The rendered states of the reference screen.
+const states = {
+  async zen(page) {
+    await page.locator('.zen-title').waitFor();
+  },
+  async menu(page) {
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'View' }).focus();
+    await page.keyboard.press('ArrowRight');
+    await page.getByRole('menuitemradio', { name: 'List' }).waitFor();
+  },
+  async dialog(page) {
+    await page.locator('.zen-title').click();
+    await page.getByLabel('Title', { exact: true }).waitFor();
+  },
+  async date(page) {
+    await states.dialog(page);
+    await page.getByRole('button', { name: /^Start considering:/ }).click();
+    await page.getByRole('grid').waitFor();
+  },
+  async confirm(page) {
+    await states.dialog(page);
+    await page.getByLabel('Title', { exact: true }).fill('Changed title');
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('alertdialog').waitFor();
+  },
+};
+// Both palettes (the package default and the app's "fresh") with every
+// action and secondary variant at least once.
+const combos =
+  process.env.UI_COMBOS === '0'
+    ? []
+    : [
+        ['default', 'solid', 'tonal'],
+        ['default', 'inverted', 'outline'],
+        ['fresh', 'solid', 'text'],
+        ['fresh', 'inverted', 'tonal'],
+      ];
+
+/**
+ * Rendered contrast (scripts/ui-contrast.js): its controls first, then each
+ * state × palette and variants × light and dark × 375 and 1280px. Zen actions
+ * are also measured hovered and pressed; controls reached by Tab with their
+ * focus indicator. A measurement of these states, not a full audit.
+ */
+async function contrast({ browser, origin, engine }) {
+  const tab = tabKey(engine);
+  const results = [];
+  {
+    const { context, page } = await newPage(browser);
+    for (const [label, expected, kind, markup] of contrastFixtures) {
+      await page.setContent(
+        `<!doctype html>${fixtureCss}<body>${markup}</body>`,
+      );
+      await page.addScriptTag({ content: contrastScript });
+      const hit = (await page.evaluate(() => window.uiContrast())).find(
+        (r) => r.kind === kind && r.what.includes('"fx"'),
+      );
+      results.push({
+        id: `control-${label}`,
+        pass: !!hit && hit.pass === expected,
+        measured: hit,
+      });
+    }
+    for (const [label, expected, markup] of focusFixtures) {
+      await page.setContent(
+        `<!doctype html>${fixtureCss}<body><button>before</button>${markup}</body>`,
+      );
+      await page.addScriptTag({ content: contrastScript });
+      await page.keyboard.press(tab);
+      await page.keyboard.press(tab);
+      await page.waitForTimeout(50);
+      const hit = await page.evaluate(() => window.uiFocusIndicator());
+      results.push({
+        id: `control-${label}`,
+        pass: !!hit && hit.pass === expected,
+        measured: hit,
+      });
+    }
+    await context.close();
+  }
+  const { context, page } = await newPage(browser);
+  await context.addInitScript(contrastScript);
+  await signIn(page, origin);
+  // The reported blind spot: the task title made white on white must fail.
+  results.push(
+    await attempt('control-app-title-white-on-white', async () => {
+      await states.dialog(page);
+      await page.waitForTimeout(300);
+      const failing = () =>
+        page.evaluate(
+          () =>
+            window
+              .uiContrast()
+              .filter((r) => r.kind === 'field-value' && !r.pass).length,
+        );
+      const before = await failing();
+      await page.getByLabel('Title', { exact: true }).evaluate((el) => {
+        el.style.setProperty('color', '#fff', 'important');
+        el.style.setProperty('background-color', '#fff', 'important');
+      });
+      // The input's colours transition (transition-colors, 150ms).
+      await page.waitForTimeout(400);
+      const after = await failing();
+      return { pass: before === 0 && after === 1, before, after };
+    }),
+  );
+  for (const [theme, actions, secondary] of combos) {
+    const query = `?theme=${theme}&actions=${actions}&secondary=${secondary}`;
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme });
+      for (const [state, reach] of Object.entries(states))
+        for (const width of [375, 1280]) {
+          const id = `${theme}/${actions}/${secondary} ${scheme} ${state} ${width}`;
+          results.push(
+            await attempt(id, async () => {
+              await page.setViewportSize({
+                width,
+                height: width < 600 ? 812 : 800,
+              });
+              await page.goto(origin + '/' + query);
+              await reach(page);
+              await page.waitForTimeout(300);
+              const measured = await page.evaluate(() => window.uiContrast());
+              const tagged = (list, suffix) =>
+                list.map((m) => ({ ...m, what: `${m.what} ${suffix}` }));
+              if (state === 'zen')
+                for (const name of ['Complete', 'Not today', 'Previous task']) {
+                  const target = page.getByRole('button', {
+                    name,
+                    exact: true,
+                  });
+                  await target.hover();
+                  await page.waitForTimeout(200);
+                  measured.push(
+                    ...tagged(
+                      await target.evaluate((el) => window.uiContrast(el)),
+                      ':hover',
+                    ),
+                  );
+                  // Pressed, released away from the button: nothing runs.
+                  await page.mouse.down();
+                  await page.waitForTimeout(100);
+                  measured.push(
+                    ...tagged(
+                      await target.evaluate((el) => window.uiContrast(el)),
+                      ':active',
+                    ),
+                  );
+                  await page.mouse.move(1, 1);
+                  await page.mouse.up();
+                }
+              const focus = [];
+              for (let i = 0; i < 8; i++) {
+                await page.keyboard.press(tab);
+                await page.waitForTimeout(200);
+                const f = await page.evaluate(() => window.uiFocusIndicator());
+                if (f && !focus.some((x) => x.what === f.what)) {
+                  focus.push(f);
+                  measured.push(
+                    ...tagged(
+                      await page.evaluate(() =>
+                        window.uiContrast(document.activeElement),
+                      ),
+                      ':focus',
+                    ),
+                  );
+                }
+              }
+              const failures = [
+                ...new Map(
+                  measured
+                    .filter((m) => !m.pass)
+                    .map((f) => [f.kind + f.what + f.fg + f.bg, f]),
+                ).values(),
+              ];
+              const min = (kind) =>
+                Math.min(
+                  ...measured
+                    .filter((m) => m.kind === kind)
+                    .map((m) => m.ratio),
+                );
+              return {
+                pass:
+                  measured.length > 0 &&
+                  failures.length === 0 &&
+                  focus.every((f) => f.pass),
+                checked: measured.length,
+                minText: min('text'),
+                minIcon: min('icon'),
+                minField: min('field-boundary'),
+                minFocus: Math.min(...focus.map((f) => f.ratio)),
+                failures,
+                focusFailures: focus.filter((f) => !f.pass),
+              };
+            }),
+          );
+        }
+    }
+  }
+  await context.close();
+  return results;
+}
+
+export const suites = { gate, roundtrip, interaction, integration, contrast };

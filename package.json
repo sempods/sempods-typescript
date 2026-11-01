@@ -15,13 +15,14 @@
     "lint": "eslint packages scripts tests examples eslint.config.mjs vitest.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm format:check && pnpm lint && pnpm check:docs && pnpm typecheck && pnpm test && pnpm test:publish && pnpm test:consumers && pnpm test:runtime && pnpm test:todo",
+    "check": "pnpm format:check && pnpm lint && pnpm check:docs && pnpm typecheck && pnpm test && pnpm test:publish && pnpm test:consumers && pnpm test:runtime && pnpm test:todo && pnpm test:ui",
     "test:runtime": "pnpm build && node scripts/test-runtime-consumer.mjs",
     "dev:todo": "pnpm build && node scripts/dev-todo.mjs",
     "build:examples": "tsc -p examples/tsconfig.json && esbuild examples/node-script/src/main.ts --bundle --platform=node --format=esm --outfile=examples/node-script/dist/main.js",
     "test:todo": "pnpm build && node scripts/test-todo-consumer.mjs",
     "test:publish": "node scripts/test-publish-packages.mjs",
-    "check:docs": "node --test scripts/check-docs.test.mjs scripts/package-docs.test.mjs && node scripts/check-docs.mjs"
+    "check:docs": "node --test scripts/check-docs.test.mjs scripts/package-docs.test.mjs && node scripts/check-docs.mjs",
+    "test:ui": "pnpm build && node scripts/test-ui-consumer.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
