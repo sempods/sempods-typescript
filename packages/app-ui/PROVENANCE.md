@@ -14,9 +14,13 @@ Changes against the registry output:
 - `button.tsx`: the `default` and `secondary` variants read the contract's
   action tokens (`bg-action`, `border-action-border`, `text-action-foreground`,
   `bg-action-secondary`, …) instead of `primary` and `secondary` directly.
-- `dialog.tsx`: no entry animation on the overlay and the modal. In WebKit,
-  React Aria kept a modal that closed during its entry animation mounted for
-  good (`data-entering` and `data-exiting` at once).
+- `dialog.tsx`: no entry or exit animation on the overlay and the modal. In
+  WebKit, React Aria kept a modal that closed during its entry animation
+  mounted for good (`data-entering` and `data-exiting` at once); in headless
+  WebKit on Linux its exit animation stalled for seconds, and React Aria
+  unmounts the modal only when that animation ends.
+- `calendar.tsx`: without the registry's `showWeekNumber` option, which only
+  shifted the cells' rounding: React Aria renders no week-number column.
 - All files: relative imports with `.js` extensions, no `"use client"`
   directive, Prettier formatting.
 

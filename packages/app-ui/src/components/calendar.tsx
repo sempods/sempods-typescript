@@ -30,14 +30,11 @@ import {
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 
 const cellVariants = cva(
-  'group/day relative mt-2 aspect-square h-full w-full cursor-default rounded-(--cell-radius) p-0 text-center select-none [&:is(:last-child>[data-selected=true])>div]:rounded-r-(--cell-radius)',
+  'group/day relative mt-2 aspect-square h-full w-full cursor-default rounded-(--cell-radius) p-0 text-center select-none [&:is(:first-child>[data-selected=true])>div]:rounded-l-(--cell-radius) [&:is(:last-child>[data-selected=true])>div]:rounded-r-(--cell-radius)',
   {
+    // React Aria renders no week-number column, so the registry's
+    // showWeekNumber option is left out.
     variants: {
-      showWeekNumber: {
-        false:
-          '[&:is(:first-child>[data-selected=true])>div]:rounded-l-(--cell-radius)',
-        true: '[&:is(:nth-child(2)>[data-selected=true])>div]:rounded-l-(--cell-radius)',
-      },
       isToday: {
         true: 'rounded-(--cell-radius) bg-muted text-foreground data-[selected=true]:rounded-none',
       },
@@ -68,7 +65,6 @@ function Calendar<
     buttonVariant?: React.ComponentProps<typeof Button>['variant'];
     captionLayout?: 'label' | 'dropdown';
     numberOfMonths?: number;
-    showWeekNumber?: boolean;
     headerFormat?: Intl.DateTimeFormatOptions;
     renderCell?: (
       renderProps: CalendarCellRenderProps & {
@@ -98,7 +94,6 @@ function RangeCalendar<T extends DateValue>(
     captionLayout?: 'label' | 'dropdown';
     headerFormat?: Intl.DateTimeFormatOptions;
     numberOfMonths?: number;
-    showWeekNumber?: boolean;
     renderCell?: (
       renderProps: CalendarCellRenderProps & {
         defaultChildren: React.ReactNode;
@@ -125,7 +120,6 @@ function CalendarInner({
   captionLayout = 'label',
   buttonVariant = 'ghost',
   numberOfMonths = 1,
-  showWeekNumber = false,
   headerFormat,
   renderCell,
   isRange,
@@ -133,7 +127,6 @@ function CalendarInner({
   buttonVariant?: React.ComponentProps<typeof Button>['variant'];
   captionLayout?: 'label' | 'dropdown';
   numberOfMonths?: number;
-  showWeekNumber?: boolean;
   headerFormat?: Intl.DateTimeFormatOptions;
   renderCell?: (
     renderProps: CalendarCellRenderProps & { defaultChildren: React.ReactNode },
@@ -189,9 +182,7 @@ function CalendarInner({
               {(date) => (
                 <CalendarCell
                   date={date}
-                  className={(renderProps) =>
-                    cellVariants({ ...renderProps, showWeekNumber })
-                  }
+                  className={(renderProps) => cellVariants(renderProps)}
                 >
                   {(renderProps) => (
                     <div
