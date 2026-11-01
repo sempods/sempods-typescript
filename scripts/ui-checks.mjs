@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, innerHeight, innerWidth, window */
+/* global document, getComputedStyle, innerHeight, innerWidth, MutationObserver, window */
 // The checks of the UI gate (scripts/test-ui-consumer.mjs), ported from the
 // template's spike #120 (gate.mjs, roundtrip.mjs, interaction.mjs,
 // evidence.mjs and contrast-selftest.mjs on sempods-apps-template branch
@@ -692,101 +692,104 @@ async function calendarTargets(page, origin, height, tab) {
   // Sizes as they settle, not halfway through the popover's zoom-in, which
   // headless WebKit on Linux can stretch over seconds.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.setViewportSize({ width: 375, height });
-  await page.goto(origin + '/');
-  await openTask(page);
-  const trigger = page.getByRole('button', { name: /^Start considering:/ });
-  await trigger.scrollIntoViewIfNeeded();
-  await trigger.focus();
-  await page.keyboard.press('Enter');
-  await page.getByRole('grid').waitFor();
-  await settle(page);
-  const boxes = await page.evaluate(() => {
-    const grid = document.querySelector('[role=grid]');
-    const popup = grid.closest('[data-slot=popover-content]');
-    const days = [...grid.querySelectorAll('[role=gridcell] > *')].map((el) =>
-      el.getBoundingClientRect(),
+  try {
+    await page.setViewportSize({ width: 375, height });
+    await page.goto(origin + '/');
+    await openTask(page);
+    const trigger = page.getByRole('button', { name: /^Start considering:/ });
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('grid').waitFor();
+    await settle(page);
+    const boxes = await page.evaluate(() => {
+      const grid = document.querySelector('[role=grid]');
+      const popup = grid.closest('[data-slot=popover-content]');
+      const days = [...grid.querySelectorAll('[role=gridcell] > *')].map((el) =>
+        el.getBoundingClientRect(),
+      );
+      const nav = [...popup.querySelectorAll('[slot=previous], [slot=next]')]
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.width > 0);
+      const overlap = (a, b) =>
+        a.x < b.x + b.width - 0.5 &&
+        b.x < a.x + a.width - 0.5 &&
+        a.y < b.y + b.height - 0.5 &&
+        b.y < a.y + a.height - 0.5;
+      let overlaps = 0;
+      for (let i = 0; i < days.length; i++)
+        for (let j = i + 1; j < days.length; j++)
+          if (overlap(days[i], days[j])) overlaps++;
+      const p = popup.getBoundingClientRect();
+      // Apply and Remove date, as the chooser opens: inside the screen and on
+      // top at their centre, without scrolling.
+      const actions = [...popup.querySelectorAll('button')]
+        .filter((b) => /^(Apply|Remove date)$/.test(b.textContent ?? ''))
+        .map((b) => {
+          const r = b.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            r.x + r.width / 2,
+            r.y + r.height / 2,
+          );
+          return (
+            r.top >= 0 &&
+            r.bottom <= innerHeight &&
+            !!hit &&
+            b.contains(hit) &&
+            Math.min(r.width, r.height) >= 44
+          );
+        });
+      return {
+        actionsOnOpen: actions.length === 2 && actions.every(Boolean),
+        dayMin: Math.min(...days.map((r) => Math.min(r.width, r.height))),
+        navMin: Math.min(...nav.map((r) => Math.min(r.width, r.height))),
+        navCount: nav.length,
+        overlaps,
+        horizontalOverflow:
+          document.scrollingElement.scrollWidth > innerWidth ||
+          p.left < 0 ||
+          p.right > innerWidth,
+      };
+    });
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Enter');
+    const apply = page.getByRole('button', { name: 'Apply', exact: true });
+    let reached = false;
+    for (let i = 0; i < 6 && !reached; i++) {
+      await page.keyboard.press(tab);
+      reached = await apply.evaluate((el) => el === document.activeElement);
+    }
+    const applyBox = await apply.boundingBox();
+    const applyVisible =
+      !!applyBox && applyBox.y >= 0 && applyBox.y + applyBox.height <= height;
+    await page.keyboard.press('Enter');
+    await hidden(page.getByRole('grid'));
+    const label = await trigger.getAttribute('aria-label');
+    const focusBack = /Start considering/.test(
+      await focusUntil(page, /Start considering/, focused),
     );
-    const nav = [...popup.querySelectorAll('[slot=previous], [slot=next]')]
-      .map((el) => el.getBoundingClientRect())
-      .filter((r) => r.width > 0);
-    const overlap = (a, b) =>
-      a.x < b.x + b.width - 0.5 &&
-      b.x < a.x + a.width - 0.5 &&
-      a.y < b.y + b.height - 0.5 &&
-      b.y < a.y + a.height - 0.5;
-    let overlaps = 0;
-    for (let i = 0; i < days.length; i++)
-      for (let j = i + 1; j < days.length; j++)
-        if (overlap(days[i], days[j])) overlaps++;
-    const p = popup.getBoundingClientRect();
-    // Apply and Remove date, as the chooser opens: inside the screen and on
-    // top at their centre, without scrolling.
-    const actions = [...popup.querySelectorAll('button')]
-      .filter((b) => /^(Apply|Remove date)$/.test(b.textContent ?? ''))
-      .map((b) => {
-        const r = b.getBoundingClientRect();
-        const hit = document.elementFromPoint(
-          r.x + r.width / 2,
-          r.y + r.height / 2,
-        );
-        return (
-          r.top >= 0 &&
-          r.bottom <= innerHeight &&
-          !!hit &&
-          b.contains(hit) &&
-          Math.min(r.width, r.height) >= 44
-        );
-      });
     return {
-      actionsOnOpen: actions.length === 2 && actions.every(Boolean),
-      dayMin: Math.min(...days.map((r) => Math.min(r.width, r.height))),
-      navMin: Math.min(...nav.map((r) => Math.min(r.width, r.height))),
-      navCount: nav.length,
-      overlaps,
-      horizontalOverflow:
-        document.scrollingElement.scrollWidth > innerWidth ||
-        p.left < 0 ||
-        p.right > innerWidth,
-    };
-  });
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Enter');
-  const apply = page.getByRole('button', { name: 'Apply', exact: true });
-  let reached = false;
-  for (let i = 0; i < 6 && !reached; i++) {
-    await page.keyboard.press(tab);
-    reached = await apply.evaluate((el) => el === document.activeElement);
-  }
-  const applyBox = await apply.boundingBox();
-  const applyVisible =
-    !!applyBox && applyBox.y >= 0 && applyBox.y + applyBox.height <= height;
-  await page.keyboard.press('Enter');
-  await hidden(page.getByRole('grid'));
-  const label = await trigger.getAttribute('aria-label');
-  const focusBack = /Start considering/.test(
-    await focusUntil(page, /Start considering/, focused),
-  );
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-  return {
-    pass:
-      boxes.actionsOnOpen &&
-      boxes.dayMin >= 44 &&
-      boxes.navMin >= 44 &&
-      boxes.navCount === 2 &&
-      boxes.overlaps === 0 &&
-      !boxes.horizontalOverflow &&
-      reached &&
-      applyVisible &&
-      /29 Oct 2026/.test(label ?? '') &&
+      pass:
+        boxes.actionsOnOpen &&
+        boxes.dayMin >= 44 &&
+        boxes.navMin >= 44 &&
+        boxes.navCount === 2 &&
+        boxes.overlaps === 0 &&
+        !boxes.horizontalOverflow &&
+        reached &&
+        applyVisible &&
+        /29 Oct 2026/.test(label ?? '') &&
+        focusBack,
+      ...boxes,
+      applyReachedByTab: reached,
+      applyVisible,
+      label,
       focusBack,
-    ...boxes,
-    applyReachedByTab: reached,
-    applyVisible,
-    label,
-    focusBack,
-  };
+    };
+  } finally {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+  }
 }
 
 /** Keyboard use of the header menu and the date chooser; German texts. */
@@ -1052,26 +1055,41 @@ async function integration({ browser, origin }) {
   results.push(
     await attempt('reduced-motion', async () => {
       // The header menu opens with its zoom-in, and without one when the
-      // person asks for reduced motion.
+      // person asks for reduced motion; measured as the menu is inserted,
+      // before a 100ms animation could have ended.
       const animations = async (reducedMotion) => {
         await page.emulateMedia({ reducedMotion });
         await page.goto(origin + '/');
+        await page.evaluate(() => {
+          window.menuAnimation = new Promise((resolve) => {
+            const observer = new MutationObserver(() => {
+              const menu = document.querySelector(
+                '[data-slot=dropdown-menu-content]',
+              );
+              if (!menu) return;
+              observer.disconnect();
+              resolve(getComputedStyle(menu).animationName);
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+          });
+        });
         await page.getByRole('button', { name: 'Menu', exact: true }).click();
-        await page.getByRole('menu').waitFor();
-        const names = await page.evaluate(
-          () =>
-            getComputedStyle(
-              document.querySelector('[data-slot=dropdown-menu-content]'),
-            ).animationName,
-        );
+        const name = await page.evaluate(() => window.menuAnimation);
         await page.keyboard.press('Escape');
         await hidden(page.getByRole('menu'));
-        return names;
+        return name;
       };
-      const normal = await animations('no-preference');
-      const reduced = await animations('reduce');
-      await page.emulateMedia({ reducedMotion: 'no-preference' });
-      return { pass: normal !== 'none' && reduced === 'none', normal, reduced };
+      try {
+        const normal = await animations('no-preference');
+        const reduced = await animations('reduce');
+        return {
+          pass: normal !== 'none' && reduced === 'none',
+          normal,
+          reduced,
+        };
+      } finally {
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+      }
     }),
   );
   await context.close();

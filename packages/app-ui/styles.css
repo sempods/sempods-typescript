@@ -240,11 +240,12 @@
 
 /* 5. Motion. A person who asks for reduced motion gets popovers, menus and
    selects without entry and exit animations; React Aria then mounts and
-   removes them at once. Its own layer, after Tailwind's utilities, wins over
+   removes them at once. Only overlays entering or leaving are affected, so a
+   spinner keeps turning. Its own layer, after Tailwind's utilities, wins over
    the components' animate-in and animate-out. */
 @layer app-ui-motion {
   @media (prefers-reduced-motion: reduce) {
-    [data-slot] {
+    :where([data-entering], [data-exiting]) {
       animation: none;
     }
   }
