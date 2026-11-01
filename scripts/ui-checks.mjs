@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, history, innerHeight, innerWidth, MutationObserver, window */
+/* global document, getComputedStyle, history, innerHeight, innerWidth, location, MutationObserver, window */
 // The checks of the UI gate (scripts/test-ui-consumer.mjs), ported from the
 // template's spike #120 (gate.mjs, roundtrip.mjs, interaction.mjs,
 // evidence.mjs, contrast-selftest.mjs and routing-gate.mjs on
@@ -1754,6 +1754,31 @@ const routingChecks = (page, origin) => {
       );
       return { pass: back && forward, back, forward, path: path() };
     },
+    // A fragment link adds an entry the router did not write (Codex, #208):
+    // staying after two entries back returns to the task, not to the
+    // fragment entry.
+    async 'fragment-entry-back-keep'() {
+      await toListInApp();
+      await page.evaluate(() => (location.hash = 'section'));
+      await until(page, async () => url().hash === '#section');
+      await plumberLink.click();
+      await title.waitFor();
+      await dirty();
+      await page.evaluate(() => history.go(-2));
+      const asked = await answer('keep');
+      const stayed = await until(
+        page,
+        async () =>
+          pathname() === at && url().hash === '' && (await consistent()),
+      );
+      const kept = (await draft()).endsWith(EDIT);
+      return {
+        pass: asked && stayed && kept,
+        asked,
+        draftKept: kept,
+        url: page.url(),
+      };
+    },
     // An invalid legacy link keeps its address and its error page.
     async 'invalid-legacy-stays'() {
       await page.goto(origin + '/?task=!!!');
@@ -1859,7 +1884,7 @@ async function signInAt(page, origin, address) {
  * The routing matrix of the template's routing spike (#114, branch
  * claude/120-ui-spike, scripts/routing-gate.mjs): 29 checks of addresses,
  * links and history moves with the package's router, three of them signed
- * out. Each history check asserts the address and what is shown together.
+ * out, and one for a fragment entry. Each history check asserts the address and what is shown together.
  */
 async function routing({ browser, origin }) {
   const results = [];

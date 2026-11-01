@@ -183,3 +183,34 @@ it('keeps unknown addresses and shows the address again on a foreign entry', asy
     expect.any(Number),
   ]);
 });
+
+it('counts a fragment entry, so a declined Back returns to the shown entry', async () => {
+  render(<Frame />);
+  act(() => nav.go({ page: 'list' }));
+  const list = state().position!;
+  // A fragment link: a new entry at the same address, without a position.
+  await act(async () => {
+    const changed = new Promise((resolve) =>
+      addEventListener('hashchange', resolve, { once: true }),
+    );
+    location.hash = 'section';
+    await changed;
+  });
+  expect(state().position).toBe(list + 1);
+  act(() => nav.go({ page: 'task' }));
+  expect(state().position).toBe(list + 2);
+  asking = true;
+  await traverse(-2);
+  await act(async () => {
+    const popped = new Promise((resolve) =>
+      addEventListener('popstate', resolve, { once: true }),
+    );
+    ask!(false);
+    await popped;
+  });
+  expect([address(), shown(), state().position]).toEqual([
+    '/task',
+    'task',
+    list + 2,
+  ]);
+});

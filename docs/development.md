@@ -142,7 +142,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     invalid addresses show explicit pages; links name the source Context, a
     named source is read and written (the other Context's copy stays) also on
     the action route and after reload, and an unreadable one is an explicit
-    error without an editor.
+    error without an editor. One more check: after a fragment link's entry,
+    staying after two entries back returns to the task screen.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

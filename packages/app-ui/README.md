@@ -673,7 +673,7 @@ cascade with the SDK's styles; the rendered contrast of both palettes and
 all variants in light and dark mode; and the router's 29-check matrix of
 links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
-Context. It uses a loopback fixture Pod: it is not
+Context, plus a fragment link's entry in the history. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits

@@ -70,7 +70,7 @@ interface Session {
   deciding: boolean;
   /** The SDK's `navigate` of the mounted frame. */
   navigate?: (action: () => void) => Promise<boolean>;
-  /** Mounted `useNav` calls; the popstate listener exists while any is. */
+  /** Mounted `useNav` calls; the history listeners exist while any is. */
   frames: number;
 }
 
@@ -125,6 +125,20 @@ export function replaceUrl(url: string): void {
   show(here());
 }
 
+/**
+ * An entry at the shown address: nothing to decide. A fragment link adds one
+ * without the router's position, right after the shown entry; it takes the
+ * next position, so the router's offsets keep matching the history.
+ */
+function adopt(s: Session) {
+  const position = positionOf();
+  if (position !== undefined) s.position = position;
+  else {
+    s.position += 1;
+    history.replaceState({ ...entry(), position: s.position }, '');
+  }
+}
+
 function onPop() {
   const s = current();
   if (s.undoing) {
@@ -132,13 +146,21 @@ function onPop() {
     return;
   }
   if (s.deciding) return;
-  // The same address (a fragment, a step back to the shown entry): nothing
-  // to decide.
-  if (here() === s.shown) {
-    s.position = positionOf() ?? s.position;
-    return;
-  }
-  void decide(s);
+  if (here() === s.shown) adopt(s);
+  else void decide(s);
+}
+
+// A fragment navigation fires popstate in current browsers; hashchange
+// covers one that does not.
+function onHash() {
+  const s = current();
+  if (
+    !s.undoing &&
+    !s.deciding &&
+    here() === s.shown &&
+    positionOf() === undefined
+  )
+    adopt(s);
 }
 
 async function decide(s: Session) {
@@ -203,10 +225,14 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
   useEffect(() => {
     const s = current();
     s.navigate = navigate;
-    if (s.frames++ === 0) addEventListener('popstate', onPop);
+    if (s.frames++ === 0) {
+      addEventListener('popstate', onPop);
+      addEventListener('hashchange', onHash);
+    }
     return () => {
       if (--s.frames > 0) return;
       removeEventListener('popstate', onPop);
+      removeEventListener('hashchange', onHash);
       s.navigate = undefined;
     };
   }, [navigate]);
