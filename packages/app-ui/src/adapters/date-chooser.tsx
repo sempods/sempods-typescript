@@ -6,6 +6,7 @@ import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Calendar } from '../components/calendar.js';
 import { Popover, PopoverTrigger } from '../components/popover.js';
+import { useFocusReturn } from './focus-return.js';
 import { useAdapterTexts } from './texts.js';
 
 export interface DateChooserProps {
@@ -50,6 +51,7 @@ export function DateChooser({
   const t = useAdapterTexts();
   const { locale, format } = useSdkLocale();
   const [open, setOpen] = useState(false);
+  const trigger = useFocusReturn<HTMLButtonElement>(open);
   // A stored zoned date-time starts the chooser at the day of its own offset;
   // it is replaced only when a day is applied.
   const day = calendarDay(value);
@@ -79,6 +81,7 @@ export function DateChooser({
         }}
       >
         <Button
+          ref={trigger}
           variant="outline"
           className="h-11 justify-between text-base font-normal"
           aria-label={`${label}: ${shown}`}
@@ -86,7 +89,7 @@ export function DateChooser({
         >
           {shown}
         </Button>
-        {/* React Aria limits the height to the screen; the content scrolls. */}
+        {/* React Aria limits the height to the screen; the calendar scrolls. */}
         <Popover
           placement="bottom start"
           className="w-auto overflow-y-auto p-2"
@@ -102,24 +105,28 @@ export function DateChooser({
                 className="[--cell-size:--spacing(11)]"
               />
             </I18nProvider>
-            <Button
-              className="mt-2 h-11 w-full"
-              isDisabled={!picked}
-              onPress={() => {
-                if (picked) close(picked.toString());
-              }}
-            >
-              {labels?.apply ?? t.apply}
-            </Button>
-            {optional && value !== null && (
+            {/* The actions stay at the popover's bottom edge while the
+                calendar scrolls on a short screen, above the days (z-10). */}
+            <div className="sticky -bottom-2 z-20 -mx-2 -mb-2 flex gap-2 border-t bg-popover p-2">
+              {optional && value !== null && (
+                <Button
+                  variant="ghost"
+                  className="h-11 flex-1"
+                  onPress={() => close(null)}
+                >
+                  {labels?.remove ?? t.removeDate}
+                </Button>
+              )}
               <Button
-                variant="ghost"
-                className="mt-1 h-11 w-full"
-                onPress={() => close(null)}
+                className="h-11 flex-1"
+                isDisabled={!picked}
+                onPress={() => {
+                  if (picked) close(picked.toString());
+                }}
               >
-                {labels?.remove ?? t.removeDate}
+                {labels?.apply ?? t.apply}
               </Button>
-            )}
+            </div>
           </AriaDialog>
         </Popover>
       </PopoverTrigger>

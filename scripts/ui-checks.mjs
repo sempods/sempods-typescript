@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, innerWidth, window */
+/* global document, getComputedStyle, innerHeight, innerWidth, window */
 // The checks of the UI gate (scripts/test-ui-consumer.mjs), ported from the
 // template's spike #120 (gate.mjs, roundtrip.mjs, interaction.mjs,
 // evidence.mjs and contrast-selftest.mjs on sempods-apps-template branch
@@ -660,8 +660,9 @@ async function focusItem(page, name) {
 
 /**
  * The date chooser's targets on a phone, also on a short screen: days and
- * month buttons at least 44 × 44px without overlap, no horizontal overflow,
- * Apply reachable by Tab and visible, focus back on the trigger.
+ * month buttons at least 44 × 44px without overlap, Apply and Remove date
+ * visible as it opens, no horizontal overflow, Apply reachable by Tab and
+ * visible, focus back on the trigger.
  */
 async function calendarTargets(page, origin, height, tab) {
   await page.setViewportSize({ width: 375, height });
@@ -692,7 +693,26 @@ async function calendarTargets(page, origin, height, tab) {
       for (let j = i + 1; j < days.length; j++)
         if (overlap(days[i], days[j])) overlaps++;
     const p = popup.getBoundingClientRect();
+    // Apply and Remove date, as the chooser opens: inside the screen and on
+    // top at their centre, without scrolling.
+    const actions = [...popup.querySelectorAll('button')]
+      .filter((b) => /^(Apply|Remove date)$/.test(b.textContent ?? ''))
+      .map((b) => {
+        const r = b.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          r.x + r.width / 2,
+          r.y + r.height / 2,
+        );
+        return (
+          r.top >= 0 &&
+          r.bottom <= innerHeight &&
+          !!hit &&
+          b.contains(hit) &&
+          Math.min(r.width, r.height) >= 44
+        );
+      });
     return {
+      actionsOnOpen: actions.length === 2 && actions.every(Boolean),
       dayMin: Math.min(...days.map((r) => Math.min(r.width, r.height))),
       navMin: Math.min(...nav.map((r) => Math.min(r.width, r.height))),
       navCount: nav.length,
@@ -723,6 +743,7 @@ async function calendarTargets(page, origin, height, tab) {
   await page.setViewportSize({ width: 1280, height: 800 });
   return {
     pass:
+      boxes.actionsOnOpen &&
       boxes.dayMin >= 44 &&
       boxes.navMin >= 44 &&
       boxes.navCount === 2 &&
