@@ -62,5 +62,6 @@ resource and action addresses through an app-owned address model, an
 opener-aware `close`, and one decision for history moves while the SDK asks.
 Changes against the spike: the history session starts on first use instead of
 at import, one popstate listener for all mounted frames, no decision for a
-move to the shown address, and `link` leaves clicks with a `target` to the
-browser.
+move to the shown address, a fragment link's entry takes the next position
+and the opener (kept with its position, so `close` returns past it), and
+`link` leaves clicks with a `target` to the browser.

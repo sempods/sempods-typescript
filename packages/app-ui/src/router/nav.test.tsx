@@ -100,11 +100,11 @@ it('pushes a switch with its opener and replaces in place', async () => {
     'task',
     length + 1,
   ]);
-  expect(state()).toEqual({ position: 1, opener: '/list' });
+  expect(state()).toEqual({ position: 1, opener: '/list', from: 0 });
   act(() => nav.go({ page: 'other' }, { replace: true }));
   expect([address(), history.length]).toEqual(['/other', length + 1]);
   // The opener stays with the entry.
-  expect(state()).toEqual({ position: 1, opener: '/list' });
+  expect(state()).toEqual({ position: 1, opener: '/list', from: 0 });
   await traverse(-1);
   expect(shown()).toBe('list');
 });
@@ -212,5 +212,32 @@ it('counts a fragment entry, so a declined Back returns to the shown entry', asy
     '/task',
     'task',
     list + 2,
+  ]);
+});
+
+it('closes to the opener past a fragment entry of the screen', async () => {
+  render(<Frame />);
+  act(() => nav.go({ page: 'list' }));
+  act(() => nav.go({ page: 'task' }));
+  const task = state();
+  await act(async () => {
+    const changed = new Promise((resolve) =>
+      addEventListener('hashchange', resolve, { once: true }),
+    );
+    location.hash = 'notes';
+    await changed;
+  });
+  expect(state()).toEqual({ ...task, position: task.position! + 1 });
+  await act(async () => {
+    const popped = new Promise((resolve) =>
+      addEventListener('popstate', resolve, { once: true }),
+    );
+    nav.close({ page: '' });
+    await popped;
+  });
+  expect([address(), shown(), state().position]).toEqual([
+    '/list',
+    'list',
+    task.position! - 1,
   ]);
 });

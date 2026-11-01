@@ -374,7 +374,8 @@ screen, the draft and the history.
 - **`useNav(model)`** returns the shown `place` and:
   - `go(place, { replace })`: a new history entry, or in place;
   - `close(fallback)`: back to the in-app place that opened the screen (kept
-    in `history.state`), or after a direct entry to `fallback` in place;
+    in `history.state`, also past the screen's fragment links), or after a
+    direct entry to `fallback` in place;
   - `link(place)`: `href` and `onClick` for an `<a>`; a plain click switches
     in place, Ctrl/Cmd-, Shift- and middle clicks open the address in the
     browser as usual.

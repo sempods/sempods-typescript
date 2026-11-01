@@ -1779,6 +1779,21 @@ const routingChecks = (page, origin) => {
         url: page.url(),
       };
     },
+    // Close after a fragment link's entry still returns to the opener
+    // (Codex, #208), past the screen's fragment entry.
+    async 'fragment-entry-close'() {
+      await page.goto(origin + '/list');
+      await plumberLink.click();
+      await title.waitFor();
+      await page.evaluate(() => (location.hash = 'notes'));
+      await until(page, async () => url().hash === '#notes');
+      await details.getByRole('button', { name: 'Close', exact: true }).click();
+      const back = await until(
+        page,
+        async () => (await showing('/list', false)()) && url().hash === '',
+      );
+      return { pass: back && (await plumberLink.isVisible()), url: page.url() };
+    },
     // An invalid legacy link keeps its address and its error page.
     async 'invalid-legacy-stays'() {
       await page.goto(origin + '/?task=!!!');
@@ -1884,7 +1899,7 @@ async function signInAt(page, origin, address) {
  * The routing matrix of the template's routing spike (#114, branch
  * claude/120-ui-spike, scripts/routing-gate.mjs): 29 checks of addresses,
  * links and history moves with the package's router, three of them signed
- * out, and one for a fragment entry. Each history check asserts the address and what is shown together.
+ * out, and two for a fragment link's entry. Each history check asserts the address and what is shown together.
  */
 async function routing({ browser, origin }) {
   const results = [];

@@ -54,12 +54,20 @@ export interface Nav<P> {
   link(place: P): NavLinkProps;
 }
 
+/** The in-app place that opened an entry: its address and position. */
+interface Opened {
+  readonly opener: string;
+  readonly from: number;
+}
+
 /** What the router keeps about the session history of this document. */
 interface Session {
   /** The address the app shows; it changes only through the router. */
   shown: string;
   /** The position of the shown entry, kept in its `history.state`. */
   position: number;
+  /** What opened the shown entry, kept in its `history.state` too. */
+  opened?: Opened;
   /** Set while the router undoes a declined step; it ignores that popstate. */
   undoing: boolean;
   /**
@@ -87,6 +95,23 @@ const positionOf = () => {
   const position = entry().position;
   return typeof position === 'number' ? position : undefined;
 };
+const openedOf = (): Opened | undefined => {
+  const { opener, from } = entry();
+  return typeof opener === 'string' && typeof from === 'number'
+    ? { opener, from }
+    : undefined;
+};
+/** The router's state for the shown entry, over what else the entry holds. */
+const stamp = (s: Session) => ({
+  ...entry(),
+  position: s.position,
+  ...s.opened,
+});
+/** Follows the entry the browser is on. */
+function sync(s: Session) {
+  s.position = positionOf() ?? s.position;
+  s.opened = openedOf();
+}
 
 function current(): Session {
   if (!session) {
@@ -97,6 +122,7 @@ function current(): Session {
     session = {
       shown: here(),
       position: position ?? 0,
+      opened: openedOf(),
       undoing: false,
       deciding: false,
       frames: 0,
@@ -121,21 +147,21 @@ function subscribe(listener: () => void) {
  * runtime returns to after sign-in is the one the app shows.
  */
 export function replaceUrl(url: string): void {
-  history.replaceState({ ...entry(), position: current().position }, '', url);
+  history.replaceState(stamp(current()), '', url);
   show(here());
 }
 
 /**
  * An entry at the shown address: nothing to decide. A fragment link adds one
- * without the router's position, right after the shown entry; it takes the
- * next position, so the router's offsets keep matching the history.
+ * without the router's state, right after the shown entry; it takes the next
+ * position, so the router's offsets keep matching the history, and the shown
+ * entry's opener, so `close` still returns to it.
  */
 function adopt(s: Session) {
-  const position = positionOf();
-  if (position !== undefined) s.position = position;
+  if (positionOf() !== undefined) sync(s);
   else {
     s.position += 1;
-    history.replaceState({ ...entry(), position: s.position }, '');
+    history.replaceState(stamp(s), '');
   }
 }
 
@@ -175,7 +201,7 @@ async function decide(s: Session) {
   // A refused or failed decision stays.
   const left = await navigate(() => {
     // Leaving: show the entry the browser is on now.
-    s.position = positionOf() ?? s.position;
+    sync(s);
     show(here());
   }).catch(() => false);
   s.deciding = false;
@@ -188,8 +214,7 @@ async function decide(s: Session) {
   // without the router's position cannot be measured; it shows the shown
   // address again in place.
   const target = positionOf();
-  if (target === undefined)
-    history.replaceState({ ...entry(), position: s.position }, '', s.shown);
+  if (target === undefined) history.replaceState(stamp(s), '', s.shown);
   else if (target !== s.position) {
     s.undoing = true;
     history.go(s.position - target);
@@ -245,12 +270,11 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
       const s = current();
       if (url === s.shown) return;
       void navigate(() => {
-        if (options?.replace)
-          history.replaceState({ ...entry(), position: s.position }, '', url);
+        if (options?.replace) history.replaceState(stamp(s), '', url);
         else {
-          const opener = s.shown;
+          s.opened = { opener: s.shown, from: s.position };
           s.position += 1;
-          history.pushState({ position: s.position, opener }, '', url);
+          history.pushState({ position: s.position, ...s.opened }, '', url);
         }
         show(here());
       });
@@ -259,7 +283,9 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
   );
   const close = useCallback(
     (fallback: P) => {
-      if (typeof entry().opener === 'string') history.back();
+      // Back to the opener, past any fragment entries of this screen.
+      const { opened, position } = current();
+      if (opened && opened.from < position) history.go(opened.from - position);
       else go(fallback, { replace: true });
     },
     [go],
