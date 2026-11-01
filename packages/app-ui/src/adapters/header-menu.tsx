@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { EllipsisIcon, MenuIcon } from 'lucide-react';
 import { Button } from '../components/button.js';
 import {
@@ -10,7 +9,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../components/dropdown-menu.js';
-import { useFocusReturn } from './focus-return.js';
 import { useAdapterTexts } from './texts.js';
 
 /** One choice of a submenu; exactly one of them is usually `checked`. */
@@ -41,12 +39,9 @@ export interface HeaderMenuProps {
  */
 export function HeaderMenu({ label, items, icon = 'menu' }: HeaderMenuProps) {
   const t = useAdapterTexts();
-  const [open, setOpen] = useState(false);
-  const trigger = useFocusReturn<HTMLButtonElement>(open);
   return (
-    <DropdownMenuTrigger isOpen={open} onOpenChange={setOpen}>
+    <DropdownMenuTrigger>
       <Button
-        ref={trigger}
         variant="secondary"
         size="icon-lg"
         className="size-11 rounded-full"

@@ -6,7 +6,6 @@ import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Calendar } from '../components/calendar.js';
 import { Popover, PopoverTrigger } from '../components/popover.js';
-import { useFocusReturn } from './focus-return.js';
 import { useAdapterTexts } from './texts.js';
 
 export interface DateChooserProps {
@@ -51,7 +50,6 @@ export function DateChooser({
   const t = useAdapterTexts();
   const { locale, format } = useSdkLocale();
   const [open, setOpen] = useState(false);
-  const trigger = useFocusReturn<HTMLButtonElement>(open);
   // A stored zoned date-time starts the chooser at the day of its own offset;
   // it is replaced only when a day is applied.
   const day = calendarDay(value);
@@ -81,7 +79,6 @@ export function DateChooser({
         }}
       >
         <Button
-          ref={trigger}
           variant="outline"
           className="h-11 justify-between text-base font-normal"
           aria-label={`${label}: ${shown}`}

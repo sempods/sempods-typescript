@@ -313,9 +313,7 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   menu of actions, separators (`null`) and submenus of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`). Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
-  returns to the button. Inside a `ScreenDialog`, the menu and the date chooser
-  return the focus to their button themselves when React Aria's restore loses
-  the race against the dialog's focus containment.
+  returns to the button.
 - **`DateChooser`**: the calendar-date chooser for the SDK's `date` field. It
   takes the field's draft value (`2026-10-29`, with `orDateTime` also a zoned
   date-time, or `null`) and returns a day as `YYYY-MM-DD`, or `null` with
