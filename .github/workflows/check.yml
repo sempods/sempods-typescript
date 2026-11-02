@@ -5,10 +5,12 @@ on:
   pull_request:
 permissions:
   contents: read
-# A new push to a pull request supersedes its running checks; main keeps every run.
+# A new push to a pull request supersedes its running checks. Every push to
+# main is its own group, so no run on main is cancelled or replaced while it
+# waits.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 jobs:
   # pnpm check, split: everything but the UI gate, and the UI gate once per
   # browser, side by side.
