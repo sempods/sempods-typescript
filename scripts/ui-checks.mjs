@@ -1032,6 +1032,209 @@ async function interaction({ browser, origin, engine }) {
           : await page.getByRole('dialog').first().innerText(),
       };
     },
+    // Filter chips at 375px: Tab reaches the group on the chosen chip, an
+    // arrow moves, Space chooses, Tab leaves the group. A chosen chip is
+    // filled with the primary role and marked; chips are 44px high and the
+    // page does not overflow.
+    async 'chips-keyboard'() {
+      await page.setViewportSize({ width: 375, height: 812 });
+      try {
+        await page.goto(origin + '/list');
+        await page.locator('.gate-list a').first().waitFor();
+        const open = page.getByRole('radio', { name: 'Open', exact: true });
+        const all = page.getByRole('radio', { name: 'All', exact: true });
+        const isFocused = (chip) =>
+          chip.evaluate((el) => el === document.activeElement);
+        await page.getByRole('button', { name: 'Menu', exact: true }).focus();
+        for (let i = 0; i < 8 && !(await isFocused(open)); i++)
+          await page.keyboard.press(tab);
+        const onOpen = await isFocused(open);
+        await page.keyboard.press('ArrowRight');
+        const onAll = await isFocused(all);
+        await page.keyboard.press('Space');
+        await settle(page);
+        const chosen = await all.getAttribute('aria-checked');
+        await page.keyboard.press(tab);
+        const left = await page.evaluate(
+          () => document.activeElement?.closest('.gate-list') !== null,
+        );
+        const chips = await page.evaluate(() => {
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--primary)';
+          document.body.append(probe);
+          const primary = getComputedStyle(probe).color;
+          probe.remove();
+          return [
+            ...document.querySelectorAll('[data-slot=toggle-group-item]'),
+          ].map((chip) => ({
+            height: chip.getBoundingClientRect().height,
+            selected: chip.getAttribute('aria-checked') === 'true',
+            marked: chip.querySelector('svg') !== null,
+            filled: getComputedStyle(chip).backgroundColor === primary,
+          }));
+        });
+        const overflow = await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth >
+            document.documentElement.clientWidth,
+        );
+        return {
+          pass:
+            onOpen &&
+            onAll &&
+            chosen === 'true' &&
+            left &&
+            chips.length === 2 &&
+            chips.every(
+              (c) =>
+                c.height >= 44 &&
+                c.marked === c.selected &&
+                c.filled === c.selected,
+            ) &&
+            !overflow,
+          onOpen,
+          onAll,
+          chosen,
+          left,
+          chips,
+          overflow,
+        };
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 800 });
+      }
+    },
+    // The Zen actions' group: the dock's full width at 375px, at most 26rem
+    // and centred at 1280px; the labelled action takes the free width, the
+    // round ones keep theirs, none overlap and each is its own Tab stop.
+    async 'action-group-width'() {
+      const measure = async (width) => {
+        await page.setViewportSize({ width, height: width < 600 ? 812 : 800 });
+        await page.goto(origin + '/');
+        const group = page.getByRole('group', { name: 'Task actions' });
+        await group.waitFor();
+        await settle(page);
+        return group.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const parent = el.parentElement.getBoundingClientRect();
+          return {
+            width: box.width,
+            parent: parent.width,
+            centred:
+              Math.abs(box.left - parent.left - (parent.right - box.right)) < 1,
+            actions: [...el.children].map((child) => {
+              const r = child.getBoundingClientRect();
+              return {
+                shape: child.dataset.shape,
+                tabIndex: child.tabIndex,
+                left: r.left,
+                right: r.right,
+                width: r.width,
+                height: r.height,
+              };
+            }),
+          };
+        });
+      };
+      try {
+        const phone = await measure(375);
+        const desktop = await measure(1280);
+        const fits = ({ actions }) => {
+          const round = actions.find((a) => a.shape === 'round');
+          return (
+            actions.length === 3 &&
+            actions.every(
+              (a, i) =>
+                a.height >= 44 &&
+                a.tabIndex === 0 &&
+                (i === 0 || a.left >= actions[i - 1].right),
+            ) &&
+            actions
+              .filter((a) => a.shape === 'pill')
+              .every((a) => a.width > round.width)
+          );
+        };
+        return {
+          pass:
+            Math.abs(phone.width - phone.parent) < 1 &&
+            desktop.width <= 416.5 &&
+            desktop.width < desktop.parent &&
+            desktop.centred &&
+            fits(phone) &&
+            fits(desktop),
+          phone,
+          desktop,
+        };
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 800 });
+      }
+    },
+    // sempods-apps-template#115: at 375px on a page taller than the screen,
+    // with a scrollbar that takes width, the routed screen and the SDK's
+    // Pods & sharing sheet stay inside the visible width, their Close
+    // buttons included. Engines that draw overlay scrollbars skip it.
+    async 'dialogs-with-page-scrollbar'() {
+      const { context: tall, page: p } = await newPage(browser, {
+        viewport: { width: 375, height: 812 },
+      });
+      try {
+        await tall.addInitScript(() =>
+          document.addEventListener('DOMContentLoaded', () => {
+            const style = document.createElement('style');
+            style.textContent =
+              '::-webkit-scrollbar { width: 15px } ::-webkit-scrollbar-thumb { background: #888 }';
+            document.head.append(style);
+            const spacer = document.createElement('div');
+            spacer.style.height = '300vh';
+            document.body.append(spacer);
+          }),
+        );
+        await signIn(p, origin, '/list');
+        const gutter = await p.evaluate(
+          () => innerWidth - document.documentElement.clientWidth,
+        );
+        if (gutter <= 0)
+          return { pass: false, skip: 'no scrollbar that takes width' };
+        const inside = (dialog) =>
+          dialog.evaluate((el) => {
+            const visible = document.documentElement.clientWidth;
+            const box = el.getBoundingClientRect();
+            const close = [...el.querySelectorAll('button')]
+              .find((b) =>
+                /^(Close|Schließen)$/.test(
+                  b.ariaLabel ?? b.textContent?.trim() ?? '',
+                ),
+              )
+              ?.getBoundingClientRect();
+            return {
+              visible,
+              left: box.left,
+              right: box.right,
+              closeRight: close?.right ?? null,
+              pass:
+                box.left >= -0.5 &&
+                box.right <= visible + 0.5 &&
+                close !== undefined &&
+                close.right <= visible + 0.5,
+            };
+          });
+        await p.getByRole('button', { name: 'Menu', exact: true }).click();
+        await p.getByRole('menuitem', { name: 'Pods & sharing' }).click();
+        const sheetDialog = p.getByRole('dialog', { name: /Pods & sharing/ });
+        await sheetDialog.waitFor();
+        await settle(p);
+        const sheet = await inside(sheetDialog);
+        await p.keyboard.press('Escape');
+        await hidden(sheetDialog);
+        await p.goto(origin + '/tasks/add');
+        const screenDialog = p.getByRole('dialog', { name: 'New task' });
+        await screenDialog.waitFor();
+        await settle(p);
+        const screen = await inside(screenDialog);
+        return { pass: sheet.pass && screen.pass, gutter, sheet, screen };
+      } finally {
+        await tall.close();
+      }
+    },
   };
   const results = [];
   for (const [id, run] of Object.entries(checks)) {
@@ -1293,6 +1496,12 @@ const states = {
     await page.keyboard.press('ArrowRight');
     await page.getByRole('menuitemradio', { name: 'List' }).waitFor();
   },
+  // The List view with its filter chips, "Open" chosen.
+  async list(page) {
+    await states.menu(page);
+    await page.getByRole('menuitemradio', { name: 'List' }).click();
+    await page.getByRole('radio', { name: 'Open', exact: true }).waitFor();
+  },
   dialog: openTask,
   async date(page) {
     await states.dialog(page);
@@ -1321,7 +1530,7 @@ const contrastPages = 4;
 /**
  * Rendered contrast (scripts/ui-contrast.js): its controls first, then each
  * state × palette and variants × light and dark × 375 and 1280px. Zen actions
- * are also measured hovered and pressed; controls reached by Tab with their
+ * and the unchosen filter chip are also measured hovered and pressed; controls reached by Tab with their
  * focus indicator. A measurement of these states, not a full audit.
  */
 async function contrast({ browser, origin, engine }) {
@@ -1402,32 +1611,35 @@ async function contrast({ browser, origin, engine }) {
               const measured = await page.evaluate(() => window.uiContrast());
               const tagged = (list, suffix) =>
                 list.map((m) => ({ ...m, what: `${m.what} ${suffix}` }));
-              if (state === 'zen')
-                for (const name of ['Complete', 'Not today', 'Previous task']) {
-                  const target = page.getByRole('button', {
-                    name,
-                    exact: true,
-                  });
-                  await target.hover();
-                  await settle(page);
-                  measured.push(
-                    ...tagged(
-                      await target.evaluate((el) => window.uiContrast(el)),
-                      ':hover',
-                    ),
-                  );
-                  // Pressed, released away from the button: nothing runs.
-                  await page.mouse.down();
-                  await settle(page);
-                  measured.push(
-                    ...tagged(
-                      await target.evaluate((el) => window.uiContrast(el)),
-                      ':active',
-                    ),
-                  );
-                  await page.mouse.move(1, 1);
-                  await page.mouse.up();
-                }
+              const pressed = {
+                zen: ['Complete', 'Not today', 'Previous task'],
+                list: ['All'],
+              };
+              for (const name of pressed[state] ?? []) {
+                const target = page.getByRole(
+                  state === 'list' ? 'radio' : 'button',
+                  { name, exact: true },
+                );
+                await target.hover();
+                await settle(page);
+                measured.push(
+                  ...tagged(
+                    await target.evaluate((el) => window.uiContrast(el)),
+                    ':hover',
+                  ),
+                );
+                // Pressed, released away from the button: nothing runs.
+                await page.mouse.down();
+                await settle(page);
+                measured.push(
+                  ...tagged(
+                    await target.evaluate((el) => window.uiContrast(el)),
+                    ':active',
+                  ),
+                );
+                await page.mouse.move(1, 1);
+                await page.mouse.up();
+              }
               const focus = [];
               for (let i = 0; i < 8; i++) {
                 await page.keyboard.press(tab);

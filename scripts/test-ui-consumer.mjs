@@ -253,9 +253,12 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
           );
           report[label][suite] = results;
           for (const r of results) {
-            const line = `${label} ${suite} ${r.pass ? '✓' : '✗'} ${r.id}${r.timezoneId ? ' ' + r.timezoneId : ''}`;
-            console.log(r.pass ? line : `${line} ${JSON.stringify(r)}`);
-            if (!r.pass) failures.push(line);
+            // A check that this engine cannot run names why (`skip`).
+            const mark = r.skip ? '–' : r.pass ? '✓' : '✗';
+            const line = `${label} ${suite} ${mark} ${r.id}${r.timezoneId ? ' ' + r.timezoneId : ''}`;
+            if (r.skip) console.log(`${line} skipped: ${r.skip}`);
+            else console.log(r.pass ? line : `${line} ${JSON.stringify(r)}`);
+            if (!r.pass && !r.skip) failures.push(line);
           }
         }
       } finally {
@@ -271,10 +274,13 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
     );
   }
   assert.deepEqual(failures, [], `${failures.length} UI checks failed`);
-  const count = Object.values(report)
+  const results = Object.values(report)
     .flatMap((s) => Object.values(s))
-    .flat().length;
-  console.log(`UI gate: ${count} checks passed in ${browsers.join(', ')}`);
+    .flat();
+  const skipped = results.filter((r) => r.skip).length;
+  console.log(
+    `UI gate: ${results.length - skipped} checks passed, ${skipped} skipped, in ${browsers.join(', ')}`,
+  );
 } finally {
   await Promise.all(pods.map((pod) => pod.close()));
   await rm(temp, { recursive: true, force: true });

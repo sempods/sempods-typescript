@@ -56,17 +56,6 @@
     justify-content: center;
     margin-bottom: 24px;
   }
-  .zen-actions {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    width: min(100%, 26rem);
-    margin-inline: auto;
-  }
-  .zen-actions > :not(:first-child, :last-child) {
-    flex: 1 1 0;
-  }
   .zen-empty {
     margin: auto;
     color: var(--muted-foreground);

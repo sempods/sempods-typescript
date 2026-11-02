@@ -257,10 +257,11 @@ the browser gate.
 ## Components
 
 The shadcn/ui components keep shadcn's names and React Aria's props
-(`onPress`, `isDisabled`, `isOpen`, …): `Button`, `LinkButton`, `Calendar`,
-`RangeCalendar`, `Dialog` and its parts, `DropdownMenu` and its parts,
-`Input`, `InputGroup` and its parts, `Popover` and its parts, `Select` and its
-parts, and `Textarea`. shadcn's
+(`onPress`, `isDisabled`, `isOpen`, …): `Badge`, `Button`, `LinkButton`,
+`Calendar`, `RangeCalendar`, `Dialog` and its parts, `DropdownMenu` and its
+parts, `Input`, `InputGroup` and its parts, `Popover` and its parts, `Select`
+and its parts, `Textarea`, `Toggle`, and `ToggleGroup` with
+`ToggleGroupItem`. `Badge` suits read-only tags. shadcn's
 [aria-nova documentation](https://ui.shadcn.com/docs/components) describes
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
@@ -463,8 +464,96 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   in a bar at the chooser's bottom edge, visible on a phone as it opens.
 - **`ActionButton`**: an app's own action in the theme's variants: `variant`
   `primary` (default), `secondary`, `ghost` or `destructive`; `shape` `pill`
-  (56px high), `round` (56px) or `round-lg` (72px); `label` names an icon-only
-  button.
+  (56px high), `round-sm` (44px, as `HeaderMenu`'s button, for icon actions
+  in a heading), `round` (56px) or `round-lg` (72px); `label` names an
+  icon-only button. **`ActionLink`** looks the same and is a real link, for
+  an action with an address (`{...nav.link(place)}`), so it can be opened in
+  a new tab or copied.
+- **`ActionGroup`**: a labelled row of actions, the full width on phones and at
+  most 26rem wide and centred above. `pill` actions share the free width,
+  round ones keep their size, and each action stays its own Tab stop.
+- **`ChipGroup`** and **`Chip`**: filter chips. `ChipGroup` takes a `label`
+  and React Aria's selection props (`selectionMode` `single` by default or
+  `multiple`, `selectedKeys`, `onSelectionChange`, `disallowEmptySelection`);
+  each `Chip` has an `id`. Chips are 44px high and wrap on narrow screens. A
+  chosen chip is filled with the primary role and shows a check mark, so its
+  state does not rest on colour alone. Tab reaches the group once, arrow keys
+  move between chips, and Space or Enter chooses one.
+
+A main action usually stands alone above a group of the others, as in the
+reference screen's Zen view:
+
+```tsx
+// zen-actions.tsx
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
+import {
+  ActionButton,
+  ActionGroup,
+  ActionLink,
+  type NavLinkProps,
+} from '@sempods/app-ui';
+
+export function ZenActions(props: {
+  readonly complete: () => void;
+  readonly previous: () => void;
+  readonly next: () => void;
+  /** The task's "Not today" address, from `nav.link(…)`. */
+  readonly postpone: NavLinkProps;
+}) {
+  return (
+    <>
+      <ActionButton shape="round-lg" label="Complete" onPress={props.complete}>
+        <CheckIcon />
+      </ActionButton>
+      <ActionGroup label="Task actions">
+        <ActionButton
+          variant="secondary"
+          shape="round"
+          label="Previous task"
+          onPress={props.previous}
+        >
+          <ChevronLeftIcon />
+        </ActionButton>
+        <ActionLink variant="secondary" {...props.postpone}>
+          Not today
+        </ActionLink>
+        <ActionButton
+          variant="secondary"
+          shape="round"
+          label="Next task"
+          onPress={props.next}
+        >
+          <ChevronRightIcon />
+        </ActionButton>
+      </ActionGroup>
+    </>
+  );
+}
+```
+
+Filter chips with one choice that cannot be emptied:
+
+```tsx
+// task-filter.tsx
+import { Chip, ChipGroup } from '@sempods/app-ui';
+
+export function TaskFilter(props: {
+  readonly shown: 'open' | 'all';
+  readonly show: (shown: 'open' | 'all') => void;
+}) {
+  return (
+    <ChipGroup
+      label="Show"
+      disallowEmptySelection
+      selectedKeys={[props.shown]}
+      onSelectionChange={(keys) => props.show(keys.has('all') ? 'all' : 'open')}
+    >
+      <Chip id="open">Open</Chip>
+      <Chip id="all">All</Chip>
+    </ChipGroup>
+  );
+}
+```
 
 The adapters' texts ("Menu", "No date", "Apply", "Remove date") follow the
 SDK provider's language (English or German) and can be passed as props.
@@ -808,7 +897,11 @@ Firefox on the Linux CI runner. It checks Escape in fields, in SDK
 confirmations, on Close, in menus and in the date chooser; focus trap and
 restore; Save after cancelled closes; closing right after opening; resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
-in three time zones; keyboard use of menus and the calendar; 44px targets; the
+in three time zones; keyboard use of menus, the calendar and filter chips;
+44px targets; the action group's width on a phone and a desktop; the routed
+screen and the SDK's Pods & sharing sheet inside the visible width beside a
+page scrollbar (where the engine draws one that takes width; otherwise the
+check reports a skip); the
 cascade with the SDK's styles; the role pairs of both palettes in all six
 combinations in light and dark; rendered screen contrast in four combinations; and the router's 29-check matrix of
 links, direct and signed-out entry, Close, Back and Forward with a dirty

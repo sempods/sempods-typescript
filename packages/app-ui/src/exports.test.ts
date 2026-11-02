@@ -8,8 +8,13 @@ import { expect, it } from 'vitest';
 it('exports the adapters, the router and the shadcn/ui components', async () => {
   expect(Object.keys(await import('./index.js')).sort()).toEqual([
     'ActionButton',
+    'ActionGroup',
+    'ActionLink',
+    'Badge',
     'Button',
     'Calendar',
+    'Chip',
+    'ChipGroup',
     'DateChooser',
     'Dialog',
     'DialogClose',
@@ -58,8 +63,13 @@ it('exports the adapters, the router and the shadcn/ui components', async () => 
     'SelectTrigger',
     'SelectValue',
     'Textarea',
+    'Toggle',
+    'ToggleGroup',
+    'ToggleGroupItem',
+    'badgeVariants',
     'buttonVariants',
     'replaceUrl',
+    'toggleVariants',
     'useNav',
   ]);
 });
