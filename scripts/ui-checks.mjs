@@ -1329,6 +1329,8 @@ const variants = [
   ['fresh', 'inverted', 'tonal'],
 ];
 const combos = process.env.UI_COMBOS === '0' ? [] : variants;
+/** Signed-in pages that measure the contrast checks side by side. */
+const contrastPages = 4;
 
 /**
  * Rendered contrast (scripts/ui-contrast.js): its controls first, then each
@@ -1372,15 +1374,9 @@ async function contrast({ browser, origin, engine }) {
     }
     await context.close();
   }
-  // Colours as they settle, not halfway through a fade-in (see calendarTargets).
-  const { context, page } = await newPage(browser, {
-    reducedMotion: 'reduce',
-  });
-  await context.addInitScript(contrastScript);
-  await signIn(page, origin);
   // The reported blind spot: the task title made white on white must fail.
-  results.push(
-    await attempt('control-app-title-white-on-white', async () => {
+  const whiteOnWhite = (page) =>
+    attempt('control-app-title-white-on-white', async () => {
       await states.dialog(page);
       await page.waitForTimeout(300);
       const failing = () =>
@@ -1399,17 +1395,17 @@ async function contrast({ browser, origin, engine }) {
       await page.waitForTimeout(400);
       const after = await failing();
       return { pass: before === 0 && after === 1, before, after };
-    }),
-  );
+    });
+  const checks = [whiteOnWhite];
   for (const [theme, actions, secondary] of combos) {
     const query = `?theme=${theme}&actions=${actions}&secondary=${secondary}`;
-    for (const scheme of ['light', 'dark']) {
-      await page.emulateMedia({ colorScheme: scheme });
+    for (const scheme of ['light', 'dark'])
       for (const [state, reach] of Object.entries(states))
         for (const width of [375, 1280]) {
           const id = `${theme}/${actions}/${secondary} ${scheme} ${state} ${width}`;
-          results.push(
-            await attempt(id, async () => {
+          checks.push((page) =>
+            attempt(id, async () => {
+              await page.emulateMedia({ colorScheme: scheme });
               await page.setViewportSize({
                 width,
                 height: width < 600 ? 812 : 800,
@@ -1502,9 +1498,28 @@ async function contrast({ browser, origin, engine }) {
             }),
           );
         }
-    }
   }
-  await context.close();
+  // Each check loads its own state, so the checks share a few signed-in pages
+  // and run side by side; the results keep their order.
+  const measured = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: contrastPages }, async () => {
+      // Colours as they settle, not halfway through a fade-in (see calendarTargets).
+      const { context, page } = await newPage(browser, {
+        reducedMotion: 'reduce',
+      });
+      try {
+        await context.addInitScript(contrastScript);
+        await signIn(page, origin);
+        for (let i = next++; i < checks.length; i = next++)
+          measured[i] = await checks[i](page);
+      } finally {
+        await context.close();
+      }
+    }),
+  );
+  results.push(...measured);
   return results;
 }
 
