@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type {
   ResourceEditor as Editor,
   SaveOutcome,
@@ -463,6 +463,25 @@ function Comparison({
     </dl>
   );
 }
+/**
+ * The element a key went to inside `own`, or null when the key belongs to
+ * an active IME composition, a handler that already took it, or a nested
+ * dialog or portal (a date chooser, the SDK's own confirmations), which
+ * handle their keys first.
+ */
+function ownKey(
+  event: KeyboardEvent,
+  own: HTMLElement | null,
+): HTMLElement | null {
+  if (event.nativeEvent.isComposing || event.defaultPrevented) return null;
+  const target = event.target as HTMLElement;
+  const nested = target.closest(
+    'dialog, [role="dialog"], [role="alertdialog"], [popover]',
+  );
+  if (!own?.contains(target) || (nested && own.contains(nested))) return null;
+  return target;
+}
+
 /** Default save/delete/review UI; children supply only domain fields.
  * Delete asks first in a modal dialog, like the leave confirmation: only its
  * Delete sends one conditional DELETE of the version shown. Any later editor state (an edit, a read, another
@@ -486,7 +505,8 @@ export function ResourceEditor<D, U = D>({
   /**
    * An editor that opens in place, for example in a list row: Cancel
    * discards and closes, and a confirmed save or delete closes it, as the
-   * changed row is the confirmation. Escape closes too, but asks first
+   * changed row is the confirmation. Escape in the fields or on the
+   * editor's buttons closes too, but asks first
    * ("Discard unsaved changes?") when the draft has changes, like closing
    * the row or an enclosing app dialog; it never reaches that dialog, and a
    * nested dialog or popover inside the fields keeps its own Escape.
@@ -522,6 +542,7 @@ export function ResourceEditor<D, U = D>({
   const [confirming, setConfirming] = useState<Editor<D>['state'] | null>(null);
   // Likewise for Escape with unsaved changes: discard only after a yes.
   const [closing, setClosing] = useState<Editor<D>['state'] | null>(null);
+  const section = useRef<HTMLElement>(null);
   const fieldset = useRef<HTMLFieldSetElement>(null);
   const removeButton = useRef<HTMLButtonElement>(null);
   const view = editor ? editorTarget(editor) : undefined;
@@ -563,6 +584,18 @@ export function ResourceEditor<D, U = D>({
   };
   return (
     <section
+      ref={section}
+      // Escape closes an editor in place from any of its controls, asking
+      // first about unsaved changes, as closing its row or an app dialog does.
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || !onClose) return;
+        if (!ownKey(event, section.current)) return;
+        // Also keeps an enclosing app dialog from closing on this key.
+        event.preventDefault();
+        event.stopPropagation();
+        if (state.dirty) setClosing(state);
+        else cancel();
+      }}
       data-sempods-ui="editor"
       // In place (a list row): a quiet card, see SdkStyles.
       data-inline={
@@ -578,32 +611,15 @@ export function ResourceEditor<D, U = D>({
           ref={fieldset}
           style={{ border: 0, padding: 0, margin: 0 }}
           onKeyDown={(event) => {
-            // Enter in a text field saves; Escape closes an editor in place,
-            // asking first about unsaved changes, as closing its row or an
-            // app dialog does. Both belong to an active IME composition, a
-            // handler that already took the key, and a nested dialog or
-            // portal (for example a date chooser) first.
-            if (event.nativeEvent.isComposing || event.defaultPrevented) return;
-            const field = event.target as HTMLElement;
-            const own = fieldset.current;
-            const nested = field.closest(
-              'dialog, [role="dialog"], [role="alertdialog"], [popover]',
-            );
-            if (!own?.contains(field) || (nested && own.contains(nested)))
-              return;
+            // Enter in a text field saves.
+            if (event.key !== 'Enter') return;
+            const field = ownKey(event, fieldset.current);
             if (
-              event.key === 'Enter' &&
               field instanceof HTMLInputElement &&
               !['checkbox', 'radio', 'button', 'submit'].includes(field.type)
             ) {
               event.preventDefault();
               save();
-            } else if (event.key === 'Escape' && onClose) {
-              // Also keeps an enclosing app dialog from closing on this key.
-              event.preventDefault();
-              event.stopPropagation();
-              if (state.dirty) setClosing(state);
-              else cancel();
             }
           }}
         >

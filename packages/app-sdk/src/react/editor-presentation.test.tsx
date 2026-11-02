@@ -237,6 +237,35 @@ it('Escape with changes asks first and never reaches the enclosing dialog', asyn
   expect(writes).toEqual([]);
 });
 
+it("Escape on the editor's buttons asks like in a field (#218)", async () => {
+  const { field, writes } = await setup({
+    presentation: 'plain',
+    closable: true,
+  });
+  fireEvent.change(field, { target: { value: 'Changed' } });
+  for (const name of ['Save', 'Cancel', 'Delete']) {
+    fireEvent.keyDown(screen.getByRole('button', { name }), { key: 'Escape' });
+    fireEvent.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Keep editing',
+      }),
+    );
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  }
+  expect(outerKeys).toEqual([]);
+  expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+    'Changed',
+  );
+  // Without changes, Escape on Cancel closes at once.
+  fireEvent.change(field, { target: { value: 'One' } });
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), {
+    key: 'Escape',
+  });
+  await screen.findByText('Closed');
+  expect(outerKeys).toEqual([]);
+  expect(writes).toEqual([]);
+});
+
 it('Escape in a nested chooser or a portal leaves the parent draft alone', async () => {
   const { field, writes } = await setup({ closable: true });
   fireEvent.change(field, { target: { value: 'Changed' } });
