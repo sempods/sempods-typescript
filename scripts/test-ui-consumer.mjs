@@ -236,11 +236,18 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
       try {
         for (const [suite, run] of Object.entries(suites)) {
           if (only && !only.includes(suite)) continue;
+          // A suite prints its results when it ends; these lines show which
+          // one runs, and for how long.
+          console.log(`${label} ${suite} started`);
+          const started = Date.now();
           const results = await run({
             browser,
             origin: pod.origin,
             engine: name,
           });
+          console.log(
+            `${label} ${suite}: ${results.length} checks in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+          );
           report[label][suite] = results;
           for (const r of results) {
             const line = `${label} ${suite} ${r.pass ? '✓' : '✗'} ${r.id}${r.timezoneId ? ' ' + r.timezoneId : ''}`;
