@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Publishes the packed tarballs in dependency order: client-sdk, app-sdk,
 // then app-ui (whose peer is app-sdk).
+// A prerelease (a version with `-`, such as 0.7.0-dev.1) gets the dist-tag
+// `next`, so `latest` keeps pointing at the last release; npm 11 refuses a
+// prerelease without a tag.
 // Resumable: a version that is already on the registry is skipped only when
 // its published contents equal the local artifact byte for byte; any other
 // difference or npm error stops the release.
@@ -56,9 +59,10 @@ try {
       /E404|404 Not Found/.test(`${view.stdout}${view.stderr}`);
     if (!absent)
       fail(`Could not check ${spec} on the registry:\n${view.stderr}`);
+    const tag = manifest.version.includes('-') ? ['--tag', 'next'] : [];
     const publish = spawnSync(
       'npm',
-      ['publish', local, '--provenance', '--access', 'public'],
+      ['publish', local, '--provenance', '--access', 'public', ...tag],
       { stdio: 'inherit' },
     );
     if (publish.status !== 0) fail(`Publishing ${spec} failed.`);

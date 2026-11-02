@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Regressions for scripts/publish-packages.mjs against a fake `npm` registry:
 // a fresh release, an interrupted release that resumes, a conflicting
-// existing version and a failing publication. Nothing is sent to npm.
+// existing version, a failing publication and a prerelease's dist-tag.
+// Nothing is sent to npm.
 import { execFileSync, spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import {
@@ -24,16 +25,16 @@ const script = join(
 const work = mkdtempSync(join(tmpdir(), 'publish-test-'));
 try {
   // Small tarballs shaped like the packed packages.
-  const pack = (name, content, into) => {
-    const root = join(work, 'src', `${name}-${content}`, 'package');
+  const pack = (name, content, into, version = '0.1.0') => {
+    const root = join(work, 'src', `${name}-${content}-${version}`, 'package');
     mkdirSync(root, { recursive: true });
     writeFileSync(
       join(root, 'package.json'),
-      JSON.stringify({ name: `@sempods/${name}`, version: '0.1.0' }),
+      JSON.stringify({ name: `@sempods/${name}`, version }),
     );
     writeFileSync(join(root, 'index.js'), `export const v = '${content}';\n`);
     mkdirSync(into, { recursive: true });
-    const file = join(into, `sempods-${name}-0.1.0.tgz`);
+    const file = join(into, `sempods-${name}-${version}.tgz`);
     execFileSync('tar', ['-czf', file, '-C', dirname(root), 'package']);
     return file;
   };
@@ -54,7 +55,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [command, target, ...rest] = process.argv.slice(2);
 const registry = process.env.FAKE_REGISTRY;
-fs.appendFileSync(path.join(registry, 'calls.log'), [command, path.basename(target)].join(' ') + '\\n');
+const tag = rest.includes('--tag') ? ['tag=' + rest[rest.indexOf('--tag') + 1]] : [];
+fs.appendFileSync(path.join(registry, 'calls.log'), [command, path.basename(target), ...tag].join(' ') + '\\n');
 const file = (spec) => path.join(registry, spec.replace('@sempods/', 'sempods-').replace('@', '-') + '.tgz');
 if (command === 'view' && process.env.FAIL_VIEW) {
   console.error('npm error code ETIMEDOUT'); process.exit(1);
@@ -79,8 +81,8 @@ process.exit(2);
 `,
   );
   chmodSync(join(bin, 'npm'), 0o755);
-  const run = (env = {}) =>
-    spawnSync('node', [script, local], {
+  const run = (env = {}, from = local) =>
+    spawnSync('node', [script, from], {
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -153,6 +155,23 @@ process.exit(2);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Could not check/);
   assert.ok(!calls().some((c) => c.startsWith('publish')));
+
+  // 7. A prerelease is published under the dist-tag `next`, a release
+  // without one (npm then sets `latest`).
+  reset();
+  const prerelease = join(work, 'prerelease');
+  for (const name of ['client-sdk', 'app-sdk', 'app-ui'])
+    pack(name, 'a', prerelease, '0.7.0-dev.1');
+  result = run({}, prerelease);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(
+    calls().filter((c) => c.startsWith('publish')),
+    [
+      'publish sempods-client-sdk-0.7.0-dev.1.tgz tag=next',
+      'publish sempods-app-sdk-0.7.0-dev.1.tgz tag=next',
+      'publish sempods-app-ui-0.7.0-dev.1.tgz tag=next',
+    ],
+  );
   console.log('Publish script regressions passed.');
 } finally {
   rmSync(work, { recursive: true, force: true });

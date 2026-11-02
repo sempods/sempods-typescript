@@ -1,6 +1,6 @@
 {
   "name": "@sempods/app-ui",
-  "version": "0.6.0",
+  "version": "0.7.0-dev.1",
   "description": "UI kit for sempods apps: shadcn/ui components on React Aria, adapters for SDK editors and confirmations, and a theme token contract for Tailwind CSS 4.",
   "keywords": [
     "sempods",
