@@ -146,9 +146,12 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     invalid addresses show explicit pages; links name the source Context, a
     named source is read and written (the other Context's copy stays) also on
     the action route and after reload, and an unreadable one is an explicit
-    error without an editor. Two more checks for a fragment link's entry:
-    staying after two entries back returns to the task screen, and Close
-    still returns to the opener.
+    error without an editor. Five more checks from the reviews of #208: an
+    address with a source opens right after sign-in without a Context choice,
+    and an unreadable source shows its error there too; after a fragment
+    link's entry, staying after two entries back returns to the task screen
+    and Close still returns to the opener, also after a replaced fragment;
+    and a path with two leading slashes shows the not-found page.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay
