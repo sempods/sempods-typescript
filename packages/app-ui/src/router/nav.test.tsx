@@ -263,3 +263,13 @@ it('decides once when navigate leaves without running the move', async () => {
   expect(navigate).toHaveBeenCalledTimes(1);
   expect(shown()).toBe('task');
 });
+
+it('keeps a path that starts with two slashes on this origin', () => {
+  render(<Frame />);
+  act(() => nav.go({ page: '/unknown' }));
+  expect([location.origin, address(), shown()]).toEqual([
+    new URL(document.baseURI).origin,
+    '//unknown',
+    'missing',
+  ]);
+});

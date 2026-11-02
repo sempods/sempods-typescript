@@ -58,17 +58,20 @@ async function newPage(browser, options = {}) {
   return { context, page, errors };
 }
 
+/** The Context chooser of the SDK's sign-in. */
+const chooser = (page) => page.getByLabel(/Data context|Datenkontext/);
+
 /**
- * Signs in to the fixture Pod on `address` and chooses its "work" context.
+ * Signs in to the fixture Pod on `address` and chooses its "work" context,
+ * unless `choose` is false.
  */
-async function signIn(page, origin, address = '/') {
+async function signIn(page, origin, address = '/', { choose = true } = {}) {
   await fetch(origin + '/__reset');
   await page.goto(origin + address);
   await page.getByLabel(/Pod address|Pod-Adresse/).fill(origin + '/alice');
   await page.getByRole('button', { name: /^(Sign in|Anmelden)$/ }).click();
-  await page
-    .getByLabel(/Data context|Datenkontext/)
-    .selectOption({ label: 'work' });
+  if (!choose) return;
+  await chooser(page).selectOption({ label: 'work' });
   await loaded(page);
 }
 
@@ -1919,6 +1922,31 @@ const routingChecks = (page, origin) => {
       );
       return { pass: back && (await plumberLink.isVisible()), url: page.url() };
     },
+    // A replaced fragment keeps the entry (Codex, #208): Close still returns
+    // to the opener, not one entry further.
+    async 'fragment-replace-close'() {
+      await page.goto(origin + '/list');
+      await openFromList();
+      await page.evaluate(() => location.replace('#notes'));
+      await until(page, async () => url().hash === '#notes');
+      await closeButton.click();
+      const back = await until(
+        page,
+        async () => (await showing('/list', false)()) && url().hash === '',
+      );
+      return { pass: back && (await plumberLink.isVisible()), url: page.url() };
+    },
+    // A path that starts with two slashes stays a path of this origin
+    // (Codex, #208): its explicit page, no cross-origin history write.
+    async 'double-slash-not-found'() {
+      await page.goto(origin + '//unknown/path');
+      const text = await notFound.textContent().catch(() => null);
+      return {
+        pass: /does not lead/.test(text ?? '') && path() === '//unknown/path',
+        text,
+        path: path(),
+      };
+    },
     // An invalid legacy link keeps its address and its error page.
     async 'invalid-legacy-stays'() {
       await page.goto(origin + '/?task=!!!');
@@ -2014,43 +2042,59 @@ const routingChecks = (page, origin) => {
  * The routing matrix of the template's routing spike (#114, branch
  * claude/120-ui-spike, scripts/routing-gate.mjs): 29 checks of addresses,
  * links and history moves with the package's router, three of them signed
- * out, and two for a fragment link's entry. Each history check asserts the address and what is shown together.
+ * out, plus five from the reviews of #208: an unreadable source signed out,
+ * fragment entries added and replaced, and a path with two leading slashes.
+ * Each history check asserts the address and what is shown together.
  */
 async function routing({ browser, origin }) {
   const results = [];
   const { at, personal } = plumberTask(origin);
+  const sourced = (source) => `${at}?context=${encodeURIComponent(source)}`;
+  // A title the task dialog shows, an alert in it, or the Not found text.
+  // An address that names its source opens without a Context choice.
   const signedOut = [
-    ['direct-entry-signed-out', at, PLUMBER],
+    ['direct-entry-signed-out', at, { title: PLUMBER }],
     [
       'source-signed-out',
-      `${at}?context=${encodeURIComponent(personal)}`,
-      PERSONAL,
+      sourced(personal),
+      { title: PERSONAL, choose: false },
     ],
-    ['invalid-legacy-signed-out', '/?task=!!!', null],
+    [
+      'source-unavailable-signed-out',
+      sourced(origin + '/alice/_system/contexts/nope'),
+      { alert: /not available/, choose: false },
+    ],
+    ['invalid-legacy-signed-out', '/?task=!!!', { notFound: /not valid/ }],
   ];
   for (const [id, address, expected] of signedOut) {
     const { context, page, errors } = await newPage(browser);
     results.push(
       await attempt(id, async () => {
-        await signIn(page, origin, address);
+        const choose = expected.choose ?? true;
+        await signIn(page, origin, address, { choose });
+        const details = page.getByRole('dialog', { name: 'Details' });
         let shows;
-        if (expected === null)
-          shows = /not valid/.test(
+        if (expected.notFound)
+          shows = expected.notFound.test(
             (await page
               .getByRole('dialog', { name: 'Not found' })
               .textContent()) ?? '',
           );
+        else if (expected.alert)
+          shows = expected.alert.test(
+            (await details.getByRole('alert').textContent()) ?? '',
+          );
         else {
-          const field = page
-            .getByRole('dialog', { name: 'Details' })
-            .getByLabel('Title', { exact: true });
+          const field = details.getByLabel('Title', { exact: true });
           await field.waitFor();
-          shows = (await field.inputValue()) === expected;
+          shows = (await field.inputValue()) === expected.title;
         }
+        const asked = !choose && (await chooser(page).isVisible());
         const path = addressOf(page);
         return {
-          pass: path === address && shows && errors.length === 0,
+          pass: path === address && shows && !asked && errors.length === 0,
           path,
+          chooserShown: asked,
           errors,
         };
       }),

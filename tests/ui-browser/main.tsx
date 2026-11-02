@@ -114,6 +114,9 @@ function App() {
   return (
     <SempodsProvider
       runtime={runtime}
+      // A TargetScreen asks for a Context; a task address with its source
+      // opens without one.
+      contextSelection="on-demand"
       language={language}
       locale={language === 'de' ? 'de-DE' : 'en-GB'}
     >
@@ -124,7 +127,7 @@ function App() {
 
 function Frame() {
   const [managing, setManaging] = useState(false);
-  const { connections } = useAppState();
+  const { connections, view: target } = useAppState();
   const { messages } = useSdkLocale();
   const t = useMessages(texts);
   const nav = useNav(places);
@@ -173,9 +176,22 @@ function Frame() {
         open={managing}
         onClose={() => setManaging(false)}
       />
-      <TargetScreen>
-        <Tasks view={view} nav={nav} />
-      </TargetScreen>
+      {/* An address that names its source opens without a selected Context:
+          no TargetScreen, so AppAccess asks for no choice. */}
+      {place.kind === 'task' && place.context && !target ? (
+        header && (
+          <TaskDialog
+            subject={place.subject}
+            context={place.context}
+            title={place.action === 'postpone' ? t.notToday : undefined}
+            leave={() => nav.close({ kind: 'zen' })}
+          />
+        )
+      ) : (
+        <TargetScreen>
+          <Tasks view={view} nav={nav} />
+        </TargetScreen>
+      )}
       {/* Signed out, sign-in stays usable: the error shows once connected. */}
       {place.kind === 'not-found' && header && (
         <ScreenDialog

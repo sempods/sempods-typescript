@@ -66,6 +66,12 @@ interface Session {
    */
   from?: number;
   /**
+   * The router's position minus the browser's history index, where the
+   * browser tells the index (the Navigation API); it measures entries
+   * without the router's state.
+   */
+  offset?: number;
+  /**
    * Set while the SDK decides about a Back or Forward. Further moves the
    * browser makes meanwhile start no second decision: the outcome applies to
    * where the browser is when it ends, never to an earlier target.
@@ -83,10 +89,29 @@ let session: Session | undefined;
 const listeners = new Set<() => void>();
 
 const here = () => location.pathname + location.search;
-/** An address as the browser keeps it, so it compares with `here()`. */
+/**
+ * An address of this document's origin as the browser keeps it, so it
+ * compares with `here()`; a path that starts with `//` stays a path.
+ */
 const normal = (address: string) => {
-  const url = new URL(address, location.href);
+  const url = new URL(location.origin + address);
   return url.pathname + url.search;
+};
+/** The address as a URL of this origin, for the history. */
+const own = (address: string) => location.origin + normal(address);
+/** The browser's index of the current entry, where it tells it. */
+const index = () =>
+  (
+    globalThis as {
+      readonly navigation?: {
+        readonly currentEntry?: { index: number } | null;
+      };
+    }
+  ).navigation?.currentEntry?.index;
+/** The position of the current entry as measured by its index, if known. */
+const measured = (s: Session) => {
+  const at = index();
+  return at === undefined || s.offset === undefined ? undefined : at + s.offset;
 };
 const entry = (): Readonly<Record<string, unknown>> =>
   history.state !== null && typeof history.state === 'object'
@@ -108,7 +133,7 @@ const stamp = (s: Session) => ({
 });
 /** Follows the entry the browser is on. */
 function sync(s: Session) {
-  s.position = positionOf() ?? s.position;
+  s.position = positionOf() ?? measured(s) ?? s.position;
   s.from = fromOf();
 }
 
@@ -118,10 +143,12 @@ function current(): Session {
     // The document's entry gets the router's position.
     if (position === undefined)
       history.replaceState({ ...entry(), position: 0 }, '');
+    const at = index();
     session = {
       shown: here(),
       position: position ?? 0,
       from: fromOf(),
+      ...(at === undefined ? {} : { offset: (position ?? 0) - at }),
       deciding: false,
       frames: [],
     };
@@ -151,15 +178,17 @@ export function replaceUrl(url: string): void {
 
 /**
  * An entry at the shown address: nothing to decide. It is the shown entry
- * again, after a declined move was undone, or a fragment link's entry: that
- * one has no router state and comes right after the shown entry, so it takes
- * the next position, keeping the router's offsets in step with the history,
- * and the shown entry's opener position, so `close` still returns to it.
+ * again, after a declined move was undone, or a fragment link's entry. That
+ * one has no router state: a link adds it right after the shown entry, a
+ * replaced fragment takes the shown entry's place. It gets its measured
+ * position, else the next one, keeping the router's offsets in step with the
+ * history, and the shown entry's opener position, so `close` still returns
+ * to it.
  */
 function adopt(s: Session) {
   if (positionOf() !== undefined) sync(s);
   else {
-    s.position += 1;
+    s.position = measured(s) ?? s.position + 1;
     history.replaceState(stamp(s), '');
   }
 }
@@ -199,10 +228,10 @@ async function decide(s: Session) {
   }
   // Staying: back to the shown entry, keeping the history intact; its
   // popstate is at the shown address and asks nothing. An entry without the
-  // router's position cannot be measured; it shows the shown address again
-  // in place.
-  const target = positionOf();
-  if (target === undefined) history.replaceState(stamp(s), '', s.shown);
+  // router's position that the browser does not measure either shows the
+  // shown address again in place.
+  const target = positionOf() ?? measured(s);
+  if (target === undefined) history.replaceState(stamp(s), '', own(s.shown));
   else if (target !== s.position) history.go(s.position - target);
 }
 
@@ -247,7 +276,7 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
     };
   }, [navigate]);
   useEffect(() => {
-    if (address !== normal(canonical)) replaceUrl(canonical);
+    if (address !== normal(canonical)) replaceUrl(own(canonical));
   }, [address, canonical]);
   const go = useCallback(
     (next: P, options?: { readonly replace?: boolean }) => {
@@ -255,11 +284,15 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
       const s = current();
       if (url === s.shown) return;
       void navigate(() => {
-        if (options?.replace) history.replaceState(stamp(s), '', url);
+        if (options?.replace) history.replaceState(stamp(s), '', own(url));
         else {
           s.from = s.position;
           s.position += 1;
-          history.pushState({ position: s.position, from: s.from }, '', url);
+          history.pushState(
+            { position: s.position, from: s.from },
+            '',
+            own(url),
+          );
         }
         show(here());
       });
