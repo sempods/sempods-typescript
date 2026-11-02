@@ -19,7 +19,12 @@ React; apps need sessions and UI on top of the same client, not a second one.
 
 `@sempods/app-ui` holds shadcn/ui components on React Aria Components, a few
 adapters (routed screen dialog, header menu, calendar-date chooser, action
-button) and the theme token contract. It depends on app-sdk's React entry and is
+button), the router over an app-owned address model and the theme token
+contract. The router is the template's own, not a router library
+(sempods/sempods-apps-template#121): it moves every switch, Back and Forward
+through the SDK's `navigate` and passed the template's 29-check routing matrix
+where the tried library adapters did not; shipping it in the package lets
+corrections reach existing apps. It depends on app-sdk's React entry and is
 released with it; app-sdk and client-sdk never depend on it and stay free of a
 UI framework. Apps own their palette, screens and copy, and take anything else
 from React Aria directly.

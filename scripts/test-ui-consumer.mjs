@@ -6,7 +6,7 @@
 // in each browser: Chromium and WebKit, plus Firefox on Linux.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=gate,roundtrip,interaction,integration,contrast]
+//        [--only=gate,roundtrip,interaction,integration,contrast,routing]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
@@ -118,9 +118,10 @@ try {
   );
   const app = join(temp, 'app');
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
-  // The installed README's examples: its task dialog is the reference
-  // screen's, so the checks run it as shipped; other TSX examples are only
-  // compiled. Its stylesheet setup is the one the screen uses.
+  // The installed README's examples: its task dialog and its address model
+  // are the reference screen's, so the checks run them as shipped; other TSX
+  // examples are only compiled. Its stylesheet setup is the one the screen
+  // uses.
   const readme = await readFile(
     join(temp, 'node_modules/@sempods/app-ui/README.md'),
     'utf8',
@@ -129,15 +130,18 @@ try {
     [
       ...readme.matchAll(new RegExp('```' + lang + '\\n([\\s\\S]*?)```', 'g')),
     ].map((m) => m[1]);
-  const examples = blocks('tsx');
-  const dialog = examples.find((block) =>
-    block.startsWith('// task-dialog.tsx'),
-  );
-  assert.ok(dialog, 'the README has no task-dialog.tsx example');
-  await writeFile(join(app, 'task-dialog.tsx'), dialog);
-  for (const [i, example] of examples.entries())
+  /** Writes the example that starts with `// <file>` as the app's file. */
+  const ship = async (lang, file) => {
+    const block = blocks(lang).find((b) => b.startsWith(`// ${file}`));
+    assert.ok(block, `the README has no ${file} example`);
+    await writeFile(join(app, file), block);
+    return block;
+  };
+  const dialog = await ship('tsx', 'task-dialog.tsx');
+  for (const [i, example] of blocks('tsx').entries())
     if (example !== dialog)
       await writeFile(join(app, `readme-${i}.tsx`), example);
+  await ship('ts', 'places.ts');
   const documentedCss = blocks('css')
     .find((block) => block.includes("@import '@sempods/app-ui/styles.css'"))
     ?.split('\n')
@@ -166,7 +170,7 @@ try {
         noEmit: true,
         skipLibCheck: false,
       },
-      include: ['app/**/*.tsx'],
+      include: ['app/**/*.ts', 'app/**/*.tsx'],
     }),
   );
   // The app's Vite config has only the Tailwind plugin: no optimizeDeps and

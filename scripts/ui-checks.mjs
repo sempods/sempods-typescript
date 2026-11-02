@@ -1,9 +1,10 @@
-/* global document, getComputedStyle, innerHeight, innerWidth, MutationObserver, window */
+/* global document, getComputedStyle, history, innerHeight, innerWidth, location, MutationObserver, window */
 // The checks of the UI gate (scripts/test-ui-consumer.mjs), ported from the
 // template's spike #120 (gate.mjs, roundtrip.mjs, interaction.mjs,
-// evidence.mjs and contrast-selftest.mjs on sempods-apps-template branch
-// claude/120-ui-spike). Each suite takes { browser, origin, engine } and
-// returns results of the form { id, pass, ... }.
+// evidence.mjs, contrast-selftest.mjs and routing-gate.mjs on
+// sempods-apps-template branch claude/120-ui-spike). Each suite takes
+// { browser, origin, engine } and returns results of the form
+// { id, pass, ... }.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -15,7 +16,27 @@ const EDIT = ' (edited)';
 const xsd = 'http://www.w3.org/2001/XMLSchema#';
 const startDate = 'https://schema.org/startDate';
 const PLUMBER = 'Call the plumber about the kitchen tap';
+const PERSONAL = 'Call the plumber (personal copy)';
 const TRAIN = 'Book train tickets to Leipzig';
+
+/** The plumber task of the fixture Pod: its IRI, address and two Contexts. */
+function plumberTask(origin) {
+  const iri = origin + '/alice/tasks/1';
+  const id = Buffer.from(iri, 'utf8').toString('base64url');
+  return {
+    iri,
+    id,
+    at: `/tasks/${id}`,
+    work: origin + '/alice/_system/contexts/work',
+    personal: origin + '/alice/_system/contexts/personal',
+  };
+}
+
+/** The page's address: path and query. */
+function addressOf(page) {
+  const url = new URL(page.url());
+  return url.pathname + url.search;
+}
 
 /**
  * The key that moves the focus to the next control. WebKit on macOS follows
@@ -37,19 +58,57 @@ async function newPage(browser, options = {}) {
   return { context, page, errors };
 }
 
-/** Signs in to the fixture Pod and chooses its "work" context. */
-async function signIn(page, origin) {
+/**
+ * Signs in to the fixture Pod on `address` and chooses its "work" context.
+ */
+async function signIn(page, origin, address = '/') {
   await fetch(origin + '/__reset');
-  await page.goto(origin + '/');
+  await page.goto(origin + address);
   await page.getByLabel(/Pod address|Pod-Adresse/).fill(origin + '/alice');
   await page.getByRole('button', { name: /^(Sign in|Anmelden)$/ }).click();
   await page
     .getByLabel(/Data context|Datenkontext/)
     .selectOption({ label: 'work' });
-  await page
+  await loaded(page);
+}
+
+/**
+ * Waits until the page shows the Pod's tasks, so its connection and Context
+ * catalogue reads are done. WebKit reports a read that a navigation cancels
+ * as a page error.
+ */
+function loaded(page) {
+  return page
     .locator('.zen-title, .gate-list a')
     .first()
     .waitFor({ timeout: 15000 });
+}
+
+/** Types the edit at the end of the task's title, as a person does. */
+async function typeEdit(page, title) {
+  await title.click();
+  await title.press('End');
+  await page.keyboard.type(EDIT);
+}
+
+/** Whether the task's title still ends with the edit. */
+async function editKept(title) {
+  return (await title.inputValue({ timeout: 2000 }).catch(() => '')).endsWith(
+    EDIT,
+  );
+}
+
+/** Answers the SDK's leave question, if it asks: keep editing, or discard. */
+async function answerLeave(page, choice) {
+  const confirm = page.getByRole('alertdialog');
+  const asked = await shown(confirm, 3000);
+  if (asked) {
+    const buttons = confirm.getByRole('button');
+    await (choice === 'keep' ? buttons.first() : buttons.last()).click();
+    await hidden(confirm);
+    await settle(page);
+  }
+  return asked;
 }
 
 /** Runs one check; an exception is a failure with its first line as note. */
@@ -64,6 +123,17 @@ async function attempt(id, run, extra = {}) {
       note: 'error: ' + error.message.split('\n')[0],
     };
   }
+}
+
+/**
+ * Runs one check on a shared page; the page errors that arrive while it runs
+ * name it. One that a check leaves pending can arrive under the next one.
+ */
+async function attemptOn(errors, id, run) {
+  const from = errors.length;
+  const result = await attempt(id, run);
+  for (let i = from; i < errors.length; i++) errors[i] = `${id}: ${errors[i]}`;
+  return result;
 }
 
 /**
@@ -426,14 +496,12 @@ const gateChecks = {
   'back-dirty-stay': async (c, page) => {
     await c.open();
     await c.dirty();
-    const address = new URL(page.url()).search;
+    const address = addressOf(page);
     await page.goBack();
-    const asked = await shown(c.confirm, 3000);
-    if (asked) await c.confirm.getByRole('button').first().click();
-    await hidden(c.confirm);
+    const asked = await answerLeave(page, 'keep');
     await page.waitForTimeout(300);
     const s = await c.state();
-    const kept = new URL(page.url()).search === address;
+    const kept = addressOf(page) === address;
     return {
       pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen && kept,
       asked,
@@ -446,11 +514,10 @@ const gateChecks = {
     await c.open();
     await c.dirty();
     await page.goBack();
-    const asked = await shown(c.confirm, 3000);
-    if (asked) await c.confirm.getByRole('button').last().click();
+    const asked = await answerLeave(page, 'discard');
     await hidden(c.dialog);
     const s = await c.state();
-    const left = !new URL(page.url()).searchParams.has('task');
+    const left = !new URL(page.url()).pathname.startsWith('/tasks/');
     return {
       pass: asked && !s.dialogOpen && !s.confirmOpen && left,
       asked,
@@ -474,22 +541,14 @@ async function gate({ browser, origin, engine }) {
     confirm: page.getByRole('alertdialog'),
     title: page.getByLabel('Title', { exact: true }),
     open: () => openTask(page),
-    async dirty() {
-      await c.title.click();
-      await c.title.press('End');
-      await page.keyboard.type(EDIT);
-    },
+    dirty: () => typeEdit(page, c.title),
     async state() {
       await settle(page);
       const dialogOpen = await c.dialog.isVisible();
       return {
         dialogOpen,
         confirmOpen: await c.confirm.isVisible(),
-        draftKept: dialogOpen
-          ? (
-              await c.title.inputValue({ timeout: 2000 }).catch(() => '')
-            ).endsWith(EDIT)
-          : false,
+        draftKept: dialogOpen ? await editKept(c.title) : false,
         focus: await focusInfo(page),
       };
     },
@@ -500,16 +559,21 @@ async function gate({ browser, origin, engine }) {
     await page.goto(origin + '/');
     await page.locator('.zen-title').waitFor();
     await fetch(origin + '/__reset');
-    results.push(await attempt(id, () => run(c, page)));
+    results.push(await attemptOn(errors, id, () => run(c, page)));
   }
   results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
   await context.close();
   return results;
 }
 
+/** The tasks the fixture Pod stores. */
+async function storedTasks(origin) {
+  return (await fetch(origin + '/__store')).json();
+}
+
 /** The start date as the fixture Pod stores it. */
 async function stored(origin, title) {
-  const tasks = await (await fetch(origin + '/__store')).json();
+  const tasks = await storedTasks(origin);
   const task = tasks.find(
     (t) => t.body['https://schema.org/name']?.[0]?.['@value'] === title,
   );
@@ -520,7 +584,7 @@ const roundtripChecks = (page, origin) => {
   const trigger = page.getByRole('button', { name: /^Start considering:/ });
   const closed = () => gone(page.getByRole('dialog', { name: 'Details' }));
   async function openNamed(title) {
-    await page.goto(origin + '/?view=list');
+    await page.goto(origin + '/list');
     await page.getByRole('link', { name: title }).click();
     await dialogReady(page);
   }
@@ -1523,4 +1587,511 @@ async function contrast({ browser, origin, engine }) {
   return results;
 }
 
-export const suites = { gate, roundtrip, interaction, integration, contrast };
+/** Whether `condition` holds within the time (default 10s), polled. */
+async function until(page, condition, timeout = 10000) {
+  for (const end = Date.now() + timeout; ;) {
+    if (await condition().catch(() => false)) return true;
+    if (Date.now() > end) return false;
+    await page.waitForTimeout(50);
+  }
+}
+
+/** The task's routing matrix, from the template's routing spike #114. */
+const routingChecks = (page, origin) => {
+  const { iri: task, id, at, work, personal } = plumberTask(origin);
+  const withSource = (context, action = '') =>
+    `${at}${action}?context=${encodeURIComponent(context)}`;
+  const details = page.getByRole('dialog', { name: /^(Details|Not today)$/ });
+  const title = details.getByLabel('Title', { exact: true });
+  const closeButton = details.getByRole('button', {
+    name: 'Close',
+    exact: true,
+  });
+  const confirm = page.getByRole('alertdialog');
+  const notFound = page.getByRole('dialog', { name: 'Not found' });
+  const zenTitle = page.locator('.zen-title');
+  const plumberLink = page.getByRole('link', { name: /^Call the plumber/ });
+  // Decoded, so the router's percent-encoding of the same address compares
+  // equal.
+  const url = () => new URL(page.url());
+  const path = () => decodeURIComponent(addressOf(page));
+  const pathname = () => url().pathname;
+  const historyLength = () => page.evaluate(() => history.length);
+  const isTask = (p) =>
+    p.startsWith('/tasks/') && !/^\/tasks\/(add|new)$/.test(p);
+  /** What is shown matches the address: the task dialog exactly on tasks. */
+  const consistent = async () =>
+    (await details.isVisible()) === isTask(pathname());
+  /** The address is `expected`, and the task dialog is open or not. */
+  const showing = (expected, open) => async () =>
+    path() === expected && (await details.isVisible()) === open;
+  /** On the task's address with its dialog open. */
+  const onTask = async () => pathname() === at && (await title.isVisible());
+  const dirty = () => typeEdit(page, title);
+  const overview = async () => {
+    await page.goto(origin + '/');
+    await zenTitle.waitFor();
+  };
+  const openFromOverview = async () => {
+    await page.goto(origin + '/');
+    await zenTitle.click();
+    await title.waitFor();
+  };
+  // Zen, then List through the menu: two entries of the same document.
+  const toList = async () => {
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'View' }).click();
+    await page.getByRole('menuitemradio', { name: 'List' }).click();
+    await plumberLink.waitFor();
+  };
+  const toListInApp = async () => {
+    await overview();
+    await toList();
+  };
+  /** Opens the task from the list. */
+  const openFromList = async () => {
+    await plumberLink.click();
+    await title.waitFor();
+  };
+  const answer = (choice) => answerLeave(page, choice);
+  /** The task's name in a Context, among the stored tasks. */
+  const nameIn = (tasks, context) =>
+    tasks.find((t) => t.context === context && t.body['@id'] === task)?.body[
+      'https://schema.org/name'
+    ]?.[0]?.['@value'];
+  return {
+    async 'direct-entry-signed-in'() {
+      await page.goto(origin + at);
+      await title.waitFor();
+      const read = await title.inputValue();
+      return { pass: read === PLUMBER && path() === at, read, path: path() };
+    },
+    // A plain click switches in place: no reload, the source in the address.
+    async 'link-plain-click-in-place'() {
+      await overview();
+      await page.evaluate(() => (window.marker = 'kept'));
+      const href = await zenTitle.getAttribute('href');
+      await zenTitle.click();
+      await title.waitFor();
+      const marker = await page.evaluate(() => window.marker);
+      return {
+        pass:
+          href === withSource(work) &&
+          path() === decodeURIComponent(withSource(work)) &&
+          marker === 'kept',
+        href,
+        path: path(),
+        noReload: marker === 'kept',
+      };
+    },
+    async 'link-modified-click-new-tab'() {
+      await overview();
+      const opened = page.context().waitForEvent('page', { timeout: 5000 });
+      await zenTitle.click({ modifiers: ['ControlOrMeta'] });
+      const tab = await opened.catch(() => null);
+      await tab?.waitForURL(/\/tasks\//).catch(() => {});
+      const tabPath = tab ? new URL(tab.url()).pathname : null;
+      await tab?.close();
+      const open = await details.isVisible();
+      return {
+        pass: tabPath === at && path() === '/' && !open,
+        newTab: tabPath,
+        stayed: path(),
+        open,
+      };
+    },
+    async 'action-route'() {
+      await page.goto(origin + '/');
+      await page
+        .getByRole('button', { name: 'Not today', exact: true })
+        .click();
+      await page
+        .getByRole('dialog', { name: 'Not today' })
+        .getByLabel('Title', { exact: true })
+        .waitFor();
+      return { pass: pathname() === at + '/postpone', path: path() };
+    },
+    async 'close-returns-to-opener'() {
+      await page.goto(origin + '/list');
+      await openFromList();
+      const before = await historyLength();
+      await closeButton.click();
+      const back = await until(page, showing('/list', false));
+      return {
+        pass: back && (await plumberLink.isVisible()),
+        path: path(),
+        historyLength: [before, await historyLength()],
+      };
+    },
+    async 'close-direct-entry-falls-back'() {
+      await page.goto(origin + at);
+      await title.waitFor();
+      const before = await historyLength();
+      await closeButton.click();
+      const back = await until(page, showing('/', false));
+      const after = await historyLength();
+      return {
+        pass: back && after === before,
+        path: path(),
+        historyLength: [before, after],
+      };
+    },
+    async 'back-dirty-stay'() {
+      await openFromOverview();
+      await dirty();
+      await page.goBack();
+      const asked = await answer('keep');
+      const stayed = await until(page, async () => pathname() === at);
+      const kept = await editKept(title);
+      return {
+        pass: asked && stayed && kept,
+        asked,
+        draftKept: kept,
+        path: path(),
+      };
+    },
+    async 'back-dirty-discard'() {
+      await openFromOverview();
+      await dirty();
+      await page.goBack();
+      const asked = await answer('discard');
+      const left = await until(page, showing('/', false));
+      return { pass: asked && left, asked, path: path() };
+    },
+    async 'back-forward-clean'() {
+      await openFromOverview();
+      await page.goBack();
+      const back = await until(page, showing('/', false));
+      await page.goForward();
+      const forward = await until(page, onTask);
+      return { pass: back && forward, back, forward, path: path() };
+    },
+    // The legacy link becomes the canonical address by replacement.
+    async 'legacy-query-link'() {
+      await overview();
+      const before = await historyLength();
+      await page.goto(origin + '/?task=' + id);
+      await title.waitFor();
+      const canonical = await until(page, async () => path() === at);
+      const after = await historyLength();
+      return {
+        pass: canonical && after === before + 1,
+        path: path(),
+        historyLength: [before, after],
+      };
+    },
+    async 'not-found-and-invalid'() {
+      await page.goto(origin + '/nowhere');
+      const unknown = await notFound.textContent().catch(() => null);
+      await loaded(page);
+      await page.goto(origin + '/tasks/!!!');
+      const invalid = await notFound.textContent().catch(() => null);
+      return {
+        pass:
+          /does not lead/.test(unknown ?? '') &&
+          /not valid/.test(invalid ?? '') &&
+          path() === '/tasks/!!!',
+        unknown,
+        invalid,
+      };
+    },
+    async 'reload-keeps-resource'() {
+      await openFromOverview();
+      await page.reload();
+      await title.waitFor();
+      return {
+        pass: path() === decodeURIComponent(withSource(work)),
+        path: path(),
+      };
+    },
+    async 'menu-switches-view'() {
+      await overview();
+      await toList();
+      return { pass: path() === '/list', path: path() };
+    },
+
+    // History moves while the SDK's question is open (Codex, template #121).
+    async 'pending-back-forward-discard'() {
+      await openFromOverview();
+      await dirty();
+      await page.goBack();
+      await confirm.waitFor({ timeout: 3000 });
+      await page.goForward();
+      const asked = await answer('discard');
+      const settled = await until(page, consistent);
+      const state = { path: pathname(), open: await details.isVisible() };
+      const kept = state.open && (await editKept(title));
+      await page.goBack();
+      const left = await until(page, showing('/', false));
+      const askedAgain = await confirm.isVisible();
+      return {
+        pass: asked && settled && !kept && left && !askedAgain,
+        state,
+        draftKept: kept,
+        askedAgain,
+      };
+    },
+    async 'pending-back-forward-keep'() {
+      await openFromOverview();
+      await dirty();
+      await page.goBack();
+      await confirm.waitFor({ timeout: 3000 });
+      await page.goForward();
+      const asked = await answer('keep');
+      const kept = await editKept(title);
+      const stayed = await until(page, onTask);
+      // The history still works: Back asks again.
+      await page.goBack();
+      const again = await answer('keep');
+      const stillThere = await until(page, async () => pathname() === at);
+      return {
+        pass: asked && kept && stayed && again && stillThere,
+        draftKept: kept,
+        asksAgain: again,
+        path: path(),
+      };
+    },
+    async 'repeated-back-keep'() {
+      await toListInApp();
+      await openFromList();
+      await dirty();
+      await page.goBack();
+      await confirm.waitFor({ timeout: 3000 });
+      await page.goBack();
+      const asked = await answer('keep');
+      const stayed = await until(page, onTask);
+      const kept = await editKept(title);
+      return { pass: asked && stayed && kept, draftKept: kept, path: path() };
+    },
+    async 'repeated-back-discard'() {
+      await toListInApp();
+      await openFromList();
+      await dirty();
+      await page.goBack();
+      await confirm.waitFor({ timeout: 3000 });
+      await page.goBack();
+      const asked = await answer('discard');
+      const left = await until(page, showing('/', false));
+      await page.goForward();
+      const forward = await until(page, showing('/list', false));
+      return { pass: asked && left && forward, left, forward, path: path() };
+    },
+    async 'multi-entry-traversal'() {
+      await toListInApp();
+      await openFromList();
+      await page.evaluate(() => history.go(-2));
+      const back = await until(page, showing('/', false));
+      await page.evaluate(() => history.go(2));
+      const forward = await until(page, onTask);
+      return { pass: back && forward, back, forward, path: path() };
+    },
+    async 'reload-then-back'() {
+      await openFromOverview();
+      await page.reload();
+      await title.waitFor();
+      await page.goBack();
+      const back = await until(page, showing('/', false));
+      await page.goForward();
+      const forward = await until(page, onTask);
+      return { pass: back && forward, back, forward, path: path() };
+    },
+    // A fragment link adds an entry the router did not write (Codex, #208):
+    // staying after two entries back returns to the task, not to the
+    // fragment entry.
+    async 'fragment-entry-back-keep'() {
+      await toListInApp();
+      await page.evaluate(() => (location.hash = 'section'));
+      await until(page, async () => url().hash === '#section');
+      await plumberLink.click();
+      await title.waitFor();
+      await dirty();
+      await page.evaluate(() => history.go(-2));
+      const asked = await answer('keep');
+      const stayed = await until(
+        page,
+        async () =>
+          pathname() === at && url().hash === '' && (await consistent()),
+      );
+      const kept = await editKept(title);
+      return {
+        pass: asked && stayed && kept,
+        asked,
+        draftKept: kept,
+        url: page.url(),
+      };
+    },
+    // Close after a fragment link's entry still returns to the opener
+    // (Codex, #208), past the screen's fragment entry.
+    async 'fragment-entry-close'() {
+      await page.goto(origin + '/list');
+      await openFromList();
+      await page.evaluate(() => (location.hash = 'notes'));
+      await until(page, async () => url().hash === '#notes');
+      await closeButton.click();
+      const back = await until(
+        page,
+        async () => (await showing('/list', false)()) && url().hash === '',
+      );
+      return { pass: back && (await plumberLink.isVisible()), url: page.url() };
+    },
+    // An invalid legacy link keeps its address and its error page.
+    async 'invalid-legacy-stays'() {
+      await page.goto(origin + '/?task=!!!');
+      const text = await notFound.textContent().catch(() => null);
+      return {
+        pass: /not valid/.test(text ?? '') && path() === '/?task=!!!',
+        text,
+        path: path(),
+      };
+    },
+    // The literal creation route wins over the resource pattern; its legacy
+    // form becomes canonical.
+    async 'creation-route-wins'() {
+      const creation = page.getByRole('dialog', { name: 'New task' });
+      await page.goto(origin + '/tasks/add');
+      const add = await shown(creation);
+      await loaded(page);
+      await page.goto(origin + '/tasks/new');
+      const legacy = await shown(creation);
+      const canonical = await until(page, async () => path() === '/tasks/add');
+      return { pass: add && legacy && canonical, path: path() };
+    },
+
+    // The source Context in the address (Codex, template #121): two Contexts
+    // hold the same subject; reads and writes go to the one the address names.
+    async 'source-named-in-links'() {
+      await overview();
+      const href = await zenTitle.getAttribute('href');
+      return { pass: href === withSource(work), href };
+    },
+    async 'source-signed-in-read-and-write'() {
+      await page.goto(origin + withSource(personal));
+      await title.waitFor();
+      const read = await title.inputValue();
+      await title.fill('Personal copy, edited');
+      await details.getByRole('button', { name: 'Save', exact: true }).click();
+      await gone(details);
+      const tasks = await storedTasks(origin);
+      const personalNow = nameIn(tasks, personal);
+      const workNow = nameIn(tasks, work);
+      return {
+        pass:
+          read === PERSONAL &&
+          personalNow === 'Personal copy, edited' &&
+          workNow === PLUMBER,
+        read,
+        personalNow,
+        workNow,
+      };
+    },
+    async 'source-action-route'() {
+      await page.goto(origin + withSource(personal, '/postpone'));
+      const field = page
+        .getByRole('dialog', { name: 'Not today' })
+        .getByLabel('Title', { exact: true });
+      await field.waitFor();
+      const read = await field.inputValue();
+      return { pass: read === PERSONAL, read };
+    },
+    async 'source-reload'() {
+      await page.goto(origin + withSource(personal));
+      await title.waitFor();
+      await page.reload();
+      await title.waitFor();
+      const read = await title.inputValue();
+      return {
+        pass:
+          path() === decodeURIComponent(withSource(personal)) &&
+          read === PERSONAL,
+        read,
+        path: path(),
+      };
+    },
+    // A named source the app cannot read: an explicit error, no editor in
+    // another Context.
+    async 'source-unavailable'() {
+      await page.goto(
+        origin + withSource(origin + '/alice/_system/contexts/nope'),
+      );
+      const alert = await shown(details.getByRole('alert'));
+      const text = await details.getByRole('alert').textContent();
+      const editors = await title.count();
+      return {
+        pass: alert && /not available/.test(text ?? '') && editors === 0,
+        text,
+        editors,
+      };
+    },
+  };
+};
+
+/**
+ * The routing matrix of the template's routing spike (#114, branch
+ * claude/120-ui-spike, scripts/routing-gate.mjs): 29 checks of addresses,
+ * links and history moves with the package's router, three of them signed
+ * out, and two for a fragment link's entry. Each history check asserts the address and what is shown together.
+ */
+async function routing({ browser, origin }) {
+  const results = [];
+  const { at, personal } = plumberTask(origin);
+  const signedOut = [
+    ['direct-entry-signed-out', at, PLUMBER],
+    [
+      'source-signed-out',
+      `${at}?context=${encodeURIComponent(personal)}`,
+      PERSONAL,
+    ],
+    ['invalid-legacy-signed-out', '/?task=!!!', null],
+  ];
+  for (const [id, address, expected] of signedOut) {
+    const { context, page, errors } = await newPage(browser);
+    results.push(
+      await attempt(id, async () => {
+        await signIn(page, origin, address);
+        let shows;
+        if (expected === null)
+          shows = /not valid/.test(
+            (await page
+              .getByRole('dialog', { name: 'Not found' })
+              .textContent()) ?? '',
+          );
+        else {
+          const field = page
+            .getByRole('dialog', { name: 'Details' })
+            .getByLabel('Title', { exact: true });
+          await field.waitFor();
+          shows = (await field.inputValue()) === expected;
+        }
+        const path = addressOf(page);
+        return {
+          pass: path === address && shows && errors.length === 0,
+          path,
+          errors,
+        };
+      }),
+    );
+    await context.close();
+  }
+  const { context, page, errors } = await newPage(browser);
+  // A draft left by one check must not hold the next one's page load.
+  page.on('dialog', (dialog) => void dialog.accept().catch(() => {}));
+  await signIn(page, origin);
+  for (const [id, run] of Object.entries(routingChecks(page, origin))) {
+    // The previous check's page finishes its reads before the next navigation.
+    await loaded(page).catch(() => {});
+    await fetch(origin + '/__reset');
+    results.push(await attemptOn(errors, id, run));
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
+export const suites = {
+  gate,
+  roundtrip,
+  interaction,
+  integration,
+  contrast,
+  routing,
+};
