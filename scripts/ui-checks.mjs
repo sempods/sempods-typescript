@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, history, innerHeight, innerWidth, location, MutationObserver, window */
+/* global document, getComputedStyle, history, innerHeight, innerWidth, location, MutationObserver, requestAnimationFrame, window */
 // The checks of the UI gate (scripts/test-ui-consumer.mjs), ported from the
 // template's spike #120 (gate.mjs, roundtrip.mjs, interaction.mjs,
 // evidence.mjs, contrast-selftest.mjs and routing-gate.mjs on
@@ -143,21 +143,29 @@ async function attemptOn(errors, id, run) {
  * Waits until no finite animation or transition runs (at most 5s), then for
  * React to commit. Headless WebKit on Linux runs them far slower than their
  * durations, so a fixed pause can catch a closing menu or a focus outline
- * halfway; the end state is what the checks assert.
+ * halfway; the end state is what the checks assert. It looks only in
+ * animation frames: WebKit applies a finished transition's end value in the
+ * next one, and under load no frame may come for hundreds of milliseconds,
+ * so a check between frames read the focus outline at its starting colour.
  */
 async function settle(page) {
   await page
-    .waitForFunction(
+    .evaluate(
       () =>
-        document
-          .getAnimations()
-          .every(
-            (a) =>
-              a.playState !== 'running' ||
-              a.effect?.getTiming().iterations === Infinity,
-          ),
-      undefined,
-      { timeout: 5000, polling: 50 },
+        new Promise((done) => {
+          setTimeout(done, 5000);
+          const check = () =>
+            document
+              .getAnimations()
+              .some(
+                (a) =>
+                  a.playState === 'running' &&
+                  a.effect?.getTiming().iterations !== Infinity,
+              )
+              ? requestAnimationFrame(check)
+              : done();
+          requestAnimationFrame(check);
+        }),
     )
     .catch(() => {});
   await page.waitForTimeout(50);
@@ -1587,7 +1595,7 @@ async function contrast({ browser, origin, engine }) {
         el.style.setProperty('background-color', '#fff', 'important');
       });
       // The input's colours transition (transition-colors, 150ms).
-      await page.waitForTimeout(400);
+      await settle(page);
       const after = await failing();
       return { pass: before === 0 && after === 1, before, after };
     });
