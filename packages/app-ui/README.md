@@ -136,17 +136,76 @@ checked:
 | `data-actions`   | `solid` (default), `inverted`        | `inverted`: the primary action takes the page colour with a primary outline and text   |
 | `data-secondary` | `tonal` (default), `outline`, `text` | Secondary actions on a tonal surface, outlined in `input`, or as primary-coloured text |
 
-Each variant reads other palette roles, so its text needs 4.5:1 against them
-in both modes. After changing the palette or a variant, check the pairs of the
-variants in use:
+### Check an app theme
 
-| Variant    | Text on surface                       | Also                   |
-| ---------- | ------------------------------------- | ---------------------- |
-| `solid`    | `primary-foreground` on `primary`     |                        |
-| `inverted` | `primary` on `background`             |                        |
-| `tonal`    | `secondary-foreground` on `secondary` |                        |
-| `outline`  | `foreground` on `background`          | `input` outline at 3:1 |
-| `text`     | `primary` on `background`             |                        |
+Load the app stylesheet in a browser. In the browser runner, emulate light
+and dark in turn and call this function in the page for each preference.
+This works for native `light-dark()` and for builds that compile it into media
+queries. The development entry ships separately from the component entry.
+
+```ts
+// check-theme.ts
+import { checkTheme, formatThemeReport } from '@sempods/app-ui/theme-check';
+
+export function checkPreferredTheme() {
+  const report = checkTheme();
+  if (report.failures.length) throw new Error(formatThemeReport(report));
+  return report;
+}
+```
+
+Each call samples the browser’s current colour preference. Read `report.skipped`
+for the other preference and for schemes the root palette excludes. An explicit
+`checkTheme('dark')` under a light preference returns only skips. A failure gives
+the active variant flag, component and palette roles, painted colours, ratio
+and threshold. Change a role in `adjust`, then rerun to check the other
+pairs listed in `alsoReads`. A component colour that differs from the
+variant mapping is marked as an override. The report is JSON-serializable.
+The original active attributes are also sampled when an implicit default paints
+differently from an explicit variant. For offline evaluation, `readTheme()` captures resolved sRGB samples,
+including the browser's mixtures. Pass its `samples`, `active` and `skipped`
+to `evaluateTheme()` to replay the same check without a DOM.
+
+The table lists CSS roles without their leading dashes. Each translucent
+surface is composited over the listed backdrop. Hover surfaces are resolved
+from the action roles in the current variant. The dark destructive action
+uses a lighter red to keep its text above 4.5:1 over its 30% hover tint on
+the page, a card or a popover.
+
+<!-- theme-pairs -->
+
+| Variant  | Foreground                  | Surface                | Backdrop                  | State | Minimum ratio |
+| -------- | --------------------------- | ---------------------- | ------------------------- | ----- | ------------- |
+| all      | foreground                  | background             | background                | rest  | 4.5           |
+| all      | card-foreground             | card                   | background                | rest  | 4.5           |
+| all      | popover-foreground          | popover                | background                | rest  | 4.5           |
+| all      | accent-foreground           | accent                 | background                | rest  | 4.5           |
+| all      | muted-foreground            | background             | background                | rest  | 4.5           |
+| all      | muted-foreground            | muted                  | background                | rest  | 4.5           |
+| all      | muted-foreground            | card                   | background                | rest  | 4.5           |
+| all      | muted-foreground            | popover                | background                | rest  | 4.5           |
+| all      | primary-foreground          | primary                | background                | rest  | 4.5           |
+| all      | destructive                 | destructive-tint       | background, card, popover | rest  | 4.5           |
+| all      | destructive                 | destructive-hover      | background, card, popover | hover | 4.5           |
+| all      | input                       | background             | background                | rest  | 3             |
+| all      | input                       | card                   | background                | rest  | 3             |
+| all      | input                       | popover                | background                | rest  | 3             |
+| all      | ring                        | background             | background                | rest  | 3             |
+| all      | ring                        | card                   | background                | rest  | 3             |
+| all      | ring                        | popover                | background                | rest  | 3             |
+| solid    | action-foreground           | action                 | background                | rest  | 4.5           |
+| solid    | action-foreground           | action-hover           | background                | hover | 4.5           |
+| inverted | action-foreground           | action                 | background                | rest  | 4.5           |
+| inverted | action-foreground           | action-hover           | background                | hover | 4.5           |
+| tonal    | action-secondary-foreground | action-secondary       | background                | rest  | 4.5           |
+| tonal    | action-secondary-foreground | action-secondary-hover | background                | hover | 4.5           |
+| outline  | action-secondary-foreground | action-secondary       | background, card, popover | rest  | 4.5           |
+| outline  | action-secondary-foreground | action-secondary-hover | background, card, popover | hover | 4.5           |
+| outline  | action-secondary-border     | transparent            | background, card, popover | rest  | 3             |
+| text     | action-secondary-foreground | action-secondary       | background, card, popover | rest  | 4.5           |
+| text     | action-secondary-foreground | action-secondary-hover | background, card, popover | hover | 4.5           |
+
+<!-- /theme-pairs -->
 
 States derive from the parts: hover mixes 12% of the text into a primary
 action's surface and 8% into a secondary action's, in `oklch`. A theme that
@@ -173,8 +232,8 @@ variants. Apps do not set these tokens themselves:
 | `--sempods-font`, `--sempods-radius`                                               | `--font-sans`, `radius`                                                            |
 
 The package's browser gate checks that SDK actions match the package's buttons
-of the same role in every variant, with both of its palettes, in light and
-dark. It does not check an app's own palette.
+of the same role at rest and on hover across all six combinations, with both
+package palettes in light and dark.
 
 Tailwind's `dark:` variant follows the system setting, as `light-dark()` does
 with `color-scheme: light dark`. An app that forces one scheme sets
@@ -198,10 +257,11 @@ the browser gate.
 ## Components
 
 The shadcn/ui components keep shadcn's names and React Aria's props
-(`onPress`, `isDisabled`, `isOpen`, …): `Button`, `LinkButton`, `Calendar`,
-`RangeCalendar`, `Dialog` and its parts, `DropdownMenu` and its parts,
-`Input`, `InputGroup` and its parts, `Popover` and its parts, `Select` and its
-parts, and `Textarea`. shadcn's
+(`onPress`, `isDisabled`, `isOpen`, …): `Badge`, `Button`, `LinkButton`,
+`Calendar`, `RangeCalendar`, `Dialog` and its parts, `DropdownMenu` and its
+parts, `Input`, `InputGroup` and its parts, `Popover` and its parts, `Select`
+and its parts, `Textarea`, `Toggle`, and `ToggleGroup` with
+`ToggleGroupItem`. `Badge` suits read-only tags. shadcn's
 [aria-nova documentation](https://ui.shadcn.com/docs/components) describes
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
@@ -404,8 +464,96 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   in a bar at the chooser's bottom edge, visible on a phone as it opens.
 - **`ActionButton`**: an app's own action in the theme's variants: `variant`
   `primary` (default), `secondary`, `ghost` or `destructive`; `shape` `pill`
-  (56px high), `round` (56px) or `round-lg` (72px); `label` names an icon-only
-  button.
+  (56px high), `round-sm` (44px, as `HeaderMenu`'s button, for icon actions
+  in a heading), `round` (56px) or `round-lg` (72px); `label` names an
+  icon-only button. **`ActionLink`** looks the same and is a real link, for
+  an action with an address (`{...nav.link(place)}`), so it can be opened in
+  a new tab or copied.
+- **`ActionGroup`**: a labelled row of actions, the full width on phones and at
+  most 26rem wide and centred above. `pill` actions share the free width,
+  round ones keep their size, and each action stays its own Tab stop.
+- **`ChipGroup`** and **`Chip`**: filter chips. `ChipGroup` takes a `label`
+  and React Aria's selection props (`selectionMode` `single` by default or
+  `multiple`, `selectedKeys`, `onSelectionChange`, `disallowEmptySelection`);
+  each `Chip` has an `id`. Chips are 44px high and wrap on narrow screens. A
+  chosen chip is filled with the primary role and shows a check mark, so its
+  state does not rest on colour alone. Tab reaches the group once, arrow keys
+  move between chips, and Space or Enter chooses one.
+
+A main action usually stands alone above a group of the others, as in the
+reference screen's Zen view:
+
+```tsx
+// zen-actions.tsx
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
+import {
+  ActionButton,
+  ActionGroup,
+  ActionLink,
+  type NavLinkProps,
+} from '@sempods/app-ui';
+
+export function ZenActions(props: {
+  readonly complete: () => void;
+  readonly previous: () => void;
+  readonly next: () => void;
+  /** The task's "Not today" address, from `nav.link(…)`. */
+  readonly postpone: NavLinkProps;
+}) {
+  return (
+    <>
+      <ActionButton shape="round-lg" label="Complete" onPress={props.complete}>
+        <CheckIcon />
+      </ActionButton>
+      <ActionGroup label="Task actions">
+        <ActionButton
+          variant="secondary"
+          shape="round"
+          label="Previous task"
+          onPress={props.previous}
+        >
+          <ChevronLeftIcon />
+        </ActionButton>
+        <ActionLink variant="secondary" {...props.postpone}>
+          Not today
+        </ActionLink>
+        <ActionButton
+          variant="secondary"
+          shape="round"
+          label="Next task"
+          onPress={props.next}
+        >
+          <ChevronRightIcon />
+        </ActionButton>
+      </ActionGroup>
+    </>
+  );
+}
+```
+
+Filter chips with one choice that cannot be emptied:
+
+```tsx
+// task-filter.tsx
+import { Chip, ChipGroup } from '@sempods/app-ui';
+
+export function TaskFilter(props: {
+  readonly shown: 'open' | 'all';
+  readonly show: (shown: 'open' | 'all') => void;
+}) {
+  return (
+    <ChipGroup
+      label="Show"
+      disallowEmptySelection
+      selectedKeys={[props.shown]}
+      onSelectionChange={(keys) => props.show(keys.has('all') ? 'all' : 'open')}
+    >
+      <Chip id="open">Open</Chip>
+      <Chip id="all">All</Chip>
+    </ChipGroup>
+  );
+}
+```
 
 The adapters' texts ("Menu", "No date", "Apply", "Remove date") follow the
 SDK provider's language (English or German) and can be passed as props.
@@ -749,9 +897,13 @@ Firefox on the Linux CI runner. It checks Escape in fields, in SDK
 confirmations, on Close, in menus and in the date chooser; focus trap and
 restore; Save after cancelled closes; closing right after opening; resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
-in three time zones; keyboard use of menus and the calendar; 44px targets; the
-cascade with the SDK's styles; the rendered contrast of both palettes and
-all variants in light and dark mode; and the router's 29-check matrix of
+in three time zones; keyboard use of menus, the calendar and filter chips;
+44px targets; the action group's width on a phone and a desktop; the routed
+screen and the SDK's Pods & sharing sheet inside the visible width beside a
+page scrollbar (where the engine draws one that takes width; otherwise the
+check reports a skip); the
+cascade with the SDK's styles; the role pairs of both palettes in all six
+combinations in light and dark; rendered screen contrast in four combinations; and the router's 29-check matrix of
 links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
 Context, plus fragment entries, a source address without a Context choice and
@@ -760,10 +912,14 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
 
-- The SDK's buttons do not follow the `inverted`, `outline` and `text`
-  variants (see the bridge).
-- Contrast is measured for the states the gate reaches, not for every state an
-  app can create; an app's own theme needs its own check.
+- The role check samples colours on the root element. Run it under each browser
+  preference to cover both schemes. Build tools can compile `light-dark()`
+  into media queries, which follow the browser preference even when a page
+  script changes the root colour scheme.
+- Missing, invalid and context-dependent `currentColor` roles throw with the
+  role name. The checker restores the page attributes on error.
+- Check screens visually as well. Classes on individual controls, nested
+  themes, opacity, images and interactions can change what a person sees.
 - The router does not protect leaving the document: Back past its first
   entry, a reload or closing the tab is the SDK's `beforeunload` prompt.
 - History entries that other code writes with `pushState` carry no router

@@ -125,13 +125,22 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   - keyboard use of the header menu and the calendar, 44px calendar targets at
     375 × 812 and 375 × 560 with Apply and Remove date visible as the chooser
     opens, German texts and locale, removing an optional
-    date;
+    date; filter chips by keyboard at 375px (one Tab stop, arrows, Space,
+    filled and marked when chosen, 44px, no overflow); the action group at
+    375 and 1280px; and, on a page taller than the screen with a scrollbar
+    that takes width, the routed screen and the SDK's Pods & sharing sheet
+    inside the visible width (#216). An engine without such a scrollbar
+    (headless Chromium hides it) reports that check as skipped, and the
+    summary counts skips apart from passes;
   - the cascade: package classes win over the SDK's element rules inside an SDK
     editor, and the token bridge reaches the SDK's own controls;
+  - the packed theme checker on the default and fresh palettes across all six
+    action combinations in both schemes, including rest and hover parity
+    with the reference buttons and controls with known failing roles;
   - rendered contrast (`scripts/ui-contrast.js`): 19 controls that must pass or
-    fail as stated, then five states × two palettes with every action and
+    fail as stated, then six states × two palettes with every action and
     secondary variant × light and dark × 375 and 1280px, including hovered,
-    pressed and focused controls. Each of these loads its own state, so four
+    pressed and focused controls; the List state measures the filter chips. Each of these loads its own state, so four
     signed-in pages measure them side by side;
   - the routing matrix of the template's routing spike (#114), 29 checks with
     the package's router: a resource link, one with a named source Context and

@@ -7,7 +7,11 @@
 (sempods/sempods-apps-template#120) and taken from the spike branch
 `claude/120-ui-spike` at `368057f`, `spikes/120-ui/ui-aria/src/components/ui/`:
 `button`, `calendar`, `dialog`, `dropdown-menu`, `input`, `input-group`,
-`popover`, `select` and `textarea`.
+`popover`, `select` and `textarea`. `badge`, `toggle` and `toggle-group`
+were taken on 2026-11-02 from the same style's registry
+(`https://ui.shadcn.com/r/styles/aria-nova/<name>.json`) for chips
+(sempods/sempods-typescript#216), with the same mechanical changes and no
+others.
 
 Changes against the registry output:
 

@@ -1,6 +1,7 @@
 // The UI gate's reference screen, ported from the template's spike #120: a
-// Focus-like Zen view and a List view switched from a header menu (View
-// submenu with checked choices), a routed task dialog holding an SDK
+// Focus-like Zen view with its actions in a group and a List view with
+// filter chips, switched from a header menu (View submenu with checked
+// choices), a routed task dialog holding an SDK
 // ResourceEditor, its "Not today" action address, a creation address and
 // explicit not-found pages, a calendar-date chooser inside the editor fields.
 // Built with Vite and Tailwind 4 against the packed packages;
@@ -23,6 +24,9 @@ import {
 } from '@sempods/app-sdk/react';
 import {
   ActionButton,
+  ActionGroup,
+  Chip,
+  ChipGroup,
   HeaderMenu,
   ScreenDialog,
   replaceUrl,
@@ -30,8 +34,11 @@ import {
   type Nav,
 } from '@sempods/app-ui';
 import { places, type Place } from './places';
+import { checkTheme, readTheme } from '@sempods/app-ui/theme-check';
 import { TaskDialog, taskFields } from './task-dialog';
 import './index.css';
+
+Object.assign(window, { checkTheme, readTheme });
 
 const texts = {
   en: {
@@ -49,6 +56,10 @@ const texts = {
     notFound: 'Not found',
     invalid: 'This task link is not valid.',
     unknown: 'This address does not lead anywhere in Focus.',
+    actions: 'Task actions',
+    show: 'Show',
+    open: 'Open',
+    all: 'All',
   },
   de: {
     menu: 'Menü',
@@ -65,6 +76,10 @@ const texts = {
     notFound: 'Nicht gefunden',
     invalid: 'Dieser Aufgabenlink ist nicht gültig.',
     unknown: 'Diese Adresse führt in Focus nirgendwohin.',
+    actions: 'Aufgabenaktionen',
+    show: 'Anzeigen',
+    open: 'Offen',
+    all: 'Alle',
   },
 };
 
@@ -216,6 +231,7 @@ function Tasks({
   const t = useMessages(texts);
   const list = useList(taskFields);
   const [index, setIndex] = useState(0);
+  const [shown, setShown] = useState<'open' | 'all'>('open');
   const { view: target } = useAppState();
   const items = (list.data?.items ?? []).filter((item) => !item.data.done);
   const at = index % Math.max(items.length, 1);
@@ -232,13 +248,30 @@ function Tasks({
     <>
       <LoadNotice {...list} />
       {view === 'list' ? (
-        <ul className="gate-list">
-          {items.map((item) => (
-            <li key={item.iri}>
-              <a {...nav.link(task(item.iri))}>{item.data.title}</a>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ChipGroup
+            label={t.show}
+            className="mb-2"
+            selectionMode="single"
+            disallowEmptySelection
+            selectedKeys={[shown]}
+            onSelectionChange={(keys) =>
+              setShown(keys.has('all') ? 'all' : 'open')
+            }
+          >
+            <Chip id="open">{t.open}</Chip>
+            <Chip id="all">{t.all}</Chip>
+          </ChipGroup>
+          <ul className="gate-list">
+            {(shown === 'all' ? (list.data?.items ?? []) : items).map(
+              (item) => (
+                <li key={item.iri}>
+                  <a {...nav.link(task(item.iri))}>{item.data.title}</a>
+                </li>
+              ),
+            )}
+          </ul>
+        </>
       ) : active ? (
         <section className="zen" aria-label={t.zen}>
           <div className="zen-task">
@@ -257,7 +290,7 @@ function Tasks({
                 <Icon path="M5 12.5l4.5 4.5L19 7.5" />
               </ActionButton>
             </div>
-            <div className="zen-actions">
+            <ActionGroup label={t.actions}>
               <ActionButton
                 variant="secondary"
                 shape="round"
@@ -282,7 +315,7 @@ function Tasks({
               >
                 <Icon path="M9 18l6-6-6-6" />
               </ActionButton>
-            </div>
+            </ActionGroup>
           </div>
         </section>
       ) : (

@@ -42,6 +42,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./theme-check": {
+      "types": "./dist/theme-check/index.d.ts",
+      "import": "./dist/theme-check/index.js"
+    },
     "./styles.css": "./styles.css"
   },
   "dependencies": {
