@@ -32,8 +32,9 @@ gave way to such rules.
 3. Check the sign-in screen, the Pods & sharing dialog, an editor and a
    confirmation with the app's real stylesheet.
 
-Five optional tokens map a UI kit's field border, main and other actions and
-focus ring onto SDK surfaces; without them nothing changes.
+Eight optional tokens map a UI kit's field border, the surface, text and border
+of the main and the other actions, and the focus ring onto SDK surfaces; without
+them nothing changes. A hovered main action now mixes its text into its surface.
 
 ## From 0.5.0 to 0.6.0
 

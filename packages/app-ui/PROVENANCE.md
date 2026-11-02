@@ -13,7 +13,9 @@ Changes against the registry output:
 
 - `button.tsx`: the `default` and `secondary` variants read the contract's
   action tokens (`bg-action`, `border-action-border`, `text-action-foreground`,
-  `bg-action-secondary`, …) instead of `primary` and `secondary` directly.
+  `bg-action-secondary`, …) instead of `primary` and `secondary` directly;
+  their hover mixes the role's own text into its surface, as the SDK's
+  actions do.
 - `dialog.tsx`: no entry or exit animation on the overlay and the modal. In
   WebKit, React Aria kept a modal that closed during its entry animation
   mounted for good (`data-entering` and `data-exiting` at once); in headless

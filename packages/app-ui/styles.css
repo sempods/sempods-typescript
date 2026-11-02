@@ -12,10 +12,12 @@
  *   1. Palette roles: semantic colours with foreground pairs in light-dark(),
  *      named as in shadcn/ui. A theme changes only these values. The defaults
  *      here are a calm neutral palette; an app's theme.css overrides them.
- *   2. Component variants: data-actions (solid, inverted) and data-secondary
- *      (tonal, outline, text) on <html> map controls to roles, never to
- *      colour values, so a theme's checked contrast stays checked.
- *   3. The bridge to the SDK's --sempods-* tokens.
+ *   2. Component roles and variants: two action roles (--action*,
+ *      --action-secondary*) with a surface, text and border each.
+ *      data-actions (solid, inverted) and data-secondary (tonal, outline,
+ *      text) on <html> point them at palette roles, never at colour values,
+ *      so a theme's checked contrast stays checked.
+ *   3. The bridge to the SDK's --sempods-* tokens, read from parts 1 and 2.
  *   4. A solid focus outline in the ring colour.
  *   5. No overlay animations for people who ask for reduced motion.
  */
@@ -175,9 +177,9 @@
   }
 
   /* 3. Bridge to the SDK. Its fields get the input role (3:1), its
-     separators the border role. The SDK's actions have no outline or tonal
-     surface, so its main action stays filled in the primary role and its
-     other actions stay primary text, whatever the variants. */
+     separators the border role. Its two action roles read the component
+     roles above, part for part (surface, text, border), so SDK actions follow
+     every variant as the package's buttons do. Themes never set these. */
   :where(:root) {
     --sempods-bg: var(--background);
     --sempods-text: var(--foreground);
@@ -186,9 +188,12 @@
     --sempods-field-line: var(--input);
     --sempods-accent: var(--primary);
     --sempods-on-accent: var(--primary-foreground);
-    --sempods-primary-bg: var(--primary);
-    --sempods-primary-text: var(--primary-foreground);
-    --sempods-secondary-text: var(--primary);
+    --sempods-primary-bg: var(--action);
+    --sempods-primary-text: var(--action-foreground);
+    --sempods-primary-border: var(--action-border);
+    --sempods-secondary-bg: var(--action-secondary);
+    --sempods-secondary-text: var(--action-secondary-foreground);
+    --sempods-secondary-border: var(--action-secondary-border);
     --sempods-focus: var(--ring);
     --sempods-font: var(--font-sans);
     --sempods-radius: var(--radius);

@@ -921,8 +921,10 @@ const styles = `
 [data-sempods-access] input { border-width:0 0 1px; border-radius:0; padding-inline:0; }
 [data-sempods-access] select { appearance:none; border-width:0 0 1px; border-radius:0; padding:12px 24px 12px 0; cursor:pointer; background-image:linear-gradient(45deg,transparent 50%,var(--sp-muted) 50%),linear-gradient(135deg,var(--sp-muted) 50%,transparent 50%); background-position:calc(100% - 10px) 50%,calc(100% - 5px) 50%; background-size:5px 5px; background-repeat:no-repeat; }
 [data-sempods-access] input::placeholder { color:var(--sp-muted); opacity:1; }
-[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:0; border-radius:calc(var(--sp-radius) * .625); color:var(--sp-secondary-text); background:transparent; padding:10px 14px; cursor:pointer; }
-[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-primary-text); background:var(--sp-primary-bg); }
+[data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:1px solid var(--sp-secondary-border); border-radius:calc(var(--sp-radius) * .625); color:var(--sp-secondary-text); background:var(--sp-secondary-bg); padding:9px 13px; cursor:pointer; }
+[data-sempods-access] button:hover:not(:disabled) { background:color-mix(in oklch,var(--sp-secondary-bg),var(--sp-secondary-text) 8%); }
+[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-primary-text); background:var(--sp-primary-bg); border:2px solid var(--sp-primary-border); padding:8px 12px; }
+[data-sempods-access] .sp-access-primary:hover:not(:disabled) { background:color-mix(in oklch,var(--sp-primary-bg),var(--sp-primary-text) 12%); }
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
 [data-sempods-access] :focus-visible { outline:2px solid var(--sp-focus); outline-offset:3px; }
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
@@ -941,7 +943,9 @@ const styles = `
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
 .sp-access-dialog-header h2 { flex:1; margin:0; }
-.sp-access-close { width:44px; height:44px; display:grid; place-items:center; padding:0; color:var(--sp-text); }
+/* An icon control, not an action role: no surface or border of its own. */
+.sp-access-close { width:44px; height:44px; display:grid; place-items:center; padding:0; color:var(--sp-text); background:transparent; border-color:transparent; }
+.sp-access-close:hover { background:color-mix(in oklch,transparent,var(--sp-text) 8%); }
 .sp-access-close svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
 .sp-access-dialog [data-sempods-access] { padding:8px 24px 24px; text-align:start; }
 .sp-access-dialog [data-sempods-access] .sp-access-content { max-width:none; }

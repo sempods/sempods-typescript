@@ -81,8 +81,24 @@ explains the order and which app rules still override SDK rules.
 
 ## The theme contract
 
-A theme changes only palette roles. Write them on `:root` in `light-dark()` so
-they follow the system's light or dark mode:
+The look is built in layers, and each layer reads only the one before it:
+
+1. **Palette roles** (`--primary`, `--background`, …): colour values, written
+   by the app's `theme.css`.
+2. **Component roles** (`--action*`, `--action-secondary*`): the two action
+   roles with a surface, text and border each. The variants below point them
+   at palette roles.
+3. **The SDK bridge**: `styles.css` passes roles to the SDK's `--sempods-*`
+   tokens, so SDK surfaces follow both layers above.
+
+Change the look in the first two layers only: palette roles in `theme.css`,
+variants on `<html>`, or, for an action look no variant gives, all three parts
+of both action roles. Leave the bridge, the `--sempods-*` tokens and the
+components' classes alone; then the package's buttons and the SDK's actions
+stay alike.
+
+A theme writes palette roles on `:root` in `light-dark()` so they follow the
+system's light or dark mode:
 
 ```css
 /* src/theme.css */
@@ -111,35 +127,73 @@ they follow the system's light or dark mode:
 
 Text pairs need 4.5:1, icons, field boundaries and focus 3:1, in both modes.
 
-**Component variants** switch with attributes on `<html>` and map controls to
-roles, never to colour values, so a checked palette stays checked:
+**Component variants** switch with attributes on `<html>` and point the action
+roles at palette roles, never at colour values, so a checked palette stays
+checked:
 
-| Attribute        | Values                               | Effect on `ActionButton` and `Button`                                                  |
+| Attribute        | Values                               | Effect on `ActionButton`, `Button` and SDK actions                                     |
 | ---------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
 | `data-actions`   | `solid` (default), `inverted`        | `inverted`: the primary action takes the page colour with a primary outline and text   |
 | `data-secondary` | `tonal` (default), `outline`, `text` | Secondary actions on a tonal surface, outlined in `input`, or as primary-coloured text |
 
+Each variant reads other palette roles, so its text needs 4.5:1 against them
+in both modes. After changing the palette or a variant, check the pairs of the
+variants in use:
+
+| Variant    | Text on surface                       | Also                   |
+| ---------- | ------------------------------------- | ---------------------- |
+| `solid`    | `primary-foreground` on `primary`     |                        |
+| `inverted` | `primary` on `background`             |                        |
+| `tonal`    | `secondary-foreground` on `secondary` |                        |
+| `outline`  | `foreground` on `background`          | `input` outline at 3:1 |
+| `text`     | `primary` on `background`             |                        |
+
+States derive from the parts: hover mixes 12% of the text into a primary
+action's surface and 8% into a secondary action's, in `oklch`. A theme that
+sets the action roles directly instead of using a variant sets all six:
+
+| Component role                                                                     | Default                                            |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `--action`, `--action-foreground`, `--action-border`                               | `primary`, `primary-foreground`, `primary`         |
+| `--action-secondary`, `--action-secondary-foreground`, `--action-secondary-border` | `secondary`, `secondary-foreground`, `transparent` |
+
 **The SDK bridge** passes the roles to the SDK's `--sempods-*` tokens, so
-`AppAccess`, editors, notices and confirmations follow the theme:
+`AppAccess`, editors, notices and confirmations follow the theme and the
+variants. Apps do not set these tokens themselves:
 
-| SDK token                                        | Role                            |
-| ------------------------------------------------ | ------------------------------- |
-| `--sempods-bg`, `--sempods-text`                 | `background`, `foreground`      |
-| `--sempods-muted`                                | `muted-foreground`              |
-| `--sempods-line`, `--sempods-field-line`         | `border`, `input`               |
-| `--sempods-accent`, `--sempods-on-accent`        | `primary`, `primary-foreground` |
-| `--sempods-primary-bg`, `--sempods-primary-text` | `primary`, `primary-foreground` |
-| `--sempods-secondary-text`                       | `primary`                       |
-| `--sempods-focus`                                | `ring`                          |
-| `--sempods-font`, `--sempods-radius`             | `--font-sans`, `radius`         |
+| SDK token                                                                          | Role                                                                               |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `--sempods-bg`, `--sempods-text`                                                   | `background`, `foreground`                                                         |
+| `--sempods-muted`                                                                  | `muted-foreground`                                                                 |
+| `--sempods-line`, `--sempods-field-line`                                           | `border`, `input`                                                                  |
+| `--sempods-accent`, `--sempods-on-accent`                                          | `primary`, `primary-foreground`                                                    |
+| `--sempods-primary-bg`, `--sempods-primary-text`, `--sempods-primary-border`       | `--action`, `--action-foreground`, `--action-border`                               |
+| `--sempods-secondary-bg`, `--sempods-secondary-text`, `--sempods-secondary-border` | `--action-secondary`, `--action-secondary-foreground`, `--action-secondary-border` |
+| `--sempods-focus`                                                                  | `ring`                                                                             |
+| `--sempods-font`, `--sempods-radius`                                               | `--font-sans`, `radius`                                                            |
 
-The SDK's buttons have no outline or tonal surface, so they keep their own
-look under `inverted`, `outline` and `text`: Save and Confirm stay filled in
-`primary`, the SDK's other actions stay primary-coloured text.
+The package's browser gate checks that SDK actions match the package's buttons
+of the same role in every variant, with both of its palettes, in light and
+dark. It does not check an app's own palette.
 
 Tailwind's `dark:` variant follows the system setting, as `light-dark()` does
 with `color-scheme: light dark`. An app that forces one scheme sets
 `color-scheme` on `:root` and redefines `@custom-variant dark` to match.
+
+## Standards
+
+The package builds on web and community standards: CSS custom properties,
+cascade layers, `light-dark()` and `color-mix()` from CSS Color 5, Tailwind CSS
+4's `@theme`, shadcn/ui's role names, React Aria's keyboard and screen reader
+behaviour after the WAI-ARIA Authoring Practices, and the contrast criteria of
+WCAG 2.2. The layers follow the token tiers of the
+[Design Tokens Community Group](https://www.designtokens.org/) as a concept, not
+its file format.
+
+Its own parts are the action roles (`--action*`), the variant attributes
+`data-actions` and `data-secondary`, and the bridge to the SDK's tokens.
+They are the contract above: change them only together with this README and
+the browser gate.
 
 ## Components
 
