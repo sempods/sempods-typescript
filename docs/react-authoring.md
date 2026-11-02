@@ -1028,17 +1028,28 @@ Theme with `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`
 `--sempods-radius` the corner radius of controls (default `8px`); cards and
 dialogs use 1.5 times it, `0` makes every SDK surface square.
 
-A UI kit with its own action variants and field style maps them onto five more
+A UI kit with its own action variants and field style maps them onto eight more
 tokens; each defaults to the token in the last column, so the look stays the same
-until you set one:
+until you set one. The SDK has two action roles, the one main action of a
+surface (Save, Confirm, Sign in) and its other actions (Cancel, Discard, text
+buttons), and each role has the same three parts:
 
-| Token                      | Styles                                              | Default               |
-| -------------------------- | --------------------------------------------------- | --------------------- |
-| `--sempods-field-line`     | Borders of fields; keep it at 3:1 to the background | `--sempods-line`      |
-| `--sempods-primary-bg`     | Fill of a surface's main action (Save, Confirm)     | `--sempods-accent`    |
-| `--sempods-primary-text`   | Text of the main action                             | `--sempods-on-accent` |
-| `--sempods-secondary-text` | Text of the other actions (Cancel, text buttons)    | `--sempods-accent`    |
-| `--sempods-focus`          | Focus outline of SDK controls                       | `--sempods-accent`    |
+| Token                        | Styles                                              | Default                |
+| ---------------------------- | --------------------------------------------------- | ---------------------- |
+| `--sempods-field-line`       | Borders of fields; keep it at 3:1 to the background | `--sempods-line`       |
+| `--sempods-primary-bg`       | Surface of the main action                          | `--sempods-accent`     |
+| `--sempods-primary-text`     | Text of the main action                             | `--sempods-on-accent`  |
+| `--sempods-primary-border`   | Border of the main action (2px)                     | `--sempods-primary-bg` |
+| `--sempods-secondary-bg`     | Surface of the other actions                        | `transparent`          |
+| `--sempods-secondary-text`   | Text of the other actions                           | `--sempods-accent`     |
+| `--sempods-secondary-border` | Border of the other actions (1px)                   | `transparent`          |
+| `--sempods-focus`            | Focus outline of SDK controls                       | `--sempods-accent`     |
+
+When a role changes, check its three parts together and keep its text at 4.5:1
+to its surface, or to the page where the surface is transparent. States follow from
+the parts: hover mixes 12% of the text into the main action's surface and 8%
+into the other actions' surface (in `oklch`), disabled actions are dimmed, and
+focus draws `--sempods-focus`. The borders stay inside the 44px target.
 
 Until you set `--sempods-field-line`, fields share the separator colour
 `--sempods-line`; set it when a quiet separator would leave field borders

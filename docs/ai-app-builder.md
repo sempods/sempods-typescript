@@ -52,6 +52,13 @@ choose a composition for the task:
   its field border, action and focus colours onto the
   [SDK tokens](react-authoring.md#shared-sdk-appearance). Preserve an existing
   app's identity unless asked to change it.
+- Make a requested look change in the layer that owns it, never on single
+  controls: colours in the palette roles, action styles such as inverted or
+  outlined buttons through the variants. With `@sempods/app-ui`, its
+  [theme contract](../packages/app-ui/README.md#the-theme-contract) names the
+  layers and the contrast pairs each variant needs; check those pairs in light
+  and dark after the change, and look at an SDK editor and confirmation next
+  to the app's own actions.
 - Give each screen one clear primary action. Use alignment, whitespace and
   typography to make the hierarchy visible; introduce tabs, cards or menus
   only when they help this interaction. A pleasing first version does not need

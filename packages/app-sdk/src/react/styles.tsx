@@ -1,6 +1,7 @@
 /** Internal shared baseline. Public tokens inherit from the host; no style registry.
  * Without them, the fallbacks are a calm neutral grey palette. Actions read as
- * text, as in AppAccess; the one main action of a surface is filled. */
+ * text, as in AppAccess; the one main action of a surface is filled. A UI kit
+ * restyles both action roles through their surface, text and border tokens. */
 export function SdkStyles() {
   return (
     <style href="sempods-sdk" precedence="sempods">
@@ -32,7 +33,10 @@ const styles = `
   --sp-field-line:var(--sempods-field-line,var(--sp-line));
   --sp-primary-bg:var(--sempods-primary-bg,var(--sp-accent));
   --sp-primary-text:var(--sempods-primary-text,var(--sp-on-accent));
+  --sp-primary-border:var(--sempods-primary-border,var(--sp-primary-bg));
+  --sp-secondary-bg:var(--sempods-secondary-bg,transparent);
   --sp-secondary-text:var(--sempods-secondary-text,var(--sp-accent));
+  --sp-secondary-border:var(--sempods-secondary-border,transparent);
   --sp-focus:var(--sempods-focus,var(--sp-accent));
   --sp-font:var(--sempods-font,system-ui,sans-serif);
   --sp-radius:var(--sempods-radius,8px);
@@ -43,9 +47,12 @@ ${surfaces} :where(.sp-sdk-actions) { display:flex; flex-wrap:wrap; gap:8px; }
 ${surfaces} :where(.sp-sdk-end) { margin-inline-start:auto; }
 ${surfaces}, ${surfaces} * { box-sizing:border-box; }
 ${surfaces} :where(button,input,select,textarea) { font:inherit; max-width:100%; min-width:0; min-height:44px; }
-${surfaces} :where(button) { font-weight:500; border:0; border-radius:var(--sp-radius); color:var(--sp-secondary-text); background:transparent; padding:10px 14px; cursor:pointer; }
-${surfaces} :where(button:hover:not(:disabled)) { background:color-mix(in srgb,var(--sp-secondary-text) 8%,transparent); }
-${surfaces} :where(button.sp-sdk-primary) { color:var(--sp-primary-text); background:var(--sp-primary-bg); }
+/* Two action roles with three parts each: surface, text, border. Borders keep
+   the outer size of 44px; hover mixes a role's text into its surface. */
+${surfaces} :where(button) { font-weight:500; border:1px solid var(--sp-secondary-border); border-radius:var(--sp-radius); color:var(--sp-secondary-text); background:var(--sp-secondary-bg); padding:9px 13px; cursor:pointer; }
+${surfaces} :where(button:hover:not(:disabled)) { background:color-mix(in oklch,var(--sp-secondary-bg),var(--sp-secondary-text) 8%); }
+${surfaces} :where(button.sp-sdk-primary) { color:var(--sp-primary-text); background:var(--sp-primary-bg); border:2px solid var(--sp-primary-border); padding:8px 12px; }
+${surfaces} :where(button.sp-sdk-primary:hover:not(:disabled)) { background:color-mix(in oklch,var(--sp-primary-bg),var(--sp-primary-text) 12%); }
 ${surfaces} :where(input,select,textarea) { color:var(--sp-text); background:var(--sp-bg); border:1px solid var(--sp-field-line); border-radius:var(--sp-radius); padding:10px 12px; }
 ${surfaces} :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { display:block; width:100%; margin-block:6px 14px; }
 ${surfaces} :where(input[type=checkbox],input[type=radio]) { width:24px; height:24px; min-height:24px; flex:none; vertical-align:middle; margin:0; margin-inline-end:10px; accent-color:var(--sp-accent); }

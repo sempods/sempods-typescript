@@ -1001,9 +1001,10 @@ async function integration({ browser, origin }) {
           // Input: bg-transparent and rounded-lg (utilities) over the SDK's
           // field background and radius.
           inputBackground: s(input).backgroundColor,
-          // The outline Button: a 1px border (utilities) over the SDK's
-          // `border: 0` for buttons.
+          // The outline Button: its 1px border in the border role
+          // (utilities) over the SDK's transparent border for buttons.
           triggerBorder: s(trigger).borderTopWidth,
+          triggerBorderColor: s(trigger).borderTopColor,
           triggerHeight: s(trigger).height,
         };
       });
@@ -1012,6 +1013,7 @@ async function integration({ browser, origin }) {
           styles.insideEditor &&
           /^(rgba\(0, 0, 0, 0\)|transparent)$/.test(styles.inputBackground) &&
           styles.triggerBorder === '1px' &&
+          styles.triggerBorderColor !== 'rgba(0, 0, 0, 0)' &&
           styles.triggerHeight === '44px',
         ...styles,
       };
@@ -1052,6 +1054,88 @@ async function integration({ browser, origin }) {
       };
     }),
   );
+  // SDK actions match the package's buttons of the same role, part for part:
+  // surface, text and border at rest, and the hover of the other actions.
+  for (const [theme, actions, secondary] of variants)
+    for (const scheme of ['light', 'dark'])
+      results.push(
+        await attempt(
+          `sdk-action-parity ${theme}/${actions}/${secondary} ${scheme}`,
+          async () => {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.goto(
+              `${origin}/?theme=${theme}&actions=${actions}&secondary=${secondary}`,
+            );
+            await openTask(page);
+            const parts = (hovered) =>
+              page.evaluate((hovered) => {
+                const probe = document.createElement('div');
+                document.body.append(probe);
+                const resolve = (css) => {
+                  probe.style.color = css;
+                  return getComputedStyle(probe).color;
+                };
+                const sdk = (name) =>
+                  [
+                    ...document.querySelectorAll(
+                      '[data-sempods-ui=editor] button',
+                    ),
+                  ].find((b) => b.textContent === name);
+                const look = (el) => {
+                  const s = getComputedStyle(el);
+                  return {
+                    surface: s.backgroundColor,
+                    text: s.color,
+                    border: `${s.borderTopWidth} ${s.borderTopColor}`,
+                  };
+                };
+                const role = (name, width) => ({
+                  surface: resolve(`var(--${name})`),
+                  text: resolve(`var(--${name}-foreground)`),
+                  border: `${width} ${resolve(`var(--${name}-border)`)}`,
+                });
+                const pairs = hovered
+                  ? [
+                      [
+                        'secondary:hover',
+                        { surface: look(sdk('Cancel')).surface },
+                        {
+                          surface: resolve(
+                            'color-mix(in oklch, var(--action-secondary), var(--action-secondary-foreground) 8%)',
+                          ),
+                        },
+                      ],
+                    ]
+                  : [
+                      ['primary', look(sdk('Save')), role('action', '2px')],
+                      [
+                        'secondary',
+                        look(sdk('Cancel')),
+                        role('action-secondary', '1px'),
+                      ],
+                    ];
+                probe.remove();
+                return pairs.flatMap(([name, got, want]) =>
+                  Object.keys(want)
+                    .filter((part) => got[part] !== want[part])
+                    .map(
+                      (part) =>
+                        `${name} ${part}: ${got[part]}, role ${want[part]}`,
+                    ),
+                );
+              }, hovered);
+            const mismatches = await parts(false);
+            await page
+              .getByRole('button', { name: 'Cancel', exact: true })
+              .hover();
+            await settle(page);
+            mismatches.push(...(await parts(true)));
+            await page.mouse.move(1, 1);
+            return { pass: mismatches.length === 0, mismatches };
+          },
+        ),
+      );
+  await page.emulateMedia({ colorScheme: null });
   results.push(
     await attempt('reduced-motion', async () => {
       // The header menu opens with its zoom-in, and without one when the
@@ -1238,15 +1322,13 @@ const states = {
 };
 // Both palettes (the package default and the app's "fresh") with every
 // action and secondary variant at least once.
-const combos =
-  process.env.UI_COMBOS === '0'
-    ? []
-    : [
-        ['default', 'solid', 'tonal'],
-        ['default', 'inverted', 'outline'],
-        ['fresh', 'solid', 'text'],
-        ['fresh', 'inverted', 'tonal'],
-      ];
+const variants = [
+  ['default', 'solid', 'tonal'],
+  ['default', 'inverted', 'outline'],
+  ['fresh', 'solid', 'text'],
+  ['fresh', 'inverted', 'tonal'],
+];
+const combos = process.env.UI_COMBOS === '0' ? [] : variants;
 
 /**
  * Rendered contrast (scripts/ui-contrast.js): its controls first, then each
@@ -1394,11 +1476,21 @@ async function contrast({ browser, origin, engine }) {
                     .filter((m) => m.kind === kind)
                     .map((m) => m.ratio),
                 );
+              // The SDK's actions are measured too: Cancel in the editor,
+              // both answers of the confirmation.
+              const sdkActions = new Set(
+                measured
+                  .filter((m) => m.what.startsWith('button[sdk:'))
+                  .map((m) => m.what),
+              ).size;
+              const sdkNeeded = { dialog: 1, confirm: 2 }[state] ?? 0;
               return {
                 pass:
                   measured.length > 0 &&
                   failures.length === 0 &&
+                  sdkActions >= sdkNeeded &&
                   focus.every((f) => f.pass),
+                sdkActions,
                 checked: measured.length,
                 minText: min('text'),
                 minIcon: min('icon'),

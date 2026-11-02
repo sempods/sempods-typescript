@@ -931,6 +931,7 @@ try {
             style.color,
             style.paddingTop,
             style.paddingLeft,
+            `${style.borderTopWidth} ${style.borderTopColor}`,
           ];
         }),
         address.evaluate((input) => {
@@ -942,8 +943,15 @@ try {
           ];
         }),
       ]);
+    // The main action's 2px border takes its fill and stays inside 44px.
     assert.deepEqual(await signInLook(), [
-      ['rgb(31, 41, 51)', 'rgb(255, 255, 255)', '10px', '14px'],
+      [
+        'rgb(31, 41, 51)',
+        'rgb(255, 255, 255)',
+        '8px',
+        '12px',
+        '2px rgb(31, 41, 51)',
+      ],
       ['1px', 'rgb(229, 231, 235)', '12px'],
     ]);
     await page.evaluate(() => {
@@ -951,10 +959,17 @@ try {
       root.setProperty('--sempods-field-line', 'rgb(11, 12, 13)');
       root.setProperty('--sempods-primary-bg', 'rgb(10, 20, 30)');
       root.setProperty('--sempods-primary-text', 'rgb(40, 50, 60)');
+      root.setProperty('--sempods-primary-border', 'rgb(13, 14, 15)');
       root.setProperty('--sempods-focus', 'rgb(100, 110, 120)');
     });
     assert.deepEqual(await signInLook(), [
-      ['rgb(10, 20, 30)', 'rgb(40, 50, 60)', '10px', '14px'],
+      [
+        'rgb(10, 20, 30)',
+        'rgb(40, 50, 60)',
+        '8px',
+        '12px',
+        '2px rgb(13, 14, 15)',
+      ],
       ['1px', 'rgb(11, 12, 13)', '12px'],
     ]);
     await address.focus();
@@ -983,6 +998,7 @@ try {
         '--sempods-field-line',
         '--sempods-primary-bg',
         '--sempods-primary-text',
+        '--sempods-primary-border',
         '--sempods-focus',
       ])
         document.documentElement.style.removeProperty(name);
@@ -1155,7 +1171,7 @@ try {
         const style = getComputedStyle(button);
         return [style.paddingTop, style.paddingLeft, style.borderTopLeftRadius];
       }),
-      ['10px', '14px', '8px'],
+      ['8px', '12px', '8px'],
     );
     assert.deepEqual(
       await field.evaluate((input) => {
@@ -1174,12 +1190,43 @@ try {
       'rgb(1, 2, 3)',
     );
     await save.evaluate((button) => button.classList.remove('host-fill'));
+    // Both action roles have a surface, text and border. By default the main
+    // action's border takes its fill and the other actions have none to see.
+    const look = (button) =>
+      button.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return [
+          style.backgroundColor,
+          style.color,
+          style.borderTopWidth,
+          style.borderTopColor,
+        ];
+      });
+    const cancel = editor.getByRole('button', { name: 'Cancel', exact: true });
+    const compare = page.getByRole('button', {
+      name: 'Check current version',
+      exact: true,
+    });
+    // Away from the actions: a hovered one mixes its text into its surface.
+    await page.mouse.move(0, 0);
+    const [saveFill, , saveBorderWidth, saveBorder] = await look(save);
+    assert.deepEqual([saveBorderWidth, saveBorder], ['2px', saveFill]);
+    for (const other of [cancel, compare]) {
+      const [fill, , width, border] = await look(other);
+      assert.deepEqual(
+        [fill, width, border],
+        ['rgba(0, 0, 0, 0)', '1px', 'rgba(0, 0, 0, 0)'],
+      );
+    }
     // Field boundaries follow --sempods-line until they get their own token.
     const tokens = {
       '--sempods-line': 'rgb(7, 8, 9)',
       '--sempods-primary-bg': 'rgb(10, 20, 30)',
       '--sempods-primary-text': 'rgb(40, 50, 60)',
+      '--sempods-primary-border': 'rgb(13, 14, 15)',
+      '--sempods-secondary-bg': 'rgb(16, 17, 18)',
       '--sempods-secondary-text': 'rgb(70, 80, 90)',
+      '--sempods-secondary-border': 'rgb(19, 20, 21)',
       '--sempods-focus': 'rgb(100, 110, 120)',
     };
     await page.evaluate((tokens) => {
@@ -1200,20 +1247,21 @@ try {
       await field.evaluate((input) => getComputedStyle(input).borderTopColor),
       'rgb(11, 12, 13)',
     );
-    // An app's action variants reach the SDK's actions and focus ring.
-    assert.deepEqual(
-      await save.evaluate((button) => {
-        const style = getComputedStyle(button);
-        return [style.backgroundColor, style.color];
-      }),
-      ['rgb(10, 20, 30)', 'rgb(40, 50, 60)'],
-    );
-    assert.equal(
-      await page
-        .getByRole('button', { name: 'Check current version', exact: true })
-        .evaluate((button) => getComputedStyle(button).color),
-      'rgb(70, 80, 90)',
-    );
+    // An app's action variants reach every part of the SDK's actions and
+    // their focus ring.
+    assert.deepEqual(await look(save), [
+      'rgb(10, 20, 30)',
+      'rgb(40, 50, 60)',
+      '2px',
+      'rgb(13, 14, 15)',
+    ]);
+    for (const other of [cancel, compare])
+      assert.deepEqual(await look(other), [
+        'rgb(16, 17, 18)',
+        'rgb(70, 80, 90)',
+        '1px',
+        'rgb(19, 20, 21)',
+      ]);
     await field.focus();
     await page.keyboard.press('Tab'); // Save.
     assert.equal(
@@ -1266,18 +1314,41 @@ try {
       });
     assert.ok(left >= 15 && Math.abs(left - right) <= 1, `${left} ${right}`);
     assert.ok(top > 15 && Math.abs(top - bottom) <= 1, `${top} ${bottom}`);
+    // A confirmation's two answers are the same two action roles.
+    await page.evaluate((tokens) => {
+      for (const [name, value] of Object.entries(tokens))
+        document.documentElement.style.setProperty(name, value);
+    }, tokens);
+    const question = page.getByRole('alertdialog');
+    assert.deepEqual(
+      await Promise.all([
+        look(question.locator('button.sp-sdk-primary')),
+        look(question.locator('button:not(.sp-sdk-primary)')),
+      ]),
+      [
+        ['rgb(10, 20, 30)', 'rgb(40, 50, 60)', '2px', 'rgb(13, 14, 15)'],
+        ['rgb(16, 17, 18)', 'rgb(70, 80, 90)', '1px', 'rgb(19, 20, 21)'],
+      ],
+    );
+    await page.evaluate((names) => {
+      for (const name of names)
+        document.documentElement.style.removeProperty(name);
+    }, Object.keys(tokens));
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
     await closeManagement(page);
     // Above 30rem, management is a centred dialog, also under the reset; its
-    // text actions follow --sempods-secondary-text.
+    // other actions follow the three secondary tokens, its close icon none.
     await page.setViewportSize({ width: 800, height: 800 });
-    await page.evaluate(() =>
-      document.documentElement.style.setProperty(
-        '--sempods-secondary-text',
-        'rgb(70, 80, 90)',
-      ),
-    );
+    const secondary = {
+      '--sempods-secondary-bg': 'rgb(16, 17, 18)',
+      '--sempods-secondary-text': 'rgb(70, 80, 90)',
+      '--sempods-secondary-border': 'rgb(19, 20, 21)',
+    };
+    await page.evaluate((tokens) => {
+      for (const [name, value] of Object.entries(tokens))
+        document.documentElement.style.setProperty(name, value);
+    }, secondary);
     await menu(page, 'Pods & sharing');
     const management = page.getByRole('dialog', { name: 'Pods & sharing' });
     await management.waitFor();
@@ -1299,16 +1370,24 @@ try {
       wideTop > 15 && Math.abs(wideTop - wideBottom) <= 1,
       `${wideTop} ${wideBottom}`,
     );
-    assert.equal(
-      await management
-        .getByRole('button', { name: 'Change sharing', exact: true })
-        .evaluate((button) => getComputedStyle(button).color),
-      'rgb(70, 80, 90)',
+    assert.deepEqual(
+      await look(
+        management.getByRole('button', { name: 'Change sharing', exact: true }),
+      ),
+      ['rgb(16, 17, 18)', 'rgb(70, 80, 90)', '1px', 'rgb(19, 20, 21)'],
+    );
+    const [closeFill, , , closeBorder] = await look(
+      management.locator('.sp-access-close'),
+    );
+    assert.deepEqual(
+      [closeFill, closeBorder],
+      ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)'],
     );
     await closeManagement(page);
-    await page.evaluate(() =>
-      document.documentElement.style.removeProperty('--sempods-secondary-text'),
-    );
+    await page.evaluate((names) => {
+      for (const name of names)
+        document.documentElement.style.removeProperty(name);
+    }, Object.keys(secondary));
     await page.setViewportSize({
       width: appearance === 'light' ? 320 : 375,
       height: 800,
