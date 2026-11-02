@@ -6,7 +6,7 @@
 // in each browser: Chromium and WebKit, plus Firefox on Linux.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=gate,roundtrip,interaction,integration,contrast,routing]
+//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
@@ -78,6 +78,8 @@ try {
         'styles.css',
         'dist/index.js',
         'dist/index.d.ts',
+        'dist/theme-check/index.js',
+        'dist/theme-check/index.d.ts',
         'LICENSE',
         'NOTICE',
       ])
@@ -142,6 +144,7 @@ try {
     if (example !== dialog)
       await writeFile(join(app, `readme-${i}.tsx`), example);
   await ship('ts', 'places.ts');
+  await ship('ts', 'check-theme.ts');
   const documentedCss = blocks('css')
     .find((block) => block.includes("@import '@sempods/app-ui/styles.css'"))
     ?.split('\n')

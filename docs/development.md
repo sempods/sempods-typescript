@@ -125,6 +125,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     date;
   - the cascade: package classes win over the SDK's element rules inside an SDK
     editor, and the token bridge reaches the SDK's own controls;
+  - the packed theme checker on the default and fresh palettes across all six
+    action combinations in both schemes, including rest and hover parity
+    with the reference buttons and controls with known failing roles;
   - rendered contrast (`scripts/ui-contrast.js`): 19 controls that must pass or
     fail as stated, then five states × two palettes with every action and
     secondary variant × light and dark × 375 and 1280px, including hovered,

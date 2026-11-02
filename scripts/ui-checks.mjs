@@ -1118,87 +1118,6 @@ async function integration({ browser, origin }) {
       };
     }),
   );
-  // SDK actions match the package's buttons of the same role, part for part:
-  // surface, text and border at rest, and the hover of the other actions.
-  for (const [theme, actions, secondary] of variants)
-    for (const scheme of ['light', 'dark'])
-      results.push(
-        await attempt(
-          `sdk-action-parity ${theme}/${actions}/${secondary} ${scheme}`,
-          async () => {
-            await page.emulateMedia({ colorScheme: scheme });
-            await page.goto(
-              `${origin}/?theme=${theme}&actions=${actions}&secondary=${secondary}`,
-            );
-            await openTask(page);
-            const parts = (hovered) =>
-              page.evaluate((hovered) => {
-                const probe = document.createElement('div');
-                document.body.append(probe);
-                const resolve = (css) => {
-                  probe.style.color = css;
-                  return getComputedStyle(probe).color;
-                };
-                const sdk = (name) =>
-                  [
-                    ...document.querySelectorAll(
-                      '[data-sempods-ui=editor] button',
-                    ),
-                  ].find((b) => b.textContent === name);
-                const look = (el) => {
-                  const s = getComputedStyle(el);
-                  return {
-                    surface: s.backgroundColor,
-                    text: s.color,
-                    border: `${s.borderTopWidth} ${s.borderTopColor}`,
-                  };
-                };
-                const role = (name, width) => ({
-                  surface: resolve(`var(--${name})`),
-                  text: resolve(`var(--${name}-foreground)`),
-                  border: `${width} ${resolve(`var(--${name}-border)`)}`,
-                });
-                const pairs = hovered
-                  ? [
-                      [
-                        'secondary:hover',
-                        { surface: look(sdk('Cancel')).surface },
-                        {
-                          surface: resolve(
-                            'color-mix(in oklch, var(--action-secondary), var(--action-secondary-foreground) 8%)',
-                          ),
-                        },
-                      ],
-                    ]
-                  : [
-                      ['primary', look(sdk('Save')), role('action', '2px')],
-                      [
-                        'secondary',
-                        look(sdk('Cancel')),
-                        role('action-secondary', '1px'),
-                      ],
-                    ];
-                probe.remove();
-                return pairs.flatMap(([name, got, want]) =>
-                  Object.keys(want)
-                    .filter((part) => got[part] !== want[part])
-                    .map(
-                      (part) =>
-                        `${name} ${part}: ${got[part]}, role ${want[part]}`,
-                    ),
-                );
-              }, hovered);
-            const mismatches = await parts(false);
-            await page
-              .getByRole('button', { name: 'Cancel', exact: true })
-              .hover();
-            await settle(page);
-            mismatches.push(...(await parts(true)));
-            await page.mouse.move(1, 1);
-            return { pass: mismatches.length === 0, mismatches };
-          },
-        ),
-      );
   await page.emulateMedia({ colorScheme: null });
   results.push(
     await attempt('reduced-motion', async () => {
@@ -2072,6 +1991,273 @@ async function routing({ browser, origin }) {
   return results;
 }
 
+// Compare the packaged checker with the paint of both real button implementations.
+// Canvas uses the same 8-bit sRGB output as a ThemeSample.
+async function theme({ browser, origin }) {
+  const { context, page } = await newPage(browser, { reducedMotion: 'reduce' });
+  const results = [];
+  try {
+    await signIn(page, origin);
+    for (const palette of ['default', 'fresh']) {
+      await page.goto(origin + '/?theme=' + palette);
+      for (const scheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme: scheme });
+        results.push(
+          await attempt(`theme roles ${palette} ${scheme}`, () =>
+            page.evaluate((scheme) => {
+              const { samples } = window.readTheme(scheme);
+              const report = window.checkTheme(scheme);
+              return {
+                pass:
+                  report.pass && !report.skipped.length && samples.length === 6,
+                failures: report.failures.map((f) => [
+                  f.variant,
+                  f.pair,
+                  f.state,
+                  f.backdrop,
+                  f.foreground.colour,
+                  f.surface.colour,
+                  f.ratio,
+                ]),
+              };
+            }, scheme),
+          ),
+        );
+        for (const actions of ['solid', 'inverted'])
+          for (const secondary of ['tonal', 'outline', 'text']) {
+            results.push(
+              await attempt(
+                `sdk-action-parity ${palette}/${actions}/${secondary} ${scheme}`,
+                async () => {
+                  await page.goto(
+                    `${origin}/?theme=${palette}&actions=${actions}&secondary=${secondary}`,
+                  );
+                  await page.locator('.zen-title').waitFor();
+                  const expected = await page.evaluate((scheme) => {
+                    const { samples, active } = window.readTheme(scheme);
+                    return samples.find(
+                      (s) =>
+                        s.scheme === scheme &&
+                        s.variant.actions === active.actions &&
+                        s.variant.secondary === active.secondary,
+                    ).colours;
+                  }, scheme);
+                  const mismatches = [];
+                  const check = async (button, role, label) => {
+                    await page.mouse.move(1, 1);
+                    for (const hover of [false, true]) {
+                      if (hover) await button.hover();
+                      await settle(page);
+                      const got = await button.evaluate((el) => {
+                        const ctx = document
+                          .createElement('canvas')
+                          .getContext('2d', { willReadFrequently: true });
+                        ctx.globalCompositeOperation = 'copy';
+                        const hex = (css) => {
+                          ctx.fillStyle = css;
+                          ctx.fillRect(0, 0, 1, 1);
+                          const pixel = ctx.getImageData(0, 0, 1, 1).data;
+                          return (
+                            '#' +
+                            Array.from(
+                              pixel.slice(0, pixel[3] === 255 ? 3 : 4),
+                              (c) => c.toString(16).padStart(2, '0'),
+                            ).join('')
+                          );
+                        };
+                        const style = getComputedStyle(el);
+                        return [
+                          hex(style.backgroundColor),
+                          hex(style.color),
+                          hex(style.borderTopColor),
+                          style.borderTopWidth,
+                        ];
+                      });
+                      const want = [
+                        expected[role + (hover ? '-hover' : '')],
+                        expected[role + '-foreground'],
+                        expected[role + '-border'],
+                        role === 'action' ? '2px' : '1px',
+                      ];
+                      if (got.some((v, i) => v !== want[i]))
+                        mismatches.push({ label, hover, got, want });
+                    }
+                  };
+                  await check(
+                    page.getByRole('button', { name: 'Complete', exact: true }),
+                    'action',
+                    'ActionButton primary',
+                  );
+                  await check(
+                    page.getByRole('button', {
+                      name: 'Not today',
+                      exact: true,
+                    }),
+                    'action-secondary',
+                    'ActionButton secondary',
+                  );
+                  await openTask(page);
+                  const save = page.getByRole('button', {
+                    name: 'Save',
+                    exact: true,
+                  });
+                  await page
+                    .getByLabel('Title', { exact: true })
+                    .fill('Changed title');
+                  await check(save, 'action', 'SDK primary');
+                  await check(
+                    page.getByRole('button', { name: 'Cancel', exact: true }),
+                    'action-secondary',
+                    'SDK secondary',
+                  );
+                  return { pass: !mismatches.length, mismatches };
+                },
+              ),
+            );
+          }
+      }
+    }
+    await page.goto(origin + '/');
+    results.push(
+      await attempt('forced scheme and attribute restoration', () =>
+        page.evaluate(() => {
+          const root = document.documentElement;
+          root.style.setProperty('color-scheme', 'only dark', 'important');
+          const original = root.outerHTML.split('>')[0];
+          const result = window.checkTheme();
+          const restored = root.outerHTML.split('>')[0] === original;
+          return {
+            pass:
+              restored &&
+              result.pass &&
+              result.skipped.length === 6 &&
+              result.skipped.every(
+                (s) => s.scheme === 'light' && s.reason.includes('only'),
+              ),
+          };
+        }),
+      ),
+    );
+    await page.goto(origin + '/');
+    results.push(
+      await attempt('invalid role restores page', () =>
+        page.evaluate(() => {
+          const root = document.documentElement;
+          root.dataset.actions = 'inverted';
+          root.style.setProperty('--accent', 'not-a-colour', 'important');
+          const original = root.outerHTML.split('>')[0];
+          const children = root.childElementCount;
+          try {
+            window.checkTheme();
+            return { pass: false };
+          } catch (error) {
+            return {
+              pass:
+                error.message.includes('accent') &&
+                root.outerHTML.split('>')[0] === original &&
+                root.childElementCount === children,
+            };
+          }
+        }),
+      ),
+    );
+    await page.goto(origin + '/');
+    results.push(
+      await attempt('implicit active combination', () =>
+        page.evaluate(() => {
+          const css = document.createElement('style');
+          css.textContent =
+            ':root:not([data-secondary]) { --action-secondary-foreground: transparent }';
+          document.head.append(css);
+          const report = window.checkTheme('dark');
+          return {
+            pass:
+              !report.pass &&
+              report.failures.length > 0 &&
+              report.failures.every(
+                (f) =>
+                  f.active &&
+                  f.variant.secondary === 'tonal' &&
+                  f.foreground.override &&
+                  f.ratio === 1,
+              ),
+          };
+        }),
+      ),
+    );
+    await page.goto(origin + '/');
+    results.push(
+      await attempt('context-dependent role', () =>
+        page.evaluate(() => {
+          document.documentElement.style.setProperty(
+            '--action',
+            'currentColor',
+          );
+          try {
+            window.checkTheme();
+            return { pass: false };
+          } catch (error) {
+            return { pass: error.message.includes('currentColor in action') };
+          }
+        }),
+      ),
+    );
+    for (const [attribute, variant, role, pair] of [
+      ['actions', 'solid', 'action-foreground', 'primary action text'],
+      ['actions', 'inverted', 'action-foreground', 'primary action text'],
+      [
+        'secondary',
+        'tonal',
+        'action-secondary-foreground',
+        'secondary action text',
+      ],
+      [
+        'secondary',
+        'outline',
+        'action-secondary-border',
+        'secondary action boundary',
+      ],
+      [
+        'secondary',
+        'text',
+        'action-secondary-foreground',
+        'secondary action text',
+      ],
+    ])
+      results.push(
+        await attempt('known failure ' + variant, async () => {
+          await page.goto(origin + '/');
+          return page.evaluate(
+            ({ attribute, variant, role, pair }) => {
+              const css = document.createElement('style');
+              css.textContent = `:root[data-${attribute}="${variant}"] { --${role}: transparent }`;
+              document.head.append(css);
+              const result = window.checkTheme();
+              return {
+                pass:
+                  !result.pass &&
+                  result.failures.length > 0 &&
+                  result.failures.every(
+                    (f) =>
+                      f.pair === pair &&
+                      f.variant[attribute] === variant &&
+                      f.foreground.role === role &&
+                      f.foreground.override &&
+                      f.adjust.includes(role) &&
+                      f.ratio === 1,
+                  ),
+              };
+            },
+            { attribute, variant, role, pair },
+          );
+        }),
+      );
+  } finally {
+    await context.close();
+  }
+  return results;
+}
+
 export const suites = {
   gate,
   roundtrip,
@@ -2079,4 +2265,5 @@ export const suites = {
   integration,
   contrast,
   routing,
+  theme,
 };

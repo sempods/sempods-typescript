@@ -56,9 +56,11 @@ choose a composition for the task:
   controls: colours in the palette roles, action styles such as inverted or
   outlined buttons through the variants. With `@sempods/app-ui`, its
   [theme contract](../packages/app-ui/README.md#the-theme-contract) names the
-  layers and the contrast pairs each variant needs; check those pairs in light
-  and dark after the change, and look at an SDK editor and confirmation next
-  to the app's own actions.
+  layers and the contrast pairs each variant needs. After a palette or variant
+  change, load the app stylesheet and run the [theme check](../packages/app-ui/README.md#check-an-app-theme)
+  with the browser set to light and dark in turn. Fix failures by the named
+  role, then rerun both schemes. Inspect an SDK editor and confirmation beside
+  the app's own actions.
 - Give each screen one clear primary action. Use alignment, whitespace and
   typography to make the hierarchy visible; introduce tabs, cards or menus
   only when they help this interaction. A pleasing first version does not need

@@ -142,7 +142,7 @@
     /* accent is the highlight surface of focused menu items. */
     --accent: light-dark(#eef0f3, #262a31);
     --accent-foreground: var(--foreground);
-    --destructive: light-dark(#b42318, #f97066);
+    --destructive: light-dark(#b42318, #ff9188);
     /* Decorative separators. Control boundaries use input, at 3:1. */
     --border: light-dark(#e5e7eb, #2d3138);
     --input: light-dark(#7a818c, #6b7280);

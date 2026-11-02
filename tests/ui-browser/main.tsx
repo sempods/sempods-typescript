@@ -30,8 +30,11 @@ import {
   type Nav,
 } from '@sempods/app-ui';
 import { places, type Place } from './places';
+import { checkTheme, readTheme } from '@sempods/app-ui/theme-check';
 import { TaskDialog, taskFields } from './task-dialog';
 import './index.css';
+
+Object.assign(window, { checkTheme, readTheme });
 
 const texts = {
   en: {

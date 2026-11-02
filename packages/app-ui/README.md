@@ -136,17 +136,78 @@ checked:
 | `data-actions`   | `solid` (default), `inverted`        | `inverted`: the primary action takes the page colour with a primary outline and text   |
 | `data-secondary` | `tonal` (default), `outline`, `text` | Secondary actions on a tonal surface, outlined in `input`, or as primary-coloured text |
 
-Each variant reads other palette roles, so its text needs 4.5:1 against them
-in both modes. After changing the palette or a variant, check the pairs of the
-variants in use:
+### Check an app theme
 
-| Variant    | Text on surface                       | Also                   |
-| ---------- | ------------------------------------- | ---------------------- |
-| `solid`    | `primary-foreground` on `primary`     |                        |
-| `inverted` | `primary` on `background`             |                        |
-| `tonal`    | `secondary-foreground` on `secondary` |                        |
-| `outline`  | `foreground` on `background`          | `input` outline at 3:1 |
-| `text`     | `primary` on `background`             |                        |
+Load the app stylesheet in a browser. In the browser runner, emulate light
+and dark in turn and call this function in the page for each preference.
+This works for native `light-dark()` and for builds that compile it into media
+queries. The development entry ships separately from the component entry.
+
+```ts
+// check-theme.ts
+import { checkTheme, formatThemeReport } from '@sempods/app-ui/theme-check';
+
+export function checkPreferredTheme() {
+  const scheme = matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+  const report = checkTheme(scheme);
+  if (report.failures.length) throw new Error(formatThemeReport(report));
+  return report;
+}
+```
+
+For a stylesheet that uses native `light-dark()` throughout, `checkTheme()`
+samples both schemes in one call. Read `report.skipped` for schemes the root
+palette excludes. A failure gives
+the active variant flag, component and palette roles, painted colours, ratio
+and threshold. Change a role in `adjust`, then rerun to check the other
+pairs listed in `alsoReads`. A component colour that differs from the
+variant mapping is marked as an override. The report is JSON-serializable.
+The original active attributes are also sampled when an implicit default paints
+differently from an explicit variant. For offline evaluation, `readTheme()` captures resolved sRGB samples,
+including the browser's mixtures. Pass its `samples`, `active` and `skipped`
+to `evaluateTheme()` to replay the same check without a DOM.
+
+The table lists CSS roles without their leading dashes. Each translucent
+surface is composited over the listed backdrop. Hover surfaces are resolved
+from the action roles in the current variant. The dark destructive action
+uses a lighter red to keep its text above 4.5:1 even over its 30% hover tint.
+
+<!-- theme-pairs -->
+
+| Variant  | Foreground                  | Surface                | Backdrop                  | State | Minimum ratio |
+| -------- | --------------------------- | ---------------------- | ------------------------- | ----- | ------------- |
+| all      | foreground                  | background             | background                | rest  | 4.5           |
+| all      | card-foreground             | card                   | background                | rest  | 4.5           |
+| all      | popover-foreground          | popover                | background                | rest  | 4.5           |
+| all      | accent-foreground           | accent                 | background                | rest  | 4.5           |
+| all      | muted-foreground            | background             | background                | rest  | 4.5           |
+| all      | muted-foreground            | muted                  | background                | rest  | 4.5           |
+| all      | muted-foreground            | card                   | background                | rest  | 4.5           |
+| all      | muted-foreground            | popover                | background                | rest  | 4.5           |
+| all      | primary-foreground          | primary                | background                | rest  | 4.5           |
+| all      | destructive                 | destructive-tint       | background                | rest  | 4.5           |
+| all      | destructive                 | destructive-hover      | background                | hover | 4.5           |
+| all      | input                       | background             | background                | rest  | 3             |
+| all      | input                       | card                   | background                | rest  | 3             |
+| all      | input                       | popover                | background                | rest  | 3             |
+| all      | ring                        | background             | background                | rest  | 3             |
+| all      | ring                        | card                   | background                | rest  | 3             |
+| all      | ring                        | popover                | background                | rest  | 3             |
+| solid    | action-foreground           | action                 | background                | rest  | 4.5           |
+| solid    | action-foreground           | action-hover           | background                | hover | 4.5           |
+| inverted | action-foreground           | action                 | background                | rest  | 4.5           |
+| inverted | action-foreground           | action-hover           | background                | hover | 4.5           |
+| tonal    | action-secondary-foreground | action-secondary       | background                | rest  | 4.5           |
+| tonal    | action-secondary-foreground | action-secondary-hover | background                | hover | 4.5           |
+| outline  | action-secondary-foreground | action-secondary       | background, card, popover | rest  | 4.5           |
+| outline  | action-secondary-foreground | action-secondary-hover | background, card, popover | hover | 4.5           |
+| outline  | action-secondary-border     | transparent            | background, card, popover | rest  | 3             |
+| text     | action-secondary-foreground | action-secondary       | background, card, popover | rest  | 4.5           |
+| text     | action-secondary-foreground | action-secondary-hover | background, card, popover | hover | 4.5           |
+
+<!-- /theme-pairs -->
 
 States derive from the parts: hover mixes 12% of the text into a primary
 action's surface and 8% into a secondary action's, in `oklch`. A theme that
@@ -173,8 +234,8 @@ variants. Apps do not set these tokens themselves:
 | `--sempods-font`, `--sempods-radius`                                               | `--font-sans`, `radius`                                                            |
 
 The package's browser gate checks that SDK actions match the package's buttons
-of the same role in every variant, with both of its palettes, in light and
-dark. It does not check an app's own palette.
+of the same role at rest and on hover across all six combinations, with both
+package palettes in light and dark.
 
 Tailwind's `dark:` variant follows the system setting, as `light-dark()` does
 with `color-scheme: light dark`. An app that forces one scheme sets
@@ -730,8 +791,8 @@ confirmations, on Close, in menus and in the date chooser; focus trap and
 restore; Save after cancelled closes; closing right after opening; resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
 in three time zones; keyboard use of menus and the calendar; 44px targets; the
-cascade with the SDK's styles; the rendered contrast of both palettes and
-all variants in light and dark mode; and the router's 29-check matrix of
+cascade with the SDK's styles; the role pairs of both palettes in all six
+combinations in light and dark; rendered screen contrast in four combinations; and the router's 29-check matrix of
 links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
 Context, plus a fragment link's entry in the history. It uses a loopback fixture Pod: it is not
@@ -739,10 +800,16 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
 
-- The SDK's buttons do not follow the `inverted`, `outline` and `text`
-  variants (see the bridge).
-- Contrast is measured for the states the gate reaches, not for every state an
-  app can create; an app's own theme needs its own check.
+- The role check samples colours on the root element. Run it under each browser
+  preference if the stylesheet branches on `prefers-color-scheme`. Use
+  `checkTheme('light')` and `checkTheme('dark')` under the matching emulated
+  preferences. This also applies to build tools that compile `light-dark()`
+  into media queries. A page script can set the root colour scheme, while
+  browser automation sets the media preference.
+- Missing, invalid and context-dependent `currentColor` roles throw with the
+  role name. The checker restores the page attributes on error.
+- Check screens visually as well. Classes on individual controls, nested
+  themes, opacity, images and interactions can change what a person sees.
 - The router does not protect leaving the document: Back past its first
   entry, a reload or closing the tab is the SDK's `beforeunload` prompt.
 - History entries that other code writes with `pushState` carry no router
