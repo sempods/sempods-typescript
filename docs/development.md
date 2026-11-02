@@ -25,12 +25,15 @@ pnpm check
 ```
 
 `pnpm check` runs format, lint, docs, typecheck, unit, publish, consumer, runtime,
-TODO and UI checks in that order. `pnpm build:examples` bundles the examples for
+TODO and UI checks in that order; `pnpm check:base` is the same without the UI
+checks. `pnpm build:examples` bundles the examples for
 manual runs; it is not part of `pnpm check`, because `typecheck` already compiles
 them.
 
-Linux CI uses `playwright install --with-deps chromium webkit firefox` and the
-same aggregate check. CI reads `.node-version`; libraries emit ESM plus declarations with plain
+Linux CI runs the same checks in parallel jobs: `pnpm check:base` with Chromium,
+and `pnpm test:ui` once each in Chromium, WebKit and Firefox. The required
+status check `Packages and consumers` passes only when all of them do. The
+release workflow runs `pnpm check` in one job. CI reads `.node-version`; libraries emit ESM plus declarations with plain
 `tsc -b` project references. Exports resolve built files, with no source aliases.
 Tests are typechecked too. `skipLibCheck` is false throughout.
 
@@ -131,7 +134,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   - rendered contrast (`scripts/ui-contrast.js`): 19 controls that must pass or
     fail as stated, then five states × two palettes with every action and
     secondary variant × light and dark × 375 and 1280px, including hovered,
-    pressed and focused controls;
+    pressed and focused controls. Each of these loads its own state, so four
+    signed-in pages measure them side by side;
   - the routing matrix of the template's routing spike (#114), 29 checks with
     the package's router: a resource link, one with a named source Context and
     an invalid legacy link keep their address through sign-in; direct entry,
@@ -145,9 +149,12 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     invalid addresses show explicit pages; links name the source Context, a
     named source is read and written (the other Context's copy stays) also on
     the action route and after reload, and an unreadable one is an explicit
-    error without an editor. Two more checks for a fragment link's entry:
-    staying after two entries back returns to the task screen, and Close
-    still returns to the opener.
+    error without an editor. Five more checks from the reviews of #208: an
+    address with a source opens right after sign-in without a Context choice,
+    and an unreadable source shows its error there too; after a fragment
+    link's entry, staying after two entries back returns to the task screen
+    and Close still returns to the opener, also after a replaced fragment;
+    and a path with two leading slashes shows the not-found page.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

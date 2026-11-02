@@ -5,11 +5,19 @@ on:
   pull_request:
 permissions:
   contents: read
+# A new push to a pull request supersedes its running checks. Every push to
+# main is its own group, so no run on main is cancelled or replaced while it
+# waits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 jobs:
-  packages:
-    name: Packages and consumers
+  # pnpm check, split: everything but the UI gate, and the UI gate once per
+  # browser, side by side.
+  base:
+    name: Checks without the UI gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -20,6 +28,41 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The UI gate (pnpm test:ui) also runs in WebKit and, on Linux, Firefox.
-      - run: pnpm exec playwright install --with-deps chromium webkit firefox
-      - run: pnpm check
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm check:base
+  ui:
+    name: UI gate (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit, firefox]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps "$BROWSER"
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - run: pnpm test:ui --browsers="$BROWSER"
+        env:
+          BROWSER: ${{ matrix.browser }}
+  # The ruleset requires this status check: it passes only when every job did.
+  packages:
+    name: Packages and consumers
+    needs: [base, ui]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: test "$BASE" = success && test "$UI" = success
+        env:
+          BASE: ${{ needs.base.result }}
+          UI: ${{ needs.ui.result }}

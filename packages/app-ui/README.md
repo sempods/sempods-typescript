@@ -530,7 +530,8 @@ export type Place =
   | { readonly kind: 'callback' }
   | { readonly kind: 'not-found'; readonly reason: 'unknown' | 'invalid' };
 
-const absolute = (value: string) => /^https?:\/\/\S+$/.test(value);
+/** An absolute IRI, as the SDK accepts it: a scheme and a rest. */
+const absolute = (value: string) => /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(value);
 
 /** A subject IRI as one path segment: UTF-8 in base64url. */
 function encode(iri: string): string {
@@ -620,8 +621,10 @@ export const places: AddressModel<Place> = {
 
 The frame: the menu switches the literal route, a list links to the resource
 route, a button opens the action route, the task dialog follows the address
-and edits the Context it names, and not-found places get an explicit page once
-the person is connected (a modal before that would block sign-in):
+and edits the Context it names (an address with a source opens it right after
+sign-in, without choosing a Context first), and not-found places get an
+explicit page once the person is connected (a modal before that would block
+sign-in):
 
 ```tsx
 // app.tsx
@@ -665,7 +668,9 @@ const runtime = createBrowserRuntime({
 
 export function App() {
   return (
-    <SempodsProvider runtime={runtime}>
+    // A TargetScreen asks for a Context; a task address with its source
+    // opens without one.
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
       <Frame />
     </SempodsProvider>
   );
@@ -673,11 +678,13 @@ export function App() {
 
 function Frame() {
   const nav = useNav(places);
-  const { connections } = useAppState();
-  const list = nav.place.kind === 'list';
+  const { place } = nav;
+  const { connections, view } = useAppState();
+  const signedIn = connections.length > 0;
+  const list = place.kind === 'list';
   return (
     <main>
-      {connections.length > 0 && (
+      {signedIn && (
         <HeaderMenu
           label="Menu"
           items={[
@@ -700,17 +707,30 @@ function Frame() {
         />
       )}
       <AppAccess appName="Focus" />
-      <TargetScreen>
-        <Tasks nav={nav} />
-      </TargetScreen>
-      {nav.place.kind === 'not-found' && connections.length > 0 && (
+      {/* A task address that names its source opens without a selected
+          Context: no TargetScreen, so AppAccess asks for no choice. */}
+      {place.kind === 'task' && place.context && !view ? (
+        signedIn && (
+          <TaskDialog
+            subject={place.subject}
+            context={place.context}
+            title={place.action === 'postpone' ? 'Not today' : undefined}
+            leave={() => nav.close({ kind: 'zen' })}
+          />
+        )
+      ) : (
+        <TargetScreen>
+          <Tasks nav={nav} />
+        </TargetScreen>
+      )}
+      {place.kind === 'not-found' && signedIn && (
         <ScreenDialog
           title="Not found"
           open
           onRequestClose={() => nav.go({ kind: 'zen' }, { replace: true })}
         >
           <p>
-            {nav.place.reason === 'invalid'
+            {place.reason === 'invalid'
               ? 'This task link is not valid.'
               : 'This address does not lead anywhere in Focus.'}
           </p>
@@ -793,7 +813,8 @@ cascade with the SDK's styles; the role pairs of both palettes in all six
 combinations in light and dark; rendered screen contrast in four combinations; and the router's 29-check matrix of
 links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
-Context, plus a fragment link's entry in the history. It uses a loopback fixture Pod: it is not
+Context, plus fragment entries, a source address without a Context choice and
+a path with two leading slashes. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
@@ -809,9 +830,10 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
 - The router does not protect leaving the document: Back past its first
   entry, a reload or closing the tab is the SDK's `beforeunload` prompt.
 - History entries that other code writes with `pushState` carry no router
-  position, and the History API cannot measure their distance. Staying on
-  one shows the shown address again in place, and later Back and Forward
-  decisions count that entry as the shown one.
+  position. The router measures them by the Navigation API's entry index;
+  in a browser without it, staying on one shows the shown address again in
+  place, and later Back and Forward decisions count that entry as the shown
+  one.
 - The UI layer adds about 97 KB of gzipped JavaScript to an app (measured in
   the spike with the same components).
 
