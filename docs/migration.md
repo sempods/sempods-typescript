@@ -53,11 +53,10 @@ them nothing changes. A hovered main action now mixes its text into its surface.
   `{ unloadPrompt: false }` to `createAppController`); keep it fixed.
 - **Escape in `ResourceEditor` with `onClose`.** With unsaved changes, Escape
   now asks before discarding, like closing the surrounding dialog; without
-  changes it closes at once. Escape in the editor's fields no longer reaches
-  enclosing React handlers, so an app dialog around it does not close on the
-  same key. Escape on the editor's buttons (Save, Cancel) still reaches them:
-  remove only workarounds that caught Escape from the fields, and keep an app
-  dialog's own close guarded.
+  changes it closes at once. Escape in the editor, in its fields and on its
+  own buttons, no longer reaches enclosing React handlers, so an app dialog
+  around it does not close on the same key. Remove app workarounds that
+  caught Escape around the editor.
 - **Management on phones.** Up to 30rem wide, `AppAccess`'s Pods & sharing
   dialog is a full-width bottom sheet; wider screens keep it centred. Recheck
   app styles that positioned it.
