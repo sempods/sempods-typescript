@@ -45,14 +45,19 @@ them nothing changes. A hovered main action now mixes its text into its surface.
   app shows the browser's leave prompt
   ([selection and draft lifetime](react-authoring.md#selection-and-draft-lifetime)).
   End-to-end tests that leave the page with unsaved work must accept or
-  dismiss the `beforeunload` dialog. An app that keeps drafts across reloads
+  dismiss the `beforeunload` dialog. Browsers show it only after the person
+  has interacted with the page, so a test that waits for it without a prior
+  click or key press can time out. Playwright runs the handler on closing a
+  tab only with `page.close({ runBeforeUnload: true })`. An app that keeps drafts across reloads
   itself can pass `unloadPrompt={false}` to `SempodsProvider` (or
   `{ unloadPrompt: false }` to `createAppController`); keep it fixed.
 - **Escape in `ResourceEditor` with `onClose`.** With unsaved changes, Escape
   now asks before discarding, like closing the surrounding dialog; without
-  changes it closes at once. The editor stops its Escape from reaching
-  enclosing React handlers, so an app dialog around it no longer closes on
-  the same key. Remove app workarounds that caught Escape around the editor.
+  changes it closes at once. Escape in the editor's fields no longer reaches
+  enclosing React handlers, so an app dialog around it does not close on the
+  same key. Escape on the editor's buttons (Save, Cancel) still reaches them:
+  remove only workarounds that caught Escape from the fields, and keep an app
+  dialog's own close guarded.
 - **Management on phones.** Up to 30rem wide, `AppAccess`'s Pods & sharing
   dialog is a full-width bottom sheet; wider screens keep it centred. Recheck
   app styles that positioned it.
@@ -64,6 +69,9 @@ them nothing changes. A hovered main action now mixes its text into its surface.
 - `SnapshotList` (and `useList`'s and `usePodList`'s data) gains
   `skippedRecords`. Test fixtures that build these objects by hand need the
   property, usually `[]`.
+- `AppActions` (from `useApp()`) gains the required method `selectTarget`
+  ([one chooser across Pods](react-authoring.md#one-chooser-across-pods)).
+  Typed test doubles of `useApp()` need it too.
 
 ## From 0.5.0 to 0.6.0
 
