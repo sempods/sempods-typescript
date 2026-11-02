@@ -53,8 +53,11 @@ export const themePairs: readonly ThemePair[] = [
     pair('muted text on ' + surface, 'muted-foreground', surface),
   ),
   pair('selected day', 'primary-foreground', 'primary'),
-  pair('destructive action', 'destructive', 'destructive-tint'),
+  pair('destructive action', 'destructive', 'destructive-tint', {
+    backdrops: surfaces,
+  }),
   pair('destructive action', 'destructive', 'destructive-hover', {
+    backdrops: surfaces,
     state: 'hover',
   }),
   ...['input', 'ring'].flatMap((role) =>

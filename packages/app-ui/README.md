@@ -148,18 +148,15 @@ queries. The development entry ships separately from the component entry.
 import { checkTheme, formatThemeReport } from '@sempods/app-ui/theme-check';
 
 export function checkPreferredTheme() {
-  const scheme = matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light';
-  const report = checkTheme(scheme);
+  const report = checkTheme();
   if (report.failures.length) throw new Error(formatThemeReport(report));
   return report;
 }
 ```
 
-For a stylesheet that uses native `light-dark()` throughout, `checkTheme()`
-samples both schemes in one call. Read `report.skipped` for schemes the root
-palette excludes. A failure gives
+Each call samples the browser’s current colour preference. Read `report.skipped`
+for the other preference and for schemes the root palette excludes. An explicit
+`checkTheme('dark')` under a light preference returns only skips. A failure gives
 the active variant flag, component and palette roles, painted colours, ratio
 and threshold. Change a role in `adjust`, then rerun to check the other
 pairs listed in `alsoReads`. A component colour that differs from the
@@ -172,7 +169,8 @@ to `evaluateTheme()` to replay the same check without a DOM.
 The table lists CSS roles without their leading dashes. Each translucent
 surface is composited over the listed backdrop. Hover surfaces are resolved
 from the action roles in the current variant. The dark destructive action
-uses a lighter red to keep its text above 4.5:1 even over its 30% hover tint.
+uses a lighter red to keep its text above 4.5:1 over its 30% hover tint on
+the page, a card or a popover.
 
 <!-- theme-pairs -->
 
@@ -187,8 +185,8 @@ uses a lighter red to keep its text above 4.5:1 even over its 30% hover tint.
 | all      | muted-foreground            | card                   | background                | rest  | 4.5           |
 | all      | muted-foreground            | popover                | background                | rest  | 4.5           |
 | all      | primary-foreground          | primary                | background                | rest  | 4.5           |
-| all      | destructive                 | destructive-tint       | background                | rest  | 4.5           |
-| all      | destructive                 | destructive-hover      | background                | hover | 4.5           |
+| all      | destructive                 | destructive-tint       | background, card, popover | rest  | 4.5           |
+| all      | destructive                 | destructive-hover      | background, card, popover | hover | 4.5           |
 | all      | input                       | background             | background                | rest  | 3             |
 | all      | input                       | card                   | background                | rest  | 3             |
 | all      | input                       | popover                | background                | rest  | 3             |
@@ -801,11 +799,9 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
 ## Limits
 
 - The role check samples colours on the root element. Run it under each browser
-  preference if the stylesheet branches on `prefers-color-scheme`. Use
-  `checkTheme('light')` and `checkTheme('dark')` under the matching emulated
-  preferences. This also applies to build tools that compile `light-dark()`
-  into media queries. A page script can set the root colour scheme, while
-  browser automation sets the media preference.
+  preference to cover both schemes. Build tools can compile `light-dark()`
+  into media queries, which follow the browser preference even when a page
+  script changes the root colour scheme.
 - Missing, invalid and context-dependent `currentColor` roles throw with the
   role name. The checker restores the page attributes on error.
 - Check screens visually as well. Classes on individual controls, nested

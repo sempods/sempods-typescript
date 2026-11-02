@@ -93,12 +93,15 @@ function readColours(
   return colours;
 }
 
-/** Sample the root theme for every action combination and supported colour
- * scheme. Restores root attributes even when an invalid role throws. CSS media
- * queries retain the browser's preference; emulate that separately in a runner.
- * Supply onlyScheme to sample the matching emulated preference in each run.
+/** Sample the root theme for every action combination under the browser’s colour
+ * preference. Other requested schemes and schemes excluded by the root are
+ * reported as skipped. Emulate each preference in turn to check both.
+ * Restores root attributes even when an invalid role throws.
  * The snapshots can be replayed with evaluateTheme in Node. */
 export function readTheme(onlyScheme?: Scheme) {
+  const preferred: Scheme = matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
   const root = document.documentElement;
   const original = new Map(
     ['data-actions', 'data-secondary', 'style'].map(
@@ -129,11 +132,16 @@ export function readTheme(onlyScheme?: Scheme) {
         s.scheme === scheme &&
         s.variant.actions === variant.actions &&
         s.variant.secondary === variant.secondary;
+      let reason: string | undefined;
       if (
         !declared.includes(scheme) &&
         (declared.includes('light') || declared.includes('dark'))
       ) {
-        const reason = 'Root color-scheme is ' + declared.join(' ');
+        reason = 'Root color-scheme is ' + declared.join(' ');
+      } else if (scheme !== preferred) {
+        reason = `Emulate prefers-color-scheme: ${scheme} and rerun`;
+      }
+      if (reason) {
         if (!skipped.some((s) => sameCase(s) && s.reason === reason))
           skipped.push({ variant, scheme, reason });
         continue;
@@ -171,7 +179,8 @@ export function readTheme(onlyScheme?: Scheme) {
   return { samples, active, skipped };
 }
 
-/** Check the loaded app stylesheet. Failures in inactive variants also fail the report. */
+/** Check the loaded app stylesheet under the current browser preference. Read
+ * skipped for unsampled schemes. Failures in inactive variants also fail the report. */
 export function checkTheme(onlyScheme?: Scheme) {
   const { samples, active, skipped } = readTheme(onlyScheme);
   return evaluateTheme(samples, active, skipped);

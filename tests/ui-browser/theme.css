@@ -16,3 +16,11 @@
   --input: light-dark(#6f8391, #688494);
   --ring: light-dark(#0a6680, #5ec6e4);
 }
+
+/* Control for the built stylesheet: only the dark preference has unreadable
+   primary text on the page. Its former destructive colour passes on the page
+   and fails on the popover when hovered. */
+:root[data-theme='contrast-control'] {
+  --primary: light-dark(#1f2933, #111315);
+  --destructive: light-dark(#b42318, #ff9188);
+}

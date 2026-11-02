@@ -33,6 +33,15 @@ function sample(variant = active): ThemeSample {
 }
 
 describe('theme contract', () => {
+  it('keeps the theme-check runtime exports deliberate', async () => {
+    expect(Object.keys(await import('./index.js')).sort()).toEqual([
+      'checkTheme',
+      'evaluateTheme',
+      'formatThemeReport',
+      'readTheme',
+      'themePairs',
+    ]);
+  });
   it.each(themePairs)(
     '$variant $name $state checks every backdrop at the declared threshold',
     (pair) => {

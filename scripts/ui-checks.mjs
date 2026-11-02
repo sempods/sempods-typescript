@@ -2117,6 +2117,49 @@ async function theme({ browser, origin }) {
           }
       }
     }
+    await page.goto(origin + '/?theme=contrast-control');
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme });
+      results.push(
+        await attempt(`built theme samples only ${scheme}`, () =>
+          page.evaluate((scheme) => {
+            const other = scheme === 'dark' ? 'light' : 'dark';
+            const report = window.checkTheme();
+            const mismatch = window.checkTheme(other);
+            const skippedOther = ({ skipped }) =>
+              skipped.length === 6 &&
+              skipped.every(
+                (s) =>
+                  s.scheme === other &&
+                  s.reason.includes(`prefers-color-scheme: ${other}`),
+              );
+            const failures = report.failures;
+            const destructiveHover = failures.filter(
+              (f) => f.pair === 'destructive action' && f.state === 'hover',
+            );
+            return {
+              pass:
+                skippedOther(report) &&
+                skippedOther(mismatch) &&
+                !mismatch.pass &&
+                !mismatch.failures.length &&
+                (scheme === 'light'
+                  ? report.pass
+                  : !report.pass &&
+                    failures.every((f) => f.scheme === 'dark') &&
+                    failures.some(
+                      (f) =>
+                        f.variant.secondary === 'text' &&
+                        f.backdrop === 'background' &&
+                        f.ratio === 1,
+                    ) &&
+                    destructiveHover.some((f) => f.backdrop === 'popover') &&
+                    destructiveHover.every((f) => f.backdrop !== 'background')),
+            };
+          }, scheme),
+        ),
+      );
+    }
     await page.goto(origin + '/');
     results.push(
       await attempt('forced scheme and attribute restoration', () =>
