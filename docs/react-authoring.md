@@ -449,7 +449,8 @@ supplies save, delete, discard and comparison controls around your inputs.
 - In place (for example in a row) pass `onClose={() => select(null)}`: it shows
   **Cancel** instead of **Discard changes**, Cancel discards and closes, and a
   confirmed save or delete closes it; refusals, conflicts and unconfirmed
-  answers keep it open. Escape closes too, but with unsaved changes it first
+  answers keep it open. Escape anywhere in the editor, in its fields and on its
+  own buttons, closes too, but with unsaved changes it first
   asks "Discard unsaved changes?", as closing the row, switching rows or
   Contexts, or an enclosing app dialog's × does. The editor keeps that Escape
   from reaching an enclosing dialog; Escape and Enter inside a nested dialog,
