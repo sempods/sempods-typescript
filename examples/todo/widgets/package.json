@@ -13,8 +13,8 @@
     }
   },
   "peerDependencies": {
-    "@sempods/app-sdk": "0.7.0-dev.2",
-    "@sempods/client-sdk": "0.7.0-dev.2",
+    "@sempods/app-sdk": "0.7.0",
+    "@sempods/client-sdk": "0.7.0",
     "react": "^19.0.0"
   }
 }

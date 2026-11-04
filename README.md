@@ -66,17 +66,17 @@ Automated checks cover installed packages and browser fixtures. Live-Pod,
 installed-device and independent app-author validation are separate evidence;
 see [development checks](docs/development.md).
 
-For 0.6.0, see the [release notes](docs/releases/0.6.0.md) and
-[upgrade instructions](docs/migration.md#from-050-to-060).
+For 0.7.0, see the [release notes](docs/releases/0.7.0.md) and
+[upgrade instructions](docs/migration.md#from-060-to-070).
 
 ## Supported environments
 
-| Environment                  | Status in 0.6                                                                                                                                                                      |
+| Environment                  | Status in 0.7                                                                                                                                                                      |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Node                         | 24.15 or newer (Node 24 LTS), ESM only (`engines` in every package).                                                                                                               |
 | Browser tab                  | Current browsers with IndexedDB and Web Locks. Automated browser checks run in Chromium.                                                                                           |
 | React                        | 19, for `@sempods/app-sdk/react` (optional peer).                                                                                                                                  |
-| UI kit                       | Not in 0.6; from the next release, `@sempods/app-ui` with React 19 and Tailwind CSS 4.1 or newer. Its browser gate runs in Chromium and WebKit, and in Firefox on Linux CI.        |
+| UI kit                       | New in 0.7: `@sempods/app-ui` with React 19 and Tailwind CSS 4.1 or newer. Its browser gate runs in Chromium and WebKit, and in Firefox on Linux CI.                               |
 | Installed PWA (experimental) | Desktop Chromium and Android are expected to work; iOS/iPadOS home-screen apps are unverified. Login returns to the app in the same window and must land in the app's own storage. |
 
 Support for installed apps is extended after device evidence. Until then, use a
