@@ -229,13 +229,31 @@ function walk(dir, base = dir) {
 }
 
 /**
- * Problems of an extracted package's reference: the entry is present, no
+ * Problems of an extracted package's reference: the entry is present, a
+ * release ships the notes of its minor version, no longer in preparation, no
  * contributor instructions are shipped, and every local link and anchor
  * resolves inside the package.
  */
 export function checkReference(dir) {
   const errors = [];
   if (!existsSync(join(dir, ENTRY))) errors.push(`Missing ${ENTRY}`);
+  const manifest = join(dir, 'package.json');
+  const { version } = existsSync(manifest)
+    ? JSON.parse(readFileSync(manifest, 'utf8'))
+    : {};
+  // Only a release: a prerelease such as 0.8.0-dev.1 may precede its notes.
+  const release = /^(\d+)\.(\d+)\.\d+$/.exec(version ?? '');
+  if (release) {
+    const notes = `docs/releases/${release[1]}.${release[2]}.0.md`;
+    if (!existsSync(join(dir, notes)))
+      errors.push(`Missing ${notes} for release ${version}`);
+    else if (
+      /in preparation/i.test(
+        readFileSync(join(dir, notes), 'utf8').split('\n', 1)[0],
+      )
+    )
+      errors.push(`${notes}: still in preparation for release ${version}`);
+  }
   const files = SHIPPED_ROOTS.flatMap((root) =>
     existsSync(join(dir, root))
       ? walk(join(dir, root)).map((f) => `${root}/${f}`)

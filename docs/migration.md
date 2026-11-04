@@ -6,9 +6,10 @@ automatic conversion of legacy app data or stored credentials.
 
 ## From 0.6.0 to 0.7.0
 
-0.7.0 is not released yet; this section collects its upgrade steps. Most apps
-need no code change. Check the cascade layers below first, then the behaviour
-changes.
+Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to
+the same version where the app uses it. See the
+[release notes](releases/0.7.0.md). Most apps need no code change. Check the
+cascade layers below first, then the behaviour changes.
 
 ### SDK styles in a cascade layer
 
