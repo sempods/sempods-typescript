@@ -59,14 +59,21 @@ export interface AppActions {
   selectContext(iri: string): Promise<boolean>;
   /** Sign in to a Pod; omit the URL to reuse/connect the preset or sole allowed Pod. */
   connect(url?: string): Promise<boolean>;
-  /** Sign in again for an existing connection. */
+  /** Sign in again for an existing connection, also a remembered `signed-out` one. */
   authorize(id: string): Promise<boolean>;
   /**
-   * Forget a connection locally; does not revoke grants or delete Pod data.
-   * `true` means the guarded action ran. If durable sign-out failed, the
-   * connection retains an ended session with `saved: false`; offer a retry.
+   * Sign out on this device; does not revoke grants or delete Pod data. The
+   * Pod stays listed as `signed-out` with its address unless the runtime has
+   * `rememberPods: false`. `true` means the guarded action ran. If durable
+   * sign-out failed, the connection retains an ended session with
+   * `saved: false`; offer a retry.
    */
   disconnect(id: string): Promise<boolean>;
+  /**
+   * Sign out if needed and forget the Pod on this device: its address and
+   * remembered Context. Guarded and reported like `disconnect`.
+   */
+  forget(id: string): Promise<boolean>;
   /** Reload a connection's context catalogue (access facts). */
   refreshContexts(id: string): Promise<unknown>;
   /**
@@ -184,6 +191,7 @@ export function SempodsProvider({
       connect: (url?: string) => controller.connect(url),
       authorize: (id: string) => controller.authorize(id),
       disconnect: (id: string) => controller.disconnect(id),
+      forget: (id: string) => controller.forget(id),
       refreshContexts: (id: string) => runtime.loadContexts(id),
       loadContextLabels: (id: string, iris: readonly string[]) =>
         runtime.loadContextLabels(id, iris),

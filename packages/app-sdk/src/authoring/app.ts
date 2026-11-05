@@ -12,7 +12,7 @@ export interface LeaveGuard {
    * Which guarded changes leave this guard, so ask about and discard it:
    * - `local` (also when omitted): every change: `navigate`, `selectContext`
    *   and the connection actions (`selectConnection`, `connect`, `authorize`,
-   *   `disconnect`).
+   *   `disconnect`, `forget`).
    * - `target`: survives `navigate` (row navigation); left by the others.
    * - `connection`: survives `selectContext`, for a draft bound to an explicit
    *   Context rather than the selection; left by the others.
@@ -122,11 +122,16 @@ export interface AppSnapshot {
   readonly startupError: unknown;
   /**
    * Whether the startup's failed or cancelled callback still needs presenting.
-   * Cleared once the person selects another connection, disconnects one or
-   * starts a sign-in; `startup` itself stays unchanged.
+   * Cleared once the person selects another connection, disconnects or
+   * forgets one or starts a sign-in; `startup` itself stays unchanged.
    */
   readonly callbackNotice: boolean;
   readonly connections: readonly Connection[];
+  /**
+   * The connection the app works with. Without an earlier choice it is the
+   * preset's Pod, else the first connection that is not merely remembered
+   * (`signed-out`), else the first remembered one.
+   */
   readonly activeId: string | null;
   /**
    * The selected Context's view of the active connection. `null` until startup
@@ -214,6 +219,10 @@ export function createAppController(
   let startupError: unknown;
   let callbackNotice = false;
   let activeId: string | null = null;
+  /** The active connection's session at the last publish, to notice a sign-out. */
+  let activeSession:
+    | { readonly id: string; readonly kind: Connection['session']['kind'] }
+    | undefined;
   let view: BoundView | null = null;
   let pod: BoundPod | null = null;
   let pending:
@@ -247,21 +256,56 @@ export function createAppController(
     unconfirmedLeave: false,
     changing,
   };
+  /**
+   * The connection to work with without a choice: the preset's Pod, else one
+   * with a session (signed in, restoring or ended) before a remembered one.
+   */
+  function fallback(connections: readonly Connection[], except?: string) {
+    const candidates = connections.filter(
+      (c) =>
+        c.id !== except &&
+        (!runtime.preset || c.podUrl === runtime.preset.podUrl),
+    );
+    return (
+      (candidates.find((c) => c.session.kind !== 'signed-out') ?? candidates[0])
+        ?.id ?? null
+    );
+  }
   function publish() {
     const connections = runtime.getSnapshot();
+    // The active connection was just signed out (a remembered Pod stays
+    // listed): like a removed one, it gives way to one with a session.
+    const signedOut =
+      activeSession !== undefined &&
+      activeSession.id === activeId &&
+      activeSession.kind !== 'signed-out' &&
+      connections.find((c) => c.id === activeId)?.session.kind === 'signed-out';
+    if (signedOut) {
+      const next = fallback(connections, activeId!);
+      if (
+        next !== null &&
+        connections.find((c) => c.id === next)?.session.kind !== 'signed-out'
+      ) {
+        activeId = next;
+        view = null;
+      }
+    }
     if (!activeId || !connections.some((c) => c.id === activeId))
-      activeId =
-        (runtime.preset
-          ? connections.find((c) => c.podUrl === runtime.preset!.podUrl)
-          : connections[0]
-        )?.id ?? null;
+      activeId = fallback(connections);
+    const activeConnection = connections.find((c) => c.id === activeId);
+    activeSession = activeConnection && {
+      id: activeConnection.id,
+      kind: activeConnection.session.kind,
+    };
     // A prompt is about the connection it was asked for. That connection
     // stopping being active without a guarded action (a returning sign-in, a
-    // removed connection) cancels it: nothing runs and no guard is discarded.
-    // A prompt asked without any active connection is not about one.
+    // removed or signed-out connection) cancels it: nothing runs and no guard
+    // is discarded. A prompt asked without any active connection is not about
+    // one.
     if (
       pending &&
-      ((pending.activeId !== null && pending.activeId !== activeId) ||
+      ((pending.activeId !== null &&
+        (pending.activeId !== activeId || signedOut)) ||
         pending.available?.() === 'gone')
     ) {
       pending.resolve(false);
@@ -616,11 +660,19 @@ export function createAppController(
     /**
      * Guarded like `selectConnection`. `true` means the action ran, not that
      * sign-out was saved. On failure the connection's ended session retains
-     * `saved: false`; a successful retry removes the connection.
+     * `saved: false`; offer a retry. A signed-out active connection gives way
+     * to another one with a session, as a removed one does.
      */
     disconnect(id: string) {
       return guard(async () => {
         if ((await runtime.disconnect(id)).kind === 'disconnected')
+          callbackNotice = false;
+      });
+    },
+    /** Signs out if needed and forgets the Pod; guarded and reported like `disconnect`. */
+    forget(id: string) {
+      return guard(async () => {
+        if ((await runtime.forget(id)).kind === 'disconnected')
           callbackNotice = false;
       });
     },

@@ -4,6 +4,58 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## From 0.7.0 to 0.8.0
+
+0.8.0 is not released yet; this section collects its upgrade steps.
+
+### Remembered Pods
+
+**A Pod address now outlives its session**
+([remembered Pods](browser-runtime.md#remembered-pods)). Sign-out and a session
+that ends keep the connection with its address, as
+`session: { kind: 'signed-out', problem?: RuntimeProblem }`, also after a
+reload, so people sign in again with one action.
+
+- **`disconnect(id)` keeps the connection.** It used to remove it from the
+  snapshot; now it stays listed as `signed-out` with
+  `problem: 'disconnected'` and its remembered Context choice. Code that waited
+  for the connection to disappear, or counted connections after a sign-out,
+  uses the new `forget(id)` (`useApp().forget(id)`), which deletes the record
+  and the choice, or checks `session.kind`.
+- **Records written by 0.7 keep working.** Pods that were signed out or whose
+  session ended under 0.7 were hidden at startup; after the upgrade they are
+  listed as `signed-out` without a `problem`, because 0.7 did not record why.
+- **Opt out with `rememberPods: false`** in `createBrowserRuntime` for shared
+  devices or privacy-sensitive apps. Sign-out then removes the connection as
+  before, and the record is deleted instead of kept as a tombstone; startup
+  also deletes records an earlier start remembered.
+- **Choosing the active connection.** Without an earlier choice, the app
+  controller prefers a connection with a session over a remembered one, and
+  when the active connection signs out it gives way to one with a session.
+  A leave prompt about a connection that signs out is cancelled.
+- **`AppAccess`** lists remembered Pods on the sign-in view, above the address
+  field, with **Sign in** and **Forget**, and under **Connect another Pod** in
+  management. Its Pod selector no longer lists remembered Pods. Check end-to-end
+  tests that expected an empty address field after a sign-out or that look up
+  **Sign in** by name alone: each remembered Pod has its own. `AccessNotice`
+  asks to sign in (`controls.signInRequired`) for a signed-out connection.
+
+### Type additions
+
+- `SessionFact`'s `signed-out` variant gains the optional `problem`. Code that
+  compares a session with `{ kind: 'signed-out' }` by deep equality accepts
+  the property.
+- `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
+  `rememberPods`. Typed test doubles of the runtime need `forget`.
+- `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
+  doubles of `useApp()` need it too.
+- **Breaking for custom stores:** `SessionStore` (the `openStore` option) gains
+  the required method `remove(id, expectedRevision)`, an atomic deletion at the
+  expected revision that answers `{ kind: 'removed' }` or `{ kind: 'conflict' }`.
+  The default IndexedDB store implements it.
+- `UiMessages` gains `rememberedPods`, `forget` and `sessionEnded`, optional in
+  the type; `createLocale` fills them from the language defaults.
+
 ## From 0.6.0 to 0.7.0
 
 0.7.0 is not released yet; this section collects its upgrade steps. Most apps
@@ -714,8 +766,9 @@ notes so recovery can be deliberate.
 | Unreadable record                                 | Record only its safe reported status and SDK version; investigate compatibility before clearing anything    |
 | Unconfirmed data write                            | Use the editor/update recovery on the original resource; session reconnection is not proof the write failed |
 
-Use guarded **Sign out** (`disconnect`) to remove a readable connection and its stored secret
-material; it does not revoke server grants or delete Pod data. If unreadable state
+Use guarded **Sign out** (`disconnect`) to remove a readable connection's stored secret
+material; its address stays remembered until **Forget** (`forget`). Neither
+revokes server grants nor deletes Pod data. If unreadable state
 makes a full browser site-data reset necessary, first preserve unsaved work and
 obtain the person's agreement: clearing site data can remove every app's local
 state on that origin and requires fresh sign-in. Never upload a browser storage

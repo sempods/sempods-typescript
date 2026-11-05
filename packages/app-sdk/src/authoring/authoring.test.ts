@@ -10,6 +10,7 @@ import {
   deferred,
   jwt,
   settleLease,
+  twoPods,
 } from '../runtime/fixture.test.js';
 import { bindResourceEditor } from './editor.js';
 import { createAppController } from './app.js';
@@ -67,7 +68,18 @@ it('keeps guarded disconnect Boolean semantics and retains its failure across co
   });
   write.mockRestore();
   expect(await remounted.disconnect(f.id)).toBe(true);
-  expect(remounted.getSnapshot().connections).toEqual([]);
+  // Remembered, signed out: still the active connection, ready to sign in.
+  expect(remounted.getSnapshot()).toMatchObject({
+    activeId: f.id,
+    connections: [
+      { id: f.id, session: { kind: 'signed-out', problem: 'disconnected' } },
+    ],
+  });
+  expect(await remounted.forget(f.id)).toBe(true);
+  expect(remounted.getSnapshot()).toMatchObject({
+    activeId: null,
+    connections: [],
+  });
 });
 it.each(['save', 'remove'] as const)(
   'a write-start observer can dispose a bound editor before its first %s (#120)',
@@ -280,16 +292,48 @@ it('cancels a leave prompt when another connection becomes active outside a guar
   const select = vi.spyOn(f.runtime, 'selectContext');
   const change = app.selectContext(personal);
   expect(app.getSnapshot().confirmingLeave).toBe(true);
-  // Removing the active connection activates another one without a guard.
+  // Signing out the active connection outside a guarded action. It stays
+  // active, remembered, as the other one has no session to give way to.
   await f.runtime.disconnect(f.id);
   expect(await change).toBe(false);
   expect(app.getSnapshot()).toMatchObject({
-    activeId: other.id,
+    activeId: f.id,
     confirmingLeave: false,
   });
+  expect(other.session.kind).toBe('signed-out');
   await app.confirmLeave();
   expect(select).not.toHaveBeenCalled();
   expect(discard).not.toHaveBeenCalled();
+});
+it('gives way to a signed-in connection when the active one signs out; a remembered one stays selectable', async () => {
+  const { f, runtime, other } = await twoPods((r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  const app = createAppController(runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().activeId).toBe(other.id));
+  const discard = vi.fn();
+  const unregister = app.register({
+    dirty: () => true,
+    blocked: () => false,
+    discard,
+  });
+  const change = app.selectContext(personal);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  await runtime.disconnect(other.id);
+  expect(await change).toBe(false);
+  expect(discard).not.toHaveBeenCalled();
+  unregister();
+  // The preset's Pod is still signed in.
+  expect(app.getSnapshot().activeId).toBe(f.id);
+  // Choosing the remembered Pod again keeps it, ready to sign in.
+  expect(await app.selectConnection(other.id)).toBe(true);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: other.id,
+    view: null,
+    pod: null,
+  });
 });
 it('cancels a leave prompt when a returning sign-in activates another connection', async () => {
   const f = await connected();

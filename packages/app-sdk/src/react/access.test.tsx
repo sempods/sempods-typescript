@@ -130,7 +130,12 @@ it.each([
     expect(runtime.getSnapshot().some((c) => c.id === id)).toBe(true);
     write.mockRestore();
     await act(async () => retry.click());
-    await waitFor(() => expect(runtime.getSnapshot()).toEqual([]));
+    await waitFor(() =>
+      expect(runtime.getSnapshot()[0]?.session).toEqual({
+        kind: 'signed-out',
+        problem: 'disconnected',
+      }),
+    );
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: label })).toBeNull();
   },
@@ -407,7 +412,9 @@ it.each([
     );
     expect(note?.textContent).toBe(text.note);
     await act(async () => signOut.click());
-    await waitFor(() => expect(logged.runtime.getSnapshot()).toHaveLength(0));
+    await waitFor(() =>
+      expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('signed-out'),
+    );
   },
 );
 
@@ -544,16 +551,21 @@ it('keeps the current target and draft when sign-in preparation for a known othe
     target: { value: other },
   });
   const navigations = f.navigate.mock.calls.length;
+  // Bob's connection, never signed in, is also listed with its own sign-in.
+  const listed = screen.getByRole('list', { name: 'Pods on this device' });
+  expect(within(listed).getByText('pod.example/bob')).toBeTruthy();
   f.fetch.mockRejectedValueOnce(new Error('offline'));
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  const form = screen.getByLabelText('Pod address').closest('form')!;
+  fireEvent.click(within(form).getByRole('button', { name: 'Sign in' }));
   await screen.findByRole('alertdialog');
   fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
   await screen.findByRole('alert');
   expect(screen.getByLabelText('Draft')).toBe(draft);
   expect((draft as HTMLInputElement).value).toBe('Keep this on Alice');
-  expect((screen.getByLabelText('Active pod') as HTMLSelectElement).value).toBe(
-    logged.id,
-  );
+  // Alice stays active: management still names her Pod, Bob stays listed.
+  expect(screen.queryByLabelText('Active pod')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Change sharing' })).toBeTruthy();
+  expect(within(listed).getByText('pod.example/bob')).toBeTruthy();
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
   expect(logged.runtime.getSnapshot()).toHaveLength(2);
 });
@@ -676,8 +688,13 @@ it.each(['select', 'disconnect'] as const)(
         screen.getByRole('button', { name: 'Sign out' }).click(),
       );
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
-    expect(runtime.getSnapshot().some((c) => c.id === bob.id)).toBe(
-      action === 'select',
+    // Signed out, Bob's Pod stays remembered.
+    expect(
+      runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
+    ).toMatchObject(
+      action === 'select'
+        ? { kind: 'ended', problem: 'login-required' }
+        : { kind: 'signed-out', problem: 'disconnected' },
     );
   },
 );

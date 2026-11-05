@@ -58,6 +58,34 @@ describe('atomic session records (storage only, no session acceptance)', () => {
     expect((await reopened.list()).records).toHaveLength(1);
   });
 
+  it('removes a record only at its current revision and only in its namespace', async () => {
+    const factory = new IDBFactory();
+    const store = await open(factory);
+    const other = await open(factory, 'other');
+    const first = committed(await store.commit('pod-a', null, { n: 1 }));
+    const second = committed(
+      await store.commit('pod-a', first.revision, { n: 2 }),
+    );
+    committed(await other.commit('pod-a', null, { n: 3 }));
+    expect(await store.remove('pod-a', first.revision)).toEqual({
+      kind: 'conflict',
+    });
+    expect(await store.remove('missing', second.revision)).toEqual({
+      kind: 'conflict',
+    });
+    expect(await store.remove('pod-a', second.revision)).toEqual({
+      kind: 'removed',
+    });
+    expect(await store.read('pod-a')).toBeUndefined();
+    expect(await store.remove('pod-a', second.revision)).toEqual({
+      kind: 'conflict',
+    });
+    expect((await other.read('pod-a'))?.value).toEqual({ n: 3 });
+    await expect(store.remove('', second.revision)).rejects.toMatchObject({
+      problem: 'configuration',
+    });
+  });
+
   it('has exactly one winner for competing creation and revision replacement', async () => {
     const factory = new IDBFactory();
     const first = await open(factory);

@@ -187,7 +187,12 @@ it('A4: a disconnect during the code exchange stays disconnected after reload', 
   });
   runtimes.push(next);
   await next.initialize();
-  expect(next.getSnapshot()).toEqual([]);
+  expect(next.getSnapshot()).toMatchObject([
+    {
+      id: connection.id,
+      session: { kind: 'signed-out', problem: 'disconnected' },
+    },
+  ]);
   const store = await openSessionStore(namespace, f.factory);
   expect((await store.read(connection.id))?.value).toMatchObject({
     kind: 'disconnected',

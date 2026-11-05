@@ -315,7 +315,10 @@ it('retires the consumed refresh after a lost token answer and never retries it 
     }),
   );
   store.close();
-  expect((await reload(f)).getSnapshot()).toEqual([]);
+  // Remembered, signed out: no token is left to retry.
+  expect((await reload(f)).getSnapshot()).toMatchObject([
+    { id: f.id, session: { kind: 'signed-out' } },
+  ]);
   expect(f.count('/token')).toBe(2);
 });
 
@@ -676,7 +679,12 @@ it.each(['resume', 'fail', 'disconnect', 'dispose'] as const)(
         const store = await openSessionStore(dynamicNamespace, f.factory);
         await store.read(f.id);
         store.close();
-        expect(next.getSnapshot().some((c) => c.id === f.id)).toBe(false);
+        // A sign-out keeps the address, signed out; disposal lists nothing.
+        expect(next.getSnapshot().find((c) => c.id === f.id)?.session).toEqual(
+          outcome === 'disconnect'
+            ? { kind: 'signed-out', problem: 'disconnected' }
+            : undefined,
+        );
       }
     } finally {
       held.resolve(await original(firstMetadata));
@@ -805,7 +813,9 @@ it('persists disconnect and keeps notifying other listeners when a subscriber th
     kind: 'disconnected',
   });
   store.close();
-  expect((await reload(f)).getSnapshot()).toEqual([]);
+  expect((await reload(f)).getSnapshot()).toMatchObject([
+    { id: f.id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
 });
 
 it('keeps a completed callback and its durable session when a subscriber throws', async () => {

@@ -310,14 +310,30 @@ export function createSessionTransitions(
             ...completion(result.record, current.value, binding),
           };
     },
-    async disconnect(id: string, revision: string): Promise<SessionChange> {
+    /**
+     * Retires the record: only its binding (the Pod address) and why it ended
+     * stay, without token or verifier.
+     */
+    async disconnect(
+      id: string,
+      revision: string,
+      reason?: string,
+    ): Promise<SessionChange> {
       const current = await observed(id, revision);
       if (!current) return conflict;
       return commit(id, revision, {
         version: 1,
         kind: 'disconnected',
         binding: sessionBinding(current.value),
+        ...(reason === undefined ? {} : { reason }),
       });
+    },
+    /** Deletes the record, whatever it holds, while it is still at `revision`. */
+    async forget(
+      id: string,
+      revision: string,
+    ): Promise<'removed' | 'conflict'> {
+      return (await store.remove(id, revision)).kind;
     },
   };
 }

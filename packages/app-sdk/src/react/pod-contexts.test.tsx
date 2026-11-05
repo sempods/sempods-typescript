@@ -244,6 +244,13 @@ it('refuses unknown, unlisted and ended targets before asking', async () => {
     reason: 'unlisted',
   });
   await act(() => runtime.disconnect(bob));
+  // Bob's Pod is remembered, signed out.
+  await waitFor(() => expect(pod(api, bob).status).toBe('signed-out'));
+  expect(await select(api, bob, shop)).toEqual({
+    kind: 'unavailable',
+    reason: 'session',
+  });
+  await act(() => runtime.forget(bob));
   await waitFor(() => expect(api.list.pods).toHaveLength(1));
   expect(await select(api, bob, shop)).toEqual({
     kind: 'unavailable',

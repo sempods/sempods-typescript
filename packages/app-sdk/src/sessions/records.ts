@@ -45,7 +45,16 @@ export type SessionRecord = { readonly version: 1 } & (
       readonly operation: 'code' | 'refresh';
       readonly subject: string | null;
     }
-  | { readonly kind: 'disconnected'; readonly binding: SessionBinding }
+  | {
+      readonly kind: 'disconnected';
+      readonly binding: SessionBinding;
+      /**
+       * Why the session ended, for display (a runtime problem such as
+       * `expired`; `disconnected` for a sign-out). Absent in records of SDK
+       * 0.7 and earlier. A retired record holds no token and no verifier.
+       */
+      readonly reason?: string;
+    }
 );
 export interface SessionSnapshot {
   readonly id: string;
@@ -145,7 +154,18 @@ export function parseSessionRecord(
           };
           break;
         case 'disconnected':
-          parsed = { version: 1, kind: 'disconnected', binding };
+          if (
+            value.reason !== undefined &&
+            (typeof value.reason !== 'string' ||
+              !/^[a-z][a-z-]{0,39}$/.test(value.reason))
+          )
+            throw new Error();
+          parsed = {
+            version: 1,
+            kind: 'disconnected',
+            binding,
+            ...(value.reason === undefined ? {} : { reason: value.reason }),
+          };
           break;
         default:
           throw new Error();
