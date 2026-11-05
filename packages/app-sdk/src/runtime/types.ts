@@ -47,6 +47,13 @@ export type SessionFact =
        */
       readonly saved?: false;
       /**
+       * `problem: 'disconnected'` came from `forget(id)`: the connection is
+       * being forgotten, or, with `saved: false`, forgetting could not be
+       * saved. Retry with `forget(id)`; `disconnect(id)` then forgets too, so
+       * the address is not kept against the person's choice.
+       */
+      readonly forget?: true;
+      /**
        * The saved session is kept: restoring it failed only because its Pod
        * could not be reached (offline, `5xx`, `408`, `429`). The runtime
        * restores it again when the browser comes back online, or on

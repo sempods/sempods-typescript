@@ -24,6 +24,7 @@ import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { layered, SdkStyles } from './styles.js';
 import { useModalDialog } from './confirm.js';
 import { contextName, podName, distinctName } from './names.js';
+import type { Connection } from '../runtime/types.js';
 import {
   knownContexts,
   presentAccess,
@@ -460,10 +461,19 @@ function AccessConnections({
   // Remembered Pods: signed out at a known address (see `rememberPods`). The
   // sign-in view lists them above the address field, each with its own
   // sign-in and a way to forget it on this device.
+  // A Pod being forgotten stays in that list; if forgetting could not be
+  // saved, with the failure and Forget again, so its address is not kept
+  // against the choice.
+  const forgetting = (entry: Connection) =>
+    entry.session.kind === 'ended' && entry.session.forget === true;
+  const forgetFailed = (entry: Connection) =>
+    forgetting(entry) &&
+    entry.session.kind === 'ended' &&
+    entry.session.saved === false;
   const remembered = state.connections.filter(
-    (entry) => entry.session.kind === 'signed-out',
+    (entry) => entry.session.kind === 'signed-out' || forgetting(entry),
   );
-  const signingIn = !c || c.session.kind === 'signed-out';
+  const signingIn = !c || remembered.includes(c);
   const defaultUrl =
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
@@ -592,8 +602,7 @@ function AccessConnections({
   );
   // A remembered Pod is chosen from its own list, unless it is the active one.
   const selectable = state.connections.filter(
-    (entry) =>
-      entry.session.kind !== 'signed-out' || entry.id === state.activeId,
+    (entry) => !remembered.includes(entry) || entry.id === state.activeId,
   );
   const activePod = selectable.length > 1 && (
     <label key="active-pod">
@@ -651,6 +660,11 @@ function AccessConnections({
           entry.session.problem !== undefined &&
           entry.session.problem !== 'disconnected';
         const shown = !addressHidden || podNames?.[entry.podUrl]?.trim();
+        const failed = forgetFailed(entry);
+        const describedBy =
+          [shown && `${id}-${entry.id}`, failed && `${id}-${entry.id}-failed`]
+            .filter(Boolean)
+            .join(' ') || undefined;
         return (
           <li key={entry.id}>
             {shown && <p id={`${id}-${entry.id}`}>{name(entry.podUrl)}</p>}
@@ -660,19 +674,28 @@ function AccessConnections({
             {ended && (
               <p className="sp-access-hint">{m.controls.sessionEnded}</p>
             )}
+            {failed && (
+              <p id={`${id}-${entry.id}-failed`} role="alert">
+                {m.controls.forgetFailed}
+              </p>
+            )}
             <div className="sp-access-actions">
+              {!forgetting(entry) && (
+                <button
+                  className={
+                    entry.id === state.activeId
+                      ? 'sp-access-primary'
+                      : undefined
+                  }
+                  aria-describedby={shown ? `${id}-${entry.id}` : undefined}
+                  disabled={unavailable}
+                  onClick={() => void act(() => app.authorize(entry.id))}
+                >
+                  {m.controls.signIn}
+                </button>
+              )}
               <button
-                className={
-                  entry.id === state.activeId ? 'sp-access-primary' : undefined
-                }
-                aria-describedby={shown ? `${id}-${entry.id}` : undefined}
-                disabled={unavailable}
-                onClick={() => void act(() => app.authorize(entry.id))}
-              >
-                {m.controls.signIn}
-              </button>
-              <button
-                aria-describedby={shown ? `${id}-${entry.id}` : undefined}
+                aria-describedby={describedBy}
                 disabled={unavailable}
                 onClick={() => void act(() => app.forget(entry.id))}
               >

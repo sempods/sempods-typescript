@@ -969,15 +969,28 @@ export function createBrowserRuntime(
    * (`erase`). A forgotten connection, or one that never had a record, leaves
    * the snapshot.
    */
-  function leave(id: string, erase: boolean): Promise<DisconnectResult> {
+  function leave(
+    id: string,
+    deleting: boolean,
+    forgetting: boolean,
+  ): Promise<DisconnectResult> {
     if (disposed || !sessions)
       return Promise.reject(new RuntimeError('configuration'));
+    const shown = entries.get(id)?.view.session;
+    // A forget that could not be saved stays a forget, also when retried as a
+    // sign-out, so the address is not kept against the person's choice.
+    const forget =
+      forgetting ||
+      (shown?.kind === 'ended' &&
+        shown.saved === false &&
+        shown.forget === true);
+    const erase = deleting || forget;
     const pending = disconnects.get(id);
     if (pending)
       // A forget asked during a sign-out deletes the record once it settled.
       return erase && !pending.erase
         ? pending.operation.then(() =>
-            entries.has(id) ? leave(id, true) : { kind: 'disconnected' },
+            entries.has(id) ? leave(id, true, true) : { kind: 'disconnected' },
           )
         : pending.operation;
     const e = get(id);
@@ -1010,6 +1023,7 @@ export function createBrowserRuntime(
                 kind: 'ended',
                 problem: 'disconnected',
                 saved: false,
+                ...(forget ? { forget: true as const } : {}),
               }),
             };
             publish();
@@ -1038,6 +1052,7 @@ export function createBrowserRuntime(
         ...(e.view.session.kind === 'ended' && e.view.session.saved === false
           ? { saved: false as const }
           : {}),
+        ...(forget ? { forget: true as const } : {}),
       }),
       catalogue: Object.freeze({ kind: 'unknown' }),
       selectedContext: null,
@@ -1193,10 +1208,10 @@ export function createBrowserRuntime(
       (options.navigate ?? ((url) => window.location.assign(url)))(url);
     },
     disconnect(id) {
-      return leave(id, !rememberPods);
+      return leave(id, !rememberPods, false);
     },
     forget(id) {
-      return leave(id, true);
+      return leave(id, true, true);
     },
     async loadContexts(id, { signal } = {}) {
       const e = get(id);

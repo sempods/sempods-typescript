@@ -42,9 +42,10 @@ reload, so people sign in again with one action.
 
 ### Type additions
 
-- `SessionFact`'s `signed-out` variant gains the optional `problem`. Code that
-  compares a session with `{ kind: 'signed-out' }` by deep equality accepts
-  the property.
+- `SessionFact`'s `signed-out` variant gains the optional `problem`, and its
+  `ended` variant the optional `forget: true` for a connection being forgotten
+  or whose forgetting failed. Code that compares sessions by deep equality
+  accepts these properties.
 - `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
   `rememberPods`. Typed test doubles of the runtime need `forget`.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
@@ -53,8 +54,9 @@ reload, so people sign in again with one action.
   the required method `remove(id, expectedRevision)`, an atomic deletion at the
   expected revision that answers `{ kind: 'removed' }` or `{ kind: 'conflict' }`.
   The default IndexedDB store implements it.
-- `UiMessages` gains `rememberedPods`, `forget` and `sessionEnded`, optional in
-  the type; `createLocale` fills them from the language defaults.
+- `UiMessages` gains `rememberedPods`, `forget`, `sessionEnded` and
+  `forgetFailed`, optional in the type; `createLocale` fills them from the
+  language defaults.
 
 ## From 0.6.0 to 0.7.0
 

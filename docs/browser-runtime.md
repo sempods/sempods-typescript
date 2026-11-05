@@ -624,8 +624,11 @@ from the next start on.
   remembered connection.
 - **Forgetting is separate.** `forget(id)` signs out if needed, deletes the
   record and the remembered Context choice, and removes the connection from the
-  snapshot. It works for any connection; a failed deletion returns
-  `blocked-locally` like `disconnect`.
+  snapshot. It works for any connection. While it runs, and after a failed
+  deletion (`blocked-locally`, as for `disconnect`), the connection reports
+  `ended { problem: 'disconnected', forget: true }`, with `saved: false` after
+  the failure; a retry with `forget(id)`, or with `disconnect(id)`, forgets it,
+  so the address is never kept against the person's choice.
 - **Opt out with `rememberPods: false`,** for shared devices or
   privacy-sensitive apps. Sign-out then forgets the address and the remembered
   Context at once and removes the connection; an ended session stays listed
@@ -642,7 +645,8 @@ A remembered Pod the person selects stays active, ready to sign in.
 `AppAccess` lists remembered Pods on its sign-in view, above the address field,
 each with **Sign in** and **Forget** (`controls.rememberedPods`,
 `controls.forget`; `controls.sessionEnded` notes an ended session); management
-lists them under **Connect another Pod**.
+lists them under **Connect another Pod**. A Pod whose forgetting failed stays
+in that list with `controls.forgetFailed` and **Forget** only.
 
 A custom `SessionStore` (`openStore`) implements `remove(id, expectedRevision)`
 for this: an atomic delete at the expected revision, `conflict` otherwise.

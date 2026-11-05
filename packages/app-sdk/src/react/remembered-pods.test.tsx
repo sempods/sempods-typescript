@@ -4,6 +4,7 @@
  * its own sign-in and a way to forget it on this device.
  */
 import { webcrypto } from 'node:crypto';
+import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   act,
@@ -266,3 +267,56 @@ it('keeps a remembered Pod reachable while another Pod restores', async () => {
   );
   expect(f.navigate.mock.calls.at(-1)![0].startsWith(bobUrl + '/')).toBe(true);
 });
+
+it.each(['en', 'de'] as const)(
+  'keeps a Pod whose forgetting failed in the list and retries Forget (%s)',
+  async (language) => {
+    const t = texts[language];
+    const failedText =
+      language === 'en'
+        ? 'This Pod was not forgotten on this device. Try forgetting it again.'
+        : 'Der Pod wurde auf diesem Gerät nicht vergessen. Versuche erneut, ihn zu vergessen.';
+    let failing = false;
+    const factory = new IDBFactory();
+    const { runtime } = await remembered('sign-out', {
+      openStore: async (name) => {
+        const store = await openSessionStore(name, factory);
+        return {
+          read: (id) => store.read(id),
+          list: () => store.list(),
+          commit: (...args) => store.commit(...args),
+          close: () => store.close(),
+          remove: (...args) =>
+            failing
+              ? Promise.reject(new Error('private fixture detail'))
+              : store.remove(...args),
+        };
+      },
+    });
+    show(runtime, language);
+    const list = await screen.findByRole('list', { name: t.list });
+    failing = true;
+    await act(async () =>
+      within(list).getByRole('button', { name: t.forget }).click(),
+    );
+    const alert = await within(list).findByRole('alert');
+    expect(alert.textContent).toBe(failedText);
+    expect(document.body.textContent).not.toMatch(
+      /reload|neu laden|private fixture/i,
+    );
+    // No sign-in and no sign-out against the person's choice: only Forget.
+    expect(within(list).queryByRole('button', { name: t.signIn })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Sign out|Abmelden/ })).toBe(
+      null,
+    );
+    const retry = within(list).getByRole('button', { name: t.forget });
+    expect(retry.getAttribute('aria-describedby')).toContain(alert.id);
+    failing = false;
+    await act(async () => retry.click());
+    await waitFor(() => expect(runtime.getSnapshot()).toEqual([]));
+    await waitFor(() =>
+      expect(screen.queryByRole('list', { name: t.list })).toBeNull(),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);

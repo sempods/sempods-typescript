@@ -157,8 +157,49 @@ it('forgets a signed-in Pod at once, also during a pending sign-out', async () =
   expect(await records(g)).toEqual([]);
 });
 
-it('reports a failed deletion as blocked-locally and forgets on retry', async () => {
-  let failing = true;
+it.each(['forget', 'disconnect'] as const)(
+  'reports a failed deletion as blocked-locally and forgets on a %s retry',
+  async (retry) => {
+    let failing = true;
+    const factory = new IDBFactory();
+    const f = await logged({
+      openStore: async (name) => {
+        const store = await openSessionStore(name, factory);
+        return {
+          read: (id) => store.read(id),
+          list: () => store.list(),
+          commit: (...args) => store.commit(...args),
+          close: () => store.close(),
+          remove: (...args) =>
+            failing
+              ? Promise.reject(new Error('write failed'))
+              : store.remove(...args),
+        };
+      },
+    });
+    const failed = {
+      kind: 'ended',
+      problem: 'disconnected',
+      saved: false,
+      forget: true,
+    };
+    expect(await f.runtime.forget(f.id)).toEqual({ kind: 'blocked-locally' });
+    expect(f.runtime.getSnapshot()[0]?.session).toEqual(failed);
+    // A retry that fails again keeps saying that forgetting failed.
+    expect(await f.runtime[retry](f.id)).toEqual({ kind: 'blocked-locally' });
+    expect(f.runtime.getSnapshot()[0]?.session).toEqual(failed);
+    failing = false;
+    // Also a sign-out retry forgets: the address is not kept.
+    expect(await f.runtime[retry](f.id)).toEqual({ kind: 'disconnected' });
+    expect(f.runtime.getSnapshot()).toEqual([]);
+    const store = await openSessionStore(namespace, factory);
+    expect((await store.list()).records).toEqual([]);
+    store.close();
+  },
+);
+
+it('marks only a failed forget, not a failed sign-out, as forgetting', async () => {
+  let failing = false;
   const factory = new IDBFactory();
   const f = await logged({
     openStore: async (name) => {
@@ -166,22 +207,24 @@ it('reports a failed deletion as blocked-locally and forgets on retry', async ()
       return {
         read: (id) => store.read(id),
         list: () => store.list(),
-        commit: (...args) => store.commit(...args),
-        close: () => store.close(),
-        remove: (...args) =>
+        commit: (...args) =>
           failing
             ? Promise.reject(new Error('write failed'))
-            : store.remove(...args),
+            : store.commit(...args),
+        close: () => store.close(),
+        remove: () => Promise.reject(new Error('write failed')),
       };
     },
   });
-  expect(await f.runtime.forget(f.id)).toEqual({ kind: 'blocked-locally' });
-  expect(f.runtime.getSnapshot()).toMatchObject([
-    { session: { kind: 'ended', problem: 'disconnected', saved: false } },
-  ]);
-  failing = false;
-  expect(await f.runtime.forget(f.id)).toEqual({ kind: 'disconnected' });
-  expect(f.runtime.getSnapshot()).toEqual([]);
+  failing = true;
+  expect(await f.runtime.disconnect(f.id)).toEqual({
+    kind: 'blocked-locally',
+  });
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
 });
 
 it('rememberPods: false forgets the address on sign-out', async () => {

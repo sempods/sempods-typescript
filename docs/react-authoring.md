@@ -900,8 +900,10 @@ function Resource({ iri }: { readonly iri: string }) {
 - **Remembered Pods:** on the sign-in view, signed-out Pods this device
   remembers, above the address field, each with **Sign in** and **Forget**;
   a Pod whose session ended rather than was signed out carries
-  `controls.sessionEnded`. Management lists them under **Connect another Pod**
-  (see [remembered Pods](browser-runtime.md#remembered-pods)).
+  `controls.sessionEnded`, and one whose forgetting could not be saved
+  `controls.forgetFailed` with **Forget** again. Management lists them under
+  **Connect another Pod** (see
+  [remembered Pods](browser-runtime.md#remembered-pods)).
 
 Catalogue failures stay visible even when earlier access facts are kept.
 

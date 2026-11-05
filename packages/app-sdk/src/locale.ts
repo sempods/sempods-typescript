@@ -109,6 +109,8 @@ export interface UiMessages {
   readonly rememberedPods?: string;
   readonly forget?: string;
   readonly sessionEnded?: string;
+  /** Forgetting a Pod could not be saved; retry Forget, never reload advice. */
+  readonly forgetFailed?: string;
   /**
    * Status while the page navigates to the Pod's sign-in. Optional in the type
    * (added in 0.6.0); `createLocale` fills it from the language defaults.
@@ -257,6 +259,8 @@ export const englishMessages: SdkMessages = {
     rememberedPods: 'Pods on this device',
     forget: 'Forget',
     sessionEnded: 'The session ended. Sign in again to continue.',
+    forgetFailed:
+      'This Pod was not forgotten on this device. Try forgetting it again.',
     leaving: 'Opening your Pod’s sign-in…',
     unreachable:
       'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
@@ -406,6 +410,8 @@ export const germanMessages: SdkMessages = {
     forget: 'Vergessen',
     sessionEnded:
       'Die Sitzung wurde beendet. Melde dich erneut an, um fortzufahren.',
+    forgetFailed:
+      'Der Pod wurde auf diesem Gerät nicht vergessen. Versuche erneut, ihn zu vergessen.',
     leaving: 'Die Anmeldung deines Pods wird geöffnet…',
     unreachable:
       'Der Pod ist gerade nicht erreichbar. Du bleibst angemeldet; die App verbindet sich wieder, sobald das Netz zurück ist.',
