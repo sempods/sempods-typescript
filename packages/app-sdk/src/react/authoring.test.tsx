@@ -783,7 +783,8 @@ it('does not report a newer draft as saved when it was typed during a slow save'
   expect(screen.getByDisplayValue('Newer draft')).toBeTruthy();
   expect(screen.queryByText('Saved.')).toBeNull();
   fireEvent.click(screen.getByText('Discard changes'));
-  expect(screen.getByDisplayValue('Submitted')).toBeTruthy();
+  // The baseline after the save is re-read; a slow runner may still show it.
+  expect(await screen.findByDisplayValue('Submitted')).toBeTruthy();
   expect(screen.queryByText('Saved.')).toBeNull();
 });
 
