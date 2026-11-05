@@ -100,8 +100,9 @@ without a token. The browser runtime has no connection without a session.
 
 - A session stays usable on every device for its server lifetime, including
   when the same person signs in elsewhere.
-- A transient failure never signs anyone out. Only the server's explicit
-  refusal or the person's own action does.
+- A short network failure never signs anyone out. A refresh whose outcome stays
+  unknown beyond the server's grace period cannot be recovered without a new
+  sign-in. That case is reported as such, and signing in again is one action.
 - Signing in again is one action: the app remembers the Pod address.
 - The app decides how access outcomes are presented. The SDK classifies them
   and supplies sensible defaults.
@@ -119,10 +120,13 @@ without a token. The browser runtime has no connection without a session.
    person, for example at 10. Exceeding it retires the least recently refreshed
    family. This replaces the current concern that repeated reconnects leave
    families behind, each renewing its own window.
-3. **An unticked box limits only this sign-in.** The new family gets the shorter
-   terms. Existing durable families switch to the shorter terms at their next
-   rotation, with their absolute limit measured from their original issue. They
-   do not end immediately.
+3. **The lifetime answer applies only to the family it creates.** An unticked
+   box gives the new family the shorter terms. It neither revokes nor shortens
+   any other family, and a later answer does not change the terms of existing
+   families either. Shortening every connection of an app is a separate,
+   explicit action on the consent page, next to sign-out everywhere. Otherwise
+   a device signed in for ten days would end at its next refresh as soon as
+   another device chose the shorter connection.
 4. **A rotation grace period of about 60 seconds.** Within it, presenting the
    predecessor once more is answered with a fresh successor in the same family,
    instead of revoking the family. After it, the reuse rule stays as it is.
@@ -143,11 +147,23 @@ part safe to implement.
   error, timeout, an interrupted claim found at startup), the runtime retries
   **once** with the same token while the claim is younger than the grace period.
   Then it either succeeds or ends the session with the server's answer.
-- **Only an explicit refusal ends the session.** That means `invalid_grant` or
-  `invalid_client` from the token endpoint, or no refresh token and an expired
-  access token. Outcomes it cannot decide keep the connection as
-  `ended { restorable: true }`, retried when the browser comes back online, as
-  restoration already does.
+- **Waiting is bounded by the grace period.** While the device is offline and the
+  claim is still younger than the grace period, the connection stays
+  `ended { restorable: true }`, and the retry runs when the browser comes back
+  online. It is restorable only for as long as that retry can succeed.
+- **An unknown outcome beyond the grace period needs a new sign-in.** This covers
+  two cases: the device stays offline past the grace period, or the single retry
+  loses its answer as well. The client then holds no token the server would
+  accept. Another attempt would only trigger reuse detection. The connection
+  ends as `ended { problem: 'interrupted' }` and keeps its Pod address (section 3).
+  Signing in again is one action, without interaction while the Pod sign-in
+  cookie is valid. Closing this gap would need a server mechanism beyond the
+  grace period, which this proposal does not include.
+- **Only these cases end the session:**
+  - an explicit refusal from the token endpoint (`invalid_grant`,
+    `invalid_client`);
+  - an expired access token without a refresh token;
+  - an outcome that stayed unknown beyond the grace period, as above.
 - **Why the old rule can be relaxed.** A Pod without a grace period answers the
   retry with reuse detection, so the session ends as it does today. A Pod with
   one keeps it. The decision "a spent refresh token must never be reused" in
