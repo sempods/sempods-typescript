@@ -815,11 +815,12 @@ function AccessConnections({
   if (body === 'leaving')
     return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
   // A restore that never settles must not hide signing in to the configured
-  // Pod or switching to another saved one.
+  // Pod, to a remembered one, or switching to another saved one.
   if (body === 'loading')
     return (
       <>
         {defaultSignIn}
+        {rememberedList}
         {activePod}
         <p role="status">{m.controls.loading}</p>
         {failure && <p role="alert">{error(failure.cause)}</p>}

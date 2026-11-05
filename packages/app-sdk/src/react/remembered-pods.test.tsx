@@ -16,6 +16,7 @@ import {
 import { AppAccess, SempodsProvider } from './index.js';
 import {
   fixture,
+  jwt,
   pod,
   renewal,
   restored,
@@ -208,4 +209,60 @@ it('shows only the address field when the runtime does not remember Pods', async
   expect(screen.queryByRole('list', { name: texts.en.list })).toBeNull();
   expect(screen.getByRole('textbox', { name: 'Pod address' })).toBeTruthy();
   expect(id).toBeTruthy();
+});
+
+it('keeps a remembered Pod reachable while another Pod restores', async () => {
+  const bobUrl = 'https://pod.example/bob';
+  const f = fixture({ preferences: null });
+  cleanups.push(() => f.runtime.dispose());
+  const alice = await f.login();
+  cleanups.push(() => alice.runtime.dispose());
+  // Bob signs in, then out: remembered beside Alice's saved session.
+  const bob = await alice.runtime.connect(bobUrl);
+  await alice.runtime.beginAuthorization(bob.id);
+  alice.runtime.dispose();
+  await settleLease();
+  f.setToken(async (url) =>
+    Response.json({
+      access_token: jwt({ iss: url.split('/_system')[0] }),
+      token_type: 'Bearer',
+      refresh_token: 'fresh',
+    }),
+  );
+  const back = f.returned();
+  cleanups.push(() => back.dispose());
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  await restored(back);
+  expect(await back.disconnect(bob.id)).toEqual({ kind: 'disconnected' });
+  back.dispose();
+  await settleLease();
+  // Alice's discovery never settles on the next start.
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation((url, init) =>
+    url === pod + '/.well-known/oauth-protected-resource'
+      ? new Promise<Response>(() => {})
+      : original(url, init),
+  );
+  const next = createBrowserRuntime({
+    ...f.options,
+    location: () => 'https://app.example/',
+  });
+  cleanups.push(() => next.dispose());
+  await next.initialize();
+  show(next);
+  await screen.findByRole('status');
+  expect(
+    Object.fromEntries(next.getSnapshot().map((c) => [c.id, c.session.kind])),
+  ).toEqual({ [alice.id]: 'restoring', [bob.id]: 'signed-out' });
+  expect(screen.getByRole('status').textContent).toBe('Loading…');
+  const list = screen.getByRole('list', { name: texts.en.list });
+  expect(within(list).getByText('pod.example/bob')).toBeTruthy();
+  const navigations = f.navigate.mock.calls.length;
+  await act(async () =>
+    within(list).getByRole('button', { name: 'Sign in' }).click(),
+  );
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+  expect(f.navigate.mock.calls.at(-1)![0].startsWith(bobUrl + '/')).toBe(true);
 });
