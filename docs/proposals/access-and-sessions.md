@@ -1,7 +1,10 @@
 # Proposal: access and sessions across devices
 
-**Status: accepted, not implemented.** The open questions are settled
-(see [Decisions](#decisions)). It spans
+**Status: accepted, partly implemented.** The open questions are settled
+(see [Decisions](#decisions)). Remembered Pods (section 3) are implemented
+([#237](https://github.com/sempods/sempods-typescript/issues/237)) and
+described in the [browser runtime guide](../browser-runtime.md#remembered-pods);
+the other sections are not implemented yet. It spans
 [sempods-kotlin](https://github.com/sempods/sempods-kotlin), this SDK and the apps
 built on it. Implemented parts move into [architecture decisions](../decisions.md),
 the [browser runtime guide](../browser-runtime.md) and the issues listed at the end.
@@ -172,6 +175,10 @@ part safe to implement.
   within the grace period, only after an unknown outcome".
 
 ### 3. SDK: remembered Pods (app-sdk)
+
+Implemented in [#237](https://github.com/sempods/sempods-typescript/issues/237);
+the [browser runtime guide](../browser-runtime.md#remembered-pods) describes the
+result. What follows is the proposal as accepted.
 
 - **A connection outlives its session.** Startup lists retired records as
   connections with `session: { kind: 'signed-out' }` and their Pod address. A
