@@ -40,7 +40,7 @@ references for the task at hand, not prerequisites to read in order.
 
 - [Vision](vision.md), [architecture decisions](decisions.md),
   [contributing](contributing.md) and [development checks](development.md).
-- Proposed, not implemented: [access and sessions across devices](proposals/access-and-sessions.md).
+- Accepted, partly implemented (remembered Pods): [access and sessions across devices](proposals/access-and-sessions.md).
 - [client-sdk](../packages/client-sdk/README.md) and its
   [provenance](../packages/client-sdk/PROVENANCE.md).
 - [app-sdk](../packages/app-sdk/README.md) and its

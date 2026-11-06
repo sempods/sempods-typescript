@@ -1,8 +1,12 @@
 # Proposal: access and sessions across devices
 
-**Status: proposed.** Nothing here is implemented. It spans
+**Status: accepted, partly implemented.** The open questions are settled
+(see [Decisions](#decisions)). Remembered Pods (section 3) are implemented
+([#237](https://github.com/sempods/sempods-typescript/issues/237)) and
+described in the [browser runtime guide](../browser-runtime.md#remembered-pods);
+the other sections are not implemented yet. It spans
 [sempods-kotlin](https://github.com/sempods/sempods-kotlin), this SDK and the apps
-built on it. Accepted parts move into [architecture decisions](../decisions.md),
+built on it. Implemented parts move into [architecture decisions](../decisions.md),
 the [browser runtime guide](../browser-runtime.md) and the issues listed at the end.
 
 ## Problem
@@ -117,9 +121,9 @@ without a token. The browser runtime has no connection without a session.
    its own family. Families still end by their idle and absolute limits, by
    sign-out everywhere and by withdrawn grants.
 2. **Bound the number of families.** Cap live families per Pod, client and
-   person, for example at 10. Exceeding it retires the least recently refreshed
-   family. This replaces the current concern that repeated reconnects leave
-   families behind, each renewing its own window.
+   person, at 10 by default (a server setting). Exceeding it retires the least
+   recently refreshed family. This replaces the current concern that repeated
+   reconnects leave families behind, each renewing its own window.
 3. **The lifetime answer applies only to the family it creates.** An unticked
    box gives the new family the shorter terms. It neither revokes nor shortens
    any other family, and a later answer does not change the terms of existing
@@ -127,9 +131,9 @@ without a token. The browser runtime has no connection without a session.
    explicit action on the consent page, next to sign-out everywhere. Otherwise
    a device signed in for ten days would end at its next refresh as soon as
    another device chose the shorter connection.
-4. **A rotation grace period of about 60 seconds.** Within it, presenting the
-   predecessor once more is answered with a fresh successor in the same family,
-   instead of revoking the family. After it, the reuse rule stays as it is.
+4. **A rotation grace period of 60 seconds by default** (a server setting).
+   Within it, presenting the predecessor once more is answered with a fresh
+   successor in the same family, instead of revoking the family. After it, the reuse rule stays as it is.
    Several widely used authorization servers offer such a period against lost
    answers and concurrent refreshes. It weakens reuse detection only within
    that window.
@@ -171,6 +175,10 @@ part safe to implement.
   within the grace period, only after an unknown outcome".
 
 ### 3. SDK: remembered Pods (app-sdk)
+
+Implemented in [#237](https://github.com/sempods/sempods-typescript/issues/237);
+the [browser runtime guide](../browser-runtime.md#remembered-pods) describes the
+result. What follows is the proposal as accepted.
 
 - **A connection outlives its session.** Startup lists retired records as
   connections with `session: { kind: 'signed-out' }` and their Pod address. A
@@ -291,14 +299,20 @@ Until then this part stays a design.
    [#240](https://github.com/sempods/sempods-typescript/issues/240)), after the
    specification check.
 
-## Open questions
+## Decisions
 
-1. Should Pod addresses be remembered by default, with an opt-out, or only when
-   an app opts in?
-2. Is a cap of 10 families and a grace period of 60 seconds right for the
-   reference deployment?
-3. May `AppAccess` change behaviour in 0.8 (for example dismissible notices,
-   no tall loading panel) while keeping its props, or should the old behaviour
-   stay available?
-4. Does the specification need to describe the grace period, so that other Pod
-   implementations behave the same way?
+Settled on 2026-11-05, before implementation:
+
+1. **Pod addresses are remembered by default.** Apps opt out with
+   `rememberPods: false`. The address is not a credential and stays on the
+   person's device.
+2. **Family cap and grace period.** The cap is 10 families per Pod, client and
+   person, and the grace period is 60 seconds. Both are server settings, so a
+   deployment can change them.
+3. **`AppAccess` may change behaviour in 0.8 while keeping its props.** This
+   covers dismissible notices and dropping the tall loading panel. The
+   migration notes describe the change; the old behaviour is not kept.
+4. **The specification describes both server rules** as recommended behaviour
+   (SHOULD): the grace period, as an amendment to `SPS-AUTH-033`, and families of
+   one client that coexist across devices. Tracked in
+   [sempods-spec#142](https://github.com/sempods/sempods-spec/issues/142).
