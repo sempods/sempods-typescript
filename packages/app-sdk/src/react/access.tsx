@@ -848,7 +848,8 @@ function AccessConnections({
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
-      {manage && active && state.connections.length < 2 && podLine(c!.podUrl)}
+      {/* Without the Pod selector, the active Pod is named here. */}
+      {manage && active && selectable.length < 2 && podLine(c!.podUrl)}
       {manage && active && namedAddress(c!.podUrl)}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>

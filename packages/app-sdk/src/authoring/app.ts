@@ -445,9 +445,24 @@ export function createAppController(
           if (version !== startVersion) return;
           if (!startup) {
             // The returning sign-in's connection becomes active, also when it
-            // failed, so its cause and recovery are shown next to it.
-            const returned = report.connectionId ?? report.attemptConnectionId;
-            if (returned) activeId = returned;
+            // failed, so its cause and recovery are shown next to it. A later
+            // controller over the same runtime gets the same report: a
+            // connection retired since then (signed out with a reason) is
+            // not reactivated.
+            const returned = runtime
+              .getSnapshot()
+              .find(
+                (c) =>
+                  c.id === (report.connectionId ?? report.attemptConnectionId),
+              );
+            if (
+              returned &&
+              !(
+                returned.session.kind === 'signed-out' &&
+                returned.session.problem !== undefined
+              )
+            )
+              activeId = returned.id;
             callbackNotice =
               report.interaction === 'failed' ||
               report.interaction === 'cancelled';

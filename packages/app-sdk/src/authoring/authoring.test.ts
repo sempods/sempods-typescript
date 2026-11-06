@@ -335,6 +335,24 @@ it('gives way to a signed-in connection when the active one signs out; a remembe
     pod: null,
   });
 });
+it('does not reactivate a returned connection that signed out before a new controller started', async () => {
+  const { f, runtime, other } = await twoPods((r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  const first = createAppController(runtime);
+  first.start();
+  await vi.waitFor(() => expect(first.getSnapshot().activeId).toBe(other.id));
+  await runtime.disconnect(other.id);
+  expect(first.getSnapshot().activeId).toBe(f.id);
+  first.stop();
+  // A remounted provider: the runtime's startup report still names Bob.
+  const second = createAppController(runtime);
+  second.start();
+  cleanups.push(() => second.stop());
+  await vi.waitFor(() => expect(second.getSnapshot().startup).toBeDefined());
+  expect(second.getSnapshot()).toMatchObject({ activeId: f.id });
+  expect(second.getSnapshot().pod).not.toBeNull();
+});
 it('cancels a leave prompt when a returning sign-in activates another connection', async () => {
   const f = await connected();
   const report = await f.runtime.initialize();

@@ -25,6 +25,7 @@ import {
   savedRecords,
   settleLease,
   storeWith,
+  twoPods,
 } from '../runtime/fixture.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import type {
@@ -300,3 +301,30 @@ it.each(['en', 'de'] as const)(
     expect(screen.queryByRole('alert')).toBeNull();
   },
 );
+
+it('names the active Pod in management beside a remembered one', async () => {
+  const { f, runtime, other } = await twoPods((r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  expect(await runtime.disconnect(other.id)).toEqual({
+    kind: 'disconnected',
+  });
+  const next = await restart(f, runtime, (r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  render(
+    <SempodsProvider runtime={next}>
+      <AppAccess appName="Shopping" open />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('button', { name: 'Sign out' });
+  // No Pod selector for one signed-in Pod: its address names it instead.
+  expect(screen.queryByLabelText('Active pod')).toBeNull();
+  const region = screen.getByRole('region', { name: 'Pods & sharing' });
+  const list = within(region).getByRole('list', { name: texts.en.list });
+  const named = within(region)
+    .getAllByText('pod.example/alice')
+    .filter((element) => !list.contains(element));
+  expect(named).toHaveLength(1);
+  expect(within(list).getByText('pod.example/bob')).toBeTruthy();
+});
