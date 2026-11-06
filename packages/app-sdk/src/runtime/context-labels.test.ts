@@ -524,7 +524,9 @@ it('keeps explicit reads across a selection change and drops them on revoked rig
   expect(signals.get(personal)?.aborted).toBe(true);
   gates.get(personal)!.resolve(description(personal, 'Stale'));
   await later;
-  expect(runtime.getSnapshot()).toHaveLength(0);
+  expect(runtime.getSnapshot()).toMatchObject([
+    { session: { kind: 'signed-out' }, catalogue: { kind: 'unknown' } },
+  ]);
 });
 
 it('rejects an explicit demand for a connection that is not signed in', async () => {

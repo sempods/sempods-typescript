@@ -87,7 +87,10 @@ export interface UiMessages {
   /** Re-authorizes an active connection, for example to share another context. */
   readonly updateAccess: string;
   readonly presetContextUnavailable: string;
-  /** Forgets the connection on this device; neither revokes sharing nor deletes data. */
+  /**
+   * Signs out on this device; neither revokes sharing nor deletes data. The
+   * Pod's address stays remembered unless the runtime has `rememberPods: false`.
+   */
   readonly disconnect: string;
   /**
    * Shown with `disconnect`; an empty string shows no note. Optional in the
@@ -97,6 +100,17 @@ export interface UiMessages {
   readonly disconnectHint?: string;
   /** Failed durable sign-out; explicit retry, never reload advice. Filled from locale defaults. */
   readonly disconnectFailed?: string;
+  /*
+   * Remembered Pods (added in 0.8.0; optional in the type, `createLocale`
+   * fills them): the list of signed-out Pods on the sign-in view, the action
+   * that removes one from this device, and the note under a Pod whose session
+   * ended rather than being signed out.
+   */
+  readonly rememberedPods?: string;
+  readonly forget?: string;
+  readonly sessionEnded?: string;
+  /** Forgetting a Pod could not be saved; retry Forget, never reload advice. */
+  readonly forgetFailed?: string;
   /**
    * Status while the page navigates to the Pod's sign-in. Optional in the type
    * (added in 0.6.0); `createLocale` fills it from the language defaults.
@@ -242,6 +256,11 @@ export const englishMessages: SdkMessages = {
     disconnectHint: 'Signing out only applies to this device.',
     disconnectFailed:
       'Sign-out was not saved on this device. Try signing out again.',
+    rememberedPods: 'Pods on this device',
+    forget: 'Forget',
+    sessionEnded: 'The session ended. Sign in again to continue.',
+    forgetFailed:
+      'This Pod was not forgotten on this device. Try forgetting it again.',
     leaving: 'Opening your Pod’s sign-in…',
     unreachable:
       'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
@@ -387,6 +406,12 @@ export const germanMessages: SdkMessages = {
     disconnectHint: 'Die Abmeldung gilt nur für dieses Gerät.',
     disconnectFailed:
       'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.',
+    rememberedPods: 'Pods auf diesem Gerät',
+    forget: 'Vergessen',
+    sessionEnded:
+      'Die Sitzung wurde beendet. Melde dich erneut an, um fortzufahren.',
+    forgetFailed:
+      'Der Pod wurde auf diesem Gerät nicht vergessen. Versuche erneut, ihn zu vergessen.',
     leaving: 'Die Anmeldung deines Pods wird geöffnet…',
     unreachable:
       'Der Pod ist gerade nicht erreichbar. Du bleibst angemeldet; die App verbindet sich wieder, sobald das Netz zurück ist.',

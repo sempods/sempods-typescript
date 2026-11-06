@@ -44,6 +44,8 @@ export interface Entry {
   /** The refresh started ahead of expiry, which a still-valid credential need not wait for. */
   ahead?: Promise<boolean>;
   clientPod: Pod;
+  /** `forget(id)` was asked; its record is deleted on every retry, also by `disconnect`. */
+  forgetting?: true;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
 }

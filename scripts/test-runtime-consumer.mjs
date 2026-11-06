@@ -1373,12 +1373,42 @@ try {
       );
       await page.evaluate(() => window.restoreSignOutStorage());
       await retry.click();
+      // Signed out, the Pod stays remembered with its address (#237).
+      await page.waitForFunction(
+        () =>
+          document.querySelector('[aria-label="Session"]')?.textContent ===
+          'signed-out',
+      );
+      assert.equal(await notice.count(), 0);
+      await page.reload();
+      const remembered = page.getByRole('list', {
+        name:
+          language === 'en' ? 'Pods on this device' : 'Pods auf diesem Gerät',
+        exact: true,
+      });
+      await remembered
+        .getByRole('button', { name: signIn, exact: true })
+        .waitFor();
+      assert.equal(
+        await page.getByLabel('Connections', { exact: true }).textContent(),
+        '1',
+      );
+      assert.equal(
+        await page.getByLabel('Session', { exact: true }).textContent(),
+        'signed-out',
+      );
+      assert.equal(await page.getByRole('alert').count(), 0);
+      await remembered
+        .getByRole('button', {
+          name: language === 'en' ? 'Forget' : 'Vergessen',
+          exact: true,
+        })
+        .click();
       await page.waitForFunction(
         () =>
           document.querySelector('[aria-label="Connections"]')?.textContent ===
           '0',
       );
-      assert.equal(await notice.count(), 0);
       await page.reload();
       await page.getByRole('button', { name: signIn, exact: true }).waitFor();
       assert.equal(
@@ -1388,7 +1418,7 @@ try {
     }
   }
   console.log(
-    'Packed sign-out: AppAccess shows failed IndexedDB writes once in EN/DE, allow explicit retry and stay signed out after reload.',
+    'Packed sign-out: AppAccess shows failed IndexedDB writes once in EN/DE, allows explicit retry, remembers the signed-out Pod across a reload and forgets it.',
   );
   // The SDK's leave confirmation over an app's own modal dialog (#102): a
   // native top-layer dialog, visible and operable above it, for a dirty editor
@@ -1724,9 +1754,14 @@ try {
   await zugriff.getByRole('button', { name: 'Abmelden', exact: true }).click();
   await page.getByLabel('Pod-Adresse').waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
+  // The signed-out Pod stays remembered above the address field (#237).
+  await page
+    .getByRole('list', { name: 'Pods auf diesem Gerät', exact: true })
+    .getByRole('button', { name: 'Anmelden', exact: true })
+    .waitFor();
   assert.equal(
     await page.getByLabel('Connections', { exact: true }).textContent(),
-    '0',
+    '1',
   );
   console.log(
     'Packed AppAccess, provider login_required callback: specific EN/DE cause once on its connection, no kept-draft claim or provider text, cleared by selecting another Pod or disconnecting passed.',

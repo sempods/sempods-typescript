@@ -3,6 +3,7 @@ export type {
   StoredSession,
   SessionCommit,
   SessionListing,
+  SessionRemoval,
   SessionStore,
 } from './types.js';
 export class SessionStorageError extends Error {
@@ -256,6 +257,22 @@ function sessionStore(database: IDBDatabase, namespace: string): SessionStore {
             kind: 'committed',
             record: { id, revision: record.revision, value: snapshot },
           });
+        });
+      });
+    },
+    remove(id, expectedRevision) {
+      if (!nonempty(id) || !nonempty(expectedRevision))
+        return Promise.reject(new SessionStorageError('configuration'));
+      return transact('readwrite', ({ store, read, accept }) => {
+        read(store.get([namespace, id]), (raw) => {
+          const current =
+            raw === undefined ? undefined : decode(raw, namespace, id);
+          if (current?.revision !== expectedRevision) {
+            accept({ kind: 'conflict' });
+            return;
+          }
+          store.delete([namespace, id]);
+          accept({ kind: 'removed' });
         });
       });
     },

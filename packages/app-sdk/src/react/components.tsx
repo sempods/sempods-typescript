@@ -365,7 +365,9 @@ export function AccessNotice({
       <Notice>
         {c.session.kind === 'ended'
           ? endedMessage(c.session, m)
-          : m.controls.readLost}
+          : c.session.kind === 'signed-out'
+            ? m.controls.signInRequired
+            : m.controls.readLost}
       </Notice>
     );
   if (c.missingRequiredScopes.length)

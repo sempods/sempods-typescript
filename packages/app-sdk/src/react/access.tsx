@@ -24,6 +24,7 @@ import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { layered, SdkStyles } from './styles.js';
 import { useModalDialog } from './confirm.js';
 import { contextName, podName, distinctName } from './names.js';
+import type { Connection } from '../runtime/types.js';
 import {
   knownContexts,
   presentAccess,
@@ -450,7 +451,20 @@ function AccessConnections({
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
-  const c = state.connections.find((entry) => entry.id === state.activeId);
+  // Remembered Pods: signed out at a known address (see `rememberPods`). The
+  // sign-in view lists them above the address field, each with its own
+  // sign-in and a way to forget it on this device. A Pod being forgotten
+  // stays in that list; if forgetting could not be saved, with the failure
+  // and Forget again, so its address is not kept against the choice.
+  const forgetting = (entry: Connection) =>
+    entry.session.kind === 'ended' && entry.session.forget === true;
+  const remembered = state.connections.filter(
+    (entry) => entry.session.kind === 'signed-out' || forgetting(entry),
+  );
+  const found = state.connections.find((entry) => entry.id === state.activeId);
+  // The connection shown as connected; a remembered active one is signed in
+  // to from its list, so the rest of this view treats it as none.
+  const c = found && !remembered.includes(found) ? found : undefined;
   const disconnectFailed =
     c?.session.kind === 'ended' && c.session.saved === false;
   const disconnectHint = disconnectFailed
@@ -515,6 +529,7 @@ function AccessConnections({
     (mode === 'multiple' || !c) &&
     defaultUrl &&
     c?.podUrl !== defaultUrl &&
+    !remembered.some((entry) => entry.podUrl === defaultUrl) &&
     !(manage && !state.allowedPods);
   const choice = url || defaultUrl || '';
   // The callback notice already names why this connection's sign-in ended.
@@ -530,13 +545,14 @@ function AccessConnections({
       (value) => podName(value, podNames),
     );
   // Without a podNames entry the derived name is the address itself.
-  const podLine = (target: string) =>
-    (!addressHidden || podNames?.[target]?.trim()) && <p>{name(target)}</p>;
+  const podLine = (target: string, lineId?: string) =>
+    (!addressHidden || podNames?.[target]?.trim()) && (
+      <p id={lineId}>{name(target)}</p>
+    );
   // Management names the Pod its actions target; a display name never
   // replaces that Pod's address, also beside several saved connections.
-  const namedAddress = c && podNames?.[c.podUrl]?.trim() && (
-    <p className="sp-access-address">{c.podUrl}</p>
-  );
+  const namedAddress = (target: string) =>
+    podNames?.[target]?.trim() && <p className="sp-access-address">{target}</p>;
   const labels =
     c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
   const selectedEntry = readable.find(
@@ -568,7 +584,7 @@ function AccessConnections({
         <p className="sp-access-address">{defaultUrl}</p>
       )}
       <button
-        className={c ? undefined : 'sp-access-primary'}
+        className={found ? undefined : 'sp-access-primary'}
         disabled={
           unavailable ||
           state.connections.some(
@@ -582,7 +598,11 @@ function AccessConnections({
       </button>
     </div>
   );
-  const activePod = state.connections.length > 1 && (
+  // A remembered Pod is chosen from its own list, unless it is the active one.
+  const selectable = state.connections.filter(
+    (entry) => !remembered.includes(entry) || entry.id === state.activeId,
+  );
+  const activePod = selectable.length > 1 && (
     <label key="active-pod">
       {m.activePod}
       <select
@@ -596,7 +616,7 @@ function AccessConnections({
         <option value="" disabled>
           {m.controls.choosePod}
         </option>
-        {state.connections.map((entry) => {
+        {selectable.map((entry) => {
           const index = state.connections.indexOf(entry) + 1;
           // Saved duplicates of the one permitted Pod: number them rather
           // than fall back to the hidden address.
@@ -623,6 +643,64 @@ function AccessConnections({
   // Signing in to a new Pod. In management of a connection it is a secondary,
   // collapsed action after the connected Pod.
   const another = manage && Boolean(c);
+  const rememberedList = remembered.length > 0 && (
+    <ul
+      key="remembered"
+      className="sp-access-remembered"
+      aria-label={m.controls.rememberedPods}
+    >
+      {remembered.map((entry) => {
+        const ended =
+          entry.session.kind === 'signed-out' &&
+          entry.session.problem !== undefined &&
+          entry.session.problem !== 'disconnected';
+        const line = podLine(entry.podUrl, `${id}-${entry.id}`);
+        const failed =
+          entry.session.kind === 'ended' && entry.session.saved === false;
+        const describedBy =
+          [line && `${id}-${entry.id}`, failed && `${id}-${entry.id}-failed`]
+            .filter(Boolean)
+            .join(' ') || undefined;
+        return (
+          <li key={entry.id}>
+            {line}
+            {!addressHidden && namedAddress(entry.podUrl)}
+            {ended && (
+              <p className="sp-access-hint">{m.controls.sessionEnded}</p>
+            )}
+            {failed && (
+              <p id={`${id}-${entry.id}-failed`} role="alert">
+                {m.controls.forgetFailed}
+              </p>
+            )}
+            <div className="sp-access-actions">
+              {!forgetting(entry) && (
+                <button
+                  className={
+                    entry.id === state.activeId
+                      ? 'sp-access-primary'
+                      : undefined
+                  }
+                  aria-describedby={line ? `${id}-${entry.id}` : undefined}
+                  disabled={unavailable}
+                  onClick={() => void act(() => app.authorize(entry.id))}
+                >
+                  {m.controls.signIn}
+                </button>
+              )}
+              <button
+                aria-describedby={describedBy}
+                disabled={unavailable}
+                onClick={() => void act(() => app.forget(entry.id))}
+              >
+                {m.controls.forget}
+              </button>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
   const actions = (
     <>
       {c && (
@@ -696,7 +774,7 @@ function AccessConnections({
         </label>
         {choice && <p className="sp-access-address">{choice}</p>}
         <button
-          className={c ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary'}
           disabled={
             unavailable ||
             !choice ||
@@ -739,7 +817,7 @@ function AccessConnections({
           </p>
         )}
         <button
-          className={c ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary'}
           disabled={unavailable}
         >
           {m.controls.signIn}
@@ -751,11 +829,12 @@ function AccessConnections({
   if (body === 'leaving')
     return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
   // A restore that never settles must not hide signing in to the configured
-  // Pod or switching to another saved one.
+  // Pod, to a remembered one, or switching to another saved one.
   if (body === 'loading')
     return (
       <>
         {defaultSignIn}
+        {rememberedList}
         {activePod}
         <p role="status">{m.controls.loading}</p>
         {failure && <p role="alert">{error(failure.cause)}</p>}
@@ -763,20 +842,22 @@ function AccessConnections({
     );
   return (
     <>
+      {!another && rememberedList}
       {!another && addPod}
-      {!active && !c && m.controls.loginHint && (
+      {!found && m.controls.loginHint && (
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
-      {manage && active && state.connections.length < 2 && podLine(c!.podUrl)}
-      {manage && active && namedAddress}
+      {/* Without the Pod selector, the active Pod is named here. */}
+      {manage && active && selectable.length < 2 && podLine(c!.podUrl)}
+      {manage && active && namedAddress(c!.podUrl)}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
       {c && !active && c.session.kind !== 'restoring' && (
         <>
           {podLine(c.podUrl)}
-          {manage && namedAddress}
+          {manage && namedAddress(c.podUrl)}
           {c.session.kind === 'ended' &&
             !disconnectFailed &&
             !shownByNotice && (
@@ -874,7 +955,7 @@ function AccessConnections({
         </section>
       )}
       {manage && actions}
-      {/* Management already shows the Pod address. */}
+      {/* Management and the remembered list already show the Pod address. */}
       {c && !manage && (
         <details>
           <summary>{m.controls.addresses}</summary>
@@ -894,9 +975,10 @@ function AccessConnections({
         </details>
       )}
       {!manage && actions}
-      {another && addPod && (
+      {another && (addPod || rememberedList) && (
         <details className="sp-access-another">
           <summary>{m.controls.connectAnother}</summary>
+          {rememberedList}
           {addPod}
         </details>
       )}
@@ -934,6 +1016,10 @@ const styles = `
 [data-sempods-access] .sp-access-context { margin:4px 0 16px; padding-inline-start:12px; border-inline-start:2px solid var(--sp-line); text-align:start; }
 [data-sempods-access] .sp-access-label { text-align:start; margin:16px 0 0; }
 [data-sempods-access] .sp-access-another { margin-top:16px; }
+[data-sempods-access] .sp-access-remembered { list-style:none; margin:0 0 16px; padding:0; }
+[data-sempods-access] .sp-access-remembered li { padding:8px 0; border-block-end:1px solid var(--sp-line); }
+[data-sempods-access] .sp-access-remembered p { margin:4px 0; }
+[data-sempods-access] .sp-access-remembered .sp-access-actions { margin-top:8px; }
 
 [data-sempods-access] .sp-access-description { margin:8px 0 0; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-actions { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:16px; }
