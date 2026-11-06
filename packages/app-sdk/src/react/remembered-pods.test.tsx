@@ -20,6 +20,7 @@ import {
   jwt,
   pod,
   renewal,
+  restart,
   restored,
   savedRecords,
   settleLease,
@@ -82,15 +83,9 @@ async function remembered(
       ).toMatchObject({ kind: 'disconnected' }),
     );
   }
-  runtime.dispose();
-  await settleLease();
-  const next = createBrowserRuntime({
-    ...f.options,
-    location: () => 'https://app.example/',
-  });
-  cleanups.push(() => next.dispose());
-  await next.initialize();
-  await restored(next);
+  const next = await restart(f, runtime, (r) =>
+    cleanups.push(() => r.dispose()),
+  );
   return { f, runtime: next, id };
 }
 function show(runtime: BrowserRuntime, language: 'en' | 'de' = 'en') {

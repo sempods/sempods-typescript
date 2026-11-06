@@ -228,6 +228,28 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
         .length,
   };
 }
+/**
+ * A fresh start without a callback, as after a reload: disposes `current`,
+ * then initializes and restores a new runtime, which `keep` receives.
+ */
+export async function restart(
+  f: Pick<ReturnType<typeof fixture>, 'options'>,
+  current: BrowserRuntime,
+  keep: (runtime: BrowserRuntime) => void,
+  overrides: Partial<BrowserRuntimeOptions> = {},
+) {
+  current.dispose();
+  await settleLease();
+  const next = createBrowserRuntime({
+    ...f.options,
+    location: () => 'https://app.example/',
+    ...overrides,
+  });
+  keep(next);
+  await next.initialize();
+  await restored(next);
+  return next;
+}
 /** A Pod's refusal of the current credential. */
 export const unauthorized = () =>
   new Response(null, {

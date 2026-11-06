@@ -10,12 +10,13 @@ import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
 import {
+  deferred,
   fixture,
   fixtureNamespace,
   jwt,
   pod,
   renewal,
-  restored,
+  restart,
   savedRecords,
   settleLease,
   signInAgain,
@@ -38,24 +39,11 @@ async function logged(overrides: Partial<BrowserRuntimeOptions> = {}) {
   return { ...f, ...login };
 }
 /** A fresh start without a callback, as after a reload. */
-async function reload(
+const reload = (
   f: ReturnType<typeof fixture>,
   current: BrowserRuntime,
   overrides: Partial<BrowserRuntimeOptions> = {},
-) {
-  current.dispose();
-  await settleLease();
-  const next = keep(
-    createBrowserRuntime({
-      ...f.options,
-      location: () => 'https://app.example/',
-      ...overrides,
-    }),
-  );
-  await next.initialize();
-  await restored(next);
-  return next;
-}
+) => restart(f, current, keep, overrides);
 const records = (f: ReturnType<typeof fixture>) => savedRecords(f.factory);
 async function stored(f: ReturnType<typeof fixture>, id: string) {
   return (await records(f)).find((r) => r.id === id)?.value as
@@ -280,24 +268,28 @@ it('lists a retired record of SDK 0.7 as signed out without a reason', async () 
   }
 });
 
-it('reports a malformed reason as an unreadable record', async () => {
-  const f = await logged();
-  await f.runtime.disconnect(f.id);
-  f.runtime.dispose();
-  await settleLease();
-  const store = await openSessionStore(fixtureNamespace, f.factory);
-  const current = (await store.read(f.id))!;
-  await store.commit(f.id, current.revision, {
-    ...(current.value as Record<string, unknown>),
-    reason: 42,
-  });
-  store.close();
-  const next = keep(createBrowserRuntime(f.options));
-  expect(await next.initialize()).toMatchObject({
-    unreadable: [{ id: f.id, problem: 'corrupt' }],
-  });
-  expect(next.getSnapshot()).toEqual([]);
-});
+it.each([42, 'session_ended', 'x'.repeat(41)])(
+  'keeps the remembered Pod when its reason is unreadable (%s)',
+  async (reason) => {
+    const f = await logged();
+    await f.runtime.disconnect(f.id);
+    f.runtime.dispose();
+    await settleLease();
+    const store = await openSessionStore(fixtureNamespace, f.factory);
+    const current = (await store.read(f.id))!;
+    await store.commit(f.id, current.revision, {
+      ...(current.value as Record<string, unknown>),
+      reason,
+    });
+    store.close();
+    const next = keep(createBrowserRuntime(f.options));
+    expect(await next.initialize()).toMatchObject({ unreadable: [] });
+    expect(next.getSnapshot()).toMatchObject([
+      { id: f.id, podUrl: pod, session: { kind: 'signed-out' } },
+    ]);
+    expect(next.getSnapshot()[0]!.session).toEqual({ kind: 'signed-out' });
+  },
+);
 
 it('keeps each Pod on its own: one ended session never affects another', async () => {
   const { f, runtime, other } = await twoPods(keep);
@@ -321,4 +313,105 @@ it('reuses the remembered preset Pod on connect instead of adding another', asyn
   const connection = await next.connect();
   expect(connection.id).toBe(f.id);
   expect(next.getSnapshot()).toHaveLength(1);
+});
+
+it('remembers a Pod whose first sign-in failed without a reason, and a failed re-authorization with one', async () => {
+  const f = fixture({ preferences: null });
+  keep(f.runtime);
+  const { connection } = await f.begin();
+  f.runtime.dispose();
+  await settleLease();
+  const denied = keep(f.returned(undefined, 'error=access_denied'));
+  expect(await denied.initialize()).toMatchObject({
+    interaction: 'cancelled',
+  });
+  await vi.waitFor(async () =>
+    expect(await stored(f, connection.id)).toMatchObject({
+      kind: 'disconnected',
+    }),
+  );
+  // There was no session to end: no reason, so no "session ended" note.
+  expect(await stored(f, connection.id)).not.toHaveProperty('reason');
+  const next = await reload(f, denied);
+  expect(next.getSnapshot()[0]?.session).toEqual({ kind: 'signed-out' });
+});
+
+it('does not let a connect reuse a Pod whose forget waits for a sign-out', async () => {
+  const factory = new IDBFactory();
+  const held = {
+    on: false,
+    entered: deferred<void>(),
+    release: deferred<void>(),
+  };
+  const f = await logged({
+    preset: { podUrl: pod },
+    openStore: storeWith(factory, (store) => ({
+      async commit(...args) {
+        if (held.on) {
+          held.on = false;
+          held.entered.resolve();
+          await held.release.promise;
+        }
+        return store.commit(...args);
+      },
+    })),
+  });
+  held.on = true;
+  const signOut = f.runtime.disconnect(f.id);
+  await held.entered.promise;
+  // The connect waits for the sign-out first; the forget follows it.
+  const connecting = f.runtime.connect();
+  const forgetting = f.runtime.forget(f.id);
+  held.release.resolve();
+  expect(await signOut).toEqual({ kind: 'disconnected' });
+  expect(await forgetting).toEqual({ kind: 'disconnected' });
+  const connection = await connecting;
+  expect(connection.id).not.toBe(f.id);
+  expect(f.runtime.getSnapshot().map((c) => c.id)).toEqual([connection.id]);
+  expect(await savedRecords(factory)).toEqual([]);
+});
+
+it('keeps the remembered Context when deleting an ended session fails (rememberPods: false)', async () => {
+  const choices = new Map<string, string>();
+  const preferences = {
+    getItem: (key: string) => choices.get(key) ?? null,
+    setItem: (key: string, value: string) => void choices.set(key, value),
+    removeItem: (key: string) => void choices.delete(key),
+  };
+  const factory = new IDBFactory();
+  const f = await logged({
+    rememberPods: false,
+    preferences,
+    openStore: storeWith(factory, () => ({
+      remove: () => Promise.reject(new Error('write failed')),
+    })),
+  });
+  expect(choices.size).toBe(1);
+  await renewal(f, f.runtime, f.id, 'refused');
+  await vi.waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]?.session).toMatchObject({
+      kind: 'ended',
+      problem: 'storage',
+    }),
+  );
+  // The record still exists, so its Context choice stays with it.
+  expect(choices.size).toBe(1);
+  expect(await savedRecords(factory)).toHaveLength(1);
+});
+
+it('drops a failed forget once the person signs in again', async () => {
+  const factory = new IDBFactory();
+  const f = await logged({
+    openStore: storeWith(factory, () => ({
+      remove: () => Promise.reject(new Error('write failed')),
+    })),
+  });
+  expect(await f.runtime.forget(f.id)).toEqual({ kind: 'blocked-locally' });
+  await f.runtime.beginAuthorization(f.id);
+  // Not a forget any more: signing out keeps the address.
+  expect(await f.runtime.disconnect(f.id)).toEqual({ kind: 'disconnected' });
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual({
+    kind: 'signed-out',
+    problem: 'disconnected',
+  });
 });

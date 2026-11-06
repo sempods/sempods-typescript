@@ -154,17 +154,16 @@ export function parseSessionRecord(
           };
           break;
         case 'disconnected':
-          if (
-            value.reason !== undefined &&
-            (typeof value.reason !== 'string' ||
-              !/^[a-z][a-z-]{0,39}$/.test(value.reason))
-          )
-            throw new Error();
+          // Display only: a reason this SDK cannot read is left out, so the
+          // remembered address survives a reason a newer SDK wrote.
           parsed = {
             version: 1,
             kind: 'disconnected',
             binding,
-            ...(value.reason === undefined ? {} : { reason: value.reason }),
+            ...(typeof value.reason === 'string' &&
+            /^[a-z][a-z-]{0,39}$/.test(value.reason)
+              ? { reason: value.reason }
+              : {}),
           };
           break;
         default:

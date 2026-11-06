@@ -35,7 +35,14 @@ reload, so people sign in again with one action.
   A leave prompt about a connection that signs out is cancelled.
 - **`AppAccess`** lists remembered Pods on the sign-in view, above the address
   field, with **Sign in** and **Forget**, and under **Connect another Pod** in
-  management. Its Pod selector no longer lists remembered Pods. Check end-to-end
+  management. Its Pod selector no longer lists remembered Pods.
+- **Connection lists include remembered Pods.** `useAppState().connections`,
+  `useConnections()` and the groups of `usePodContexts()` now also contain
+  remembered Pods (`signed-out`) and Pods being forgotten
+  (`ended { forget: true }`). An app's own Pod menu or a custom
+  `components.Connections` built on them shows these too; filter by
+  `session.kind`, or offer **Sign in** (`authorize`) and **Forget** (`forget`)
+  for them as `AppAccess` does. Check end-to-end
   tests that expected an empty address field after a sign-out or that look up
   **Sign in** by name alone: each remembered Pod has its own. `AccessNotice`
   asks to sign in (`controls.signInRequired`) for a signed-out connection.

@@ -610,9 +610,11 @@ and the next start lists it again, as
 
 with its `podUrl` and its remembered Context choice. `problem` is
 `disconnected` after a sign-out, otherwise how the session ended, for example
-`expired`. A connection that was never signed in has none, and neither have
-records written by SDK 0.7, which did not keep the reason: after an upgrade,
-those Pods are listed as signed out too. Within the page where it happened, an
+`expired`. A connection that was never signed in has none, nor has a Pod
+whose first sign-in failed, as no session ended. Records written by SDK 0.7,
+which did not keep the reason, have none either: after an upgrade, those Pods
+are listed as signed out too. A reason this SDK cannot read (from a newer
+SDK) is left out; the address stays. Within the page where it happened, an
 ended session keeps reporting `ended` with its cause; it reads as `signed-out`
 from the next start on.
 

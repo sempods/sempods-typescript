@@ -20,7 +20,9 @@ export type SessionFact =
    * remembered Pod, listed at startup after its session ended or the person
    * signed out (see `rememberPods`), keeps why: `disconnected` for a sign-out,
    * otherwise how the session ended, for example `expired` or
-   * `invalid-client`. Records of SDK 0.7 do not say why, so they have none.
+   * `invalid-client`. A Pod whose first sign-in failed had no session to end,
+   * and records of SDK 0.7 or with a reason this SDK cannot read do not say
+   * why, so they have none.
    * `beginAuthorization(id)` signs in again at the remembered address.
    */
   | { readonly kind: 'signed-out'; readonly problem?: RuntimeProblem }

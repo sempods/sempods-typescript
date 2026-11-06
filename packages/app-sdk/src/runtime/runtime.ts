@@ -261,7 +261,17 @@ export function createBrowserRuntime(
     publish();
     loadSelectedLabel(e, { eligible, publish });
   }
-  function end(e: Entry, error: unknown, retireRecord = true) {
+  /**
+   * Ends the session. A retired record keeps why it ended (`hadSession`); a
+   * first sign-in that failed had no session to end, so its record keeps only
+   * the address.
+   */
+  function end(
+    e: Entry,
+    error: unknown,
+    retireRecord = true,
+    hadSession = true,
+  ) {
     delete e.credentials;
     delete e.credential;
     invalidate(e);
@@ -287,17 +297,19 @@ export function createBrowserRuntime(
     const ended = e.view.session;
     publish();
     if (!retireRecord) return;
-    void retire(e, problem, !rememberPods).catch(() => {
-      // A subscriber may already have started sign-out or another sign-in.
-      // Cleanup of this ended session must not replace the newer fact.
-      if (entries.get(e.view.id) === e && e.view.session === ended) {
-        e.view = {
-          ...e.view,
-          session: Object.freeze({ kind: 'ended', problem: 'storage' }),
-        };
-        publish();
-      }
-    });
+    void retire(e, hadSession ? problem : undefined, !rememberPods).catch(
+      () => {
+        // A subscriber may already have started sign-out or another sign-in.
+        // Cleanup of this ended session must not replace the newer fact.
+        if (entries.get(e.view.id) === e && e.view.session === ended) {
+          e.view = {
+            ...e.view,
+            session: Object.freeze({ kind: 'ended', problem: 'storage' }),
+          };
+          publish();
+        }
+      },
+    );
   }
   /** Deletes a record and, once it is gone, the Context choice remembered with it. */
   async function erase(id: string, revision: string) {
@@ -310,7 +322,11 @@ export function createBrowserRuntime(
    * (`reason`), or deletes the record (`deleting`). Resolves whether a record
    * stays; without one, nothing is remembered.
    */
-  function retire(e: Entry, reason: RuntimeProblem, deleting: boolean) {
+  function retire(
+    e: Entry,
+    reason: RuntimeProblem | undefined,
+    deleting: boolean,
+  ) {
     return serial(e, async () => {
       if (!sessions || !e.revision) {
         contexts.forget(e.view.id);
@@ -718,6 +734,8 @@ export function createBrowserRuntime(
     revision: string,
     location: URL,
     destination: string,
+    /** A re-authorization: its failure ends the session it started from. */
+    hadSession: boolean,
   ): Promise<string> {
     const e = get(id);
     const generation = e.generation;
@@ -759,7 +777,7 @@ export function createBrowserRuntime(
       if (eligible(e, generation)) {
         if (error instanceof OAuthError && error.problem === 'invalid-client')
           registry.clear(e.pod.podUrl);
-        end(e, error);
+        end(e, error, true, hadSession);
         await e.persistence;
       }
       throw error;
@@ -930,6 +948,7 @@ export function createBrowserRuntime(
         pending.revision,
         location,
         destination,
+        pending.value.previous !== undefined,
       );
       return { ...report, interaction: 'completed', connectionId };
     } catch (error) {
@@ -972,25 +991,26 @@ export function createBrowserRuntime(
   function leave(id: string, forgetting: boolean): Promise<DisconnectResult> {
     if (disposed || !sessions)
       return Promise.reject(new RuntimeError('configuration'));
-    const shown = entries.get(id)?.view.session;
     // A forget that could not be saved stays a forget, also when retried as a
     // sign-out, so the address is not kept against the person's choice.
-    const forget =
-      forgetting ||
-      (shown?.kind === 'ended' &&
-        shown.saved === false &&
-        shown.forget === true);
+    const forget = forgetting || entries.get(id)?.forgetting === true;
     const deleting = forget || !rememberPods;
     const marked = forget ? { forget: true as const } : {};
     const pending = disconnects.get(id);
-    if (pending)
-      // A forget asked during a sign-out deletes the record once it settled.
-      return deleting && !pending.erase
-        ? pending.operation.then(() =>
-            entries.has(id) ? leave(id, true) : { kind: 'disconnected' },
-          )
-        : pending.operation;
+    if (pending) {
+      if (!deleting || pending.erase) return pending.operation;
+      // A forget asked during a sign-out deletes the record once that
+      // settled. It counts as pending meanwhile, so neither a connect nor a
+      // sign-in reuses the connection in between.
+      const chained: Promise<DisconnectResult> = pending.operation.then(() => {
+        if (disconnects.get(id)?.operation === chained) disconnects.delete(id);
+        return entries.has(id) ? leave(id, true) : { kind: 'disconnected' };
+      });
+      disconnects.set(id, { erase: true, operation: chained });
+      return chained;
+    }
     const e = get(id);
+    if (forget) e.forgetting = true;
     // Register before abort/notifications so reentrant callers see the retirement.
     const operation = retire(e, 'disconnected', deleting)
       .then(
@@ -1025,7 +1045,11 @@ export function createBrowserRuntime(
           return { kind: 'blocked-locally' as const };
         },
       )
-      .finally(() => disconnects.delete(id));
+      .finally(() => {
+        // A forget chained to this sign-out may hold the entry already.
+        if (disconnects.get(id)?.operation === operation)
+          disconnects.delete(id);
+      });
     disconnects.set(id, { erase: deleting, operation });
     delete e.credentials;
     delete e.credential;
@@ -1173,6 +1197,8 @@ export function createBrowserRuntime(
         e.generation = generation;
         e.pod = pod;
         e.client = client;
+        // Signing in again replaces a forget that could not be saved.
+        delete e.forgetting;
         delete e.credentials;
         delete e.credential;
         delete e.bound;
