@@ -206,6 +206,41 @@ describe('checking an extracted reference', () => {
     );
   });
 
+  it('reports a migration section that still calls the release unreleased', () => {
+    const guide = (state) =>
+      [
+        '# Upgrade',
+        '',
+        '## From 9.9.0 to 9.10.0',
+        '',
+        '9.10.0 is not released yet; this section collects its steps.',
+        '',
+        '## From 9.8.0 to 9.9.0',
+        '',
+        state,
+        '',
+        '## From 9.7.0 to 9.8.0',
+        '',
+        'Older steps.',
+        '',
+      ].join('\n');
+    writeFileSync(
+      join(pkg, 'docs/migration.md'),
+      guide('9.9.0 is not released yet; this section collects its steps.'),
+    );
+    assert.ok(
+      checkReference(pkg).some((e) =>
+        e.includes('docs/migration.md: the section for 9.9.0 still calls it'),
+      ),
+    );
+    // The next version's section may stay unreleased; this one is done.
+    writeFileSync(
+      join(pkg, 'docs/migration.md'),
+      guide('Upgrade both packages. See the release notes.'),
+    );
+    assert.deepEqual(checkReference(pkg), []);
+  });
+
   it('accepts a prerelease without its notes', () => {
     writeFileSync(
       join(pkg, 'package.json'),

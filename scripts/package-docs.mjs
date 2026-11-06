@@ -230,9 +230,10 @@ function walk(dir, base = dir) {
 
 /**
  * Problems of an extracted package's reference: the entry is present, a
- * release ships the notes of its minor version, no longer in preparation, no
- * contributor instructions are shipped, and every local link and anchor
- * resolves inside the package.
+ * release ships the notes of its minor version, and neither they nor its
+ * section of the migration guide still call it unreleased; no contributor
+ * instructions are shipped, and every local link and anchor resolves inside
+ * the package.
  */
 export function checkReference(dir) {
   const errors = [];
@@ -253,6 +254,21 @@ export function checkReference(dir) {
       )
     )
       errors.push(`${notes}: still in preparation for release ${version}`);
+    // Its upgrade section, which the guide collects before the release (#225).
+    const guide = join(dir, 'docs/migration.md');
+    const minor = `${release[1]}.${release[2]}.0`;
+    const heading = new RegExp(
+      `^## From \\S+ to ${release[1]}\\.${release[2]}\\.0$`,
+    );
+    const section = existsSync(guide)
+      ? readFileSync(guide, 'utf8')
+          .split(/^(?=## )/m)
+          .find((part) => heading.test(part.split('\n', 1)[0].trim()))
+      : undefined;
+    if (section && /not released yet|in preparation/i.test(section))
+      errors.push(
+        `docs/migration.md: the section for ${minor} still calls it unreleased`,
+      );
   }
   const files = SHIPPED_ROOTS.flatMap((root) =>
     existsSync(join(dir, root))

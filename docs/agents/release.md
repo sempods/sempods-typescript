@@ -27,8 +27,9 @@ version and commit. Use the [contributor rules](../contributing.md).
 - For a release, its notes and its section in the migration guide no longer
   call the version unreleased or in preparation, and the migration section
   links the notes, so app-sdk ships them. `test:consumers` fails when the
-  packed reference of a release lacks `docs/releases/<minor>.0.md` or its
-  title still says "in preparation".
+  packed reference of a release lacks `docs/releases/<minor>.0.md`, its title
+  still says "in preparation", or the migration section for that version
+  still says "not released yet" or "in preparation".
 - Run `pnpm check` on the exact release candidate. Pack the packages with pnpm into
   a fresh directory and inspect contents and `npm publish --dry-run` output.
   Compare packages by their extracted file contents, as the publisher does, not by
