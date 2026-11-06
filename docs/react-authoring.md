@@ -897,6 +897,13 @@ function Resource({ iri }: { readonly iri: string }) {
   (`useApp().retryRestore(id)`); it also restores when back online.
 - **Sign-out not saved:** `controls.disconnectFailed` beside **Sign out** (see
   [draft lifetime](#selection-and-draft-lifetime)).
+- **Remembered Pods:** on the sign-in view, signed-out Pods this device
+  remembers, above the address field, each with **Sign in** and **Forget**;
+  a Pod whose session ended rather than was signed out carries
+  `controls.sessionEnded`, and one whose forgetting could not be saved
+  `controls.forgetFailed` with **Forget** again. Management lists them under
+  **Connect another Pod** (see
+  [remembered Pods](browser-runtime.md#remembered-pods)).
 
 Catalogue failures stay visible even when earlier access facts are kept.
 
@@ -1211,7 +1218,7 @@ host runtime and provider, without `AppAccess` in every widget.
 ### Selection and draft lifetime
 
 `useApp()` has the guarded `selectConnection`, `selectContext`, `connect`,
-`authorize`, `disconnect` and `navigate(action)`, plus unguarded
+`authorize`, `disconnect`, `forget` and `navigate(action)`, plus unguarded
 `refreshContexts(id)`, `loadContextLabels(id, iris)` and `retryRestore(id)`.
 Read state with `useAppState`, `useConnections` and `useView`.
 `useDraftGuard(dirty, discard, scope?)` registers your own draft:
@@ -1223,18 +1230,18 @@ Read state with `useAppState`, `useConnections` and `useView`.
 | `'connection'`       | A draft at an explicit Context (`bindContext`)             |
 | `'explicit'`         | A creation at an explicit Context; only connection changes |
 
-| Change                                                   | Leaves (asks, then discards)                  |
-| -------------------------------------------------------- | --------------------------------------------- |
-| Row navigation (`navigate`, `useSelection().select`)     | `local` (or unscoped) and `connection` guards |
-| Context selection (`selectContext`)                      | `local` (or unscoped) and `target` guards     |
-| `selectConnection`, `connect`, `authorize`, `disconnect` | every guard                                   |
+| Change                                                             | Leaves (asks, then discards)                  |
+| ------------------------------------------------------------------ | --------------------------------------------- |
+| Row navigation (`navigate`, `useSelection().select`)               | `local` (or unscoped) and `connection` guards |
+| Context selection (`selectContext`)                                | `local` (or unscoped) and `target` guards     |
+| `selectConnection`, `connect`, `authorize`, `disconnect`, `forget` | every guard                                   |
 
 - A pending write blocks every change, except that a saving `connection` or
   `explicit` draft does not block a Context selection. A confirmation names
   unconfirmed writes it leaves and warns that discarding does not undo them.
 - A declined change discards nothing; the target stays when its replacement is
   gone. A prompt whose connection stops being active (a returning sign-in, a
-  removal) is cancelled: the action resolves `false`, nothing runs.
+  removal, a sign-out) is cancelled: the action resolves `false`, nothing runs.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.
 - Leaving the document (reload, closing the tab, typing an address, Back past
@@ -1259,7 +1266,9 @@ Read state with `useAppState`, `useConnections` and `useView`.
   saving failed the connection keeps an ended session with
   `problem: 'disconnected', saved: false`; offer a retry (custom sign-out
   controls carry the advice, `AccessNotice` does not), and do not suggest
-  reloading, which may restore it.
+  reloading, which may restore it. Once saved, the Pod stays listed as
+  `signed-out` with its address; `forget(id)` removes it (see
+  [remembered Pods](browser-runtime.md#remembered-pods)).
 
 `useWorkflowAccess()` gives read, write and catalogue facts and each requested
 feature scope's required/optional and granted/missing/unknown status, for the

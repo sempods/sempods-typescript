@@ -14,6 +14,8 @@ export interface SessionListing {
     readonly problem: 'corrupt' | 'unsupported';
   }[];
 }
+export type SessionRemoval =
+  { readonly kind: 'removed' } | { readonly kind: 'conflict' };
 export interface SessionStore {
   read(id: string): Promise<StoredSession | undefined>;
   list(): Promise<SessionListing>;
@@ -22,6 +24,12 @@ export interface SessionStore {
     expectedRevision: string | null,
     value: unknown,
   ): Promise<SessionCommit>;
+  /**
+   * Deletes the record when its revision is still `expectedRevision`, in one
+   * atomic step like `commit`; `conflict` otherwise, also for a missing
+   * record. Added in 0.8.0 for `forget(id)` and `rememberPods: false`.
+   */
+  remove(id: string, expectedRevision: string): Promise<SessionRemoval>;
   close(): void;
 }
 export interface SessionLocks {

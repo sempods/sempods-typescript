@@ -448,15 +448,16 @@ it('reports blocked-locally on failed disconnect and permits explicit retry', as
   const saved = f.runtime.disconnect(f.id);
   expect(f.runtime.getSnapshot()[0]?.session).toEqual(failed);
   expect(await saved).toEqual({ kind: 'disconnected' });
-  expect(f.runtime.getSnapshot()).toEqual([]);
-  expect(observed.at(-1)).toBeUndefined();
+  const signedOut = { kind: 'signed-out', problem: 'disconnected' };
+  expect(f.runtime.getSnapshot()[0]?.session).toEqual(signedOut);
+  expect(observed.at(-1)).toEqual(signedOut);
   off();
   f.runtime.dispose();
   await settleLease();
   const reloaded = createBrowserRuntime(f.options);
   runtimes.push(reloaded);
   await reloaded.initialize();
-  expect(reloaded.getSnapshot()).toEqual([]);
+  expect(reloaded.getSnapshot()[0]?.session).toEqual(signedOut);
 });
 
 it('retains explicit sign-out failure when session-end cleanup also fails', async () => {
@@ -587,13 +588,18 @@ it('does not accept a refresh arriving after disconnect, even when transport ign
     }),
   );
   await settleLease();
-  expect(f.runtime.getSnapshot()).toEqual([]);
+  // The late refresh installs nothing: the Pod stays signed out.
+  expect(f.runtime.getSnapshot()).toMatchObject([
+    { session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
   f.runtime.dispose();
   await settleLease();
   const next = createBrowserRuntime(f.options);
   runtimes.push(next);
   await next.initialize();
-  expect(next.getSnapshot()).toEqual([]);
+  expect(next.getSnapshot()).toMatchObject([
+    { session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
 });
 it('keeps an answered write refusal when scope narrowing stops the resend', async () => {
   const f = fixture({ scopes: { required: ['tasks'] } });

@@ -15,7 +15,18 @@ export type FeatureScopes = {
   readonly optional?: readonly string[];
 };
 export type SessionFact =
-  | { readonly kind: 'signed-out' | 'restoring' }
+  /**
+   * No session. A connection that was never signed in has no `problem`. A
+   * remembered Pod, listed at startup after its session ended or the person
+   * signed out (see `rememberPods`), keeps why: `disconnected` for a sign-out,
+   * otherwise how the session ended, for example `expired` or
+   * `invalid-client`. A Pod whose first sign-in failed had no session to end,
+   * and records of SDK 0.7 or with a reason this SDK cannot read do not say
+   * why, so they have none.
+   * `beginAuthorization(id)` signs in again at the remembered address.
+   */
+  | { readonly kind: 'signed-out'; readonly problem?: RuntimeProblem }
+  | { readonly kind: 'restoring' }
   | { readonly kind: 'active' | 'renewing'; readonly subject: string }
   /**
    * The sign-in attempt is stored and the page is navigating to the Pod's
@@ -37,6 +48,13 @@ export type SessionFact =
        * not persisted across reloads. Absence makes no claim about persistence.
        */
       readonly saved?: false;
+      /**
+       * `problem: 'disconnected'` came from `forget(id)`: the connection is
+       * being forgotten, or, with `saved: false`, forgetting could not be
+       * saved. Retry with `forget(id)`; `disconnect(id)` then forgets too, so
+       * the address is not kept against the person's choice.
+       */
+      readonly forget?: true;
       /**
        * The saved session is kept: restoring it failed only because its Pod
        * could not be reached (offline, `5xx`, `408`, `429`). The runtime
@@ -172,6 +190,19 @@ export interface BrowserRuntimeOptions {
    * disables remembering.
    */
   readonly preferences?: PreferenceStorage | null;
+  /**
+   * Whether a Pod address outlives its session (default `true`). Signing out
+   * (`disconnect`) or a session that ends (a refused renewal, an expired
+   * token) then keeps the address on this device, without token or
+   * verifier, and the next start lists the connection as `signed-out`, so
+   * signing in again is one action. `forget(id)` deletes it.
+   *
+   * `false` forgets the address and the remembered Context on sign-out and
+   * session end, for shared devices or privacy-sensitive apps: a signed-out
+   * connection leaves the snapshot, an ended one stays listed only until the
+   * page unloads, and startup deletes addresses an earlier start remembered.
+   */
+  readonly rememberPods?: boolean;
 }
 /** Minimal synchronous key-value storage with the shape of `localStorage`. */
 export interface PreferenceStorage {
@@ -199,12 +230,24 @@ export interface BrowserRuntime {
   connect(url?: string): Promise<Connection>;
   beginAuthorization(id: string): Promise<void>;
   /**
-   * Blocks this connection locally, then removes its saved session. A failed
-   * durable write returns `blocked-locally` and publishes an ended session with
-   * `problem: 'disconnected', saved: false`. Retry explicitly; success removes
-   * the connection. Neither outcome revokes sharing or deletes Pod data.
+   * Signs out on this device: blocks this connection locally, then removes its
+   * saved session. The connection stays listed as
+   * `signed-out { problem: 'disconnected' }` with its address and remembered
+   * Context, also after a reload, until `forget(id)`; with
+   * `rememberPods: false` it is forgotten instead. A failed durable write
+   * returns `blocked-locally` and publishes an ended session with
+   * `problem: 'disconnected', saved: false`. Retry explicitly. Neither outcome
+   * revokes sharing or deletes Pod data.
    */
   disconnect(id: string): Promise<DisconnectResult>;
+  /**
+   * Signs out like `disconnect` if needed, then deletes the connection's
+   * record and its remembered Context choice, and removes it from the
+   * snapshot. A failed durable deletion returns `blocked-locally` like
+   * `disconnect`; retry explicitly. Neither revokes sharing nor deletes Pod
+   * data.
+   */
+  forget(id: string): Promise<DisconnectResult>;
   loadContexts(
     id: string,
     options?: { readonly signal?: AbortSignal },

@@ -1,8 +1,9 @@
 /**
  * The last explicitly chosen context survives a reload as a convenience: it is
  * reselected only while the fresh catalogue lists it as readable, never
- * replaced by another context, forgotten on disconnect, and storage failures
- * only disable the convenience.
+ * replaced by another context, kept for a remembered Pod after sign-out,
+ * forgotten with the Pod (`forget`, `rememberPods: false`), and storage
+ * failures only disable the convenience.
  */
 import { afterEach, expect, it } from 'vitest';
 import type { BrowserRuntime, PreferenceStorage } from './types.js';
@@ -15,6 +16,7 @@ import {
   catalogue,
   work,
   personal,
+  signInAgain,
 } from './fixture.test.js';
 
 const runtimes: BrowserRuntime[] = [];
@@ -30,8 +32,14 @@ function memoryStorage(): PreferenceStorage & { map: Map<string, string> } {
     removeItem: (key) => void map.delete(key),
   };
 }
-async function loggedIn(preferences: PreferenceStorage | null) {
-  const f = fixture({ preferences });
+async function loggedIn(
+  preferences: PreferenceStorage | null,
+  rememberPods?: boolean,
+) {
+  const f = fixture({
+    preferences,
+    ...(rememberPods === undefined ? {} : { rememberPods }),
+  });
   runtimes.push(f.runtime);
   const result = await f.login();
   runtimes.push(result.runtime);
@@ -90,9 +98,31 @@ it('never overrides a choice made in this session', async () => {
   expect(selected(next, f.id)).toBe(personal);
 });
 
-it('forgets the choice when the connection is disconnected', async () => {
+it('keeps the choice of a remembered Pod after sign-out and forgets it with the Pod', async () => {
   const storage = memoryStorage();
   const f = await loggedIn(storage);
+  expect(storage.map.size).toBe(1);
+  expect(await f.runtime.disconnect(f.id)).toEqual({ kind: 'disconnected' });
+  expect(storage.map.size).toBe(1);
+  expect(await f.runtime.forget(f.id)).toEqual({ kind: 'disconnected' });
+  expect(storage.map.size).toBe(0);
+});
+
+it('signing in again to a remembered Pod reselects its choice', async () => {
+  const storage = memoryStorage();
+  const f = await loggedIn(storage);
+  await f.runtime.disconnect(f.id);
+  const next = await reload(f, f.runtime);
+  expect(next.getSnapshot()).toMatchObject([
+    { id: f.id, session: { kind: 'signed-out' } },
+  ]);
+  const again = await signInAgain(f, next, f.id, (r) => runtimes.push(r));
+  expect(selected(again, f.id)).toBe(work);
+});
+
+it('rememberPods: false forgets the choice on sign-out', async () => {
+  const storage = memoryStorage();
+  const f = await loggedIn(storage, false);
   expect(storage.map.size).toBe(1);
   expect(await f.runtime.disconnect(f.id)).toEqual({ kind: 'disconnected' });
   expect(storage.map.size).toBe(0);

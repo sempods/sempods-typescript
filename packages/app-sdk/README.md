@@ -98,7 +98,10 @@ If **Sign out** cannot be saved on this device, the connection stays locally
 blocked and exposes an ended session with `saved: false`. `AppAccess` explains
 the failure and offers signing out again. The
 guarded action's Boolean says whether it ran; the retained fact tells custom
-controls that a retry is needed. Successful retry removes the connection.
+controls that a retry is needed. A successful retry signs out. The Pod then
+stays listed as signed out with its address, so signing in again is one
+action; `forget(id)` removes it, and `rememberPods: false` turns remembering
+off.
 
 ## Pod reads without a context choice
 

@@ -16,6 +16,46 @@ export type RuntimeProblem =
   | 'request'
   | SessionTransitionProblem
   | 'unexpected';
+// Every problem, so a stored reason is read back only as a known one.
+const problems: Record<RuntimeProblem, true> = {
+  configuration: true,
+  attempt: true,
+  callback: true,
+  denied: true,
+  'login-required': true,
+  'interaction-required': true,
+  'consent-required': true,
+  'provider-unavailable': true,
+  rejected: true,
+  exchange: true,
+  'invalid-client': true,
+  claims: true,
+  'invalid-config': true,
+  network: true,
+  cancelled: true,
+  http: true,
+  'invalid-response': true,
+  storage: true,
+  busy: true,
+  coordination: true,
+  disconnected: true,
+  expired: true,
+  interrupted: true,
+  discovery: true,
+  request: true,
+  corrupt: true,
+  unsupported: true,
+  state: true,
+  result: true,
+  consumed: true,
+  unexpected: true,
+};
+/** A stored reason this SDK knows; a newer SDK's unknown reason reads as absent. */
+export function knownProblem(value: string | undefined) {
+  return value !== undefined && Object.hasOwn(problems, value)
+    ? (value as RuntimeProblem)
+    : undefined;
+}
 /** Session/coordinator failures are runtime facts, separate from portable protocol failures. */
 export class RuntimeError extends Error {
   constructor(readonly problem: RuntimeProblem) {

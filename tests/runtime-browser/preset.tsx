@@ -148,6 +148,9 @@ function Evidence() {
         <output aria-label="Selected context">
           {state.view?.contextIri ?? ''}
         </output>
+        <output aria-label="Session">
+          {state.connections[0]?.session.kind ?? ''}
+        </output>
         <output aria-label="Sign-out failure">
           {state.connections.some(
             (c) => c.session.kind === 'ended' && c.session.saved === false,

@@ -213,7 +213,9 @@ it('does not navigate when disconnect happens while the new attempt is being per
   await expect(begun).rejects.toThrow();
   expect(await disconnected).toEqual({ kind: 'disconnected' });
   expect(f.navigate).not.toHaveBeenCalled();
-  expect(runtime.getSnapshot()).toEqual([]);
+  expect(runtime.getSnapshot()).toMatchObject([
+    { id: first.id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
   // The committed attempt was retired durably, too.
   runtime.dispose();
   await settleLease();
@@ -223,7 +225,9 @@ it('does not navigate when disconnect happens while the new attempt is being per
   });
   runtimes.push(next);
   await next.initialize();
-  expect(next.getSnapshot()).toEqual([]);
+  expect(next.getSnapshot()).toMatchObject([
+    { id: first.id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
 });
 
 it.each(['consumed-refresh', 'permanent-pre-claim'] as const)(

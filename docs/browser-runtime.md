@@ -489,7 +489,8 @@ reload. Context rights are reloaded rather than persisted as grants. The last
 explicitly chosen context of each connection is remembered as a preference
 (`preferences`, localStorage by default; `null` disables it) and reselected when
 the fresh catalogue lists it as readable. It is never replaced by another
-context, it is forgotten on disconnect, and storage failures only disable it.
+context, it is kept for a [remembered Pod](#remembered-pods) and forgotten
+with it, and storage failures only disable it.
 Connecting a second Pod preserves the first session.
 
 Discovery retains `authorization_response_iss_parameter_supported`. When true,
@@ -506,7 +507,8 @@ an explicit `interrupted` session problem; an expired authorization reports
 `expired`.
 Neither is dispatched or silently retried on startup. Call `beginAuthorization(id)`
 for an explicit new attempt, or `disconnect(id)` to durably remove its secret
-material and hide the connection. Until one of those actions, a retained
+material; the Pod then stays a [remembered Pod](#remembered-pods) until
+`forget(id)`. Until one of those actions, a retained
 `authorizing` record still contains its verifier. There is no automatic expiry
 cleanup. Corrupt/future-version records remain untouched and
 are reported separately through `StartupReport.unreadable`.
@@ -577,18 +579,79 @@ They are not JWT signature verification: token receipt is bound to the validated
 token endpoint and TLS. Reloaded data is structurally checked and rediscovered;
 same-origin script access is not a separate trust boundary.
 
-`disconnect()` blocks locally immediately and writes a durable tombstone.
+`disconnect()` blocks locally immediately and retires the saved session: the
+record keeps only the Pod address and why the session ended, without token or
+verifier (see [remembered Pods](#remembered-pods)).
 If that write fails, it returns `blocked-locally` and retains
 `session: { kind: 'ended', problem: 'disconnected', saved: false }` on the
 connection. The fact survives UI remounts and remains during explicit retries;
-a successful retry removes the connection. It is not persisted across reloads:
+a successful retry signs out. It is not persisted across reloads:
 the saved session may still restore. Offer **Sign out** again, not a reload.
-A late exchange cannot resurrect the locally blocked connection.
+A late exchange cannot resurrect the locally blocked connection. `forget(id)`
+reports a failed deletion the same way.
 `AppAccess` shows this failure next to **Sign out** in
 EN/DE (`controls.disconnectFailed`). The ordinary hint notes that sign-out applies
 only to this device: it neither revokes sharing on the Pod, deletes Pod data nor
 signs out at the Pod's provider. `dispose()` releases memory/locks while
 retaining durable sessions.
+
+## Remembered Pods
+
+A Pod address outlives its session, so people do not type it again on their
+own device. Signing out (`disconnect(id)`) and a session that ends (a refused
+renewal, an expired token without a refresh token, a failed sign-in) keep the
+connection's record with only its address (the Pod binding) and why the
+session ended: no token and no verifier. The connection stays in the snapshot,
+and the next start lists it again, as
+
+```ts
+{ kind: 'signed-out', problem?: RuntimeProblem }
+```
+
+with its `podUrl` and its remembered Context choice. `problem` is
+`disconnected` after a sign-out, otherwise how the session ended, for example
+`expired`. A connection that was never signed in has none, nor has a Pod
+whose first sign-in failed, as no session ended. Records written by SDK 0.7,
+which did not keep the reason, have none either: after an upgrade, those Pods
+are listed as signed out too. A reason this SDK cannot read (from a newer
+SDK) is left out; the address stays. Within the page where it happened, an
+ended session keeps reporting `ended` with its cause; it reads as `signed-out`
+from the next start on.
+
+- **Signing in again is one action.** `beginAuthorization(id)` (the guarded
+  `useApp().authorize(id)`) uses the remembered address and reselects the
+  remembered Context once the fresh catalogue confirms it. With a valid sign-in
+  cookie at the Pod and a remembered consent, the Pod answers without
+  interaction. `connect()` for the preset or sole allowed Pod reuses its
+  remembered connection.
+- **Forgetting is separate.** `forget(id)` signs out if needed, deletes the
+  record and the remembered Context choice, and removes the connection from the
+  snapshot. It works for any connection. While it runs, and after a failed
+  deletion (`blocked-locally`, as for `disconnect`), the connection reports
+  `ended { problem: 'disconnected', forget: true }`, with `saved: false` after
+  the failure; a retry with `forget(id)`, or with `disconnect(id)`, forgets it,
+  so the address is never kept against the person's choice.
+- **Opt out with `rememberPods: false`,** for shared devices or
+  privacy-sensitive apps. Sign-out then forgets the address and the remembered
+  Context at once and removes the connection; an ended session stays listed
+  only until the page unloads; startup deletes records an earlier start (or SDK
+  0.7) remembered for the permitted Pods. Records of Pods outside `allowedPods`
+  stay untouched.
+- **Each Pod keeps its own state.** One ended session or sign-out never
+  changes another connection.
+
+The app controller does not make a remembered Pod active while another
+connection has a session (signed in, restoring or ended), and when the active
+connection signs out it gives way to such a connection, as a removed one did.
+A remembered Pod the person selects stays active, ready to sign in.
+`AppAccess` lists remembered Pods on its sign-in view, above the address field,
+each with **Sign in** and **Forget** (`controls.rememberedPods`,
+`controls.forget`; `controls.sessionEnded` notes an ended session); management
+lists them under **Connect another Pod**. A Pod whose forgetting failed stays
+in that list with `controls.forgetFailed` and **Forget** only.
+
+A custom `SessionStore` (`openStore`) implements `remove(id, expectedRevision)`
+for this: an atomic delete at the expected revision, `conflict` otherwise.
 
 ## Protocol and session ownership
 

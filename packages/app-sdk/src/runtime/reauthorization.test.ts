@@ -16,6 +16,7 @@ import {
   jwt,
   restored,
   settleLease,
+  storeWith,
   unauthorized,
   work,
 } from './fixture.test.js';
@@ -223,10 +224,16 @@ it('ends the connection for another provider answer during re-authorization', as
     problem: 'login-required',
   });
   await vi.waitFor(async () =>
-    expect(await stored(f, id)).toMatchObject({ kind: 'disconnected' }),
+    expect(await stored(f, id)).toMatchObject({
+      kind: 'disconnected',
+      reason: 'login-required',
+    }),
   );
   next.dispose();
-  expect((await reload(f)).getSnapshot()).toEqual([]);
+  // The Pod is remembered, signed out, with why its session ended.
+  expect((await reload(f)).getSnapshot()).toMatchObject([
+    { id, session: { kind: 'signed-out', problem: 'login-required' } },
+  ]);
 });
 
 it('ends the connection when the earlier credential expired without a refresh token', async () => {
@@ -346,8 +353,11 @@ it('ends the connection when the token answer is lost; the old one never returns
   expect(await next.initialize()).toMatchObject({ interaction: 'failed' });
   expect(next.getSnapshot()[0]?.session.kind).toBe('ended');
   expect(await stored(f, id)).toMatchObject({ kind: 'disconnected' });
+  expect(await stored(f, id)).not.toHaveProperty('credentials');
   next.dispose();
-  expect((await reload(f)).getSnapshot()).toEqual([]);
+  expect((await reload(f)).getSnapshot()).toMatchObject([
+    { id, session: { kind: 'signed-out' } },
+  ]);
 });
 
 it('resumes the earlier session when the person comes back without a callback', async () => {
@@ -461,7 +471,9 @@ it('does not resurrect a connection disconnected while leaving', async () => {
     interaction: 'failed',
     problem: 'attempt',
   });
-  expect(next.getSnapshot()).toEqual([]);
+  expect(next.getSnapshot()).toMatchObject([
+    { id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
 });
 
 it('keeps the earlier facts while leaving and resumes from the back/forward cache', async () => {
@@ -538,21 +550,15 @@ it('retires a resumed record when sign-out runs during the resume commit', async
   const held: { gate?: ReturnType<typeof deferred<void>>; reached?: boolean } =
     {};
   const f = fixture({
-    async openStore(name) {
-      const store = await openSessionStore(name, factory);
-      return {
-        read: (id) => store.read(id),
-        list: () => store.list(),
-        close: () => store.close(),
-        async commit(id, revision, value) {
-          if (held.gate) {
-            held.reached = true;
-            await held.gate.promise;
-          }
-          return store.commit(id, revision, value);
-        },
-      };
-    },
+    openStore: storeWith(factory, (store) => ({
+      async commit(id, revision, value) {
+        if (held.gate) {
+          held.reached = true;
+          await held.gate.promise;
+        }
+        return store.commit(id, revision, value);
+      },
+    })),
   });
   keep(f.runtime);
   const { runtime, id } = await f.login();
@@ -567,9 +573,14 @@ it('retires a resumed record when sign-out runs during the resume commit', async
   gate.resolve();
   expect(await signOut).toEqual({ kind: 'disconnected' });
   const store = await openSessionStore(namespace, factory);
-  expect((await store.read(id))?.value).toMatchObject({ kind: 'disconnected' });
+  expect((await store.read(id))?.value).toMatchObject({
+    kind: 'disconnected',
+    reason: 'disconnected',
+  });
   store.close();
-  expect(runtime.getSnapshot()).toEqual([]);
+  expect(runtime.getSnapshot()).toMatchObject([
+    { id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
 });
 
 it('publishes nothing from a resume that settles after dispose', async () => {
