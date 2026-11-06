@@ -66,6 +66,18 @@ function Form() {
     </ResourceEditor>
   );
 }
+/**
+ * Clicks Save once the editor may write. The view's write access can follow
+ * its first read, and a click before it is ignored, as on a busy runner.
+ */
+async function saveWhenWritable() {
+  await waitFor(() =>
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByText('Save'));
+}
 function Picker() {
   const app = useApp();
   return (
@@ -723,7 +735,7 @@ it('retires saved feedback through a newer draft, access recovery and review', a
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Saved draft' },
   });
-  fireEvent.click(screen.getByText('Save'));
+  await saveWhenWritable();
   await screen.findByText('Saved.');
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'New draft' },
@@ -769,7 +781,7 @@ it('does not report a newer draft as saved when it was typed during a slow save'
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Submitted' },
   });
-  fireEvent.click(screen.getByText('Save'));
+  await saveWhenWritable();
   fireEvent.change(screen.getByLabelText('Title'), {
     target: { value: 'Newer draft' },
   });
@@ -783,9 +795,7 @@ it('does not report a newer draft as saved when it was typed during a slow save'
   expect(screen.getByDisplayValue('Newer draft')).toBeTruthy();
   expect(screen.queryByText('Saved.')).toBeNull();
   fireEvent.click(screen.getByText('Discard changes'));
-  // On the Linux CI runner the value once arrived after this tick; the cause
-  // is not identified (the editor sets it synchronously), so wait for it.
-  expect(await screen.findByDisplayValue('Submitted')).toBeTruthy();
+  expect(screen.getByDisplayValue('Submitted')).toBeTruthy();
   expect(screen.queryByText('Saved.')).toBeNull();
 });
 
