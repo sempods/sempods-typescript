@@ -21,10 +21,11 @@ import {
   pod,
   renewal,
   restored,
+  savedRecords,
   settleLease,
+  storeWith,
 } from '../runtime/fixture.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
-import { openSessionStore } from '../sessions/store.js';
 import type {
   BrowserRuntime,
   BrowserRuntimeOptions,
@@ -75,20 +76,11 @@ async function remembered(
   else {
     await renewal(f, runtime, id, 'refused');
     // The ended session is retired in the background: wait until it is.
-    const namespace = JSON.stringify([
-      'dynamic',
-      f.options.identity.redirectUri,
-    ]);
-    await vi.waitFor(async () => {
-      const store = await openSessionStore(namespace, f.factory);
-      try {
-        expect((await store.read(id))?.value).toMatchObject({
-          kind: 'disconnected',
-        });
-      } finally {
-        store.close();
-      }
-    });
+    await vi.waitFor(async () =>
+      expect(
+        (await savedRecords(f.factory)).find((r) => r.id === id)?.value,
+      ).toMatchObject({ kind: 'disconnected' }),
+    );
   }
   runtime.dispose();
   await settleLease();
@@ -279,19 +271,12 @@ it.each(['en', 'de'] as const)(
     let failing = false;
     const factory = new IDBFactory();
     const { runtime } = await remembered('sign-out', {
-      openStore: async (name) => {
-        const store = await openSessionStore(name, factory);
-        return {
-          read: (id) => store.read(id),
-          list: () => store.list(),
-          commit: (...args) => store.commit(...args),
-          close: () => store.close(),
-          remove: (...args) =>
-            failing
-              ? Promise.reject(new Error('private fixture detail'))
-              : store.remove(...args),
-        };
-      },
+      openStore: storeWith(factory, (store) => ({
+        remove: (...args) =>
+          failing
+            ? Promise.reject(new Error('private fixture detail'))
+            : store.remove(...args),
+      })),
     });
     show(runtime, language);
     const list = await screen.findByRole('list', { name: t.list });

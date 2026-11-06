@@ -451,29 +451,26 @@ function AccessConnections({
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
-  const c = state.connections.find((entry) => entry.id === state.activeId);
+  // Remembered Pods: signed out at a known address (see `rememberPods`). The
+  // sign-in view lists them above the address field, each with its own
+  // sign-in and a way to forget it on this device. A Pod being forgotten
+  // stays in that list; if forgetting could not be saved, with the failure
+  // and Forget again, so its address is not kept against the choice.
+  const forgetting = (entry: Connection) =>
+    entry.session.kind === 'ended' && entry.session.forget === true;
+  const remembered = state.connections.filter(
+    (entry) => entry.session.kind === 'signed-out' || forgetting(entry),
+  );
+  const found = state.connections.find((entry) => entry.id === state.activeId);
+  // The connection shown as connected; a remembered active one is signed in
+  // to from its list, so the rest of this view treats it as none.
+  const c = found && !remembered.includes(found) ? found : undefined;
   const disconnectFailed =
     c?.session.kind === 'ended' && c.session.saved === false;
   const disconnectHint = disconnectFailed
     ? m.controls.disconnectFailed
     : m.controls.disconnectHint;
   const active = c?.session.kind === 'active' || c?.session.kind === 'renewing';
-  // Remembered Pods: signed out at a known address (see `rememberPods`). The
-  // sign-in view lists them above the address field, each with its own
-  // sign-in and a way to forget it on this device.
-  // A Pod being forgotten stays in that list; if forgetting could not be
-  // saved, with the failure and Forget again, so its address is not kept
-  // against the choice.
-  const forgetting = (entry: Connection) =>
-    entry.session.kind === 'ended' && entry.session.forget === true;
-  const forgetFailed = (entry: Connection) =>
-    forgetting(entry) &&
-    entry.session.kind === 'ended' &&
-    entry.session.saved === false;
-  const remembered = state.connections.filter(
-    (entry) => entry.session.kind === 'signed-out' || forgetting(entry),
-  );
-  const signingIn = !c || remembered.includes(c);
   const defaultUrl =
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
@@ -527,9 +524,9 @@ function AccessConnections({
       await app.authorize(existing.id);
     } else await app.connect(target);
   }
-  const showNew = (manage && mode === 'multiple') || signingIn;
+  const showNew = (manage && mode === 'multiple') || !c;
   const showDefault =
-    (mode === 'multiple' || signingIn) &&
+    (mode === 'multiple' || !c) &&
     defaultUrl &&
     c?.podUrl !== defaultUrl &&
     !remembered.some((entry) => entry.podUrl === defaultUrl) &&
@@ -548,13 +545,14 @@ function AccessConnections({
       (value) => podName(value, podNames),
     );
   // Without a podNames entry the derived name is the address itself.
-  const podLine = (target: string) =>
-    (!addressHidden || podNames?.[target]?.trim()) && <p>{name(target)}</p>;
+  const podLine = (target: string, lineId?: string) =>
+    (!addressHidden || podNames?.[target]?.trim()) && (
+      <p id={lineId}>{name(target)}</p>
+    );
   // Management names the Pod its actions target; a display name never
   // replaces that Pod's address, also beside several saved connections.
-  const namedAddress = c && podNames?.[c.podUrl]?.trim() && (
-    <p className="sp-access-address">{c.podUrl}</p>
-  );
+  const namedAddress = (target: string) =>
+    podNames?.[target]?.trim() && <p className="sp-access-address">{target}</p>;
   const labels =
     c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
   const selectedEntry = readable.find(
@@ -586,7 +584,7 @@ function AccessConnections({
         <p className="sp-access-address">{defaultUrl}</p>
       )}
       <button
-        className={c ? undefined : 'sp-access-primary'}
+        className={found ? undefined : 'sp-access-primary'}
         disabled={
           unavailable ||
           state.connections.some(
@@ -644,33 +642,29 @@ function AccessConnections({
   );
   // Signing in to a new Pod. In management of a connection it is a secondary,
   // collapsed action after the connected Pod.
-  const another = manage && Boolean(c) && !signingIn;
-  const others = remembered.filter(
-    (entry) => !another || entry.id !== state.activeId,
-  );
-  const rememberedList = others.length > 0 && (
+  const another = manage && Boolean(c);
+  const rememberedList = remembered.length > 0 && (
     <ul
       key="remembered"
       className="sp-access-remembered"
       aria-label={m.controls.rememberedPods}
     >
-      {others.map((entry) => {
+      {remembered.map((entry) => {
         const ended =
           entry.session.kind === 'signed-out' &&
           entry.session.problem !== undefined &&
           entry.session.problem !== 'disconnected';
-        const shown = !addressHidden || podNames?.[entry.podUrl]?.trim();
-        const failed = forgetFailed(entry);
+        const line = podLine(entry.podUrl, `${id}-${entry.id}`);
+        const failed =
+          entry.session.kind === 'ended' && entry.session.saved === false;
         const describedBy =
-          [shown && `${id}-${entry.id}`, failed && `${id}-${entry.id}-failed`]
+          [line && `${id}-${entry.id}`, failed && `${id}-${entry.id}-failed`]
             .filter(Boolean)
             .join(' ') || undefined;
         return (
           <li key={entry.id}>
-            {shown && <p id={`${id}-${entry.id}`}>{name(entry.podUrl)}</p>}
-            {!addressHidden && podNames?.[entry.podUrl]?.trim() && (
-              <p className="sp-access-address">{entry.podUrl}</p>
-            )}
+            {line}
+            {!addressHidden && namedAddress(entry.podUrl)}
             {ended && (
               <p className="sp-access-hint">{m.controls.sessionEnded}</p>
             )}
@@ -687,7 +681,7 @@ function AccessConnections({
                       ? 'sp-access-primary'
                       : undefined
                   }
-                  aria-describedby={shown ? `${id}-${entry.id}` : undefined}
+                  aria-describedby={line ? `${id}-${entry.id}` : undefined}
                   disabled={unavailable}
                   onClick={() => void act(() => app.authorize(entry.id))}
                 >
@@ -729,7 +723,7 @@ function AccessConnections({
               )}
             </>
           )}
-          {(manage || c.session.kind === 'ended') && !signingIn && (
+          {(manage || c.session.kind === 'ended') && (
             <button
               disabled={unavailable}
               aria-describedby={disconnectHint ? disconnectId : undefined}
@@ -740,18 +734,15 @@ function AccessConnections({
           )}
         </div>
       )}
-      {c &&
-        (manage || c.session.kind === 'ended') &&
-        !signingIn &&
-        disconnectHint && (
-          <p
-            id={disconnectId}
-            role={disconnectFailed ? 'alert' : undefined}
-            className="sp-access-hint"
-          >
-            {disconnectHint}
-          </p>
-        )}
+      {c && (manage || c.session.kind === 'ended') && disconnectHint && (
+        <p
+          id={disconnectId}
+          role={disconnectFailed ? 'alert' : undefined}
+          className="sp-access-hint"
+        >
+          {disconnectHint}
+        </p>
+      )}
     </>
   );
   const addPod =
@@ -783,7 +774,7 @@ function AccessConnections({
         </label>
         {choice && <p className="sp-access-address">{choice}</p>}
         <button
-          className={c ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary'}
           disabled={
             unavailable ||
             !choice ||
@@ -826,7 +817,7 @@ function AccessConnections({
           </p>
         )}
         <button
-          className={c ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary'}
           disabled={unavailable}
         >
           {m.controls.signIn}
@@ -853,19 +844,19 @@ function AccessConnections({
     <>
       {!another && rememberedList}
       {!another && addPod}
-      {!active && !c && m.controls.loginHint && (
+      {!found && m.controls.loginHint && (
         <p className="sp-access-hint">{m.controls.loginHint}</p>
       )}
       {activePod}
       {manage && active && state.connections.length < 2 && podLine(c!.podUrl)}
-      {manage && active && namedAddress}
+      {manage && active && namedAddress(c!.podUrl)}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
-      {c && !active && c.session.kind !== 'restoring' && !signingIn && (
+      {c && !active && c.session.kind !== 'restoring' && (
         <>
           {podLine(c.podUrl)}
-          {manage && namedAddress}
+          {manage && namedAddress(c.podUrl)}
           {c.session.kind === 'ended' &&
             !disconnectFailed &&
             !shownByNotice && (
@@ -964,7 +955,7 @@ function AccessConnections({
       )}
       {manage && actions}
       {/* Management and the remembered list already show the Pod address. */}
-      {c && !manage && !signingIn && (
+      {c && !manage && (
         <details>
           <summary>{m.controls.addresses}</summary>
           <p>{c.podUrl}</p>

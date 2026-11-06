@@ -11,12 +11,15 @@ import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
 import {
   fixture,
+  fixtureNamespace,
   jwt,
   pod,
   renewal,
   restored,
+  savedRecords,
   settleLease,
   signInAgain,
+  storeWith,
   twoPods,
 } from './fixture.test.js';
 
@@ -26,10 +29,6 @@ const keep = (runtime: BrowserRuntime) => {
   runtimes.push(runtime);
   return runtime;
 };
-const namespace = JSON.stringify([
-  'dynamic',
-  'https://app.example/oauth/callback',
-]);
 
 async function logged(overrides: Partial<BrowserRuntimeOptions> = {}) {
   const f = fixture({ preferences: null, ...overrides });
@@ -57,14 +56,7 @@ async function reload(
   await restored(next);
   return next;
 }
-async function records(f: ReturnType<typeof fixture>) {
-  const store = await openSessionStore(namespace, f.factory);
-  try {
-    return (await store.list()).records;
-  } finally {
-    store.close();
-  }
-}
+const records = (f: ReturnType<typeof fixture>) => savedRecords(f.factory);
 async function stored(f: ReturnType<typeof fixture>, id: string) {
   return (await records(f)).find((r) => r.id === id)?.value as
     Record<string, unknown> | undefined;
@@ -163,19 +155,12 @@ it.each(['forget', 'disconnect'] as const)(
     let failing = true;
     const factory = new IDBFactory();
     const f = await logged({
-      openStore: async (name) => {
-        const store = await openSessionStore(name, factory);
-        return {
-          read: (id) => store.read(id),
-          list: () => store.list(),
-          commit: (...args) => store.commit(...args),
-          close: () => store.close(),
-          remove: (...args) =>
-            failing
-              ? Promise.reject(new Error('write failed'))
-              : store.remove(...args),
-        };
-      },
+      openStore: storeWith(factory, (store) => ({
+        remove: (...args) =>
+          failing
+            ? Promise.reject(new Error('write failed'))
+            : store.remove(...args),
+      })),
     });
     const failed = {
       kind: 'ended',
@@ -192,9 +177,7 @@ it.each(['forget', 'disconnect'] as const)(
     // Also a sign-out retry forgets: the address is not kept.
     expect(await f.runtime[retry](f.id)).toEqual({ kind: 'disconnected' });
     expect(f.runtime.getSnapshot()).toEqual([]);
-    const store = await openSessionStore(namespace, factory);
-    expect((await store.list()).records).toEqual([]);
-    store.close();
+    expect(await savedRecords(factory)).toEqual([]);
   },
 );
 
@@ -202,19 +185,13 @@ it('marks only a failed forget, not a failed sign-out, as forgetting', async () 
   let failing = false;
   const factory = new IDBFactory();
   const f = await logged({
-    openStore: async (name) => {
-      const store = await openSessionStore(name, factory);
-      return {
-        read: (id) => store.read(id),
-        list: () => store.list(),
-        commit: (...args) =>
-          failing
-            ? Promise.reject(new Error('write failed'))
-            : store.commit(...args),
-        close: () => store.close(),
-        remove: () => Promise.reject(new Error('write failed')),
-      };
-    },
+    openStore: storeWith(factory, (store) => ({
+      commit: (...args) =>
+        failing
+          ? Promise.reject(new Error('write failed'))
+          : store.commit(...args),
+      remove: () => Promise.reject(new Error('write failed')),
+    })),
   });
   failing = true;
   expect(await f.runtime.disconnect(f.id)).toEqual({
@@ -282,7 +259,7 @@ it('lists a retired record of SDK 0.7 as signed out without a reason', async () 
   await settleLease();
   // Rewrite the record as 0.7.0 wrote it: no reason; then an unknown one.
   for (const reason of [undefined, 'from-a-newer-sdk']) {
-    const store = await openSessionStore(namespace, f.factory);
+    const store = await openSessionStore(fixtureNamespace, f.factory);
     const current = (await store.read(f.id))!;
     const value = { ...(current.value as Record<string, unknown>) };
     delete value.reason;
@@ -308,7 +285,7 @@ it('reports a malformed reason as an unreadable record', async () => {
   await f.runtime.disconnect(f.id);
   f.runtime.dispose();
   await settleLease();
-  const store = await openSessionStore(namespace, f.factory);
+  const store = await openSessionStore(fixtureNamespace, f.factory);
   const current = (await store.read(f.id))!;
   await store.commit(f.id, current.revision, {
     ...(current.value as Record<string, unknown>),

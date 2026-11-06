@@ -219,10 +219,8 @@ export function createAppController(
   let startupError: unknown;
   let callbackNotice = false;
   let activeId: string | null = null;
-  /** The active connection's session at the last publish, to notice a sign-out. */
-  let activeSession:
-    | { readonly id: string; readonly kind: Connection['session']['kind'] }
-    | undefined;
+  /** The active connection at the last publish (snapshots are immutable), to notice a sign-out. */
+  let previous: Connection | undefined;
   let view: BoundView | null = null;
   let pod: BoundPod | null = null;
   let pending:
@@ -256,47 +254,39 @@ export function createAppController(
     unconfirmedLeave: false,
     changing,
   };
-  /**
-   * The connection to work with without a choice: the preset's Pod, else one
-   * with a session (signed in, restoring or ended) before a remembered one.
-   */
-  function fallback(connections: readonly Connection[], except?: string) {
-    const candidates = connections.filter(
+  /** The connections to work with without a choice: the preset's Pod's, else all. */
+  function candidates(connections: readonly Connection[], except?: string) {
+    return connections.filter(
       (c) =>
         c.id !== except &&
         (!runtime.preset || c.podUrl === runtime.preset.podUrl),
     );
-    return (
-      (candidates.find((c) => c.session.kind !== 'signed-out') ?? candidates[0])
-        ?.id ?? null
-    );
   }
+  /** One with a session (signed in, restoring or ended), not merely remembered. */
+  const inSession = (c: Connection) => c.session.kind !== 'signed-out';
   function publish() {
     const connections = runtime.getSnapshot();
+    let connection = connections.find((c) => c.id === activeId);
     // The active connection was just signed out (a remembered Pod stays
     // listed): like a removed one, it gives way to one with a session.
     const signedOut =
-      activeSession !== undefined &&
-      activeSession.id === activeId &&
-      activeSession.kind !== 'signed-out' &&
-      connections.find((c) => c.id === activeId)?.session.kind === 'signed-out';
+      previous !== undefined &&
+      previous.id === connection?.id &&
+      inSession(previous) &&
+      !inSession(connection);
     if (signedOut) {
-      const next = fallback(connections, activeId!);
-      if (
-        next !== null &&
-        connections.find((c) => c.id === next)?.session.kind !== 'signed-out'
-      ) {
-        activeId = next;
+      const next = candidates(connections, activeId!).find(inSession);
+      if (next) {
+        connection = next;
         view = null;
       }
     }
-    if (!activeId || !connections.some((c) => c.id === activeId))
-      activeId = fallback(connections);
-    const activeConnection = connections.find((c) => c.id === activeId);
-    activeSession = activeConnection && {
-      id: activeConnection.id,
-      kind: activeConnection.session.kind,
-    };
+    if (!connection) {
+      const options = candidates(connections);
+      connection = options.find(inSession) ?? options[0];
+    }
+    activeId = connection?.id ?? null;
+    previous = connection;
     // A prompt is about the connection it was asked for. That connection
     // stopping being active without a guarded action (a returning sign-in, a
     // removed or signed-out connection) cancels it: nothing runs and no guard
@@ -311,7 +301,6 @@ export function createAppController(
       pending.resolve(false);
       pending = undefined;
     }
-    const connection = connections.find((c) => c.id === activeId);
     pod = null;
     if (
       connection &&

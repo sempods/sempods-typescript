@@ -4,11 +4,36 @@ import type { PodFetch } from '@sempods/client-sdk';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
+import type { SessionStore } from '../sessions/types.js';
 
 export const pod = 'https://pod.example/alice';
 export const callback = 'https://app.example/oauth/callback';
 export const work = pod + '/_system/contexts/work';
 export const personal = pod + '/_system/contexts/personal';
+/** The session-store namespace of the fixture's dynamic identity. */
+export const fixtureNamespace = JSON.stringify(['dynamic', callback]);
+/** The saved session records on `factory`, as the next start lists them. */
+export async function savedRecords(factory: IDBFactory) {
+  const store = await openSessionStore(fixtureNamespace, factory);
+  try {
+    return (await store.list()).records;
+  } finally {
+    store.close();
+  }
+}
+/**
+ * An `openStore` on `factory` with some methods replaced, for storage
+ * failures; the replacements receive the real store.
+ */
+export function storeWith(
+  factory: IDBFactory,
+  overrides: (store: SessionStore) => Partial<SessionStore>,
+): NonNullable<BrowserRuntimeOptions['openStore']> {
+  return async (namespace) => {
+    const store = await openSessionStore(namespace, factory);
+    return { ...store, ...overrides(store) };
+  };
+}
 /** Startup no longer waits for restoration; tests wait for each saved Pod to settle. */
 export async function restored(runtime: BrowserRuntime) {
   await vi.waitFor(() => {

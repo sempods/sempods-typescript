@@ -1,9 +1,8 @@
 import { afterEach, expect, it } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { openSessionStore } from '../sessions/store.js';
 import type { BrowserRuntime, Connection } from './types.js';
 import { RuntimeError } from './errors.js';
-import { deferred, fixture, pod } from './fixture.test.js';
+import { deferred, fixture, pod, storeWith } from './fixture.test.js';
 
 const runtimes: BrowserRuntime[] = [];
 afterEach(() => runtimes.splice(0).forEach((runtime) => runtime.dispose()));
@@ -23,22 +22,16 @@ async function heldDisconnect(rememberPods = true) {
   const f = fixture({
     preset: { podUrl: pod },
     rememberPods,
-    openStore: async (namespace) => {
-      const store = await openSessionStore(namespace, factory);
-      return {
-        read: (id) => store.read(id),
-        list: () => store.list(),
-        close: () => store.close(),
-        async commit(...args) {
-          await hold();
-          return store.commit(...args);
-        },
-        async remove(...args) {
-          await hold();
-          return store.remove(...args);
-        },
-      };
-    },
+    openStore: storeWith(factory, (store) => ({
+      async commit(...args) {
+        await hold();
+        return store.commit(...args);
+      },
+      async remove(...args) {
+        await hold();
+        return store.remove(...args);
+      },
+    })),
   });
   runtimes.push(f.runtime);
   const login = await f.login();

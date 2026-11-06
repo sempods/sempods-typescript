@@ -16,6 +16,7 @@ import {
   jwt,
   restored,
   settleLease,
+  storeWith,
   unauthorized,
   work,
 } from './fixture.test.js';
@@ -549,22 +550,15 @@ it('retires a resumed record when sign-out runs during the resume commit', async
   const held: { gate?: ReturnType<typeof deferred<void>>; reached?: boolean } =
     {};
   const f = fixture({
-    async openStore(name) {
-      const store = await openSessionStore(name, factory);
-      return {
-        read: (id) => store.read(id),
-        list: () => store.list(),
-        close: () => store.close(),
-        async commit(id, revision, value) {
-          if (held.gate) {
-            held.reached = true;
-            await held.gate.promise;
-          }
-          return store.commit(id, revision, value);
-        },
-        remove: (id, revision) => store.remove(id, revision),
-      };
-    },
+    openStore: storeWith(factory, (store) => ({
+      async commit(id, revision, value) {
+        if (held.gate) {
+          held.reached = true;
+          await held.gate.promise;
+        }
+        return store.commit(id, revision, value);
+      },
+    })),
   });
   keep(f.runtime);
   const { runtime, id } = await f.login();

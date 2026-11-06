@@ -287,7 +287,6 @@ export function createBrowserRuntime(
     const ended = e.view.session;
     publish();
     if (!retireRecord) return;
-    if (!rememberPods) contexts.forget(e.view.id);
     void retire(e, problem, !rememberPods).catch(() => {
       // A subscriber may already have started sign-out or another sign-in.
       // Cleanup of this ended session must not replace the newer fact.
@@ -300,20 +299,28 @@ export function createBrowserRuntime(
       }
     });
   }
+  /** Deletes a record and, once it is gone, the Context choice remembered with it. */
+  async function erase(id: string, revision: string) {
+    if (!sessions || (await sessions.forget(id, revision)) === 'conflict')
+      throw new RuntimeError('disconnected');
+    contexts.forget(id);
+  }
   /**
    * Retires the saved session: keeps only the address and why it ended
-   * (`reason`), or deletes the record (`erase`). Resolves whether a record
-   * stays.
+   * (`reason`), or deletes the record (`deleting`). Resolves whether a record
+   * stays; without one, nothing is remembered.
    */
-  function retire(e: Entry, reason: RuntimeProblem, erase: boolean) {
+  function retire(e: Entry, reason: RuntimeProblem, deleting: boolean) {
     return serial(e, async () => {
-      if (!sessions || !e.revision) return false;
-      if (!erase) {
+      if (!sessions || !e.revision) {
+        contexts.forget(e.view.id);
+        return false;
+      }
+      if (!deleting) {
         accepted(e, await sessions.disconnect(e.view.id, e.revision, reason));
         return true;
       }
-      if ((await sessions.forget(e.view.id, e.revision)) === 'conflict')
-        throw new RuntimeError('disconnected');
+      await erase(e.view.id, e.revision);
       e.revision = null;
       return false;
     });
@@ -820,29 +827,24 @@ export function createBrowserRuntime(
           pending = saved;
         }
         if (!allows(b.pod.podUrl)) continue;
-        if (saved.value.kind === 'disconnected') {
-          // A retired record holds only the address (binding) and why its
-          // session ended: a remembered Pod, signed out.
-          if (!rememberPods) {
-            forgotten.push(saved);
-            continue;
-          }
-          const e = createEntry(b.pod, b.client, saved.id, b.generation);
-          e.revision = saved.revision;
-          const problem = knownProblem(saved.value.reason);
-          e.view = {
-            ...e.view,
-            session: Object.freeze(
-              problem === undefined
-                ? { kind: 'signed-out' }
-                : { kind: 'signed-out', problem },
-            ),
-          };
-          entries.set(saved.id, e);
+        if (saved.value.kind === 'disconnected' && !rememberPods) {
+          forgotten.push(saved);
           continue;
         }
         const e = createEntry(b.pod, b.client, saved.id, b.generation);
         e.revision = saved.revision;
+        if (saved.value.kind === 'disconnected') {
+          // A retired record holds only the address (binding) and why its
+          // session ended: a remembered Pod, signed out.
+          const ended = knownProblem(saved.value.reason);
+          if (ended)
+            e.view = {
+              ...e.view,
+              session: Object.freeze({ kind: 'signed-out', problem: ended }),
+            };
+          entries.set(saved.id, e);
+          continue;
+        }
         const problem =
           saved.value.kind === 'authorizing' &&
           saved.value.attempt.expiresAt <= Date.now()
@@ -876,10 +878,8 @@ export function createBrowserRuntime(
       }
       publish();
       // Best effort: a record left by a failed deletion is deleted next time.
-      for (const saved of forgotten) {
-        contexts.forget(saved.id);
-        void sessions.forget(saved.id, saved.revision).catch(() => {});
-      }
+      for (const saved of forgotten)
+        void erase(saved.id, saved.revision).catch(() => {});
       const restoring = Promise.all(
         listing.records.map((saved) => {
           const e = entries.get(saved.id);
@@ -964,16 +964,12 @@ export function createBrowserRuntime(
     }
   }
   /**
-   * Signs out (`disconnect`) or forgets a connection: blocks it locally at
-   * once, then retires its record, keeping the address, or deletes it
-   * (`erase`). A forgotten connection, or one that never had a record, leaves
-   * the snapshot.
+   * Signs out (`disconnect`) or forgets a connection (`forgetting`): blocks it
+   * locally at once, then retires its record, keeping the address unless
+   * `rememberPods` is false, or deletes it. A connection without a record
+   * afterwards leaves the snapshot.
    */
-  function leave(
-    id: string,
-    deleting: boolean,
-    forgetting: boolean,
-  ): Promise<DisconnectResult> {
+  function leave(id: string, forgetting: boolean): Promise<DisconnectResult> {
     if (disposed || !sessions)
       return Promise.reject(new RuntimeError('configuration'));
     const shown = entries.get(id)?.view.session;
@@ -984,22 +980,23 @@ export function createBrowserRuntime(
       (shown?.kind === 'ended' &&
         shown.saved === false &&
         shown.forget === true);
-    const erase = deleting || forget;
+    const deleting = forget || !rememberPods;
+    const marked = forget ? { forget: true as const } : {};
     const pending = disconnects.get(id);
     if (pending)
       // A forget asked during a sign-out deletes the record once it settled.
-      return erase && !pending.erase
+      return deleting && !pending.erase
         ? pending.operation.then(() =>
-            entries.has(id) ? leave(id, true, true) : { kind: 'disconnected' },
+            entries.has(id) ? leave(id, true) : { kind: 'disconnected' },
           )
         : pending.operation;
     const e = get(id);
     // Register before abort/notifications so reentrant callers see the retirement.
-    const operation = retire(e, 'disconnected', erase)
+    const operation = retire(e, 'disconnected', deleting)
       .then(
         (kept) => {
           if (entries.get(id) === e) {
-            if (kept) {
+            if (kept)
               e.view = {
                 ...e.view,
                 session: Object.freeze({
@@ -1007,11 +1004,8 @@ export function createBrowserRuntime(
                   problem: 'disconnected',
                 }),
               };
-            } else {
-              entries.delete(id);
-              contexts.forget(id);
-            }
-          } else if (!kept) contexts.forget(id);
+            else entries.delete(id);
+          }
           publish();
           return { kind: 'disconnected' as const };
         },
@@ -1023,7 +1017,7 @@ export function createBrowserRuntime(
                 kind: 'ended',
                 problem: 'disconnected',
                 saved: false,
-                ...(forget ? { forget: true as const } : {}),
+                ...marked,
               }),
             };
             publish();
@@ -1032,7 +1026,7 @@ export function createBrowserRuntime(
         },
       )
       .finally(() => disconnects.delete(id));
-    disconnects.set(id, { erase, operation });
+    disconnects.set(id, { erase: deleting, operation });
     delete e.credentials;
     delete e.credential;
     e.lifetime.abort();
@@ -1052,7 +1046,7 @@ export function createBrowserRuntime(
         ...(e.view.session.kind === 'ended' && e.view.session.saved === false
           ? { saved: false as const }
           : {}),
-        ...(forget ? { forget: true as const } : {}),
+        ...marked,
       }),
       catalogue: Object.freeze({ kind: 'unknown' }),
       selectedContext: null,
@@ -1208,10 +1202,10 @@ export function createBrowserRuntime(
       (options.navigate ?? ((url) => window.location.assign(url)))(url);
     },
     disconnect(id) {
-      return leave(id, !rememberPods, false);
+      return leave(id, false);
     },
     forget(id) {
-      return leave(id, true, true);
+      return leave(id, true);
     },
     async loadContexts(id, { signal } = {}) {
       const e = get(id);
