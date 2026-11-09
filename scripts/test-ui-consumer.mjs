@@ -20,8 +20,9 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { freemem, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
+import { setInterval } from 'node:timers';
 import { chromium, firefox, webkit } from 'playwright';
 import { startPod } from './ui-pod.mjs';
 import { suites } from './ui-checks.mjs';
@@ -232,6 +233,37 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
   }
   const failures = [];
   const report = {};
+  // A run that stalls names its suite and the machine's memory while it still
+  // writes a log: each minute, every suite that runs for longer reports, and a
+  // suite that does not end within its deadline fails the gate.
+  const running = new Map();
+  const heartbeat = setInterval(() => {
+    const mib = (bytes) => Math.round(bytes / 2 ** 20);
+    for (const [label, { suite, started }] of running)
+      console.log(
+        `${label} ${suite} still running after ${Math.round((Date.now() - started) / 1000)}s; ` +
+          `free memory ${mib(freemem())} of ${mib(totalmem())} MiB, gate process ${mib(process.memoryUsage().rss)} MiB`,
+      );
+  }, 60_000);
+  heartbeat.unref();
+  const SUITE_DEADLINE_MS = 6 * 60_000;
+  const withinDeadline = (label, suite, pending) => {
+    let timer;
+    return Promise.race([
+      pending,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `${label} ${suite} did not end in ${SUITE_DEADLINE_MS / 1000}s`,
+              ),
+            ),
+          SUITE_DEADLINE_MS,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
+  };
   // Browsers run side by side, each against its own Pod (the checks reset it).
   await Promise.all(
     browsers.map(async (name) => {
@@ -247,11 +279,13 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
           // one runs, and for how long.
           console.log(`${label} ${suite} started`);
           const started = Date.now();
-          const results = await run({
-            browser,
-            origin: pod.origin,
-            engine: name,
-          });
+          running.set(label, { suite, started });
+          const results = await withinDeadline(
+            label,
+            suite,
+            run({ browser, origin: pod.origin, engine: name }),
+          );
+          running.delete(label);
           console.log(
             `${label} ${suite}: ${results.length} checks in ${((Date.now() - started) / 1000).toFixed(1)}s`,
           );

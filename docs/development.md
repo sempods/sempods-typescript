@@ -32,7 +32,12 @@ them.
 
 Linux CI runs the same checks in parallel jobs: `pnpm check:base` with Chromium,
 and `pnpm test:ui` once each in Chromium, WebKit and Firefox. The required
-status check `Packages and consumers` passes only when all of them do. The
+status check `Packages and consumers` passes only when all of them do. These
+jobs run in the official Playwright image of the pinned Playwright version
+instead of installing browsers through apt. A Playwright bump must update that
+image in `.github/workflows/check.yml` too, and a CI step fails while the two
+differ. In the UI gate, a check that does not settle within 120s fails under its
+own name, and so does a suite that does not end within 6 minutes. The
 release workflow runs `pnpm check` in one job. CI reads `.node-version`; libraries emit ESM plus declarations with plain
 `tsc -b` project references. Exports resolve built files, with no source aliases.
 Tests are typechecked too. `skipLibCheck` is false throughout.

@@ -134,16 +134,20 @@ needs them; preserve the minimal screen's recovery when adapting it.
 - **One data meaning.** Define the type, predicates, text language and status
   values from the domain, not just the example's names. Use `fields()` and
   suitable helpers (`trim: true` for text, `dateTime` for instants, `date` for
-  calendar days). Show a day with `format.dateOnly` only for years 0001 to
-  9999 without a time zone; it throws or misreads other forms a `date`
-  accepts (`2026-10-05Z`, `-0044-03-15`, `0000-01-01`), so show those as
-  stored. Keep original
+  calendar days). `format.dateOnly` shows a day from years 0001 to 9999
+  without a time zone, a year below 1000 with four digits (`01.03.0050`). It
+  throws a `RangeError` for other forms a `date` accepts (`2026-10-05Z`,
+  `-0044-03-15`, `0000-01-01`), so show those as stored. `format.dateTime`
+  also throws, for an invalid time or a year before 0001 in its time zone;
+  show such an instant as stored too. Keep original
   list snapshots; never reconstruct them from plain values. Preserve unknown
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
   do not implement your own Context enumeration, consent handling, token store,
   credential-bearing fetch or OAuth callback handler. Use `useContexts` for a
-  Context picker and `usePodList`/`usePodLoad` for Pod-wide reads.
+  Context picker and `usePodList`/`usePodLoad` for Pod-wide reads;
+  [one read per connection](react-authoring.md#reads-per-connection) passes
+  each `runtime.bindPod(id)` handle to `usePodLoad`, not an own loader hook.
   Every write names a Context; an empty selection never means all Contexts.
   Choose the [app shape](react-authoring.md#choose-the-app-shape) from the
   user's interaction, not by asking them to choose APIs. An app that only reads
