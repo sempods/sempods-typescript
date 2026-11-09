@@ -595,8 +595,9 @@ have rotated the token, so the runtime sends the same token once more while it
 was first sent less than `refreshGracePeriod` ago (60 seconds by default, the
 sempods server's default rotation grace period). It first rediscovers the Pod:
 that read probes the network, so a connection that lost the answer does not
-lose the one resend too, and the grace period is checked again right before
-the resend is recorded and when it is sent:
+lose the one resend too. The probe ends with the grace period (a probe still
+unanswered then ends as `interrupted`), and the grace period is checked again
+right before the resend is recorded and when it is sent:
 
 | After a lost answer                                      | Result                                                                                     |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
