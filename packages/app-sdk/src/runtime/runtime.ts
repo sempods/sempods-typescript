@@ -634,7 +634,12 @@ export function createBrowserRuntime(
     pod: PodDiscovery | undefined,
     sentAt: number,
   ) {
+    // Bound handles stay current but lose access until the resend succeeds;
+    // pending reads are invalidated. The durable claim and the catalogue stay.
     delete e.credential;
+    invalidate(e);
+    invalidatePod(e);
+    invalidateContexts(e);
     const timer = setTimeout(
       () => {
         if (eligible(e, generation) && e.lost?.sentAt === sentAt) {

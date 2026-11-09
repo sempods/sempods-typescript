@@ -19,6 +19,7 @@ import {
   settleLease,
   storeWith,
   unauthorized,
+  work,
 } from './fixture.test.js';
 
 const runtimes: BrowserRuntime[] = [];
@@ -311,9 +312,8 @@ it('stays restorable while offline within the grace period and resends once onli
   const { f, runtime, id } = await signedIn();
   f.setToken(losing(1));
   const network = goOffline();
-  expect(await refusedRead(f, runtime, id)).toMatchObject({
-    kind: 'refused',
-  });
+  // The access loss invalidates the read that needed the renewal.
+  expect(await refusedRead(f, runtime, id)).toEqual({ kind: 'invalidated' });
   expect(session(runtime)).toEqual({
     kind: 'ended',
     problem: 'network',
@@ -329,6 +329,40 @@ it('stays restorable while offline within the grace period and resends once onli
   );
   expect(sentRefreshTokens(f)).toEqual(['refresh-private', 'refresh-private']);
   expect(await refusedRead(f, runtime, id)).toMatchObject({ kind: 'ok' });
+});
+
+it('suspends bound access and pending reads while the resend waits, and restores it after', async () => {
+  const { f, runtime, id } = await signedIn();
+  const view = runtime.bindContext(id, work);
+  const pod = runtime.bindPod(id);
+  await vi.waitFor(() =>
+    expect(view.getSnapshot()).toMatchObject({ read: true, write: true }),
+  );
+  f.setResource(() => new Promise<Response>(() => {}));
+  const pending = view.subjects.get('urn:item');
+  const changes = vi.fn();
+  view.subscribe(changes);
+  const before = view.getSnapshot().revision;
+  f.setToken(losing(1));
+  const network = goOffline();
+  await refusedRead(f, runtime, id);
+  expect(session(runtime)).toMatchObject({ kind: 'ended', restorable: true });
+  expect(view.getSnapshot()).toMatchObject({
+    current: true,
+    read: false,
+    write: false,
+  });
+  expect(view.getSnapshot().revision).toBeGreaterThan(before);
+  expect(pod.getSnapshot()).toMatchObject({ current: true, read: false });
+  expect(changes).toHaveBeenCalled();
+  expect(await pending).toEqual({ kind: 'invalidated' });
+  expect(await view.subjects.get('urn:item')).toEqual({ kind: 'invalidated' });
+  network.online();
+  await vi.waitFor(() =>
+    expect(session(runtime)).toMatchObject({ kind: 'active' }),
+  );
+  expect(view.getSnapshot()).toMatchObject({ read: true, write: true });
+  expect(pod.getSnapshot()).toMatchObject({ current: true, read: true });
 });
 
 it('ends as interrupted when the device stays offline beyond the grace period', async () => {
