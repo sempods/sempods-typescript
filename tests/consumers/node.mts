@@ -38,9 +38,9 @@ assert.deepEqual(classifyDate('2026-10-05+02:00'), {
   day: 5,
   timeZone: '+02:00',
 });
+const endOfDay = classifyDate('2026-10-05T24:00:00Z');
 assert.equal(
-  classifyDate('2026-10-05T24:00:00Z').kind === 'instant' &&
-    classifyDate('2026-10-05T24:00:00Z').epochMilliseconds,
+  endOfDay.kind === 'instant' ? endOfDay.epochMilliseconds : undefined,
   Date.UTC(2026, 9, 6),
 );
 assert.equal(classifyDate('2026-02-30').kind, 'unsupported');

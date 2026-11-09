@@ -20,8 +20,8 @@ npm install --save-dev tailwindcss @tailwindcss/vite
 ```
 
 Peers: React 19, `@sempods/app-sdk` and `@sempods/client-sdk` of the same minor
-version as this package, and Tailwind CSS 4.1 or newer (checked with 4.3.3). The package ships built
-JavaScript with TypeScript declarations; `react-aria-components`,
+version as this package, and Tailwind CSS 4.1 or newer (checked with 4.3.3).
+The package ships built JavaScript with TypeScript declarations; `react-aria-components`,
 `@internationalized/date`, `lucide-react` and the class utilities are its own
 dependencies. The `shadcn` CLI is not needed at runtime.
 
@@ -570,7 +570,8 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   chooser starts at the day of its stored offset and replaces it only when a
   day is applied. A value the `date` field does not accept, such as one that
   names no real day (`2026-02-30`) or a date-time without a time zone, is shown
-  as stored and opens without a chosen day; so is a year outside 0001–9999. Month names and the first weekday follow the SDK
+  as stored and opens without a chosen day; so is a value written with a year
+  outside 0001–9999. Month names and the first weekday follow the SDK
   provider's locale; days and month buttons are 44px targets. Apply and Remove
   date stay in a bar at the chooser's bottom edge, visible on a phone as it
   opens.

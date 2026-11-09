@@ -59,14 +59,15 @@ export function DateChooser({
   // A value that names no real day, or a date-time without a zone, is shown
   // as stored: `Date` would roll 30 February over to 2 March or read the
   // time in the device's zone. A day's own zone does not change the day.
+  // Only a value the chooser opens on is formatted, so a written year
+  // outside 0001–9999 stays as stored even where its instant falls inside.
   function show(stored: string): string {
+    if (!day) return stored;
     const parts = classifyDate(stored);
     const formatted =
       parts.kind === 'instant'
         ? format.dateTime(stored)
-        : parts.kind === 'day' && day
-          ? format.dateOnly(day.toString())
-          : undefined;
+        : format.dateOnly(day.toString());
     return formatted ?? stored;
   }
   const close = (next: string | null) => {
