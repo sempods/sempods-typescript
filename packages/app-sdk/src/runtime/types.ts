@@ -57,10 +57,12 @@ export type SessionFact =
       readonly forget?: true;
       /**
        * The saved session is kept: restoring it failed only because its Pod
-       * could not be reached (offline, `5xx`, `408`, `429`). The runtime
-       * restores it again when the browser comes back online, or on
-       * `retryRestore(id)`. This is not a sign-out; offer a retry, not a
-       * sign-in.
+       * could not be reached (offline, `5xx`, `408`, `429`), or a renewal
+       * lost its answer while the browser is offline (`problem: 'network'`).
+       * The runtime restores it again when the browser comes back online, or
+       * on `retryRestore(id)`. This is not a sign-out; offer a retry, not a
+       * sign-in. After a lost renewal answer it lasts only for the
+       * `refreshGracePeriod`; then the session ends as `interrupted`.
        */
       readonly restorable?: true;
     };
@@ -203,6 +205,20 @@ export interface BrowserRuntimeOptions {
    * page unloads, and startup deletes addresses an earlier start remembered.
    */
   readonly rememberPods?: boolean;
+  /**
+   * The Pod's refresh rotation grace period in milliseconds (default
+   * `60_000`, the sempods server's default). When the answer to a renewal
+   * is lost (no connection, a timeout after 20 seconds, a cut-off body, or an
+   * answer that is neither a token response nor an OAuth error, such as a
+   * `5xx` or `429`), or a page left during one, the refresh token is sent once more
+   * while it was first sent less than this long ago; offline, the session is
+   * `restorable` until then. Beyond it, or when the resend loses its answer
+   * too, the session ends as `interrupted` and the address is kept. A Pod
+   * without a grace period refuses the resend, which ends the session as
+   * before. `0` never resends. A negative or non-finite value is a
+   * configuration error.
+   */
+  readonly refreshGracePeriod?: number;
 }
 /** Minimal synchronous key-value storage with the shape of `localStorage`. */
 export interface PreferenceStorage {

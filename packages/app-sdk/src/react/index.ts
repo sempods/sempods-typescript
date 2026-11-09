@@ -1,6 +1,20 @@
 export { SdkLocaleProvider, useMessages, useSdkLocale } from './locale.js';
-export { AppAccess } from './access.js';
-export type { AppAccessProps, ConnectionsProps } from './access.js';
+export { AccessGate, AppAccess, ContextAccess } from './access.js';
+export type {
+  AccessGateProps,
+  AppAccessProps,
+  ConnectionsProps,
+  ContextAccessProps,
+} from './access.js';
+export {
+  AccessPrompt,
+  AccessPrompts,
+  useAccessPrompts,
+} from './access-prompts.js';
+export type {
+  AccessPromptProps,
+  AccessPromptsProps,
+} from './access-prompts.js';
 export {
   SempodsProvider,
   TargetScreen,

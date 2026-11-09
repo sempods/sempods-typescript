@@ -94,6 +94,7 @@ entire SDK or protocol before implementing an ordinary screen.
 | SDK integration in an existing React project  | [Quickstart](quickstart.md)                                                                                       |
 | A hook, component or its lifecycle            | [API map](react-authoring.md#api-at-a-glance), [state ownership](react-authoring.md#state-ownership-and-lifetime) |
 | Several lists or an overview                  | [Context choices](react-authoring.md#choose-the-app-shape)                                                        |
+| Values of any vocabulary from a SPARQL read   | [RDF values](rdf-values.md)                                                                                       |
 | App texts or a custom layout                  | [Customizing](react-authoring.md#part-4-customizing)                                                              |
 | A real-Pod exercise                           | [Local testing](local-testing.md)                                                                                 |
 | Deployment or installation                    | [Deployment](deployment.md), then [PWA](pwa.md) if needed                                                         |

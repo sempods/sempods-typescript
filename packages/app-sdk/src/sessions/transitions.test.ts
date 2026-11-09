@@ -133,7 +133,11 @@ describe('durable transitions owned by the browser coordinator', () => {
     const winner = claimed(contenders.find((r) => r.kind === 'claimed')!);
     const saved = await other.read(before.id);
     expect(saved?.value.kind).toBe('claimed');
-    expect(JSON.stringify(saved)).not.toContain('refresh-one');
+    // Only the one resend keeps the refresh token; no access token stays.
+    expect(saved?.value).toMatchObject({
+      resend: { refreshToken: 'refresh-one', sentAt: winner.sentAt },
+    });
+    expect(saved?.value).not.toHaveProperty('credentials');
     expect(JSON.stringify(saved)).not.toContain(winner.credentials.accessToken);
     const result = await refreshAuthorization(
       { ...winner.binding, scopes: winner.credentials.scopes },
@@ -169,6 +173,132 @@ describe('durable transitions owned by the browser coordinator', () => {
       committed(await reopened.disconnect(saved.id, saved.revision)).value.kind,
     ).toBe('disconnected');
   });
+
+  it('resends a claimed refresh once, keeping when it was first sent', async () => {
+    const { factory, store, transitions, ready, attempt } = await setup();
+    const before = await ready();
+    const first = claimed(
+      await transitions.claimRefresh(before.id, before.revision, attempt),
+    );
+    // A new page: the claim is all that is left of the lost answer.
+    store.close();
+    const reopened = (await setup(factory)).transitions;
+    const saved = (await reopened.read(before.id))!;
+    const resend = claimed(
+      await reopened.resendRefresh(saved.id, saved.revision, attempt),
+    );
+    expect(resend.resend).toEqual({
+      refreshToken: 'refresh-one',
+      scopes: [],
+      sentAt: first.sentAt,
+      resent: true,
+    });
+    expect(resend.subject).toBe('https://person.example/#me');
+    expect((await reopened.read(before.id))?.value).toMatchObject({
+      kind: 'claimed',
+      resend: { resent: true, sentAt: first.sentAt },
+    });
+    // Only once, also from a later page.
+    await expect(
+      reopened.resendRefresh(saved.id, resend.revision, attempt),
+    ).rejects.toMatchObject({ problem: 'state' });
+    // The result continues the refresh like the first answer would have.
+    await expect(
+      resend.complete(credentials({ refreshToken: 'refresh-one' })),
+    ).rejects.toMatchObject({ problem: 'result' });
+    expect((await reopened.read(before.id))?.value.kind).toBe('claimed');
+    // Retiring the claim drops the token.
+    const retired = committed(
+      await reopened.disconnect(saved.id, resend.revision, 'interrupted'),
+    );
+    expect(JSON.stringify(retired)).not.toContain('refresh-one');
+  });
+
+  it('accepts a resent refresh result and refuses a resend of other records', async () => {
+    const { transitions, ready, attempt } = await setup();
+    const before = await ready();
+    claimed(
+      await transitions.claimRefresh(before.id, before.revision, attempt),
+    );
+    const saved = (await transitions.read(before.id))!;
+    // Another binding (here: another generation) is refused unchanged.
+    await expect(
+      transitions.resendRefresh(saved.id, saved.revision, {
+        ...attempt,
+        generation: 'generation-two',
+      }),
+    ).rejects.toMatchObject({ problem: 'state' });
+    expect(await transitions.read(before.id)).toEqual(saved);
+    expect(await transitions.resendRefresh(saved.id, 'stale', attempt)).toEqual(
+      { kind: 'conflict' },
+    );
+    const resend = claimed(
+      await transitions.resendRefresh(saved.id, saved.revision, attempt),
+    );
+    expect(
+      committed(await resend.complete(credentials({ refreshToken: 'rotated' })))
+        .value,
+    ).toMatchObject({
+      kind: 'ready',
+      credentials: { refreshToken: 'rotated' },
+    });
+    // A ready record or an attempt has nothing to resend.
+    const current = (await transitions.read(before.id))!;
+    await expect(
+      transitions.resendRefresh(current.id, current.revision, attempt),
+    ).rejects.toMatchObject({ problem: 'state' });
+    const other = await setup();
+    const attemptRecord = await other.prepare();
+    await expect(
+      other.transitions.resendRefresh(
+        attemptRecord.id,
+        attemptRecord.revision,
+        other.attempt,
+      ),
+    ).rejects.toMatchObject({ problem: 'state' });
+  });
+
+  it('never resends a refresh claim written without its token (SDK 0.7)', async () => {
+    const { store, transitions, ready, attempt } = await setup();
+    const before = await ready();
+    claimed(
+      await transitions.claimRefresh(before.id, before.revision, attempt),
+    );
+    const saved = (await store.read(before.id))!;
+    const value = { ...(saved.value as Record<string, unknown>) };
+    delete value.resend;
+    const old = await store.commit(saved.id, saved.revision, value);
+    if (old.kind !== 'committed') throw new Error('Expected commit');
+    await expect(
+      transitions.resendRefresh(saved.id, old.record.revision, attempt),
+    ).rejects.toMatchObject({ problem: 'state' });
+  });
+
+  it.each([
+    ['an empty token', { refreshToken: '' }],
+    ['a missing send time', { sentAt: undefined }],
+    ['a negative send time', { sentAt: -1 }],
+    ['invalid scopes', { scopes: ['a b'] }],
+    ['an invalid resent mark', { resent: false }],
+  ] as const)(
+    'reads a refresh claim with %s as corrupt',
+    async (_l, change) => {
+      const { store, transitions, ready, attempt } = await setup();
+      const before = await ready();
+      claimed(
+        await transitions.claimRefresh(before.id, before.revision, attempt),
+      );
+      const saved = (await store.read(before.id))!;
+      const value = saved.value as { resend: Record<string, unknown> };
+      await store.commit(saved.id, saved.revision, {
+        ...value,
+        resend: { ...value.resend, ...change },
+      });
+      await expect(transitions.read(before.id)).rejects.toMatchObject({
+        problem: 'corrupt',
+      });
+    },
+  );
 
   it.each(['disconnect', 'reconnect'] as const)(
     'rejects late completion after %s wins',

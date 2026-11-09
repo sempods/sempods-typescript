@@ -55,26 +55,31 @@ it.each(['en', 'de'] as const)(
     });
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(f.fetch).not.toHaveBeenCalled();
-    // Two copies consume the same controller and cannot launch two authorization flows.
+    // Two copies share one gate, and a double click cannot launch two
+    // authorization flows.
     mounted.rerender(
       <SempodsProvider runtime={f.runtime} language={language}>
         <AppAccess appName="Tasks" mode="single" />
         <AppAccess appName="Tasks" mode="single" />
       </SempodsProvider>,
     );
-    const buttons = screen.getAllByRole('button', {
-      name: button.textContent!,
+    const buttons = await waitFor(() => {
+      const found = screen.getAllByRole('button', {
+        name: button.textContent!,
+      });
+      expect(found).toHaveLength(1);
+      return found;
     });
     f.fetch.mockRejectedValueOnce(new Error('offline'));
     await act(async () => {
       buttons[0]!.click();
-      buttons[1]!.click();
+      buttons[0]!.click();
     });
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(f.runtime.getSnapshot()).toHaveLength(0);
     await act(async () => {
       buttons[0]!.click();
-      buttons[1]!.click();
+      buttons[0]!.click();
     });
     await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(1));
     expect(f.runtime.getSnapshot()).toHaveLength(1);

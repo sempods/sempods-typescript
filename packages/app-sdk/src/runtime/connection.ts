@@ -48,6 +48,18 @@ export interface Entry {
   forgetting?: true;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
+  /**
+   * A refresh whose answer was lost while offline, within the grace period:
+   * its one resend waits for `online` or `retryRestore`. `pod` is absent when
+   * the Pod could not be rediscovered at startup; `timer` ends it once the
+   * grace period has passed.
+   */
+  lost?: {
+    readonly generation: string;
+    readonly sentAt: number;
+    readonly timer: ReturnType<typeof setTimeout>;
+    readonly pod?: PodDiscovery;
+  };
 }
 
 /** Credentials never follow a subject IRI or another pod's route. */

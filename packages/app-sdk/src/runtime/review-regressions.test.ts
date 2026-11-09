@@ -234,7 +234,7 @@ it('retries renewal only after failures that may pass', () => {
     ].map(transientBeforeClaim),
   ).toEqual([false, false, false, false, false, false, false, false]);
 });
-it('stores only a secret-free claim at the moment the refresh is dispatched', async () => {
+it('stores a claim without access token at the moment the refresh is dispatched', async () => {
   const f = await logged();
   const store = await openSessionStore(dynamicNamespace, f.factory);
   let atDispatch: unknown;
@@ -258,9 +258,13 @@ it('stores only a secret-free claim at the moment the refresh is dispatched', as
   expect(
     await f.view.subjects.patch('urn:item', {}, { ifMatch: '"v1"' }),
   ).toMatchObject({ kind: 'applied' });
-  expect(atDispatch).toMatchObject({ kind: 'claimed' });
-  // Neither the spent refresh token nor any access token is in that record.
-  expect(JSON.stringify(atDispatch)).not.toContain('refresh-private');
+  // Only the one resend after a lost answer keeps the sent refresh token
+  // (#239); no access token is in that record.
+  expect(atDispatch).toMatchObject({
+    kind: 'claimed',
+    resend: { refreshToken: 'refresh-private' },
+  });
+  expect(JSON.stringify(atDispatch).match(/refresh-private/g)).toHaveLength(1);
   expect(JSON.stringify(atDispatch)).not.toMatch(/eyJ|access/i);
   expect((await store.read(f.id))?.value).toMatchObject({ kind: 'ready' });
   store.close();
@@ -293,7 +297,7 @@ it('reports missing Web Locks without touching records, and a later start recove
   expect(next.getSnapshot()[0]?.session.kind).toBe('active');
 });
 
-it('retires the consumed refresh after a lost token answer and never retries it on reload', async () => {
+it('retires the claim when the resend loses its answer too and never sends it again on reload', async () => {
   const f = await logged();
   f.setResource(
     async () =>
@@ -312,14 +316,16 @@ it('retires the consumed refresh after a lost token answer and never retries it 
   await vi.waitFor(async () =>
     expect((await store.read(f.id))?.value).toMatchObject({
       kind: 'disconnected',
+      reason: 'interrupted',
     }),
   );
   store.close();
   // Remembered, signed out: no token is left to retry.
   expect((await reload(f)).getSnapshot()).toMatchObject([
-    { id: f.id, session: { kind: 'signed-out' } },
+    { id: f.id, session: { kind: 'signed-out', problem: 'interrupted' } },
   ]);
-  expect(f.count('/token')).toBe(2);
+  // The sign-in, the lost refresh and its one resend.
+  expect(f.count('/token')).toBe(3);
 });
 
 it.each(['unchanged', 'other-context', 'refused', 'offline'] as const)(

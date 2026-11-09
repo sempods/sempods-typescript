@@ -58,7 +58,7 @@ it.each([
   ['controls-with-notice', 'en'],
   ['controls-with-notice', 'de'],
 ] as const)(
-  'retains failed sign-out feedback across a provider remount and retries (%s, %s)',
+  'shows a failed sign-out in the gate across a provider remount and retries it (%s, %s)',
   async (surface, language) => {
     const f = fixture();
     const { runtime, id } = await f.login();
@@ -68,6 +68,7 @@ it.each([
         ? 'Sign-out was not saved on this device. Try signing out again.'
         : 'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.';
     const label = language === 'en' ? 'Sign out' : 'Abmelden';
+    const again = language === 'en' ? 'Try again' : 'Erneut versuchen';
     const ui = (
       <StrictMode>
         <SempodsProvider
@@ -103,7 +104,15 @@ it.each([
           ? 'Access is unavailable. Your draft is kept.'
           : 'Der Zugriff ist nicht verfügbar. Dein Entwurf bleibt erhalten.',
       );
-    expect(button.getAttribute('aria-describedby')).toBe(notice.id);
+    // The gate offers the retry, never a sign-in or an address.
+    const gate = document.querySelector('[data-sempods-ui="gate"]')!;
+    expect(gate.getAttribute('data-reason')).toBe('sign-out-failed');
+    expect(gate.contains(notice)).toBe(true);
+    expect(
+      within(gate as HTMLElement)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual([again]);
     expect(document.body.textContent).not.toMatch(
       /reload|neu laden|private fixture/i,
     );
@@ -117,7 +126,7 @@ it.each([
     render(ui);
     expect((await screen.findByRole('alert')).textContent).toBe(text);
     expect(screen.getAllByText(text)).toHaveLength(1);
-    const retry = screen.getByRole('button', { name: label });
+    const retry = screen.getByRole('button', { name: again });
     await waitFor(() =>
       expect((retry as HTMLButtonElement).disabled).toBe(false),
     );
@@ -137,9 +146,73 @@ it.each([
       }),
     );
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.queryByRole('button', { name: label })).toBeNull();
+    expect(screen.queryByRole('button', { name: again })).toBeNull();
+    // Signed out: the gate offers the remembered Pod's sign-in now.
+    expect(
+      document
+        .querySelector('[data-sempods-ui="gate"]')
+        ?.getAttribute('data-reason'),
+    ).toBe('signed-out');
   },
 );
+
+it('offers the sign-out retry, not a sign-in, in open modal management after a failed sign-out', async () => {
+  const f = fixture();
+  const { runtime } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  const management = () =>
+    document.querySelector<HTMLElement>('[data-sempods-ui="management"]')!;
+  const signOut = await within(management()).findByRole('button', {
+    name: 'Sign out',
+  });
+  await waitFor(() =>
+    expect((signOut as HTMLButtonElement).disabled).toBe(false),
+  );
+  const write = vi
+    .spyOn(IDBObjectStore.prototype, 'put')
+    .mockImplementation(() => {
+      throw new Error('private fixture storage detail');
+    });
+  await act(async () => signOut.click());
+  await waitFor(() =>
+    expect(
+      document
+        .querySelector('[data-sempods-ui="gate"]')
+        ?.getAttribute('data-reason'),
+    ).toBe('sign-out-failed'),
+  );
+  // Management above the gate repeats the sign-out; it never signs in to
+  // this connection again. Another Pod stays reachable, collapsed.
+  const buttons = () =>
+    within(management())
+      .getAllByRole('button')
+      .filter((b) => !b.closest('.sp-access-another'))
+      .map((b) => b.textContent);
+  await waitFor(() => expect(buttons()).toContain('Try again'));
+  expect(buttons()).not.toContain('Sign in');
+  expect(buttons()).not.toContain('Sign out');
+  expect(management().querySelector('.sp-access-primary')?.textContent).toBe(
+    'Try again',
+  );
+  expect(within(management()).getByRole('alert').textContent).toBe(
+    'Sign-out was not saved on this device. Try signing out again.',
+  );
+  write.mockRestore();
+  await act(async () =>
+    within(management()).getByRole('button', { name: 'Try again' }).click(),
+  );
+  await waitFor(() =>
+    expect(runtime.getSnapshot()[0]?.session).toEqual({
+      kind: 'signed-out',
+      problem: 'disconnected',
+    }),
+  );
+});
 
 it.each(['en', 'de'] as const)(
   'one permitted Pod needs only explicit sign-in, supports an optional icon and retries (%s)',
@@ -233,12 +306,30 @@ it('keeps the Pod address in management with one permitted Pod', async () => {
         podAddress="hidden"
         podNames={{ [pod]: 'Personal' }}
         open
+        onClose={() => {}}
       />
     </SempodsProvider>,
   );
-  await screen.findByRole('button', { name: 'Sign in' });
-  expect(screen.getByText('Personal')).toBeTruthy();
-  expect(screen.getByText(pod)).toBeTruthy();
+  const dialog = await waitFor(() => {
+    const found = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="management"]',
+    );
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  await within(dialog).findByRole('button', { name: 'Sign in' });
+  expect(within(dialog).getByText('Personal')).toBeTruthy();
+  expect(within(dialog).getByText(pod)).toBeTruthy();
+  // The gate behind it may omit the address.
+  const gate = await waitFor(() => {
+    const found = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  expect(within(gate).getByText('Personal')).toBeTruthy();
+  expect(within(gate).queryByText(pod)).toBeNull();
 });
 
 it('offers only the permitted finite choices, disambiguates names and does not sign in on selection', async () => {
@@ -268,18 +359,43 @@ it('offers only the permitted finite choices, disambiguates names and does not s
   expect(f.runtime.getSnapshot()[0]!.podUrl).toBe(other);
 });
 
-it('keeps an unrestricted preset a default and offers another Pod in explicit management', async () => {
+it('keeps an unrestricted preset a default and offers another Pod in the management dialog', async () => {
   const f = fixture({ preset: { podUrl: pod } });
   cleanups.push(() => f.runtime.dispose());
+  function Managed() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button onClick={() => setOpen(true)}>Manage</button>
+        <AppAccess
+          appName="Shopping"
+          open={open}
+          onClose={() => setOpen(false)}
+        />
+      </>
+    );
+  }
   render(
     <SempodsProvider runtime={f.runtime}>
-      <Host />
+      <Managed />
     </SempodsProvider>,
   );
-  await screen.findByRole('button', { name: 'Sign in' });
-  expect(screen.queryByRole('textbox', { name: 'Pod address' })).toBeNull();
+  // The preset fixes the gate's address: one sign-in, no address field.
+  const gate = await waitFor(() => {
+    const found = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  expect(within(gate).getByRole('button', { name: 'Sign in' })).toBeTruthy();
+  expect(within(gate).queryByRole('textbox')).toBeNull();
+  // The management dialog opens above the gate and reaches another Pod.
   fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
-  const input = screen.getByRole('textbox', { name: 'Pod address' });
+  const dialog = document.querySelector<HTMLElement>(
+    '[data-sempods-ui="management"]',
+  )!;
+  const input = within(dialog).getByRole('textbox', { name: 'Pod address' });
   fireEvent.change(input, { target: { value: 'https://pod.example/bob' } });
   await act(async () => fireEvent.submit(input.closest('form')!));
   await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(1));
@@ -687,15 +803,29 @@ it.each(['select', 'disconnect'] as const)(
       await act(async () =>
         screen.getByRole('button', { name: 'Sign out' }).click(),
       );
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
-    // Signed out, Bob's Pod stays remembered.
-    expect(
-      runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
-    ).toMatchObject(
-      action === 'select'
-        ? { kind: 'ended', problem: 'login-required' }
-        : { kind: 'signed-out', problem: 'disconnected' },
+    // Signed out, Bob's Pod stays remembered; the gate closes as it starts.
+    await waitFor(() =>
+      expect(
+        runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
+      ).toMatchObject(
+        action === 'select'
+          ? { kind: 'ended', problem: 'login-required' }
+          : { kind: 'signed-out', problem: 'disconnected' },
+      ),
     );
+    await waitFor(() =>
+      expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull(),
+    );
+    const prompts = [
+      ...document.querySelectorAll<HTMLElement>('[data-sempods-ui="prompt"]'),
+    ];
+    if (action === 'select') {
+      // Bob's ended session is now a dismissible prompt beside Alice.
+      expect(prompts.map((p) => p.dataset.reason)).toEqual(['signed-out']);
+      expect(prompts[0]!.dataset.severity).toBe('action');
+      expect(prompts[0]!.textContent).toContain('pod.example/bob');
+      expect(screen.getAllByText(message)).toHaveLength(1);
+    } else expect(prompts).toEqual([]);
   },
 );
 
@@ -885,6 +1015,12 @@ function Validating({ mode }: { readonly mode: 'on-demand' | 'required' }) {
     </>
   );
 }
+/** A pending restore shows no access surface: no sign-in screen, no prompt. */
+function expectNoSurface() {
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
+  expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull();
+  expect(document.querySelector('[data-sempods-ui="prompt"]')).toBeNull();
+}
 /** While a connection validates, the surface shows its heading and loading status only. */
 function expectLoadingOnly() {
   const region = screen.getByRole('region', { name: 'Pods & sharing' });
@@ -895,7 +1031,7 @@ function expectLoadingOnly() {
 }
 
 it.each(['on-demand', 'required'] as const)(
-  'shows only the loading status while a saved connection restores (%s)',
+  'shows no access surface while a saved connection restores (%s)',
   async (mode) => {
     const f = fixture({ allowedPods: [pod], preferences: null });
     const signed = await f.login();
@@ -918,12 +1054,12 @@ it.each(['on-demand', 'required'] as const)(
     );
     await screen.findByText('started');
     expect(runtime.getSnapshot()[0]?.session.kind).toBe('restoring');
-    expectLoadingOnly();
+    expectNoSurface();
     // Explicit management still shows the connection and its actions.
     fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
-    expectLoadingOnly();
+    expectNoSurface();
     await act(async () => discovery.resolve());
     if (mode === 'on-demand')
       await waitFor(() =>
@@ -1068,7 +1204,8 @@ it.each([
     await screen.findByText('Context screen');
     expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
     // The preset Context settles the target: nothing for the person to decide.
-    expect(states).toEqual(['loading', 'hidden']);
+    // Before startup settles, nothing shows (no initial loading panel).
+    expect(states).toEqual(['hidden', 'loading', 'hidden']);
   },
 );
 
@@ -1112,7 +1249,7 @@ it.each(['required', 'on-demand'] as const)(
         await screen.findByText(
           'Context catalogue unavailable. Access is unknown.',
         );
-      expect(states, outcome).toEqual(['loading', 'connection']);
+      expect(states, outcome).toEqual(['hidden', 'loading', 'connection']);
       // A reload the person starts keeps the connection view and its focus.
       const check = screen.getByRole('button', { name: 'Check access' });
       check.focus();
@@ -1129,7 +1266,7 @@ it.each(['required', 'on-demand'] as const)(
       expect(document.activeElement).toBe(check);
       await act(async () => again.resolve());
       await screen.findByRole('combobox', { name: 'Data context' });
-      expect(states, outcome).toEqual(['loading', 'connection']);
+      expect(states, outcome).toEqual(['hidden', 'loading', 'connection']);
       view.unmount();
       runtime.dispose();
       await settleLease();
@@ -1218,39 +1355,7 @@ async function bothSignedIn(f: ReturnType<typeof fixture>, other: string) {
   return { runtime, first: signed.id, second: second.id };
 }
 
-it('keeps the active-Pod selector mounted, focused and usable while a saved connection restores', async () => {
-  const other = 'https://pod.example/bob';
-  const f = fixture({ allowedPods: [pod, other], preferences: null });
-  const both = await bothSignedIn(f, other);
-  const { runtime, discovery } = await restoring(f, both.runtime);
-  render(
-    <SempodsProvider runtime={runtime} contextSelection="on-demand">
-      <Validating mode="on-demand" />
-    </SempodsProvider>,
-  );
-  await screen.findByText('started');
-  const region = screen.getByRole('region', { name: 'Pods & sharing' });
-  expect(within(region).getByRole('status').textContent).toBe('Loading…');
-  expect(within(region).queryByText('Full addresses')).toBeNull();
-  const select = within(region).getByRole('combobox', {
-    name: 'Active pod',
-  }) as HTMLSelectElement;
-  expect(select.disabled).toBe(false);
-  const active = select.value;
-  select.focus();
-  // The restore fails and ends the session: the view changes, the selector stays.
-  await act(async () => discovery.reject(new Error('offline')));
-  await waitFor(() =>
-    expect(
-      runtime.getSnapshot().find((entry) => entry.id === active)?.session.kind,
-    ).toBe('ended'),
-  );
-  expect(screen.getByText('Full addresses')).toBeTruthy();
-  expect(screen.getByRole('combobox', { name: 'Active pod' })).toBe(select);
-  expect(document.activeElement).toBe(select);
-});
-
-it('switches to another saved Pod from the selector while a restore is pending', async () => {
+it('keeps the active-Pod selector usable in management while a saved connection restores', async () => {
   const other = 'https://pod.example/bob';
   const f = fixture({ allowedPods: [pod, other], preferences: null });
   const both = await bothSignedIn(f, other);
@@ -1273,14 +1378,18 @@ it('switches to another saved Pod from the selector while a restore is pending',
     </SempodsProvider>,
   );
   await screen.findByText('started');
+  // A restore that never settles shows no sign-in screen; management reaches the rest.
+  expectNoSurface();
+  fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
   const region = screen.getByRole('region', { name: 'Pods & sharing' });
-  expect(within(region).getByRole('status').textContent).toBe('Loading…');
   const select = within(region).getByRole('combobox', {
     name: 'Active pod',
   }) as HTMLSelectElement;
+  expect(select.disabled).toBe(false);
   // The active Pod's restore keeps hanging; the other one restores.
-  const connections = runtime.getSnapshot();
-  const target = connections.find((entry) => entry.id !== select.value)!;
+  const target = runtime
+    .getSnapshot()
+    .find((entry) => entry.id !== select.value)!;
   await act(async () => gates.get(target.podUrl)!.resolve());
   await waitFor(() =>
     expect(
@@ -1288,14 +1397,21 @@ it('switches to another saved Pod from the selector while a restore is pending',
         .kind,
     ).toBe('active'),
   );
-  expect(within(region).getByRole('status').textContent).toBe('Loading…');
-  fireEvent.change(select, { target: { value: target.id } });
-  await waitFor(() =>
-    expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull(),
+  await act(async () =>
+    fireEvent.change(select, { target: { value: target.id } }),
   );
+  await waitFor(() => expect(runtime.getSnapshot()).toBeTruthy());
+  expect(
+    within(screen.getByRole('region', { name: 'Pods & sharing' })).getByRole(
+      'combobox',
+      { name: 'Active pod' },
+    ),
+  ).toHaveProperty('value', target.id);
+  fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
+  expectNoSurface();
 });
 
-it('keeps the preset Pod sign-in and its failures while another saved Pod restores', async () => {
+it('keeps signing in to the preset Pod and its failures in management while another saved Pod restores', async () => {
   const other = 'https://pod.example/bob';
   const f = fixture({ preset: { podUrl: other }, preferences: null });
   const signed = await f.login();
@@ -1323,18 +1439,19 @@ it('keeps the preset Pod sign-in and its failures while another saved Pod restor
     screen.getByRole('button', { name: 'Select saved' }).click(),
   );
   expect(runtime.getSnapshot()[0]?.session.kind).toBe('restoring');
+  expectNoSurface();
+  fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
   const region = screen.getByRole('region', { name: 'Pods & sharing' });
-  expect(within(region).getByRole('status').textContent).toBe('Loading…');
-  expect(within(region).queryByText('Full addresses')).toBeNull();
-  const signIn = within(region).getByRole('button', { name: 'Sign in' });
+  // Management offers the preset Pod (unrestricted) through its address field.
+  const input = within(region).getByRole('textbox', { name: 'Pod address' });
+  fireEvent.change(input, { target: { value: other } });
   f.fetch.mockRejectedValueOnce(new Error('offline'));
-  await act(async () => signIn.click());
+  await act(async () => fireEvent.submit(input.closest('form')!));
   expect(await within(region).findByRole('alert')).toBeTruthy();
-  expect(within(region).getByRole('status').textContent).toBe('Loading…');
-  expect(within(region).queryByText('Full addresses')).toBeNull();
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('restoring');
 });
 
-it('replaces custom Connections with the loading status while a saved connection restores', async () => {
+it('shows no custom Connections while a saved connection restores', async () => {
   const f = fixture({ allowedPods: [pod], preferences: null });
   const signed = await f.login();
   const { runtime, discovery } = await restoring(f, signed.runtime);
@@ -1348,13 +1465,14 @@ it('replaces custom Connections with the loading status while a saved connection
     </SempodsProvider>,
   );
   await screen.findByText('started');
-  const region = screen.getByRole('region', { name: 'Pods & sharing' });
-  expect(within(region).getByRole('status').textContent).toBe('Loading…');
+  expectNoSurface();
   expect(screen.queryByText('Custom connections')).toBeNull();
   await act(async () => discovery.resolve());
   await waitFor(() =>
-    expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull(),
+    expect(runtime.getSnapshot()[0]?.session.kind).toBe('active'),
   );
+  expectNoSurface();
+  expect(screen.queryByText('Custom connections')).toBeNull();
 });
 
 it.each(['missing scopes', 'ended session'] as const)(
@@ -1567,13 +1685,21 @@ it('shows a display-only description under the app name, not in management', asy
   expect(heading.nextElementSibling?.textContent).toBe('Shopping made easy');
   view.rerender(
     <SempodsProvider runtime={f.runtime}>
-      <AppAccess appName="Shopping" description="Shopping made easy" open />
+      <AppAccess
+        appName="Shopping"
+        description="Shopping made easy"
+        open
+        onClose={() => {}}
+      />
     </SempodsProvider>,
   );
+  const dialog = document.querySelector<HTMLElement>(
+    '[data-sempods-ui="management"]',
+  )!;
   expect(
-    screen.getByRole('heading', { name: 'Pods & sharing', level: 2 }),
+    within(dialog).getByRole('heading', { name: 'Pods & sharing', level: 2 }),
   ).toBeTruthy();
-  expect(screen.queryByText('Shopping made easy')).toBeNull();
+  expect(within(dialog).queryByText('Shopping made easy')).toBeNull();
   expect(f.fetch).not.toHaveBeenCalled();
 });
 

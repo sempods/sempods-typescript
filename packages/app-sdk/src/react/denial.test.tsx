@@ -14,14 +14,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { callback, fixture, settleLease } from '../runtime/fixture.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import type { BrowserRuntime } from '../runtime/types.js';
-import { useState } from 'react';
 import {
   AppAccess,
   SempodsProvider,
   TargetScreen,
   useApp,
   useAppState,
-  useDraftGuard,
 } from './index.js';
 
 const runtimes: BrowserRuntime[] = [];
@@ -140,36 +138,78 @@ it.each(
     ),
   ),
 )(
-  'a declined re-authorization (%s, %s description) says sharing is unchanged and offers only Change sharing',
+  'a declined re-authorization (%s, %s description) says sharing is unchanged in one dismissible info prompt',
   async (language, _name, query) => {
     const t = text[language];
-    const { f, runtime } = await returning(
-      'again',
-      `error=access_denied${query}`,
-    );
+    const { runtime } = await returning('again', `error=access_denied${query}`);
     show(runtime, language);
-    const region = await screen.findByRole('region', { name: t.region });
-    await waitFor(() =>
-      expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
-    );
-    expect(within(region).queryByRole('alert')).toBeNull();
-    // The list stays; the one action is to try changing the sharing again.
+    const prompt = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(
+        '[data-sempods-ui="prompt"][data-reason="sharing-unchanged"]',
+      );
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect(prompt.getAttribute('role')).toBe('status');
+    expect(prompt.textContent).toContain(t.unchanged);
+    // The list stays; the person only acknowledges.
     expect(await screen.findByText('My list')).toBeTruthy();
     expect(
-      within(region)
+      within(prompt)
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual([t.change]);
+    ).toEqual(['OK']);
+    expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull();
     expect(document.body.textContent).not.toMatch(
       /scopes|Benutzer|onerror|<img/,
     );
-    const navigations = f.navigate.mock.calls.length;
-    await act(async () =>
-      within(region).getByRole('button', { name: t.change }).click(),
+  },
+);
+
+it.each(['ok', 'escape'] as const)(
+  'dismissing the unchanged sharing (%s) retires it, and a reload of the list does not reopen it (#227)',
+  async (how) => {
+    const { runtime } = await returning('again', 'error=access_denied');
+    let app!: ReturnType<typeof useApp>;
+    let state!: ReturnType<typeof useAppState>;
+    function Probe() {
+      app = useApp();
+      state = useAppState();
+      return null;
+    }
+    render(
+      <SempodsProvider runtime={runtime} language="en">
+        <AppAccess appName="Shopping" />
+        <Probe />
+        <TargetScreen>
+          <p>My list</p>
+        </TargetScreen>
+      </SempodsProvider>,
     );
+    const prompt = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(
+        '[data-sempods-ui="prompt"][data-reason="sharing-unchanged"]',
+      );
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    const ok = within(prompt).getByRole('button', { name: 'OK' });
+    if (how === 'ok') await act(async () => ok.click());
+    else
+      await act(async () => {
+        ok.focus();
+        fireEvent.keyDown(ok, { key: 'Escape' });
+      });
     await waitFor(() =>
-      expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+      expect(document.querySelector('[data-sempods-ui="prompt"]')).toBeNull(),
     );
+    expect(state.callbackNotice).toBe(false);
+    // Reading the list (the catalogue) again does not bring it back.
+    await act(async () => {
+      await app.refreshContexts(state.activeId!);
+    });
+    expect(document.querySelector('[data-sempods-ui="prompt"]')).toBeNull();
+    expect(state.access.prompts).toEqual([]);
   },
 );
 
@@ -194,187 +234,3 @@ it.each(['en', 'de'] as const)(
     expect(document.body.textContent).not.toContain('You are not signed in');
   },
 );
-
-it('keeps Change sharing and shows the failure when preparing it again fails', async () => {
-  const t = text.en;
-  const { f, runtime } = await returning('again', 'error=access_denied');
-  show(runtime, 'en');
-  const region = await screen.findByRole('region', { name: t.region });
-  await waitFor(() =>
-    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
-  );
-  await screen.findByText('My list');
-  const change = () => within(region).getByRole('button', { name: t.change });
-  const navigations = f.navigate.mock.calls.length;
-  // Discovery for the new attempt fails, as when offline.
-  const original = f.fetch.getMockImplementation()!;
-  f.fetch.mockImplementation(async (url, init) => {
-    if (url.includes('/.well-known/')) throw new TypeError('offline');
-    return original(url, init);
-  });
-  await act(async () => change().click());
-  await waitFor(() => expect(within(region).getByRole('alert')).toBeTruthy());
-  expect(region.hidden).toBe(false);
-  expect(f.navigate).toHaveBeenCalledTimes(navigations);
-  f.fetch.mockImplementation(original);
-  // The session still works; the same one action tries again.
-  await act(async () =>
-    within(region).getByRole('button', { name: t.change }).click(),
-  );
-  await waitFor(() =>
-    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
-  );
-});
-
-it('keeps the failed retry and its action when the leave prompt is declined', async () => {
-  const t = text.en;
-  const { f, runtime } = await returning('again', 'error=access_denied');
-  function Draft() {
-    const [draft, setDraft] = useState('');
-    useDraftGuard(draft !== '', () => setDraft(''));
-    return (
-      <input
-        aria-label="Draft"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-      />
-    );
-  }
-  render(
-    <SempodsProvider runtime={runtime} language="en">
-      <AppAccess appName="Shopping" />
-      <TargetScreen>
-        <Draft />
-      </TargetScreen>
-    </SempodsProvider>,
-  );
-  const region = await screen.findByRole('region', { name: t.region });
-  await waitFor(() =>
-    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
-  );
-  const change = () => within(region).getByRole('button', { name: t.change });
-  const original = f.fetch.getMockImplementation()!;
-  f.fetch.mockImplementation(async (url, init) => {
-    if (url.includes('/.well-known/')) throw new TypeError('offline');
-    return original(url, init);
-  });
-  await act(async () => change().click());
-  await waitFor(() => expect(within(region).getByRole('alert')).toBeTruthy());
-  f.fetch.mockImplementation(original);
-  const draft = await screen.findByLabelText('Draft');
-  fireEvent.change(draft, { target: { value: 'Unsaved' } });
-  const navigations = f.navigate.mock.calls.length;
-  await act(async () => change().click());
-  await act(async () =>
-    screen.getByRole('button', { name: 'Keep editing' }).click(),
-  );
-  // Nothing happened: the failure and the one action are still offered.
-  expect(region.hidden).toBe(false);
-  expect(within(region).getByRole('alert')).toBeTruthy();
-  expect(change()).toBeTruthy();
-  expect(f.navigate).toHaveBeenCalledTimes(navigations);
-  expect((draft as HTMLInputElement).value).toBe('Unsaved');
-});
-
-it('keeps Change sharing when preparation fails after the leave prompt was confirmed', async () => {
-  const t = text.en;
-  const { f, runtime } = await returning('again', 'error=access_denied');
-  function Draft() {
-    const [draft, setDraft] = useState('');
-    useDraftGuard(draft !== '', () => setDraft(''));
-    return (
-      <input
-        aria-label="Draft"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-      />
-    );
-  }
-  render(
-    <SempodsProvider runtime={runtime} language="en">
-      <AppAccess appName="Shopping" />
-      <TargetScreen>
-        <Draft />
-      </TargetScreen>
-    </SempodsProvider>,
-  );
-  const region = await screen.findByRole('region', { name: t.region });
-  await waitFor(() =>
-    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
-  );
-  const change = () => within(region).getByRole('button', { name: t.change });
-  fireEvent.change(await screen.findByLabelText('Draft'), {
-    target: { value: 'Unsaved' },
-  });
-  const original = f.fetch.getMockImplementation()!;
-  f.fetch.mockImplementation(async (url, init) => {
-    if (url.includes('/.well-known/')) throw new TypeError('offline');
-    return original(url, init);
-  });
-  const navigations = f.navigate.mock.calls.length;
-  await act(async () => change().click());
-  await act(async () =>
-    screen.getByRole('button', { name: 'Discard and continue' }).click(),
-  );
-  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
-  expect(f.navigate).toHaveBeenCalledTimes(navigations);
-  expect(region.hidden).toBe(false);
-  // The draft was kept, as nothing left: the retry asks again.
-  expect((screen.getByLabelText('Draft') as HTMLInputElement).value).toBe(
-    'Unsaved',
-  );
-  f.fetch.mockImplementation(original);
-  await act(async () => change().click());
-  await act(async () =>
-    screen.getByRole('button', { name: 'Discard and continue' }).click(),
-  );
-  await waitFor(() =>
-    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
-  );
-});
-
-it('drops the offer and its failure once another connection was active', async () => {
-  const t = text.en;
-  const { f, runtime } = await returning('again', 'error=access_denied');
-  let app!: ReturnType<typeof useApp>;
-  let activeId: string | null = null;
-  function Probe() {
-    app = useApp();
-    activeId = useAppState().activeId;
-    return null;
-  }
-  render(
-    <SempodsProvider runtime={runtime} language="en">
-      <AppAccess appName="Shopping" />
-      <Probe />
-      <TargetScreen>
-        <p>My list</p>
-      </TargetScreen>
-    </SempodsProvider>,
-  );
-  const region = await screen.findByRole('region', { name: t.region });
-  await waitFor(() =>
-    expect(within(region).getByRole('status').textContent).toBe(t.unchanged),
-  );
-  const original = f.fetch.getMockImplementation()!;
-  f.fetch.mockImplementation(async (url, init) => {
-    if (url.includes('/.well-known/')) throw new TypeError('offline');
-    return original(url, init);
-  });
-  await act(async () =>
-    within(region).getByRole('button', { name: t.change }).click(),
-  );
-  await waitFor(() => expect(within(region).getByRole('alert')).toBeTruthy());
-  f.fetch.mockImplementation(original);
-  const first = activeId!;
-  const other = await act(() => runtime.connect('https://pod.example/bob'));
-  await act(async () => {
-    await app.selectConnection(other.id);
-  });
-  await act(async () => {
-    await app.selectConnection(first);
-  });
-  await waitFor(() => expect(region.hidden).toBe(true));
-  expect(within(region).queryByRole('button', { name: t.change })).toBeNull();
-  expect(within(region).queryByRole('alert')).toBeNull();
-});

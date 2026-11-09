@@ -11,6 +11,7 @@ import {
 } from 'react';
 import {
   useApp,
+  useAppFacts,
   useAppState,
   useContextDemand,
   useContextDiscovery,
@@ -19,6 +20,8 @@ import {
   useWorkflowAccess,
   type AppActions,
 } from './app.js';
+import type { AppSnapshot } from '../authoring/app.js';
+import type { AccessPrompt as AccessPromptFact } from '../authoring/access.js';
 import { useSdkLocale } from './locale.js';
 import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { layered, SdkStyles } from './styles.js';
@@ -30,6 +33,13 @@ import {
   presentAccess,
   type ConnectionBody,
 } from './access-presentation.js';
+import {
+  AccessPrompts,
+  PromptActions,
+  usePromptText,
+} from './access-prompts.js';
+import { useFirst } from './first.js';
+import { useFocusHold } from './focus.js';
 
 /** What a replacement for the connection view (`components.Connections`) receives. */
 export interface ConnectionsProps {
@@ -66,10 +76,15 @@ export interface AppAccessProps {
   /**
    * Shows management (`open`) as a modal dialog with a title and a close
    * button; Escape, the close button and a click beside it call this, which
-   * should set `open` to false. Sign-in and recovery stay inline. Without it,
-   * management renders in place.
+   * should set `open` to false. Without it, management renders in place.
    */
   readonly onClose?: () => void;
+  /**
+   * `management`: render only management (while `open`), for an app that
+   * composes `AccessGate`, `ContextAccess` and `AccessPrompts` itself. No
+   * gate, Context surface or prompts then come from here.
+   */
+  readonly only?: 'management';
   /**
    * Return focus here once the focused access surface hides and its guarded
    * transition ends. Visible retry or error feedback does not trigger this.
@@ -81,6 +96,36 @@ export interface AppAccessProps {
   readonly className?: string;
   readonly style?: CSSProperties;
 }
+/** What `AccessGate` receives: the sign-in screen's own options of `AppAccess`. */
+export type AccessGateProps = Pick<
+  AppAccessProps,
+  | 'appName'
+  | 'mode'
+  | 'icon'
+  | 'description'
+  | 'podNames'
+  | 'podAddress'
+  | 'focusTarget'
+  | 'className'
+  | 'style'
+>;
+/** What `ContextAccess` receives: the Context surface's options of `AppAccess`. */
+export type ContextAccessProps = Partial<
+  Pick<
+    AppAccessProps,
+    | 'appName'
+    | 'headingLevel'
+    | 'mode'
+    | 'icon'
+    | 'description'
+    | 'podNames'
+    | 'podAddress'
+    | 'focusTarget'
+    | 'components'
+    | 'className'
+    | 'style'
+  >
+>;
 const unavailablePod = Object.freeze({
   current: false,
   read: false,
@@ -89,24 +134,93 @@ const unavailablePod = Object.freeze({
 const noSubscription = () => () => {};
 
 /**
- * Centered login/recovery UI beside, never around, app content. Uses the host's
- * existing runtime facts/actions; hides when a target is readable unless open.
- * With `contextSelection: 'on-demand'` it hides while the Pod reader is usable and
- * offers Context selection only once a Context flow (`TargetScreen`) asks;
- * management (`open`) lists the connected Pod's Contexts and their access first.
- * While the active connection restores, its Pod reader is not yet readable, or
- * its first demanded Context catalogue loads, it shows the loading status (plus
- * the active-Pod selector for several saved connections and the sign-in for
- * another configured Pod) until something needs a decision. Nothing there
- * cancels a load that never settles; `open` still reaches every action.
- * Read-only targets remain usable. Callback failures remain visible separately
- * until the person selects another connection, disconnects one or signs in again.
- * Keep this outside hidden/inert widget regions and keep TargetScreen/editor
- * children mounted during same-target access loss; this is not a content gate.
- * Inline, scoped defaults use shared --sempods-* CSS variables; no stylesheet
- * import or UI framework is required. A CSP must permit this component's styles.
+ * The default access UI: `AccessGate` (the sign-in screen while the app
+ * cannot work), `ContextAccess` (Context selection and catalogue recovery),
+ * `AccessPrompts` (dialogs and toasts at the bottom of the viewport) and,
+ * while `open`, management of Pods and sharing. With `only="management"` it
+ * renders management alone, for an app that places the other parts itself.
+ * Keep it outside hidden/inert widget regions and keep TargetScreen/editor
+ * children mounted during same-target access loss: the gate covers them as a
+ * modal layer, they stay mounted. Inline, scoped defaults use shared
+ * --sempods-* CSS variables; no stylesheet import or UI framework is
+ * required. A CSP must permit this component's styles.
  */
 export function AppAccess({
+  only,
+  open = false,
+  onClose,
+  ...props
+}: AppAccessProps) {
+  const asDialog = open && Boolean(onClose);
+  // Management in place would sit behind the gate; the dialog opens above it.
+  const blocked = useAppFacts(selectBlocking) !== null;
+  const management = !open ? null : asDialog ? (
+    <Management {...props} onClose={onClose!} />
+  ) : blocked ? null : (
+    <AccessSection {...props} manage />
+  );
+  if (only === 'management') return management;
+  return (
+    <>
+      <Gate {...props} />
+      {/* Management in place already shows the connection view. */}
+      {!(open && !asDialog) && <AccessSection {...props} manage={false} />}
+      <AccessPrompts focusTarget={props.focusTarget} />
+      {management}
+    </>
+  );
+}
+
+/**
+ * Context selection and catalogue recovery, outside access prompts. It shows
+ * while the active connection is usable and a flow demands a Context: a
+ * selection (`TargetScreen`, the `required` mode) with the chooser, the first
+ * load, an empty or unreadable catalogue, a failed one with retry and an
+ * unavailable preset Context; or only discovery (an explicit target such as
+ * `useContextEditor`) with the catalogue status and retry, without a chooser.
+ * It renders nothing otherwise. Part of `AppAccess`.
+ */
+export function ContextAccess(props: ContextAccessProps) {
+  return <AccessSection {...props} manage={false} />;
+}
+
+function Management({
+  onClose,
+  focusTarget,
+  ...props
+}: Omit<AppAccessProps, 'open' | 'only' | 'onClose'> & {
+  readonly onClose: () => void;
+}) {
+  const { messages: m } = useSdkLocale();
+  const app = useApp();
+  const activeId = useAppFacts((s) => {
+    const c = s.connections.find((entry) => entry.id === s.activeId);
+    return c?.session.kind === 'active' || c?.session.kind === 'renewing'
+      ? c.id
+      : null;
+  });
+  // Opening the management dialog checks the access again, so it needs no
+  // separate button.
+  const refreshContexts = app.refreshContexts;
+  useLayoutEffect(() => {
+    if (activeId) void refreshContexts(activeId).catch(() => {});
+  }, [activeId, refreshContexts]);
+  return (
+    <ManagementDialog
+      title={m.controls.dataAccess}
+      onClose={onClose}
+      {...(focusTarget ? { returnFocus: focusTarget } : {})}
+    >
+      <AccessSection {...props} manage asDialog />
+    </ManagementDialog>
+  );
+}
+
+/**
+ * The connection view: Context flows inline (`manage` false) or management.
+ * Session problems belong to the gate and the prompts.
+ */
+function AccessSection({
   appName,
   headingLevel,
   mode = 'multiple',
@@ -114,19 +228,22 @@ export function AppAccess({
   description,
   podNames,
   podAddress = 'visible',
-  open = false,
-  onClose,
+  manage,
+  asDialog = false,
   focusTarget,
   components,
   className,
   style,
-}: AppAccessProps) {
+}: ContextAccessProps & {
+  readonly manage: boolean;
+  readonly asDialog?: boolean;
+}) {
   const state = useAppState();
   const access = useWorkflowAccess();
   // Management lists the Contexts (discovery); only a Context flow, or the
   // required mode, asks for a selected one.
   const contextRequired = useContextDemand(false);
-  useContextDiscovery(open);
+  useContextDiscovery(manage);
   // An explicit target (useContextEditor) needs the catalogue, not a selection.
   const discoveryDemand = useDiscoveryDemand();
   const switching = useSwitchDemand();
@@ -136,41 +253,8 @@ export function AppAccess({
     state.pod?.getSnapshot ?? (() => unavailablePod),
     state.pod?.getSnapshot ?? (() => unavailablePod),
   );
-  const { messages: m, direction, error } = useSdkLocale();
-  const heldFocus = useRef(false);
-  // A declined re-authorization kept this active connection's session. Its
-  // one next step stays offered until an attempt actually leaves for the
-  // Pod: starting one clears the callback notice, and a declined leave prompt,
-  // a blocking write or a failed preparation (direct or after the prompt)
-  // keeps the session usable.
-  const [offered, setOffered] = useState<string | null>(null);
-  const [retryFailure, setRetryFailure] = useState<{
-    readonly id: string;
-    readonly cause: unknown;
-  } | null>(null);
-  const kept = access.connection;
-  const keptActive =
-    kept?.session.kind === 'active' || kept?.session.kind === 'renewing';
-  const noticed =
-    keptActive &&
-    state.callbackNotice &&
-    state.startup?.resumed &&
-    state.startup.attemptConnectionId === kept.id
-      ? kept.id
-      : null;
-  if (noticed && offered !== noticed) setOffered(noticed);
-  // Leaving, losing the session or another active connection ends the offer
-  // and its failure: returning to the connection does not bring them back.
-  if (offered && (kept?.id !== offered || !keptActive)) setOffered(null);
-  if (retryFailure && (kept?.id !== retryFailure.id || !keptActive))
-    setRetryFailure(null);
-  const retry = noticed ?? (keptActive && offered === kept.id ? kept.id : null);
-  const failedRetry = retry && retryFailure?.id === retry ? retryFailure : null;
-  // The active connection is still being validated (restoring, signed in while
-  // its Pod reader is not yet readable, or loading its first demanded Context
-  // catalogue) and nothing awaits a decision: show the loading status, not the
-  // connection view, until it settles. Once a catalogue has settled, a reload
-  // (Check access, revalidation) keeps the connection view and its focus.
+  const { messages: m, direction } = useSdkLocale();
+  const { held: heldFocus, onFocusCapture, onBlurCapture } = useFocusHold();
   const c = access.connection;
   // Scoped to this provider's controller: a replacement runtime restoring the
   // same connection ID loads its first catalogue again.
@@ -202,21 +286,12 @@ export function AppAccess({
       : discoveryDemand
         ? 'discovery'
         : 'none',
-    manage: open,
+    manage,
     catalogueSettled,
-    retry: Boolean(retry),
     ...(headingLevel === undefined ? {} : { headingLevel }),
   });
   const { body, notice, heading: Heading, namesApp } = presentation;
   const hidden = !presentation.visible;
-  const asDialog = open && Boolean(onClose);
-  // Opening the management dialog checks the access again, so it needs no
-  // separate button.
-  const activeId = keptActive ? kept.id : null;
-  const refreshContexts = app.refreshContexts;
-  useLayoutEffect(() => {
-    if (asDialog && activeId) void refreshContexts(activeId).catch(() => {});
-  }, [asDialog, activeId, refreshContexts]);
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
     // focus only after that transition and once access feedback has hidden.
@@ -229,25 +304,15 @@ export function AppAccess({
       heldFocus.current = false;
       focusTarget?.current?.focus();
     }
-  }, [hidden, focusTarget, state.changing, state.confirmingLeave]);
+  }, [hidden, focusTarget, heldFocus, state.changing, state.confirmingLeave]);
   const Connections = components?.Connections;
-  const section = (
+  return (
     <section
-      onFocusCapture={() => {
-        heldFocus.current = true;
-      }}
-      onBlurCapture={(event) => {
-        if (
-          event.relatedTarget &&
-          event.relatedTarget !== event.currentTarget.ownerDocument.body &&
-          !event.currentTarget.contains(event.relatedTarget)
-        )
-          heldFocus.current = false;
-      }}
+      onFocusCapture={onFocusCapture}
+      onBlurCapture={onBlurCapture}
       hidden={hidden}
       data-sempods-access=""
       data-sempods-ui="access"
-      data-initial={presentation.initial ? '' : undefined}
       aria-label={m.controls.dataAccess}
       dir={direction}
       className={className}
@@ -257,104 +322,204 @@ export function AppAccess({
       <style href="sempods-access" precedence="sempods">
         {layered(styles)}
       </style>
-      <div className="sp-access-content">
-        {(presentation.attention || open) && !asDialog && (
+      {!hidden && (
+        <div className="sp-access-content">
+          {!asDialog && (
+            <header>
+              {icon && namesApp && appName && (
+                <div className="sp-access-icon" aria-hidden="true">
+                  {icon}
+                </div>
+              )}
+              <Heading>
+                {namesApp && appName ? appName : m.controls.dataAccess}
+              </Heading>
+              {namesApp && appName && description && (
+                <p className="sp-access-description">{description}</p>
+              )}
+            </header>
+          )}
+          {Connections ? (
+            body === 'leaving' ? (
+              <p role="status">{m.controls.leaving ?? m.controls.loading}</p>
+            ) : body === 'loading' ? (
+              <p role="status">{m.controls.loading}</p>
+            ) : (
+              <Connections mode={mode} {...(podNames ? { podNames } : {})} />
+            )
+          ) : (
+            <AccessConnections
+              contextRequired={contextRequired}
+              switching={switching}
+              // The dialog checks the access again on opening instead.
+              discovery={discovery && !asDialog}
+              manage={manage}
+              mode={mode}
+              body={body}
+              podAddress={podAddress}
+              {...(podNames ? { podNames } : {})}
+            />
+          )}
+          {notice && <AccessNotice />}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const selectBlocking = (s: AppSnapshot) => s.access.blocking;
+/** The custom properties of a style, such as `--sempods-*` tokens. */
+function tokensOf(style: CSSProperties | undefined) {
+  if (!style) return undefined;
+  const tokens = Object.fromEntries(
+    Object.entries(style).filter(([name]) => name.startsWith('--')),
+  );
+  return Object.keys(tokens).length ? (tokens as CSSProperties) : undefined;
+}
+/** The gate's reasons that sign in: they show the connection view. */
+const signInReasons = new Set<AccessPromptFact['reason']>([
+  'no-connection',
+  'signed-out',
+  'missing-scopes',
+]);
+
+/**
+ * The sign-in screen while the app cannot work (`access.blocking`): a
+ * full-viewport modal layer above the app, whose content stays mounted and
+ * inert, so drafts stay in memory. It does not close on Escape and offers no
+ * way back to the content until the cause ends. For `no-connection`,
+ * `signed-out` and `missing-scopes` it shows the sign-in view: remembered
+ * Pods, the other connections and, without a connection, the address input
+ * (keeping `allowedPods`). Every other reason shows its own actions only.
+ * `className` and `style` apply to its access surface as in `AppAccess`;
+ * custom properties such as `--sempods-*` tokens also cover the whole layer.
+ */
+export function AccessGate(props: AccessGateProps) {
+  return <Gate {...props} />;
+}
+
+function Gate(
+  props: Omit<AppAccessProps, 'open' | 'onClose' | 'only'> &
+    Partial<Pick<AppAccessProps, 'appName'>>,
+) {
+  const blocking = useAppFacts(selectBlocking);
+  // One gate per provider, also with several AppAccess instances.
+  const first = useFirst('gate');
+  return blocking && first ? (
+    <GateDialog {...props} blocking={blocking} />
+  ) : null;
+}
+
+function GateDialog({
+  appName,
+  mode = 'multiple',
+  icon,
+  description,
+  podNames,
+  podAddress = 'visible',
+  focusTarget,
+  components,
+  className,
+  style,
+  blocking,
+}: Omit<AppAccessProps, 'open' | 'onClose' | 'only' | 'appName'> & {
+  readonly appName?: string;
+  readonly blocking: AccessPromptFact;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const label = useId();
+  const { messages: m, direction } = useSdkLocale();
+  useModalDialog(dialog, true, focusTarget);
+  useLayoutEffect(() => {
+    // A gate that opens after management or a leave confirmation must not
+    // cover them: the top layer stacks by opening order, so raise them again.
+    const above =
+      dialog.current?.ownerDocument.querySelectorAll<HTMLDialogElement>(
+        'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]',
+      );
+    for (const element of above ?? []) {
+      if (typeof element.showModal !== 'function') continue;
+      const focused = element.contains(element.ownerDocument.activeElement)
+        ? (element.ownerDocument.activeElement as HTMLElement)
+        : null;
+      element.close();
+      element.showModal();
+      focused?.focus();
+    }
+  }, []);
+  const text = usePromptText(blocking);
+  const signIn = signInReasons.has(blocking.reason);
+  const startup =
+    blocking.reason === 'startup-failed' ||
+    blocking.reason === 'other-tab' ||
+    blocking.reason === 'storage';
+  const Connections = components?.Connections;
+  return (
+    <dialog
+      ref={dialog}
+      aria-labelledby={label}
+      data-sempods-ui="gate"
+      data-reason={blocking.reason}
+      className="sp-access-gate"
+      dir={direction}
+      // Custom properties (--sempods-* tokens) also cover the whole layer.
+      style={tokensOf(style)}
+      // The gate ends only with its cause.
+      onCancel={(event) => event.preventDefault()}
+    >
+      <SdkStyles />
+      <style href="sempods-access" precedence="sempods">
+        {layered(styles)}
+      </style>
+      <section
+        data-sempods-access=""
+        data-sempods-ui="access"
+        aria-label={m.controls.dataAccess}
+        className={className}
+        style={style}
+      >
+        <div className="sp-access-content">
           <header>
-            {icon && namesApp && (
+            {icon && (
               <div className="sp-access-icon" aria-hidden="true">
                 {icon}
               </div>
             )}
-            <Heading>{namesApp ? appName : m.controls.dataAccess}</Heading>
-            {namesApp && description && (
+            <h1 id={label}>{appName ?? m.controls.dataAccess}</h1>
+            {description && (
               <p className="sp-access-description">{description}</p>
             )}
           </header>
-        )}
-        {body === 'startup-error' ? (
-          <p role="alert">{error(state.startupError)}</p>
-        ) : body === 'starting' ? (
-          <p role="status">{m.controls.loading}</p>
-        ) : body === 'busy' ? (
-          <p role="alert">{m.controls.busy}</p>
-        ) : body === 'unavailable' ? (
-          <p role="alert">{m.controls.storage}</p>
-        ) : (
-          <>
-            <CallbackNotice />
-            {body === 'retry' && retry && (
-              // The one next step after an unchanged re-authorization: the
-              // connection view (and its actions) is not shown here.
-              <div className="sp-access-actions">
-                <button
-                  className="sp-access-primary"
-                  disabled={state.changing || state.confirmingLeave}
-                  onClick={() => {
-                    // A failure stays until an attempt proceeds: a declined
-                    // leave prompt or a blocking write resolves false.
-                    void app.authorize(retry).then(
-                      (started) => {
-                        if (started) setRetryFailure(null);
-                      },
-                      (cause: unknown) => setRetryFailure({ id: retry, cause }),
-                    );
-                  }}
-                >
-                  {m.controls.updateAccess}
-                </button>
-              </div>
-            )}
-            {body === 'retry' && failedRetry && (
-              <p role="alert">{error(failedRetry.cause)}</p>
-            )}
-            {(body === 'leaving' ||
-              body === 'loading' ||
-              body === 'connections') && (
-              <>
-                {Connections ? (
-                  body === 'leaving' ? (
-                    <p role="status">
-                      {m.controls.leaving ?? m.controls.loading}
-                    </p>
-                  ) : body === 'loading' ? (
-                    <p role="status">{m.controls.loading}</p>
-                  ) : (
-                    <Connections
-                      mode={mode}
-                      {...(podNames ? { podNames } : {})}
-                    />
-                  )
-                ) : (
-                  <AccessConnections
-                    contextRequired={contextRequired}
-                    switching={switching}
-                    // The dialog checks the access again on opening instead.
-                    discovery={discovery && !asDialog}
-                    manage={open}
-                    mode={mode}
-                    body={body}
-                    podAddress={podAddress}
-                    {...(podNames ? { podNames } : {})}
-                  />
-                )}
-                {notice && <AccessNotice />}
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </section>
-  );
-  return asDialog ? (
-    <ManagementDialog
-      title={m.controls.dataAccess}
-      onClose={onClose!}
-      {...(focusTarget ? { returnFocus: focusTarget } : {})}
-    >
-      {section}
-    </ManagementDialog>
-  ) : (
-    section
+          {!startup && <CallbackNotice />}
+          {signIn ? (
+            <>
+              {blocking.reason === 'missing-scopes' && text && (
+                <p role="status">{text}</p>
+              )}
+              {Connections ? (
+                <Connections mode={mode} {...(podNames ? { podNames } : {})} />
+              ) : (
+                <AccessConnections
+                  contextRequired={false}
+                  switching={false}
+                  discovery={false}
+                  manage={false}
+                  mode={mode}
+                  body="connections"
+                  podAddress={podAddress}
+                  {...(podNames ? { podNames } : {})}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              {text && <p role="alert">{text}</p>}
+              <PromptActions prompt={blocking} />
+            </>
+          )}
+        </div>
+      </section>
+    </dialog>
   );
 }
 
@@ -724,12 +889,14 @@ function AccessConnections({
             </>
           )}
           {(manage || c.session.kind === 'ended') && (
+            // After a failed sign-out it is the main action: repeat it.
             <button
+              className={disconnectFailed ? 'sp-access-primary' : undefined}
               disabled={unavailable}
               aria-describedby={disconnectHint ? disconnectId : undefined}
               onClick={() => void act(() => app.disconnect(c.id))}
             >
-              {m.controls.disconnect}
+              {disconnectFailed ? m.controls.retry : m.controls.disconnect}
             </button>
           )}
         </div>
@@ -863,7 +1030,9 @@ function AccessConnections({
             !shownByNotice && (
               <p role="status">{endedMessage(c.session, m, true)}</p>
             )}
-          {c.session.kind === 'ended' && c.session.restorable ? (
+          {/* After a failed sign-out, the sign-out button repeats it. */}
+          {disconnectFailed ? null : c.session.kind === 'ended' &&
+            c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button
               className="sp-access-primary"
@@ -990,7 +1159,6 @@ function AccessConnections({
 const styles = `
 [data-sempods-access] { padding:clamp(16px,4vw,32px); text-align:center; }
 [data-sempods-access][hidden] { display:none; }
-[data-sempods-access][data-initial]:not([hidden]) { min-block-size:32rem; display:grid; align-items:center; }
 [data-sempods-access] * { box-sizing:border-box; }
 [data-sempods-access] .sp-access-content { width:100%; max-width:22rem; margin-inline:auto; }
 [data-sempods-access] header { margin:0 0 28px; }
@@ -1026,6 +1194,10 @@ const styles = `
 [data-sempods-access] details { margin-top:16px; overflow-wrap:anywhere; }
 [data-sempods-access] [data-sempods-ui="notice"][role=alert] { border-width:1px; border-style:solid; border-color:var(--sp-line); border-radius:calc(var(--sp-radius) * .625); padding:10px 12px; }
 [data-sempods-access] summary { min-height:44px; padding:10px; cursor:pointer; }
+/* The gate covers the viewport above the app, which stays mounted behind it. */
+.sp-access-gate { position:fixed; inset:0; width:100%; height:100%; max-width:none; max-height:none; margin:0; padding:0; border:0; background:var(--sp-bg); color:var(--sp-text); overflow:auto; }
+.sp-access-gate[open] { display:grid; align-items:center; }
+.sp-access-gate::backdrop { background:var(--sp-bg); }
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
 .sp-access-dialog-header h2 { flex:1; margin:0; }

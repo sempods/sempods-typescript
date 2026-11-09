@@ -162,6 +162,18 @@ try {
     verbatimModuleSyntax: true,
   };
   await cp(join(root, 'tests/consumers/node.mts'), join(plain, 'node.mts'));
+  // The shipped React-free RDF value recipe runs from the installed package.
+  await cp(
+    join(
+      plain,
+      'node_modules/@sempods/app-sdk/examples/todo/recipes/rdf-values.ts',
+    ),
+    join(plain, 'rdf-values.ts'),
+  );
+  await cp(
+    join(root, 'tests/consumers/rdf-values.mts'),
+    join(plain, 'rdf-values.mts'),
+  );
   await json(join(plain, 'tsconfig.node.json'), {
     compilerOptions: {
       ...strict,
@@ -171,7 +183,7 @@ try {
       types: ['node'],
       outDir: 'out',
     },
-    files: ['node.mts'],
+    files: ['node.mts', 'rdf-values.mts'],
   });
   run(
     process.execPath,
@@ -179,6 +191,7 @@ try {
     plain,
   );
   run(process.execPath, ['out/node.mjs'], plain);
+  run(process.execPath, ['out/rdf-values.mjs'], plain);
 
   // Sparse SELECT bindings must remain optional for consumers that turn off
   // noUncheckedIndexedAccess. Compile every portable README recipe verbatim too.
@@ -602,6 +615,7 @@ try {
   await page.getByText('Zugriff prüfen', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('draft').inputValue(), 'Unfinished');
   assert.equal(await page.locator('output').innerText(), '1.234,5');
+  assert.equal(await page.locator('#rdf-values code').innerText(), '"a  b"');
   // The quickstart app starts and offers its first step.
   await page.goto(`${origin}/quickstart`);
   await page.getByText('My tasks', { exact: true }).waitFor();
@@ -636,7 +650,7 @@ try {
   await page.getByText('My tasks', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    'Packed DOM-only browser discovery, the edit entry, React provider/draft preservation, the verbatim quickstart and PWA entry-only registration passed in Chromium.',
+    'Packed DOM-only browser discovery, the edit entry, React provider/draft preservation, the exact RDF value form, the verbatim quickstart and PWA entry-only registration passed in Chromium.',
   );
 } finally {
   await browser?.close();
