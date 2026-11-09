@@ -129,6 +129,11 @@ seconds, the sempods server's default).
   in `ScreenDialog`, cancelling a question above it keeps the dialog and the
   draft. An app's own `shouldCloseOnInteractOutside` still applies; a filter
   that only ignored `dialog:modal` can go.
+- **`DateChooser` shows a value that names no real day as stored** (#262).
+  `2026-02-30` used to read as 2 March and `2026-04-31` as 1 May; a date-time
+  without a time zone (`2026-10-30T09:30:00`) was read in the device's zone.
+  The button now shows these values unchanged. Days and zoned date-times are
+  shown as before.
 
 - **`ScreenDialog` keeps clear of device insets on phones.** Full screen
   (below 640px), its heading and scrolling content add

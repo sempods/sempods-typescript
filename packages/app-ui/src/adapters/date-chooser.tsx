@@ -55,14 +55,17 @@ export function DateChooser({
   const day = calendarDay(value);
   const [picked, setPicked] = useState<CalendarDate | null>(day);
   const shown = value === null ? (labels?.none ?? t.noDate) : show(value);
+  // A value that names no real day, or a date-time without a zone, is shown
+  // as stored: `Date` would roll 30 February over to 2 March or read the
+  // time in the device's zone.
   function show(stored: string): string {
     try {
-      return day && !stored.includes('T')
-        ? format.dateOnly(day.toString())
-        : format.dateTime(stored);
+      if (day && !stored.includes('T')) return format.dateOnly(day.toString());
+      if (day && ZONED.test(stored)) return format.dateTime(stored);
     } catch {
-      return stored;
+      // The formatters reject a day or instant they cannot show.
     }
+    return stored;
   }
   const close = (next: string | null) => {
     onChange(next);
@@ -130,6 +133,9 @@ export function DateChooser({
     </div>
   );
 }
+
+/** A date-time that ends in a time zone (`Z` or an offset such as `+02:00`). */
+const ZONED = /T.*(?:Z|[+-]\d{2}:\d{2})$/;
 
 /** The calendar day a stored value names, or `null` when it names none. */
 export function calendarDay(value: string | null): CalendarDate | null {
