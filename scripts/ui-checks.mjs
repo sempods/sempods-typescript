@@ -938,13 +938,16 @@ async function interaction({ browser, origin, engine }) {
         listChecked,
       };
     },
-    // #232: the menu's focus styles follow React Aria's input modality. A
-    // hovered row gets the accent surface without a ring and turns neutral
-    // over the separator although it keeps the focus; a pointer dismissal
-    // leaves no ring on the button; keyboard focus draws one solid outline,
-    // inside the row in the menu and around the button after Escape.
+    // #232: the menu's focus styles follow React Aria's input modality, in
+    // light, dark and forced colors. A hovered row gets the accent surface
+    // without a ring and turns neutral over the separator although it keeps
+    // the focus; a pointer dismissal leaves no ring on the button; keyboard
+    // focus draws one solid outline, inside the row in the menu and around
+    // the button after Escape. Forced colors drop the surfaces: the focused
+    // row draws the inner outline, also for the pointer, and other rows none.
     async 'menu-focus-modality'() {
       const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      const view = page.getByRole('menuitem', { name: 'View' });
       const sharing = page.getByRole('menuitem', { name: 'Pods & sharing' });
       const paint = (locator) =>
         locator.evaluate((el) => {
@@ -967,7 +970,9 @@ async function interaction({ browser, origin, engine }) {
                 /((?:rgba?|oklch|oklab|color|lab|lch)\([^)]*\)|#[0-9a-f]+)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px/g,
               ),
             ].some(
-              (m) => parseFloat(m[5]) > 0 && !/(,\s*0|\/\s*0)\)$/.test(m[1]),
+              (m) =>
+                parseFloat(m[5]) > 0 &&
+                !/^rgba\(.*,\s*0\)$|\/\s*0\)$/.test(m[1]),
             ),
             filled: !/^(rgba\(\d+, \d+, \d+, 0\)|transparent)$/.test(
               s.backgroundColor,
@@ -980,53 +985,88 @@ async function interaction({ browser, origin, engine }) {
                 box.bottom + grow <= scroller.bottom + 0.5),
           };
         });
-      await menu.click();
-      await sharing.waitFor();
-      const row = await sharing.boundingBox();
-      const x = row.x + row.width / 2;
-      await page.mouse.move(x, row.y + row.height / 2, { steps: 5 });
-      await settle(page);
-      const hovered = await paint(sharing);
-      const separator = await page
-        .locator('[data-slot=dropdown-menu-separator]')
-        .boundingBox();
-      await page.mouse.move(x, separator.y + separator.height / 2, {
-        steps: 8,
-      });
-      await settle(page);
-      const overSeparator = await paint(sharing);
-      await page.mouse.click(8, 400);
-      await hidden(page.getByRole('menu'));
-      await settle(page);
-      const afterPointer = await paint(menu);
-      await page.keyboard.press('Enter');
-      await page.getByRole('menuitem', { name: 'View' }).waitFor();
-      await settle(page);
-      const keyboardRow = await paint(page.locator('[role=menuitem]:focus'));
-      await page.keyboard.press('Escape');
-      await hidden(page.getByRole('menu'));
-      await settle(page);
-      const afterEscape = await paint(menu);
-      return {
-        pass:
-          hovered.filled &&
-          hovered.outline === 'none' &&
-          overSeparator.outline === 'none' &&
-          !overSeparator.filled &&
+      const inner = '2px solid -2px';
+      const modes = {};
+      for (const [mode, media] of Object.entries({
+        light: { colorScheme: 'light', forcedColors: 'none' },
+        dark: { colorScheme: 'dark', forcedColors: 'none' },
+        forced: { colorScheme: 'light', forcedColors: 'active' },
+      })) {
+        await page.emulateMedia(media);
+        const forced = media.forcedColors === 'active';
+        await page.mouse.move(8, 400);
+        await menu.click();
+        await sharing.waitFor();
+        const row = await sharing.boundingBox();
+        const x = row.x + row.width / 2;
+        await page.mouse.move(x, row.y + row.height / 2, { steps: 5 });
+        await settle(page);
+        const hovered = await paint(sharing);
+        const separator = await page
+          .locator('[data-slot=dropdown-menu-separator]')
+          .boundingBox();
+        await page.mouse.move(x, separator.y + separator.height / 2, {
+          steps: 8,
+        });
+        await settle(page);
+        const overSeparator = await paint(sharing);
+        await page.mouse.click(8, 400);
+        await hidden(page.getByRole('menu'));
+        await settle(page);
+        const afterPointer = await paint(menu);
+        // Enter focuses View (a submenu trigger), ArrowDown a plain row.
+        await page.keyboard.press('Enter');
+        await view.waitFor();
+        await settle(page);
+        const keyboardSubTrigger = await paint(view);
+        await page.keyboard.press('ArrowDown');
+        await settle(page);
+        const keyboardRow = await paint(sharing);
+        const otherRow = await paint(view);
+        await page.keyboard.press('Escape');
+        await hidden(page.getByRole('menu'));
+        await settle(page);
+        const afterEscape = await paint(menu);
+        const pass =
+          (forced
+            ? hovered.outline === inner &&
+              overSeparator.focused &&
+              overSeparator.outline === inner &&
+              otherRow.outline === 'none'
+            : hovered.filled &&
+              hovered.outline === 'none' &&
+              overSeparator.outline === 'none' &&
+              !overSeparator.filled &&
+              keyboardSubTrigger.filled &&
+              keyboardRow.filled &&
+              !otherRow.filled &&
+              otherRow.outline === 'none') &&
           afterPointer.focused &&
           afterPointer.outline === 'none' &&
           !afterPointer.ring &&
-          keyboardRow.outline === '2px solid -2px' &&
-          keyboardRow.filled &&
+          keyboardSubTrigger.outline === inner &&
+          keyboardSubTrigger.inside &&
+          keyboardRow.focused &&
+          keyboardRow.outline === inner &&
           keyboardRow.inside &&
           afterEscape.focused &&
           afterEscape.outline === '2px solid 2px' &&
-          !afterEscape.ring,
-        hovered,
-        overSeparator,
-        afterPointer,
-        keyboardRow,
-        afterEscape,
+          !afterEscape.ring;
+        modes[mode] = {
+          pass,
+          hovered,
+          overSeparator,
+          afterPointer,
+          keyboardSubTrigger,
+          keyboardRow,
+          otherRow,
+          afterEscape,
+        };
+      }
+      await page.emulateMedia({ colorScheme: null, forcedColors: null });
+      return {
+        pass: Object.values(modes).every((m) => m.pass),
+        ...modes,
       };
     },
     // Focus starts on the chosen day; arrows, PageDown, Enter and Apply.

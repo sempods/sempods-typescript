@@ -124,13 +124,14 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`
     kept until a day is applied;
   - keyboard use of the header menu and the calendar; menu focus styles by
-    input modality (a hovered row filled without a ring and neutral over the
-    separator, no ring on the button after a pointer dismissal, one solid
-    outline inside the row and around the button after Escape); 44px
-    calendar targets at 375 × 812 and 375 × 560 with Apply and Remove date visible as the chooser
-    opens, German texts and locale, removing an optional
-    date; filter chips by keyboard at 375px (one Tab stop, arrows, Space,
-    filled and marked when chosen, 44px, no overflow); the action group at
+    input modality in light, dark and forced colors (a hovered row filled
+    without a ring and neutral over the separator, no ring on the button
+    after a pointer dismissal, one solid outline inside the row and around
+    the button after Escape); 44px calendar targets at 375 × 812 and
+    375 × 560 with Apply and Remove date visible as the chooser opens,
+    German texts and locale, removing an optional date; filter chips by
+    keyboard at 375px (one Tab stop, arrows, Space, filled and marked when
+    chosen, 44px, no overflow); the action group at
     375 and 1280px; and, on a page taller than the screen with a scrollbar
     that takes width, the routed screen and the SDK's Pods & sharing sheet
     inside the visible width (#216). An engine without such a scrollbar
