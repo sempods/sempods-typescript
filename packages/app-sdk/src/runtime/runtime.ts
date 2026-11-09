@@ -660,18 +660,31 @@ export function createBrowserRuntime(
     try {
       if (resent || !withinGrace(sentAt)) throw new RuntimeError('interrupted');
       if (!pod) {
+        // The probe ends with the grace period, also for a fetch that ignores
+        // its signal: beyond it, nothing can be resent.
+        const grace = new AbortController();
+        const timer = setTimeout(
+          () => grace.abort(new RuntimeError('interrupted')),
+          Math.min(MAX_DELAY, Math.max(0, sentAt + gracePeriod - Date.now())),
+        );
+        const signal = combineSignals(e.lifetime.signal, grace.signal);
         try {
-          pod = await discoverPod(e.pod.podUrl, {
-            ...protocol,
-            signal: e.lifetime.signal,
-          });
+          pod = await waitFor(
+            discoverPod(e.pod.podUrl, { ...protocol, signal: signal.signal }),
+            signal.signal,
+          );
         } catch (error) {
+          if (grace.signal.aborted && !e.lifetime.signal.aborted)
+            throw new RuntimeError('interrupted');
           // An unreachable Pod spends nothing: wait within the grace period.
           if (eligible(e, generation) && transientBeforeClaim(error)) {
             wait();
             return;
           }
           throw error;
+        } finally {
+          clearTimeout(timer);
+          signal.dispose();
         }
       }
       current(e, generation);

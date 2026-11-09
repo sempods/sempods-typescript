@@ -575,6 +575,29 @@ it('leaves a sign-in started during the refresh alone when the cancelled request
   expect(await record(f)).toMatchObject({ kind: 'authorizing' });
 });
 
+it('ends as interrupted when the probe before the resend never settles', async () => {
+  const { f, runtime, id } = await signedIn({ refreshGracePeriod: 200 });
+  const original = f.fetch.getMockImplementation()!;
+  let probing = false;
+  f.fetch.mockImplementation(async (url, init) => {
+    // Never answers and ignores its signal; the grace period bounds it.
+    if (probing && url.includes('/.well-known/'))
+      return new Promise<Response>(() => {});
+    return original(url, init);
+  });
+  f.setToken(async () => {
+    probing = true;
+    return failed();
+  });
+  const read = refusedRead(f, runtime, id);
+  expect(await read).toEqual({ kind: 'invalidated' });
+  expect(session(runtime)).toMatchObject({
+    kind: 'ended',
+    problem: 'interrupted',
+  });
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
+});
+
 it('keeps a very long grace period restorable instead of ending at once', async () => {
   const { f, runtime, id } = await signedIn({ refreshGracePeriod: 1e12 });
   f.setToken(losing(1));
