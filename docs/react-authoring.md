@@ -1021,14 +1021,15 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
 ```
 
 - `<AccessPrompt>` renders one prompt's localized message and buttons,
-  unstyled and unpositioned; Escape dismisses a dismissible one. Its buttons
+  unstyled and unpositioned; Escape dismisses a dismissible one. When it goes
+  while it holds focus, focus returns to its `focusTarget` prop, otherwise to
+  where focus came from. Its buttons
   run the guarded actions and do nothing once the prompt is no longer current,
   also after a leave confirmation.
 - `<AccessPrompts />` is the default stack: a polite live region at the bottom
   of the viewport. Info prompts hide after about 6 seconds unless focused or
-  hovered, and hiding dismisses them, so they do not return. A prompt that goes
-  while it holds focus returns focus to its `focusTarget` prop (`AppAccess`
-  passes its own), otherwise to where focus came from.
+  hovered, and hiding dismisses them, so they do not return. It passes its
+  `focusTarget` prop on to each prompt (`AppAccess` passes its own).
 - Own buttons call the guarded actions directly: `sign-in` is
   `authorize(connectionId)`, or without a connection `connect()` for a preset or
   sole allowed Pod and otherwise `connect(url)` from an address field; `retry`

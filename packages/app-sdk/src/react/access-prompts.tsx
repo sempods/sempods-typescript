@@ -19,6 +19,7 @@ import { useSdkLocale } from './locale.js';
 import { podName } from './names.js';
 import { layered, SdkStyles } from './styles.js';
 import { useFirst } from './first.js';
+import { useCommitted } from './hooks.js';
 
 const selectAccess = (s: AppSnapshot) => s.access;
 
@@ -149,14 +150,33 @@ export function PromptActions({
  * One prompt: its localized message and action buttons, unstyled and
  * unpositioned, for the app's own toast, banner or dialog. A prompt about a
  * connection other than the active one names its Pod. Escape dismisses a
- * prompt that offers `dismiss`.
+ * prompt that offers `dismiss`. When it goes while it holds focus, focus
+ * returns to `focusTarget`, otherwise to where it came from.
  */
 export function AccessPrompt({
   prompt,
+  focusTarget,
 }: {
   readonly prompt: AccessPromptFact;
+  /** Focus after this prompt goes while focused, as `focusTarget` of `AppAccess`. */
+  readonly focusTarget?: RefObject<HTMLElement | null>;
 }) {
   const app = useController();
+  const element = useRef<HTMLDivElement>(null);
+  // Where focus came from. Focus elsewhere is never moved.
+  const previous = useRef<HTMLElement | null>(null);
+  const target = useCommitted(focusTarget);
+  useLayoutEffect(() => {
+    const item = element.current;
+    // Read at unmount: the committed focusTarget and where focus came from.
+    const returnTo = () => target.current?.current ?? previous.current;
+    return () => {
+      // Still attached here: the deletion removes the element afterwards.
+      if (!item?.contains(item.ownerDocument.activeElement)) return;
+      const next = returnTo();
+      if (next?.isConnected) next.focus();
+    };
+  }, [target]);
   const { connections, activeId } = useAppFacts(
     (s) => ({ connections: s.connections, activeId: s.activeId }),
     (a, b) => a.connections === b.connections && a.activeId === b.activeId,
@@ -167,11 +187,17 @@ export function AccessPrompt({
   const other = c && c.id !== activeId ? podName(c.podUrl) : null;
   return (
     <div
+      ref={element}
       data-sempods-ui="prompt"
       data-severity={prompt.severity}
       data-reason={prompt.reason}
       role={prompt.severity === 'info' ? 'status' : 'alert'}
       dir={direction}
+      onFocus={(event) => {
+        const from = event.relatedTarget;
+        if (from instanceof HTMLElement && !event.currentTarget.contains(from))
+          previous.current = from;
+      }}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && prompt.actions.includes('dismiss')) {
           event.stopPropagation();
@@ -192,11 +218,9 @@ const infoTimeout = 6000;
 
 function TimedPrompt({
   prompt,
-  focusTarget,
   children,
 }: {
   readonly prompt: AccessPromptFact;
-  readonly focusTarget: RefObject<HTMLElement | null> | undefined;
   readonly children: ReactNode;
 }) {
   const app = useController();
@@ -210,20 +234,6 @@ function TimedPrompt({
     return () => clearTimeout(timer);
   }, [timed, app, id]);
   const element = useRef<HTMLLIElement>(null);
-  // Where focus came from, to return there when this prompt goes while it
-  // holds focus (dismissed, resolved). Focus elsewhere is never moved.
-  const previous = useRef<HTMLElement | null>(null);
-  const target = useRef(focusTarget);
-  target.current = focusTarget;
-  useLayoutEffect(() => {
-    const item = element.current;
-    return () => {
-      // Still attached here: the deletion removes the element afterwards.
-      if (!item?.contains(item.ownerDocument.activeElement)) return;
-      const next = target.current?.current ?? previous.current;
-      if (next?.isConnected) next.focus();
-    };
-  }, []);
   const blur = useCallback(
     (next: EventTarget | null) =>
       !(next instanceof Node && element.current?.contains(next)),
@@ -234,14 +244,7 @@ function TimedPrompt({
       ref={element}
       onPointerEnter={() => setHeld((h) => ({ ...h, hover: true }))}
       onPointerLeave={() => setHeld((h) => ({ ...h, hover: false }))}
-      onFocus={(event) => {
-        if (
-          event.relatedTarget instanceof HTMLElement &&
-          !event.currentTarget.contains(event.relatedTarget)
-        )
-          previous.current = event.relatedTarget;
-        setHeld((h) => ({ ...h, focus: true }));
-      }}
+      onFocus={() => setHeld((h) => ({ ...h, focus: true }))}
       onBlur={(event) => {
         if (blur(event.relatedTarget)) setHeld((h) => ({ ...h, focus: false }));
       }}
@@ -255,9 +258,9 @@ function TimedPrompt({
  * A default stack of all action and info prompts at the bottom of the
  * viewport, for apps without their own toast host; a polite live region.
  * Info prompts hide after about 6 seconds unless focused or hovered, which
- * dismisses them; action prompts stay until dismissed or resolved. A prompt
- * that goes while it holds focus returns focus to `focusTarget`, otherwise to
- * where focus came from. Shows nothing while a blocking prompt holds the gate.
+ * dismisses them; action prompts stay until dismissed or resolved. Each
+ * prompt gets `focusTarget` (see `AccessPrompt`). Shows nothing while a
+ * blocking prompt holds the gate.
  */
 export function AccessPrompts({
   focusTarget,
@@ -283,12 +286,11 @@ export function AccessPrompts({
       </style>
       <ul>
         {shown.map((prompt) => (
-          <TimedPrompt
-            key={prompt.id}
-            prompt={prompt}
-            focusTarget={focusTarget}
-          >
-            <AccessPrompt prompt={prompt} />
+          <TimedPrompt key={prompt.id} prompt={prompt}>
+            <AccessPrompt
+              prompt={prompt}
+              {...(focusTarget ? { focusTarget } : {})}
+            />
           </TimedPrompt>
         ))}
       </ul>

@@ -898,14 +898,15 @@ function AccessConnections({
               )}
             </>
           )}
-          {/* After a failed sign-out, Try again below repeats it. */}
-          {(manage || c.session.kind === 'ended') && !disconnectFailed && (
+          {(manage || c.session.kind === 'ended') && (
+            // After a failed sign-out it is the main action: repeat it.
             <button
+              className={disconnectFailed ? 'sp-access-primary' : undefined}
               disabled={unavailable}
               aria-describedby={disconnectHint ? disconnectId : undefined}
               onClick={() => void act(() => app.disconnect(c.id))}
             >
-              {m.controls.disconnect}
+              {disconnectFailed ? m.controls.retry : m.controls.disconnect}
             </button>
           )}
         </div>
@@ -1039,17 +1040,9 @@ function AccessConnections({
             !shownByNotice && (
               <p role="status">{endedMessage(c.session, m, true)}</p>
             )}
-          {disconnectFailed ? (
-            // The sign-out was not saved: repeat it, never sign in again.
-            <button
-              className="sp-access-primary"
-              disabled={unavailable}
-              aria-describedby={disconnectHint ? disconnectId : undefined}
-              onClick={() => void act(() => app.disconnect(c.id))}
-            >
-              {m.controls.retry}
-            </button>
-          ) : c.session.kind === 'ended' && c.session.restorable ? (
+          {/* After a failed sign-out, the sign-out button repeats it. */}
+          {disconnectFailed ? null : c.session.kind === 'ended' &&
+            c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button
               className="sp-access-primary"

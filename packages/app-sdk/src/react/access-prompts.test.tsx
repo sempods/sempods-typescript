@@ -6,7 +6,7 @@
  * message once.
  */
 import { webcrypto } from 'node:crypto';
-import { useRef, useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties, type RefObject } from 'react';
 import {
   act,
   cleanup,
@@ -33,6 +33,7 @@ import type {
 } from '../runtime/types.js';
 import {
   AccessGate,
+  AccessPrompt,
   AccessPrompts,
   AppAccess,
   ContextAccess,
@@ -456,25 +457,49 @@ it('hides an info prompt after about 6 seconds by dismissing it, pauses while ho
   expect(prompts()).toEqual([]);
 });
 
-it.each(['ok', 'escape'] as const)(
-  'returns focus to focusTarget when a focused prompt is dismissed (%s)',
-  async (how) => {
-    const { runtime } = await sharingUnchanged();
-    function App() {
-      const back = useRef<HTMLButtonElement>(null);
-      return (
-        <SempodsProvider runtime={runtime}>
-          <button ref={back}>Back</button>
+/** A dismissible info prompt beside a Back button (`focusTarget`) and a draft. */
+async function promptWithBack(surface: 'app-access' | 'own') {
+  const { runtime } = await sharingUnchanged();
+  function OwnPrompts({
+    back,
+  }: {
+    readonly back: RefObject<HTMLButtonElement | null>;
+  }) {
+    const { prompts: shown } = useAccessPrompts();
+    return shown.map((p) => (
+      <AccessPrompt key={p.id} prompt={p} focusTarget={back} />
+    ));
+  }
+  function App() {
+    const back = useRef<HTMLButtonElement>(null);
+    return (
+      <SempodsProvider runtime={runtime}>
+        <button ref={back}>Back</button>
+        <input aria-label="Draft" />
+        {surface === 'app-access' ? (
           <AppAccess appName="Tasks" focusTarget={back} />
-        </SempodsProvider>
-      );
-    }
-    render(<App />);
-    await waitFor(() =>
-      expect(prompts().map((p) => p.dataset.reason)).toEqual([
-        'sharing-unchanged',
-      ]),
+        ) : (
+          <OwnPrompts back={back} />
+        )}
+      </SempodsProvider>
     );
+  }
+  render(<App />);
+  await waitFor(() =>
+    expect(prompts().map((p) => p.dataset.reason)).toEqual([
+      'sharing-unchanged',
+    ]),
+  );
+}
+
+it.each([
+  ['app-access', 'ok'],
+  ['app-access', 'escape'],
+  ['own', 'escape'],
+] as const)(
+  'returns focus to focusTarget when a focused prompt is dismissed (%s, %s)',
+  async (surface, how) => {
+    await promptWithBack(surface);
     const ok = within(prompts()[0]!).getByRole('button', { name: 'OK' });
     act(() => ok.focus());
     if (how === 'ok') await act(async () => ok.click());
@@ -487,19 +512,7 @@ it.each(['ok', 'escape'] as const)(
 );
 
 it('moves no focus when an unfocused prompt goes', async () => {
-  const { runtime } = await sharingUnchanged();
-  function App() {
-    const back = useRef<HTMLButtonElement>(null);
-    return (
-      <SempodsProvider runtime={runtime}>
-        <button ref={back}>Back</button>
-        <input aria-label="Draft" />
-        <AppAccess appName="Tasks" focusTarget={back} />
-      </SempodsProvider>
-    );
-  }
-  render(<App />);
-  await waitFor(() => expect(prompts()).toHaveLength(1));
+  await promptWithBack('app-access');
   const draft = screen.getByRole('textbox', { name: 'Draft' });
   act(() => draft.focus());
   fireEvent.keyDown(prompts()[0]!, { key: 'Escape' });
