@@ -5,7 +5,10 @@ import {
   type SessionAttempt,
 } from './authorization.js';
 import { type ExchangeResult } from '@sempods/client-sdk/oauth';
-import { parseStoredCredentials } from '@sempods/client-sdk/oauth/host';
+import {
+  parseStoredCredentials,
+  scopeList,
+} from '@sempods/client-sdk/oauth/host';
 import type { DiscoveryOptions } from '@sempods/client-sdk/oauth';
 import type { StoredSession, SessionTransitionProblem } from './types.js';
 
@@ -44,6 +47,12 @@ export type SessionRecord = { readonly version: 1 } & (
       readonly binding: SessionBinding;
       readonly operation: 'code' | 'refresh';
       readonly subject: string | null;
+      /**
+       * A refresh claim's one resend after a lost answer (refresh claims of
+       * SDK 0.8 and later only). Absent in code claims and in refresh claims
+       * of SDK 0.7 and earlier, which are never sent again.
+       */
+      readonly resend?: RefreshResend;
     }
   | {
       readonly kind: 'disconnected';
@@ -56,6 +65,17 @@ export type SessionRecord = { readonly version: 1 } & (
       readonly reason?: string;
     }
 );
+/**
+ * What one resend of a claimed refresh needs: the refresh token that was
+ * sent, the granted scopes it continues and when it was first sent (this
+ * device's clock). `resent` records that the one resend was sent.
+ */
+export interface RefreshResend {
+  readonly refreshToken: string;
+  readonly scopes: readonly string[];
+  readonly sentAt: number;
+  readonly resent?: true;
+}
 export interface SessionSnapshot {
   readonly id: string;
   readonly revision: string;
@@ -151,6 +171,9 @@ export function parseSessionRecord(
             binding,
             operation: value.operation,
             subject: value.subject as string | null,
+            ...(value.resend === undefined || value.operation !== 'refresh'
+              ? {}
+              : { resend: parseResend(value.resend) }),
           };
           break;
         case 'disconnected':
@@ -175,6 +198,25 @@ export function parseSessionRecord(
   } catch {
     throw new SessionTransitionError('corrupt');
   }
+}
+
+function parseResend(value: unknown): RefreshResend {
+  if (
+    !record(value) ||
+    typeof value.refreshToken !== 'string' ||
+    !value.refreshToken ||
+    typeof value.sentAt !== 'number' ||
+    !Number.isFinite(value.sentAt) ||
+    value.sentAt < 0 ||
+    (value.resent !== undefined && value.resent !== true)
+  )
+    throw new Error();
+  return {
+    refreshToken: value.refreshToken,
+    scopes: scopeList(value.scopes),
+    sentAt: value.sentAt,
+    ...(value.resent ? { resent: true as const } : {}),
+  };
 }
 
 function parsePrevious(

@@ -3,8 +3,13 @@
 **Status: accepted, partly implemented.** The open questions are settled
 (see [Decisions](#decisions)). Remembered Pods (section 3) are implemented
 ([#237](https://github.com/sempods/sempods-typescript/issues/237)) and
-described in the [browser runtime guide](../browser-runtime.md#remembered-pods);
-the other sections are not implemented yet. It spans
+described in the [browser runtime guide](../browser-runtime.md#remembered-pods).
+Resilient renewal (section 2) is implemented
+([#239](https://github.com/sempods/sempods-typescript/issues/239)) and
+described under
+[lost renewal answers](../browser-runtime.md#lost-renewal-answers); live
+evidence against a Pod with the grace period is still open. The other sections
+are not implemented yet. It spans
 [sempods-kotlin](https://github.com/sempods/sempods-kotlin), this SDK and the apps
 built on it. Implemented parts move into [architecture decisions](../decisions.md),
 the [browser runtime guide](../browser-runtime.md) and the issues listed at the end.
@@ -145,6 +150,10 @@ Items 1–3 alone remove the cross-device sign-outs. Item 4 makes item 2 of the 
 part safe to implement.
 
 ### 2. SDK: resilient renewal (app-sdk)
+
+Implemented in [#239](https://github.com/sempods/sempods-typescript/issues/239);
+the [browser runtime guide](../browser-runtime.md#lost-renewal-answers)
+describes the result. What follows is the proposal as accepted.
 
 - **The claim keeps the refresh token.** A refresh claim records the refresh
   token and when it was sent. After a failure whose outcome is unknown (network

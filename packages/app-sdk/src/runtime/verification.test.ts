@@ -51,6 +51,22 @@ function refusingFirst(n: number): PodFetch {
   let calls = 0;
   return async () => (++calls <= n ? refused() : Response.json([]));
 }
+/**
+ * Waits until the ended session's record is retired. Until then its refresh
+ * claim keeps the token for one resend within the grace period (#239).
+ */
+async function retired(f: Awaited<ReturnType<typeof logged>>) {
+  const store = await openSessionStore(namespace, f.factory);
+  try {
+    await vi.waitFor(async () =>
+      expect((await store.read(f.id))?.value).toMatchObject({
+        kind: 'disconnected',
+      }),
+    );
+  } finally {
+    store.close();
+  }
+}
 /** The refresh_token sent in each token request. */
 function sentRefreshTokens(f: Awaited<ReturnType<typeof logged>>) {
   return f.fetch.mock.calls
@@ -102,6 +118,7 @@ it('A1: sends each rotated refresh token once and never a spent one, also after 
   expect(f.runtime.getSnapshot()[0]?.session.kind).toBe('ended');
   const sent = sentRefreshTokens(f);
   expect(sent).toEqual(['refresh-private', 'rotated-1', 'rotated-2']);
+  await retired(f);
   const next = await reload(f);
   expect(next.getSnapshot().some((c) => c.session.kind === 'active')).toBe(
     false,
@@ -227,6 +244,7 @@ it('A5: a failed acceptance after a sent refresh ends visibly and never resurrec
     problem: 'storage',
   });
   const tokens = f.count('/token');
+  await retired(f);
   vi.restoreAllMocks();
   const next = await reload(f);
   expect(next.getSnapshot().some((c) => c.session.kind === 'active')).toBe(

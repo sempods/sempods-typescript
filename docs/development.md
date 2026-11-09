@@ -64,7 +64,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   HTTP), locale/date formatting and React draft preservation. These are fixture
   tests, not live Kotlin interoperability evidence. Runtime scenarios also cover
   durable storage, callbacks, scope/identity continuity, refresh (including
-  renewal before expiry), target races and remembered Pods (sign-out and session
+  renewal before expiry and the one resend after a lost answer: online,
+  offline within and beyond the grace period, a page left mid-refresh, a
+  resend refused or lost too), target races and remembered Pods (sign-out and session
   end across a reload, `forget`, `rememberPods: false`, 0.7 records).
 - `test:consumers`: packs client-sdk and app-sdk and installs their tarballs together in
   fresh directories outside the workspace. Checks packed file allowlists and
