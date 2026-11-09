@@ -117,6 +117,25 @@ seconds, the sempods server's default).
   ends as under 0.7. Set `refreshGracePeriod` to your Pod's period; `0` never
   resends.
 
+### Bounded discovery
+
+**A Pod whose discovery never answers no longer stays `restoring`**
+([browser runtime](browser-runtime.md#configure-initialize-connect), #253). After 15
+seconds, discovery counts as unreachable:
+
+- a restoring connection ends as `ended { problem: 'network', restorable: true }`
+  and keeps its saved session; `retryRestore(id)` and coming back online try
+  again, as for an offline Pod. A late answer is ignored.
+- `connect(url)` and `beginAuthorization(id)` reject with
+  `RuntimeError('network')` when discovery does not answer, instead of
+  waiting indefinitely (client registration is not bounded), and a renewal
+  whose discovery stalls stays signed in with its unspent refresh token.
+- A timeout carries no `failure` detail, unlike an offline discovery
+  (`failure.code: 'discovery'`); branch on `problem` and `restorable`.
+- Other connections never waited for a restoring one; the guide now says
+  which runtime actions are safe meanwhile. Which controls apps and the SDK
+  components keep available while a Pod restores is settled in #238.
+
 ### UI kit
 
 - **The compact `Dialog` speaks the SDK's language.** Its corner close button
