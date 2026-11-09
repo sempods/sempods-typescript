@@ -47,6 +47,95 @@ reload, so people sign in again with one action.
   **Sign in** by name alone: each remembered Pod has its own. `AccessNotice`
   asks to sign in (`controls.signInRequired`) for a signed-out connection.
 
+### Access prompts
+
+**`AppAccess` keeps its props but changes how it presents access**
+([access prompts](react-authoring.md#access-prompts-and-your-own-placement)).
+It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
+
+- **The sign-in screen is a gate above the content.** While the app cannot
+  work (no connection, the active connection signed out, its session ended,
+  its sign-out not saved or its required scopes missing, a startup problem) a
+  full-viewport modal layer shows; the content stays mounted and inert behind
+  it. Tests that looked for sign-in controls inside the `Pods & sharing` region
+  find them in the gate (`[data-sempods-ui="gate"]`). After a failed sign-out
+  or forget the gate offers **Try again**, not **Sign out** or **Forget**.
+- **No initial loading panel.** Before startup settles and while a saved
+  session restores, `AppAccess` shows nothing: no tall loading panel, no
+  sign-in flash. A restore that never settles no longer shows the Pod selector
+  or other sign-ins inline; open management for them.
+- **Outcomes are dismissible prompts.** A failed or cancelled callback, a Pod
+  whose session ended beside the active one and an unreachable Pod appear at
+  the bottom of the viewport. Information (a cancelled sign-in, unchanged
+  sharing) hides after about 6 seconds; **OK** or Escape dismisses a prompt.
+  The callback notice no longer stays until the next sign-in or selection. A
+  declined re-authorization no longer offers **Change sharing** again; it is in
+  management.
+- **Management in place** (`open` without `onClose`) does not show while the
+  gate blocks. As a dialog it opens above the gate.
+- **Your own placement:** render `AccessGate`, `ContextAccess` and
+  `AccessPrompts` (or your own `AccessPrompt` host) and
+  `<AppAccess only="management" open={open} onClose={onClose} />`, which
+  renders management alone.
+- **Accepted limitation for drafts:** after the session is lost, the person can
+  neither view nor copy a retained draft while the gate shows. Signing in again
+  navigates to the Pod, so the leave confirmation may ask to discard it.
+  Declining keeps the draft in memory behind the gate for as long as the page
+  stays open. Apps that must keep drafts across a sign-in store them
+  themselves.
+
+### Lost renewal answers
+
+**A lost answer to a renewal no longer signs people out**
+([lost renewal answers](browser-runtime.md#lost-renewal-answers), #239). The
+refresh claim now keeps the sent refresh token, and the runtime sends it once
+more while it was first sent less than `refreshGracePeriod` ago (default 60
+seconds, the sempods server's default).
+
+- **The stored refresh claim holds the refresh token** until it settles. It
+  still holds no access token. Retiring or replacing the claim removes it.
+- **Offline during a renewal** reports
+  `ended { problem: 'network', restorable: true }`, as for an unreachable Pod at
+  startup, and resends when the browser comes back online or on
+  `retryRestore(id)`. Offer a retry there, not a sign-in.
+- **The session ends as `interrupted`**, keeping the Pod address, when the
+  outcome stays unknown beyond the grace period or the resend loses its answer
+  too. Under 0.7 such a session ended with `exchange`; a refusal of the token
+  endpoint still ends with `exchange`.
+- **A token request is given up after 20 seconds** and counts as lost; there
+  was no limit before. An answer that is neither a token response nor an OAuth
+  error (`400`, `401`), such as a `5xx`, `403` or `429` from a proxy, counts as
+  lost too.
+- **Downgrading to 0.7** reads such a claim as `interrupted` and leaves it
+  stored, with its refresh token, until the person signs in again or signs
+  out.
+- **A refresh the earlier page left** (reload or a suspended tab during the
+  request) is resent once at the next start within the grace period
+  (`restoring` → `active`) instead of ending as `interrupted`. Refresh claims
+  written by 0.7 hold no token and still end as `interrupted`.
+- **A Pod without a grace period** refuses the resend as reuse, so the session
+  ends as under 0.7. Set `refreshGracePeriod` to your Pod's period; `0` never
+  resends.
+
+### Bounded discovery
+
+**A Pod whose discovery never answers no longer stays `restoring`**
+([browser runtime](browser-runtime.md#configure-initialize-connect), #253). After 15
+seconds, discovery counts as unreachable:
+
+- a restoring connection ends as `ended { problem: 'network', restorable: true }`
+  and keeps its saved session; `retryRestore(id)` and coming back online try
+  again, as for an offline Pod. A late answer is ignored.
+- `connect(url)` and `beginAuthorization(id)` reject with
+  `RuntimeError('network')` when discovery does not answer, instead of
+  waiting indefinitely (client registration is not bounded), and a renewal
+  whose discovery stalls stays signed in with its unspent refresh token.
+- A timeout carries no `failure` detail, unlike an offline discovery
+  (`failure.code: 'discovery'`); branch on `problem` and `restorable`.
+- Other connections never waited for a restoring one; the guide now says
+  which runtime actions are safe meanwhile. Which controls apps and the SDK
+  components keep available while a Pod restores is settled in #238.
+
 ### UI kit
 
 - **The compact `Dialog` speaks the SDK's language.** Its corner close button
@@ -91,17 +180,26 @@ reload, so people sign in again with one action.
   or whose forgetting failed. Code that compares sessions by deep equality
   accepts these properties.
 - `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
-  `rememberPods`. Typed test doubles of the runtime need `forget`.
+  `rememberPods` and `refreshGracePeriod`. Typed test doubles of the runtime need `forget`.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
   doubles of `useApp()` need it too.
 - **Breaking for custom stores:** `SessionStore` (the `openStore` option) gains
   the required method `remove(id, expectedRevision)`, an atomic deletion at the
   expected revision that answers `{ kind: 'removed' }` or `{ kind: 'conflict' }`.
   The default IndexedDB store implements it.
+- `UiMessages` gains `rememberedPods`, `forget`, `sessionEnded`,
+  `forgetFailed`, `dismiss` and `reload`, optional in the type; `createLocale`
+  fills them from the language defaults.
+- `AppSnapshot` gains the required `access` (`AccessState`), and
+  `AppController` the method `dismiss(promptId)`. Typed test doubles of the
+  snapshot need `access`. `AppSnapshot.callbackNotice` is deprecated and stays
+  until 1.0.
+- `AppAccessProps` gains `only?: 'management'`. New exports: `AccessPrompt` and
+  `AccessState` (types, `@sempods/app-sdk`); `AccessGate`, `ContextAccess`,
+  `AccessPrompt`, `AccessPrompts`, `useAccessPrompts` and the types
+  `AccessGateProps`, `ContextAccessProps`, `AccessPromptProps` and
+  `AccessPromptsProps` (`@sempods/app-sdk/react`).
 - app-ui's `Dialog` and `DialogFooter` gain the optional `closeLabel`.
-- `UiMessages` gains `rememberedPods`, `forget`, `sessionEnded` and
-  `forgetFailed`, optional in the type; `createLocale` fills them from the
-  language defaults.
 - `@sempods/app-ui`: `HeaderMenuProps` gains the optional `ref` to the menu's
   button. An app whose menu item opens `AppAccess` (Pods & sharing) passes
   that ref as `focusTarget`, so closing management returns the focus to the
@@ -112,6 +210,13 @@ reload, so people sign in again with one action.
   accessible name and leads typeahead; text-only menus render as before. Apps
   that composed `DropdownMenu` directly only to place an icon can return to
   `HeaderMenu`.
+
+- `usePodLoad` gains the form `usePodLoad(pod, read, options?)` for an explicit
+  `BoundPod` from `runtime.bindPod(id)`
+  ([reads per connection](react-authoring.md#reads-per-connection)). An app
+  that wrapped `createViewLoader` in its own hook to read through several
+  connections, as an explorer does, can use it instead; the existing form
+  still follows the active connection.
 
 ## From 0.6.0 to 0.7.0
 

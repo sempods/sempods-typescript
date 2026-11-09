@@ -256,6 +256,13 @@ export interface UiMessages {
   readonly sharingUnchanged?: string;
   /** An unfinished sign-in or an expired session; implies neither access nor a kept draft. */
   readonly signInRequired: string;
+  /*
+   * Access prompts (added in 0.8.0; optional in the type, `createLocale`
+   * fills them): the button that dismisses a prompt and the one that reloads
+   * the page after a startup problem.
+   */
+  readonly dismiss?: string;
+  readonly reload?: string;
 }
 
 export interface SdkMessages {
@@ -375,6 +382,8 @@ export const englishMessages: SdkMessages = {
     sharingUnchanged:
       'Sharing was not changed: the consent was cancelled or declined at the Pod. This app keeps the access it had.',
     signInRequired: 'Sign in to use this pod.',
+    dismiss: 'OK',
+    reload: 'Reload',
   },
   activePod: 'Active pod',
   dataContext: 'Data context',
@@ -527,6 +536,8 @@ export const germanMessages: SdkMessages = {
     sharingUnchanged:
       'Die Freigabe wurde nicht geändert: Die Zustimmung wurde beim Pod abgebrochen oder abgelehnt. Diese App behält ihren bisherigen Zugriff.',
     signInRequired: 'Melde dich an, um diesen Pod zu nutzen.',
+    dismiss: 'OK',
+    reload: 'Neu laden',
   },
   activePod: 'Aktiver Pod',
   dataContext: 'Datenkontext',

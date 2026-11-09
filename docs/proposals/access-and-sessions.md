@@ -3,8 +3,16 @@
 **Status: accepted, partly implemented.** The open questions are settled
 (see [Decisions](#decisions)). Remembered Pods (section 3) are implemented
 ([#237](https://github.com/sempods/sempods-typescript/issues/237)) and
-described in the [browser runtime guide](../browser-runtime.md#remembered-pods);
-the other sections are not implemented yet. It spans
+described in the [browser runtime guide](../browser-runtime.md#remembered-pods).
+Resilient renewal (section 2) is implemented
+([#239](https://github.com/sempods/sempods-typescript/issues/239)) and
+described under
+[lost renewal answers](../browser-runtime.md#lost-renewal-answers); live
+evidence against a Pod with the grace period is still open. Access prompts
+(section 4) are implemented
+([#238](https://github.com/sempods/sempods-typescript/issues/238)) and described
+in the [React authoring guide](../react-authoring.md#access-prompts-and-your-own-placement).
+The other sections are not implemented yet. It spans
 [sempods-kotlin](https://github.com/sempods/sempods-kotlin), this SDK and the apps
 built on it. Implemented parts move into [architecture decisions](../decisions.md),
 the [browser runtime guide](../browser-runtime.md) and the issues listed at the end.
@@ -146,6 +154,10 @@ part safe to implement.
 
 ### 2. SDK: resilient renewal (app-sdk)
 
+Implemented in [#239](https://github.com/sempods/sempods-typescript/issues/239);
+the [browser runtime guide](../browser-runtime.md#lost-renewal-answers)
+describes the result. What follows is the proposal as accepted.
+
 - **The claim keeps the refresh token.** A refresh claim records the refresh
   token and when it was sent. After a failure whose outcome is unknown (network
   error, timeout, an interrupted claim found at startup), the runtime retries
@@ -198,6 +210,12 @@ result. What follows is the proposal as accepted.
   affects another. The prompts below name the connection they belong to.
 
 ### 4. SDK: access prompts instead of inline UI (app-sdk)
+
+Implemented in [#238](https://github.com/sempods/sempods-typescript/issues/238),
+whose contract refines this section: fewer reasons, no `choose-context` action
+(Context choice keeps its own `ContextAccess` surface), no public action
+executor, and `AppAccess only="management"` for apps that place the parts
+themselves. What follows is the proposal as accepted.
 
 The headless controller derives a list of **access prompts** from runtime facts.
 It does not add session states. The runtime stays the authority. Each prompt

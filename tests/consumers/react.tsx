@@ -12,16 +12,20 @@ import {
   useList,
   usePodContexts,
   usePodList,
+  usePodLoad,
   type PodContextChoice,
   type PodListSkipped,
 } from '@sempods/app-sdk/react';
 import type {
+  BoundPod,
   BrowserRuntime,
   ContextTarget,
+  LoadState,
   LeaveGuard,
   TargetSelection,
 } from '@sempods/app-sdk';
 import type { SkippedRecord } from '@sempods/client-sdk/edit';
+import { ResourceValues } from './node_modules/@sempods/app-sdk/examples/todo/recipes/rdf-value-view.js';
 
 function Task() {
   const [draft, setDraft] = useState('');
@@ -50,6 +54,28 @@ function App() {
 const host = document.getElementById('app');
 if (!host) throw new Error('Missing consumer mount point.');
 createRoot(host).render(<App />);
+
+// The shipped RDF value recipe (#235) in a real layout: the exact form keeps
+// consecutive spaces, which a browser would otherwise collapse.
+const values = document.createElement('section');
+values.id = 'rdf-values';
+document.body.append(values);
+createRoot(values).render(
+  <SdkLocaleProvider locale="en-US">
+    <ResourceValues
+      result={{
+        variables: ['property', 'value'],
+        rows: [
+          {
+            property: { type: 'iri', value: 'https://schema.org/name' },
+            value: { type: 'literal', value: 'a  b' },
+          },
+        ],
+      }}
+      onShow={() => {}}
+    />
+  </SdkLocaleProvider>,
+);
 
 // Compile the changed contract from installed declarations, not workspace paths.
 function CreationTypes() {
@@ -136,3 +162,26 @@ function UnloadPromptTypes(runtime: BrowserRuntime) {
   );
 }
 void UnloadPromptTypes;
+
+// A read tied to an explicit connection's Pod beside the active one (#236).
+function PodLoadTypes(runtime: BrowserRuntime) {
+  const select = 'SELECT ?s WHERE { ?s ?p ?o }';
+  const active = usePodLoad((pod, signal) =>
+    pod.sparql.select(select, { signal }),
+  );
+  const reader: BoundPod | null = runtime.bindPod('id');
+  const explicit = usePodLoad(
+    reader,
+    (pod, signal) => pod.sparql.select(select, { signal }),
+    { key: select, retain: true },
+  );
+  const none = usePodLoad(null, (pod, signal) =>
+    pod.sparql.construct('CONSTRUCT {} WHERE {}', { signal }),
+  );
+  const state: LoadState<unknown> = explicit.state;
+  const rows: number | undefined = explicit.data?.rows.length;
+  void explicit.reload().then((s) => s?.kind);
+  explicit.cancel();
+  return [active.state.kind, state, rows, none.data];
+}
+void PodLoadTypes;

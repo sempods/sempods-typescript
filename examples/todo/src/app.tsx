@@ -1,7 +1,10 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  AppAccess,
+  AccessGate,
   AccessNotice,
+  AccessPrompts,
+  AppAccess,
+  ContextAccess,
   LoadNotice,
   RemoveButton,
   ResourceEditor,
@@ -293,10 +296,20 @@ function StandardScreen({
       </header>
       {/* Preparing the Pod's consent can fail (unreachable Pod); say so here. */}
       {lists.shareProblem && <p role="alert">{lists.shareProblem}</p>}
-      <AppAccess
+      {/* The access UI in parts: the sign-in screen while nothing works, the
+          list choice, prompts at the bottom and the menu's management. */}
+      <AccessGate
         appName="TODO"
         icon={icon}
         description={m.description}
+        mode="single"
+        focusTarget={focusTarget}
+      />
+      <ContextAccess appName="TODO" mode="single" focusTarget={focusTarget} />
+      <AccessPrompts />
+      <AppAccess
+        appName="TODO"
+        only="management"
         mode="single"
         open={open}
         onClose={() => setOpen(false)}

@@ -94,6 +94,7 @@ entire SDK or protocol before implementing an ordinary screen.
 | SDK integration in an existing React project  | [Quickstart](quickstart.md)                                                                                       |
 | A hook, component or its lifecycle            | [API map](react-authoring.md#api-at-a-glance), [state ownership](react-authoring.md#state-ownership-and-lifetime) |
 | Several lists or an overview                  | [Context choices](react-authoring.md#choose-the-app-shape)                                                        |
+| Values of any vocabulary from a SPARQL read   | [RDF values](rdf-values.md)                                                                                       |
 | App texts or a custom layout                  | [Customizing](react-authoring.md#part-4-customizing)                                                              |
 | A real-Pod exercise                           | [Local testing](local-testing.md)                                                                                 |
 | Deployment or installation                    | [Deployment](deployment.md), then [PWA](pwa.md) if needed                                                         |
@@ -144,7 +145,9 @@ needs them; preserve the minimal screen's recovery when adapting it.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
   do not implement your own Context enumeration, consent handling, token store,
   credential-bearing fetch or OAuth callback handler. Use `useContexts` for a
-  Context picker and `usePodList`/`usePodLoad` for Pod-wide reads.
+  Context picker and `usePodList`/`usePodLoad` for Pod-wide reads;
+  [one read per connection](react-authoring.md#reads-per-connection) passes
+  each `runtime.bindPod(id)` handle to `usePodLoad`, not an own loader hook.
   Every write names a Context; an empty selection never means all Contexts.
   Choose the [app shape](react-authoring.md#choose-the-app-shape) from the
   user's interaction, not by asking them to choose APIs. An app that only reads
