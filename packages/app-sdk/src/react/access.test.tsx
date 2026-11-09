@@ -1411,12 +1411,12 @@ it('keeps the active-Pod selector usable in management while a saved connection 
   expectNoSurface();
 });
 
-it('keeps a custom layout’s global and other-Pod actions available while one saved Pod restores (#253)', async () => {
+it('keeps switching Pods and the restoring Pod’s sign-out available to a custom layout while one saved Pod restores (#253)', async () => {
   const other = 'https://pod.example/bob';
   const f = fixture({ allowedPods: [pod, other], preferences: null });
   const both = await bothSignedIn(f, other);
-  // Only [pod]'s restore hangs; [other] was active and restores.
-  const { runtime } = await restoring(f, both.runtime, (url) =>
+  // Only [pod]'s restore hangs; [other] restores.
+  const { runtime, discovery } = await restoring(f, both.runtime, (url) =>
     url.startsWith(pod),
   );
   let app!: ReturnType<typeof useApp>;
@@ -1437,8 +1437,11 @@ it('keeps a custom layout’s global and other-Pod actions available while one s
     runtime.getSnapshot().find((entry) => entry.id === id)?.session.kind;
   await waitFor(() => expect(kind(both.second)).toBe('active'));
   expect(kind(both.first)).toBe('restoring');
-  // With the restoring Pod active, access is pending. Choosing the usable Pod
-  // runs although the other one still restores.
+  // Startup may make either Pod active. From the usable one, choosing the
+  // restoring Pod runs through the guard; access is then pending. Choosing the
+  // usable Pod again runs although the other one still restores.
+  expect(await act(() => app.selectConnection(both.second))).toBe(true);
+  expect(state.activeId).toBe(both.second);
   expect(await act(() => app.selectConnection(both.first))).toBe(true);
   expect(state.activeId).toBe(both.first);
   expect(state.access.pending).toBe(true);
@@ -1457,7 +1460,13 @@ it('keeps a custom layout’s global and other-Pod actions available while one s
   // The restoring Pod's own sign-out runs as well and wins over its pending
   // restoration; the usable Pod stays active.
   expect(await act(() => app.disconnect(both.first))).toBe(true);
-  expect(kind(both.first)).not.toBe('restoring');
+  const signedOut = kind(both.first);
+  expect(signedOut).not.toBe('restoring');
+  expect(state.activeId).toBe(both.second);
+  // The late discovery answer publishes nothing.
+  await act(async () => discovery.resolve());
+  await settleLease();
+  expect(kind(both.first)).toBe(signedOut);
   expect(state.activeId).toBe(both.second);
   expect(kind(both.second)).toBe('active');
 });

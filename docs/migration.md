@@ -62,7 +62,7 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
   or forget the gate offers **Try again**, not **Sign out** or **Forget**.
 - **No initial loading panel.** Before startup settles and while a saved
   session restores, `AppAccess` shows nothing: no tall loading panel, no
-  sign-in flash. A restore that never settles no longer shows the Pod selector
+  sign-in flash. A restore that has not settled no longer shows the Pod selector
   or other sign-ins inline; open management for them.
 - **Outcomes are dismissible prompts.** A failed or cancelled callback, a Pod
   whose session ended beside the active one and an unreachable Pod appear at

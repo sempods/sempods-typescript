@@ -955,7 +955,7 @@ function Source(props: {
 `AppAccess` is `AccessGate` + `ContextAccess` + `AccessPrompts` + management.
 It follows `useAppState().access` ([access prompts](#access-prompts-and-your-own-placement)):
 
-- **While startup settles or a saved session restores:** nothing. The app shows
+- **While startup settles or the active connection restores:** nothing. The app shows
   its content or a skeleton; no sign-in screen flashes and no loading panel
   shifts the layout.
 - **The gate**, while the app cannot work (`access.blocking`): a full-viewport
@@ -1049,7 +1049,8 @@ still do:
 - **`info`**: nothing needs doing: a toast that disappears. A cancelled sign-in,
   unchanged sharing.
 
-While `access.pending` (startup or a restore), nothing is derived. A prompt's
+While `access.pending` (startup, or the active connection restoring), nothing
+is derived. A prompt's
 `reason` names the cause, `connectionId` its connection and `actions` the
 offered steps, the first primary. A prompt keeps its `id` while its cause
 lasts; `dismiss(id)` retires a prompt that offers `dismiss` for the
@@ -1313,11 +1314,13 @@ from the guarded `useApp()` actions.
 - Restoration is per connection. While one connection is `restoring`, keep
   global actions (adding a Pod, choosing another one) and other connections'
   actions enabled. On the restoring connection, show its status and offer no
-  sign-in; its sign-out and **Forget** stay available and win over the
-  restoration. While the active connection restores, `access.pending` is true:
-  show content or a skeleton. A restoration whose Pod does not answer within
-  15 seconds ends `restorable` with the prompt `unreachable`: offer
-  `retryRestore(id)`.
+  sign-in; adding its own Pod address counts as that sign-in. Its sign-out and
+  **Forget** stay available and win over the restoration. While the active
+  connection restores, `access.pending` is true: show content or a skeleton. A
+  saved session whose Pod does not answer within 15 seconds ends `restorable`
+  with the prompt `unreachable`: offer `retryRestore(id)`. A resumed
+  re-authorization that times out ends without `restorable` and asks for a new
+  sign-in.
 - Read `useAppState().access` for what needs attention, or compose the
   [access parts](#access-prompts-and-your-own-placement). A failed or cancelled
   callback activates its connection; its prompt (or the deprecated
@@ -1325,8 +1328,8 @@ from the guarded `useApp()` actions.
 - A `leaving` connection (navigating to the Pod) stays inert without a
   sign-in. `active` and `renewing` are authentication, not Context access. A
   cancelled re-authorization keeps the session (`startup.resumed`); an
-  unreachable Pod at startup is `ended` with `restorable: true`, like a timed-out
-  restoration.
+  unreachable Pod at startup is `ended` with `restorable: true`, like a saved
+  session that timed out.
 - `access_denied` cannot tell cancel from decline and its
   `error_description` is never shown: the notice says no access was granted
   (`controls.signInCancelled`) with **Sign in**, or after a declined
