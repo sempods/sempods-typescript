@@ -46,6 +46,44 @@ it('formats regions and time zones explicitly without moving calendar dates', ()
   expect(de.list(['Lesen', 'Schreiben'])).toBe('Lesen und Schreiben');
 });
 
+it('shows Gregorian years below 1000 with four digits and refuses years before 0001 (#258)', () => {
+  const de = createFormatters('de-DE', 'Europe/Berlin');
+  const en = createFormatters('en-US', 'America/New_York');
+  expect(de.dateOnly('0050-03-01')).toBe('01.03.0050');
+  expect(en.dateOnly('0099-12-31')).toBe('Dec 31, 0099');
+  expect(de.dateOnly('0001-01-01')).toBe('01.01.0001');
+  expect(de.dateOnly('1000-01-01')).toBe('01.01.1000');
+  expect(de.dateOnly('9999-12-31')).toBe('31.12.9999');
+  // The locale's own digits, not Latin ones.
+  expect(createFormatters('ar-EG').dateOnly('0050-03-01')).toContain('٠٠٥٠');
+  expect(createFormatters('ar-EG').dateOnly('0050-03-01')).not.toContain('50');
+  // Other calendars keep their own years.
+  expect(createFormatters('th-TH').dateOnly('0050-03-01')).toContain('593');
+  expect(() => de.dateOnly('0000-01-01')).toThrow(RangeError);
+
+  // The year of an instant is the year in the formatter's time zone.
+  expect(de.dateTime('0050-03-01T12:00:00Z')).toMatch(/^01\.03\.0050, /);
+  expect(en.dateTime('0099-12-31T12:00:00Z')).toMatch(/^Dec 31, 0099, /);
+  expect(
+    createFormatters('de-DE', 'UTC').dateTime('1000-01-01T00:30:00Z'),
+  ).toBe('01.01.1000, 00:30');
+  expect(en.dateTime('1000-01-01T00:30:00Z')).toMatch(/^Dec 31, 0999, /);
+  expect(de.dateTime(new Date('2026-10-01T00:30:00Z'))).toBe(
+    '01.10.2026, 02:30',
+  );
+  expect(() => de.dateTime('0000-06-01T00:00:00Z')).toThrow(RangeError);
+  // Year 0001 in UTC, but still year 0000 (1 BCE) in New York.
+  expect(() => en.dateTime('0001-01-01T00:00:00Z')).toThrow(RangeError);
+  expect(createFormatters('en-US').dateTime('0001-01-01T00:00:00Z')).toMatch(
+    /^Jan 1, 0001, /,
+  );
+  // A numbering-system extension is followed too.
+  expect(createFormatters('de-DE-u-nu-deva').dateOnly('0050-03-01')).toBe(
+    '०१.०३.००५०',
+  );
+  expect(() => de.dateTime('not a date')).toThrow(RangeError);
+});
+
 it('keeps translation, formatting and time zone independent and hides diagnostics', () => {
   const locale = createLocale({
     language: 'de',

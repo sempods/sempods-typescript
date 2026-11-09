@@ -157,6 +157,22 @@ seconds, discovery counts as unreachable:
   is unchanged. Remove app CSS that added these insets around or inside a
   `ScreenDialog`, or they count twice.
 
+### Dates
+
+- **`format.dateOnly` and `format.dateTime` show years below 1000 with four
+  digits** in the Gregorian calendar: `0050-03-01` is `01.03.0050` in German
+  and no longer `01.03.50`, which read like 1950. `DateChooser`'s button shows
+  them the same way; its calendar's heading comes from React Aria and still
+  shows the short year. Later years and other calendars are unchanged.
+- **Both throw a `RangeError` for a year before 0001**, such as `0000-01-01`,
+  which `dateOnly` showed as `01.01.1` without its era. For `dateTime` the year
+  in its time zone counts: `0001-01-01T00:00:00Z` throws in New York, where it
+  was 31 December of year 0. Code that shows such
+  values as stored after a `RangeError`, as the
+  [app-builder guide](ai-app-builder.md#correctness-contract) recommends, needs
+  no change. `DateChooser` shows a stored `0000-01-01` as stored and opens
+  without a chosen day; it used to treat it as `0001-01-01`.
+
 ### Type additions
 
 - `SessionFact`'s `signed-out` variant gains the optional `problem`, and its
