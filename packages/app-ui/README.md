@@ -283,6 +283,7 @@ import {
   useAppState,
   useContextEditor,
   useMessages,
+  useSdkLocale,
 } from '@sempods/app-sdk/react';
 import { Dialog, DialogHeader, DialogTitle, Input } from '@sempods/app-ui';
 import { taskFields } from './task-dialog';
@@ -302,6 +303,7 @@ export function QuickEdit({
   readonly leave: () => void;
 }) {
   const t = useMessages(texts);
+  const { messages } = useSdkLocale();
   const edit = useContextEditor(taskFields);
   const { open, close } = edit;
   const { changing } = useAppState();
@@ -330,23 +332,28 @@ export function QuickEdit({
       <DialogHeader>
         <DialogTitle>{t.rename}</DialogTitle>
       </DialogHeader>
-      <ResourceEditor
-        editor={editor}
-        quiet
-        onClose={() => void requestClose()}
-        labels={{ title: t.title }}
-      >
-        {(draft, change) => (
-          <label className="grid gap-1.5">
-            {t.title}
-            <Input
-              value={draft.title}
-              onChange={(e) => change({ ...draft, title: e.target.value })}
-              required
-            />
-          </label>
-        )}
-      </ResourceEditor>
+      {edit.phase === 'unavailable' && edit.problem ? (
+        // A Context the app cannot read: its problem, not a loading notice.
+        <p role="alert">{messages.contextProblems?.[edit.problem]}</p>
+      ) : (
+        <ResourceEditor
+          editor={editor}
+          quiet
+          onClose={() => void requestClose()}
+          labels={{ title: t.title }}
+        >
+          {(draft, change) => (
+            <label className="grid gap-1.5">
+              {t.title}
+              <Input
+                value={draft.title}
+                onChange={(e) => change({ ...draft, title: e.target.value })}
+                required
+              />
+            </label>
+          )}
+        </ResourceEditor>
+      )}
     </Dialog>
   );
 }

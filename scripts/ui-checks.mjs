@@ -2684,6 +2684,21 @@ async function compact({ browser, origin }) {
       const unsaved = !(await titles()).some((t) => t?.endsWith(EDIT));
       return { pass: asked && closed && unsaved, asked, closed, unsaved };
     },
+    // A source Context the app cannot read: its problem, no editor and no
+    // loading notice that stays.
+    async 'compact-source-unavailable'() {
+      const { at } = plumberTask(origin);
+      const nope = encodeURIComponent(origin + '/alice/_system/contexts/nope');
+      await page.goto(origin + `${at}?context=${nope}&dialog=compact`);
+      const alert = await shown(dialog.getByRole('alert'));
+      const text = await dialog.getByRole('alert').textContent();
+      const editors = await title.count();
+      return {
+        pass: alert && /not available/.test(text ?? '') && editors === 0,
+        text,
+        editors,
+      };
+    },
     // German: the corner Close takes the SDK's text.
     async 'compact-close-label-german'() {
       await open('de');
