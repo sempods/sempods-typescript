@@ -76,6 +76,8 @@ const RENEWAL_ROUNDS = 3;
 const REFRESH_GRACE_PERIOD = 60_000;
 /** How long a token request may take before its answer counts as lost. */
 const TOKEN_TIMEOUT = 20_000;
+/** How long a Pod's discovery (two metadata reads) may take before it counts as unreachable. */
+const DISCOVERY_TIMEOUT = 15_000;
 
 /** The token endpoint answered (`renewed`) or its answer was lost (`lost`). */
 type Sent =
@@ -166,6 +168,33 @@ export function createBrowserRuntime(
     throw new RuntimeError('configuration');
   /** Whether a refresh first sent at `sentAt` may still be sent once more. */
   const withinGrace = (sentAt: number) => Date.now() < sentAt + gracePeriod;
+  /**
+   * Discovers a Pod within a deadline. Discovery only reads metadata, so
+   * giving up is safe: a Pod that has not answered after 15 seconds is
+   * unreachable (`RuntimeError('network')`, transient like an offline Pod),
+   * not loading. A late answer is dropped, also for a fetch that ignores its
+   * signal. An aborted `signal` (a lifetime) rejects with `disconnected`.
+   */
+  async function discover(url: string, signal?: AbortSignal) {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), DISCOVERY_TIMEOUT);
+    const combined = combineSignals(signal, deadline.signal);
+    try {
+      return await waitFor(
+        discoverPod(url, { ...protocol, signal: combined.signal }),
+        combined.signal,
+      );
+    } catch (error) {
+      // An ended lifetime (sign-out, a new sign-in, dispose) stops waiting at
+      // once, whether or not the fetch honours its signal.
+      if (signal?.aborted) throw new RuntimeError('disconnected');
+      if (deadline.signal.aborted) throw new RuntimeError('network');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      combined.dispose();
+    }
+  }
   let connectingDefault: Promise<Connection> | undefined;
   const contexts = createContextMemory(
     namespace,
@@ -194,6 +223,8 @@ export function createBrowserRuntime(
   let startup: Promise<StartupReport> | undefined;
   let initialized = false;
   let disposed = false;
+  /** Ends with `dispose()`: stops waits that belong to no connection yet. */
+  const runtimeLifetime = new AbortController();
 
   function invalidate(e: Entry) {
     e.epoch++;
@@ -396,10 +427,7 @@ export function createBrowserRuntime(
       const operation = (async () => {
         let consumed = false;
         try {
-          const pod = await discoverPod(e.pod.podUrl, {
-            ...protocol,
-            signal: e.lifetime.signal,
-          });
+          const pod = await discover(e.pod.podUrl, e.lifetime.signal);
           const claim = await serial(e, async () => {
             current(e, generation);
             if (!sessions || !e.revision) throw new RuntimeError('storage');
@@ -669,10 +697,8 @@ export function createBrowserRuntime(
         );
         const signal = combineSignals(e.lifetime.signal, grace.signal);
         try {
-          pod = await waitFor(
-            discoverPod(e.pod.podUrl, { ...protocol, signal: signal.signal }),
-            signal.signal,
-          );
+          // Also within the discovery deadline: a shorter grace period wins.
+          pod = await discover(e.pod.podUrl, signal.signal);
         } catch (error) {
           if (grace.signal.aborted && !e.lifetime.signal.aborted)
             throw new RuntimeError('interrupted');
@@ -835,10 +861,7 @@ export function createBrowserRuntime(
     const generation = e.generation;
     const events = onlineEvents;
     try {
-      const pod = await discoverPod(e.pod.podUrl, {
-        ...protocol,
-        signal: e.lifetime.signal,
-      });
+      const pod = await discover(e.pod.podUrl, e.lifetime.signal);
       current(e, generation);
       assertSessionBinding(saved.binding, binding(e, pod));
       e.pod = pod;
@@ -904,10 +927,7 @@ export function createBrowserRuntime(
    */
   async function resume(e: Entry, callback?: URL): Promise<boolean> {
     const generation = e.generation;
-    const pod = await discoverPod(e.pod.podUrl, {
-      ...protocol,
-      signal: e.lifetime.signal,
-    });
+    const pod = await discover(e.pod.podUrl, e.lifetime.signal);
     const change = await serial(e, async () => {
       current(e, generation);
       if (!sessions || !e.revision) throw new RuntimeError('storage');
@@ -1008,10 +1028,7 @@ export function createBrowserRuntime(
   ): Promise<string> {
     const e = get(id);
     const generation = e.generation;
-    const pod = await discoverPod(e.pod.podUrl, {
-      ...protocol,
-      signal: e.lifetime.signal,
-    });
+    const pod = await discover(e.pod.podUrl, e.lifetime.signal);
     const claim = await serial(e, async () => {
       current(e, generation);
       const c = await sessions!.claimCode(
@@ -1403,7 +1420,7 @@ export function createBrowserRuntime(
         if (connectingDefault) return connectingDefault;
       }
       const operation = (async () => {
-        const pod = await discoverPod(url, protocol);
+        const pod = await discover(url, runtimeLifetime.signal);
         const client = await registry.resolve(pod, identity);
         if (disposed) throw new RuntimeError('disconnected');
         const e = createEntry(pod, client);
@@ -1435,7 +1452,7 @@ export function createBrowserRuntime(
       // registration or persisting the attempt fails, nothing was reset.
       const before = e.generation;
       const signal = e.lifetime.signal;
-      const pod = await discoverPod(e.pod.podUrl, { ...protocol, signal });
+      const pod = await discover(e.pod.podUrl, signal);
       current(e, before);
       const client = await registry.resolve(pod, identity, { signal });
       current(e, before);
@@ -1625,6 +1642,7 @@ export function createBrowserRuntime(
     dispose() {
       disposed = true;
       initialized = false;
+      runtimeLifetime.abort();
       page.removeEventListener?.('online', online);
       for (const e of entries.values()) {
         delete e.credentials;

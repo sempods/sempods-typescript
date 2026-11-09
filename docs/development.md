@@ -66,7 +66,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   durable storage, callbacks, scope/identity continuity, refresh (including
   renewal before expiry and the one resend after a lost answer: online,
   offline within and beyond the grace period, a page left mid-refresh, a
-  resend refused or lost too), target races and remembered Pods (sign-out and session
+  resend refused or lost too), a discovery that never settles (beside a
+  healthy Pod, a late answer after the deadline or a sign-out, explicit
+  retry, other connections' actions meanwhile), target races and remembered Pods (sign-out and session
   end across a reload, `forget`, `rememberPods: false`, 0.7 records).
 - `test:consumers`: packs client-sdk and app-sdk and installs their tarballs together in
   fresh directories outside the workspace. Checks packed file allowlists and

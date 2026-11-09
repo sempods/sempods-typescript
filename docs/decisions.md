@@ -195,7 +195,9 @@ failure instead of a token or OAuth error answer) or a page left during it, the 
 and when it was sent, sends it once more. Only an OAuth error answer of the token
 endpoint, an expired access token without a refresh token, or an outcome still
 unknown beyond the grace period ends the session; the Pod address stays.
-Startup never waits for a Pod's discovery. The storage namespace
+Startup never waits for a Pod's discovery, and discovery, which only reads
+metadata, gives up after a deadline: a Pod that does not answer is unreachable
+and its saved session stays restorable. The storage namespace
 derives from the app identity, so renaming the app or changing scopes keeps
 sessions.
 
