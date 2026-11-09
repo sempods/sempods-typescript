@@ -27,6 +27,8 @@ references for the task at hand, not prerequisites to read in order.
   and the copyable [overview](../examples/todo/recipes/pod-overview.tsx),
   [one-click](../examples/todo/recipes/overview-toggle.tsx) and
   [task-with-note](../examples/todo/recipes/task-with-note.tsx) recipes.
+- [RDF values](rdf-values.md): readable text, exact terms, dates and web
+  addresses for values a SPARQL read returns.
 - [TODO example](../examples/todo/README.md) and
   [Node example](../examples/node-script/README.md).
 

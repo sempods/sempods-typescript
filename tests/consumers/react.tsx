@@ -22,6 +22,7 @@ import type {
   TargetSelection,
 } from '@sempods/app-sdk';
 import type { SkippedRecord } from '@sempods/client-sdk/edit';
+import { ResourceValues } from './node_modules/@sempods/app-sdk/examples/todo/recipes/rdf-value-view.js';
 
 function Task() {
   const [draft, setDraft] = useState('');
@@ -50,6 +51,28 @@ function App() {
 const host = document.getElementById('app');
 if (!host) throw new Error('Missing consumer mount point.');
 createRoot(host).render(<App />);
+
+// The shipped RDF value recipe (#235) in a real layout: the exact form keeps
+// consecutive spaces, which a browser would otherwise collapse.
+const values = document.createElement('section');
+values.id = 'rdf-values';
+document.body.append(values);
+createRoot(values).render(
+  <SdkLocaleProvider locale="en-US">
+    <ResourceValues
+      result={{
+        variables: ['property', 'value'],
+        rows: [
+          {
+            property: { type: 'iri', value: 'https://schema.org/name' },
+            value: { type: 'literal', value: 'a  b' },
+          },
+        ],
+      }}
+      onShow={() => {}}
+    />
+  </SdkLocaleProvider>,
+);
 
 // Compile the changed contract from installed declarations, not workspace paths.
 function CreationTypes() {
