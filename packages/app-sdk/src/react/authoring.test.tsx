@@ -189,7 +189,7 @@ it('guards an app-owned creation draft', async () => {
   await screen.findByRole('alertdialog');
   expect(f.runtime.bind(f.id).contextIri).toBe(work);
 });
-it('renders loading before startup and a localized busy notice without mounting screens', async () => {
+it('shows no sign-in screen before startup, then a localized busy gate without mounting screens', async () => {
   const f = fixture();
   cleanups.push(() => f.runtime.dispose());
   const gate = deferred<StartupReport>();
@@ -202,11 +202,19 @@ it('renders loading before startup and a localized busy notice without mounting 
     </SempodsProvider>,
   );
   expect(screen.queryByText('Tasks mounted')).toBeNull();
-  expect(screen.getByText('Loading…')).toBeTruthy();
+  // Startup has not settled: no loading panel and no gate (0.8).
+  expect(screen.queryByText('Loading…')).toBeNull();
+  expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull();
   await act(async () =>
     gate.resolve({ storage: 'busy', interaction: 'none', unreadable: [] }),
   );
   expect(screen.getByRole('alert').textContent).toMatch(/another tab/i);
+  expect(
+    document
+      .querySelector('[data-sempods-ui="gate"]')
+      ?.getAttribute('data-reason'),
+  ).toBe('other-tab');
+  expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
   expect(screen.queryByText('Tasks mounted')).toBeNull();
   mounted.rerender(
     <SempodsProvider runtime={f.runtime} language="de">

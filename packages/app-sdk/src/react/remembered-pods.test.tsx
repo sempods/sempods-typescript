@@ -200,7 +200,7 @@ it('shows only the address field when the runtime does not remember Pods', async
   expect(id).toBeTruthy();
 });
 
-it('keeps a remembered Pod reachable while another Pod restores', async () => {
+it('keeps a remembered Pod reachable in management while another Pod restores', async () => {
   const bobUrl = 'https://pod.example/bob';
   const f = fixture({ preferences: null });
   cleanups.push(() => f.runtime.dispose());
@@ -238,13 +238,17 @@ it('keeps a remembered Pod reachable while another Pod restores', async () => {
   });
   cleanups.push(() => next.dispose());
   await next.initialize();
-  show(next);
-  await screen.findByRole('status');
+  // A pending restore shows no sign-in screen; management reaches the others.
+  render(
+    <SempodsProvider runtime={next}>
+      <AppAccess appName="Shopping" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  const list = await screen.findByRole('list', { name: texts.en.list });
   expect(
     Object.fromEntries(next.getSnapshot().map((c) => [c.id, c.session.kind])),
   ).toEqual({ [alice.id]: 'restoring', [bob.id]: 'signed-out' });
-  expect(screen.getByRole('status').textContent).toBe('Loading…');
-  const list = screen.getByRole('list', { name: texts.en.list });
+  expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull();
   expect(within(list).getByText('pod.example/bob')).toBeTruthy();
   const navigations = f.navigate.mock.calls.length;
   await act(async () =>
@@ -257,7 +261,7 @@ it('keeps a remembered Pod reachable while another Pod restores', async () => {
 });
 
 it.each(['en', 'de'] as const)(
-  'keeps a Pod whose forgetting failed in the list and retries Forget (%s)',
+  'shows a Pod whose forgetting failed in the gate and retries forgetting it (%s)',
   async (language) => {
     const t = texts[language];
     const failedText =
@@ -280,18 +284,26 @@ it.each(['en', 'de'] as const)(
     await act(async () =>
       within(list).getByRole('button', { name: t.forget }).click(),
     );
-    const alert = await within(list).findByRole('alert');
+    const gate = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    )!;
+    await waitFor(() =>
+      expect(gate.getAttribute('data-reason')).toBe('sign-out-failed'),
+    );
+    const alert = within(gate).getByRole('alert');
     expect(alert.textContent).toBe(failedText);
     expect(document.body.textContent).not.toMatch(
       /reload|neu laden|private fixture/i,
     );
-    // No sign-in and no sign-out against the person's choice: only Forget.
-    expect(within(list).queryByRole('button', { name: t.signIn })).toBeNull();
+    // No sign-in and no sign-out against the person's choice: only the retry.
+    expect(within(gate).queryByRole('button', { name: t.signIn })).toBeNull();
     expect(screen.queryByRole('button', { name: /Sign out|Abmelden/ })).toBe(
       null,
     );
-    const retry = within(list).getByRole('button', { name: t.forget });
-    expect(retry.getAttribute('aria-describedby')).toContain(alert.id);
+    expect(within(gate).queryByRole('textbox')).toBeNull();
+    const retry = within(gate).getByRole('button', {
+      name: language === 'en' ? 'Try again' : 'Erneut versuchen',
+    });
     failing = false;
     await act(async () => retry.click());
     await waitFor(() => expect(runtime.getSnapshot()).toEqual([]));
@@ -299,6 +311,8 @@ it.each(['en', 'de'] as const)(
       expect(screen.queryByRole('list', { name: t.list })).toBeNull(),
     );
     expect(screen.queryByRole('alert')).toBeNull();
+    // Forgetting the only Pod leaves the first sign-in.
+    expect(screen.getByRole('textbox', { name: t.address })).toBeTruthy();
   },
 );
 

@@ -187,13 +187,24 @@ Renewal happens on demand: before a request whose credential is about to expire,
 or after a request refused with a Bearer challenge. There is no background timer.
 A `401` without a challenge on an unexpired credential neither renews nor ends
 the session.
-A consumed refresh token is removed durably before it is sent, while a failure
-before that point keeps the session signed in. Startup never waits for a Pod's discovery. The storage namespace
+A refresh is claimed durably before its token is sent, while a failure
+before that point keeps the session signed in. A refresh token is reused at
+most once, within the Pod's grace period, only after an unknown outcome: when
+the token request loses its answer (no connection, a timeout, a gateway
+failure instead of a token or OAuth error answer) or a page left during it, the claim, which keeps the token
+and when it was sent, sends it once more. Only an OAuth error answer of the token
+endpoint, an expired access token without a refresh token, or an outcome still
+unknown beyond the grace period ends the session; the Pod address stays.
+Startup never waits for a Pod's discovery. The storage namespace
 derives from the app identity, so renaming the app or changing scopes keeps
 sessions.
 
-_Why:_ a reload or a short network failure must not log people out, and a spent
-refresh token must never be reused. The token's own lifetime justifies renewal
+_Why:_ a reload or a short network failure must not log people out. A Pod with
+a rotation grace period (sempods-kotlin#447) answers the one resend with a
+fresh successor; a Pod without one treats it as reuse and refuses it, which
+ends the session as before. Beyond the grace period the client holds no token
+the server would accept, and another attempt would only trigger reuse
+detection. The token's own lifetime justifies renewal
 without trusting a response, so a Pod that omits its challenge cannot strand a
 session past its token's expiry; idle apps send nothing. A challenge-less `401`
 does not conform to the specification and its cause is unknown: acting on it

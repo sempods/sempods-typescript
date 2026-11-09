@@ -52,6 +52,7 @@ export type {
   LeaveGuard,
   TargetSelection,
 } from './authoring/app.js';
+export type { AccessPrompt, AccessState } from './authoring/access.js';
 export { createViewLoader } from './authoring/load.js';
 export type {
   LoadState,

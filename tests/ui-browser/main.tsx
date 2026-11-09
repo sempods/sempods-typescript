@@ -4,13 +4,17 @@
 // choices), a routed task dialog holding an SDK
 // ResourceEditor, its "Not today" action address, a creation address and
 // explicit not-found pages, a calendar-date chooser inside the editor fields.
+// With `?dialog=compact`, a task address opens the compact quick edit
+// instead of the task dialog.
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
-// and the address model, places.ts, are the package README's examples, which
+// the quick edit, quick-edit.tsx, and the address model, places.ts, are the
+// package README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
-import { StrictMode, useState } from 'react';
+import { StrictMode, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { UsersIcon } from 'lucide-react';
 import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
@@ -36,6 +40,7 @@ import {
 import { places, type Place } from './places';
 import { checkTheme, readTheme } from '@sempods/app-ui/theme-check';
 import { TaskDialog, taskFields } from './task-dialog';
+import { QuickEdit } from './quick-edit';
 import './index.css';
 
 Object.assign(window, { checkTheme, readTheme });
@@ -102,6 +107,7 @@ const Icon = ({ path }: { readonly path: string }) => (
 // them by the canonical address. Read once, at load.
 const settings = new URLSearchParams(location.search);
 const language = settings.get('lang') === 'de' ? 'de' : 'en';
+const compact = settings.get('dialog') === 'compact';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -142,6 +148,8 @@ function App() {
 
 function Frame() {
   const [managing, setManaging] = useState(false);
+  // Closing Pods & sharing returns here: the menu item is gone by then.
+  const menu = useRef<HTMLButtonElement>(null);
   const { connections, view: target } = useAppState();
   const { messages } = useSdkLocale();
   const t = useMessages(texts);
@@ -158,6 +166,7 @@ function Frame() {
         <header className="gate-header">
           <h1>Focus</h1>
           <HeaderMenu
+            ref={menu}
             label={t.menu}
             items={[
               {
@@ -179,6 +188,8 @@ function Frame() {
               {
                 label: messages.controls.dataAccess,
                 onSelect: () => setManaging(true),
+                // Decorative: the label stays the item's name (#231).
+                icon: <UsersIcon />,
               },
             ]}
           />
@@ -190,6 +201,7 @@ function Frame() {
         headingLevel={header ? 2 : 1}
         open={managing}
         onClose={() => setManaging(false)}
+        focusTarget={menu}
       />
       {/* An address that names its source opens without a selected Context:
           no TargetScreen, so AppAccess asks for no choice. */}
@@ -321,7 +333,19 @@ function Tasks({
       ) : (
         list.state.kind === 'ready' && <p className="zen-empty">{t.emptyZen}</p>
       )}
-      {target && (
+      {target && compact && (
+        <QuickEdit
+          subject={place.kind === 'task' ? place.subject : null}
+          context={
+            (place.kind === 'task' && place.context) || target.contextIri
+          }
+          leave={() => {
+            nav.close({ kind: 'zen' });
+            void list.reload();
+          }}
+        />
+      )}
+      {target && !compact && (
         <TaskDialog
           subject={place.kind === 'task' ? place.subject : null}
           // The Context the address names, else the selected one.

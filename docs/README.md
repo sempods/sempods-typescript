@@ -27,6 +27,8 @@ references for the task at hand, not prerequisites to read in order.
   and the copyable [overview](../examples/todo/recipes/pod-overview.tsx),
   [one-click](../examples/todo/recipes/overview-toggle.tsx) and
   [task-with-note](../examples/todo/recipes/task-with-note.tsx) recipes.
+- [RDF values](rdf-values.md): readable text, exact terms, dates and web
+  addresses for values a SPARQL read returns.
 - [TODO example](../examples/todo/README.md) and
   [Node example](../examples/node-script/README.md).
 
@@ -40,7 +42,7 @@ references for the task at hand, not prerequisites to read in order.
 
 - [Vision](vision.md), [architecture decisions](decisions.md),
   [contributing](contributing.md) and [development checks](development.md).
-- Accepted, partly implemented (remembered Pods): [access and sessions across devices](proposals/access-and-sessions.md).
+- Accepted, partly implemented (remembered Pods, resilient renewal): [access and sessions across devices](proposals/access-and-sessions.md).
 - [client-sdk](../packages/client-sdk/README.md) and its
   [provenance](../packages/client-sdk/PROVENANCE.md).
 - [app-sdk](../packages/app-sdk/README.md) and its
