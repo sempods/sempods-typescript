@@ -6,7 +6,7 @@
 // in each browser: Chromium and WebKit, plus Firefox on Linux.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme]
+//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
@@ -120,8 +120,9 @@ try {
   );
   const app = join(temp, 'app');
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
-  // The installed README's examples: its task dialog and its address model
-  // are the reference screen's, so the checks run them as shipped; other TSX
+  // The installed README's examples: its task dialog, its quick edit and its
+  // address model are the reference screen's, so the checks run them as
+  // shipped; other TSX
   // examples are only compiled. Its stylesheet setup is the one the screen
   // uses.
   const readme = await readFile(
@@ -139,9 +140,12 @@ try {
     await writeFile(join(app, file), block);
     return block;
   };
-  const dialog = await ship('tsx', 'task-dialog.tsx');
+  const shipped = [
+    await ship('tsx', 'task-dialog.tsx'),
+    await ship('tsx', 'quick-edit.tsx'),
+  ];
   for (const [i, example] of blocks('tsx').entries())
-    if (example !== dialog)
+    if (!shipped.includes(example))
       await writeFile(join(app, `readme-${i}.tsx`), example);
   await ship('ts', 'places.ts');
   await ship('ts', 'check-theme.ts');

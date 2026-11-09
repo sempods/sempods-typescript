@@ -981,6 +981,137 @@ async function interaction({ browser, origin, engine }) {
         afterClose,
       };
     },
+    // #232: the menu's focus styles follow React Aria's input modality, in
+    // light, dark and forced colors. A hovered row gets the accent surface
+    // without a ring and turns neutral over the separator although it keeps
+    // the focus; a pointer dismissal leaves no ring on the button; keyboard
+    // focus draws one solid outline, inside the row in the menu and around
+    // the button after Escape. Forced colors drop the surfaces: the focused
+    // row draws the inner outline, also for the pointer, and other rows none.
+    async 'menu-focus-modality'() {
+      const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      const view = page.getByRole('menuitem', { name: 'View' });
+      const sharing = page.getByRole('menuitem', { name: 'Pods & sharing' });
+      const paint = (locator) =>
+        locator.evaluate((el) => {
+          const s = getComputedStyle(el);
+          const box = el.getBoundingClientRect();
+          const scroller = el.closest('[role=menu]')?.getBoundingClientRect();
+          const grow = Math.max(
+            0,
+            parseFloat(s.outlineWidth) + parseFloat(s.outlineOffset),
+          );
+          return {
+            focused: el === document.activeElement,
+            outline:
+              s.outlineStyle === 'none'
+                ? 'none'
+                : `${s.outlineWidth} ${s.outlineStyle} ${s.outlineOffset}`,
+            // A visible shadow with a spread: Tailwind's ring.
+            ring: [
+              ...s.boxShadow.matchAll(
+                /((?:rgba?|oklch|oklab|color|lab|lch)\([^)]*\)|#[0-9a-f]+)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px/g,
+              ),
+            ].some(
+              (m) =>
+                parseFloat(m[5]) > 0 &&
+                !/^rgba\(.*,\s*0\)$|\/\s*0\)$/.test(m[1]),
+            ),
+            filled: !/^(rgba\(\d+, \d+, \d+, 0\)|transparent)$/.test(
+              s.backgroundColor,
+            ),
+            inside:
+              !scroller ||
+              (box.left - grow >= scroller.left - 0.5 &&
+                box.right + grow <= scroller.right + 0.5 &&
+                box.top - grow >= scroller.top - 0.5 &&
+                box.bottom + grow <= scroller.bottom + 0.5),
+          };
+        });
+      const inner = '2px solid -2px';
+      const modes = {};
+      for (const [mode, media] of Object.entries({
+        light: { colorScheme: 'light', forcedColors: 'none' },
+        dark: { colorScheme: 'dark', forcedColors: 'none' },
+        forced: { colorScheme: 'light', forcedColors: 'active' },
+      })) {
+        await page.emulateMedia(media);
+        const forced = media.forcedColors === 'active';
+        await page.mouse.move(8, 400);
+        await menu.click();
+        await sharing.waitFor();
+        const row = await sharing.boundingBox();
+        const x = row.x + row.width / 2;
+        await page.mouse.move(x, row.y + row.height / 2, { steps: 5 });
+        await settle(page);
+        const hovered = await paint(sharing);
+        const separator = await page
+          .locator('[data-slot=dropdown-menu-separator]')
+          .boundingBox();
+        await page.mouse.move(x, separator.y + separator.height / 2, {
+          steps: 8,
+        });
+        await settle(page);
+        const overSeparator = await paint(sharing);
+        await page.mouse.click(8, 400);
+        await hidden(page.getByRole('menu'));
+        await settle(page);
+        const afterPointer = await paint(menu);
+        // Enter focuses View (a submenu trigger), ArrowDown a plain row.
+        await page.keyboard.press('Enter');
+        await view.waitFor();
+        await settle(page);
+        const keyboardSubTrigger = await paint(view);
+        await page.keyboard.press('ArrowDown');
+        await settle(page);
+        const keyboardRow = await paint(sharing);
+        const otherRow = await paint(view);
+        await page.keyboard.press('Escape');
+        await hidden(page.getByRole('menu'));
+        await settle(page);
+        const afterEscape = await paint(menu);
+        const pass =
+          (forced
+            ? hovered.outline === inner &&
+              overSeparator.focused &&
+              overSeparator.outline === inner &&
+              otherRow.outline === 'none'
+            : hovered.filled &&
+              hovered.outline === 'none' &&
+              overSeparator.outline === 'none' &&
+              !overSeparator.filled &&
+              keyboardSubTrigger.filled &&
+              keyboardRow.filled &&
+              !otherRow.filled &&
+              otherRow.outline === 'none') &&
+          afterPointer.focused &&
+          afterPointer.outline === 'none' &&
+          !afterPointer.ring &&
+          keyboardSubTrigger.outline === inner &&
+          keyboardSubTrigger.inside &&
+          keyboardRow.focused &&
+          keyboardRow.outline === inner &&
+          keyboardRow.inside &&
+          afterEscape.focused &&
+          afterEscape.outline === '2px solid 2px' &&
+          !afterEscape.ring;
+        modes[mode] = {
+          pass,
+          hovered,
+          overSeparator,
+          afterPointer,
+          keyboardSubTrigger,
+          keyboardRow,
+          otherRow,
+          afterEscape,
+        };
+      }
+      await page.emulateMedia({ colorScheme: null, forcedColors: null });
+      return {
+        pass: Object.values(modes).every((m) => m.pass),
+        ...modes,
+      };
+    },
     // Focus starts on the chosen day; arrows, PageDown, Enter and Apply.
     async 'calendar-keyboard'() {
       await openTask(page);
@@ -2623,6 +2754,274 @@ async function theme({ browser, origin }) {
   return results;
 }
 
+/**
+ * The README's quick edit (#229): a compact `Dialog` around an SDK editor.
+ * Cancelling an SDK question above it keeps the dialog and the draft, its
+ * corner Close asks through the editor, and it speaks the SDK's language.
+ */
+async function compact({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser);
+  await signIn(page, origin);
+  const dialog = page.getByRole('dialog', { name: /^(Rename|Umbenennen)$/ });
+  const confirm = page.getByRole('alertdialog');
+  const title = dialog.getByLabel(/^(Title|Titel)$/);
+  const open = async (lang = 'en') => {
+    await page.goto(
+      origin + `/?dialog=compact${lang === 'de' ? '&lang=de' : ''}`,
+    );
+    await page.locator('.zen-title').click();
+    await title.waitFor();
+    await settle(page);
+  };
+  const state = async () => {
+    await settle(page);
+    const dialogOpen = await dialog.isVisible();
+    return {
+      dialogOpen,
+      confirmOpen: await confirm.isVisible(),
+      draftKept: dialogOpen ? await editKept(title) : false,
+      focus: await focusInfo(page),
+    };
+  };
+  const close = () =>
+    dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  // The narrow field scrolls its text: a click lands inside it, and WebKit on
+  // macOS ignores End there, so the caret goes to the end first.
+  const dirty = async () => {
+    await title.click();
+    await title.evaluate((el) =>
+      el.setSelectionRange(el.value.length, el.value.length),
+    );
+    await page.keyboard.type(EDIT);
+  };
+  const titles = async () =>
+    (await storedTasks(origin)).map(
+      (t) => t.body['https://schema.org/name']?.[0]?.['@value'],
+    );
+  const checks = {
+    // Close, then Cancel by pointer: the press in the question is no press
+    // beside the dialog.
+    async 'compact-close-cancel'() {
+      await open();
+      await dirty();
+      await close();
+      const asked = await shown(confirm, 3000);
+      await confirm.getByRole('button').first().click();
+      await hidden(confirm);
+      const s = await state();
+      return {
+        pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen,
+        asked,
+        ...s,
+      };
+    },
+    // Escape in the question answers only the question.
+    async 'compact-close-escape'() {
+      await open();
+      await dirty();
+      await close();
+      const asked = await shown(confirm, 3000);
+      await page.keyboard.press('Escape');
+      await hidden(confirm);
+      const s = await state();
+      return {
+        pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen,
+        asked,
+        ...s,
+      };
+    },
+    // The editor's own delete question, cancelled by pointer.
+    async 'compact-delete-cancel'() {
+      await open();
+      const before = (await titles()).length;
+      await dirty();
+      await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+      const asked = await shown(confirm, 3000);
+      await confirm.getByRole('button').first().click();
+      await hidden(confirm);
+      const s = await state();
+      const kept = (await titles()).length === before;
+      return {
+        pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen && kept,
+        asked,
+        taskKept: kept,
+        ...s,
+      };
+    },
+    // A press beside the dialog asks too; discarding closes it unsaved.
+    async 'compact-outside-discard'() {
+      await open();
+      await dirty();
+      await page.mouse.click(5, 5);
+      const asked = await answerLeave(page, 'discard');
+      const closed = await gone(dialog);
+      const unsaved = !(await titles()).some((t) => t?.endsWith(EDIT));
+      return { pass: asked && closed && unsaved, asked, closed, unsaved };
+    },
+    // A source Context the app cannot read: its problem, no editor and no
+    // loading notice that stays.
+    async 'compact-source-unavailable'() {
+      const { at } = plumberTask(origin);
+      const nope = encodeURIComponent(origin + '/alice/_system/contexts/nope');
+      await page.goto(origin + `${at}?context=${nope}&dialog=compact`);
+      const alert = await shown(dialog.getByRole('alert'));
+      const text = await dialog.getByRole('alert').textContent();
+      const editors = await title.count();
+      return {
+        pass: alert && /not available/.test(text ?? '') && editors === 0,
+        text,
+        editors,
+      };
+    },
+    // German: the corner Close takes the SDK's text.
+    async 'compact-close-label-german'() {
+      await open('de');
+      const names = await dialog
+        .locator('[data-slot=dialog-close]')
+        .evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim()));
+      return { pass: names.join() === 'Schließen', names };
+    },
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(checks)) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await fetch(origin + '/__reset');
+    results.push(await attemptOn(errors, id, run));
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
+/**
+ * ScreenDialog full screen on a phone with device insets (#228): Close below
+ * the top inset, the heading and fields beside the side insets, the last
+ * action above the bottom inset; the ordinary phone layout and the centred
+ * dialog stay as they are. Only Chromium can emulate insets (DevTools
+ * protocol); the other engines check the layout without them.
+ */
+async function insets({ browser, origin, engine }) {
+  const { context, page, errors } = await newPage(browser);
+  await signIn(page, origin);
+  const cdp =
+    engine === 'chromium' ? await context.newCDPSession(page) : undefined;
+  const setInsets = (insets = {}) =>
+    cdp?.send('Emulation.setSafeAreaInsetsOverride', {
+      insets: { top: 0, bottom: 0, left: 0, right: 0, ...insets },
+    });
+  const dialog = page.getByRole('dialog', { name: 'Details' });
+  /** Opens the task at a size and measures the dialog's parts. */
+  const measure = async (width, height, deviceInsets) => {
+    await setInsets(deviceInsets);
+    await page.setViewportSize({ width, height });
+    await page.goto(origin + '/');
+    await openTask(page);
+    return dialog.evaluate((el) => {
+      const box = (node) => {
+        const r = node.getBoundingClientRect();
+        return { top: r.top, right: r.right, bottom: r.bottom, left: r.left };
+      };
+      const [header, scroller] = el.children;
+      const close = [...header.querySelectorAll('button')].at(-1);
+      const field = scroller.querySelector('input');
+      scroller.scrollTop = scroller.scrollHeight;
+      const last = [...scroller.querySelectorAll('button')].at(-1);
+      const padding = (node) => {
+        const s = getComputedStyle(node);
+        return [s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft];
+      };
+      return {
+        modal: box(el.parentElement),
+        heading: box(header.querySelector('h2')),
+        close: box(close),
+        field: box(field),
+        last: box(last),
+        scrolls: scroller.scrollHeight > scroller.clientHeight,
+        headerPadding: padding(header),
+        contentPadding: padding(scroller),
+        viewport: { width: innerWidth, height: innerHeight },
+      };
+    });
+  };
+  const emulated = (run) => async () =>
+    cdp ? run() : { pass: false, skip: 'no safe-area emulation' };
+  const checks = {
+    // Without insets the phone layout keeps its ordinary padding.
+    async 'screen-dialog-phone-without-insets'() {
+      const m = await measure(375, 600);
+      return {
+        pass:
+          m.headerPadding.join() === '8px,16px,8px,16px' &&
+          m.contentPadding.join() === '16px,16px,16px,16px' &&
+          m.modal.top === 0 &&
+          m.modal.left === 0,
+        ...m,
+      };
+    },
+    // A notch and a home indicator: Close and the last action stay clear.
+    'screen-dialog-portrait-insets': emulated(async () => {
+      const top = 47;
+      const bottom = 34;
+      // Low enough that the content scrolls to its last action.
+      const m = await measure(375, 440, { top, bottom });
+      return {
+        pass:
+          m.scrolls &&
+          m.close.top >= top &&
+          m.headerPadding[0] === `${8 + top}px` &&
+          m.last.bottom <= m.viewport.height - bottom - 16 + 0.5 &&
+          m.modal.top === 0,
+        ...m,
+      };
+    }),
+    // Landscape on a narrow phone: the heading, Close and the fields stay
+    // beside the side insets.
+    'screen-dialog-landscape-insets': emulated(async () => {
+      const side = 44;
+      const m = await measure(600, 360, {
+        left: side,
+        right: side,
+        bottom: 21,
+      });
+      return {
+        pass:
+          m.heading.left >= side + 16 - 0.5 &&
+          m.close.right <= m.viewport.width - side - 16 + 0.5 &&
+          m.field.left >= side + 16 - 0.5 &&
+          m.field.right <= m.viewport.width - side - 16 + 0.5 &&
+          m.last.bottom <= m.viewport.height - 21 - 16 + 0.5,
+        ...m,
+      };
+    }),
+    // The centred dialog does not move with insets.
+    'screen-dialog-centred-ignores-insets': emulated(async () => {
+      const plain = await measure(1280, 800);
+      const inset = await measure(1280, 800, {
+        top: 47,
+        bottom: 34,
+        left: 44,
+        right: 44,
+      });
+      return {
+        pass:
+          JSON.stringify(plain.modal) === JSON.stringify(inset.modal) &&
+          plain.contentPadding.join() === inset.contentPadding.join() &&
+          plain.headerPadding.join() === inset.headerPadding.join(),
+        plain: plain.modal,
+        inset: inset.modal,
+      };
+    }),
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(checks)) {
+    await fetch(origin + '/__reset');
+    results.push(await attemptOn(errors, id, run));
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   gate,
   roundtrip,
@@ -2631,4 +3030,6 @@ export const suites = {
   contrast,
   routing,
   theme,
+  compact,
+  insets,
 };
