@@ -136,7 +136,9 @@ needs them; preserve the minimal screen's recovery when adapting it.
   calendar days). `format.dateOnly` shows a day from years 0001 to 9999
   without a time zone, a year below 1000 with four digits (`01.03.0050`). It
   throws a `RangeError` for other forms a `date` accepts (`2026-10-05Z`,
-  `-0044-03-15`, `0000-01-01`), so show those as stored. Keep original
+  `-0044-03-15`, `0000-01-01`), so show those as stored. `format.dateTime`
+  also throws, for an invalid time or a year before 0001 in its time zone;
+  show such an instant as stored too. Keep original
   list snapshots; never reconstruct them from plain values. Preserve unknown
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;

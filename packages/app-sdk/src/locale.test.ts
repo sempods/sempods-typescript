@@ -72,6 +72,15 @@ it('shows Gregorian years below 1000 with four digits and refuses years before 0
     '01.10.2026, 02:30',
   );
   expect(() => de.dateTime('0000-06-01T00:00:00Z')).toThrow(RangeError);
+  // Year 0001 in UTC, but still year 0000 (1 BCE) in New York.
+  expect(() => en.dateTime('0001-01-01T00:00:00Z')).toThrow(RangeError);
+  expect(createFormatters('en-US').dateTime('0001-01-01T00:00:00Z')).toMatch(
+    /^Jan 1, 0001, /,
+  );
+  // A numbering-system extension is followed too.
+  expect(createFormatters('de-DE-u-nu-deva').dateOnly('0050-03-01')).toBe(
+    '०१.०३.००५०',
+  );
   expect(() => de.dateTime('not a date')).toThrow(RangeError);
 });
 
