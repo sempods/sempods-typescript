@@ -571,7 +571,7 @@ was first sent less than `refreshGracePeriod` ago (60 seconds by default, the
 sempods server's default rotation grace period). It first rediscovers the Pod:
 that read probes the network, so a connection that lost the answer does not
 lose the one resend too, and the grace period is checked again right before
-the resend is recorded:
+the resend is recorded and when it is sent:
 
 | After a lost answer                                      | Result                                                                                     |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -586,7 +586,9 @@ The resend is recorded durably before it is sent, so a reload never sends it a
 third time. A session that ends this way keeps its Pod address: it is listed as
 a [remembered Pod](#remembered-pods) with `signed-out { problem: 'interrupted' }`
 from the next start on, and signing in again is one action. While restorable,
-nothing is dispatched. Of the token endpoint's outcomes, only an OAuth error
+nothing is dispatched: bound handles stay `current` but report `read` and
+`write` as `false`, and pending reads resolve `invalidated`. The resend restores
+their access. Of the token endpoint's outcomes, only an OAuth error
 answer (for example `invalid_grant` or `invalid_client`) or an outcome still
 unknown beyond the grace period ends the session, besides an expired access token without a
 refresh token; an answer that does not continue the session (`claims`) and
