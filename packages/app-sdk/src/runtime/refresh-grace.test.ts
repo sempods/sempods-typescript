@@ -17,6 +17,7 @@ import {
   restored,
   savedRecords,
   settleLease,
+  storeWith,
   unauthorized,
 } from './fixture.test.js';
 
@@ -499,6 +500,45 @@ it('sends no resend once a slow probe took it past the grace period', async () =
     problem: 'interrupted',
   });
   expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
+});
+
+it('sends no resend once recording it took it past the grace period', async () => {
+  const { f, id } = await leftMidRefresh();
+  f.setToken(rotated);
+  const runtime = await start(f, {
+    openStore: storeWith(f.factory, (store) => ({
+      async commit(...args: Parameters<typeof store.commit>) {
+        const result = await store.commit(...args);
+        // The durable resend record lands after the grace period.
+        if ((args[2] as { resend?: { resent?: true } }).resend?.resent)
+          advance(60_000);
+        return result;
+      },
+    })),
+  });
+  expect(session(runtime)).toMatchObject({
+    kind: 'ended',
+    problem: 'interrupted',
+  });
+  expect(runtime.getSnapshot()[0]?.id).toBe(id);
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
+});
+
+it('leaves a sign-in started during the refresh alone when the cancelled request settles', async () => {
+  const { f, runtime, id } = await signedIn();
+  const held = deferred<Response>();
+  f.setToken(() => held.promise);
+  const read = refusedRead(f, runtime, id);
+  await vi.waitFor(() => expect(sentRefreshTokens(f)).toHaveLength(1));
+  await runtime.beginAuthorization(id);
+  const before = session(runtime);
+  held.reject(new TypeError('Failed to fetch'));
+  expect(await read).toEqual({ kind: 'invalidated' });
+  await settleLease();
+  expect(session(runtime)).toEqual(before);
+  expect(session(runtime)?.kind).not.toBe('ended');
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
+  expect(await record(f)).toMatchObject({ kind: 'authorizing' });
 });
 
 it('keeps a very long grace period restorable instead of ending at once', async () => {
