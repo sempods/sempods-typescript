@@ -73,10 +73,11 @@ import {
 
 const noopSubscribe = () => () => {};
 /**
- * Publish committed inputs before any descendant layout effect can call back.
- * The insertion phase only updates refs: no state, notifications or DOM access.
+ * Internal: publish committed inputs before any descendant layout effect can
+ * call back. The insertion phase only updates refs: no state, notifications or
+ * DOM access.
  */
-function useCommitted<T>(value: T) {
+export function useCommitted<T>(value: T) {
   const current = useRef(value);
   useInsertionEffect(() => {
     current.current = value;

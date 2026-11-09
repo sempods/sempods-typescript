@@ -20,11 +20,27 @@ Changes against the registry output:
   `bg-action-secondary`, …) instead of `primary` and `secondary` directly;
   their hover mixes the role's own text into its surface, as the SDK's
   actions do.
+- `button.tsx`: a menu trigger (`aria-haspopup="true"`) gets no focus ring
+  or border change of its own; its one keyboard indicator is the focus
+  outline, drawn from React Aria's `data-focus-visible`
+  (sempods/sempods-typescript#232).
+- `dropdown-menu.tsx`: rows take the accent surface while hovered, pressed or
+  focused by keyboard (`data-hovered`, `data-pressed`, `data-focus-visible`)
+  instead of whenever they hold the focus (`focus:`), and the menu no longer
+  mixes 10% of the text colour into a focused row. Hovering moves the focus to
+  the row, and it keeps the focus while the pointer crosses a separator; the
+  row now stays neutral there (#232).
 - `dialog.tsx`: no entry or exit animation on the overlay and the modal. In
   WebKit, React Aria kept a modal that closed during its entry animation
   mounted for good (`data-entering` and `data-exiting` at once); in headless
   WebKit on Linux its exit animation stalled for seconds, and React Aria
   unmounts the modal only when that animation ends.
+- `dialog.tsx`: the close buttons of `Dialog` and `DialogFooter` take the
+  SDK's "Close" text in the provider's language (English without one) unless
+  `closeLabel` is given, and a press in a native modal `<dialog>`, such as an
+  SDK confirmation, never closes `Dialog`; an app's
+  `shouldCloseOnInteractOutside` applies on top
+  (sempods/sempods-typescript#229).
 - `calendar.tsx`: without the registry's `showWeekNumber` option, which only
   shifted the cells' rounding: React Aria renders no week-number column.
 - `calendar.tsx`: with `captionLayout="dropdown"` and several months, only

@@ -389,10 +389,11 @@ export function AccessNotice({
 }
 /**
  * The outcome of a returning sign-in that failed or was cancelled, with its
- * protocol cause when the runtime kept one. AppAccess renders it; custom
- * layouts place it themselves. It clears once the person selects another
- * connection, disconnects one or starts a sign-in (`callbackNotice`).
- * Renders nothing otherwise.
+ * protocol cause when the runtime kept one: a thin view of the callback's
+ * access prompt. The gate renders it; custom layouts may place it themselves
+ * or render the prompt (`AccessPrompt`). It clears once the person dismisses
+ * that prompt, selects another connection, disconnects or forgets one or
+ * starts a sign-in (`callbackNotice`). Renders nothing otherwise.
  */
 export function CallbackNotice() {
   const state = useAppState();

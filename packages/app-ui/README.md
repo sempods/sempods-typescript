@@ -72,7 +72,10 @@ explains the order and which app rules still override SDK rules.
   solid focus outline;
 - in its own layer `app-ui-focus`, after Tailwind's utilities: a solid 2px
   focus outline in the `ring` colour on the package's components and calendar
-  days. Name the layer in the order statement only to move it; an unlayered
+  days. Menu triggers and menu rows show it only for keyboard focus, as
+  React Aria's `data-focus-visible` reports it, and a row draws it inside its
+  edge; with forced colors, the focused row draws it for pointer focus too.
+  Name the layer in the order statement only to move it; an unlayered
   app rule overrides it;
 - in the layer `app-ui-motion`: without entry and exit animations of popovers,
   menus and selects when the person asks for reduced motion
@@ -118,7 +121,7 @@ system's light or dark mode:
 | `primary`, `primary-foreground`     | The main action and selected days                             |
 | `secondary`, `secondary-foreground` | Tonal secondary actions                                       |
 | `muted`, `muted-foreground`         | A quiet surface, and secondary text                           |
-| `accent`, `accent-foreground`       | The highlight of focused menu items                           |
+| `accent`, `accent-foreground`       | The highlight of hovered and focused menu items               |
 | `destructive`                       | Destructive actions                                           |
 | `border`                            | Decorative separators                                         |
 | `input`                             | Boundaries of fields and outlined controls; keep 3:1          |
@@ -265,6 +268,99 @@ and its parts, `Textarea`, `Toggle`, and `ToggleGroup` with
 [aria-nova documentation](https://ui.shadcn.com/docs/components) describes
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
+
+The compact `Dialog` names its close buttons (the corner one and
+`DialogFooter`'s `showCloseButton`) with the SDK's "Close" text in the
+provider's language, or English without a provider; `closeLabel` replaces it.
+A press in an SDK confirmation (a native modal `<dialog>`) never counts as a
+press beside it, also with the app's own `shouldCloseOnInteractOutside`, so
+cancelling the question keeps the dialog and the draft. Around an SDK editor,
+route every close request through the editor, as the UI gate's quick edit
+does:
+
+```tsx
+// quick-edit.tsx
+import { useEffect } from 'react';
+import {
+  ResourceEditor,
+  useAppState,
+  useContextEditor,
+  useMessages,
+  useSdkLocale,
+} from '@sempods/app-sdk/react';
+import { Dialog, DialogHeader, DialogTitle, Input } from '@sempods/app-ui';
+import { taskFields } from './task-dialog';
+
+const texts = {
+  en: { rename: 'Rename', title: 'Title' },
+  de: { rename: 'Umbenennen', title: 'Titel' },
+};
+
+export function QuickEdit({
+  subject,
+  context,
+  leave,
+}: {
+  readonly subject: string | null;
+  readonly context: string;
+  readonly leave: () => void;
+}) {
+  const t = useMessages(texts);
+  const { messages } = useSdkLocale();
+  const edit = useContextEditor(taskFields);
+  const { open, close } = edit;
+  const { changing } = useAppState();
+  useEffect(() => {
+    if (changing) return;
+    if (subject) void open({ subject, context });
+    else void close();
+  }, [subject, context, changing, open, close]);
+  const editor =
+    subject &&
+    edit.target?.subject === subject &&
+    edit.target.context === context
+      ? edit.editor
+      : null;
+  // Escape, Close and a press beside the dialog: the SDK asks first.
+  const requestClose = async () => {
+    if (await edit.close()) leave();
+  };
+  return (
+    <Dialog
+      isOpen={subject !== null}
+      onOpenChange={(next) => {
+        if (!next) void requestClose();
+      }}
+    >
+      <DialogHeader>
+        <DialogTitle>{t.rename}</DialogTitle>
+      </DialogHeader>
+      {edit.phase === 'unavailable' && edit.problem ? (
+        // A Context the app cannot read: its problem, not a loading notice.
+        <p role="alert">{messages.contextProblems?.[edit.problem]}</p>
+      ) : (
+        <ResourceEditor
+          editor={editor}
+          quiet
+          onClose={() => void requestClose()}
+          labels={{ title: t.title }}
+        >
+          {(draft, change) => (
+            <label className="grid gap-1.5">
+              {t.title}
+              <Input
+                value={draft.title}
+                onChange={(e) => change({ ...draft, title: e.target.value })}
+                required
+              />
+            </label>
+          )}
+        </ResourceEditor>
+      )}
+    </Dialog>
+  );
+}
+```
 
 A component the package lacks can be added with `shadcn add` (the CLI as a
 development dependency). A component copied out of the package to change it
@@ -444,13 +540,26 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   an SDK confirmation (a native `<dialog>`) does not count as a press beside
   it. It has no entry or exit animation, because WebKit kept a modal mounted
   that closed during one: it goes as soon as it closes. Close takes the SDK's "Close" text unless `closeLabel` is
-  given.
+  given. Full screen, in an app with `viewport-fit=cover`, its heading and
+  content add the device's safe-area insets (`env(safe-area-inset-*)`) to
+  their padding: Close sits below a notch, the heading and fields beside a
+  landscape cutout, the last action above the home indicator. Without insets
+  and in the centred dialog nothing changes, so an app's own inset padding
+  around it can go.
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and submenus of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
-  when their labels can repeat). Arrow keys move,
+  when their labels can repeat). An action's own `icon` is a decorative
+  leading icon (`{ label, onSelect, icon: <UsersIcon /> }`, shown at 16px,
+  so give it no size of its own): it is hidden from assistive technology, so
+  the label stays the item's name and leads typeahead. Once one action has an
+  icon, every other row keeps an empty icon space, so the labels start in one
+  column in either reading direction; submenus take no icon. Rows stay 44px
+  high. Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
-  returns to the button.
+  returns to the button. `ref` reaches the button: pass it as `focusTarget`
+  to a surface an item opens, such as `AppAccess`, so focus returns there
+  once the item has gone (see the menu example below).
 - **`DateChooser`**: the calendar-date chooser for the SDK's `date` field. It
   takes the field's draft value (`2026-10-29`, with `orDateTime` also a zoned
   date-time, or `null`) and returns a day as `YYYY-MM-DD`, or `null` with
@@ -551,6 +660,45 @@ export function TaskFilter(props: {
       <Chip id="open">Open</Chip>
       <Chip id="all">All</Chip>
     </ChipGroup>
+  );
+}
+```
+
+A header menu that opens Pods & sharing gives `AppAccess` its button as
+`focusTarget`. The chosen item has left with the menu by the time management
+closes, so Escape or Close would otherwise leave the focus on the page:
+
+```tsx
+// app-menu.tsx
+import { useRef, useState } from 'react';
+import { UsersIcon } from 'lucide-react';
+import { AppAccess, useSdkLocale } from '@sempods/app-sdk/react';
+import { HeaderMenu } from '@sempods/app-ui';
+
+export function AppMenu() {
+  const [managing, setManaging] = useState(false);
+  const menu = useRef<HTMLButtonElement>(null);
+  const { messages } = useSdkLocale();
+  return (
+    <>
+      <HeaderMenu
+        ref={menu}
+        label="Menu"
+        items={[
+          {
+            label: messages.controls.dataAccess,
+            onSelect: () => setManaging(true),
+            icon: <UsersIcon />,
+          },
+        ]}
+      />
+      <AppAccess
+        appName="Focus"
+        open={managing}
+        onClose={() => setManaging(false)}
+        focusTarget={menu}
+      />
+    </>
   );
 }
 ```
@@ -895,7 +1043,9 @@ The packed browser gate builds a reference screen with Vite and Tailwind 4
 against the installed packages and runs in Chromium and WebKit, and in
 Firefox on the Linux CI runner. It checks Escape in fields, in SDK
 confirmations, on Close, in menus and in the date chooser; focus trap and
-restore; Save after cancelled closes; closing right after opening; resizing
+restore; Save after cancelled closes; closing right after opening; cancelled
+SDK questions above the compact quick edit and its German Close; the full
+screen dialog with emulated safe-area insets (Chromium only); resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
 in three time zones; keyboard use of menus, the calendar and filter chips;
 44px targets; the action group's width on a phone and a desktop; the routed
@@ -927,6 +1077,11 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
   in a browser without it, staying on one shows the shown address again in
   place, and later Back and Forward decisions count that entry as the shown
   one.
+- `ScreenDialog`'s safe-area padding is checked with insets that Chromium
+  emulates, not on an iPhone, an Android phone or an installed PWA. It reads
+  only `env(safe-area-inset-*)`, which is 0 unless the app's viewport sets
+  `viewport-fit=cover`. The centred dialog above 640px keeps its margins of
+  at least 1rem and adds no insets.
 - The UI layer adds about 97 KB of gzipped JavaScript to an app (measured in
   the spike with the same components).
 

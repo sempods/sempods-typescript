@@ -17,13 +17,7 @@ const connected = (overrides: Partial<Connection> = {}): Connection => ({
   ...overrides,
 });
 const base: AccessFacts = {
-  state: {
-    startup: { interaction: 'none', storage: 'durable', unreadable: [] },
-    startupError: undefined,
-    callbackNotice: false,
-    contextSelection: 'on-demand',
-    preset: undefined,
-  },
+  state: { contextSelection: 'on-demand', preset: undefined },
   connection: connected(),
   podReadable: true,
   viewReadable: false,
@@ -31,13 +25,14 @@ const base: AccessFacts = {
   demand: 'none',
   manage: false,
   catalogueSettled: false,
-  retry: false,
 };
-type Decision = Pick<
-  ReturnType<typeof presentAccess>,
-  'body' | 'visible' | 'notice'
+type Decision = Partial<
+  Pick<ReturnType<typeof presentAccess>, 'body' | 'visible' | 'notice'>
 >;
-const hidden: Decision = { body: 'none', visible: false, notice: false };
+const hidden: Decision = {
+  visible: false,
+  notice: false,
+};
 const connections: Decision = {
   body: 'connections',
   visible: true,
@@ -46,54 +41,35 @@ const connections: Decision = {
 const loading: Decision = { body: 'loading', visible: true, notice: false };
 
 it.each<{ name: string; facts: Partial<AccessFacts>; expected: Decision }>([
-  {
-    name: 'no connection offers sign-in',
-    facts: { connection: undefined, podReadable: false },
-    expected: connections,
-  },
-  {
-    name: 'prepared but signed-out connection offers sign-in',
-    facts: {
-      connection: connected({ session: { kind: 'signed-out' } }),
-      podReadable: false,
-    },
-    expected: connections,
-  },
-  {
-    name: 'restoration shows loading',
-    facts: {
-      connection: connected({ session: { kind: 'restoring' } }),
-      podReadable: false,
-    },
-    expected: loading,
-  },
-  {
-    name: 'callback notice keeps restoring controls visible',
-    facts: {
-      connection: connected({ session: { kind: 'restoring' } }),
-      podReadable: false,
-      state: { ...base.state, callbackNotice: true },
-    },
-    expected: connections,
-  },
-  {
-    name: 'ended session offers sign-in',
-    facts: {
-      connection: connected({ session: { kind: 'ended', problem: 'expired' } }),
-      podReadable: false,
-    },
-    expected: connections,
-  },
-  {
-    name: 'failed durable sign-out keeps retry controls visible',
-    facts: {
-      connection: connected({
-        session: { kind: 'ended', problem: 'disconnected', saved: false },
-      }),
-      podReadable: false,
-    },
-    expected: connections,
-  },
+  // Session and startup problems belong to the gate and the prompts.
+  ...(
+    [
+      ['no connection', undefined],
+      [
+        'a signed-out connection',
+        connected({ session: { kind: 'signed-out' } }),
+      ],
+      ['a restoring connection', connected({ session: { kind: 'restoring' } })],
+      [
+        'an ended session',
+        connected({ session: { kind: 'ended', problem: 'expired' } }),
+      ],
+      [
+        'a failed durable sign-out',
+        connected({
+          session: { kind: 'ended', problem: 'disconnected', saved: false },
+        }),
+      ],
+      [
+        'missing required scopes',
+        connected({ missingRequiredScopes: ['tasks'] }),
+      ],
+    ] as const
+  ).map(([what, connection]) => ({
+    name: `${what} shows no inline Context surface`,
+    facts: { connection, podReadable: false, demand: 'selection' as const },
+    expected: hidden,
+  })),
   { name: 'readable Pod overview hides access', facts: {}, expected: hidden },
   {
     name: 'renewing readable Pod keeps access hidden',
@@ -120,8 +96,9 @@ it.each<{ name: string; facts: Partial<AccessFacts>; expected: Decision }>([
     expected: loading,
   },
   {
-    name: 'missing required scopes needs recovery',
+    name: 'management explains missing required scopes',
     facts: {
+      manage: true,
       podReadable: false,
       connection: connected({ missingRequiredScopes: ['tasks'] }),
     },
@@ -233,12 +210,12 @@ it.each<{ name: string; facts: Partial<AccessFacts>; expected: Decision }>([
     expected: connections,
   },
   {
-    name: 'first sign-in leaves',
+    name: 'first sign-in leaves without an inline surface',
     facts: {
       podReadable: false,
       connection: connected({ session: { kind: 'leaving' } }),
     },
-    expected: { body: 'leaving', visible: true, notice: false },
+    expected: hidden,
   },
   {
     name: 'reauthorization keeps usable access hidden',
@@ -261,16 +238,7 @@ it.each<{ name: string; facts: Partial<AccessFacts>; expected: Decision }>([
     },
     expected: hidden,
   },
-  {
-    name: 'reauthorization with missing scopes shows leaving',
-    facts: {
-      connection: connected({
-        session: { kind: 'leaving', subject: 'urn:person' },
-        missingRequiredScopes: ['tasks'],
-      }),
-    },
-    expected: { body: 'leaving', visible: true, notice: false },
-  },
+
   {
     name: 'open management shows leaving',
     facts: {
@@ -281,71 +249,19 @@ it.each<{ name: string; facts: Partial<AccessFacts>; expected: Decision }>([
     },
     expected: { body: 'leaving', visible: true, notice: false },
   },
-  {
-    name: 'resumed denial offers one retry',
-    facts: { retry: true, state: { ...base.state, callbackNotice: true } },
-    expected: { body: 'retry', visible: true, notice: false },
-  },
-  {
-    name: 'retry survives cleared callback notice',
-    facts: { retry: true },
-    expected: { body: 'retry', visible: true, notice: false },
-  },
-  {
-    name: 'callback notice alone stays visible',
-    facts: { state: { ...base.state, callbackNotice: true } },
-    expected: { body: 'none', visible: true, notice: false },
-  },
-  {
-    name: 'recovery takes precedence over a retained retry',
-    facts: {
-      retry: true,
-      demand: 'selection',
-      connection: connected({ catalogue: { kind: 'failed' } }),
-    },
-    expected: { ...connections, notice: true },
-  },
 ])('$name', ({ facts, expected }) => {
   expect(presentAccess({ ...base, ...facts })).toMatchObject(expected);
 });
 
 it.each([
-  ['startup-error', { startupError: new Error('fixture') }],
-  ['starting', { startup: undefined }],
-  [
-    'busy',
-    { startup: { interaction: 'none', storage: 'busy', unreadable: [] } },
-  ],
-  [
-    'unavailable',
-    {
-      startup: { interaction: 'none', storage: 'unavailable', unreadable: [] },
-    },
-  ],
-] as const)('%s takes precedence over management and retry', (body, state) => {
-  expect(
-    presentAccess({
-      ...base,
-      manage: true,
-      retry: true,
-      state: { ...base.state, ...state },
-    }),
-  ).toMatchObject({ body, visible: true, notice: false });
+  [{}, 'h1', true],
+  [{ manage: true }, 'h2', false],
+  [{ hasView: true }, 'h2', false],
+  [{ headingLevel: 2 }, 'h2', false],
+  [{ hasView: true, headingLevel: 1 }, 'h1', false],
+] as const)('preserves the heading for %j', (facts, heading, namesApp) => {
+  expect(presentAccess({ ...base, ...facts })).toMatchObject({
+    heading,
+    namesApp,
+  });
 });
-
-it.each([
-  [{}, 'h1', true, true],
-  [{ manage: true }, 'h2', false, false],
-  [{ hasView: true }, 'h2', false, false],
-  [{ headingLevel: 2 }, 'h2', false, true],
-  [{ hasView: true, headingLevel: 1 }, 'h1', false, false],
-] as const)(
-  'preserves heading and layout for %j',
-  (facts, heading, namesApp, initial) => {
-    expect(presentAccess({ ...base, ...facts })).toMatchObject({
-      heading,
-      namesApp,
-      initial,
-    });
-  },
-);

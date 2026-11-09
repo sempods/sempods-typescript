@@ -6,6 +6,11 @@ import type {
 } from '../runtime/types.js';
 import { RuntimeError } from '../runtime/errors.js';
 import type { BoundPod, BoundView } from '../runtime/view.js';
+import {
+  createAccessTracker,
+  type AccessPrompt,
+  type AccessState,
+} from './access.js';
 
 export interface LeaveGuard {
   /**
@@ -123,9 +128,17 @@ export interface AppSnapshot {
   /**
    * Whether the startup's failed or cancelled callback still needs presenting.
    * Cleared once the person selects another connection, disconnects or
-   * forgets one or starts a sign-in; `startup` itself stays unchanged.
+   * forgets one, starts a sign-in or dismisses the callback's prompt;
+   * `startup` itself stays unchanged.
+   * @deprecated Read `access` instead; kept until 1.0.
    */
   readonly callbackNotice: boolean;
+  /**
+   * Access and session outcomes that need attention, derived from the facts
+   * above: a blocking one for a sign-in screen, and action and info prompts
+   * for the app's own dialogs, banners and toasts. See `AccessState`.
+   */
+  readonly access: AccessState;
   readonly connections: readonly Connection[];
   /**
    * The connection the app works with. Without an earlier choice it is the
@@ -221,6 +234,7 @@ export function createAppController(
   let activeId: string | null = null;
   /** The active connection at the last publish (snapshots are immutable), to notice a sign-out. */
   let previous: Connection | undefined;
+  const tracker = createAccessTracker();
   let view: BoundView | null = null;
   let pod: BoundPod | null = null;
   let pending:
@@ -246,6 +260,13 @@ export function createAppController(
     startup,
     startupError,
     callbackNotice,
+    access: tracker.derive({
+      startup,
+      startupError,
+      callbackNotice,
+      connections: runtime.getSnapshot(),
+      activeId,
+    }),
     connections: runtime.getSnapshot(),
     activeId,
     view,
@@ -287,6 +308,15 @@ export function createAppController(
     }
     activeId = connection?.id ?? null;
     previous = connection;
+    // Before the prompt check below: a leave prompt for a prompt's action is
+    // withdrawn once that prompt is no longer current.
+    const access = tracker.derive({
+      startup,
+      startupError,
+      callbackNotice,
+      connections,
+      activeId,
+    });
     // A prompt is about the connection it was asked for. That connection
     // stopping being active without a guarded action (a returning sign-in, a
     // removed or signed-out connection) cancels it: nothing runs and no guard
@@ -331,6 +361,7 @@ export function createAppController(
       startup,
       startupError,
       callbackNotice,
+      access,
       connections,
       activeId,
       view,
@@ -639,27 +670,11 @@ export function createAppController(
     },
     /** Guarded like `selectConnection`. */
     connect(url = defaultPodUrl) {
-      return guard(async () => {
-        callbackNotice = false;
-        const connection =
-          (url === defaultPodUrl
-            ? runtime
-                .getSnapshot()
-                .find((c) => c.id === activeId && c.podUrl === url)
-            : undefined) ?? (await runtime.connect(url));
-        if (connection.session.kind === 'restoring')
-          throw new RuntimeError('configuration');
-        await runtime.beginAuthorization(connection.id);
-        activeId = connection.id;
-        publish();
-      });
+      return guard(connecting(url));
     },
     /** Guarded like `selectConnection`. */
     authorize(id: string) {
-      return guard(() => {
-        callbackNotice = false;
-        return runtime.beginAuthorization(id);
-      });
+      return guard(authorizing(id));
     },
     /**
      * Guarded like `selectConnection`. `true` means the action ran, not that
@@ -668,22 +683,123 @@ export function createAppController(
      * to another one with a session, as a removed one does.
      */
     disconnect(id: string) {
-      return guard(async () => {
-        if ((await runtime.disconnect(id)).kind === 'disconnected')
-          callbackNotice = false;
-      });
+      return guard(disconnecting(id));
     },
     /** Signs out if needed and forgets the Pod; guarded and reported like `disconnect`. */
     forget(id: string) {
-      return guard(async () => {
-        if ((await runtime.forget(id)).kind === 'disconnected')
-          callbackNotice = false;
-      });
+      return guard(forgetting(id));
+    },
+    /**
+     * Retires a prompt of `access.prompts` that offers `dismiss`, for this
+     * controller's lifetime; nothing is persisted. Dismissing a sign-in
+     * callback's prompt also clears `callbackNotice`. Returns `false` and does
+     * nothing for any other prompt.
+     */
+    dismiss(promptId: string) {
+      const prompt = tracker.dismiss(promptId);
+      if (!prompt) return false;
+      if (callbackReasons.has(prompt.reason)) callbackNotice = false;
+      publish();
+      return true;
     },
   };
+  function connecting(url: string | undefined) {
+    return async () => {
+      callbackNotice = false;
+      const connection =
+        (url === defaultPodUrl
+          ? runtime
+              .getSnapshot()
+              .find((c) => c.id === activeId && c.podUrl === url)
+          : undefined) ?? (await runtime.connect(url));
+      if (connection.session.kind === 'restoring')
+        throw new RuntimeError('configuration');
+      await runtime.beginAuthorization(connection.id);
+      activeId = connection.id;
+      publish();
+    };
+  }
+  function authorizing(id: string) {
+    return () => {
+      callbackNotice = false;
+      return runtime.beginAuthorization(id);
+    };
+  }
+  function disconnecting(id: string) {
+    return async () => {
+      if ((await runtime.disconnect(id)).kind === 'disconnected')
+        callbackNotice = false;
+    };
+  }
+  function forgetting(id: string) {
+    return async () => {
+      if ((await runtime.forget(id)).kind === 'disconnected')
+        callbackNotice = false;
+    };
+  }
+  /**
+   * Runs one offered prompt action. The prompt must still be current with
+   * that action, before it runs and, through the guard's availability check,
+   * again after a leave confirmation: a stale one runs and discards nothing.
+   */
+  async function runAccess(
+    prompt: AccessPrompt,
+    action: AccessPrompt['actions'][number],
+  ): Promise<boolean> {
+    const available = (): Availability =>
+      tracker.current(prompt, action) ? 'yes' : 'gone';
+    if (available() !== 'yes') return false;
+    const id = prompt.connectionId;
+    const guarded = (run: () => void | Promise<void>) =>
+      guard(run, 'connection', undefined, available);
+    switch (action) {
+      case 'dismiss':
+        return controller.dismiss(prompt.id);
+      case 'reload':
+        if (typeof location === 'undefined') return false;
+        location.reload();
+        return true;
+      case 'retry':
+        if (!id) return false;
+        if (prompt.reason !== 'unreachable') return guarded(disconnecting(id));
+        await runtime.retryRestore(id);
+        return true;
+      case 'forget':
+        return id ? guarded(forgetting(id)) : false;
+      case 'sign-in':
+        if (id) return guarded(authorizing(id));
+        // Without a fixed address the app asks for one (`connect(url)`).
+        return defaultPodUrl === undefined
+          ? false
+          : guarded(connecting(defaultPodUrl));
+    }
+  }
   retainedNavigation.set(controller, (action, retained) =>
     guard(action, 'navigate', retained),
   );
+  accessActions.set(controller, runAccess);
   return controller;
+}
+const callbackReasons = new Set<AccessPrompt['reason']>([
+  'sign-in-failed',
+  'sign-in-cancelled',
+  'sharing-unchanged',
+]);
+type AccessAction = (
+  prompt: AccessPrompt,
+  action: AccessPrompt['actions'][number],
+) => Promise<boolean>;
+const accessActions = new WeakMap<object, AccessAction>();
+/**
+ * Internal, for the SDK components: runs an offered action of a prompt
+ * through the controller's guarded actions; `false` when it is stale, the
+ * person declined or a guard blocked it. No public executor.
+ */
+export function runAccessAction(
+  app: AppController,
+  prompt: AccessPrompt,
+  action: AccessPrompt['actions'][number],
+): Promise<boolean> {
+  return accessActions.get(app)?.(prompt, action) ?? Promise.resolve(false);
 }
 export type AppController = ReturnType<typeof createAppController>;

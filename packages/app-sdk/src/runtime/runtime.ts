@@ -30,6 +30,7 @@ import {
 import {
   sessionBinding,
   SessionTransitionError,
+  type RefreshResend,
   type SessionRecord,
   type SessionSnapshot,
 } from '../sessions/records.js';
@@ -49,6 +50,7 @@ import {
   transientBeforeClaim,
 } from './errors.js';
 import { waitFor } from './wait.js';
+import { combineSignals } from './signals.js';
 import {
   bindView,
   explicitTarget,
@@ -70,6 +72,32 @@ import { assertCredentialRecipient, type Entry } from './connection.js';
 const RENEWAL_MARGIN = 60_000;
 /** How often one dispatch checks a replacement credential before using it. */
 const RENEWAL_ROUNDS = 3;
+/** The sempods server's default rotation grace period (sempods-kotlin#447). */
+const REFRESH_GRACE_PERIOD = 60_000;
+/** How long a token request may take before its answer counts as lost. */
+const TOKEN_TIMEOUT = 20_000;
+
+/** The token endpoint answered (`renewed`) or its answer was lost (`lost`). */
+type Sent =
+  | { readonly kind: 'renewed'; readonly result: ExchangeResult }
+  | { readonly kind: 'lost' };
+/**
+ * Whether the token endpoint's answer is unknown: no complete answer (no
+ * connection, a timeout, a cut-off body), or one that is neither a token
+ * response (`2xx`) nor an OAuth error answer (`400`, `401`), such as a
+ * gateway or proxy failure (`5xx`, `403`, `404`, `408`, `429`).
+ */
+function unanswered(status: number | undefined) {
+  return (
+    status === undefined ||
+    !((status >= 200 && status < 300) || status === 400 || status === 401)
+  );
+}
+/** The longest delay `setTimeout` keeps; longer ones fire at once. */
+const MAX_DELAY = 2_147_483_647;
+function offline() {
+  return globalThis.navigator?.onLine === false;
+}
 
 /** Creates no storage, request or navigation until initialize/connect is called. */
 export function createBrowserRuntime(
@@ -133,6 +161,11 @@ export function createBrowserRuntime(
     preset?.podUrl ?? (allowedPods?.length === 1 ? allowedPods[0] : undefined);
   // Whether a Pod address outlives its session (sign-out, a session that ends).
   const rememberPods = options.rememberPods ?? true;
+  const gracePeriod = options.refreshGracePeriod ?? REFRESH_GRACE_PERIOD;
+  if (!Number.isFinite(gracePeriod) || gracePeriod < 0)
+    throw new RuntimeError('configuration');
+  /** Whether a refresh first sent at `sentAt` may still be sent once more. */
+  const withinGrace = (sentAt: number) => Date.now() < sentAt + gracePeriod;
   let connectingDefault: Promise<Connection> | undefined;
   const contexts = createContextMemory(
     namespace,
@@ -382,23 +415,33 @@ export function createBrowserRuntime(
             return claimed;
           });
           current(e, generation);
-          // Erase a consumed refresh token from memory before the token request.
+          // Erase a consumed refresh token from memory before the token
+          // request; only the durable claim keeps it, for one resend.
           const withoutRefresh = { ...before };
           delete withoutRefresh.refreshToken;
           e.credentials = withoutRefresh;
-          const result = await refreshAuthorization(
-            { pod, client: e.client, scopes: before.scopes },
+          const sent = await sendRefresh(
+            e,
+            pod,
             before.refreshToken!,
             before.subject,
-            { ...protocol, signal: e.lifetime.signal },
+            before.scopes,
           );
+          if (sent.kind === 'lost') {
+            // Only for this generation: a newer sign-in or sign-out owns the
+            // record now.
+            current(e, generation);
+            // The one resend publishes its own outcome, like at startup.
+            await resumeLost(e, claim.sentAt);
+            return eligible(e, generation) && e.view.session.kind === 'active';
+          }
           await serial(e, async () => {
             current(e, generation);
-            accepted(e, await claim.complete(result));
+            accepted(e, await claim.complete(sent.result));
           });
           current(e, generation);
           e.pod = pod;
-          install(e, result);
+          install(e, sent.result);
           return true;
         } catch (error) {
           if (eligible(e, generation)) {
@@ -442,6 +485,220 @@ export function createBrowserRuntime(
       delete e.ahead;
     }
     return waitFor(e.refresh, e.lifetime.signal, signal).catch(() => false);
+  }
+  /**
+   * Sends one refresh token request. A complete answer of the token endpoint
+   * resolves `renewed` or rejects with its problem (a refusal, invalid claims).
+   * Without one (no connection, a timeout, a cut-off body, a `5xx`, `408` or
+   * `429`), the outcome is unknown: the Pod may have rotated the token, so
+   * it resolves `lost`. A disconnect or dispose rejects.
+   */
+  async function sendRefresh(
+    e: Entry,
+    pod: PodDiscovery,
+    refreshToken: string,
+    subject: string,
+    scopes: readonly string[],
+    deadline?: number,
+  ): Promise<Sent> {
+    // The lifetime this request belongs to: a sign-in or sign-out replaces
+    // `e.lifetime`, and its cancellation must not read as a lost answer.
+    const lifetime = e.lifetime.signal;
+    const timeout = new AbortController();
+    const timer = setTimeout(
+      () => timeout.abort(new RuntimeError('interrupted')),
+      TOKEN_TIMEOUT,
+    );
+    const signal = combineSignals(lifetime, timeout.signal);
+    const send: NonNullable<typeof protocol.fetch> =
+      protocol.fetch ?? ((url, init) => globalThis.fetch(url, init));
+    let requested = false;
+    let expired = false;
+    let status: number | undefined;
+    try {
+      const result = await refreshAuthorization(
+        { pod, client: e.client, scopes },
+        refreshToken,
+        subject,
+        {
+          ...protocol,
+          fetch: async (url, init) => {
+            // Checked at dispatch: the token stays unsent once the Pod would
+            // treat it as reuse.
+            if (deadline !== undefined && Date.now() >= deadline) {
+              expired = true;
+              throw new RuntimeError('interrupted');
+            }
+            requested = true;
+            // Bounded also for a fetch that ignores its signal.
+            const response = await waitFor(send(url, init), signal.signal);
+            // Only a complete answer counts: a body cut off may have carried
+            // the rotated token.
+            await waitFor(response.clone().arrayBuffer(), signal.signal);
+            status = response.status;
+            return response;
+          },
+          signal: signal.signal,
+        },
+      );
+      return { kind: 'renewed', result };
+    } catch (error) {
+      if (expired && !lifetime.aborted) throw new RuntimeError('interrupted');
+      if (lifetime.aborted || !requested || !unanswered(status)) throw error;
+      return { kind: 'lost' };
+    } finally {
+      clearTimeout(timer);
+      signal.dispose();
+    }
+  }
+  /**
+   * Sends the one resend of a claimed refresh, recorded durably before it is
+   * sent, and installs its result. A lost answer again rejects with
+   * `interrupted`; a refusal with the server's problem.
+   */
+  async function resendRefresh(
+    e: Entry,
+    generation: string,
+    pod: PodDiscovery,
+    sentAt: number,
+  ) {
+    const claim = await serial(e, async () => {
+      current(e, generation);
+      // Checked again here and at dispatch: discovery, queued writes or the
+      // durable resend record may take it past the grace period, when the
+      // Pod would treat the resend as reuse.
+      if (!withinGrace(sentAt)) throw new RuntimeError('interrupted');
+      if (!sessions || !e.revision) throw new RuntimeError('storage');
+      const claimed = await sessions.resendRefresh(
+        e.view.id,
+        e.revision,
+        binding(e, pod),
+      );
+      if (claimed.kind === 'conflict') throw new RuntimeError('disconnected');
+      e.revision = claimed.revision;
+      return claimed;
+    });
+    current(e, generation);
+    const sent = await sendRefresh(
+      e,
+      pod,
+      claim.resend.refreshToken,
+      claim.subject,
+      claim.resend.scopes,
+      sentAt + gracePeriod,
+    );
+    if (sent.kind === 'lost') throw new RuntimeError('interrupted');
+    await serial(e, async () => {
+      current(e, generation);
+      accepted(e, await claim.complete(sent.result));
+    });
+    current(e, generation);
+    e.pod = pod;
+    install(e, sent.result);
+  }
+  /**
+   * Offline after a lost answer, within the grace period: nothing is sent, the
+   * connection is restorable and the resend waits for `online` or
+   * `retryRestore(id)`. Once the grace period has passed it ends as
+   * `interrupted`, keeping its address.
+   */
+  function suspend(
+    e: Entry,
+    generation: string,
+    pod: PodDiscovery | undefined,
+    sentAt: number,
+  ) {
+    // Bound handles stay current but lose access until the resend succeeds;
+    // pending reads are invalidated. The durable claim and the catalogue stay.
+    delete e.credential;
+    invalidate(e);
+    invalidatePod(e);
+    invalidateContexts(e);
+    const timer = setTimeout(
+      () => {
+        if (eligible(e, generation) && e.lost?.sentAt === sentAt) {
+          delete e.lost;
+          end(e, new RuntimeError('interrupted'));
+        }
+      },
+      Math.min(MAX_DELAY, Math.max(0, sentAt + gracePeriod - Date.now())),
+    );
+    e.lifetime.signal.addEventListener('abort', () => clearTimeout(timer), {
+      once: true,
+    });
+    e.lost = { generation, sentAt, timer, ...(pod ? { pod } : {}) };
+    e.view = {
+      ...e.view,
+      session: Object.freeze({
+        kind: 'ended',
+        problem: 'network',
+        restorable: true,
+      }),
+    };
+    publish();
+  }
+  /**
+   * Resends a refresh whose answer was lost, in this page or an earlier one;
+   * publishes its own outcome. The Pod is rediscovered first (`pod` only when
+   * a restorable connection already has it): that read probes the network, so
+   * a connection that lost the answer does not lose the one resend too, and
+   * an unreachable Pod waits within the grace period.
+   */
+  async function resumeLost(
+    e: Entry,
+    sentAt: number,
+    pod?: PodDiscovery,
+    resent = false,
+  ): Promise<void> {
+    const generation = e.generation;
+    const events = onlineEvents;
+    const wait = (pod?: PodDiscovery) => {
+      suspend(e, generation, pod, sentAt);
+      // The browser came back online meanwhile: try once more now.
+      if (onlineEvents !== events) void retryRestore(e);
+    };
+    try {
+      if (resent || !withinGrace(sentAt)) throw new RuntimeError('interrupted');
+      if (!pod) {
+        // The probe ends with the grace period, also for a fetch that ignores
+        // its signal: beyond it, nothing can be resent.
+        const grace = new AbortController();
+        const timer = setTimeout(
+          () => grace.abort(new RuntimeError('interrupted')),
+          Math.min(MAX_DELAY, Math.max(0, sentAt + gracePeriod - Date.now())),
+        );
+        const signal = combineSignals(e.lifetime.signal, grace.signal);
+        try {
+          pod = await waitFor(
+            discoverPod(e.pod.podUrl, { ...protocol, signal: signal.signal }),
+            signal.signal,
+          );
+        } catch (error) {
+          if (grace.signal.aborted && !e.lifetime.signal.aborted)
+            throw new RuntimeError('interrupted');
+          // An unreachable Pod spends nothing: wait within the grace period.
+          if (eligible(e, generation) && transientBeforeClaim(error)) {
+            wait();
+            return;
+          }
+          throw error;
+        } finally {
+          clearTimeout(timer);
+          signal.dispose();
+        }
+      }
+      current(e, generation);
+      if (offline()) {
+        wait(pod);
+        return;
+      }
+      await resendRefresh(e, generation, pod, sentAt);
+    } catch (error) {
+      if (!eligible(e, generation)) return;
+      if (error instanceof OAuthError && error.problem === 'invalid-client')
+        registry.clear(e.pod.podUrl);
+      end(e, error);
+    }
   }
   /**
    * Renews ahead of the credential's own expiry, so dispatch does not depend on
@@ -611,8 +868,20 @@ export function createBrowserRuntime(
   /** Restores a session whose restoration found its Pod unreachable; no-op otherwise. */
   async function retryRestore(e: Entry) {
     const saved = e.restorable;
+    const lost = e.lost;
     const session = e.view.session;
-    if (!saved || session.kind !== 'ended' || !session.restorable) return;
+    if (session.kind !== 'ended' || !session.restorable) return;
+    if (lost && eligible(e, lost.generation)) {
+      // Offline still: keep the one resend for later.
+      if (offline() && withinGrace(lost.sentAt)) return;
+      clearTimeout(lost.timer);
+      delete e.lost;
+      e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+      publish();
+      await resumeLost(e, lost.sentAt, lost.pod);
+      return;
+    }
+    if (!saved) return;
     delete e.restorable;
     e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
     publish();
@@ -829,6 +1098,8 @@ export function createBrowserRuntime(
       if (disposed) throw new RuntimeError('disconnected');
       let pending: SessionSnapshot | undefined;
       const abandoned: { e: Entry; problem: RuntimeProblem }[] = [];
+      /** Refreshes an earlier page sent without an answer, resent once below. */
+      const lost: { e: Entry; resend: RefreshResend }[] = [];
       /** Addresses an earlier start remembered, deleted under `rememberPods: false`. */
       const forgotten: SessionSnapshot[] = [];
       for (const saved of listing.records) {
@@ -881,13 +1152,18 @@ export function createBrowserRuntime(
               location.searchParams.has('error') &&
               !location.searchParams.has('code')));
         if (resumes && !callback) abandoned.push({ e, problem });
+        // A refresh claim of SDK 0.8 keeps its token: resent once below
+        // within the grace period, or ended as `interrupted` otherwise.
+        const resend =
+          saved.value.kind === 'claimed' ? saved.value.resend : undefined;
+        if (resend) lost.push({ e, resend });
         e.view = {
           ...e.view,
           requestedScopes: b.scopes,
           requiredScopes: required,
           optionalScopes: optional,
           session: Object.freeze(
-            saved.value.kind === 'ready' || resumes
+            saved.value.kind === 'ready' || resumes || resend
               ? { kind: 'restoring' }
               : { kind: 'ended', problem },
           ),
@@ -907,6 +1183,8 @@ export function createBrowserRuntime(
         }),
       );
       for (const { e, problem } of abandoned) void resumeAbandoned(e, problem);
+      for (const { e, resend } of lost)
+        void resumeLost(e, resend.sentAt, undefined, resend.resent);
       // Restoration publishes per connection (`restoring` → `active`/`ended`).
       // Neither the startup report nor a callback waits for another Pod, so
       // one Pod whose discovery never settles cannot hold the app open.
@@ -1206,6 +1484,7 @@ export function createBrowserRuntime(
         delete e.explicit;
         delete e.observations;
         delete e.refresh;
+        delete e.lost;
         delete e.catalogue;
         delete e.revalidation;
         invalidate(e);
