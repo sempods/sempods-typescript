@@ -215,6 +215,7 @@ export interface LoadOptions {
 /** What `useLoad` and `usePodLoad` return. */
 type Loaded<T> = ReturnType<typeof useLoad<T>>;
 const selectPod = (s: AppSnapshot) => s.pod;
+const noPod = () => null;
 /**
  * Loads the active BoundPod using the same cancellable/bounded loader as useLoad.
  * Context/catalogue/label changes do not reload it. Changed Pod/session/grants
@@ -246,17 +247,20 @@ export function usePodLoad<T>(
   second?: PodRead<T> | LoadOptions,
   third?: LoadOptions,
 ): Loaded<T> {
-  const active = useAppFacts(selectPod);
-  const settled = useAppFacts(startupSettled);
   // The active-Pod form passes the read first; the explicit form a handle.
   const explicit = typeof first !== 'function';
+  // An explicit source does not follow (or re-render for) the active Pod.
+  const active = useAppFacts(explicit ? noPod : selectPod);
+  const settled = useAppFacts(startupSettled);
   const pod = explicit ? first : active;
   const read = (explicit ? second : first) as PodRead<T>;
   const options = (explicit ? third : second) as LoadOptions | undefined;
   const { state, reload, cancel } = useBoundLoad(
     pod,
     read,
-    settled ? unavailable : loading,
+    // A handle whose loader starts after this render is loading, not
+    // unavailable: no notice offers a retry that has nothing to reload.
+    pod || !settled ? loading : unavailable,
     options,
   );
   return { state, data: shownData(state), reload, cancel };

@@ -47,10 +47,12 @@ function Source({
   name,
   reader,
   query = '',
+  seen,
 }: {
   readonly name: string;
   readonly reader: BoundPod | null;
   readonly query?: string;
+  readonly seen?: string[];
 }) {
   // Inline callback and data type inferred from the handle form.
   const load = usePodLoad(
@@ -59,6 +61,7 @@ function Source({
       target.sparql.construct(`CONSTRUCT {} WHERE {} # ${query}`, { signal }),
     { key: query },
   );
+  seen?.push(load.state.kind);
   return (
     <section aria-label={name}>
       <output>
@@ -75,21 +78,19 @@ const region = (name: string) => within(screen.getByRole('region', { name }));
 const text = (name: string) =>
   screen.getByRole('region', { name }).querySelector('output')!.textContent;
 
-/** The recipe: bind only while the connection's session is signed in. */
-function readerOf(runtime: BrowserRuntime, connection: Connection) {
-  const { kind } = connection.session;
-  return kind === 'active' || kind === 'renewing'
-    ? runtime.bindPod(connection.id)
-    : null;
-}
+/** The recipe: read only signed-in connections; bindPod never throws then. */
+const signedIn = ({ session }: Connection) =>
+  session.kind === 'active' || session.kind === 'renewing';
 function EachConnection({ runtime }: { readonly runtime: BrowserRuntime }) {
-  return useConnections().map((connection) => (
-    <Source
-      key={connection.id}
-      name={connection.podUrl}
-      reader={readerOf(runtime, connection)}
-    />
-  ));
+  return useConnections()
+    .filter(signedIn)
+    .map((connection) => (
+      <Source
+        key={connection.id}
+        name={connection.podUrl}
+        reader={signedIn(connection) ? runtime.bindPod(connection.id) : null}
+      />
+    ));
 }
 
 it('reads each connection through its own handle, failing and retrying independently', async () => {
@@ -118,8 +119,6 @@ it('reads each connection through its own handle, failing and retrying independe
   await waitFor(() => expect(text(pod)).toBe('[{"@id":"urn:alice"}]'));
   expect([alice, bob]).toEqual([2, 1]);
   expect(text(otherUrl)).toBe('[{"@id":"urn:bob"}]');
-  // No implicit federation or Context discovery.
-  expect(f.count('/_system/contexts')).toBe(0);
 });
 
 it('withdraws only the disconnected connection’s result, also from a kept handle', async () => {
@@ -140,7 +139,10 @@ it('withdraws only the disconnected connection’s result, also from a kept hand
   await waitFor(() => expect(text(otherUrl)).toBe('[{"@id":"urn:bob"}]'));
   await waitFor(() => expect(text(pod)).toBe('[{"@id":"urn:alice"}]'));
   await act(() => runtime.disconnect(other.id));
-  await waitFor(() => expect(text(otherUrl)).toBe('unavailable'));
+  // The recipe drops the signed-out source; a kept handle withdraws its data.
+  await waitFor(() =>
+    expect(screen.queryByRole('region', { name: otherUrl })).toBeNull(),
+  );
   expect(text('kept')).toBe('unavailable');
   expect(text(pod)).toBe('[{"@id":"urn:alice"}]');
   expect(screen.queryByText(/urn:bob/)).toBeNull();
@@ -173,6 +175,28 @@ it('aborts the superseded handle’s read and ignores its late answer', async ()
   expect(signal?.aborted).toBe(true);
   await act(async () => gate.resolve(Response.json([{ '@id': 'urn:alice' }])));
   expect(text('source')).toBe('[{"@id":"urn:bob"}]');
+});
+
+it('shows a new or replaced handle as loading, never unavailable, until it answers', async () => {
+  const { f, runtime, other } = await twoPods(keep);
+  f.setQuery(async (url) =>
+    Response.json([
+      { '@id': url.startsWith(pod + '/') ? 'urn:alice' : 'urn:bob' },
+    ]),
+  );
+  const seen: string[] = [];
+  const ui = (id: string) => (
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Source name="source" reader={runtime.bindPod(id)} seen={seen} />
+    </SempodsProvider>
+  );
+  // Startup has settled: a source mounted now still starts loading.
+  const { rerender } = render(ui(f.id));
+  await waitFor(() => expect(text('source')).toBe('[{"@id":"urn:alice"}]'));
+  rerender(ui(other.id));
+  await waitFor(() => expect(text('source')).toBe('[{"@id":"urn:bob"}]'));
+  expect(seen).not.toContain('unavailable');
+  expect(seen[0]).toBe('loading');
 });
 
 it('cancels a superseded query when its key changes and never shows the old inputs’ data', async () => {

@@ -868,18 +868,16 @@ reads with the same loader as the active-Pod form, but only through that handle:
 ```tsx
 // Fragment: `runtime` is the app's one BrowserRuntime; Connection from
 // @sempods/app-sdk. describe(iri) is your CONSTRUCT for a validated IRI.
-/** A handle only while the session is signed in: bindPod never throws then. */
-function readerOf(connection: Connection) {
-  const { kind } = connection.session;
-  return kind === 'active' || kind === 'renewing'
-    ? runtime.bindPod(connection.id)
-    : null;
-}
+/** Signed in: bindPod returns this connection's handle and never throws. */
+const signedIn = ({ session }: Connection) =>
+  session.kind === 'active' || session.kind === 'renewing';
 
 function Sources({ iri }: { readonly iri: string }) {
-  return useConnections().map((connection) => (
-    <Source key={connection.id} connection={connection} iri={iri} />
-  ));
+  return useConnections()
+    .filter(signedIn)
+    .map((connection) => (
+      <Source key={connection.id} connection={connection} iri={iri} />
+    ));
 }
 
 function Source(props: {
@@ -888,7 +886,7 @@ function Source(props: {
 }) {
   const { connection, iri } = props;
   const load = usePodLoad(
-    readerOf(connection),
+    signedIn(connection) ? runtime.bindPod(connection.id) : null,
     (pod, signal) => pod.sparql.construct(describe(iri), { signal }),
     { key: iri },
   );
@@ -905,6 +903,9 @@ function Source(props: {
   connection's session lasts; a new sign-in gives a new handle and a fresh
   read. Bind only while `session.kind` is `active` or `renewing`; otherwise
   `bindPod` throws `RuntimeError('disconnected')`.
+- `useConnections()` also lists remembered, signed-out Pods. Leave them out as
+  above, or offer **Sign in** (`useApp().authorize(id)`) for them: a `null`
+  handle reads `unavailable`, and `reload()` has nothing to read.
 - Each source has its own state, `LoadNotice` and retry: a `403`, a failure or
   `cancel()` of one never touches another. Nothing combines Pods or falls back
   to another connection, and credentials stay with the runtime.
@@ -915,9 +916,9 @@ function Source(props: {
   data (`unavailable`), also from a handle the app kept; changed grants
   refresh ready data. `null` is `loading` until startup settles, then
   `unavailable`.
-- Which connections to read is the app's choice: filter `useConnections()`, for
-  example to the Pods the person enabled. Each source reads as soon as it
-  mounts.
+- Which connections to read is the app's choice: filter `useConnections()`
+  further, for example to the Pods the person enabled. Each source shows
+  `loading` from its first render and reads as soon as it mounts.
 
 ## Part 4: Customizing
 
