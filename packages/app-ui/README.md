@@ -21,9 +21,10 @@ npm install --save-dev tailwindcss @tailwindcss/vite
 
 Peers: React 19, `@sempods/app-sdk` and `@sempods/client-sdk` of the same minor
 version as this package, and Tailwind CSS 4.1 or newer (checked with 4.3.3).
-The package ships built JavaScript with TypeScript declarations; `react-aria-components`,
-`@internationalized/date`, `lucide-react` and the class utilities are its own
-dependencies. The `shadcn` CLI is not needed at runtime.
+The package ships built JavaScript with TypeScript declarations;
+`react-aria-components`, `@internationalized/date`, `lucide-react` and the
+class utilities are its own dependencies. The `shadcn` CLI is not needed at
+runtime.
 
 ## Set up Tailwind
 
