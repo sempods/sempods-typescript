@@ -2704,6 +2704,135 @@ async function compact({ browser, origin }) {
   return results;
 }
 
+/**
+ * ScreenDialog full screen on a phone with device insets (#228): Close below
+ * the top inset, the heading and fields beside the side insets, the last
+ * action above the bottom inset; the ordinary phone layout and the centred
+ * dialog stay as they are. Only Chromium can emulate insets (DevTools
+ * protocol); the other engines check the layout without them.
+ */
+async function insets({ browser, origin, engine }) {
+  const { context, page, errors } = await newPage(browser);
+  await signIn(page, origin);
+  const cdp =
+    engine === 'chromium' ? await context.newCDPSession(page) : undefined;
+  const setInsets = (insets = {}) =>
+    cdp?.send('Emulation.setSafeAreaInsetsOverride', {
+      insets: { top: 0, bottom: 0, left: 0, right: 0, ...insets },
+    });
+  const dialog = page.getByRole('dialog', { name: 'Details' });
+  /** Opens the task at a size and measures the dialog's parts. */
+  const measure = async (width, height, deviceInsets) => {
+    await setInsets(deviceInsets);
+    await page.setViewportSize({ width, height });
+    await page.goto(origin + '/');
+    await openTask(page);
+    return dialog.evaluate((el) => {
+      const box = (node) => {
+        const r = node.getBoundingClientRect();
+        return { top: r.top, right: r.right, bottom: r.bottom, left: r.left };
+      };
+      const [header, scroller] = el.children;
+      const close = [...header.querySelectorAll('button')].at(-1);
+      const field = scroller.querySelector('input');
+      scroller.scrollTop = scroller.scrollHeight;
+      const last = [...scroller.querySelectorAll('button')].at(-1);
+      const padding = (node) => {
+        const s = getComputedStyle(node);
+        return [s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft];
+      };
+      return {
+        modal: box(el.parentElement),
+        heading: box(header.querySelector('h2')),
+        close: box(close),
+        field: box(field),
+        last: box(last),
+        scrolls: scroller.scrollHeight > scroller.clientHeight,
+        headerPadding: padding(header),
+        contentPadding: padding(scroller),
+        viewport: { width: innerWidth, height: innerHeight },
+      };
+    });
+  };
+  const emulated = (run) => async () =>
+    cdp ? run() : { pass: false, skip: 'no safe-area emulation' };
+  const checks = {
+    // Without insets the phone layout keeps its ordinary padding.
+    async 'screen-dialog-phone-without-insets'() {
+      const m = await measure(375, 600);
+      return {
+        pass:
+          m.headerPadding.join() === '8px,16px,8px,16px' &&
+          m.contentPadding.join() === '16px,16px,16px,16px' &&
+          m.modal.top === 0 &&
+          m.modal.left === 0,
+        ...m,
+      };
+    },
+    // A notch and a home indicator: Close and the last action stay clear.
+    'screen-dialog-portrait-insets': emulated(async () => {
+      const top = 47;
+      const bottom = 34;
+      // Low enough that the content scrolls to its last action.
+      const m = await measure(375, 440, { top, bottom });
+      return {
+        pass:
+          m.scrolls &&
+          m.close.top >= top &&
+          m.headerPadding[0] === `${8 + top}px` &&
+          m.last.bottom <= m.viewport.height - bottom - 16 + 0.5 &&
+          m.modal.top === 0,
+        ...m,
+      };
+    }),
+    // Landscape on a narrow phone: the heading, Close and the fields stay
+    // beside the side insets.
+    'screen-dialog-landscape-insets': emulated(async () => {
+      const side = 44;
+      const m = await measure(600, 360, {
+        left: side,
+        right: side,
+        bottom: 21,
+      });
+      return {
+        pass:
+          m.heading.left >= side + 16 - 0.5 &&
+          m.close.right <= m.viewport.width - side - 16 + 0.5 &&
+          m.field.left >= side + 16 - 0.5 &&
+          m.field.right <= m.viewport.width - side - 16 + 0.5 &&
+          m.last.bottom <= m.viewport.height - 21 - 16 + 0.5,
+        ...m,
+      };
+    }),
+    // The centred dialog does not move with insets.
+    'screen-dialog-centred-ignores-insets': emulated(async () => {
+      const plain = await measure(1280, 800);
+      const inset = await measure(1280, 800, {
+        top: 47,
+        bottom: 34,
+        left: 44,
+        right: 44,
+      });
+      return {
+        pass:
+          JSON.stringify(plain.modal) === JSON.stringify(inset.modal) &&
+          plain.contentPadding.join() === inset.contentPadding.join() &&
+          plain.headerPadding.join() === inset.headerPadding.join(),
+        plain: plain.modal,
+        inset: inset.modal,
+      };
+    }),
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(checks)) {
+    await fetch(origin + '/__reset');
+    results.push(await attemptOn(errors, id, run));
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   gate,
   roundtrip,
@@ -2713,4 +2842,5 @@ export const suites = {
   routing,
   theme,
   compact,
+  insets,
 };

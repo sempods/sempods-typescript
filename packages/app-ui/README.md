@@ -530,7 +530,12 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   an SDK confirmation (a native `<dialog>`) does not count as a press beside
   it. It has no entry or exit animation, because WebKit kept a modal mounted
   that closed during one: it goes as soon as it closes. Close takes the SDK's "Close" text unless `closeLabel` is
-  given.
+  given. Full screen, in an app with `viewport-fit=cover`, its heading and
+  content add the device's safe-area insets (`env(safe-area-inset-*)`) to
+  their padding: Close sits below a notch, the heading and fields beside a
+  landscape cutout, the last action above the home indicator. Without insets
+  and in the centred dialog nothing changes, so an app's own inset padding
+  around it can go.
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and submenus of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
@@ -982,7 +987,8 @@ against the installed packages and runs in Chromium and WebKit, and in
 Firefox on the Linux CI runner. It checks Escape in fields, in SDK
 confirmations, on Close, in menus and in the date chooser; focus trap and
 restore; Save after cancelled closes; closing right after opening; cancelled
-SDK questions above the compact quick edit and its German Close; resizing
+SDK questions above the compact quick edit and its German Close; the full
+screen dialog with emulated safe-area insets (Chromium only); resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
 in three time zones; keyboard use of menus, the calendar and filter chips;
 44px targets; the action group's width on a phone and a desktop; the routed
@@ -1014,6 +1020,11 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
   in a browser without it, staying on one shows the shown address again in
   place, and later Back and Forward decisions count that entry as the shown
   one.
+- `ScreenDialog`'s safe-area padding is checked with insets that Chromium
+  emulates, not on an iPhone, an Android phone or an installed PWA. It reads
+  only `env(safe-area-inset-*)`, which is 0 unless the app's viewport sets
+  `viewport-fit=cover`. The centred dialog above 640px keeps its margins of
+  at least 1rem and adds no insets.
 - The UI layer adds about 97 KB of gzipped JavaScript to an app (measured in
   the spike with the same components).
 

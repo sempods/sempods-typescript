@@ -124,6 +124,12 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     the SDK's question, and Cancel in its delete question, keep the dialog
     and the draft; a press beside it asks, and discarding closes it unsaved;
     its close button is named in German;
+  - `ScreenDialog` full screen with safe-area insets, emulated through the
+    DevTools protocol in Chromium only (other engines report a skip): Close
+    below a 47px top inset, the last action after scrolling above a 34px
+    bottom inset, heading, Close and fields beside 44px landscape side
+    insets; the ordinary phone padding without insets in every engine, and
+    the centred dialog unmoved by insets;
   - the calendar-date roundtrip with the SDK's `date` field in
     Europe/Berlin, UTC+14 and UTC−11: stored `xsd:date` after Apply and Save,
     nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`

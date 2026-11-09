@@ -60,6 +60,14 @@ reload, so people sign in again with one action.
   draft. An app's own `shouldCloseOnInteractOutside` still applies; a filter
   that only ignored `dialog:modal` can go.
 
+- **`ScreenDialog` keeps clear of device insets on phones.** Full screen
+  (below 640px), its heading and scrolling content add
+  `env(safe-area-inset-*)` to their padding, so in an app with
+  `viewport-fit=cover` Close and the last action no longer sit under a notch
+  or the home indicator. Without insets, and in the centred dialog, the layout
+  is unchanged. Remove app CSS that added these insets around or inside a
+  `ScreenDialog`, or they count twice.
+
 ### Type additions
 
 - `SessionFact`'s `signed-out` variant gains the optional `problem`, and its

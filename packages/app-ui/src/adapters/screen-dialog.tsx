@@ -14,8 +14,8 @@ export interface ScreenDialogProps {
   /**
    * Escape, the heading's Close button or a press beside the dialog ask to
    * close (a press in an SDK confirmation is none); the dialog closes only
-   * when `open` turns false. Run the SDK's
-   * guarded close here (`editor.close()`, then leave the route).
+   * when `open` turns false. Run the SDK's guarded close here
+   * (`editor.close()`, then leave the route).
    */
   readonly onRequestClose: () => void;
   /** Defaults to the SDK's "Close" text. */
@@ -28,7 +28,8 @@ export interface ScreenDialogProps {
 
 /**
  * A routed screen as a modal: full screen below 640px, up to 42rem wide
- * above. Content scrolls inside it; the heading stays.
+ * above. Content scrolls inside it; the heading stays. Full screen, the
+ * heading and the content keep clear of the device's safe-area insets.
  */
 export function ScreenDialog({
   title,
@@ -52,7 +53,10 @@ export function ScreenDialog({
         className,
       )}
     >
-      <header className="flex items-center gap-2 border-b px-4 py-2">
+      {/* Full screen, the ordinary padding starts at the device's safe
+          area (viewport-fit=cover): below a notch, beside it in landscape,
+          above the home indicator. Without insets env() is 0. */}
+      <header className="flex items-center gap-2 border-b px-4 py-2 max-sm:pt-[calc(0.5rem_+_env(safe-area-inset-top))] max-sm:pr-[calc(1rem_+_env(safe-area-inset-right))] max-sm:pl-[calc(1rem_+_env(safe-area-inset-left))]">
         <Heading slot="title" className="flex-1 text-lg font-medium">
           {title}
         </Heading>
@@ -67,7 +71,7 @@ export function ScreenDialog({
           <XIcon />
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 max-sm:pr-[calc(1rem_+_env(safe-area-inset-right))] max-sm:pb-[calc(1rem_+_env(safe-area-inset-bottom))] max-sm:pl-[calc(1rem_+_env(safe-area-inset-left))] sm:p-6">
         {children}
       </div>
     </Dialog>
