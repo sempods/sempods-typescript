@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CalendarDate } from '@internationalized/date';
 import { Dialog as AriaDialog, I18nProvider } from 'react-aria-components';
 import { useSdkLocale } from '@sempods/app-sdk/react';
+import { classifyDate } from '@sempods/client-sdk/edit';
 import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Calendar } from '../components/calendar.js';
@@ -57,15 +58,16 @@ export function DateChooser({
   const shown = value === null ? (labels?.none ?? t.noDate) : show(value);
   // A value that names no real day, or a date-time without a zone, is shown
   // as stored: `Date` would roll 30 February over to 2 March or read the
-  // time in the device's zone.
+  // time in the device's zone. A day's own zone does not change the day.
   function show(stored: string): string {
-    try {
-      if (day && !stored.includes('T')) return format.dateOnly(day.toString());
-      if (day && ZONED.test(stored)) return format.dateTime(stored);
-    } catch {
-      // The formatters reject a day or instant they cannot show.
-    }
-    return stored;
+    const parts = classifyDate(stored);
+    const formatted =
+      parts.kind === 'instant'
+        ? format.dateTime(stored)
+        : parts.kind === 'day' && day
+          ? format.dateOnly(day.toString())
+          : undefined;
+    return formatted ?? stored;
   }
   const close = (next: string | null) => {
     onChange(next);
@@ -135,26 +137,14 @@ export function DateChooser({
 }
 
 /**
- * The time of an `xsd:dateTime` with its required time zone, as the SDK's
- * `date` field accepts it (`T09:30:00`, `T09:30:00.5`, `T24:00:00`, then `Z`
- * or an offset such as `+02:00`).
+ * The calendar day a stored value names (a day, or the day a zoned date-time
+ * names in its own offset), or `null` when it names none or one outside the
+ * years 0001–9999 that `CalendarDate` holds.
  */
-const ZONED =
-  /T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?|24:00:00(?:\.0+)?)(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
-
-/** The calendar day a stored value names, or `null` when it names none. */
 export function calendarDay(value: string | null): CalendarDate | null {
-  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T|Z|[+-])/);
-  if (!match) return null;
-  const [year, month, day] = [match[1], match[2], match[3]].map(Number) as [
-    number,
-    number,
-    number,
-  ];
-  const date = new CalendarDate(year, month, day);
-  // CalendarDate constrains an impossible day (31 February) or year 0000
-  // (moved to 0001) instead of failing.
-  return date.year === year && date.month === month && date.day === day
-    ? date
+  if (value === null) return null;
+  const parts = classifyDate(value);
+  return parts.kind !== 'unsupported' && parts.year >= 1 && parts.year <= 9999
+    ? new CalendarDate(parts.year, parts.month, parts.day)
     : null;
 }

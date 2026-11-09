@@ -19,6 +19,9 @@
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
   "references": [
     {
+      "path": "../client-sdk"
+    },
+    {
       "path": "../app-sdk"
     }
   ]

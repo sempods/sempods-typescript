@@ -7,6 +7,8 @@ export type {
   Review,
   SaveOutcome,
 } from './editor.js';
+export { classifyDate } from './dates.js';
+export type { StoredDate } from './dates.js';
 export {
   date,
   dateTime,

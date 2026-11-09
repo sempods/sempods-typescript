@@ -41,12 +41,12 @@ it('formats regions and time zones explicitly without moving calendar dates', ()
   expect(ch.dateOnly('2026-10-01')).toBe(de.dateOnly('2026-10-01'));
   expect(ch.dateTime('2026-10-01T00:30:00Z')).toContain('30.09.2026');
   expect(de.dateTime('2026-10-01T00:30:00Z')).toContain('01.10.2026');
-  expect(() => de.dateOnly('2026-02-30')).toThrow(RangeError);
-  expect(() => de.dateOnly('2026-10-01T00:00:00Z')).toThrow(RangeError);
+  expect(de.dateOnly('2026-02-30')).toBeUndefined();
+  expect(de.dateOnly('2026-10-01T00:00:00Z')).toBeUndefined();
   expect(de.list(['Lesen', 'Schreiben'])).toBe('Lesen und Schreiben');
 });
 
-it('shows Gregorian years below 1000 with four digits and refuses years before 0001 (#258)', () => {
+it('shows Gregorian years below 1000 with four digits and leaves years before 0001 as stored (#258)', () => {
   const de = createFormatters('de-DE', 'Europe/Berlin');
   const en = createFormatters('en-US', 'America/New_York');
   expect(de.dateOnly('0050-03-01')).toBe('01.03.0050');
@@ -59,7 +59,7 @@ it('shows Gregorian years below 1000 with four digits and refuses years before 0
   expect(createFormatters('ar-EG').dateOnly('0050-03-01')).not.toContain('50');
   // Other calendars keep their own years.
   expect(createFormatters('th-TH').dateOnly('0050-03-01')).toContain('593');
-  expect(() => de.dateOnly('0000-01-01')).toThrow(RangeError);
+  expect(de.dateOnly('0000-01-01')).toBeUndefined();
 
   // The year of an instant is the year in the formatter's time zone.
   expect(de.dateTime('0050-03-01T12:00:00Z')).toMatch(/^01\.03\.0050, /);
@@ -71,9 +71,9 @@ it('shows Gregorian years below 1000 with four digits and refuses years before 0
   expect(de.dateTime(new Date('2026-10-01T00:30:00Z'))).toBe(
     '01.10.2026, 02:30',
   );
-  expect(() => de.dateTime('0000-06-01T00:00:00Z')).toThrow(RangeError);
+  expect(de.dateTime('0000-06-01T00:00:00Z')).toBeUndefined();
   // Year 0001 in UTC, but still year 0000 (1 BCE) in New York.
-  expect(() => en.dateTime('0001-01-01T00:00:00Z')).toThrow(RangeError);
+  expect(en.dateTime('0001-01-01T00:00:00Z')).toBeUndefined();
   expect(createFormatters('en-US').dateTime('0001-01-01T00:00:00Z')).toMatch(
     /^Jan 1, 0001, /,
   );
@@ -81,7 +81,52 @@ it('shows Gregorian years below 1000 with four digits and refuses years before 0
   expect(createFormatters('de-DE-u-nu-deva').dateOnly('0050-03-01')).toBe(
     '०१.०३.००५०',
   );
-  expect(() => de.dateTime('not a date')).toThrow(RangeError);
+  expect(de.dateTime('not a date')).toBeUndefined();
+});
+
+it('shows only stored forms the SDK classifies, and years up to 9999 (#268)', () => {
+  const de = createFormatters('de-DE', 'Europe/Berlin');
+  const utc = createFormatters('en-US', 'UTC');
+  // A day: no zone, no time, a real day; nothing is rolled over.
+  for (const stored of [
+    '2026-10-05Z',
+    '2026-10-05+02:00',
+    '2026-02-29',
+    '2026-04-31',
+    '-0044-03-15',
+    '10000-01-01',
+    '2026-10-05T00:00:00Z',
+    ' 2026-10-05',
+  ])
+    expect(de.dateOnly(stored)).toBeUndefined();
+  expect(de.dateOnly('2024-02-29')).toBe('29.02.2024');
+  // An instant: a zoned XSD date-time on a real day, not what Date parses.
+  for (const stored of [
+    '2026-10-29',
+    '2026-10-29T10:00',
+    '2026-10-29T10:00:00',
+    '2026-02-30T10:00:00Z',
+    '2026-10-29T10:00:00+14:01',
+    'October 29, 2026 10:00 UTC',
+    '1761732000000',
+  ])
+    expect(de.dateTime(stored)).toBeUndefined();
+  expect(de.dateTime('2026-10-30T09:30:00.123456+02:00')).toBe(
+    '30.10.2026, 08:30',
+  );
+  // 24:00:00 is the next midnight, read the same in every engine.
+  expect(utc.dateTime('2026-12-31T24:00:00Z')).toBe('Jan 1, 2027, 12:00 AM');
+  // The year in the formatter's zone decides, up to 9999.
+  expect(utc.dateTime('9999-12-31T23:30:00Z')).toBe('Dec 31, 9999, 11:30 PM');
+  expect(utc.dateTime('9999-12-31T23:30:00-01:00')).toBeUndefined();
+  expect(
+    createFormatters('en-US', 'America/New_York').dateTime(
+      '9999-12-31T23:30:00-01:00',
+    ),
+  ).toBe('Dec 31, 9999, 7:30 PM');
+  expect(utc.dateTime('10000-01-01T00:00:00Z')).toBeUndefined();
+  expect(utc.dateTime(new Date(Date.UTC(10000, 0, 1)))).toBeUndefined();
+  expect(utc.dateTime(new Date(Number.NaN))).toBeUndefined();
 });
 
 it('keeps translation, formatting and time zone independent and hides diagnostics', () => {

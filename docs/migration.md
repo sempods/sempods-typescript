@@ -171,14 +171,44 @@ seconds, discovery counts as unreachable:
   and no longer `01.03.50`, which read like 1950. `DateChooser`'s button shows
   them the same way; its calendar's heading comes from React Aria and still
   shows the short year. Later years and other calendars are unchanged.
-- **Both throw a `RangeError` for a year before 0001**, such as `0000-01-01`,
-  which `dateOnly` showed as `01.01.1` without its era. For `dateTime` the year
-  in its time zone counts: `0001-01-01T00:00:00Z` throws in New York, where it
-  was 31 December of year 0. Code that shows such
-  values as stored after a `RangeError`, as the
-  [app-builder guide](ai-app-builder.md#correctness-contract) recommends, needs
-  no change. `DateChooser` shows a stored `0000-01-01` as stored and opens
-  without a chosen day; it used to treat it as `0001-01-01`.
+- **Both return `undefined` instead of throwing a `RangeError`** (#268), for
+  every value they cannot show; nothing they format throws any more. This is
+  a breaking change of the return type, `string` to `string | undefined`.
+  TypeScript reports `const text: string = format.dateOnly(value)`, but
+  `{format.dateOnly(value)}` in JSX still compiles and now renders nothing
+  where a `catch` showed the stored value. Replace each `try`/`catch` around
+  them with `format.dateOnly(value) ?? value` and
+  `format.dateTime(value) ?? value`.
+- **Both show years 0001 to 9999 only.** `0000-01-01` (1 BCE), which
+  `dateOnly` showed as `01.01.1` without its era, now gives `undefined`. For
+  `dateTime` the year in its time zone counts: `0001-01-01T00:00:00Z` gives
+  `undefined` in New York, where it is 31 December of year 0, and
+  `9999-12-31T23:30:00-01:00` gives `undefined` in UTC, where it used to show
+  as `Jan 1, 10000`.
+- **`format.dateTime` reads a string only as an `xsd:dateTime` with a time
+  zone on a real day**, the form the `dateTime` field accepts. It used to
+  format anything `new Date()` parses: `2026-10-29` and
+  `2026-10-29T10:00:00` (read in the device's zone) now give `undefined`, and
+  `2026-02-30T10:00:00Z` no longer shows as 2 March. `T24:00:00` is the next
+  midnight in every engine. A `Date` argument is formatted as before, within
+  the year range.
+- **New: `classifyDate` in `@sempods/client-sdk/edit`** tells whether a stored
+  lexical form is a calendar day (`kind: 'day'`, with a reported time zone),
+  an instant with a time zone (`kind: 'instant'`, with
+  `epochMilliseconds`) or neither (`kind: 'unsupported'`). The `date` and
+  `dateTime` fields, both formatters, `DateChooser` and the
+  [RDF value recipe](rdf-values.md) use it, so they agree on every value; what
+  the fields accept is unchanged. Code that checked XSD forms with its own
+  pattern can use it.
+- **`@sempods/app-ui` has `@sempods/client-sdk` as a peer dependency** of the
+  same minor version, as its install line already listed. `DateChooser` shows
+  a stored `0000-01-01` as stored and opens without a chosen day; it used to
+  treat it as `0001-01-01`. It also opens without a chosen day on a value the
+  `date` field rejects, such as `2026-10-29+99:99` (formerly 29 October) or a
+  date-time without a time zone, and shows those values as stored.
+- **The RDF value recipe** shows `xsd:date` and `xsd:dateTime` values from
+  0001 instead of 1000 (`01.03.0050`) and `T24:00:00` instants formatted. A
+  copied `readableDate` keeps working; the new one only picks the formatter.
 
 ### Type additions
 

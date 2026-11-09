@@ -24,9 +24,10 @@ contract. The router is the template's own, not a router library
 (sempods/sempods-apps-template#121): it moves every switch, Back and Forward
 through the SDK's `navigate` and passed the template's 29-check routing matrix
 where the tried library adapters did not; shipping it in the package lets
-corrections reach existing apps. It depends on app-sdk's React entry and is
-released with it; app-sdk and client-sdk never depend on it and stay free of a
-UI framework. Apps own their palette, screens and copy, and take anything else
+corrections reach existing apps. It depends on app-sdk's React entry and on
+client-sdk's `edit` entry, whose classification of stored dates the `date`
+field and the formatters share, and is released with them; app-sdk and
+client-sdk never depend on it and stay free of a UI framework. Apps own their palette, screens and copy, and take anything else
 from React Aria directly.
 
 _Why:_ a UI kit copied into every app drifts apart, and an update cannot reach
