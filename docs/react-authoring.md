@@ -886,6 +886,7 @@ function Source(props: {
 }) {
   const { connection, iri } = props;
   const load = usePodLoad(
+    // Checked again here, so Source stays safe wherever it is used.
     signedIn(connection) ? runtime.bindPod(connection.id) : null,
     (pod, signal) => pod.sparql.construct(describe(iri), { signal }),
     { key: iri },
@@ -903,9 +904,11 @@ function Source(props: {
   connection's session lasts; a new sign-in gives a new handle and a fresh
   read. Bind only while `session.kind` is `active` or `renewing`; otherwise
   `bindPod` throws `RuntimeError('disconnected')`.
-- `useConnections()` also lists remembered, signed-out Pods. Leave them out as
-  above, or offer **Sign in** (`useApp().authorize(id)`) for them: a `null`
-  handle reads `unavailable`, and `reload()` has nothing to read.
+- `useConnections()` also lists connections that are not signed in
+  (`signed-out`, `restoring`, `leaving`, `ended`). Leave them out as above: a
+  `null` handle reads `unavailable`, and `reload()` has nothing to read. For a
+  remembered `signed-out` Pod, offer **Sign in** (`useApp().authorize(id)`, a
+  guarded navigation to its sign-in) as `AppAccess` does.
 - Each source has its own state, `LoadNotice` and retry: a `403`, a failure or
   `cancel()` of one never touches another. Nothing combines Pods or falls back
   to another connection, and credentials stay with the runtime.

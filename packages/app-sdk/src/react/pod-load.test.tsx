@@ -14,6 +14,8 @@ import type { BoundPod, BrowserRuntime, Connection } from '../index.js';
 import {
   LoadNotice,
   SempodsProvider,
+  useApp,
+  useAppState,
   useConnections,
   usePodLoad,
 } from './index.js';
@@ -185,18 +187,66 @@ it('shows a new or replaced handle as loading, never unavailable, until it answe
     ]),
   );
   const seen: string[] = [];
+  let settledAtMount: boolean | undefined;
+  /** Mounts the source only once startup has settled. */
+  function AfterStartup({ id }: { readonly id: string }) {
+    const { startup } = useAppState();
+    if (!startup) return null;
+    settledAtMount ??= true;
+    return <Source name="source" reader={runtime.bindPod(id)} seen={seen} />;
+  }
   const ui = (id: string) => (
     <SempodsProvider runtime={runtime} contextSelection="on-demand">
-      <Source name="source" reader={runtime.bindPod(id)} seen={seen} />
+      <AfterStartup id={id} />
     </SempodsProvider>
   );
-  // Startup has settled: a source mounted now still starts loading.
   const { rerender } = render(ui(f.id));
   await waitFor(() => expect(text('source')).toBe('[{"@id":"urn:alice"}]'));
+  expect(settledAtMount).toBe(true);
+  expect(seen[0]).toBe('loading');
   rerender(ui(other.id));
   await waitFor(() => expect(text('source')).toBe('[{"@id":"urn:bob"}]'));
   expect(seen).not.toContain('unavailable');
-  expect(seen[0]).toBe('loading');
+});
+
+it('does not follow or re-render for the active connection', async () => {
+  const { f, runtime, other } = await twoPods(keep);
+  f.setQuery(async (url) =>
+    Response.json([
+      { '@id': url.startsWith(pod + '/') ? 'urn:alice' : 'urn:bob' },
+    ]),
+  );
+  const seen: string[] = [];
+  function Active() {
+    const app = useApp();
+    const { activeId } = useAppState();
+    return (
+      <>
+        <output data-testid="active">{activeId}</output>
+        <button onClick={() => void app.selectConnection(f.id)}>Alice</button>
+        <button onClick={() => void app.selectConnection(other.id)}>Bob</button>
+      </>
+    );
+  }
+  const reader = runtime.bindPod(f.id);
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Active />
+      <Source name="source" reader={reader} seen={seen} />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(text('source')).toBe('[{"@id":"urn:alice"}]'));
+  const target =
+    screen.getByTestId('active').textContent === f.id ? 'Bob' : 'Alice';
+  const renders = seen.length;
+  fireEvent.click(screen.getByText(target));
+  await waitFor(() =>
+    expect(screen.getByTestId('active').textContent).toBe(
+      target === 'Bob' ? other.id : f.id,
+    ),
+  );
+  expect(seen).toHaveLength(renders);
+  expect(text('source')).toBe('[{"@id":"urn:alice"}]');
 });
 
 it('cancels a superseded query when its key changes and never shows the old inputs’ data', async () => {
