@@ -1307,18 +1307,26 @@ Keep the provider and compose `CallbackNotice`, `AccessNotice` and own controls
 from the guarded `useApp()` actions.
 
 - Call actions only from user input. Disable controls until startup storage is
-  durable and while `changing`, `confirmingLeave` or a restore is pending; show
-  errors with `useSdkLocale().error`. `false` means the leave policy declined
-  (a sign-in it cancelled is not an error).
+  durable and while `changing` or `confirmingLeave`; show errors with
+  `useSdkLocale().error`. `false` means the leave policy declined (a sign-in it
+  cancelled is not an error).
+- Restoration is per connection. While one connection is `restoring`, keep
+  global actions (adding a Pod, choosing another one) and other connections'
+  actions enabled. On the restoring connection, show its status and offer no
+  sign-in; its sign-out and **Forget** stay available and win over the
+  restoration. While the active connection restores, `access.pending` is true:
+  show content or a skeleton. A restoration whose Pod does not answer within
+  15 seconds ends `restorable` with the prompt `unreachable`: offer
+  `retryRestore(id)`.
 - Read `useAppState().access` for what needs attention, or compose the
   [access parts](#access-prompts-and-your-own-placement). A failed or cancelled
   callback activates its connection; its prompt (or the deprecated
   `callbackNotice`) tells whether a `startup.interaction` outcome is current.
-- A restoring connection waits; a `leaving` one (navigating to the Pod)
-  stays inert without a sign-in. `active` and `renewing` are authentication,
-  not Context access. A cancelled re-authorization keeps the session
-  (`startup.resumed`); an unreachable Pod at startup is `ended` with
-  `restorable: true`: offer `retryRestore(id)`.
+- A `leaving` connection (navigating to the Pod) stays inert without a
+  sign-in. `active` and `renewing` are authentication, not Context access. A
+  cancelled re-authorization keeps the session (`startup.resumed`); an
+  unreachable Pod at startup is `ended` with `restorable: true`, like a timed-out
+  restoration.
 - `access_denied` cannot tell cancel from decline and its
   `error_description` is never shown: the notice says no access was granted
   (`controls.signInCancelled`) with **Sign in**, or after a declined

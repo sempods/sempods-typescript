@@ -132,9 +132,12 @@ seconds, discovery counts as unreachable:
   whose discovery stalls stays signed in with its unspent refresh token.
 - A timeout carries no `failure` detail, unlike an offline discovery
   (`failure.code: 'discovery'`); branch on `problem` and `restorable`.
-- Other connections never waited for a restoring one; the guide now says
-  which runtime actions are safe meanwhile. Which controls apps and the SDK
-  components keep available while a Pod restores is settled in #238.
+- Other connections never waited for a restoring one. A custom layout that
+  disabled all its controls while any restore was pending, as the guide used
+  to say, now disables only the restoring connection's sign-in: adding a Pod,
+  choosing another one and the other connections' actions stay enabled
+  ([custom layouts](react-authoring.md#custom-layouts-without-appaccess)).
+  `AppAccess` keeps them enabled too.
 
 ### UI kit
 
