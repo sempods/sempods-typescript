@@ -13,7 +13,8 @@ export interface ScreenDialogProps {
   readonly open: boolean;
   /**
    * Escape, the heading's Close button or a press beside the dialog ask to
-   * close; the dialog closes only when `open` turns false. Run the SDK's
+   * close (a press in an SDK confirmation is none); the dialog closes only
+   * when `open` turns false. Run the SDK's
    * guarded close here (`editor.close()`, then leave the route).
    */
   readonly onRequestClose: () => void;
@@ -45,11 +46,6 @@ export function ScreenDialog({
       onOpenChange={(next) => {
         if (!next) onRequestClose();
       }}
-      // SDK confirmations are native modal <dialog> elements outside this
-      // modal's DOM: a press in them is not a press beside the dialog.
-      shouldCloseOnInteractOutside={(element) =>
-        !element.closest('dialog:modal')
-      }
       showCloseButton={false}
       className={cn(
         'flex flex-col gap-0 p-0 max-sm:inset-0 max-sm:h-dvh max-sm:max-w-none max-sm:translate-0 max-sm:rounded-none sm:max-h-[min(48rem,calc(100dvh-4rem))] sm:max-w-2xl [&>[data-slot=dialog]]:flex [&>[data-slot=dialog]]:min-h-0 [&>[data-slot=dialog]]:flex-1 [&>[data-slot=dialog]]:flex-col',

@@ -47,6 +47,19 @@ reload, so people sign in again with one action.
   **Sign in** by name alone: each remembered Pod has its own. `AccessNotice`
   asks to sign in (`controls.signInRequired`) for a signed-out connection.
 
+### UI kit
+
+- **The compact `Dialog` speaks the SDK's language.** Its corner close button
+  and `DialogFooter`'s `showCloseButton` were always named "Close"; they now
+  take the SDK's text in the provider's language (German: "Schließen"), and
+  `closeLabel` sets another. Without a provider they stay "Close". End-to-end
+  tests of a German app that find these buttons by "Close" look for
+  "Schließen".
+- **A press in an SDK confirmation no longer closes a compact `Dialog`.** As
+  in `ScreenDialog`, cancelling a question above it keeps the dialog and the
+  draft. An app's own `shouldCloseOnInteractOutside` still applies; a filter
+  that only ignored `dialog:modal` can go.
+
 ### Type additions
 
 - `SessionFact`'s `signed-out` variant gains the optional `problem`, and its
@@ -61,6 +74,7 @@ reload, so people sign in again with one action.
   the required method `remove(id, expectedRevision)`, an atomic deletion at the
   expected revision that answers `{ kind: 'removed' }` or `{ kind: 'conflict' }`.
   The default IndexedDB store implements it.
+- app-ui's `Dialog` and `DialogFooter` gain the optional `closeLabel`.
 - `UiMessages` gains `rememberedPods`, `forget`, `sessionEnded` and
   `forgetFailed`, optional in the type; `createLocale` fills them from the
   language defaults.

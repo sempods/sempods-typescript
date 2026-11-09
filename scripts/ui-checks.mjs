@@ -2580,6 +2580,130 @@ async function theme({ browser, origin }) {
   return results;
 }
 
+/**
+ * The README's quick edit (#229): a compact `Dialog` around an SDK editor.
+ * Cancelling an SDK question above it keeps the dialog and the draft, its
+ * corner Close asks through the editor, and it speaks the SDK's language.
+ */
+async function compact({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser);
+  await signIn(page, origin);
+  const dialog = page.getByRole('dialog', { name: /^(Rename|Umbenennen)$/ });
+  const confirm = page.getByRole('alertdialog');
+  const title = dialog.getByLabel(/^(Title|Titel)$/);
+  const open = async (lang = 'en') => {
+    await page.goto(
+      origin + `/?dialog=compact${lang === 'de' ? '&lang=de' : ''}`,
+    );
+    await page.locator('.zen-title').click();
+    await title.waitFor();
+    await settle(page);
+  };
+  const state = async () => {
+    await settle(page);
+    const dialogOpen = await dialog.isVisible();
+    return {
+      dialogOpen,
+      confirmOpen: await confirm.isVisible(),
+      draftKept: dialogOpen ? await editKept(title) : false,
+      focus: await focusInfo(page),
+    };
+  };
+  const close = () =>
+    dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  // The narrow field scrolls its text: a click lands inside it, and WebKit on
+  // macOS ignores End there, so the caret goes to the end first.
+  const dirty = async () => {
+    await title.click();
+    await title.evaluate((el) =>
+      el.setSelectionRange(el.value.length, el.value.length),
+    );
+    await page.keyboard.type(EDIT);
+  };
+  const titles = async () =>
+    (await storedTasks(origin)).map(
+      (t) => t.body['https://schema.org/name']?.[0]?.['@value'],
+    );
+  const checks = {
+    // Close, then Cancel by pointer: the press in the question is no press
+    // beside the dialog.
+    async 'compact-close-cancel'() {
+      await open();
+      await dirty();
+      await close();
+      const asked = await shown(confirm, 3000);
+      await confirm.getByRole('button').first().click();
+      await hidden(confirm);
+      const s = await state();
+      return {
+        pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen,
+        asked,
+        ...s,
+      };
+    },
+    // Escape in the question answers only the question.
+    async 'compact-close-escape'() {
+      await open();
+      await dirty();
+      await close();
+      const asked = await shown(confirm, 3000);
+      await page.keyboard.press('Escape');
+      await hidden(confirm);
+      const s = await state();
+      return {
+        pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen,
+        asked,
+        ...s,
+      };
+    },
+    // The editor's own delete question, cancelled by pointer.
+    async 'compact-delete-cancel'() {
+      await open();
+      const before = (await titles()).length;
+      await dirty();
+      await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+      const asked = await shown(confirm, 3000);
+      await confirm.getByRole('button').first().click();
+      await hidden(confirm);
+      const s = await state();
+      const kept = (await titles()).length === before;
+      return {
+        pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen && kept,
+        asked,
+        taskKept: kept,
+        ...s,
+      };
+    },
+    // A press beside the dialog asks too; discarding closes it unsaved.
+    async 'compact-outside-discard'() {
+      await open();
+      await dirty();
+      await page.mouse.click(5, 5);
+      const asked = await answerLeave(page, 'discard');
+      const closed = await gone(dialog);
+      const unsaved = !(await titles()).some((t) => t?.endsWith(EDIT));
+      return { pass: asked && closed && unsaved, asked, closed, unsaved };
+    },
+    // German: the corner Close takes the SDK's text.
+    async 'compact-close-label-german'() {
+      await open('de');
+      const names = await dialog
+        .locator('[data-slot=dialog-close]')
+        .evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim()));
+      return { pass: names.join() === 'Schließen', names };
+    },
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(checks)) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await fetch(origin + '/__reset');
+    results.push(await attemptOn(errors, id, run));
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   gate,
   roundtrip,
@@ -2588,4 +2712,5 @@ export const suites = {
   contrast,
   routing,
   theme,
+  compact,
 };

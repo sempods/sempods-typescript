@@ -266,6 +266,92 @@ and its parts, `Textarea`, `Toggle`, and `ToggleGroup` with
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
 
+The compact `Dialog` names its close buttons (the corner one and
+`DialogFooter`'s `showCloseButton`) with the SDK's "Close" text in the
+provider's language, or English without a provider; `closeLabel` replaces it.
+A press in an SDK confirmation (a native modal `<dialog>`) never counts as a
+press beside it, also with the app's own `shouldCloseOnInteractOutside`, so
+cancelling the question keeps the dialog and the draft. Around an SDK editor,
+route every close request through the editor, as the UI gate's quick edit
+does:
+
+```tsx
+// quick-edit.tsx
+import { useEffect } from 'react';
+import {
+  ResourceEditor,
+  useAppState,
+  useContextEditor,
+  useMessages,
+} from '@sempods/app-sdk/react';
+import { Dialog, DialogHeader, DialogTitle, Input } from '@sempods/app-ui';
+import { taskFields } from './task-dialog';
+
+const texts = {
+  en: { rename: 'Rename', title: 'Title' },
+  de: { rename: 'Umbenennen', title: 'Titel' },
+};
+
+export function QuickEdit({
+  subject,
+  context,
+  leave,
+}: {
+  readonly subject: string | null;
+  readonly context: string;
+  readonly leave: () => void;
+}) {
+  const t = useMessages(texts);
+  const edit = useContextEditor(taskFields);
+  const { open, close } = edit;
+  const { changing } = useAppState();
+  useEffect(() => {
+    if (changing) return;
+    if (subject) void open({ subject, context });
+    else void close();
+  }, [subject, context, changing, open, close]);
+  const editor =
+    subject &&
+    edit.target?.subject === subject &&
+    edit.target.context === context
+      ? edit.editor
+      : null;
+  // Escape, Close and a press beside the dialog: the SDK asks first.
+  const requestClose = async () => {
+    if (await edit.close()) leave();
+  };
+  return (
+    <Dialog
+      isOpen={subject !== null}
+      onOpenChange={(next) => {
+        if (!next) void requestClose();
+      }}
+    >
+      <DialogHeader>
+        <DialogTitle>{t.rename}</DialogTitle>
+      </DialogHeader>
+      <ResourceEditor
+        editor={editor}
+        quiet
+        onClose={() => void requestClose()}
+        labels={{ title: t.title }}
+      >
+        {(draft, change) => (
+          <label className="grid gap-1.5">
+            {t.title}
+            <Input
+              value={draft.title}
+              onChange={(e) => change({ ...draft, title: e.target.value })}
+              required
+            />
+          </label>
+        )}
+      </ResourceEditor>
+    </Dialog>
+  );
+}
+```
+
 A component the package lacks can be added with `shadcn add` (the CLI as a
 development dependency). A component copied out of the package to change it
 becomes the app's own: package updates no longer reach it, so do that on
@@ -895,7 +981,8 @@ The packed browser gate builds a reference screen with Vite and Tailwind 4
 against the installed packages and runs in Chromium and WebKit, and in
 Firefox on the Linux CI runner. It checks Escape in fields, in SDK
 confirmations, on Close, in menus and in the date chooser; focus trap and
-restore; Save after cancelled closes; closing right after opening; resizing
+restore; Save after cancelled closes; closing right after opening; cancelled
+SDK questions above the compact quick edit and its German Close; resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
 in three time zones; keyboard use of menus, the calendar and filter chips;
 44px targets; the action group's width on a phone and a desktop; the routed
