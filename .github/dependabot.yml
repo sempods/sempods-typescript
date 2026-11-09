@@ -22,6 +22,12 @@ updates:
         update-types:
           - 'version-update:semver-major'
           - 'version-update:semver-minor'
+      # Playwright 1.65 counts a modal <dialog> under an [inert] ancestor as
+      # inert, contrary to the HTML spec, and cannot click the SDK's questions
+      # (#264). Lift this once a release handles that exception.
+      - dependency-name: 'playwright'
+        versions:
+          - '>= 1.65.0'
 
   # The pinned `uses:` SHAs in the workflows are supply-chain dependencies too.
   - package-ecosystem: 'github-actions'
