@@ -669,8 +669,9 @@ a successful retry signs out. It is not persisted across reloads:
 the saved session may still restore. Offer **Sign out** again, not a reload.
 A late exchange cannot resurrect the locally blocked connection. `forget(id)`
 reports a failed deletion the same way.
-`AppAccess` shows this failure next to **Sign out** in
-EN/DE (`controls.disconnectFailed`). The ordinary hint notes that sign-out applies
+`AppAccess` shows this failure with **Try again** in
+EN/DE (`controls.disconnectFailed`): in its gate for the active connection, as a
+prompt for another one (`access`, reason `sign-out-failed`). The ordinary hint notes that sign-out applies
 only to this device: it neither revokes sharing on the Pod, deletes Pod data nor
 signs out at the Pod's provider. `dispose()` releases memory/locks while
 retaining durable sessions.
@@ -724,11 +725,11 @@ The app controller does not make a remembered Pod active while another
 connection has a session (signed in, restoring or ended), and when the active
 connection signs out it gives way to such a connection, as a removed one did.
 A remembered Pod the person selects stays active, ready to sign in.
-`AppAccess` lists remembered Pods on its sign-in view, above the address field,
-each with **Sign in** and **Forget** (`controls.rememberedPods`,
+`AppAccess` lists remembered Pods on its gate's sign-in view, above the address
+field, each with **Sign in** and **Forget** (`controls.rememberedPods`,
 `controls.forget`; `controls.sessionEnded` notes an ended session); management
-lists them under **Connect another Pod**. A Pod whose forgetting failed stays
-in that list with `controls.forgetFailed` and **Forget** only.
+lists them under **Connect another Pod**. A Pod whose forgetting failed shows
+`controls.forgetFailed` with **Try again** only, which forgets it.
 
 A custom `SessionStore` (`openStore`) implements `remove(id, expectedRevision)`
 for this: an atomic delete at the expected revision, `conflict` otherwise.

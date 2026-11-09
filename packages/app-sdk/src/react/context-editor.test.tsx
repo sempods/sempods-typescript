@@ -13,7 +13,9 @@ import {
 import { fields, text } from '@sempods/client-sdk/edit';
 import type { PodFetch } from '@sempods/client-sdk';
 import {
+  AccessPrompts,
   AppAccess,
+  ContextAccess,
   ResourceEditor,
   SempodsProvider,
   TargetScreen,
@@ -132,7 +134,14 @@ function SelectedDraft() {
     />
   );
 }
-function Harness({ selected = false }: { readonly selected?: boolean }) {
+function Harness({
+  selected = false,
+  composed = false,
+}: {
+  readonly selected?: boolean;
+  /** The parts instead of AppAccess: ContextAccess, prompts and management only. */
+  readonly composed?: boolean;
+}) {
   const [manage, setManage] = useState(false);
   const [result, setResult] = useState('');
   const edit = useContextEditor(note);
@@ -140,7 +149,15 @@ function Harness({ selected = false }: { readonly selected?: boolean }) {
   const { activeId } = useAppState();
   return (
     <>
-      <AppAccess appName="Overview" open={manage} />
+      {composed ? (
+        <>
+          <ContextAccess appName="Overview" />
+          <AccessPrompts />
+          <AppAccess appName="Overview" only="management" open={manage} />
+        </>
+      ) : (
+        <AppAccess appName="Overview" open={manage} />
+      )}
       <output data-testid="active">{activeId}</output>
       <button onClick={() => setManage(!manage)}>Manage access</button>
       <output data-testid="phase">
@@ -362,9 +379,15 @@ it('shares one open between calls made before a re-render and chains on the late
   await waitFor(() => expect(phase()).toBe('idle'));
 });
 
-it.each(['unreadable', 'refused', 'offline'] as const)(
-  'reports %s discovery as unavailable until the catalogue lists the Context',
-  async (mode) => {
+it.each(
+  (['unreadable', 'refused', 'offline'] as const).flatMap((mode) =>
+    (['AppAccess', 'ContextAccess'] as const).map(
+      (surface) => [mode, surface] as const,
+    ),
+  ),
+)(
+  'reports %s discovery as unavailable until the catalogue lists the Context (%s)',
+  async (mode, surface) => {
     const f = await returned();
     const { reads } = notes(f);
     f.setCatalogue(async () => {
@@ -373,7 +396,7 @@ it.each(['unreadable', 'refused', 'offline'] as const)(
         ? new Response(null, { status: 403 })
         : catalogue([personal], [personal]);
     });
-    render(ui(f.runtime));
+    render(ui(f.runtime, <Harness composed={surface === 'ContextAccess'} />));
     await open('Edit urn:a in work');
     await waitFor(() =>
       expect(phase()).toBe(

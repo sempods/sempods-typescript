@@ -65,7 +65,9 @@ screen and access-management controls, follow the complete
 [quickstart](https://github.com/sempods/sempods-typescript/blob/v0.7.0/docs/quickstart.md).
 
 `AppAccess` provides login, context choice and recovery without a mandatory app
-frame. It hides when access is usable, including read-only access. The app owns
+frame: a sign-in gate above the content while the app cannot work, the Context
+choice, and dismissible prompts for the rest. It hides when access is usable,
+including read-only access; apps can also place these parts themselves. The app owns
 its layout and a **Pods & sharing** button that opens management (`open`). The
 [API table](https://github.com/sempods/sempods-typescript/blob/v0.7.0/docs/react-authoring.md#api-at-a-glance)
 maps each screen task (lists, creation, row updates, editors, notices) to its
@@ -96,7 +98,7 @@ for startup outcomes, restrictions and recovery limits.
 
 If **Sign out** cannot be saved on this device, the connection stays locally
 blocked and exposes an ended session with `saved: false`. `AppAccess` explains
-the failure and offers signing out again. The
+the failure and offers **Try again**. The
 guarded action's Boolean says whether it ran; the retained fact tells custom
 controls that a retry is needed. A successful retry signs out. The Pod then
 stays listed as signed out with its address, so signing in again is one

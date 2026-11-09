@@ -125,13 +125,17 @@ const runtime = createBrowserRuntime({
   recovery; see [browser runtime](browser-runtime.md) for identity, sessions and
   the one-active-tab contract.
 
-`AppAccess` is a centered sign-in and recovery surface beside your content, not
-a frame; it hides once the target is readable, including read-only access. It
-takes no children and never unmounts your screen: keep `TargetScreen` and
-mutation controllers mounted through same-target access loss, and keep
-uncertain-write recovery outside hidden or inert regions. Disable edits by
-operation eligibility; `<AccessNotice only="write" />` beside `AppAccess` says
-only that the list is read-only. Options: [customizing](#part-4-customizing).
+`AppAccess` is the default access UI beside your content, not a frame. While
+the app cannot work it shows a sign-in screen as a modal layer above the app,
+which stays mounted behind it; for Context choice it shows a centered surface;
+outcomes that need a decision or none appear as prompts at the bottom of the
+viewport. It takes no children and never unmounts your screen: keep
+`TargetScreen` and mutation controllers mounted through same-target access
+loss, and keep uncertain-write recovery outside hidden or inert regions.
+Disable edits by operation eligibility; `<AccessNotice only="write" />` beside
+`AppAccess` says only that the list is read-only. Options:
+[customizing](#part-4-customizing); placing the parts yourself:
+[access prompts](#access-prompts-and-your-own-placement).
 
 ## Part 2: The core screen
 
@@ -140,28 +144,29 @@ only that the list is read-only. Options: [customizing](#part-4-customizing).
 The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 **React** = `@sempods/app-sdk/react`, **edit** = `@sempods/client-sdk/edit`.
 
-| Task                                                                 | Hook or component (entry)                                     | What to pass                                                                 |
-| -------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [Start the browser session](#runtime-and-provider)                   | `createBrowserRuntime` (app)                                  | Identity, optional `preset`/`allowedPods`; one stable runtime outside render |
-| [Bind the UI](#runtime-and-provider)                                 | `SempodsProvider`, `TargetScreen` (React)                     | The runtime; your screen inside `TargetScreen`                               |
-| [Sign-in, Context choice, recovery](#appaccess-props)                | `AppAccess` (React)                                           | `appName`; a host button sets `open`                                         |
-| [Describe your data](#field-definitions)                             | `fields`, `text`, `flag`, `iri`, `dateTime`, `date` (edit)    | Type and predicate IRIs, explicit text language, `trim: true` for text       |
-| [Show a list](#lists-uselist-and-loadnotice)                         | `useList`, `LoadNotice` (React)                               | The definition; render `list.data?.items` and `<LoadNotice {...list} />`     |
-| [Add an item](#creating-usecreation)                                 | `useCreation` (React)                                         | `{ initial, collection }`; inputs to `canEdit`, submit to `canCreate`        |
-| [Update or delete a row](#updating-and-deleting-rows-usefieldupdate) | `useFieldUpdate`, `RemoveButton`, `UnresolvedNotices` (React) | One hook per list; `const row = mutate.for(item)` per row                    |
-| [Edit one item in a form](#editing-a-form-useresourceeditor)         | `useResourceEditor`, `ResourceEditor` (React)                 | Selected IRI and definition; inputs calling `change`; `onClose` in place     |
-| [Explain an outcome](#notices-updatenotice)                          | `UpdateNotice` (React)                                        | `{...creation.notice}` or `{...row.notice}`; `quiet` when the row confirms   |
-| [Open another item](#selection-useselection)                         | `useSelection` (React)                                        | Guarded `select(iri)`; `select(null)` closes                                 |
-| [Translate the app's texts](#app-texts-usemessages)                  | `useMessages` (React)                                         | One `{ en, de }` catalogue outside components                                |
-| [Switch between Contexts](#apps-that-switch-contexts)                | `useContexts` (React)                                         | Mount outside `TargetScreen`                                                 |
-| [Switch across Pods](#one-chooser-across-pods)                       | `usePodContexts` (React)                                      | Optional `podNames`; `select({ connectionId, contextIri })`                  |
-| [Create in another Context](#creating-in-an-explicit-context)        | `useCreation` with `context` (React), `bindCreation` (app)    | The Context IRI; one hook per Context                                        |
-| [Read across the Pod](#pod-overviews-with-contexts-on-demand)        | `usePodLoad` (React)                                          | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
-| [One type across Contexts](#pod-overviews-with-contexts-on-demand)   | `usePodList` + `LoadNotice` (React)                           | A `fields()` definition with a `type`                                        |
-| [One-click overview rows](#one-click-overview-rows)                  | `useContextUpdate` (React)                                    | The same definition as `usePodList`                                          |
-| [Edit a Pod-overview row](#editing-an-overview-row)                  | `useContextEditor`, `ResourceEditor` (React)                  | The row's subject and `GRAPH` Context                                        |
-| [Read arbitrary resources](#read-arbitrary-resources)                | `useLoad` (React)                                             | A `ViewRead`; `key` for its inputs                                           |
-| [Custom connection controls](#custom-layouts-without-appaccess)      | `useApp`, `useAppState`, `useConnections` (React)             | Guarded actions only                                                         |
+| Task                                                                    | Hook or component (entry)                                                  | What to pass                                                                 |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [Start the browser session](#runtime-and-provider)                      | `createBrowserRuntime` (app)                                               | Identity, optional `preset`/`allowedPods`; one stable runtime outside render |
+| [Bind the UI](#runtime-and-provider)                                    | `SempodsProvider`, `TargetScreen` (React)                                  | The runtime; your screen inside `TargetScreen`                               |
+| [Sign-in, Context choice, recovery](#appaccess-props)                   | `AppAccess` (React)                                                        | `appName`; a host button sets `open`                                         |
+| [Place access prompts yourself](#access-prompts-and-your-own-placement) | `AccessGate`, `ContextAccess`, `AccessPrompts`, `useAccessPrompts` (React) | `AppAccess only="management"` for management                                 |
+| [Describe your data](#field-definitions)                                | `fields`, `text`, `flag`, `iri`, `dateTime`, `date` (edit)                 | Type and predicate IRIs, explicit text language, `trim: true` for text       |
+| [Show a list](#lists-uselist-and-loadnotice)                            | `useList`, `LoadNotice` (React)                                            | The definition; render `list.data?.items` and `<LoadNotice {...list} />`     |
+| [Add an item](#creating-usecreation)                                    | `useCreation` (React)                                                      | `{ initial, collection }`; inputs to `canEdit`, submit to `canCreate`        |
+| [Update or delete a row](#updating-and-deleting-rows-usefieldupdate)    | `useFieldUpdate`, `RemoveButton`, `UnresolvedNotices` (React)              | One hook per list; `const row = mutate.for(item)` per row                    |
+| [Edit one item in a form](#editing-a-form-useresourceeditor)            | `useResourceEditor`, `ResourceEditor` (React)                              | Selected IRI and definition; inputs calling `change`; `onClose` in place     |
+| [Explain an outcome](#notices-updatenotice)                             | `UpdateNotice` (React)                                                     | `{...creation.notice}` or `{...row.notice}`; `quiet` when the row confirms   |
+| [Open another item](#selection-useselection)                            | `useSelection` (React)                                                     | Guarded `select(iri)`; `select(null)` closes                                 |
+| [Translate the app's texts](#app-texts-usemessages)                     | `useMessages` (React)                                                      | One `{ en, de }` catalogue outside components                                |
+| [Switch between Contexts](#apps-that-switch-contexts)                   | `useContexts` (React)                                                      | Mount outside `TargetScreen`                                                 |
+| [Switch across Pods](#one-chooser-across-pods)                          | `usePodContexts` (React)                                                   | Optional `podNames`; `select({ connectionId, contextIri })`                  |
+| [Create in another Context](#creating-in-an-explicit-context)           | `useCreation` with `context` (React), `bindCreation` (app)                 | The Context IRI; one hook per Context                                        |
+| [Read across the Pod](#pod-overviews-with-contexts-on-demand)           | `usePodLoad` (React)                                                       | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
+| [One type across Contexts](#pod-overviews-with-contexts-on-demand)      | `usePodList` + `LoadNotice` (React)                                        | A `fields()` definition with a `type`                                        |
+| [One-click overview rows](#one-click-overview-rows)                     | `useContextUpdate` (React)                                                 | The same definition as `usePodList`                                          |
+| [Edit a Pod-overview row](#editing-an-overview-row)                     | `useContextEditor`, `ResourceEditor` (React)                               | The row's subject and `GRAPH` Context                                        |
+| [Read arbitrary resources](#read-arbitrary-resources)                   | `useLoad` (React)                                                          | A `ViewRead`; `key` for its inputs                                           |
+| [Custom connection controls](#custom-layouts-without-appaccess)         | `useApp`, `useAppState`, `useConnections` (React)                          | Guarded actions only                                                         |
 
 ### Field definitions
 
@@ -871,41 +876,43 @@ function Resource({ iri }: { readonly iri: string }) {
 | `podAddress`             | `'visible'` \| `'hidden'`         | `'hidden'` omits the address at sign-in while exactly one Pod is permitted; see [sign-in](#sign-in-and-pod-addresses)               |
 | `open`                   | `boolean`                         | Host-owned **Pods & sharing** management; never starts a login, demands discovery in on-demand mode                                 |
 | `onClose`                | `() => void`                      | Management as a modal dialog; Escape, **Close** and a click beside it call this to reset `open`. Without it, management is in place |
+| `only`                   | `'management'`                    | Renders management alone (while `open`), for an app that places the gate, Context surface and prompts itself                        |
 | `focusTarget`            | `RefObject<HTMLElement \| null>`  | Focus returns here when the focused surface hides after its guarded transition (not for visible retry or error feedback)            |
 | `mode`                   | `'single'` \| `'multiple'`        | `'single'` hides adding another Pod once one is selected; presentation only, enforce with runtime `allowedPods`                     |
 | `headingLevel`           | `1` \| `2`                        | Default: `h1` for first sign-in, `h2` for recovery and management. Use `2` under a host title                                       |
 | `components.Connections` | `ComponentType<ConnectionsProps>` | Replaces the connection view; see [replacing it](#replacing-the-connection-view)                                                    |
-| `className`, `style`     | `string`, `CSSProperties`         | Root styling, for example `--sempods-*` tokens                                                                                      |
+| `className`, `style`     | `string`, `CSSProperties`         | Styling of the gate and the Context surface, for example `--sempods-*` tokens, which also cover the gate's whole layer              |
 
 ### What AppAccess shows
 
-- **Startup:** loading; unavailable session storage blocks controls with a
-  reload notice (no in-memory fallback); a second-tab notice.
-- **After a returning sign-in:** the callback notice, also after a failed or
-  cancelled sign-in (its connection becomes active), naming the cause beside
-  **Sign in** and **Sign out**; `login_required` has its own message. It stays
-  until a connection is selected or signed out or a sign-in starts
-  (`AppSnapshot.callbackNotice`).
-- **Restoring or loading the first demanded catalogue:** a loading status, with
-  the Pod selector and a configured Pod's sign-in beside it, so a load that
-  never settles cannot block switching or signing in; a preset or remembered
-  Context never flashes the connection view. A custom `components.Connections`
-  is replaced by the status alone.
-- **A decision or `open`:** the connection view, for an ended session, missing
-  required scopes, a Context choice, a failed catalogue. It lists readable
-  Contexts only and says so when there are none. A sign-in that never returned
-  or expired asks to sign in, without claiming access.
-- **Pod unreachable at startup:** `controls.unreachable` with **Try again**
-  (`useApp().retryRestore(id)`); it also restores when back online.
-- **Sign-out not saved:** `controls.disconnectFailed` beside **Sign out** (see
-  [draft lifetime](#selection-and-draft-lifetime)).
-- **Remembered Pods:** on the sign-in view, signed-out Pods this device
-  remembers, above the address field, each with **Sign in** and **Forget**;
-  a Pod whose session ended rather than was signed out carries
-  `controls.sessionEnded`, and one whose forgetting could not be saved
-  `controls.forgetFailed` with **Forget** again. Management lists them under
-  **Connect another Pod** (see
-  [remembered Pods](browser-runtime.md#remembered-pods)).
+`AppAccess` is `AccessGate` + `ContextAccess` + `AccessPrompts` + management.
+It follows `useAppState().access` ([access prompts](#access-prompts-and-your-own-placement)):
+
+- **While startup settles or a saved session restores:** nothing. The app shows
+  its content or a skeleton; no sign-in screen flashes and no loading panel
+  shifts the layout.
+- **The gate**, while the app cannot work (`access.blocking`): a full-viewport
+  modal layer with the app's name, `icon` and `description`. The content stays
+  mounted and inert behind it, and Escape does not close it. Without a
+  connection, after a sign-out or an ended session and with missing required
+  scopes it is the sign-in view: remembered Pods with **Sign in** and
+  **Forget**, the Pod selector, and without a connection the address input
+  (see [sign-in](#sign-in-and-pod-addresses)); a failed or cancelled callback
+  names its cause there. A startup failure or a second tab offer **Reload**,
+  unavailable session storage only explains; a sign-out or forget that could
+  not be saved offers **Try again** and never a sign-in.
+- **The Context surface**, while the active connection is usable and a flow
+  needs a Context: the first catalogue load, the **Data context** chooser, an
+  empty or unreadable catalogue, a failed one with **Check access**, an
+  unavailable preset Context. For an explicit target (`useContextEditor`) it
+  shows only the catalogue's state and retry, never a chooser.
+- **Prompts** at the bottom of the viewport: a Pod whose session ended beside
+  the active one, missing required scopes of another Pod, an unreachable Pod
+  (**Try again**; it also restores when back online), a failed sign-in, and
+  information such as a cancelled sign-in or unchanged sharing, which hides
+  after about 6 seconds.
+- **Management** while `open` (see below). In place (without `onClose`) it does
+  not show while the gate blocks; as a dialog it opens above the gate.
 
 Catalogue failures stay visible even when earlier access facts are kept.
 
@@ -945,7 +952,7 @@ function AppContent() {
 
 - As a dialog (`onClose`) the app behind it is inert, a leave confirmation
   opens above it, and opening re-checks access (no **Check access**). Sign-in
-  and recovery stay inline. Up to 30rem wide it is a bottom sheet across the
+  is the gate's. Up to 30rem wide it is a bottom sheet across the
   screen's width, as small-screen app dialogs usually are; wider, it is centred.
 - It shows the Pod, then the Context and this app's access (**Read only** or
   **Read and write**); several Contexts appear in the **Data context** chooser
@@ -953,9 +960,87 @@ function AppContent() {
   otherwise **Available to this app** lists them. Then **Change sharing**,
   **Sign out** with its this-device note (`controls.disconnectHint`; empty
   hides it), and last a collapsed **Connect another Pod** (`mode="multiple"`).
+  After a sign-out that could not be saved, **Try again** repeats it in place
+  of a sign-in.
 - These are the catalogue's rights for this session, not whether a Context is
   shared or public; changing them is the Pod's consent behind **Change
   sharing**. It sends one catalogue request and no extra label reads.
+
+### Access prompts and your own placement
+
+The controller derives **access prompts** from runtime facts
+(`useAppState().access`, React-free as `createAppController().getSnapshot().access`).
+They add no session states. Each has a `severity` that says what the app can
+still do:
+
+- **`blocking`** (at most one, `access.blocking`): the app cannot work: show a
+  sign-in screen. Startup problems, no connection, and the active connection's
+  ended session, failed sign-out or missing required scopes. Never dismissible.
+- **`action`** (`access.prompts`): something needs a decision, the app stays
+  usable: a dialog or banner. Another Pod's ended session, an unreachable Pod,
+  a failed sign-in.
+- **`info`**: nothing needs doing: a toast that disappears. A cancelled sign-in,
+  unchanged sharing.
+
+While `access.pending` (startup or a restore), nothing is derived. A prompt's
+`reason` names the cause, `connectionId` its connection and `actions` the
+offered steps, the first primary. A prompt keeps its `id` while its cause
+lasts; `dismiss(id)` retires a prompt that offers `dismiss` for the
+controller's lifetime, and returns `false` for any other.
+
+To place them yourself, compose the parts and render management on its own:
+
+```tsx
+import {
+  AccessGate,
+  AccessPrompt,
+  AppAccess,
+  ContextAccess,
+  useAccessPrompts,
+} from '@sempods/app-sdk/react';
+
+function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { prompts } = useAccessPrompts();
+  return (
+    <>
+      <AccessGate appName="My tasks" />
+      <ContextAccess appName="My tasks" />
+      {/* Or <AccessPrompts /> for the default stack. */}
+      <MyToasts>
+        {prompts.map((prompt) => (
+          <AccessPrompt key={prompt.id} prompt={prompt} />
+        ))}
+      </MyToasts>
+      <AppAccess
+        appName="My tasks"
+        only="management"
+        open={open}
+        onClose={onClose}
+      />
+    </>
+  );
+}
+```
+
+- `<AccessPrompt>` renders one prompt's localized message and buttons,
+  unstyled and unpositioned; Escape dismisses a dismissible one. Its buttons
+  run the guarded actions and do nothing once the prompt is no longer current,
+  also after a leave confirmation. When it goes while it holds focus, focus
+  returns to its `focusTarget` prop, otherwise to where focus came from.
+- `<AccessPrompts />` is the default stack: a polite live region at the bottom
+  of the viewport. Info prompts hide after about 6 seconds unless focused or
+  hovered, and hiding dismisses them, so they do not return. It passes its
+  `focusTarget` prop on to each prompt (`AppAccess` passes its own).
+- Own buttons call the guarded actions directly: `sign-in` is
+  `authorize(connectionId)`, or without a connection `connect()` for a preset or
+  sole allowed Pod and otherwise `connect(url)` from an address field; `retry`
+  is `retryRestore(id)` for `unreachable` (not guarded) and `disconnect(id)` for
+  `sign-out-failed` (it forgets too when the person asked to); `forget` is
+  `forget(id)`; `reload` reloads the page.
+- **Drafts behind the gate:** the content stays mounted, so a draft stays in
+  memory, but it cannot be viewed or copied while the gate shows. Signing in
+  navigates to the Pod; the leave confirmation asks first, and declining keeps
+  the draft behind the gate for as long as the page stays open.
 
 ### Sign-in and Pod addresses
 
@@ -1158,9 +1243,10 @@ from the guarded `useApp()` actions.
   durable and while `changing`, `confirmingLeave` or a restore is pending; show
   errors with `useSdkLocale().error`. `false` means the leave policy declined
   (a sign-in it cancelled is not an error).
-- Keep startup feedback and `CallbackNotice` outside the content gate. A failed
-  or cancelled callback activates its connection; use `callbackNotice` to tell
-  whether a `startup.interaction` outcome is current.
+- Read `useAppState().access` for what needs attention, or compose the
+  [access parts](#access-prompts-and-your-own-placement). A failed or cancelled
+  callback activates its connection; its prompt (or the deprecated
+  `callbackNotice`) tells whether a `startup.interaction` outcome is current.
 - A restoring connection waits; a `leaving` one (navigating to the Pod)
   stays inert without a sign-in. `active` and `renewing` are authentication,
   not Context access. A cancelled re-authorization keeps the session
@@ -1169,8 +1255,8 @@ from the guarded `useApp()` actions.
 - `access_denied` cannot tell cancel from decline and its
   `error_description` is never shown: the notice says no access was granted
   (`controls.signInCancelled`) with **Sign in**, or after a declined
-  re-authorization that sharing is unchanged (`controls.sharingUnchanged`) with
-  **Change sharing**.
+  re-authorization that sharing is unchanged (`controls.sharingUnchanged`), an
+  information that needs no action.
 - Select a readable Context explicitly; reloads reselect the last one while
   readable. Catalogue refresh and authorization never retry a write. A busy
   startup offers reload guidance, not a fake restart. Saved-record warnings do
