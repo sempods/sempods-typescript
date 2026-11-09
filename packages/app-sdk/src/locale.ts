@@ -43,6 +43,38 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
     dateStyle: 'medium',
     timeZone: 'UTC',
   });
+  // The Gregorian year where `instants` shows it; the era tells 1 BCE from 1 CE.
+  const zoneYears = new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
+    year: 'numeric',
+    era: 'short',
+    timeZone,
+  });
+  const { calendar, numberingSystem } = dates.resolvedOptions();
+  const gregorian = calendar === 'gregory' || calendar === 'iso8601';
+  const fullYears = new Intl.NumberFormat(locale, {
+    numberingSystem,
+    minimumIntegerDigits: 4,
+    useGrouping: false,
+  });
+  /**
+   * The medium date style prints a year as it is, so 50 would read like 1950.
+   * A Gregorian year below 1000 is shown with four digits; a year before 1
+   * has no unambiguous form without an era and is refused.
+   */
+  function withFullYear(
+    formatter: Intl.DateTimeFormat,
+    date: Date,
+    year: number,
+  ) {
+    if (year < 1) throw new RangeError('Years before 0001 are not supported.');
+    if (year >= 1000 || !gregorian) return formatter.format(date);
+    return formatter
+      .formatToParts(date)
+      .map((part) =>
+        part.type === 'year' ? fullYears.format(year) : part.value,
+      )
+      .join('');
+  }
   return {
     number: (value: number) => numbers.format(value),
     list: (values: readonly string[]) => lists.format(values),
@@ -52,7 +84,26 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
         other: string;
       },
     ) => forms[plurals.select(count)] ?? forms.other,
-    dateTime: (value: string | Date) => instants.format(new Date(value)),
+    /**
+     * An instant in `timeZone`, with a Gregorian year below 1000 in four
+     * digits. Throws a `RangeError` for an invalid time or a year before 0001.
+     */
+    dateTime(value: string | Date) {
+      const date = new Date(value);
+      if (!Number.isFinite(date.valueOf()))
+        throw new RangeError('Invalid time value.');
+      // A zone moves an instant by less than a day, so later UTC years stay.
+      if (date.getUTCFullYear() > 1000) return instants.format(date);
+      const parts = zoneYears.formatToParts(date);
+      const shown = Number(parts.find((part) => part.type === 'year')?.value);
+      const era = parts.find((part) => part.type === 'era')?.value;
+      return withFullYear(instants, date, era === 'BC' ? 1 - shown : shown);
+    },
+    /**
+     * A calendar day `YYYY-MM-DD` from 0001 to 9999, the same in every time
+     * zone, with a Gregorian year below 1000 in four digits. Throws a
+     * `RangeError` for any other form or an impossible day.
+     */
     dateOnly(value: string) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
         throw new RangeError('Expected an ISO calendar date.');
@@ -62,7 +113,7 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
         date.toISOString().slice(0, 10) !== value
       )
         throw new RangeError('Invalid calendar date.');
-      return dates.format(date);
+      return withFullYear(dates, date, date.getUTCFullYear());
     },
   };
 }
