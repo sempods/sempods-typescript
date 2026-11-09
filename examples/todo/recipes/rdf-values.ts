@@ -127,18 +127,30 @@ export function exactTerm(term: SparqlTerm): string {
       return term.datatype ? `${quoted}^^<${visible(term.datatype)}>` : quoted;
     }
     case 'unsupported':
-      return visible(JSON.stringify(term.term));
+      return visibleJson(JSON.stringify(term.term));
   }
 }
 
+const INVISIBLES = new RegExp(INVISIBLE.source, 'gu');
+
 /** Escapes invisible characters as N-Triples `\\uXXXX` or `\\UXXXXXXXX`. */
 function visible(value: string): string {
-  return value.replace(new RegExp(INVISIBLE.source, 'gu'), (char) => {
+  return value.replace(INVISIBLES, (char) => {
     const code = char.codePointAt(0)!;
     return code > 0xffff
       ? `\\U${code.toString(16).padStart(8, '0')}`
       : `\\u${code.toString(16).padStart(4, '0')}`;
   });
+}
+
+/** The same in JSON, which has only `\\uXXXX`: one per UTF-16 unit, so it parses. */
+function visibleJson(json: string): string {
+  return json.replace(INVISIBLES, (char) =>
+    char
+      .split('')
+      .map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, '0')}`)
+      .join(''),
+  );
 }
 
 /**

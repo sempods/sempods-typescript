@@ -615,6 +615,7 @@ try {
   await page.getByText('Zugriff prüfen', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('draft').inputValue(), 'Unfinished');
   assert.equal(await page.locator('output').innerText(), '1.234,5');
+  assert.equal(await page.locator('#rdf-values code').innerText(), '"a  b"');
   // The quickstart app starts and offers its first step.
   await page.goto(`${origin}/quickstart`);
   await page.getByText('My tasks', { exact: true }).waitFor();
@@ -649,7 +650,7 @@ try {
   await page.getByText('My tasks', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    'Packed DOM-only browser discovery, the edit entry, React provider/draft preservation, the verbatim quickstart and PWA entry-only registration passed in Chromium.',
+    'Packed DOM-only browser discovery, the edit entry, React provider/draft preservation, the exact RDF value form, the verbatim quickstart and PWA entry-only registration passed in Chromium.',
   );
 } finally {
   await browser?.close();

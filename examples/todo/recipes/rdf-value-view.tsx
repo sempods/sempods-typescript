@@ -116,7 +116,10 @@ export function ResourceValues({
                 )
               )}
               <br />
-              <code dir="ltr">{shown.exact}</code>
+              {/* pre-wrap: "a  b" and "a b" are different literals. */}
+              <code dir="ltr" style={{ whiteSpace: 'pre-wrap' }}>
+                {shown.exact}
+              </code>
             </dd>
           </div>
         );

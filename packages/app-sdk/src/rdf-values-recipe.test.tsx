@@ -95,6 +95,12 @@ const values = {
     'xml:lang': 'ar',
     'its:dir': 'rtl',
   },
+  taggedDirected: {
+    type: 'literal',
+    value: 'a\u{E0041}b',
+    'xml:lang': 'en',
+    'its:dir': 'ltr',
+  },
 };
 
 /** One row per value, decoded by the SDK's own SELECT decoder. */
@@ -179,6 +185,10 @@ describe('RDF value recipe', () => {
       text: 'Nicht unterstützt',
       exact: JSON.stringify(values.directed),
     });
+    // Its JSON keeps JSON escapes, so the copy parses back to the same term.
+    const tagged = show(t.taggedDirected).exact;
+    expect(tagged).toContain('a\\udb40\\udc41b');
+    expect(JSON.parse(tagged)).toEqual(values.taggedDirected);
   });
 
   it('formats calendar days independently of the time zone and instants in it', async () => {

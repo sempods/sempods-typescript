@@ -99,14 +99,17 @@ details:
   text. Converting `007`, a large integer or a decimal to a JavaScript number
   would change the value.
 - **Unsupported terms.** A term the SDK reports as `unsupported` shows the app's
-  neutral text and keeps its JSON in `exact`. Flattening it would lose data: an
-  RDF 1.2 text direction (`its:dir`), for example, changes the term's identity.
+  neutral text and keeps its JSON in `exact`, which still parses. Flattening it
+  would lose data: an RDF 1.2 text direction (`its:dir`), for example, changes
+  the term's identity.
 - **Exact form.** `exact` is `"…"@lang`, `"…"^^<datatype>`, `<iri>` or `_:b0`.
   Invisible characters are escaped as `\uXXXX` or `\UXXXXXXXX`, so they appear
   as text instead of hiding or reordering it: controls, format characters such
   as bidi overrides and tag characters, surrogates, private use, line separators
-  and blank fillers. A blank node label is local to one result; it does not
-  identify the node in another read.
+  and blank fillers. In JSON, a character above U+FFFF becomes two `\uXXXX`. The
+  view shows `exact` with `white-space: pre-wrap`, so `"a  b"` does not look
+  like `"a b"`. A blank node label is local to one result; it does not identify
+  the node in another read.
 
 ## Calendar days and instants
 
