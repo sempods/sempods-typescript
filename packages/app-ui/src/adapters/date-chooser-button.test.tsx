@@ -39,6 +39,8 @@ it.each([
   ['2026-10-30T09:30:00'],
   // Without seconds, which the SDK's date field rejects.
   ['2026-10-30T09:30+02:00'],
+  ['2026-10-30T09:30:00+15:00'],
+  ['2026-10-30T24:00:00.5Z'],
   // A year the formatters cannot show reliably.
   ['12026-10-29'],
   ['-0001-10-29'],

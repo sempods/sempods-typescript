@@ -140,7 +140,7 @@ export function DateChooser({
  * or an offset such as `+02:00`).
  */
 const ZONED =
-  /T(?:\d{2}:\d{2}:\d{2}(?:\.\d+)?|24:00:00(?:\.0+)?)(?:Z|[+-]\d{2}:\d{2})$/;
+  /T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?|24:00:00(?:\.0+)?)(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
 
 /** The calendar day a stored value names, or `null` when it names none. */
 export function calendarDay(value: string | null): CalendarDate | null {
