@@ -134,8 +134,13 @@ export function DateChooser({
   );
 }
 
-/** A date-time that ends in a time zone (`Z` or an offset such as `+02:00`). */
-const ZONED = /T.*(?:Z|[+-]\d{2}:\d{2})$/;
+/**
+ * The time of an `xsd:dateTime` with its required time zone, as the SDK's
+ * `date` field accepts it (`T09:30:00`, `T09:30:00.5`, `T24:00:00`, then `Z`
+ * or an offset such as `+02:00`).
+ */
+const ZONED =
+  /T(?:\d{2}:\d{2}:\d{2}(?:\.\d+)?|24:00:00(?:\.0+)?)(?:Z|[+-]\d{2}:\d{2})$/;
 
 /** The calendar day a stored value names, or `null` when it names none. */
 export function calendarDay(value: string | null): CalendarDate | null {

@@ -132,8 +132,10 @@ seconds, the sempods server's default).
 - **`DateChooser` shows a value that names no real day as stored** (#262).
   `2026-02-30` used to read as 2 March and `2026-04-31` as 1 May; a date-time
   without a time zone (`2026-10-30T09:30:00`) was read in the device's zone.
-  The button now shows these values unchanged. Days and zoned date-times are
-  shown as before.
+  The button now shows these values unchanged, as it does a date-time that the
+  `date` field rejects (`2026-10-30T09:30+02:00`, without seconds) and a year
+  with more than four digits or a minus sign. Other days and zoned date-times
+  are shown as before.
 
 - **`ScreenDialog` keeps clear of device insets on phones.** Full screen
   (below 640px), its heading and scrolling content add

@@ -570,8 +570,8 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   chooser starts at the day of its stored offset and replaces it only when a
   day is applied. A value that names no real day (`2026-02-30`) is shown as
   stored and opens without a chosen day; a date-time without a time zone is
-  shown as stored too. Month names and the first weekday follow the SDK provider's
-  locale; days and month buttons are 44px targets. Apply and Remove date stay
+  shown as stored too. Month names and the first weekday follow the SDK
+  provider's locale; days and month buttons are 44px targets. Apply and Remove date stay
   in a bar at the chooser's bottom edge, visible on a phone as it opens.
 - **`ActionButton`**: an app's own action in the theme's variants: `variant`
   `primary` (default), `secondary`, `ghost` or `destructive`; `shape` `pill`
