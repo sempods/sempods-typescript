@@ -938,6 +938,97 @@ async function interaction({ browser, origin, engine }) {
         listChecked,
       };
     },
+    // #232: the menu's focus styles follow React Aria's input modality. A
+    // hovered row gets the accent surface without a ring and turns neutral
+    // over the separator although it keeps the focus; a pointer dismissal
+    // leaves no ring on the button; keyboard focus draws one solid outline,
+    // inside the row in the menu and around the button after Escape.
+    async 'menu-focus-modality'() {
+      const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      const sharing = page.getByRole('menuitem', { name: 'Pods & sharing' });
+      const paint = (locator) =>
+        locator.evaluate((el) => {
+          const s = getComputedStyle(el);
+          const box = el.getBoundingClientRect();
+          const scroller = el.closest('[role=menu]')?.getBoundingClientRect();
+          const grow = Math.max(
+            0,
+            parseFloat(s.outlineWidth) + parseFloat(s.outlineOffset),
+          );
+          return {
+            focused: el === document.activeElement,
+            outline:
+              s.outlineStyle === 'none'
+                ? 'none'
+                : `${s.outlineWidth} ${s.outlineStyle} ${s.outlineOffset}`,
+            // A visible shadow with a spread: Tailwind's ring.
+            ring: [
+              ...s.boxShadow.matchAll(
+                /((?:rgba?|oklch|oklab|color|lab|lch)\([^)]*\)|#[0-9a-f]+)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px/g,
+              ),
+            ].some(
+              (m) => parseFloat(m[5]) > 0 && !/(,\s*0|\/\s*0)\)$/.test(m[1]),
+            ),
+            filled: !/^(rgba\(\d+, \d+, \d+, 0\)|transparent)$/.test(
+              s.backgroundColor,
+            ),
+            inside:
+              !scroller ||
+              (box.left - grow >= scroller.left - 0.5 &&
+                box.right + grow <= scroller.right + 0.5 &&
+                box.top - grow >= scroller.top - 0.5 &&
+                box.bottom + grow <= scroller.bottom + 0.5),
+          };
+        });
+      await menu.click();
+      await sharing.waitFor();
+      const row = await sharing.boundingBox();
+      const x = row.x + row.width / 2;
+      await page.mouse.move(x, row.y + row.height / 2, { steps: 5 });
+      await settle(page);
+      const hovered = await paint(sharing);
+      const separator = await page
+        .locator('[data-slot=dropdown-menu-separator]')
+        .boundingBox();
+      await page.mouse.move(x, separator.y + separator.height / 2, {
+        steps: 8,
+      });
+      await settle(page);
+      const overSeparator = await paint(sharing);
+      await page.mouse.click(8, 400);
+      await hidden(page.getByRole('menu'));
+      await settle(page);
+      const afterPointer = await paint(menu);
+      await page.keyboard.press('Enter');
+      await page.getByRole('menuitem', { name: 'View' }).waitFor();
+      await settle(page);
+      const keyboardRow = await paint(page.locator('[role=menuitem]:focus'));
+      await page.keyboard.press('Escape');
+      await hidden(page.getByRole('menu'));
+      await settle(page);
+      const afterEscape = await paint(menu);
+      return {
+        pass:
+          hovered.filled &&
+          hovered.outline === 'none' &&
+          overSeparator.outline === 'none' &&
+          !overSeparator.filled &&
+          afterPointer.focused &&
+          afterPointer.outline === 'none' &&
+          !afterPointer.ring &&
+          keyboardRow.outline === '2px solid -2px' &&
+          keyboardRow.filled &&
+          keyboardRow.inside &&
+          afterEscape.focused &&
+          afterEscape.outline === '2px solid 2px' &&
+          !afterEscape.ring,
+        hovered,
+        overSeparator,
+        afterPointer,
+        keyboardRow,
+        afterEscape,
+      };
+    },
     // Focus starts on the chosen day; arrows, PageDown, Enter and Apply.
     async 'calendar-keyboard'() {
       await openTask(page);

@@ -139,7 +139,7 @@
        --sempods-muted is that text colour. */
     --muted: light-dark(#f3f4f6, #1d2026);
     --muted-foreground: light-dark(#5f6672, #a1a7b0);
-    /* accent is the highlight surface of focused menu items. */
+    /* accent is the highlight surface of hovered and focused menu items. */
     --accent: light-dark(#eef0f3, #262a31);
     --accent-foreground: var(--foreground);
     --destructive: light-dark(#b42318, #ffbcb5);
@@ -240,6 +240,35 @@
   ):focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+  /* Menu triggers and menu rows follow React Aria's input modality
+     (data-focus-visible) instead of :focus-visible. Chromium matches
+     :focus-visible on a trigger that gets the focus back after an outside
+     pointer press, and on a row that the pointer focused by hovering it. */
+  :where([data-slot][aria-haspopup='true'], [data-slot][role^='menuitem']) {
+    &:focus-visible {
+      outline: none;
+    }
+    &[data-focus-visible] {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
+    }
+  }
+  /* Inside the row: the scrolling menu would clip an outline outside it. */
+  :where([data-slot][role^='menuitem'])[data-focus-visible] {
+    outline-offset: -2px;
+  }
+  /* Forced colors drop the rows' surfaces: the focused row draws the
+     outline, whether the pointer or the keyboard focused it, and the other
+     rows none (Tailwind's outline-hidden would draw a clipped one there). */
+  @media (forced-colors: active) {
+    :where([data-slot][role^='menuitem']) {
+      outline: none;
+      &[data-focused] {
+        outline: 2px solid var(--ring);
+        outline-offset: -2px;
+      }
+    }
   }
 }
 

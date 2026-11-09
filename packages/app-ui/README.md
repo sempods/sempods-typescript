@@ -72,7 +72,10 @@ explains the order and which app rules still override SDK rules.
   solid focus outline;
 - in its own layer `app-ui-focus`, after Tailwind's utilities: a solid 2px
   focus outline in the `ring` colour on the package's components and calendar
-  days. Name the layer in the order statement only to move it; an unlayered
+  days. Menu triggers and menu rows show it only for keyboard focus, as
+  React Aria's `data-focus-visible` reports it, and a row draws it inside its
+  edge; with forced colors, the focused row draws it for pointer focus too.
+  Name the layer in the order statement only to move it; an unlayered
   app rule overrides it;
 - in the layer `app-ui-motion`: without entry and exit animations of popovers,
   menus and selects when the person asks for reduced motion
@@ -118,7 +121,7 @@ system's light or dark mode:
 | `primary`, `primary-foreground`     | The main action and selected days                             |
 | `secondary`, `secondary-foreground` | Tonal secondary actions                                       |
 | `muted`, `muted-foreground`         | A quiet surface, and secondary text                           |
-| `accent`, `accent-foreground`       | The highlight of focused menu items                           |
+| `accent`, `accent-foreground`       | The highlight of hovered and focused menu items               |
 | `destructive`                       | Destructive actions                                           |
 | `border`                            | Decorative separators                                         |
 | `input`                             | Boundaries of fields and outlined controls; keep 3:1          |
