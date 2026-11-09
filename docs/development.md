@@ -102,7 +102,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   in `tests/ui-browser` strictly against the packed declarations (React Aria's
   included, `skipLibCheck` off). Its task dialog and its address model are the
   installed README's `task-dialog.tsx` and `places.ts` examples as shipped, so
-  every check below runs the documented recipe; the screen routes with the
+  every check below runs the documented recipe; its compact quick edit is the
+  README's `quick-edit.tsx`; the screen routes with the
   package's `useNav` and uses the README's stylesheet setup. The README's other
   TSX examples are compiled. It is
   built with Vite and Tailwind CSS 4. The
@@ -119,6 +120,17 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     closing the dialog, a menu and the date chooser right after opening;
     1280 → 375 → 1280px with a draft; Back and
     Forward, and Back with a dirty draft, staying and discarding;
+  - the compact `Dialog` around an SDK editor: Close, then Cancel or Escape in
+    the SDK's question, and Cancel in its delete question, keep the dialog
+    and the draft; a press beside it asks, and discarding closes it unsaved;
+    an unreadable source Context shows its problem instead of an editor; its
+    close button is named in German;
+  - `ScreenDialog` full screen with safe-area insets, emulated through the
+    DevTools protocol in Chromium only (other engines report a skip): Close
+    below a 47px top inset, the last action after scrolling above a 34px
+    bottom inset, heading, Close and fields beside 44px landscape side
+    insets; the ordinary phone padding without insets in every engine, and
+    the centred dialog unmoved by insets;
   - the calendar-date roundtrip with the SDK's `date` field in
     Europe/Berlin, UTC+14 and UTC−11: stored `xsd:date` after Apply and Save,
     nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`
