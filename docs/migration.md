@@ -64,6 +64,10 @@ reload, so people sign in again with one action.
 - `UiMessages` gains `rememberedPods`, `forget`, `sessionEnded` and
   `forgetFailed`, optional in the type; `createLocale` fills them from the
   language defaults.
+- `@sempods/app-ui`: `HeaderMenuProps` gains the optional `ref` to the menu's
+  button. A menu item that opens `AppAccess` (Pods & sharing) passes that ref
+  as `focusTarget`, so closing management returns the focus to the button
+  instead of the page ([UI kit guide](../packages/app-ui/README.md)).
 
 ## From 0.6.0 to 0.7.0
 

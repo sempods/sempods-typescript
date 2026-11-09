@@ -450,7 +450,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
   when their labels can repeat). Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
-  returns to the button.
+  returns to the button. `ref` reaches the button: pass it as `focusTarget`
+  to a surface an item opens, such as `AppAccess`, so focus returns there
+  once the item has gone (see the menu example below).
 - **`DateChooser`**: the calendar-date chooser for the SDK's `date` field. It
   takes the field's draft value (`2026-10-29`, with `orDateTime` also a zoned
   date-time, or `null`) and returns a day as `YYYY-MM-DD`, or `null` with
@@ -551,6 +553,43 @@ export function TaskFilter(props: {
       <Chip id="open">Open</Chip>
       <Chip id="all">All</Chip>
     </ChipGroup>
+  );
+}
+```
+
+A header menu that opens Pods & sharing gives `AppAccess` its button as
+`focusTarget`. The chosen item has left with the menu by the time management
+closes, so Escape or Close would otherwise leave the focus on the page:
+
+```tsx
+// app-menu.tsx
+import { useRef, useState } from 'react';
+import { AppAccess, useSdkLocale } from '@sempods/app-sdk/react';
+import { HeaderMenu } from '@sempods/app-ui';
+
+export function AppMenu() {
+  const [managing, setManaging] = useState(false);
+  const menu = useRef<HTMLButtonElement>(null);
+  const { messages } = useSdkLocale();
+  return (
+    <>
+      <HeaderMenu
+        ref={menu}
+        label="Menu"
+        items={[
+          {
+            label: messages.controls.dataAccess,
+            onSelect: () => setManaging(true),
+          },
+        ]}
+      />
+      <AppAccess
+        appName="Focus"
+        open={managing}
+        onClose={() => setManaging(false)}
+        focusTarget={menu}
+      />
+    </>
   );
 }
 ```

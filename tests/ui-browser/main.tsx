@@ -9,7 +9,7 @@
 // and the address model, places.ts, are the package README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
-import { StrictMode, useState } from 'react';
+import { StrictMode, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
 import {
@@ -142,6 +142,8 @@ function App() {
 
 function Frame() {
   const [managing, setManaging] = useState(false);
+  // Closing Pods & sharing returns here: the menu item is gone by then.
+  const menu = useRef<HTMLButtonElement>(null);
   const { connections, view: target } = useAppState();
   const { messages } = useSdkLocale();
   const t = useMessages(texts);
@@ -158,6 +160,7 @@ function Frame() {
         <header className="gate-header">
           <h1>Focus</h1>
           <HeaderMenu
+            ref={menu}
             label={t.menu}
             items={[
               {
@@ -190,6 +193,7 @@ function Frame() {
         headingLevel={header ? 2 : 1}
         open={managing}
         onClose={() => setManaging(false)}
+        focusTarget={menu}
       />
       {/* An address that names its source opens without a selected Context:
           no TargetScreen, so AppAccess asks for no choice. */}

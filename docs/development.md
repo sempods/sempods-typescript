@@ -123,7 +123,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     Europe/Berlin, UTC+14 and UTC−11: stored `xsd:date` after Apply and Save,
     nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`
     kept until a day is applied;
-  - keyboard use of the header menu and the calendar, 44px calendar targets at
+  - keyboard use of the header menu and the calendar; focus back on the menu
+    button after Pods & sharing, opened from the menu, closes by Escape or by
+    Close once the menu has gone; 44px calendar targets at
     375 × 812 and 375 × 560 with Apply and Remove date visible as the chooser
     opens, German texts and locale, removing an optional
     date; filter chips by keyboard at 375px (one Tab stop, arrows, Space,

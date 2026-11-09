@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it } from 'vitest';
+import { createRef } from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
 import {
   act,
   cleanup,
@@ -40,4 +41,31 @@ it('checks the choice by id when two choices share a label', async () => {
     .getAllByRole('menuitemradio', { name: 'Work' })
     .map((item) => item.getAttribute('aria-checked'));
   expect(checked).toEqual(['false', 'true']);
+});
+
+it('passes its button through ref, which stays after an item closes the menu', async () => {
+  const menu = createRef<HTMLButtonElement>();
+  const manage = vi.fn();
+  render(
+    <HeaderMenu
+      ref={menu}
+      label="Menu"
+      items={[{ label: 'Pods & sharing', onSelect: manage }]}
+    />,
+  );
+  const button = screen.getByRole('button', { name: 'Menu' });
+  expect(menu.current).toBe(button);
+  await act(async () => {
+    fireEvent.keyDown(button, { key: 'Enter' });
+  });
+  const item = screen.getByRole('menuitem', { name: 'Pods & sharing' });
+  await act(async () => {
+    fireEvent.keyDown(item, { key: 'Enter' });
+    fireEvent.keyUp(item, { key: 'Enter' });
+  });
+  expect(manage).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('menu')).toBeNull();
+  // A surface the item opened returns the focus here (AppAccess focusTarget).
+  expect(menu.current).toBe(button);
+  expect(button.isConnected).toBe(true);
 });

@@ -1,3 +1,4 @@
+import type { Ref } from 'react';
 import { EllipsisIcon, MenuIcon } from 'lucide-react';
 import { Button } from '../components/button.js';
 import {
@@ -32,18 +33,31 @@ export interface HeaderMenuProps {
   readonly items: readonly HeaderMenuEntry[];
   /** `menu` (three lines) for a screen, `more` (three dots) for an item. */
   readonly icon?: 'menu' | 'more';
+  /**
+   * The menu's button. Pass the same ref as `focusTarget` to a surface the menu
+   * opens, such as `AppAccess` for Pods & sharing: the chosen item is gone by
+   * the time that surface closes, so focus needs the button to return to.
+   */
+  readonly ref?: Ref<HTMLButtonElement>;
 }
 
 /**
  * A round icon button with a menu: Enter or a press opens it, arrow keys move,
  * ArrowRight opens a submenu and ArrowLeft returns, Escape closes one level and
- * focus returns to the button. Items are 44px high.
+ * focus returns to the button. Items are 44px high. `ref` reaches the button,
+ * for example as `AppAccess`'s `focusTarget`.
  */
-export function HeaderMenu({ label, items, icon = 'menu' }: HeaderMenuProps) {
+export function HeaderMenu({
+  label,
+  items,
+  icon = 'menu',
+  ref,
+}: HeaderMenuProps) {
   const t = useAdapterTexts();
   return (
     <DropdownMenuTrigger>
       <Button
+        ref={ref}
         variant="secondary"
         size="icon-lg"
         className="size-11 rounded-full"

@@ -938,6 +938,49 @@ async function interaction({ browser, origin, engine }) {
         listChecked,
       };
     },
+    // Pods & sharing from the menu (#230): once the menu's popup has gone,
+    // closing management with Escape or with a press on Close returns the
+    // focus to the menu button, which the frame passes as `focusTarget`.
+    async 'menu-access-focus'() {
+      const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      const sheet = page.getByRole('dialog', { name: /Pods & sharing/ });
+      const open = async (how) => {
+        if (how === 'keyboard') {
+          await menu.focus();
+          await page.keyboard.press('Enter');
+          await page.getByRole('menuitem', { name: 'View' }).waitFor();
+          await focusItem(page, 'Pods & sharing');
+          await page.keyboard.press('Enter');
+        } else {
+          await menu.click();
+          await page.getByRole('menuitem', { name: 'Pods & sharing' }).click();
+        }
+        await sheet.waitFor();
+        // The popup unmounts after its exit; only then close management.
+        return gone(page.getByRole('menu'));
+      };
+      const keyboardMenuGone = await open('keyboard');
+      await page.keyboard.press('Escape');
+      const keyboardClosed = await hidden(sheet);
+      const afterEscape = await focusUntil(page, /Menu/, focused);
+      const pointerMenuGone = await open('pointer');
+      await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+      const pointerClosed = await hidden(sheet);
+      const afterClose = await focusUntil(page, /Menu/, focused);
+      return {
+        pass:
+          keyboardMenuGone &&
+          keyboardClosed &&
+          /Menu/.test(afterEscape) &&
+          pointerMenuGone &&
+          pointerClosed &&
+          /Menu/.test(afterClose),
+        keyboardMenuGone,
+        afterEscape,
+        pointerMenuGone,
+        afterClose,
+      };
+    },
     // Focus starts on the chosen day; arrows, PageDown, Enter and Apply.
     async 'calendar-keyboard'() {
       await openTask(page);
