@@ -454,6 +454,9 @@ export function createBrowserRuntime(
             before.scopes,
           );
           if (sent.kind === 'lost') {
+            // Only for this generation: a newer sign-in or sign-out owns the
+            // record now.
+            current(e, generation);
             // The one resend publishes its own outcome, like at startup.
             await resumeLost(e, claim.sentAt);
             return eligible(e, generation) && e.view.session.kind === 'active';
@@ -522,16 +525,21 @@ export function createBrowserRuntime(
     refreshToken: string,
     subject: string,
     scopes: readonly string[],
+    deadline?: number,
   ): Promise<Sent> {
+    // The lifetime this request belongs to: a sign-in or sign-out replaces
+    // `e.lifetime`, and its cancellation must not read as a lost answer.
+    const lifetime = e.lifetime.signal;
     const timeout = new AbortController();
     const timer = setTimeout(
       () => timeout.abort(new RuntimeError('interrupted')),
       TOKEN_TIMEOUT,
     );
-    const signal = combineSignals(e.lifetime.signal, timeout.signal);
+    const signal = combineSignals(lifetime, timeout.signal);
     const send: NonNullable<typeof protocol.fetch> =
       protocol.fetch ?? ((url, init) => globalThis.fetch(url, init));
     let requested = false;
+    let expired = false;
     let status: number | undefined;
     try {
       const result = await refreshAuthorization(
@@ -541,6 +549,12 @@ export function createBrowserRuntime(
         {
           ...protocol,
           fetch: async (url, init) => {
+            // Checked at dispatch: the token stays unsent once the Pod would
+            // treat it as reuse.
+            if (deadline !== undefined && Date.now() >= deadline) {
+              expired = true;
+              throw new RuntimeError('interrupted');
+            }
             requested = true;
             // Bounded also for a fetch that ignores its signal.
             const response = await waitFor(send(url, init), signal.signal);
@@ -555,8 +569,8 @@ export function createBrowserRuntime(
       );
       return { kind: 'renewed', result };
     } catch (error) {
-      if (e.lifetime.signal.aborted || !requested || !unanswered(status))
-        throw error;
+      if (expired && !lifetime.aborted) throw new RuntimeError('interrupted');
+      if (lifetime.aborted || !requested || !unanswered(status)) throw error;
       return { kind: 'lost' };
     } finally {
       clearTimeout(timer);
@@ -576,8 +590,9 @@ export function createBrowserRuntime(
   ) {
     const claim = await serial(e, async () => {
       current(e, generation);
-      // Checked again here: discovery or queued writes may have taken it
-      // past the grace period, when the Pod would treat the resend as reuse.
+      // Checked again here and at dispatch: discovery, queued writes or the
+      // durable resend record may take it past the grace period, when the
+      // Pod would treat the resend as reuse.
       if (!withinGrace(sentAt)) throw new RuntimeError('interrupted');
       if (!sessions || !e.revision) throw new RuntimeError('storage');
       const claimed = await sessions.resendRefresh(
@@ -596,6 +611,7 @@ export function createBrowserRuntime(
       claim.resend.refreshToken,
       claim.subject,
       claim.resend.scopes,
+      sentAt + gracePeriod,
     );
     if (sent.kind === 'lost') throw new RuntimeError('interrupted');
     await serial(e, async () => {
