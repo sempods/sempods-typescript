@@ -448,7 +448,11 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and submenus of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
-  when their labels can repeat). Arrow keys move,
+  when their labels can repeat). An action can lead with a decorative `icon`
+  (`{ label, onSelect, icon: <UsersIcon /> }`): it is hidden from assistive
+  technology, so the label stays the item's name and leads typeahead, and
+  once one action has an icon every other row leaves its space, so the labels
+  start in one column. Rows stay 44px high. Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
   returns to the button. `ref` reaches the button: pass it as `focusTarget`
   to a surface an item opens, such as `AppAccess`, so focus returns there
@@ -557,13 +561,15 @@ export function TaskFilter(props: {
 }
 ```
 
-A header menu that opens Pods & sharing gives `AppAccess` its button as
-`focusTarget`. The chosen item has left with the menu by the time management
-closes, so Escape or Close would otherwise leave the focus on the page:
+A header menu that opens Pods & sharing, with a leading icon, gives
+`AppAccess` its button as `focusTarget`. The chosen item has left with the
+menu by the time management closes, so Escape or Close would otherwise leave
+the focus on the page:
 
 ```tsx
 // app-menu.tsx
 import { useRef, useState } from 'react';
+import { UsersIcon } from 'lucide-react';
 import { AppAccess, useSdkLocale } from '@sempods/app-sdk/react';
 import { HeaderMenu } from '@sempods/app-ui';
 
@@ -580,6 +586,7 @@ export function AppMenu() {
           {
             label: messages.controls.dataAccess,
             onSelect: () => setManaging(true),
+            icon: <UsersIcon />,
           },
         ]}
       />

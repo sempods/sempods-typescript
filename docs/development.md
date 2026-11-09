@@ -125,7 +125,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     kept until a day is applied;
   - keyboard use of the header menu and the calendar; focus back on the menu
     button after Pods & sharing, opened from the menu, closes by Escape or by
-    Close once the menu has gone; 44px calendar targets at
+    Close once the menu has gone; a decorative leading icon in the menu that
+    leaves the label as the item's name and typeahead, with all labels in
+    one column and 44px rows; 44px calendar targets at
     375 × 812 and 375 × 560 with Apply and Remove date visible as the chooser
     opens, German texts and locale, removing an optional
     date; filter chips by keyboard at 375px (one Tab stop, arrows, Space,

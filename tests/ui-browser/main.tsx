@@ -11,6 +11,7 @@
 // router moves between the places.
 import { StrictMode, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { UsersIcon } from 'lucide-react';
 import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
@@ -182,6 +183,8 @@ function Frame() {
               {
                 label: messages.controls.dataAccess,
                 onSelect: () => setManaging(true),
+                // Decorative: the label stays the item's name (#231).
+                icon: <UsersIcon />,
               },
             ]}
           />

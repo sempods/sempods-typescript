@@ -981,6 +981,55 @@ async function interaction({ browser, origin, engine }) {
         afterClose,
       };
     },
+    // A decorative leading icon (#231): Pods & sharing keeps its label as
+    // its whole name and leads typeahead; every row's label starts in one
+    // column next to the 16px icon, and rows stay 44px high.
+    async 'menu-icon-columns'() {
+      const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      await menu.focus();
+      await page.keyboard.press('Enter');
+      const pods = page.getByRole('menuitem', {
+        name: 'Pods & sharing',
+        exact: true,
+      });
+      await pods.waitFor();
+      await settle(page);
+      const rows = await page.getByRole('menu').evaluate((list) =>
+        [...list.querySelectorAll('[role=menuitem]')].map((item) => {
+          // Where the label's text starts, apart from any icon.
+          const text = [...item.childNodes].find(
+            (node) => node.nodeType === 3 && node.textContent.trim(),
+          );
+          const range = document.createRange();
+          if (text) range.selectNodeContents(text);
+          const icon = item.querySelector('[aria-hidden=true] svg');
+          return {
+            label: text?.textContent.trim(),
+            textLeft: text ? range.getBoundingClientRect().left : null,
+            height: item.getBoundingClientRect().height,
+            icon: icon ? icon.getBoundingClientRect().width : null,
+          };
+        }),
+      );
+      const lefts = rows.map((row) => row.textLeft);
+      const column =
+        lefts.every((left) => left !== null) &&
+        Math.max(...lefts) - Math.min(...lefts) <= 0.5;
+      const podsRow = rows.find((row) => row.label === 'Pods & sharing');
+      await page.keyboard.press('p');
+      const typeahead = await focusUntil(page, /Pods & sharing/, focused);
+      await page.keyboard.press('Escape');
+      await hidden(page.getByRole('menu'));
+      return {
+        pass:
+          column &&
+          podsRow?.icon === 16 &&
+          rows.every((row) => row.height >= 44) &&
+          /Pods & sharing/.test(typeahead),
+        rows,
+        typeahead,
+      };
+    },
     // Focus starts on the chosen day; arrows, PageDown, Enter and Apply.
     async 'calendar-keyboard'() {
       await openTask(page);

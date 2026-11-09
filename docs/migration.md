@@ -69,6 +69,11 @@ reload, so people sign in again with one action.
   that ref as `focusTarget`, so closing management returns the focus to the
   button; without it, the focus still falls to the page, as in 0.7
   ([UI kit guide](../packages/app-ui/README.md#adapters)).
+- `@sempods/app-ui`: a `HeaderMenu` action (the new exported type
+  `HeaderMenuAction`) gains the optional decorative `icon`. The label stays its
+  accessible name and leads typeahead; text-only menus render as before. Apps
+  that composed `DropdownMenu` directly only to place an icon can return to
+  `HeaderMenu`.
 
 ## From 0.6.0 to 0.7.0
 

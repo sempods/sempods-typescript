@@ -1,4 +1,4 @@
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { EllipsisIcon, MenuIcon } from 'lucide-react';
 import { Button } from '../components/button.js';
 import {
@@ -21,9 +21,22 @@ export interface HeaderMenuChoice {
   readonly onSelect: () => void;
 }
 
+/** An action: its label names it and leads typeahead. */
+export interface HeaderMenuAction {
+  readonly label: string;
+  readonly onSelect: () => void;
+  /**
+   * A decorative leading icon, such as a lucide icon. It is hidden from
+   * assistive technology, so `label` stays the whole accessible name. When an
+   * action has one, the other rows of the menu leave its space, so all labels
+   * start in one column.
+   */
+  readonly icon?: ReactNode;
+}
+
 /** An action, a submenu of checked choices, or `null` for a separator. */
 export type HeaderMenuEntry =
-  | { readonly label: string; readonly onSelect: () => void }
+  | HeaderMenuAction
   | { readonly label: string; readonly choices: readonly HeaderMenuChoice[] }
   | null;
 
@@ -44,8 +57,9 @@ export interface HeaderMenuProps {
 /**
  * A round icon button with a menu: Enter or a press opens it, arrow keys move,
  * ArrowRight opens a submenu and ArrowLeft returns, Escape closes one level and
- * focus returns to the button. Items are 44px high. `ref` reaches the button,
- * for example as `AppAccess`'s `focusTarget`.
+ * focus returns to the button. Items are 44px high. An action can lead with a
+ * decorative `icon`. `ref` reaches the button, for example as `AppAccess`'s
+ * `focusTarget`.
  */
 export function HeaderMenu({
   label,
@@ -54,6 +68,11 @@ export function HeaderMenu({
   ref,
 }: HeaderMenuProps) {
   const t = useAdapterTexts();
+  // With an icon on any action, rows without one leave its column free
+  // (`inset`: the row's padding, a 16px icon and the gap).
+  const icons = items.some(
+    (item) => item !== null && 'icon' in item && Boolean(item.icon),
+  );
   return (
     <DropdownMenuTrigger>
       <Button
@@ -71,7 +90,7 @@ export function HeaderMenu({
             <DropdownMenuSeparator key={i} />
           ) : 'choices' in item ? (
             <DropdownMenuSub key={i}>
-              <DropdownMenuSubTrigger className="min-h-11">
+              <DropdownMenuSubTrigger className="min-h-11" {...inset(icons)}>
                 {item.label}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent
@@ -96,9 +115,23 @@ export function HeaderMenu({
             <DropdownMenuItem
               key={i}
               className="min-h-11"
+              {...inset(icons && !item.icon)}
+              textValue={item.label}
               onAction={item.onSelect}
             >
-              {item.label}
+              {item.icon ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="flex size-4 shrink-0 items-center justify-center"
+                  >
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </>
+              ) : (
+                item.label
+              )}
             </DropdownMenuItem>
           ),
         )}
@@ -106,3 +139,6 @@ export function HeaderMenu({
     </DropdownMenuTrigger>
   );
 }
+
+// `data-inset` styles a row by its presence, so `false` must leave it out.
+const inset = (on: boolean) => (on ? { inset: true } : {});
