@@ -682,6 +682,8 @@ or `construct`; `useAppState().pod` is the same active `BoundPod`.
 
 The [overview recipe](../examples/todo/recipes/pod-overview.tsx) combines a Pod
 SELECT, a later Context-bound creation form and editing a row.
+To show the terms such a SELECT returns, with labels, dates and web addresses,
+see [RDF values](rdf-values.md).
 
 For items of one type, `usePodList(definition)` does the reading across
 Contexts. The definition needs a `type`:

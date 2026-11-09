@@ -23,7 +23,11 @@ export function bindPod(
     current() &&
     e.generation === generation &&
     e.credentials?.subject === subject;
-  const readable = () => valid() && e.view.missingRequiredScopes.length === 0;
+  // Suspended without a credential, as while a lost renewal answer waits.
+  const readable = () =>
+    valid() &&
+    e.credential !== undefined &&
+    e.view.missingRequiredScopes.length === 0;
   const pod = client(readable);
   let snapshot: Pick<ViewAccess, 'current' | 'read' | 'revision'> | undefined;
   function getSnapshot() {

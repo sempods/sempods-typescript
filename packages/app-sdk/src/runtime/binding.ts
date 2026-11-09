@@ -146,8 +146,11 @@ export function bindView(
     e.generation === generation &&
     e.credentials?.subject === subject &&
     target.holds();
+  // Without a credential (a lost renewal answer waiting for its resend),
+  // the handle stays current but its access is suspended.
   const permission = (write: boolean) =>
     valid() &&
+    e.credential !== undefined &&
     e.view.missingRequiredScopes.length === 0 &&
     catalogueLists(e.view.catalogue, contextIri, write);
   let snapshot: ViewAccess | undefined;

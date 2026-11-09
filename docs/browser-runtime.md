@@ -100,19 +100,19 @@ its stored attempt. Two outcomes resume it, if its credential is still usable
 (unexpired, or renewable with its refresh token) and fresh discovery confirms
 its binding:
 
-| Outcome of the re-authorization                                             | Result                                                                    |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| The provider answers `access_denied` for this attempt                       | Earlier session resumes; report `cancelled` with `resumed: true`          |
-| The person returns without a callback (back navigation, abandoned attempt)  | Earlier session resumes (`restoring` → `active`); interaction `none`      |
-| Any other provider error, a lost token answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                  |
-| An expired earlier credential without a refresh token, or a disconnect      | Connection ends; nothing resumes                                          |
-| A successful answer                                                         | The new grant replaces the earlier one, also when narrower; never a merge |
+| Outcome of the re-authorization                                            | Result                                                                    |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| The provider answers `access_denied` for this attempt                      | Earlier session resumes; report `cancelled` with `resumed: true`          |
+| The person returns without a callback (back navigation, abandoned attempt) | Earlier session resumes (`restoring` → `active`); interaction `none`      |
+| Any other provider error, a lost code answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                  |
+| An expired earlier credential without a refresh token, or a disconnect     | Connection ends; nothing resumes                                          |
+| A successful answer                                                        | The new grant replaces the earlier one, also when narrower; never a merge |
 
 Resuming sends no token request and consumes the attempt: a replayed callback
 then fails with `attempt` while the session stays. A denied first sign-in ends
 its connection with `denied`, as above. A resume that cannot be stored keeps the attempt, and the next
 start resumes it. A refresh claimed before the re-authorization began is not
-kept, so its refresh token is never sent twice. Records written by SDK 0.5 have
+kept, so its refresh token is not sent again. Records written by SDK 0.5 have
 no earlier session and end as before; records written by 0.6 are not supported
 by older SDKs.
 
@@ -132,7 +132,10 @@ discovery) is not a sign-out: the connection ends with that problem and
 `restorable: true`, and the saved session is kept. The runtime restores it again
 when the browser fires `online`, and `retryRestore(id)` tries at once; both go
 through `restoring` to `active` without a token request or a new sign-in. Any
-other restoration failure, such as a changed binding, ends the session.
+other restoration failure, such as a changed binding, ends the session. A
+renewal whose answer was lost while the browser is offline is restorable the
+same way, but only within the grace period (see
+[lost renewal answers](#lost-renewal-answers)).
 
 Configured callback URLs may retain application query parameters, but may not
 contain authorization-response keys (`code`, `state`, `iss`, `error`,
@@ -502,10 +505,12 @@ announces support, so its callbacks use the strict path. The announcement is als
 part of the saved discovery binding, preventing silent changes on resume.
 
 A first sign-in left without a callback, an abandoned re-authorization whose
-earlier session cannot resume, and interrupted claimed records are retained with
-an explicit `interrupted` session problem; an expired authorization reports
-`expired`.
-Neither is dispatched or silently retried on startup. Call `beginAuthorization(id)`
+earlier session cannot resume, and interrupted code claims (and refresh claims
+of SDK 0.7) are retained with an explicit `interrupted` session problem; an
+expired authorization reports `expired`.
+Neither is dispatched or silently retried on startup. A refresh the earlier
+page left is resent once instead (see
+[lost renewal answers](#lost-renewal-answers)). Call `beginAuthorization(id)`
 for an explicit new attempt, or `disconnect(id)` to durably remove its secret
 material; the Pod then stays a [remembered Pod](#remembered-pods) until
 `forget(id)`. Until one of those actions, a retained
@@ -536,8 +541,9 @@ The runtime shares one refresh across callers; cancelling one waiter does not
 cancel another. Immutable credential objects retain their identity until an
 accepted replacement. A delayed refusal of the old credential reuses that
 replacement. The client alone decides whether one resend is still allowed.
-Consumed refresh tokens are removed durably before dispatch. Subject/issuer/client
-changes, widening scopes or reusing a refresh token are rejected. Scopes are
+A refresh token is claimed durably before dispatch, and removed from memory;
+only the claim keeps it, for one resend after a lost answer. Subject/issuer/client
+changes, widening scopes or a result that returns the sent refresh token are rejected. Scopes are
 unordered sets; duplicates and mismatches are rejected.
 
 A transient failure before a committed refresh claim (unreachable Pod, failing
@@ -549,8 +555,56 @@ without a reload. A permanent
 one (a changed token endpoint, issuer, client or refresh support, unsupported or
 invalid metadata, a store closed by a newer database version) ends the session
 visibly with its problem and needs a new sign-in; the unspent record is kept but
-restores to the same end. Once claimed, an unsuccessful exchange retires the
-consumed session.
+restores to the same end. Once claimed, a refused or invalid answer retires the
+consumed session; a lost one is resent once, as below.
+
+### Lost renewal answers
+
+A token request whose answer is lost no longer signs people out. The refresh
+claim keeps the sent refresh token, the granted scopes and when it was first
+sent. The outcome is unknown when the token endpoint gives no complete answer
+(no connection, no answer within 20 seconds, a body cut off), or one that is
+neither a token response (`2xx`) nor an OAuth error answer (`400`, `401`), such
+as a gateway or proxy failure (`5xx`, `403`, `404`, `408`, `429`). The Pod may
+have rotated the token, so the runtime sends the same token once more while it
+was first sent less than `refreshGracePeriod` ago (60 seconds by default, the
+sempods server's default rotation grace period). It first rediscovers the Pod:
+that read probes the network, so a connection that lost the answer does not
+lose the one resend too. The probe ends with the grace period (a probe still
+unanswered then ends as `interrupted`), and the grace period is checked again
+right before the resend is recorded and when it is sent:
+
+| After a lost answer                                      | Result                                                                                     |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Online, within the grace period                          | Rediscovered, then resent; `renewing` until it settles, then `active`                      |
+| Offline or Pod unreachable, within the grace period      | `ended { problem: 'network', restorable: true }`; resent on `online` or `retryRestore(id)` |
+| Offline beyond the grace period                          | `ended { problem: 'interrupted' }`; nothing is sent                                        |
+| The resend loses its answer too                          | `ended { problem: 'interrupted' }`                                                         |
+| The resend is refused (reuse detection, `invalid_grant`) | `ended` with the server's problem (`exchange`), as before                                  |
+| A page left during the request (reload, suspended tab)   | The next start resends once within the grace period (`restoring` → `active`)               |
+
+The resend is recorded durably before it is sent, so a reload never sends it a
+third time. A session that ends this way keeps its Pod address: it is listed as
+a [remembered Pod](#remembered-pods) with `signed-out { problem: 'interrupted' }`
+from the next start on, and signing in again is one action. While restorable,
+nothing is dispatched: bound handles stay `current` but report `read` and
+`write` as `false`, and pending reads resolve `invalidated`. The resend restores
+their access. Of the token endpoint's outcomes, only an OAuth error
+answer (for example `invalid_grant` or `invalid_client`) or an outcome still
+unknown beyond the grace period ends the session, besides an expired access token without a
+refresh token; an answer that does not continue the session (`claims`) and
+local failures (`storage`) end it as before.
+
+A Pod without a grace period treats the resend as reuse and refuses it, so the
+session ends as before; with one (sempods-kotlin#447) it survives.
+`refreshGracePeriod: 0` never resends. The grace period is measured on this
+device's clock from the first send; a clock set back extends it on the client
+only, and the Pod still refuses a late resend. Should a page close before an ended
+session's claim is retired, the next start within the grace period may send
+that claim's token once more; its result passes the same continuity checks.
+These are fixture tests; evidence against a deployed Pod with the grace period
+is still open ([#239](https://github.com/sempods/sempods-typescript/issues/239)).
+A code exchange is never resent.
 
 `beginAuthorization()` prepares first (discovery, client resolution, the stored
 attempt) while the current session keeps working; the app controller reports
@@ -569,7 +623,8 @@ disconnect or dispose during preparation still cancels without navigating. A
 Pod that advertises no registration endpoint (optional, RFC 8414) still serves
 `did:web` clients; dynamic clients
 need one and are refused with `invalid-config`.
-A lost token answer requires explicit login, never another use of the old token.
+A lost answer to a code exchange requires explicit login; its code is never
+redeemed again.
 Startup/session failures preserve safe structured protocol `failure` facts for
 presentation alongside `problem` (`network`, `discovery`, `state`, etc.). Neither
 raw error causes nor credential-bearing responses enter snapshots.

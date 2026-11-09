@@ -15,6 +15,7 @@ import {
   parseSessionRecord,
   sessionBinding,
   SessionTransitionError,
+  type RefreshResend,
   type SessionConfiguration,
   type SessionRecord,
   type SessionSnapshot,
@@ -37,7 +38,18 @@ export type RefreshClaim = Completion & {
   readonly kind: 'claimed';
   readonly binding: SessionBinding;
   readonly credentials: ExchangeResult;
+  /** When the refresh token was claimed for sending (this device's clock). */
+  readonly sentAt: number;
 };
+/** The one resend of a claimed refresh whose answer was lost. */
+export type RefreshResendClaim = Completion & {
+  readonly kind: 'claimed';
+  readonly binding: SessionBinding;
+  readonly subject: string;
+  readonly resend: RefreshResend;
+};
+/** What a refresh result must continue: the subject, the sent token and the granted scopes. */
+type Continuity = Pick<ExchangeResult, 'subject' | 'refreshToken' | 'scopes'>;
 const conflict = { kind: 'conflict' } as const;
 
 /** Internal transition functions for the single browser coordinator; no network, timers or UI ownership. */
@@ -91,8 +103,9 @@ export function createSessionTransitions(
   }
   function completion(
     claimed: SessionSnapshot,
-    before: SessionRecord,
     binding: SessionBinding,
+    /** A refresh's continuity; absent for a code exchange. */
+    before?: Continuity,
   ): Completion {
     // One attempt to complete: a rejected result is never retried, and a
     // failed claim is retired by the coordinator's disconnect.
@@ -104,14 +117,10 @@ export function createSessionTransitions(
         open = false;
         let result: ExchangeResult;
         try {
-          const scopes =
-            before.kind === 'ready'
-              ? before.credentials.scopes
-              : binding.scopes;
+          const scopes = before ? before.scopes : binding.scopes;
           result = parseStoredCredentials(input, { ...binding, scopes });
           if (result.expiresAt <= Date.now()) throw new Error();
-          if (before.kind === 'ready')
-            assertRefreshContinuity(before.credentials, result);
+          if (before) assertRefreshContinuity(before, result);
         } catch {
           throw new SessionTransitionError('result');
         }
@@ -133,16 +142,26 @@ export function createSessionTransitions(
     assertSessionBinding(binding, expected);
     if (operation === 'refresh' && !expected.pod.supportsRefreshToken)
       throw new SessionTransitionError('state');
-    // No verifier, access token or refresh token survives in this durable claim.
+    // No verifier or access token survives in this durable claim. A refresh
+    // claim keeps the refresh token it sends, for one resend after a lost
+    // answer within the Pod's grace period; a code claim keeps nothing.
+    const credentials =
+      current.value.kind === 'ready' ? current.value.credentials : undefined;
     return commit(current.id, current.revision, {
       version: 1,
       kind: 'claimed',
       binding: expected,
       operation,
-      subject:
-        current.value.kind === 'ready'
-          ? current.value.credentials.subject
-          : null,
+      subject: credentials?.subject ?? null,
+      ...(operation === 'refresh' && credentials?.refreshToken
+        ? {
+            resend: {
+              refreshToken: credentials.refreshToken,
+              scopes: credentials.scopes,
+              sentAt: Date.now(),
+            },
+          }
+        : {}),
     });
   }
   return {
@@ -284,7 +303,7 @@ export function createSessionTransitions(
         : {
             kind: 'claimed',
             attempt,
-            ...completion(result.record, current.value, binding),
+            ...completion(result.record, binding),
           };
     },
     async claimRefresh(
@@ -300,15 +319,62 @@ export function createSessionTransitions(
         !current.value.credentials.refreshToken
       )
         throw new SessionTransitionError('state');
+      const credentials = current.value.credentials;
       const result = await claim(current, 'refresh', binding);
-      return result.kind === 'conflict'
-        ? conflict
-        : {
-            kind: 'claimed',
-            binding: structuredClone(binding),
-            credentials: structuredClone(current.value.credentials),
-            ...completion(result.record, current.value, binding),
-          };
+      if (result.kind === 'conflict') return conflict;
+      const claimed = result.record.value;
+      if (claimed.kind !== 'claimed' || !claimed.resend)
+        throw new SessionTransitionError('state');
+      return {
+        kind: 'claimed',
+        binding: structuredClone(binding),
+        credentials: structuredClone(credentials),
+        sentAt: claimed.resend.sentAt,
+        ...completion(result.record, binding, credentials),
+      };
+    },
+    /**
+     * Claims the one resend of a refresh whose answer was lost: records that
+     * it is sent (`resent`), keeping when the refresh was first sent. Throws
+     * `state` for any other record, also once the resend was claimed; the
+     * coordinator decides whether the Pod's grace period still allows it.
+     */
+    async resendRefresh(
+      id: string,
+      revision: string,
+      expected: SessionBinding,
+    ): Promise<RefreshResendClaim | typeof conflict> {
+      const binding = expectedBinding(expected);
+      const current = await observed(id, revision);
+      if (!current) return conflict;
+      const value = current.value;
+      if (
+        value.kind !== 'claimed' ||
+        value.operation !== 'refresh' ||
+        value.subject === null ||
+        !value.resend ||
+        value.resend.resent
+      )
+        throw new SessionTransitionError('state');
+      assertSessionBinding(value.binding, binding);
+      const resend = { ...value.resend, resent: true as const };
+      const result = await commit(id, revision, {
+        ...value,
+        binding,
+        resend,
+      });
+      if (result.kind === 'conflict') return conflict;
+      return {
+        kind: 'claimed',
+        binding: structuredClone(binding),
+        subject: value.subject,
+        resend: structuredClone(resend),
+        ...completion(result.record, binding, {
+          subject: value.subject,
+          refreshToken: resend.refreshToken,
+          scopes: resend.scopes,
+        }),
+      };
     },
     /**
      * Retires the record: only its binding (the Pod address) and why it ended

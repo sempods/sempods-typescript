@@ -84,6 +84,39 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
   stays open. Apps that must keep drafts across a sign-in store them
   themselves.
 
+### Lost renewal answers
+
+**A lost answer to a renewal no longer signs people out**
+([lost renewal answers](browser-runtime.md#lost-renewal-answers), #239). The
+refresh claim now keeps the sent refresh token, and the runtime sends it once
+more while it was first sent less than `refreshGracePeriod` ago (default 60
+seconds, the sempods server's default).
+
+- **The stored refresh claim holds the refresh token** until it settles. It
+  still holds no access token. Retiring or replacing the claim removes it.
+- **Offline during a renewal** reports
+  `ended { problem: 'network', restorable: true }`, as for an unreachable Pod at
+  startup, and resends when the browser comes back online or on
+  `retryRestore(id)`. Offer a retry there, not a sign-in.
+- **The session ends as `interrupted`**, keeping the Pod address, when the
+  outcome stays unknown beyond the grace period or the resend loses its answer
+  too. Under 0.7 such a session ended with `exchange`; a refusal of the token
+  endpoint still ends with `exchange`.
+- **A token request is given up after 20 seconds** and counts as lost; there
+  was no limit before. An answer that is neither a token response nor an OAuth
+  error (`400`, `401`), such as a `5xx`, `403` or `429` from a proxy, counts as
+  lost too.
+- **Downgrading to 0.7** reads such a claim as `interrupted` and leaves it
+  stored, with its refresh token, until the person signs in again or signs
+  out.
+- **A refresh the earlier page left** (reload or a suspended tab during the
+  request) is resent once at the next start within the grace period
+  (`restoring` → `active`) instead of ending as `interrupted`. Refresh claims
+  written by 0.7 hold no token and still end as `interrupted`.
+- **A Pod without a grace period** refuses the resend as reuse, so the session
+  ends as under 0.7. Set `refreshGracePeriod` to your Pod's period; `0` never
+  resends.
+
 ### UI kit
 
 - **The compact `Dialog` speaks the SDK's language.** Its corner close button
@@ -112,7 +145,7 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
   or whose forgetting failed. Code that compares sessions by deep equality
   accepts these properties.
 - `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
-  `rememberPods`. Typed test doubles of the runtime need `forget`.
+  `rememberPods` and `refreshGracePeriod`. Typed test doubles of the runtime need `forget`.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
   doubles of `useApp()` need it too.
 - **Breaking for custom stores:** `SessionStore` (the `openStore` option) gains
