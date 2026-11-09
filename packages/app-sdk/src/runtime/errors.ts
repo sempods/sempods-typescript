@@ -94,7 +94,7 @@ export function runtimeFailure(error: unknown): {
 
 /**
  * Failures before a refresh claim that may pass on the next attempt: an
- * unreachable or failing Pod, or storage that could not be written. Changed
+ * unreachable, failing or unanswering Pod, or storage that could not be written. Changed
  * bindings, invalid metadata, unreadable records and a closed store are
  * permanent.
  */
@@ -103,6 +103,8 @@ export function transientBeforeClaim(error: unknown): boolean {
   // that could not complete a write may succeed next time.
   if (error instanceof SessionStorageError)
     return error.problem === 'unavailable';
+  // A discovery that did not answer before its deadline.
+  if (error instanceof RuntimeError) return error.problem === 'network';
   if (!(error instanceof SdkError)) return false;
   const reason = error.reason;
   if (reason.code === 'transport') return reason.problem === 'network';

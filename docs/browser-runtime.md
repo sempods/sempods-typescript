@@ -127,8 +127,23 @@ callback's code claim and exchange, nor keep callback parameters in the address
 bar. Disconnect/dispose still prevent late restoration from publishing
 credentials.
 
-A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` during
-discovery) is not a sign-out: the connection ends with that problem and
+Discovery only reads the Pod's metadata, so the runtime bounds it: a Pod whose
+discovery has not answered after 15 seconds counts as unreachable
+(`problem: 'network'`), also when its `fetch` ignores the abort signal. This
+applies to every discovery: restoration, resuming an abandoned
+re-authorization, the discovery before a refresh claim (which then spends
+nothing and stays signed in), rediscovery for a
+[lost renewal answer](#lost-renewal-answers), `connect(url)` (rejects),
+`beginAuthorization(id)` (rejects, nothing reset) and a callback's code claim
+(fails before the attempt is claimed). A late answer is dropped: it publishes
+nothing and installs no credentials, also after a disconnect or dispose, which
+stop the wait at once (`disconnected`); a pending `connect(url)` belongs to no
+connection yet, so dispose stops it. A timeout reports no `failure` detail.
+Token requests and client registration are not covered by this deadline, and no
+refresh or code exchange is replayed.
+
+A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` or no
+answer within the deadline during discovery) is not a sign-out: the connection ends with that problem and
 `restorable: true`, and the saved session is kept. The runtime restores it again
 when the browser fires `online`, and `retryRestore(id)` tries at once; both go
 through `restoring` to `active` without a token request or a new sign-in. Any
@@ -136,6 +151,17 @@ other restoration failure, such as a changed binding, ends the session. A
 renewal whose answer was lost while the browser is offline is restorable the
 same way, but only within the grace period (see
 [lost renewal answers](#lost-renewal-answers)).
+
+One connection's restoration never holds another back. While a connection is
+`restoring`, the runtime accepts `connect(url)`, and for every other
+connection `beginAuthorization`, `disconnect`, `forget`, `selectContext`,
+`loadContexts` and reads through its views. On the restoring connection itself,
+`disconnect(id)` and `forget(id)` sign out at once and `beginAuthorization(id)`
+prepares a new sign-in; each wins over the pending restoration, which then
+publishes nothing. Which controls an app offers meanwhile is the app's and the
+SDK components' policy
+([#238](https://github.com/sempods/sempods-typescript/issues/238)), not a
+runtime restriction.
 
 Configured callback URLs may retain application query parameters, but may not
 contain authorization-response keys (`code`, `state`, `iss`, `error`,
