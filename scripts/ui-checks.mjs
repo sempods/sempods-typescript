@@ -114,10 +114,25 @@ async function answerLeave(page, choice) {
   return asked;
 }
 
+// Checks take seconds and each Playwright action at most 10s; a check that
+// never settles fails under its own name instead of holding the job until its
+// timeout.
+const CHECK_DEADLINE_MS = 120_000;
+
 /** Runs one check; an exception is a failure with its first line as note. */
 async function attempt(id, run, extra = {}) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(`check did not settle in ${CHECK_DEADLINE_MS / 1000}s`),
+        ),
+      CHECK_DEADLINE_MS,
+    );
+  });
   try {
-    return { id, ...extra, ...(await run()) };
+    return { id, ...extra, ...(await Promise.race([run(), deadline])) };
   } catch (error) {
     return {
       id,
@@ -125,6 +140,8 @@ async function attempt(id, run, extra = {}) {
       pass: false,
       note: 'error: ' + error.message.split('\n')[0],
     };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

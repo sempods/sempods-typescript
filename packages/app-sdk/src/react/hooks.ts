@@ -32,12 +32,11 @@ import {
   type RemoveSnapshotOutcome,
   type CreateOutcome,
 } from '@sempods/client-sdk/edit';
-import { startupSettled } from '../authoring/app.js';
+import { startupSettled, type AppSnapshot } from '../authoring/app.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
   shallowEqual,
   useAppFacts,
-  useAppState,
   useContextDiscovery,
   useController,
   useView,
@@ -214,6 +213,10 @@ export interface LoadOptions {
    */
   readonly key?: unknown;
 }
+/** What `useLoad` and `usePodLoad` return. */
+type Loaded<T> = ReturnType<typeof useLoad<T>>;
+const selectPod = (s: AppSnapshot) => s.pod;
+const noPod = () => null;
 /**
  * Loads the active BoundPod using the same cancellable/bounded loader as useLoad.
  * Context/catalogue/label changes do not reload it. Changed Pod/session/grants
@@ -221,12 +224,44 @@ export interface LoadOptions {
  * No reader means unavailable after startup completes or fails. Inline callbacks do not loop:
  * pass `key` for the query's inputs, and a new value reads again.
  */
-export function usePodLoad<T>(read: PodRead<T>, options: LoadOptions = {}) {
-  const { pod, startup, startupError } = useAppState();
+export function usePodLoad<T>(
+  read: PodRead<T>,
+  options?: LoadOptions,
+): Loaded<T>;
+/**
+ * Loads an explicit BoundPod from `runtime.bindPod(id)`, for example one read
+ * per connection, with the same loader as the active-Pod form: one loader per
+ * handle, so another handle (connection or authorization) starts fresh and
+ * never shows the old one's data. Session end, disconnect and lost read access
+ * withdraw its result; changed grants refresh ready data. `null` is `loading`
+ * until startup settles, then `unavailable`. Each call is independent: one
+ * source's failure, retry or cancel never touches another. The hook never
+ * binds, and never reads another Pod or Context.
+ */
+export function usePodLoad<T>(
+  pod: BoundPod | null,
+  read: PodRead<T>,
+  options?: LoadOptions,
+): Loaded<T>;
+export function usePodLoad<T>(
+  first: PodRead<T> | BoundPod | null,
+  second?: PodRead<T> | LoadOptions,
+  third?: LoadOptions,
+): Loaded<T> {
+  // The active-Pod form passes the read first; the explicit form a handle.
+  const explicit = typeof first !== 'function';
+  // An explicit source does not follow (or re-render for) the active Pod.
+  const active = useAppFacts(explicit ? noPod : selectPod);
+  const settled = useAppFacts(startupSettled);
+  const pod = explicit ? first : active;
+  const read = (explicit ? second : first) as PodRead<T>;
+  const options = (explicit ? third : second) as LoadOptions | undefined;
   const { state, reload, cancel } = useBoundLoad(
     pod,
     read,
-    startupSettled({ startup, startupError }) ? unavailable : loading,
+    // A handle whose loader starts after this render is loading, not
+    // unavailable: no notice offers a retry that has nothing to reload.
+    pod || !settled ? loading : unavailable,
     options,
   );
   return { state, data: shownData(state), reload, cancel };
