@@ -77,7 +77,12 @@ const openMenu = async () => {
     });
   });
 };
-const Icon = () => <svg data-testid="icon" />;
+// An icon with a text of its own: only aria-hidden keeps it out of the name.
+const Icon = () => (
+  <svg data-testid="icon">
+    <title>people</title>
+  </svg>
+);
 
 it('keeps the label as the name of an action with a silent leading icon', async () => {
   const manage = vi.fn();
@@ -95,22 +100,27 @@ it('keeps the label as the name of an action with a silent leading icon', async 
   );
   await openMenu();
   const items = screen.getAllByRole('menuitem');
+  // The icon's <title> is in the text, but not in any item's name.
   expect(items.map((item) => item.textContent)).toEqual([
-    'List',
+    'peopleList',
     'View',
-    'Pods & sharing',
+    'peoplePods & sharing',
     'Print',
   ]);
   const pods = screen.getByRole('menuitem', { name: 'Pods & sharing' });
-  const icon = pods.querySelector('[data-testid=icon]')!;
-  expect(icon.closest('[aria-hidden=true]')?.parentElement).toBe(pods);
-  // Rows without an icon leave its column: the submenu and the plain action.
-  expect(items.map((item) => item.hasAttribute('data-inset'))).toEqual([
-    false,
-    true,
-    false,
-    true,
-  ]);
+  expect(screen.getByRole('menuitem', { name: 'List' })).toBe(items[0]);
+  // Every row leads with a silent 16px box, filled or empty, so the labels
+  // share one column in either reading direction; no row is inset.
+  for (const item of items) {
+    const box = item.firstElementChild!;
+    expect(box.getAttribute('aria-hidden')).toBe('true');
+    expect(box.className).toMatch(/\bsize-4\b/);
+    expect(item.hasAttribute('data-inset')).toBe(false);
+  }
+  expect(pods.firstElementChild!.querySelector('[data-testid=icon]')).not.toBe(
+    null,
+  );
+  expect(items[1]!.firstElementChild!.childNodes).toHaveLength(0);
   // The row's hit area stays 44px for every kind of row.
   for (const item of items) expect(item.className).toMatch(/\bmin-h-11\b/);
   // Typeahead follows the label, not the icon.
@@ -138,6 +148,17 @@ it('renders text-only menus as before, without inset rows', async () => {
   await openMenu();
   for (const item of screen.getAllByRole('menuitem')) {
     expect(item.hasAttribute('data-inset')).toBe(false);
-    expect(item.querySelector('[aria-hidden=true] svg')).toBeNull();
+    expect(item.querySelector('span[aria-hidden=true]')).toBeNull();
   }
+});
+
+it('takes no icon on a submenu', () => {
+  render(
+    <HeaderMenu
+      items={[
+        // @ts-expect-error A submenu has no icon; it would show nowhere.
+        { label: 'View', choices: [], icon: <Icon /> },
+      ]}
+    />,
+  );
 });

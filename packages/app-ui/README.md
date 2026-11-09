@@ -448,11 +448,13 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and submenus of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
-  when their labels can repeat). An action can lead with a decorative `icon`
-  (`{ label, onSelect, icon: <UsersIcon /> }`): it is hidden from assistive
-  technology, so the label stays the item's name and leads typeahead, and
-  once one action has an icon every other row leaves its space, so the labels
-  start in one column. Rows stay 44px high. Arrow keys move,
+  when their labels can repeat). An action's own `icon` is a decorative
+  leading icon (`{ label, onSelect, icon: <UsersIcon /> }`, shown at 16px,
+  so give it no size of its own): it is hidden from assistive technology, so
+  the label stays the item's name and leads typeahead. Once one action has an
+  icon, every other row keeps an empty icon space, so the labels start in one
+  column in either reading direction; submenus take no icon. Rows stay 44px
+  high. Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
   returns to the button. `ref` reaches the button: pass it as `focusTarget`
   to a surface an item opens, such as `AppAccess`, so focus returns there
@@ -561,10 +563,9 @@ export function TaskFilter(props: {
 }
 ```
 
-A header menu that opens Pods & sharing, with a leading icon, gives
-`AppAccess` its button as `focusTarget`. The chosen item has left with the
-menu by the time management closes, so Escape or Close would otherwise leave
-the focus on the page:
+A header menu that opens Pods & sharing gives `AppAccess` its button as
+`focusTarget`. The chosen item has left with the menu by the time management
+closes, so Escape or Close would otherwise leave the focus on the page:
 
 ```tsx
 // app-menu.tsx

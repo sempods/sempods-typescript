@@ -983,50 +983,67 @@ async function interaction({ browser, origin, engine }) {
     },
     // A decorative leading icon (#231): Pods & sharing keeps its label as
     // its whole name and leads typeahead; every row's label starts in one
-    // column next to the 16px icon, and rows stay 44px high.
+    // column next to the 16px icon, and rows stay 44px high. Right to left
+    // too: React Aria lays the menu out by the browser's locale (Arabic here).
     async 'menu-icon-columns'() {
-      const menu = page.getByRole('button', { name: 'Menu', exact: true });
-      await menu.focus();
-      await page.keyboard.press('Enter');
-      const pods = page.getByRole('menuitem', {
-        name: 'Pods & sharing',
-        exact: true,
-      });
-      await pods.waitFor();
-      await settle(page);
-      const rows = await page.getByRole('menu').evaluate((list) =>
-        [...list.querySelectorAll('[role=menuitem]')].map((item) => {
-          // Where the label's text starts, apart from any icon.
-          const text = [...item.childNodes].find(
-            (node) => node.nodeType === 3 && node.textContent.trim(),
-          );
-          const range = document.createRange();
-          if (text) range.selectNodeContents(text);
-          const icon = item.querySelector('[aria-hidden=true] svg');
-          return {
-            label: text?.textContent.trim(),
-            textLeft: text ? range.getBoundingClientRect().left : null,
-            height: item.getBoundingClientRect().height,
-            icon: icon ? icon.getBoundingClientRect().width : null,
-          };
-        }),
-      );
-      const lefts = rows.map((row) => row.textLeft);
-      const column =
-        lefts.every((left) => left !== null) &&
-        Math.max(...lefts) - Math.min(...lefts) <= 0.5;
-      const podsRow = rows.find((row) => row.label === 'Pods & sharing');
+      const measure = async (p) => {
+        const menu = p.getByRole('button', { name: 'Menu', exact: true });
+        await menu.focus();
+        await p.keyboard.press('Enter');
+        await p
+          .getByRole('menuitem', { name: 'Pods & sharing', exact: true })
+          .waitFor();
+        await settle(p);
+        const rows = await p.getByRole('menu').evaluate((list) =>
+          [...list.querySelectorAll('[role=menuitem]')].map((item) => {
+            const dir = getComputedStyle(item).direction;
+            // Where the label's text starts, apart from any icon.
+            const text = [...item.childNodes].find(
+              (node) => node.nodeType === 3 && node.textContent.trim(),
+            );
+            const range = document.createRange();
+            if (text) range.selectNodeContents(text);
+            const box = text ? range.getBoundingClientRect() : null;
+            const icon = item.querySelector('[aria-hidden=true] svg');
+            return {
+              label: text?.textContent.trim(),
+              dir,
+              start: box ? (dir === 'rtl' ? box.right : box.left) : null,
+              height: item.getBoundingClientRect().height,
+              icon: icon ? icon.getBoundingClientRect().width : null,
+            };
+          }),
+        );
+        const starts = rows.map((row) => row.start);
+        const column =
+          starts.every((start) => start !== null) &&
+          Math.max(...starts) - Math.min(...starts) <= 0.5;
+        return { column, rows };
+      };
+      const ltr = await measure(page);
       await page.keyboard.press('p');
       const typeahead = await focusUntil(page, /Pods & sharing/, focused);
       await page.keyboard.press('Escape');
       await hidden(page.getByRole('menu'));
+      const arabic = await newPage(browser, { locale: 'ar-EG' });
+      let rtl;
+      try {
+        await signIn(arabic.page, origin);
+        rtl = await measure(arabic.page);
+      } finally {
+        await arabic.context.close();
+      }
+      const podsRow = ltr.rows.find((row) => row.label === 'Pods & sharing');
       return {
         pass:
-          column &&
+          ltr.column &&
+          ltr.rows.every((row) => row.dir === 'ltr' && row.height >= 44) &&
+          rtl.column &&
+          rtl.rows.every((row) => row.dir === 'rtl' && row.height >= 44) &&
           podsRow?.icon === 16 &&
-          rows.every((row) => row.height >= 44) &&
           /Pods & sharing/.test(typeahead),
-        rows,
+        ltr,
+        rtl,
         typeahead,
       };
     },

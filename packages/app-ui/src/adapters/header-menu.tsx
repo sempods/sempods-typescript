@@ -26,10 +26,11 @@ export interface HeaderMenuAction {
   readonly label: string;
   readonly onSelect: () => void;
   /**
-   * A decorative leading icon, such as a lucide icon. It is hidden from
-   * assistive technology, so `label` stays the whole accessible name. When an
-   * action has one, the other rows of the menu leave its space, so all labels
-   * start in one column.
+   * A decorative leading icon, such as a lucide icon without a size of its
+   * own: it is shown in a 16px box and hidden from assistive technology, so
+   * `label` stays the whole accessible name. When an action has one, the other
+   * rows of the menu keep an empty box, so all labels start in one column, in
+   * either reading direction.
    */
   readonly icon?: ReactNode;
 }
@@ -37,7 +38,12 @@ export interface HeaderMenuAction {
 /** An action, a submenu of checked choices, or `null` for a separator. */
 export type HeaderMenuEntry =
   | HeaderMenuAction
-  | { readonly label: string; readonly choices: readonly HeaderMenuChoice[] }
+  | {
+      readonly label: string;
+      readonly choices: readonly HeaderMenuChoice[];
+      /** Submenus take no icon; they line up with the actions' labels. */
+      readonly icon?: never;
+    }
   | null;
 
 export interface HeaderMenuProps {
@@ -68,11 +74,20 @@ export function HeaderMenu({
   ref,
 }: HeaderMenuProps) {
   const t = useAdapterTexts();
-  // With an icon on any action, rows without one leave its column free
-  // (`inset`: the row's padding, a 16px icon and the gap).
+  // With an icon on any action, every row gets the icon's box, filled or
+  // empty, so the labels share one column in both reading directions.
   const icons = items.some(
-    (item) => item !== null && 'icon' in item && Boolean(item.icon),
+    (item) => item !== null && !('choices' in item) && Boolean(item.icon),
   );
+  const lead = (icon?: ReactNode) =>
+    icons ? (
+      <span
+        aria-hidden="true"
+        className="flex size-4 shrink-0 items-center justify-center overflow-hidden"
+      >
+        {icon}
+      </span>
+    ) : null;
   return (
     <DropdownMenuTrigger>
       <Button
@@ -90,7 +105,11 @@ export function HeaderMenu({
             <DropdownMenuSeparator key={i} />
           ) : 'choices' in item ? (
             <DropdownMenuSub key={i}>
-              <DropdownMenuSubTrigger className="min-h-11" {...inset(icons)}>
+              <DropdownMenuSubTrigger
+                className="min-h-11"
+                textValue={item.label}
+              >
+                {lead()}
                 {item.label}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent
@@ -115,23 +134,11 @@ export function HeaderMenu({
             <DropdownMenuItem
               key={i}
               className="min-h-11"
-              {...inset(icons && !item.icon)}
               textValue={item.label}
               onAction={item.onSelect}
             >
-              {item.icon ? (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className="flex size-4 shrink-0 items-center justify-center"
-                  >
-                    {item.icon}
-                  </span>
-                  {item.label}
-                </>
-              ) : (
-                item.label
-              )}
+              {lead(item.icon)}
+              {item.label}
             </DropdownMenuItem>
           ),
         )}
@@ -139,6 +146,3 @@ export function HeaderMenu({
     </DropdownMenuTrigger>
   );
 }
-
-// `data-inset` styles a row by its presence, so `false` must leave it out.
-const inset = (on: boolean) => (on ? { inset: true } : {});
