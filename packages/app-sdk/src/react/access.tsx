@@ -39,6 +39,7 @@ import {
   usePromptText,
 } from './access-prompts.js';
 import { useFirst } from './first.js';
+import { useFocusHold } from './focus.js';
 
 /** What a replacement for the connection view (`components.Connections`) receives. */
 export interface ConnectionsProps {
@@ -164,9 +165,7 @@ export function AppAccess({
       <Gate {...props} />
       {/* Management in place already shows the connection view. */}
       {!(open && !asDialog) && <AccessSection {...props} manage={false} />}
-      <AccessPrompts
-        {...(props.focusTarget ? { focusTarget: props.focusTarget } : {})}
-      />
+      <AccessPrompts focusTarget={props.focusTarget} />
       {management}
     </>
   );
@@ -255,7 +254,7 @@ function AccessSection({
     state.pod?.getSnapshot ?? (() => unavailablePod),
   );
   const { messages: m, direction } = useSdkLocale();
-  const heldFocus = useRef(false);
+  const { held: heldFocus, onFocusCapture, onBlurCapture } = useFocusHold();
   const c = access.connection;
   // Scoped to this provider's controller: a replacement runtime restoring the
   // same connection ID loads its first catalogue again.
@@ -305,21 +304,12 @@ function AccessSection({
       heldFocus.current = false;
       focusTarget?.current?.focus();
     }
-  }, [hidden, focusTarget, state.changing, state.confirmingLeave]);
+  }, [hidden, focusTarget, heldFocus, state.changing, state.confirmingLeave]);
   const Connections = components?.Connections;
   return (
     <section
-      onFocusCapture={() => {
-        heldFocus.current = true;
-      }}
-      onBlurCapture={(event) => {
-        if (
-          event.relatedTarget &&
-          event.relatedTarget !== event.currentTarget.ownerDocument.body &&
-          !event.currentTarget.contains(event.relatedTarget)
-        )
-          heldFocus.current = false;
-      }}
+      onFocusCapture={onFocusCapture}
+      onBlurCapture={onBlurCapture}
       hidden={hidden}
       data-sempods-access=""
       data-sempods-ui="access"

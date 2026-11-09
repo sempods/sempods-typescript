@@ -458,12 +458,14 @@ it('hides an info prompt after about 6 seconds by dismissing it, pauses while ho
 });
 
 /** A dismissible info prompt beside a Back button (`focusTarget`) and a draft. */
-async function promptWithBack(surface: 'app-access' | 'own') {
+async function promptWithBack(
+  surface: 'app-access' | 'own' | 'own-untargeted',
+) {
   const { runtime } = await sharingUnchanged();
   function OwnPrompts({
     back,
   }: {
-    readonly back: RefObject<HTMLButtonElement | null>;
+    readonly back?: RefObject<HTMLButtonElement | null>;
   }) {
     const { prompts: shown } = useAccessPrompts();
     return shown.map((p) => (
@@ -479,7 +481,7 @@ async function promptWithBack(surface: 'app-access' | 'own') {
         {surface === 'app-access' ? (
           <AppAccess appName="Tasks" focusTarget={back} />
         ) : (
-          <OwnPrompts back={back} />
+          <OwnPrompts {...(surface === 'own' ? { back } : {})} />
         )}
       </SempodsProvider>
     );
@@ -518,6 +520,32 @@ it('moves no focus when an unfocused prompt goes', async () => {
   fireEvent.keyDown(prompts()[0]!, { key: 'Escape' });
   await waitFor(() => expect(prompts()).toEqual([]));
   expect(document.activeElement).toBe(draft);
+});
+
+it('returns focus to where it came from without a focusTarget', async () => {
+  await promptWithBack('own-untargeted');
+  const draft = screen.getByRole('textbox', { name: 'Draft' });
+  act(() => draft.focus());
+  const ok = within(prompts()[0]!).getByRole('button', { name: 'OK' });
+  act(() => ok.focus());
+  fireEvent.keyDown(ok, { key: 'Escape' });
+  await waitFor(() => expect(prompts()).toEqual([]));
+  expect(document.activeElement).toBe(draft);
+});
+
+it('returns focus after the focused button lost it to the body', async () => {
+  // Browsers move focus to the body when a focused button disables itself
+  // while its action runs; the prompt still held focus.
+  await promptWithBack('app-access');
+  const ok = within(prompts()[0]!).getByRole('button', { name: 'OK' });
+  act(() => ok.focus());
+  act(() => ok.blur());
+  expect(document.activeElement).toBe(document.body);
+  fireEvent.keyDown(prompts()[0]!, { key: 'Escape' });
+  await waitFor(() => expect(prompts()).toEqual([]));
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Back' }),
+  );
 });
 
 it('shows no prompt and no gate while startup settles and a saved session restores', async () => {

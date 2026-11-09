@@ -11,6 +11,10 @@ export {
   AccessPrompts,
   useAccessPrompts,
 } from './access-prompts.js';
+export type {
+  AccessPromptProps,
+  AccessPromptsProps,
+} from './access-prompts.js';
 export {
   SempodsProvider,
   TargetScreen,

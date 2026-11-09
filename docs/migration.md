@@ -129,7 +129,8 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
 - `AppAccessProps` gains `only?: 'management'`. New exports: `AccessPrompt` and
   `AccessState` (types, `@sempods/app-sdk`); `AccessGate`, `ContextAccess`,
   `AccessPrompt`, `AccessPrompts`, `useAccessPrompts` and the types
-  `AccessGateProps` and `ContextAccessProps` (`@sempods/app-sdk/react`).
+  `AccessGateProps`, `ContextAccessProps`, `AccessPromptProps` and
+  `AccessPromptsProps` (`@sempods/app-sdk/react`).
 - app-ui's `Dialog` and `DialogFooter` gain the optional `closeLabel`.
 - `@sempods/app-ui`: `HeaderMenuProps` gains the optional `ref` to the menu's
   button. An app whose menu item opens `AppAccess` (Pods & sharing) passes

@@ -20,6 +20,7 @@ import { podName } from './names.js';
 import { layered, SdkStyles } from './styles.js';
 import { useFirst } from './first.js';
 import { useCommitted } from './hooks.js';
+import { useFocusHold } from './focus.js';
 
 const selectAccess = (s: AppSnapshot) => s.access;
 
@@ -146,6 +147,21 @@ export function PromptActions({
   );
 }
 
+/** What `AccessPrompt` receives. */
+export interface AccessPromptProps {
+  readonly prompt: AccessPromptFact;
+  /**
+   * Focus after this prompt goes while it holds focus, as `focusTarget` of
+   * `AppAccess`; without it, focus returns to where it came from.
+   */
+  readonly focusTarget?: RefObject<HTMLElement | null> | undefined;
+}
+/** What `AccessPrompts` receives. */
+export interface AccessPromptsProps {
+  /** Passed on to each prompt (see `AccessPromptProps`). */
+  readonly focusTarget?: RefObject<HTMLElement | null> | undefined;
+}
+
 /**
  * One prompt: its localized message and action buttons, unstyled and
  * unpositioned, for the app's own toast, banner or dialog. A prompt about a
@@ -153,30 +169,22 @@ export function PromptActions({
  * prompt that offers `dismiss`. When it goes while it holds focus, focus
  * returns to `focusTarget`, otherwise to where it came from.
  */
-export function AccessPrompt({
-  prompt,
-  focusTarget,
-}: {
-  readonly prompt: AccessPromptFact;
-  /** Focus after this prompt goes while focused, as `focusTarget` of `AppAccess`. */
-  readonly focusTarget?: RefObject<HTMLElement | null>;
-}) {
+export function AccessPrompt({ prompt, focusTarget }: AccessPromptProps) {
   const app = useController();
   const element = useRef<HTMLDivElement>(null);
-  // Where focus came from. Focus elsewhere is never moved.
+  const focus = useFocusHold();
+  // Where focus came from, if no focusTarget is given.
   const previous = useRef<HTMLElement | null>(null);
   const target = useCommitted(focusTarget);
   useLayoutEffect(() => {
-    const item = element.current;
-    // Read at unmount: the committed focusTarget and where focus came from.
-    const returnTo = () => target.current?.current ?? previous.current;
+    // Read at unmount: only a held focus returns; focus elsewhere stays.
+    const returnTo = () =>
+      focus.held.current ? (target.current?.current ?? previous.current) : null;
     return () => {
-      // Still attached here: the deletion removes the element afterwards.
-      if (!item?.contains(item.ownerDocument.activeElement)) return;
       const next = returnTo();
       if (next?.isConnected) next.focus();
     };
-  }, [target]);
+  }, [focus.held, target]);
   const { connections, activeId } = useAppFacts(
     (s) => ({ connections: s.connections, activeId: s.activeId }),
     (a, b) => a.connections === b.connections && a.activeId === b.activeId,
@@ -193,11 +201,13 @@ export function AccessPrompt({
       data-reason={prompt.reason}
       role={prompt.severity === 'info' ? 'status' : 'alert'}
       dir={direction}
-      onFocus={(event) => {
+      onFocusCapture={(event) => {
         const from = event.relatedTarget;
         if (from instanceof HTMLElement && !event.currentTarget.contains(from))
           previous.current = from;
+        focus.onFocusCapture();
       }}
+      onBlurCapture={focus.onBlurCapture}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && prompt.actions.includes('dismiss')) {
           event.stopPropagation();
@@ -262,12 +272,7 @@ function TimedPrompt({
  * prompt gets `focusTarget` (see `AccessPrompt`). Shows nothing while a
  * blocking prompt holds the gate.
  */
-export function AccessPrompts({
-  focusTarget,
-}: {
-  /** Focus after a focused prompt goes, as `focusTarget` of `AppAccess`. */
-  readonly focusTarget?: RefObject<HTMLElement | null>;
-} = {}) {
+export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const { blocking, prompts } = useAccessPrompts();
   const { direction } = useSdkLocale();
   // One stack per provider, also with several AppAccess instances.
@@ -287,10 +292,7 @@ export function AccessPrompts({
       <ul>
         {shown.map((prompt) => (
           <TimedPrompt key={prompt.id} prompt={prompt}>
-            <AccessPrompt
-              prompt={prompt}
-              {...(focusTarget ? { focusTarget } : {})}
-            />
+            <AccessPrompt prompt={prompt} focusTarget={focusTarget} />
           </TimedPrompt>
         ))}
       </ul>
