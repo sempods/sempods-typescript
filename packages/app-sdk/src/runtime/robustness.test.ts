@@ -320,12 +320,16 @@ it.each(['removed', 'blocked-locally'] as const)(
     });
     f.navigate.mockClear();
     const begun = runtime.beginAuthorization(id);
+    // The sign-out stops waiting for the held discovery at once (#253).
+    const refused = expect(begun).rejects.toMatchObject({
+      problem: 'disconnected',
+    });
     const disconnected = runtime.disconnect(id);
     expect(await disconnected).toEqual({
       kind: outcome === 'removed' ? 'disconnected' : 'blocked-locally',
     });
+    await refused;
     hold.resolve();
-    await expect(begun).rejects.toThrow();
     expect(f.navigate).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   },

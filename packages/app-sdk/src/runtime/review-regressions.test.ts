@@ -219,8 +219,10 @@ it('retries renewal only after failures that may pass', () => {
       discovery('http', 429),
       new SdkError({ code: 'transport', problem: 'network' }, 'transport'),
       new SessionStorageError('unavailable'),
+      // A discovery that did not answer before its deadline (#253).
+      new RuntimeError('network'),
     ].map(transientBeforeClaim),
-  ).toEqual([true, true, true, true, true]);
+  ).toEqual([true, true, true, true, true, true]);
   expect(
     [
       discovery('http', 404),

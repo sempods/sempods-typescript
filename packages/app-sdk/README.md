@@ -120,6 +120,8 @@ and `usePodLoad`. Startup and read recovery then request no catalogue. Mount
 `TargetScreen` when a Context flow is wanted, or open `AppAccess` management;
 **Check access** retries failed discovery explicitly. Preset/remembered targets
 still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
+`usePodLoad(pod, read)` reads an explicit `runtime.bindPod(id)` handle instead,
+for example one read per connection, each with its own state and retry.
 
 An app that switches Contexts in its own UI, such as a list switch, uses
 `useContexts()`: readable Contexts with names and access, a guarded `select`,

@@ -32,7 +32,12 @@ them.
 
 Linux CI runs the same checks in parallel jobs: `pnpm check:base` with Chromium,
 and `pnpm test:ui` once each in Chromium, WebKit and Firefox. The required
-status check `Packages and consumers` passes only when all of them do. The
+status check `Packages and consumers` passes only when all of them do. These
+jobs run in the official Playwright image of the pinned Playwright version
+instead of installing browsers through apt. A Playwright bump must update that
+image in `.github/workflows/check.yml` too, and a CI step fails while the two
+differ. In the UI gate, a check that does not settle within 120s fails under its
+own name, and so does a suite that does not end within 6 minutes. The
 release workflow runs `pnpm check` in one job. CI reads `.node-version`; libraries emit ESM plus declarations with plain
 `tsc -b` project references. Exports resolve built files, with no source aliases.
 Tests are typechecked too. `skipLibCheck` is false throughout.
@@ -66,7 +71,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   durable storage, callbacks, scope/identity continuity, refresh (including
   renewal before expiry and the one resend after a lost answer: online,
   offline within and beyond the grace period, a page left mid-refresh, a
-  resend refused or lost too), target races and remembered Pods (sign-out and session
+  resend refused or lost too), a discovery that never settles (beside a
+  healthy Pod, a late answer after the deadline or a sign-out, explicit
+  retry, other connections' actions meanwhile), target races and remembered Pods (sign-out and session
   end across a reload, `forget`, `rememberPods: false`, 0.7 records).
 - `test:consumers`: packs client-sdk and app-sdk and installs their tarballs together in
   fresh directories outside the workspace. Checks packed file allowlists and

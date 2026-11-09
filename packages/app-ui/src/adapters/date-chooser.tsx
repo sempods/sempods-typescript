@@ -152,6 +152,9 @@ export function calendarDay(value: string | null): CalendarDate | null {
     number,
   ];
   const date = new CalendarDate(year, month, day);
-  // CalendarDate constrains an impossible day (31 February) instead of failing.
-  return date.month === month && date.day === day ? date : null;
+  // CalendarDate constrains an impossible day (31 February) or year 0000
+  // (moved to 0001) instead of failing.
+  return date.year === year && date.month === month && date.day === day
+    ? date
+    : null;
 }
