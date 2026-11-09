@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useSdkLocale } from '@sempods/app-sdk/react';
 import { cn } from 'cn';
 import {
   Dialog as DialogPrimitive,
@@ -62,20 +63,42 @@ function DialogOverlay({
   );
 }
 
+// SDK confirmations are native modal <dialog> elements in the top layer, often
+// outside this modal's DOM: a press in one answers that question and is never
+// a press beside this dialog. An app's own filter applies on top.
+function outsideNativeModal(
+  filter: ((element: Element) => boolean) | undefined,
+) {
+  return (element: Element) =>
+    !element.closest('dialog:modal') && (filter?.(element) ?? true);
+}
+
 function Dialog({
   className,
   children,
   showCloseButton = true,
+  closeLabel,
   isDismissable = true,
+  shouldCloseOnInteractOutside,
   ...props
 }: Omit<ModalOverlayPrimitiveProps, 'className' | 'children'> &
   Pick<React.ComponentProps<typeof ModalPrimitive>, 'isDismissable'> & {
     className?: string;
     children: React.ReactNode;
     showCloseButton?: boolean;
+    /** The close button's accessible name; defaults to the SDK's "Close". */
+    closeLabel?: string;
   }) {
+  // Without an SDK provider, the SDK's English texts.
+  const { messages } = useSdkLocale();
   return (
-    <DialogOverlay isDismissable={isDismissable} {...props}>
+    <DialogOverlay
+      isDismissable={isDismissable}
+      shouldCloseOnInteractOutside={outsideNativeModal(
+        shouldCloseOnInteractOutside,
+      )}
+      {...props}
+    >
       <ModalPrimitive
         data-slot="dialog-content"
         className={cn(
@@ -95,7 +118,9 @@ function Dialog({
               size="icon-sm"
             >
               <XIcon />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">
+                {closeLabel ?? messages.controls.close}
+              </span>
             </DialogClose>
           )}
         </DialogPrimitive>
@@ -117,11 +142,15 @@ function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
 function DialogFooter({
   className,
   showCloseButton = false,
+  closeLabel,
   children,
   ...props
 }: React.ComponentProps<'div'> & {
   showCloseButton?: boolean;
+  /** The close button's text; defaults to the SDK's "Close". */
+  closeLabel?: string;
 }) {
+  const { messages } = useSdkLocale();
   return (
     <div
       data-slot="dialog-footer"
@@ -132,7 +161,11 @@ function DialogFooter({
       {...props}
     >
       {children}
-      {showCloseButton && <DialogClose variant="outline">Close</DialogClose>}
+      {showCloseButton && (
+        <DialogClose variant="outline">
+          {closeLabel ?? messages.controls.close}
+        </DialogClose>
+      )}
     </div>
   );
 }
