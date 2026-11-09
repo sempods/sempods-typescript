@@ -195,6 +195,13 @@ seconds, discovery counts as unreachable:
   that composed `DropdownMenu` directly only to place an icon can return to
   `HeaderMenu`.
 
+- `usePodLoad` gains the form `usePodLoad(pod, read, options?)` for an explicit
+  `BoundPod` from `runtime.bindPod(id)`
+  ([reads per connection](react-authoring.md#reads-per-connection)). An app
+  that wrapped `createViewLoader` in its own hook to read through several
+  connections, as an explorer does, can use it instead; the existing form
+  still follows the active connection.
+
 ## From 0.6.0 to 0.7.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

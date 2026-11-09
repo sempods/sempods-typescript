@@ -12,12 +12,15 @@ import {
   useList,
   usePodContexts,
   usePodList,
+  usePodLoad,
   type PodContextChoice,
   type PodListSkipped,
 } from '@sempods/app-sdk/react';
 import type {
+  BoundPod,
   BrowserRuntime,
   ContextTarget,
+  LoadState,
   LeaveGuard,
   TargetSelection,
 } from '@sempods/app-sdk';
@@ -159,3 +162,26 @@ function UnloadPromptTypes(runtime: BrowserRuntime) {
   );
 }
 void UnloadPromptTypes;
+
+// A read tied to an explicit connection's Pod beside the active one (#236).
+function PodLoadTypes(runtime: BrowserRuntime) {
+  const select = 'SELECT ?s WHERE { ?s ?p ?o }';
+  const active = usePodLoad((pod, signal) =>
+    pod.sparql.select(select, { signal }),
+  );
+  const reader: BoundPod | null = runtime.bindPod('id');
+  const explicit = usePodLoad(
+    reader,
+    (pod, signal) => pod.sparql.select(select, { signal }),
+    { key: select, retain: true },
+  );
+  const none = usePodLoad(null, (pod, signal) =>
+    pod.sparql.construct('CONSTRUCT {} WHERE {}', { signal }),
+  );
+  const state: LoadState<unknown> = explicit.state;
+  const rows: number | undefined = explicit.data?.rows.length;
+  void explicit.reload().then((s) => s?.kind);
+  explicit.cancel();
+  return [active.state.kind, state, rows, none.data];
+}
+void PodLoadTypes;
