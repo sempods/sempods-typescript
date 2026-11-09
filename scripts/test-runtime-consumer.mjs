@@ -1317,6 +1317,7 @@ try {
         origin + '/app?identity=signout-' + surface + '-' + language;
       const signIn = language === 'en' ? 'Sign in' : 'Anmelden';
       const signOut = language === 'en' ? 'Sign out' : 'Abmelden';
+      const tryAgain = language === 'en' ? 'Try again' : 'Erneut versuchen';
       const message =
         language === 'en'
           ? 'Sign-out was not saved on this device. Try signing out again.'
@@ -1347,10 +1348,12 @@ try {
           },
         });
       });
-      const retry = page.getByRole('button', { name: signOut, exact: true });
-      await retry.click();
-      const notice = page.getByRole('alert');
+      await page.getByRole('button', { name: signOut, exact: true }).click();
+      // The gate offers the retry of the sign-out, never a sign-in (#238).
+      const gate = page.locator('[data-sempods-ui="gate"]');
+      const notice = gate.getByRole('alert');
       await notice.waitFor();
+      const retry = gate.getByRole('button', { name: tryAgain, exact: true });
       assert.equal(await notice.textContent(), message);
       assert.equal(await page.getByText(message, { exact: true }).count(), 1);
       assert.equal(
@@ -1359,10 +1362,7 @@ try {
           .textContent(),
         'failed',
       );
-      assert.equal(
-        await retry.getAttribute('aria-describedby'),
-        await notice.getAttribute('id'),
-      );
+      assert.equal(await gate.getByRole('button').count(), 1);
       assert.doesNotMatch(
         await page.locator('body').innerText(),
         /reload|neu laden|fixture storage/i,
@@ -1544,9 +1544,9 @@ try {
       assert.equal(await page.getByRole('combobox').count(), 0);
       await page.getByText('Personal', { exact: true }).waitFor();
       assert.ok(
-        !(await page.locator('[data-sempods-access]').textContent()).includes(
-          origin.replace(/^https?:\/\//, '') + '/alice',
-        ),
+        !(
+          await page.locator('[data-sempods-ui="gate"]').textContent()
+        ).includes(origin.replace(/^https?:\/\//, '') + '/alice'),
       );
     } else if (mode === 'set') {
       await page.getByLabel('Pod address').selectOption(origin + '/alice');
@@ -1587,7 +1587,7 @@ try {
       .waitFor();
     // Management names the Pod and still shows its address under the name.
     await page
-      .locator('[data-sempods-access]')
+      .getByRole('region', { name: 'Pods & sharing', exact: true })
       .getByText(origin + '/alice', { exact: true })
       .waitFor();
     assert.ok(
@@ -1647,8 +1647,13 @@ try {
     consent = 'deny';
     await Promise.all([page.waitForURL('**/callback?**'), retry.click()]);
     await page.waitForURL('**/app?identity=' + identity);
-    await retry.waitFor();
+    // The unchanged sharing is information; Change sharing stays in management.
+    await page
+      .locator('[data-sempods-ui="prompt"][data-reason="sharing-unchanged"]')
+      .waitFor();
     await page.getByLabel('Preset draft').waitFor();
+    await host.click();
+    await retry.waitFor();
     await host.evaluate((el) => {
       window.hostFocusCount = 0;
       el.addEventListener('focus', () => window.hostFocusCount++);
@@ -1734,7 +1739,13 @@ try {
   );
   await activePod.selectOption({ label: 'Personal' });
   await access.waitFor({ state: 'hidden' });
-  assert.equal(await page.getByRole('alert').count(), 0);
+  // The refusing Pod is now another Pod whose session ended: one prompt.
+  const ended = page.locator(
+    '[data-sempods-ui="prompt"][data-reason="signed-out"]',
+  );
+  await ended.waitFor();
+  assert.equal(await ended.count(), 1);
+  assert.equal(await page.getByText(refusal).count(), 1);
   await page.goto(origin + '/app?identity=access-refusing-de');
   await page.getByLabel('Pod-Adresse').fill(origin + '/refusing');
   await Promise.all([
@@ -1766,10 +1777,9 @@ try {
   console.log(
     'Packed AppAccess, provider login_required callback: specific EN/DE cause once on its connection, no kept-draft claim or provider text, cleared by selecting another Pod or disconnecting passed.',
   );
-  // One permitted Pod, Contexts on demand: until the Pod reader is readable
-  // (callback, then restore), the surface shows only its loading status and
-  // never the connection view with "Full addresses"; then it hides. Recovery
-  // views (ended session, missing required scopes) still appear directly.
+  // One permitted Pod, Contexts on demand: while the callback or restore is
+  // pending nothing shows, never the connection view with "Full addresses".
+  // The gate (ended session, missing required scopes) still appears directly.
   const accessTrace = () => page.evaluate(() => window.accessTrace);
   const settled = (state) =>
     page.waitForFunction((last) => window.accessTrace.at(-1) === last, state);
@@ -1780,15 +1790,20 @@ try {
   ]);
   await page.waitForURL('**/app?identity=access-delayed');
   await settled('hidden');
-  assert.deepEqual(await accessTrace(), ['loading', 'hidden']);
+  // A pending callback or restore shows nothing, not a loading panel (#238).
+  assert.deepEqual(await accessTrace(), ['hidden']);
   await page.reload();
   await settled('hidden');
-  assert.deepEqual(await accessTrace(), ['loading', 'hidden']);
+  assert.deepEqual(await accessTrace(), ['hidden']);
   // An unreachable Pod keeps the session: Try again restores it, no sign-in.
   delayedOffline = 503;
   await page.reload();
-  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
-  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  // A prompt offers the retry; no sign-in screen and no inline surface.
+  await page
+    .locator('[data-sempods-ui="prompt"][data-reason="unreachable"]')
+    .getByRole('button', { name: 'Try again', exact: true })
+    .waitFor();
+  assert.deepEqual(await accessTrace(), ['hidden']);
   assert.equal(
     await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
     0,
@@ -1799,8 +1814,11 @@ try {
   // A discovery that fails for good ends the session; it asks to sign in.
   delayedOffline = 404;
   await page.reload();
-  await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
-  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  await page
+    .locator('[data-sempods-ui="gate"]')
+    .getByRole('button', { name: 'Sign in', exact: true })
+    .waitFor();
+  assert.deepEqual(await accessTrace(), ['hidden', 'connection']);
   delayedOffline = 0;
   delayedScope = '';
   await Promise.all([
@@ -1809,10 +1827,10 @@ try {
   ]);
   await page.waitForURL('**/app?identity=access-delayed');
   await page.getByText('Review required feature access: tasks.').waitFor();
-  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  assert.deepEqual(await accessTrace(), ['hidden', 'connection']);
   delayedScope = 'tasks';
   console.log(
-    'Packed AppAccess, one Pod on demand: loading status only (no Full addresses) from callback and restore until the delayed Pod reader is readable, then hidden; an unreachable Pod offers Try again and restores, an ended session and missing required scopes show recovery directly passed.',
+    'Packed AppAccess, one Pod on demand: nothing while the callback or restore of the delayed Pod is pending; an unreachable Pod offers Try again in a prompt and restores, an ended session and missing required scopes show the gate directly passed.',
   );
   // A demanded Context catalogue that answers after a delay: with a preset
   // Context the target settles by itself, so sign-in and restore show only the
@@ -1828,11 +1846,19 @@ try {
     await page.waitForURL(app);
     await page.getByText('Context screen').waitFor();
     await settled('hidden');
-    assert.deepEqual(await accessTrace(), ['loading', 'hidden'], mode);
+    assert.deepEqual(
+      await accessTrace(),
+      ['hidden', 'loading', 'hidden'],
+      mode,
+    );
     await page.reload();
     await page.getByText('Context screen').waitFor();
     await settled('hidden');
-    assert.deepEqual(await accessTrace(), ['loading', 'hidden'], mode);
+    assert.deepEqual(
+      await accessTrace(),
+      ['hidden', 'loading', 'hidden'],
+      mode,
+    );
   }
   const choice = origin + '/app?identity=access-catalogue-choice';
   await page.goto(choice);
@@ -1842,13 +1868,13 @@ try {
   ]);
   await page.waitForURL(choice);
   await page.getByLabel('Data context', { exact: true }).waitFor();
-  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  assert.deepEqual(await accessTrace(), ['hidden', 'loading', 'connection']);
   slowCatalogueFailing = true;
   await page.reload();
   await page
     .getByText('Context catalogue unavailable. Access is unknown.')
     .waitFor();
-  assert.deepEqual(await accessTrace(), ['loading', 'connection']);
+  assert.deepEqual(await accessTrace(), ['hidden', 'loading', 'connection']);
   slowCatalogueFailing = false;
   console.log(
     'Packed AppAccess, delayed Context catalogue (required and on-demand with TargetScreen): preset sign-in and restore pass loading -> hidden only; without a preset the chooser, and a failing catalogue its failure view, follow loading directly passed.',
@@ -2046,10 +2072,18 @@ try {
     assert.ok(value, 'pod option ' + name);
     await pods.selectOption(value);
   };
+  // The failed sign-in to the second Pod blocks: the gate offers the other Pod.
+  await page.locator('[data-sempods-ui="gate"]').waitFor();
+  await choosePod('overview-pod');
+  await page.locator('[data-sempods-ui="gate"]').waitFor({ state: 'detached' });
+  // The second Pod's failed sign-in is now a prompt beside it: dismiss it.
+  await page
+    .locator('[data-sempods-ui="prompt"]')
+    .getByRole('button', { name: 'OK', exact: true })
+    .click();
   await page
     .getByRole('button', { name: 'Pods & sharing', exact: true })
     .click();
-  await choosePod('overview-pod');
   await page.getByRole('button', { name: 'Edit urn:overview-note' }).click();
   await editRegion.getByLabel('Note title').waitFor();
   await choosePod('second-pod');

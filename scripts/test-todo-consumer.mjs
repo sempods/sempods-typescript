@@ -800,13 +800,15 @@ try {
   // The documented default is the actual shell-free TODO, installed from tarballs.
   for (const language of ['en', 'de']) {
     tasks.clear();
+    // The gate covers the header menu before sign-in (#238): the sign-in
+    // screen follows the browser's language.
     const context = await browser.newContext({
       viewport: { width: 320, height: 740 },
       colorScheme: language === 'de' ? 'dark' : 'light',
+      locale: language === 'de' ? 'de-DE' : 'en-US',
     });
     const page = await context.newPage();
     await page.goto(origin + '/');
-    if (language === 'de') await menu(page, german);
     await page
       .getByLabel(language === 'de' ? 'Pod-Adresse' : 'Pod address', {
         exact: true,
@@ -818,8 +820,8 @@ try {
         exact: true,
       })
       .click();
-    // Redirect initializes the example's default language again.
     await listShown(page, 'work');
+    if (language === 'de') await menu(page, english);
     const input = page.getByLabel('New task', { exact: true });
     await input.fill('Shell-free task');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -913,7 +915,10 @@ try {
         await surface.evaluate(
           (element) => getComputedStyle(element).backgroundColor,
         ),
-        ['access'].includes(await surface.getAttribute('data-sempods-ui'))
+        // The gate covers the page; the access surface keeps its own background.
+        ['access', 'gate'].includes(
+          await surface.getAttribute('data-sempods-ui'),
+        )
           ? 'rgb(255, 255, 255)'
           : 'rgba(0, 0, 0, 0)',
       );
@@ -1161,7 +1166,13 @@ try {
             .map((rule) => rule.nameList.join()),
         ),
       ),
-      ['base,sempods', 'base,sempods', 'theme,base,components,utilities'],
+      // The shared sheet, the access sheet and the prompt stack's sheet.
+      [
+        'base,sempods',
+        'base,sempods',
+        'base,sempods',
+        'theme,base,components,utilities',
+      ],
     );
     // The reset loses although the host names `base` without `sempods`: the
     // SDK's statement put `base` first. With `@layer sempods` alone, `base`
@@ -1936,9 +1947,16 @@ try {
     });
     const busy = await context.newPage();
     await busy.goto(origin + '/');
-    await busy.getByRole('alert').filter({ hasText: 'another tab' }).waitFor();
-    await menu(busy, german);
-    await busy.getByRole('alert').filter({ hasText: 'anderen Tab' }).waitFor();
+    // A second tab gets the gate with a reload; the header menu stays behind
+    // it (#238). The German text is covered by the unit tests.
+    const busyGate = busy.locator('[data-sempods-ui="gate"]');
+    await busyGate
+      .getByRole('alert')
+      .filter({ hasText: 'another tab' })
+      .waitFor();
+    assert.deepEqual(await busyGate.getByRole('button').allTextContents(), [
+      'Reload',
+    ]);
     await busy.close();
     // A reload keeps the session and reselects the last chosen context from
     // localStorage while it is still readable; no new login, no new choice.
@@ -2071,11 +2089,15 @@ try {
         .count(),
       0,
     );
-    await menu(failed, german);
-    await failed
-      .getByRole('alert')
-      .filter({ hasText: 'Sitzungsspeicher' })
-      .waitFor();
+    // The gate only explains; the header menu stays behind it (#238). The
+    // German text is covered by the unit tests.
+    assert.equal(
+      await failed
+        .locator('[data-sempods-ui="gate"]')
+        .getByRole('button')
+        .count(),
+      0,
+    );
     await unavailable.close();
   }
   // The TODO app as an installable PWA with the recipe's service worker. The
@@ -2190,11 +2212,15 @@ try {
     // without a reload or another authorization.
     await context.setOffline(true);
     await page.reload();
-    await page.getByRole('heading', { name: 'TODO', level: 1 }).waitFor();
-    await page
+    // A prompt, not a sign-in screen (#238): the retry and its reason.
+    const offline = page.locator(
+      '[data-sempods-ui="prompt"][data-reason="unreachable"]',
+    );
+    await offline
       .getByRole('button', { name: 'Try again', exact: true })
       .waitFor();
-    await page.getByText('The Pod cannot be reached right now.').waitFor();
+    await offline.getByText('The Pod cannot be reached right now.').waitFor();
+    assert.equal(await page.locator('[data-sempods-ui="gate"]').count(), 0);
     assert.equal(
       await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
       0,
@@ -2202,14 +2228,6 @@ try {
     assert.equal(
       await page.getByLabel('Pod address', { exact: true }).count(),
       0,
-    );
-    assert.equal(
-      await page
-        .getByText('Full addresses')
-        .locator('..')
-        .textContent()
-        .then((text) => text.includes(pod)),
-      true,
     );
     const afterOffline = { loads: 0, auth: 0 };
     const countLoad = () => afterOffline.loads++;
