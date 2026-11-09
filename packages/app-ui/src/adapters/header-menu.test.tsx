@@ -70,6 +70,13 @@ it('passes its button through ref, which stays after an item closes the menu', a
   expect(button.isConnected).toBe(true);
 });
 
+const typeahead = async (key: string) => {
+  // React Aria joins keys typed within a second into one search.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await act(async () => {
+    fireEvent.keyDown(document.activeElement!, { key });
+  });
+};
 const openMenu = async () => {
   await act(async () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Menu' }), {
@@ -109,6 +116,7 @@ it('keeps the label as the name of an action with a silent leading icon', async 
   ]);
   const pods = screen.getByRole('menuitem', { name: 'Pods & sharing' });
   expect(screen.getByRole('menuitem', { name: 'List' })).toBe(items[0]);
+  expect(screen.getByRole('menuitem', { name: 'View' })).toBe(items[1]);
   // Every row leads with a silent 16px box, filled or empty, so the labels
   // share one column in either reading direction; no row is inset.
   for (const item of items) {
@@ -123,10 +131,10 @@ it('keeps the label as the name of an action with a silent leading icon', async 
   expect(items[1]!.firstElementChild!.childNodes).toHaveLength(0);
   // The row's hit area stays 44px for every kind of row.
   for (const item of items) expect(item.className).toMatch(/\bmin-h-11\b/);
-  // Typeahead follows the label, not the icon.
-  await act(async () => {
-    fireEvent.keyDown(document.activeElement!, { key: 'p' });
-  });
+  // Typeahead follows the label, not the icon, also to the submenu.
+  await typeahead('v');
+  expect(document.activeElement).toBe(items[1]);
+  await typeahead('p');
   expect(document.activeElement).toBe(pods);
   await act(async () => {
     fireEvent.keyDown(pods, { key: 'Enter' });
@@ -135,30 +143,43 @@ it('keeps the label as the name of an action with a silent leading icon', async 
   expect(manage).toHaveBeenCalledOnce();
 });
 
-it('renders text-only menus as before, without inset rows', async () => {
+it('renders text-only menus as before', async () => {
   render(
     <HeaderMenu
       label="Menu"
       items={[
+        { label: 'Print', onSelect: () => {} },
         { label: 'View', choices: [] },
+      ]}
+    />,
+  );
+  await openMenu();
+  const items = screen.getAllByRole('menuitem');
+  expect(items.map((item) => item.textContent)).toEqual(['Print', 'View']);
+  expect(screen.getByRole('menuitem', { name: 'Print' })).toBe(items[0]);
+  expect(screen.getByRole('menuitem', { name: 'View' })).toBe(items[1]);
+  for (const item of items) {
+    expect(item.hasAttribute('data-inset')).toBe(false);
+    expect(item.querySelector('span[aria-hidden=true]')).toBeNull();
+  }
+  // The submenu's label still leads typeahead without a plain-text child.
+  await typeahead('v');
+  expect(document.activeElement).toBe(items[1]);
+});
+
+it('takes no icon on a submenu', async () => {
+  render(
+    <HeaderMenu
+      label="Menu"
+      items={[
+        // @ts-expect-error A submenu has no icon; it would show nowhere.
+        { label: 'View', choices: [], icon: <Icon /> },
         { label: 'Print', onSelect: () => {} },
       ]}
     />,
   );
   await openMenu();
-  for (const item of screen.getAllByRole('menuitem')) {
-    expect(item.hasAttribute('data-inset')).toBe(false);
+  // Passed anyway (untyped code), it neither shows nor shifts the labels.
+  for (const item of screen.getAllByRole('menuitem'))
     expect(item.querySelector('span[aria-hidden=true]')).toBeNull();
-  }
-});
-
-it('takes no icon on a submenu', () => {
-  render(
-    <HeaderMenu
-      items={[
-        // @ts-expect-error A submenu has no icon; it would show nowhere.
-        { label: 'View', choices: [], icon: <Icon /> },
-      ]}
-    />,
-  );
 });
