@@ -137,7 +137,8 @@ nothing and stays signed in), rediscovery for a
 `beginAuthorization(id)` (rejects, nothing reset) and a callback's code claim
 (fails before the attempt is claimed). A late answer is dropped: it publishes
 nothing and installs no credentials, also after a disconnect or dispose, which
-stop the wait at once (`disconnected`). A timeout reports no `failure` detail.
+stop the wait at once (`disconnected`); a pending `connect(url)` belongs to no
+connection yet, so dispose stops it. A timeout reports no `failure` detail.
 Token requests and client registration are not covered by this deadline, and no
 refresh or code exchange is replayed.
 

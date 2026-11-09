@@ -223,6 +223,8 @@ export function createBrowserRuntime(
   let startup: Promise<StartupReport> | undefined;
   let initialized = false;
   let disposed = false;
+  /** Ends with `dispose()`: stops waits that belong to no connection yet. */
+  const runtimeLifetime = new AbortController();
 
   function invalidate(e: Entry) {
     e.epoch++;
@@ -1418,7 +1420,7 @@ export function createBrowserRuntime(
         if (connectingDefault) return connectingDefault;
       }
       const operation = (async () => {
-        const pod = await discover(url);
+        const pod = await discover(url, runtimeLifetime.signal);
         const client = await registry.resolve(pod, identity);
         if (disposed) throw new RuntimeError('disconnected');
         const e = createEntry(pod, client);
@@ -1640,6 +1642,7 @@ export function createBrowserRuntime(
     dispose() {
       disposed = true;
       initialized = false;
+      runtimeLifetime.abort();
       page.removeEventListener?.('online', online);
       for (const e of entries.values()) {
         delete e.credentials;

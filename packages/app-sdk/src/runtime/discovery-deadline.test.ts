@@ -306,6 +306,29 @@ it('rejects a connect whose discovery never settles, adding no connection', asyn
   expect(f.runtime.getSnapshot()).toEqual([]);
 });
 
+it('stops a connect whose discovery stalls at once on dispose', async () => {
+  const f = fixture({ preferences: null });
+  keep(f.runtime);
+  await f.runtime.initialize();
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url, init) =>
+    url.includes('/.well-known/')
+      ? new Promise<Response>(() => {})
+      : original(url, init),
+  );
+  const connecting = f.runtime.connect(pod);
+  const outcome = expect(connecting).rejects.toMatchObject({
+    problem: 'disconnected',
+  });
+  await vi.waitFor(() =>
+    expect(
+      f.fetch.mock.calls.some(([url]) => url.includes('/.well-known/')),
+    ).toBe(true),
+  );
+  f.runtime.dispose();
+  await outcome;
+});
+
 /** A signed-in runtime whose Pod's discovery stalls once `stall` is called. */
 async function signedIn() {
   const f = fixture({ preferences: null });
