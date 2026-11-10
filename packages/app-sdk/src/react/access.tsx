@@ -641,6 +641,9 @@ function AccessConnections({
   // Signed in, or reading without a token: its Contexts can be chosen.
   const reads = readsAtAll(c);
   const anonymous = c?.reading === 'anonymous';
+  // Inline beside the content, the access prompt already offers signing in
+  // to a connection that reads without a token; management offers it too.
+  const inPrompt = anonymous && !manage;
   // Adding a Pod signs in only where sign-in is required; otherwise it opens
   // the Pod to read without a token.
   const addLabel =
@@ -1070,11 +1073,12 @@ function AccessConnections({
           {manage && namedAddress(c.podUrl)}
           {c.session.kind === 'ended' &&
             !disconnectFailed &&
-            !shownByNotice && (
+            !shownByNotice &&
+            !inPrompt && (
               <p role="status">{endedMessage(c.session, m, true)}</p>
             )}
           {/* After a failed sign-out, the sign-out button repeats it. */}
-          {disconnectFailed ? null : c.session.kind === 'ended' &&
+          {disconnectFailed || inPrompt ? null : c.session.kind === 'ended' &&
             c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button

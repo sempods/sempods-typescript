@@ -311,8 +311,9 @@ export interface BrowserRuntime {
    * returns `blocked-locally` and publishes an ended session with
    * `problem: 'disconnected', saved: false`. Retry explicitly. Neither outcome
    * revokes sharing or deletes Pod data. Under `signIn: 'optional'` the
-   * connection then reads without a token, also with `rememberPods: false`
-   * (its address is only not kept for the next start). Rejects with
+   * connection then reads without a token, also with `rememberPods: false`;
+   * its address is then not kept, and it reports `signed-out` without a
+   * `problem`, as a Pod never signed in to. Rejects with
    * RuntimeError (configuration) under `signIn: 'none'`.
    */
   disconnect(id: string): Promise<DisconnectResult>;

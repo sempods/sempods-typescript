@@ -442,10 +442,19 @@ export function createAppController(
     if (ask) window.addEventListener('beforeunload', askBeforeUnload);
     else window.removeEventListener('beforeunload', askBeforeUnload);
   }
-  /** Whether any guard holds work: a draft, a pending or an unconfirmed write. */
+  /**
+   * Whether a guard of the selected view holds work: a draft, a pending or an
+   * unconfirmed write. Guards of explicit Contexts (`connection`, `explicit`)
+   * keep their own bindings and do not hold the selected one.
+   */
   function unresolved() {
     for (const g of guards)
-      if (g.dirty() || g.blocked() || g.unconfirmed?.()) return true;
+      if (
+        g.scope !== 'connection' &&
+        g.scope !== 'explicit' &&
+        (g.dirty() || g.blocked() || g.unconfirmed?.())
+      )
+        return true;
     return false;
   }
   /** A guard changed: follow the leave prompt, and release a held view. */

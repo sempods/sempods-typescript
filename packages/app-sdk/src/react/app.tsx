@@ -335,10 +335,11 @@ export function useContexts() {
   useDemand(true, 'discovery');
   const { retainSwitch, actions } = value;
   useEffect(() => retainSwitch(), [retainSwitch]);
-  const { connection, preset } = useAppFacts(
+  const { connection, preset, signIn } = useAppFacts(
     (s) => ({
       connection: s.connections.find((c) => c.id === s.activeId),
       preset: s.preset,
+      signIn: s.signIn,
     }),
     shallowEqual,
   );
@@ -394,7 +395,7 @@ export function useContexts() {
     readonly cause: unknown;
   } | null>(null);
   const share = useCallback(async () => {
-    if (!id) return false;
+    if (!id || signIn === 'none') return false;
     setShareFailure(null);
     try {
       return await actions.authorize(id);
@@ -402,12 +403,12 @@ export function useContexts() {
       setShareFailure({ id, cause });
       return false;
     }
-  }, [actions, id]);
+  }, [actions, id, signIn]);
   return {
     contexts,
     selected: contexts.find((entry) => entry.iri === selectedIri) ?? null,
     select,
-    /** Signed in, but no Contexts known yet. */
+    /** Reading (signed in, or without a token), but no Contexts known yet. */
     loading:
       reading !== undefined &&
       !knownContexts(catalogue) &&
@@ -415,8 +416,12 @@ export function useContexts() {
     /** The catalogue failed; known Contexts may still show. */
     failed: catalogue?.kind === 'failed',
     retry,
-    /** Whether `share` can ask the Pod now (a signed-in connection). */
-    canShare: id !== null,
+    /**
+     * Whether `share` can ask the Pod now: a connection that reads, where the
+     * app signs in at all (not under `signIn: 'none'`). Without a session,
+     * sharing signs in.
+     */
+    canShare: id !== null && signIn !== 'none',
     /**
      * Asks the Pod to share more Contexts with this app: its consent page
      * opens, and the catalogue reloads on return. Runs under the leave policy.

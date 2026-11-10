@@ -1485,12 +1485,15 @@ export function createBrowserRuntime(
             // Without sign-in, a sign-out keeps the connection to read
             // without a token, also when its address is not remembered.
             if (kept || (readsAnonymously && !forget)) {
+              // Only a remembered address keeps why it was signed out: one
+              // not kept (`rememberPods: false`) is as if never signed in.
               e.view = {
                 ...e.view,
-                session: Object.freeze({
-                  kind: 'signed-out',
-                  problem: 'disconnected',
-                }),
+                session: Object.freeze(
+                  kept
+                    ? { kind: 'signed-out', problem: 'disconnected' }
+                    : { kind: 'signed-out' },
+                ),
               };
               settle(e);
             } else {

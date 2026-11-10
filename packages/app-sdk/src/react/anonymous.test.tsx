@@ -34,6 +34,7 @@ import {
   SempodsProvider,
   TargetScreen,
   useAppState,
+  useContexts,
   useCreation,
   useDraftGuard,
 } from './index.js';
@@ -91,6 +92,9 @@ it('reads public data without a gate and offers signing in as a prompt', async (
     'Data context',
   )) as HTMLSelectElement;
   expect(gate()).toBeNull();
+  // Signing in is offered once, in the prompt; the chooser does not repeat it.
+  await waitFor(() => expect(prompts()).toHaveLength(1));
+  expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(1);
   await act(async () => {
     fireEvent.change(chooser, { target: { value: work } });
   });
@@ -448,4 +452,55 @@ it('keeps an explicit-Context creation in flight when the session ends', async (
   await act(async () => held.resolve(new Response(null, { status: 202 })));
   await waitFor(() => expect(f.state()).toBe('unconfirmed'));
   expect(f.title.value).toBe('Unsaved task');
+});
+
+it('releases the selected view when only an explicit-Context form holds work', async () => {
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  const app = createAppController(runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const before = app.getSnapshot().view;
+  // A draft of a creation in an explicit Context keeps its own binding.
+  app.register({
+    scope: 'explicit',
+    dirty: () => true,
+    blocked: () => false,
+    discard: () => {},
+  });
+  await renewal(f, runtime, id, 'refused');
+  await waitFor(() =>
+    expect(runtime.getSnapshot()[0]!.reading).toBe('anonymous'),
+  );
+  const after = app.getSnapshot().view;
+  expect(after).not.toBe(before);
+  expect(after!.getSnapshot()).toMatchObject({ current: true, write: false });
+});
+
+function Sharing() {
+  const { canShare } = useContexts();
+  return <output data-testid="share">{String(canShare)}</output>;
+}
+
+it('offers sharing only where the app signs in', async () => {
+  for (const signIn of ['optional', 'none'] as const) {
+    const f = start({
+      signIn,
+      preset: { podUrl: pod },
+      ...(signIn === 'none' ? without('identity') : {}),
+    });
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        <Sharing />
+      </SempodsProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('share').textContent).toBe(
+        String(signIn === 'optional'),
+      ),
+    );
+    cleanup();
+  }
 });

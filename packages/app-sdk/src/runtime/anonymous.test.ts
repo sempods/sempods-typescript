@@ -292,13 +292,15 @@ describe('signIn: optional', () => {
       expect(await f.runtime.disconnect(f.id)).toEqual({
         kind: 'disconnected',
       });
+      // Only a remembered address keeps why it was signed out.
       expect(f.runtime.getSnapshot()).toMatchObject([
-        {
-          id: f.id,
-          session: { kind: 'signed-out', problem: 'disconnected' },
-          reading: 'anonymous',
-        },
+        { id: f.id, reading: 'anonymous' },
       ]);
+      expect(f.runtime.getSnapshot()[0]!.session).toEqual(
+        rememberPods
+          ? { kind: 'signed-out', problem: 'disconnected' }
+          : { kind: 'signed-out' },
+      );
       expect((await savedRecords(f.factory)).length).toBe(rememberPods ? 1 : 0);
       runtimes.splice(0).forEach((runtime) => runtime.dispose());
       await settleLease();
