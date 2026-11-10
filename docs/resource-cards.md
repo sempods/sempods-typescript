@@ -110,6 +110,10 @@ A path has one or two steps, and each step lists alternative predicates:
 - `[[schema:image], [schema:thumbnailUrl, schema:contentUrl]]` takes the
   addresses of the node the resource links to, such as an `ImageObject`.
 
+A linked node is an image description only where one declared path has both
+its link and its variant predicate. Otherwise a direct path still takes the
+link's value as the address.
+
 `schema(name)` lists both schema.org namespaces (`https:` and `http:`), and
 `pictures` is the pair of paths above with `schema:image`, `foaf:img` and
 `foaf:depiction`. Replace the rules with the app's vocabulary.

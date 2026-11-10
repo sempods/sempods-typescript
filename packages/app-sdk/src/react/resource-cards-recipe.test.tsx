@@ -381,3 +381,39 @@ it('shows a refused address as unavailable, not absent', () => {
     'Picture unavailable',
   );
 });
+
+it('starts the details preview afresh for another resource', async () => {
+  const { f, runtime } = await twoPods(keep);
+  // Both resources name the same address; only the first one tried it.
+  const shared = { literal: 'https://img.example/shared.jpg' };
+  f.setQuery(
+    answers({
+      [pod]: [
+        ['urn:x:a', `${S}image`, shared, 'a'],
+        ['urn:x:b', `${S}image`, shared, 'b'],
+      ],
+    }),
+  );
+  const details = (root: string) => (
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <CardDetails runtime={runtime} root={root} />
+    </SempodsProvider>
+  );
+  const view = render(details('urn:x:a'));
+  const box = () =>
+    within(screen.getByRole('region', { name: /^[ab]$/ })).getAllByRole(
+      'img',
+    )[0]!;
+  await waitFor(() => expect(box().querySelector('img')).toBeTruthy());
+  fireEvent.error(box().querySelector('img')!);
+  expect(box().getAttribute('aria-label')).toBe('Picture unavailable');
+  view.rerender(details('urn:x:b'));
+  await waitFor(() =>
+    expect(screen.getByRole('region', { name: 'b' })).toBeTruthy(),
+  );
+  await waitFor(() =>
+    expect(box().querySelector('img')?.getAttribute('src')).toBe(
+      'https://img.example/shared.jpg',
+    ),
+  );
+});

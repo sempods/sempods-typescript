@@ -9,6 +9,7 @@ import {
   previewCandidates,
   resourceCards,
   sourceFacts,
+  type CardRule,
   type SourceFacts,
 } from '../../../examples/todo/recipes/resource-cards.js';
 
@@ -172,7 +173,7 @@ describe('facts of one read', () => {
       {
         url: 'https://img.example/ada-2.jpg',
         // A blank node is keyed within its read only.
-        node: JSON.stringify([alice, ada, '_:b0']),
+        node: expect.stringContaining('_:b0'),
         link: `${S}image`,
       },
     ]);
@@ -355,6 +356,62 @@ describe('cards across sources', () => {
       'https://img.example/b.jpg',
       'https://img.example/a.jpg',
     ]);
+  });
+
+  it('keeps blank nodes of two reads apart, even with equal labels', async () => {
+    const read = () =>
+      facts(ada, alice, [
+        [iri(ada), `${S}image`, blank('b0'), ctx(alice, 'a')],
+        [
+          blank('b0'),
+          `${S}contentUrl`,
+          text(`https://img.example/${n++}.jpg`),
+          ctx(alice, 'a'),
+        ],
+      ]);
+    let n = 1;
+    // For example two connections to the same Pod.
+    const card = resourceCards(
+      [ada],
+      [await read(), await read()],
+      exampleRules,
+    ).get(ada)!;
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([['https://img.example/1.jpg'], ['https://img.example/2.jpg']]);
+  });
+
+  it('suppresses a direct address only for a complete declared path', async () => {
+    const photo = 'urn:v:photo';
+    const rules: readonly CardRule[] = [
+      {
+        id: 'any',
+        types: [],
+        images: [
+          [[photo], ['urn:v:thumbnail']],
+          [['urn:v:icon'], ['urn:v:iconUrl']],
+          [[photo]],
+        ],
+        dates: [],
+      },
+    ];
+    const address = 'https://img.example/photo.jpg';
+    // The query pairs every first step with every second step.
+    const result = await select([
+      [iri(ada), photo, iri(address), ctx(alice, 'a')],
+      [
+        iri(address),
+        'urn:v:iconUrl',
+        text('https://img.example/icon.jpg'),
+        ctx(alice, 'a'),
+      ],
+    ]);
+    const found = sourceFacts(result, ada, alice, rules);
+    expect(found.refused).toBe(0);
+    const card = resourceCards([ada], [found], rules).get(ada)!;
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([[address]]);
   });
 
   it('groups the variants of a blank image node, thumbnail first', async () => {

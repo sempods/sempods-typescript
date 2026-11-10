@@ -438,7 +438,13 @@ export function CardDetails({
       {readers}
       {card && (
         <>
-          <ImagePreview card={card} status={status(card)} size={160} />
+          {/* A new resource starts with no failed or loaded addresses. */}
+          <ImagePreview
+            key={root}
+            card={card}
+            status={status(card)}
+            size={160}
+          />
           <CardEvidence card={card} />
         </>
       )}

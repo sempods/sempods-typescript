@@ -101,7 +101,7 @@ interface ImageMatch {
   readonly url: string;
   /**
    * The image's node: variants of one node are one picture. An IRI, or for a
-   * blank node a key that is unique to its read (Pod, root and label).
+   * blank node a key that is unique to its read result.
    */
   readonly node?: string;
   readonly evidence: readonly Evidence[];
@@ -201,6 +201,28 @@ function addressValue(term: SparqlTerm) {
   return plain || term.datatype === `${XSD}anyURI` ? term.value : undefined;
 }
 
+const declaresPath = (
+  rules: readonly CardRule[],
+  link: string,
+  predicate: string,
+) =>
+  rules.some((rule) =>
+    rule.images.some(
+      (path) =>
+        path.length === 2 &&
+        path[0].includes(link) &&
+        path[1].includes(predicate),
+    ),
+  );
+
+/** A number per read result, so blank nodes of two reads never meet. */
+const reads = new WeakMap<SelectResult, number>();
+let lastRead = 0;
+const readId = (result: SelectResult) => {
+  if (!reads.has(result)) reads.set(result, ++lastRead);
+  return reads.get(result)!;
+};
+
 /**
  * Facts from one card read of `root` in the Pod `pod`. Rows outside the
  * declared paths are ignored, and blank nodes never leave this read.
@@ -212,7 +234,8 @@ export function sourceFacts(
   rules: readonly CardRule[],
   aliases: readonly string[] = exampleAliases,
 ): SourceFacts {
-  const { direct, links, variants } = declared(rules, aliases);
+  const { direct, variants } = declared(rules, aliases);
+  const read = readId(result);
   const aliasSet = new Set(aliases);
   const dateSet = new Set(rules.flatMap((rule) => rule.dates));
   const rows = result.rows.slice(0, MAX_ROWS).flatMap((row) => {
@@ -231,40 +254,44 @@ export function sourceFacts(
     [];
   const images: ImageMatch[] = [];
   let refused = 0;
-  // A linked node that has variants describes an image; it is no address.
-  const described = new Set(
-    rows
-      .filter((row) => !row.own && variants.has(row.p))
-      .map((row) => exactTerm(row.s)),
+  // Second step: a link statement and a statement of the linked node, joined
+  // within this read only where one declared path has both predicates.
+  const joins = rows.flatMap((row) =>
+    row.own
+      ? []
+      : rows
+          .filter(
+            (link) =>
+              link.own &&
+              exactTerm(link.o) === exactTerm(row.s) &&
+              declaresPath(rules, link.p, row.p),
+          )
+          .map((link) => ({ link, row })),
   );
+  // A linked node with a declared variant describes an image; it is no address.
+  const described = new Set(joins.map(({ row }) => exactTerm(row.s)));
   const image = (match: Omit<ImageMatch, 'url'>, value: string | undefined) => {
     const url = value === undefined ? undefined : imageAddress(value);
     if (url) images.push({ ...match, url });
     else refused++;
   };
+  for (const { link, row } of joins)
+    image(
+      {
+        link: link.p,
+        predicate: row.p,
+        // A blank node's label means nothing outside its read.
+        node:
+          row.s.type === 'iri'
+            ? row.s.value
+            : JSON.stringify([read, exactTerm(row.s)]),
+        evidence: [link.evidence, row.evidence],
+      },
+      addressValue(row.o),
+    );
   for (const row of rows) {
     const { o, p, evidence } = row;
-    if (!row.own) {
-      // Second step: join the link statements to this node within this read.
-      for (const linkRow of rows) {
-        if (!linkRow.own || !links.has(linkRow.p)) continue;
-        if (exactTerm(linkRow.o) !== exactTerm(row.s)) continue;
-        image(
-          {
-            link: linkRow.p,
-            predicate: p,
-            node:
-              row.s.type === 'iri'
-                ? row.s.value
-                : JSON.stringify([pod, root, exactTerm(row.s)]),
-            evidence: [linkRow.evidence, evidence],
-          },
-          addressValue(o),
-        );
-      }
-      continue;
-    }
-    if (!direct.has(p)) continue;
+    if (!row.own || !direct.has(p)) continue;
     if (p === RDF_TYPE && o.type === 'iri') add(types, o.value, evidence);
     if (aliasSet.has(p) && o.type === 'iri' && o.value !== root)
       add(aliasFacts, o.value, evidence);
