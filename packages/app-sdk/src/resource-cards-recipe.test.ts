@@ -414,6 +414,44 @@ describe('cards across sources', () => {
     ).toEqual([[address]]);
   });
 
+  it('keeps the preferred variants when a picture has more than three', async () => {
+    const photo = 'https://people.example/ada/photo';
+    const originals = await facts(ada, alice, [
+      [iri(ada), `${S}image`, iri(photo), ctx(alice, 'a')],
+      ...[1, 2, 3].map(
+        (n) =>
+          [
+            iri(photo),
+            `${S}contentUrl`,
+            iri(`https://img.example/${n}.jpg`),
+            ctx(alice, 'a'),
+          ] as const,
+      ),
+    ]);
+    // The thumbnail arrives from a later source.
+    const thumbnail = await facts(ada, bob, [
+      [iri(ada), `${S}image`, iri(photo), ctx(bob, 'b')],
+      [
+        iri(photo),
+        `${S}thumbnailUrl`,
+        iri('https://img.example/s.jpg'),
+        ctx(bob, 'b'),
+      ],
+    ]);
+    const card = resourceCards([ada], [originals, thumbnail], exampleRules).get(
+      ada,
+    )!;
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([
+      [
+        'https://img.example/s.jpg',
+        'https://img.example/1.jpg',
+        'https://img.example/2.jpg',
+      ],
+    ]);
+  });
+
   it('groups the variants of a blank image node, thumbnail first', async () => {
     const found = await facts(ada, alice, [
       [iri(ada), `${S}image`, blank('b0'), ctx(alice, 'a')],

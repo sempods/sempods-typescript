@@ -237,7 +237,7 @@ The preview is bounded:
 
 - A card keeps at most four pictures with up to three variants each. Variants
   of one picture are those of the same linked node (a blank node only within
-  its read), and those that share an address: the same address from two Pods counts once.
+  its read), and those that share an address: the same address from two Pods counts once. The three kept are the preferred ones, such as the thumbnail.
 - A preview tries the addresses in card order. When one fails to load or
   decode, it moves to the next. It never retries a failed address, and after
   six failures (`MAX_ATTEMPTS`) it tries no further address, also when new

@@ -512,7 +512,7 @@ function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
       for (const evidence of match.evidence)
         if (!variant.evidence.some((e) => sameEvidence(e, evidence)))
           variant.evidence.push(evidence);
-    } else if (image.variants.length < MAX_VARIANTS)
+    } else
       image.variants.push({
         value: match.url,
         evidence: [...match.evidence],
@@ -523,6 +523,8 @@ function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
     variants: image.variants
       .map((variant, index) => ({ variant, index }))
       .sort((a, b) => a.variant.rank - b.variant.rank || a.index - b.index)
+      // The limit applies after ranking, so a thumbnail is never cut.
+      .slice(0, MAX_VARIANTS)
       .map(({ variant: { value, evidence } }) => ({ value, evidence })),
   }));
 }
