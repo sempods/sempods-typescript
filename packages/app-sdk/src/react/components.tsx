@@ -360,7 +360,9 @@ export function AccessNotice({
     ) : null;
   if (!c) return <Notice>{m.controls.noTarget}</Notice>;
   if (c.session.kind === 'leaving') return null;
-  if (c.session.kind !== 'active' && c.session.kind !== 'renewing')
+  // A connection reading without a token is explained like a signed-in one:
+  // its access follows the catalogue (read-only, as a rule).
+  if (c.reading === null)
     return (
       <Notice>
         {c.session.kind === 'ended'

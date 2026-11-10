@@ -276,6 +276,15 @@ export interface UiMessages {
    */
   readonly dismiss?: string;
   readonly reload?: string;
+  /*
+   * Without required sign-in (added in 0.8.0; optional in the type,
+   * `createLocale` fills them): the prompt while the app reads only public
+   * data, the button that opens a Pod without signing in, and an anonymous
+   * catalogue without public Contexts.
+   */
+  readonly anonymous?: string;
+  readonly open?: string;
+  readonly noPublicData?: string;
 }
 
 export interface SdkMessages {
@@ -397,6 +406,11 @@ export const englishMessages: SdkMessages = {
     signInRequired: 'Sign in to use this pod.',
     dismiss: 'OK',
     reload: 'Reload',
+    anonymous:
+      'You see this Pod’s public data. Sign in to see more or to make changes.',
+    open: 'Open',
+    noPublicData:
+      'This Pod shares no public data. Sign in to see what you have access to.',
   },
   activePod: 'Active pod',
   dataContext: 'Data context',
@@ -551,6 +565,11 @@ export const germanMessages: SdkMessages = {
     signInRequired: 'Melde dich an, um diesen Pod zu nutzen.',
     dismiss: 'OK',
     reload: 'Neu laden',
+    anonymous:
+      'Du siehst die öffentlichen Daten dieses Pods. Melde dich an, um mehr zu sehen oder etwas zu ändern.',
+    open: 'Öffnen',
+    noPublicData:
+      'Dieser Pod teilt keine öffentlichen Daten. Melde dich an, um zu sehen, worauf du Zugriff hast.',
   },
   activePod: 'Aktiver Pod',
   dataContext: 'Datenkontext',

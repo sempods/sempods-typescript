@@ -136,6 +136,26 @@ seconds, discovery counts as unreachable:
   which runtime actions are safe meanwhile. Which controls apps and the SDK
   components keep available while a Pod restores is settled in #238.
 
+### Apps without sign-in
+
+**Apps can read public data without a session**
+([apps without sign-in](browser-runtime.md#apps-without-sign-in), #240). Existing
+apps keep `signIn: 'required'`, the default, and behave as before. To adopt it:
+
+- Set `signIn: 'optional'` for an app that reads public data first and offers
+  signing in, or `signIn: 'none'` with a `preset` (or one `allowedPods` entry)
+  for an app that never signs in; `none` needs no `identity`.
+- Move `scopes.required` to `scopes.optional` under `optional`; under `none`
+  remove `scopes`. Both are configuration errors otherwise.
+- Code that checks `session.kind === 'active'` to decide whether a connection
+  can be read, or bound, checks `connection.reading !== null` instead: a
+  connection reading without a token is `signed-out`.
+- `useApp().connect(url)` opens a Pod without signing in under `optional` and
+  `none`; call `authorize(id)` to sign in.
+- End-to-end tests of an `optional` app expect no sign-in screen, an
+  `anonymous` prompt with **Sign in**, and **Open** instead of **Sign in** on
+  the address field.
+
 ### Bounded Pod reads
 
 **An app can bound its explicit Pod reads**
@@ -235,6 +255,16 @@ taking turns. Without the option nothing changes.
   accepts these properties.
 - `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
   `rememberPods`, `refreshGracePeriod` and `podReadLimit`. Typed test doubles of the runtime need `forget`.
+- `BrowserRuntimeOptions` gains `signIn`, and its `identity` becomes optional
+  in the type: it is still required unless `signIn: 'none'`, and construction
+  throws `RuntimeError('configuration')` without it. `BrowserRuntime` gains the
+  required `signIn`, and `AppSnapshot` the required `signIn`; typed test
+  doubles need them.
+- `Connection` gains the required `reading` (`'session' | 'anonymous' | null`),
+  and `clientKind` may be `null` (only under `signIn: 'none'` without an
+  identity). Test doubles that build `Connection` objects add `reading`.
+- `AccessPrompt['reason']` gains `'anonymous'`. An exhaustive `switch` over it
+  needs a case.
 - `BoundPod.sparql.select` and `construct` accept `priority: 'current'` beside
   `signal`. A typed test double of `BoundPod` accepts the wider options.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
@@ -244,8 +274,8 @@ taking turns. Without the option nothing changes.
   expected revision that answers `{ kind: 'removed' }` or `{ kind: 'conflict' }`.
   The default IndexedDB store implements it.
 - `UiMessages` gains `rememberedPods`, `forget`, `sessionEnded`,
-  `forgetFailed`, `dismiss` and `reload`, optional in the type; `createLocale`
-  fills them from the language defaults.
+  `forgetFailed`, `dismiss`, `reload`, `anonymous`, `open` and `noPublicData`,
+  optional in the type; `createLocale` fills them from the language defaults.
 - `AppSnapshot` gains the required `access` (`AccessState`), and
   `AppController` the method `dismiss(promptId)`. Typed test doubles of the
   snapshot need `access`. `AppSnapshot.callbackNotice` is deprecated and stays

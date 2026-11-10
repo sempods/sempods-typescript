@@ -56,7 +56,12 @@ import {
 } from '../authoring/lane.js';
 import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
-import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
+import {
+  lanesOf,
+  retainView,
+  type LaneKind,
+  type LaneScope,
+} from '../authoring/lanes.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 import {
   creationAddress,
@@ -1029,13 +1034,20 @@ export type FieldUpdate<D> = ReturnType<typeof useFieldUpdate<D>>;
  * `runtime.bindContext`. A configuration refusal (not a Context of this Pod,
  * or not the preset's) is reported; while signed out it waits. It demands
  * catalogue discovery, so its write access is known, but no selection.
+ * While `hold` (unresolved work on it), a session that ended under
+ * `signIn: 'optional'` is same-target access loss: the binding that lost
+ * access stays, with its creation lanes (`retainView`), and the binding
+ * that reads without a token follows once that work is resolved or
+ * discarded. A new authorization still replaces it.
  */
-function useExplicitView(context: string | undefined) {
+function useExplicitView(context: string | undefined, hold = false) {
   const app = useController();
-  const { activeId, ready } = useAppFacts(
+  const { activeId, ready, anonymous } = useAppFacts(
     (s) => ({
       activeId: s.activeId,
       ready: startupSettled(s) && s.pod !== null,
+      anonymous:
+        s.connections.find((c) => c.id === s.activeId)?.reading === 'anonymous',
     }),
     shallowEqual,
   );
@@ -1054,8 +1066,15 @@ function useExplicitView(context: string | undefined) {
     () => bound?.getSnapshot().current ?? true,
     () => bound?.getSnapshot().current ?? true,
   );
+  // Registered while there is work, so it is in place when the session ends.
+  useLayoutEffect(
+    () => (hold && bound ? retainView(app, bound) : undefined),
+    [app, hold, bound],
+  );
+  const kept = hold && anonymous;
   useEffect(() => {
-    if (!key || !ready || current === 'refused' || (current && live)) return;
+    if (!key || !ready || current === 'refused' || (current && (live || kept)))
+      return;
     try {
       const view = app.runtime.bindContext(activeId!, context!);
       if (view !== current) setBinding({ key, view });
@@ -1065,7 +1084,7 @@ function useExplicitView(context: string | undefined) {
         setBinding({ key, view: 'refused' });
       else if (error.problem !== 'disconnected') throw error;
     }
-  }, [app, key, ready, current, live, activeId, context]);
+  }, [app, key, ready, current, live, kept, activeId, context]);
   useContextDiscovery(current !== null && current !== 'refused');
   return {
     view: current === 'refused' ? null : current,
@@ -1112,23 +1131,46 @@ export function useCreation<D extends object>(
     readonly id?: string;
   },
 ) {
-  const explicit = useExplicitView(options.context);
+  // Whether this form holds work (a draft, or an open creation): its explicit
+  // binding then stays through access loss, as the selected view does.
+  const [holding, setHolding] = useState(false);
+  const explicit = useExplicitView(options.context, holding);
   const selected = useView();
   const fixed = options.context !== undefined;
-  const view = fixed ? explicit.view : selected;
-  const access = useWorkflowAccess();
-  // An explicit Context has its own write access.
-  const explicitWrite = useSyncExternalStore(
-    explicit.view?.subscribe ?? noopSubscribe,
-    () => explicit.view?.getSnapshot().write ?? false,
-    () => explicit.view?.getSnapshot().write ?? false,
-  );
-  const writable = fixed ? explicitWrite : access.write;
   const { key: shape } = useDefinition(definition, 'useCreation');
   // The address mode, address, form name and definition own the generation.
   // Distinct tuples cannot collide; old commands never follow a changed IRI.
   const address = creationAddress(options);
   const key = JSON.stringify([...address, options.id ?? '', shape]);
+  // A creation of this form name captured before the session ended keeps
+  // its explicit view and lane (`LaneGroup.holds`), also while no form was
+  // mounted: a form shown again returns to it until it is resolved.
+  const app = useController();
+  const channel = lanesOf(app).channel(`forms ${key}`, 'explicit');
+  useSyncExternalStore(
+    channel.subscribe,
+    channel.getVersion,
+    channel.getVersion,
+  );
+  const kept = fixed
+    ? channel
+        .held()
+        .find(
+          (g) =>
+            g.view !== explicit.view &&
+            g.view.contextIri === options.context &&
+            !g.view.getSnapshot().current,
+        )?.view
+    : undefined;
+  const view = fixed ? (kept ?? explicit.view) : selected;
+  const access = useWorkflowAccess();
+  // An explicit Context has its own write access.
+  const explicitWrite = useSyncExternalStore(
+    view?.subscribe ?? noopSubscribe,
+    () => (fixed ? (view?.getSnapshot().write ?? false) : false),
+    () => (fixed ? (view?.getSnapshot().write ?? false) : false),
+  );
+  const writable = fixed ? explicitWrite : access.write;
   // The controller owns the creation lane of this form name, with the
   // captured creation and its recovery: every form of the name (by default all
   // forms of that address), also one hidden, shown again or remounted, shows
@@ -1203,14 +1245,13 @@ export function useCreation<D extends object>(
     if (current.current.view !== view || current.current.key !== key) return;
     replace(copy(initial.current));
   };
-  useDraftGuard(
-    JSON.stringify(draft) !== JSON.stringify(options.initial),
-    reset,
-    fixed ? 'explicit' : 'target',
-  );
+  const dirty = JSON.stringify(draft) !== JSON.stringify(options.initial);
+  useDraftGuard(dirty, reset, fixed ? 'explicit' : 'target');
   // Pending, unresolved or held for an explicit retry.
   const locked = (of: CreationLane<D> | null | undefined) =>
     Boolean(of?.outstanding());
+  const unresolved = dirty || locked(lane);
+  useLayoutEffect(() => setHolding(unresolved), [unresolved]);
   const valid = (value: D) => {
     try {
       return definition.valid?.(value) ?? true;

@@ -55,7 +55,8 @@ export interface BoundPod {
 }
 
 /**
- * A context view bound to a signed-in connection and one target. Same
+ * A context view bound to a signed-in connection, or one that reads without a
+ * token (`Connection.reading`), and one target. Same
  * operations as the client `ContextView`; reads widen with `invalidated`,
  * writes keep the client `WriteResult` (a stopped write is `not-sent`).
  * Apps receive it without tokens or a credential-bearing fetch.

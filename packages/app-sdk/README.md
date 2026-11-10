@@ -86,6 +86,10 @@ uses them together.
 - An exact preset context needs fresh readable catalogue evidence. There is no
   fallback to another context. Context grants and feature scopes remain separate;
   the Pod authorizes every operation.
+- `signIn: 'optional'` reads a Pod's public Contexts without a token and offers
+  signing in; `signIn: 'none'` never signs in and needs a `preset` or one
+  allowed Pod, but no identity. `connection.reading` says whether a connection
+  reads with a session, without a token, or not at all.
 
 `runtime.preset` and `useAppState().preset` expose the frozen default as
 `PodPreset | undefined`; `PodPreset` is exported by the root entry.
@@ -108,7 +112,8 @@ off.
 ## Pod reads without a context choice
 
 `runtime.bindPod(connectionId)` supplies read-only `select`/`construct` methods
-for the signed-in connection's authorized dataset. It needs no catalogue or
+for a signed-in connection's authorized dataset, or a Pod's public data without
+a token. It needs no catalogue or
 selected context. Required feature scopes gate dispatch; Context/label changes
 do not invalidate these independent reads. Writes remain on a validated
 `BoundView`. `runtime.bindContext(connectionId, contextIri)` binds
