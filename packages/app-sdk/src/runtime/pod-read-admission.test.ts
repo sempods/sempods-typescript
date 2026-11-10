@@ -76,7 +76,14 @@ function transport(
     },
   };
 }
+/**
+ * Lets pending work run for a moment. Only for showing that nothing more
+ * happens; to wait for something to happen, wait for its observable state.
+ */
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
+/** Waits until exactly these reads were sent, in this order. */
+const sent = (t: { names(): string[] }, names: string[]) =>
+  vi.waitFor(() => expect(t.names()).toEqual(names));
 
 /**
  * A signed-in connection granted the optional `ai` and `mcp` scopes, and its
@@ -189,18 +196,22 @@ it('a reload burst never dispatches superseded waiting reads and keeps cancelled
   const t = transport(f);
   const all = Array.from({ length: 100 }, (_, i) => loader(f.reader, `r${i}`));
   all.forEach((l) => void l.reload());
-  await flush();
-  expect(t.dispatched).toHaveLength(4);
+  await vi.waitFor(() => expect(t.dispatched).toHaveLength(4));
   // Twice: every read restarts, the four running ones are cancelled but keep
   // their slots (this transport ignores aborts).
   all.forEach((l) => void l.reload());
   all.forEach((l) => void l.reload());
   await flush();
   expect(t.dispatched).toHaveLength(4);
-  while (t.pending.length) {
-    t.answer();
-    await flush();
-  }
+  // Answers each request in turn until every loader is ready.
+  await vi.waitFor(
+    () => {
+      if (t.pending.length) t.answer();
+      expect(t.pending).toHaveLength(0);
+      expect(all.every((l) => l.getSnapshot().kind === 'ready')).toBe(true);
+    },
+    { interval: 5, timeout: 5_000 },
+  );
   // The four cancelled requests plus exactly one current read each.
   expect(t.dispatched).toHaveLength(104);
   expect(t.maxima.perPod).toBe(4);
@@ -221,15 +232,14 @@ it('a cancelled read returns at once but its slot waits for an abort-ignoring tr
   const first = f.reader.sparql.construct(query('first'), {
     signal: stop.signal,
   });
-  await flush();
+  await sent(t, ['first']);
   const second = f.reader.sparql.construct(query('second'));
   stop.abort();
   expect(await first).toEqual({ kind: 'cancelled' });
   await flush();
   expect(t.names()).toEqual(['first']);
   t.answer('first');
-  await flush();
-  expect(t.names()).toEqual(['first', 'second']);
+  await sent(t, ['first', 'second']);
   t.answer('second');
   expect(await second).toMatchObject({ kind: 'ok' });
 });
@@ -238,7 +248,7 @@ it('two grant revisions while a loader waits spend no recovery: one request, the
   const f = await session({ perPod: 1 });
   const t = transport(f);
   const blocker = f.reader.sparql.construct(query('blocker'));
-  await flush();
+  await sent(t, ['blocker']);
   const waiting = loader(f.reader, 'waiting');
   void waiting.reload();
   await flush();
@@ -250,8 +260,7 @@ it('two grant revisions while a loader waits spend no recovery: one request, the
   expect(waiting.getSnapshot().kind).toBe('loading');
   expect(t.names()).toEqual(['blocker']);
   t.answer('blocker');
-  await flush();
-  expect(t.names()).toEqual(['blocker', 'waiting']);
+  await sent(t, ['blocker', 'waiting']);
   t.answer('waiting');
   await vi.waitFor(() => expect(id(waiting)).toBe('urn:waiting'));
 });
@@ -261,13 +270,12 @@ it('an admitted read still has one recovery: a second revision while it runs end
   const t = transport(f);
   const l = loader(f.reader, 'admitted');
   void l.reload();
-  await flush();
+  await sent(t, ['admitted']);
   await f.grants('ai');
-  await flush();
   // Recovery: a new request beside the old one, which keeps its slot.
-  expect(t.names()).toEqual(['admitted', 'admitted']);
+  await sent(t, ['admitted', 'admitted']);
   await f.grants('');
-  expect(l.getSnapshot().kind).toBe('unavailable');
+  await vi.waitFor(() => expect(l.getSnapshot().kind).toBe('unavailable'));
   while (t.pending.length) t.answer();
   await flush();
   expect(l.getSnapshot().kind).toBe('unavailable');
@@ -287,8 +295,7 @@ it('changed grants drop waiting reads of the old grants; new reads wait for old 
     }),
   );
   all.forEach((l) => void l.reload());
-  await flush();
-  expect(t.names()).toEqual(['g0', 'g1']);
+  await sent(t, ['g0', 'g1']);
   await f.grants('ai');
   await flush();
   // The two old requests keep both slots: nothing new is sent yet.
@@ -328,7 +335,7 @@ it('a removed source drops its waiting reads at once; its running requests keep 
     alice.sparql.construct(query('a0')),
     alice.sparql.construct(query('a1')),
   ];
-  await flush();
+  await sent(t, ['a0', 'a1']);
   const dropped = alice.sparql.construct(query('a2'));
   const waiting = bob.sparql.construct(query('b0'));
   await runtime.disconnect(f.id);
@@ -340,8 +347,7 @@ it('a removed source drops its waiting reads at once; its running requests keep 
   await flush();
   expect(t.names()).toEqual(['a0', 'a1']);
   t.answer('a0');
-  await flush();
-  expect(t.names()).toEqual(['a0', 'a1', 'b0']);
+  await sent(t, ['a0', 'a1', 'b0']);
   t.answer('b0');
   expect(await waiting).toMatchObject({ kind: 'ok' });
   t.answer('a1');
@@ -364,7 +370,7 @@ it('the resend after a Bearer 401 stays in its slot; the renewal is not counted'
   });
   const first = f.reader.sparql.construct(query('first'));
   const second = f.reader.sparql.construct(query('second'));
-  await flush();
+  await sent(t, ['first']);
   t.answer('first'); // the 401
   // Renewal and resend take a few turns; wait for the resend, not a fixed time.
   await vi.waitFor(() => expect(t.names()).toHaveLength(2));
@@ -390,8 +396,7 @@ it('a read cancelled right after its slot was granted, before it is sent, frees 
   stop.abort();
   expect(await granted).toEqual({ kind: 'cancelled' });
   const next = f.reader.sparql.construct(query('next'));
-  await flush();
-  expect(t.names()).toEqual(['next']);
+  await sent(t, ['next']);
   t.answer('next');
   expect(await next).toMatchObject({ kind: 'ok' });
 });
@@ -419,8 +424,7 @@ it('a client that throws before sending frees the slot', async () => {
   const t = transport(f);
   await expect(f.reader.sparql.construct(query('broken'))).rejects.toBe(defect);
   const next = f.reader.sparql.select(`SELECT * WHERE { ?s ?p ?o } #next`);
-  await flush();
-  expect(t.names()).toEqual(['next']);
+  await sent(t, ['next']);
   t.answer('next');
   // This transport answers JSON-LD, not SELECT results: only dispatch counts.
   await next.catch(() => {});
@@ -445,7 +449,7 @@ it('a failing admission notice neither stops the read nor keeps its slot', async
     );
   try {
     void f.reader.sparql.construct(query('blocker'));
-    await flush();
+    await sent(t, ['blocker']);
     const noticed = new AbortController();
     watchAdmission(noticed.signal, () => {
       throw new Error('notice defect');
@@ -456,13 +460,11 @@ it('a failing admission notice neither stops the read nor keeps its slot', async
     });
     await flush();
     t.answer('blocker');
-    await flush();
-    expect(t.names()).toEqual(['blocker', 'noticed']);
+    await sent(t, ['blocker', 'noticed']);
     t.answer('noticed');
     expect(await read).toMatchObject({ kind: 'ok' });
     const next = f.reader.sparql.construct(query('next'));
-    await flush();
-    expect(t.names()).toEqual(['blocker', 'noticed', 'next']);
+    await sent(t, ['blocker', 'noticed', 'next']);
     t.answer('next');
     await next;
   } finally {
@@ -478,17 +480,15 @@ it('a current read goes before older waiting reads, within the limit', async () 
   const f = await session({ perPod: 1 });
   const t = transport(f);
   void f.reader.sparql.construct(query('blocker'));
-  await flush();
+  await sent(t, ['blocker']);
   void f.reader.sparql.construct(query('older'));
   void f.reader.sparql.construct(query('current'), { priority: 'current' });
   await flush();
   expect(t.names()).toEqual(['blocker']);
   t.answer();
-  await flush();
-  expect(t.names()).toEqual(['blocker', 'current']);
+  await sent(t, ['blocker', 'current']);
   t.answer();
-  await flush();
-  expect(t.names()).toEqual(['blocker', 'current', 'older']);
+  await sent(t, ['blocker', 'current', 'older']);
   t.answer();
 });
 
@@ -496,7 +496,7 @@ it('cancelling, disposing or aborting a waiting read sends nothing', async () =>
   const f = await session({ perPod: 1 });
   const t = transport(f);
   void f.reader.sparql.construct(query('blocker'));
-  await flush();
+  await sent(t, ['blocker']);
   const cancelled = loader(f.reader, 'cancelled');
   const disposed = loader(f.reader, 'disposed');
   void cancelled.reload();
@@ -521,8 +521,7 @@ it('without podReadLimit every read starts at once', async () => {
   const t = transport(f);
   const all = Array.from({ length: 50 }, (_, i) => loader(f.reader, `u${i}`));
   all.forEach((l) => void l.reload());
-  await flush();
-  expect(t.dispatched).toHaveLength(50);
+  await vi.waitFor(() => expect(t.dispatched).toHaveLength(50));
   while (t.pending.length) t.answer();
   await vi.waitFor(() =>
     expect(all.every((l) => l.getSnapshot().kind === 'ready')).toBe(true),
