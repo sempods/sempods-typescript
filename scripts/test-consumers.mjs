@@ -24,6 +24,7 @@ import {
   queryAnswer,
 } from './consumer-fixture.mjs';
 import { checkReference, ENTRY } from './package-docs.mjs';
+import { examplePackages } from './example-packages.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const temp = await mkdtemp(join(tmpdir(), 'sempods-consumers-'));
@@ -91,6 +92,7 @@ try {
       );
     }
   }
+  const example = await examplePackages(root);
   async function consumer(name, react) {
     const path = join(temp, name);
     await mkdir(path);
@@ -99,6 +101,8 @@ try {
     // the DOM-only browser consumer stays without Node types.
     if (name === 'plain' || react)
       devDependencies['@types/node'] = tools['@types/node'];
+    // The shipped examples include recipes with their own packages.
+    if (react) Object.assign(devDependencies, example.devDependencies);
     if (react)
       Object.assign(devDependencies, {
         react: tools.react,
@@ -110,7 +114,7 @@ try {
       name: `packed-${name}-consumer`,
       private: true,
       type: 'module',
-      dependencies: tarballs,
+      dependencies: react ? { ...example.dependencies, ...tarballs } : tarballs,
       devDependencies,
     });
     // Outside the workspace; npm's file dependencies install both tarballs together.

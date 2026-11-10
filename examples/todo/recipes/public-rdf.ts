@@ -198,11 +198,17 @@ export async function lookupPublicRdf(
     }
 
     const body = await readCapped(response, maxBytes);
-    if (body === 'too-large') return { kind: 'failed', reason: 'too-large' };
-    if (body === null)
+    if (body.kind === 'too-large')
+      return { kind: 'failed', reason: 'too-large' };
+    if (body.kind === 'broken')
       return stopped() ?? { kind: 'failed', reason: 'network' };
 
-    const parsed = await parse(body, contentType, url, options.contexts ?? {});
+    const parsed = await parse(
+      body.text,
+      contentType,
+      url,
+      options.contexts ?? {},
+    );
     // Parsing is bounded by the byte cap, not by the deadline.
     const late = stopped();
     if (late?.kind === 'cancelled') return late;
@@ -226,12 +232,19 @@ function discard(response: Response): void {
   void response.body?.cancel().catch(() => {});
 }
 
-/** UTF-8 text of at most `maxBytes`, whatever `Content-Length` claimed. */
+/**
+ * UTF-8 text of at most `maxBytes`, whatever `Content-Length` claimed. RDF
+ * serializations are UTF-8; a `charset` parameter is ignored.
+ */
 async function readCapped(
   response: Response,
   maxBytes: number,
-): Promise<string | 'too-large' | null> {
-  if (!response.body) return '';
+): Promise<
+  | { readonly kind: 'read'; readonly text: string }
+  | { readonly kind: 'too-large' }
+  | { readonly kind: 'broken' }
+> {
+  if (!response.body) return { kind: 'read', text: '' };
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -242,12 +255,12 @@ async function readCapped(
       total += value.byteLength;
       if (total > maxBytes) {
         void reader.cancel().catch(() => {});
-        return 'too-large';
+        return { kind: 'too-large' };
       }
       chunks.push(value);
     }
   } catch {
-    return null;
+    return { kind: 'broken' };
   }
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -255,7 +268,7 @@ async function readCapped(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(bytes);
+  return { kind: 'read', text: new TextDecoder().decode(bytes) };
 }
 
 type ParseFailure = 'remote-context' | 'parse-failed' | 'unsupported-type';
@@ -269,9 +282,9 @@ async function parse(
   if (N3_TYPES.has(contentType)) {
     try {
       const { Parser } = await import('n3');
-      return new Parser({ format: contentType, baseIRI: base })
-        .parse(body)
-        .map((quad) => statement(quad, ''));
+      return statements(
+        new Parser({ format: contentType, baseIRI: base }).parse(body),
+      );
     } catch {
       return 'parse-failed';
     }
@@ -293,13 +306,29 @@ async function parse(
   return jsonLd(scripts, base, contexts);
 }
 
-/** Each document separately, so blank node labels of two scripts never merge. */
+/**
+ * All documents as one: JSON-LD 1.1 merges the scripts of an HTML page into one
+ * dataset, and the same blank node label in two scripts names one node. Each
+ * script keeps its own `@context`.
+ */
 async function jsonLd(
   documents: readonly string[],
   base: string,
   contexts: Readonly<Record<string, unknown>>,
 ): Promise<readonly PublicStatement[] | ParseFailure> {
-  if (documents.length === 0) return [];
+  const nodes: object[] = [];
+  try {
+    for (const text of documents) {
+      const value: unknown = JSON.parse(text);
+      // A top-level string would be loaded as a URL; only data is accepted.
+      if (typeof value !== 'object' || value === null) return 'parse-failed';
+      if (Array.isArray(value)) nodes.push(...(value as object[]));
+      else nodes.push(value);
+    }
+  } catch {
+    return 'parse-failed';
+  }
+  if (nodes.length === 0) return [];
   const { default: jsonld } = await import('jsonld');
   let remote = false;
   const documentLoader = async (url: string): Promise<RemoteDocument> => {
@@ -312,20 +341,20 @@ async function jsonLd(
       document: contexts[url] as RemoteDocument['document'],
     };
   };
-  const statements: PublicStatement[] = [];
-  for (const [index, text] of documents.entries()) {
-    try {
-      const quads = (await jsonld.toRDF(JSON.parse(text) as object, {
+  try {
+    const quads = await jsonld.toRDF(
+      nodes as Parameters<typeof jsonld.toRDF>[0],
+      {
         base,
         documentLoader,
-      })) as unknown as readonly Quad[];
-      const scope = documents.length > 1 ? `s${index}.` : '';
-      for (const quad of quads) statements.push(statement(quad, scope));
-    } catch {
-      return remote ? 'remote-context' : 'parse-failed';
-    }
+        // Keeps `@direction` as an i18n datatype instead of dropping it.
+        rdfDirection: 'i18n-datatype',
+      } as Options.ToRdf,
+    );
+    return statements(quads as unknown as readonly Quad[]);
+  } catch {
+    return remote ? 'remote-context' : 'parse-failed';
   }
-  return statements;
 }
 
 /** The RDF/JS fields both parsers produce. */
@@ -340,33 +369,42 @@ interface Term {
   readonly language?: string;
   readonly direction?: string;
   readonly datatype?: { readonly value: string };
+  /** Parts of an RDF 1.2 triple term (`termType: 'Quad'`). */
+  readonly subject?: Term;
+  readonly predicate?: Term;
+  readonly object?: Term;
 }
 
-function statement(quad: Quad, scope: string): PublicStatement {
-  return {
-    subject: term(quad.subject, scope),
-    predicate: term(quad.predicate, scope),
-    object: term(quad.object, scope),
-  };
+/** Graph names are dropped; a triple in several graphs is kept once. */
+function statements(quads: readonly Quad[]): readonly PublicStatement[] {
+  const seen = new Set<string>();
+  const result: PublicStatement[] = [];
+  for (const quad of quads) {
+    const statement = {
+      subject: term(quad.subject),
+      predicate: term(quad.predicate),
+      object: term(quad.object),
+    };
+    const key = JSON.stringify(statement);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(statement);
+  }
+  return result;
 }
 
-/** Named graphs are dropped; a literal keeps its lexical form and tags. */
-function term(value: Term, scope: string): SparqlTerm {
+const I18N = 'https://www.w3.org/ns/i18n#';
+
+/** A literal keeps its lexical form and tags; other terms stay whole. */
+function term(value: Term): SparqlTerm {
   if (value.termType === 'NamedNode')
     return { type: 'iri', value: value.value };
   if (value.termType === 'BlankNode')
-    return { type: 'blank', value: scope + value.value.replace(/^_:/, '') };
-  if (value.direction)
-    // RDF 1.2 base direction changes the term's identity; keep it whole.
-    return {
-      type: 'unsupported',
-      term: {
-        type: 'literal',
-        value: value.value,
-        'xml:lang': value.language,
-        'its:dir': value.direction,
-      },
-    };
+    return { type: 'blank', value: value.value.replace(/^_:/, '') };
+  if (value.termType !== 'Literal' || direction(value))
+    // A triple term or a base direction changes the term's identity; keep it
+    // whole, in SPARQL 1.2 JSON form, instead of flattening it.
+    return { type: 'unsupported', term: sparqlJson(value) };
   if (value.language)
     return { type: 'literal', value: value.value, language: value.language };
   const datatype = value.datatype?.value;
@@ -375,23 +413,72 @@ function term(value: Term, scope: string): SparqlTerm {
     : { type: 'literal', value: value.value };
 }
 
+/** Turtle's `@en--ltr`, or JSON-LD's `@direction` as an i18n datatype. */
+function direction(value: Term): { language: string; dir: string } | undefined {
+  if (value.direction)
+    return { language: value.language ?? '', dir: value.direction };
+  const datatype = value.datatype?.value;
+  if (!datatype?.startsWith(I18N)) return undefined;
+  const [language = '', dir = ''] = datatype.slice(I18N.length).split('_');
+  return { language, dir };
+}
+
+function sparqlJson(value: Term): Readonly<Record<string, unknown>> {
+  switch (value.termType) {
+    case 'NamedNode':
+      return { type: 'uri', value: value.value };
+    case 'BlankNode':
+      return { type: 'bnode', value: value.value.replace(/^_:/, '') };
+    case 'Literal': {
+      const tags = direction(value);
+      if (tags)
+        return {
+          type: 'literal',
+          value: value.value,
+          ...(tags.language ? { 'xml:lang': tags.language } : {}),
+          'its:dir': tags.dir,
+        };
+      return {
+        type: 'literal',
+        value: value.value,
+        ...(value.language
+          ? { 'xml:lang': value.language }
+          : value.datatype && value.datatype.value !== XSD_STRING
+            ? { datatype: value.datatype.value }
+            : {}),
+      };
+    }
+    case 'Quad':
+      return {
+        type: 'triple',
+        value: {
+          subject: sparqlJson(value.subject!),
+          predicate: sparqlJson(value.predicate!),
+          object: sparqlJson(value.object!),
+        },
+      };
+    default:
+      return { type: value.termType, value: value.value };
+  }
+}
+
 function blockedHost(hostname: string): boolean {
   const host = hostname
     .toLowerCase()
     .replace(/^\[|\]$/g, '')
-    .replace(/\.$/, '');
+    .replace(/\.+$/, '');
   if (host.includes(':')) return blockedIpv6(host);
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return blockedIpv4(host);
   // A single label (`intranet`) or a local suffix never names a public origin.
   return (
     !host.includes('.') ||
-    /(^|\.)(localhost|local|internal|home\.arpa)$/.test(host)
+    /(^|\.)(localhost|localdomain|local|internal|home\.arpa)$/.test(host)
   );
 }
 
 /** `URL` already turned decimal, octal and hex forms into dotted quads. */
 function blockedIpv4(host: string): boolean {
-  const [a, b] = host.split('.').map(Number) as [number, number];
+  const [a, b, c] = host.split('.').map(Number) as [number, number, number];
   return (
     a === 0 ||
     a === 10 ||
@@ -400,21 +487,39 @@ function blockedIpv4(host: string): boolean {
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168)
+    (a === 192 && b === 0 && c === 0) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19))
   );
 }
 
 /** `URL` already compressed the literal, for example `::ffff:7f00:1`. */
 function blockedIpv6(host: string): boolean {
-  if (host === '::' || host === '::1') return true;
-  // Unique local fc00::/7, link-local fe80::/10, deprecated site-local fec0::/10.
-  if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89a-f][0-9a-f]:/.test(host))
-    return true;
-  // IPv4-mapped and NAT64 addresses reach an IPv4 host.
-  const embedded =
-    /^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
-  if (!embedded) return false;
-  const high = parseInt(embedded[1]!, 16);
-  const low = parseInt(embedded[2]!, 16);
-  return blockedIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  const [head = '', tail] = host.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const fill =
+    tail === undefined ? [] : Array(8 - left.length - right.length).fill('0');
+  const h = [...left, ...fill, ...right].map((part) => parseInt(part, 16));
+  const ipv4 = (high: number, low: number) =>
+    blockedIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  const zero = (from: number, to: number) =>
+    h.slice(from, to).every((part) => part === 0);
+  return (
+    // Unique local fc00::/7, link-local fe80::/10, site-local fec0::/10.
+    (h[0]! & 0xfe00) === 0xfc00 ||
+    (h[0]! >= 0xfe80 && h[0]! <= 0xfeff) ||
+    // Multicast ff00::/8.
+    h[0]! >> 8 === 0xff ||
+    // Local-use NAT64 64:ff9b:1::/48.
+    (h[0] === 0x64 && h[1] === 0xff9b && h[2] === 1) ||
+    // Unspecified, loopback, IPv4-compatible and IPv4-mapped (::/96, ::ffff:0:0/96).
+    (zero(0, 5) && (h[5] === 0 || h[5] === 0xffff) && ipv4(h[6]!, h[7]!)) ||
+    // IPv4-translated ::ffff:0:0:0/96.
+    (zero(0, 4) && h[4] === 0xffff && h[5] === 0 && ipv4(h[6]!, h[7]!)) ||
+    // NAT64 64:ff9b::/96.
+    (h[0] === 0x64 && h[1] === 0xff9b && zero(2, 6) && ipv4(h[6]!, h[7]!)) ||
+    // 6to4 2002::/16.
+    (h[0] === 0x2002 && ipv4(h[1]!, h[2]!))
+  );
 }

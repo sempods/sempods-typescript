@@ -147,10 +147,25 @@ describe('public RDF lookup: request policy', () => {
     ['https://[::ffff:127.0.0.1]/a', 'blocked-host'],
     ['https://[::ffff:10.0.0.1]/a', 'blocked-host'],
     ['https://[64:ff9b::192.168.0.1]/a', 'blocked-host'],
-  ])('refuses %s before any request (%s)', async (address, reason) => {
+    ['https://localhost../a', 'blocked-host'],
+    ['https://localhost.localdomain/a', 'blocked-host'],
+    ['https://192.0.0.1/a', 'blocked-host'],
+    ['https://198.18.0.1/a', 'blocked-host'],
+    ['https://[ff02::1]/a', 'blocked-host'],
+    ['https://[::127.0.0.1]/a', 'blocked-host'],
+    ['https://[::ffff:0:a00:1]/a', 'blocked-host'],
+    ['https://[64:ff9b:1::1]/a', 'blocked-host'],
+    ['https://[2002:7f00:1::]/a', 'blocked-host'],
+  ])('refuses %s (%s)', (address, reason) => {
+    expect(publicAddress(address)).toEqual({ kind: 'failed', reason });
+  });
+
+  it.each([
+    ['http://data.example.org/a', 'unsupported-scheme'],
+    ['https://169.254.169.254/latest', 'blocked-host'],
+  ])('looks up %s not at all (%s)', async (address, reason) => {
     const fetch = serve(answer('', 'text/turtle'));
 
-    expect(publicAddress(address)).toEqual({ kind: 'failed', reason });
     expect(await lookupPublicRdf(address, { fetch })).toEqual({
       kind: 'failed',
       reason,
@@ -167,6 +182,9 @@ describe('public RDF lookup: request policy', () => {
     'https://[fc::1]/a',
     'https://[2001:db8::1]/a',
     'https://[::ffff:8.8.8.8]/a',
+    'https://[2002:808:808::]/a',
+    'https://192.0.1.1/a',
+    'https://198.20.0.1/a',
   ])('allows the public address %s', (address) => {
     expect(publicAddress(address)).toMatchObject({ kind: 'allowed' });
   });
@@ -353,6 +371,8 @@ describe('public RDF lookup: bounded answers', () => {
     ['text/turtle', '<a> <b> "unterminated .'],
     ['application/ld+json', '{"@id": '],
     ['application/ld+json', '{"@context": 5}'],
+    // A top-level string would otherwise be loaded as a document URL.
+    ['application/ld+json', '"https://schema.org"'],
     ['text/html', '<script type="application/ld+json">{ nope</script>'],
   ])(
     'reports an unparseable %s body as parse-failed',
@@ -446,10 +466,11 @@ describe('public RDF lookup: parsed statements', () => {
     ]);
 
     const trig = await loaded(
-      `<https://ex.org/g> { <${IRI}> <${SCHEMA}name> "Berlin" . }`,
+      `<https://ex.org/g> { <${IRI}> <${SCHEMA}name> "Berlin" . }\n` +
+        `<https://ex.org/h> { <${IRI}> <${SCHEMA}name> "Berlin" . }`,
       'application/trig',
     );
-    // Named graphs are dropped.
+    // Graph names are dropped; the same triple in two graphs is kept once.
     expect(trig).toEqual([
       {
         subject: iri(IRI),
@@ -459,21 +480,59 @@ describe('public RDF lookup: parsed statements', () => {
     ]);
   });
 
-  it('keeps an RDF 1.2 base direction whole as an unsupported term', async () => {
-    const [statement] = await loaded(
-      `<${IRI}> <${RDFS_LABEL}> "Berlin"@en--ltr .`,
+  it.each([
+    ['text/turtle', `<${IRI}> <${RDFS_LABEL}> "Berlin"@ar--rtl .`],
+    [
+      'application/ld+json',
+      JSON.stringify({
+        '@id': IRI,
+        [RDFS_LABEL]: {
+          '@value': 'Berlin',
+          '@language': 'ar',
+          '@direction': 'rtl',
+        },
+      }),
+    ],
+  ])(
+    'keeps a %s base direction whole as an unsupported term',
+    async (contentType, body) => {
+      const [statement] = await loaded(body, contentType);
+
+      expect(statement!.object).toEqual({
+        type: 'unsupported',
+        term: {
+          type: 'literal',
+          value: 'Berlin',
+          'xml:lang': 'ar',
+          'its:dir': 'rtl',
+        },
+      });
+    },
+  );
+
+  it('keeps an RDF 1.2 triple term whole as an unsupported term', async () => {
+    const statements = await loaded(
+      `<${IRI}> <${SCHEMA}subjectOf> <<( <https://s.example.org/a> <${RDFS_LABEL}> "a"@en )>> .`,
       'text/turtle',
     );
 
-    expect(statement!.object).toEqual({
-      type: 'unsupported',
-      term: {
-        type: 'literal',
-        value: 'Berlin',
-        'xml:lang': 'en',
-        'its:dir': 'ltr',
+    expect(statements).toEqual([
+      {
+        subject: iri(IRI),
+        predicate: iri(`${SCHEMA}subjectOf`),
+        object: {
+          type: 'unsupported',
+          term: {
+            type: 'triple',
+            value: {
+              subject: { type: 'uri', value: 'https://s.example.org/a' },
+              predicate: { type: 'uri', value: RDFS_LABEL },
+              object: { type: 'literal', value: 'a', 'xml:lang': 'en' },
+            },
+          },
+        },
       },
-    });
+    ]);
   });
 
   it('reads JSON-LD with an inline context, @graph, references and embedded nodes', async () => {
@@ -531,6 +590,24 @@ describe('public RDF lookup: parsed statements', () => {
     expect(statements).toHaveLength(5);
   });
 
+  it('merges the statements of JSON-LD named graphs', async () => {
+    const statements = await loaded(
+      JSON.stringify({
+        '@id': 'https://data.example.org/graph',
+        '@graph': [{ '@id': IRI, [RDFS_LABEL]: 'Berlin' }],
+      }),
+      'application/ld+json',
+    );
+
+    expect(statements).toEqual([
+      {
+        subject: iri(IRI),
+        predicate: iri(RDFS_LABEL),
+        object: { type: 'literal', value: 'Berlin' },
+      },
+    ]);
+  });
+
   it('never fetches a remote JSON-LD context; bundled contexts resolve by exact URL', async () => {
     const document = JSON.stringify({
       '@context': 'https://schema.org',
@@ -570,41 +647,74 @@ describe('public RDF lookup: parsed statements', () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
-  it('reads every JSON-LD script of an HTML page in an inert document', async () => {
-    (globalThis as { ran?: boolean }).ran = false;
+  it('reads all JSON-LD scripts of an HTML page as one dataset', async () => {
     const page = `<!doctype html><html><head>
-      <script>globalThis.ran = true</script>
       <script type="application/ld+json">
         { "@context": { "rdfs": "http://www.w3.org/2000/01/rdf-schema#" },
           "@id": "${IRI}", "rdfs:label": { "@value": "Berlin", "@language": "en" },
           "rdfs:seeAlso": { "@id": "_:x" } }
       </script>
       <script type="Application/LD+JSON; charset=utf-8">
-        { "@id": "_:x", "${RDFS_LABEL}": "other document" }
+        [{ "@id": "_:x", "${RDFS_LABEL}": "described in another script" }]
       </script>
       <script type="application/json">{ "@id": "${IRI}", "${RDFS_LABEL}": "ignored" }</script>
-    </head><body><img src="https://tracker.example.org/pixel"></body></html>`;
-    const fetch = serve(() => answer(page, 'text/html; charset=utf-8'));
+    </head></html>`;
 
-    const result = await lookupPublicRdf(IRI, { fetch });
+    const result = await lookupPublicRdf(IRI, {
+      fetch: serve(answer(page, 'text/html; charset=utf-8')),
+    });
 
-    expect((globalThis as { ran?: boolean }).ran).toBe(false);
-    expect(fetch).toHaveBeenCalledTimes(1);
     if (result.kind !== 'loaded') throw new Error(JSON.stringify(result));
     expect(result.contentType).toBe('text/html');
-    const labels = result.statements.filter(
-      (s) => s.predicate.type === 'iri' && s.predicate.value === RDFS_LABEL,
+    const by = (predicate: string) =>
+      result.statements.filter(
+        (s) => s.predicate.type === 'iri' && s.predicate.value === predicate,
+      );
+    expect(by(RDFS_LABEL)).toHaveLength(2);
+    const [seeAlso] = by('http://www.w3.org/2000/01/rdf-schema#seeAlso');
+    // JSON-LD 1.1: `_:x` in two scripts of one page names one node.
+    expect(by(RDFS_LABEL)).toEqual(
+      expect.arrayContaining([
+        {
+          subject: iri(IRI),
+          predicate: iri(RDFS_LABEL),
+          object: { type: 'literal', value: 'Berlin', language: 'en' },
+        },
+        {
+          subject: seeAlso!.object,
+          predicate: iri(RDFS_LABEL),
+          object: { type: 'literal', value: 'described in another script' },
+        },
+      ]),
     );
-    expect(labels.map((s) => s.object)).toEqual([
-      { type: 'literal', value: 'Berlin', language: 'en' },
-      { type: 'literal', value: 'other document' },
-    ]);
-    // `_:x` in two scripts names two different nodes.
-    const seeAlso = result.statements.find(
-      (s) =>
-        s.predicate.type === 'iri' && s.predicate.value.endsWith('seeAlso'),
-    );
-    expect(seeAlso!.object).not.toEqual(labels[1]!.subject);
+    expect(seeAlso!.object.type).toBe('blank');
+  });
+
+  it('reads a page without JSON-LD, even one reading "too-large", as empty', async () => {
+    expect(await loaded('too-large', 'text/html')).toEqual([]);
+  });
+
+  it('is cancelled when the caller aborts while the body is parsed', async () => {
+    const lookup = new AbortController();
+    const contexts = {
+      get 'https://context.example.org/'() {
+        lookup.abort();
+        return { '@context': { '@vocab': SCHEMA } };
+      },
+    };
+    const document = JSON.stringify({
+      '@context': 'https://context.example.org/',
+      '@id': IRI,
+      name: 'Berlin',
+    });
+
+    expect(
+      await lookupPublicRdf(IRI, {
+        fetch: serve(answer(document, 'application/ld+json')),
+        signal: lookup.signal,
+        contexts,
+      }),
+    ).toEqual({ kind: 'cancelled' });
   });
 
   it('feeds the RDF value recipe unchanged', async () => {

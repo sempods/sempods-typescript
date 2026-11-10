@@ -15,8 +15,8 @@ SDK import brings a parser along. Copy and adapt it:
   dependency.
 - It imports [`n3`](https://www.npmjs.com/package/n3) and
   [`jsonld`](https://www.npmjs.com/package/jsonld) lazily, on the first lookup
-  that needs them. Neither needs Node polyfills in a browser bundle. Add both
-  to the app, and `@types/n3` and `@types/jsonld` for TypeScript.
+  that needs them. Add both to the app, and `@types/n3` and `@types/jsonld` for
+  TypeScript. They bundle for the browser without Node polyfills.
 
 The statements use the SDK's `SparqlTerm`, so the
 [RDF value recipe](rdf-values.md) shows them like the values of a SPARQL read.
@@ -84,22 +84,26 @@ path:
   loaded before stays as it is, and it does not take the place of the withdrawn
   Pod data. Removing a public source leaves the Pod data alone.
 - **Blank nodes.** A blank node label is local to one lookup. In an HTML page,
-  each JSON-LD script is a document of its own, so `_:x` in two scripts names
-  two nodes.
+  all JSON-LD scripts form one dataset, as JSON-LD 1.1 requires: `_:x` in two
+  scripts of the page names one node.
 
 ## What the lookup sends and accepts
 
 - **No credentials.** The request uses `credentials: 'omit'`,
-  `referrerPolicy: 'no-referrer'` and only an `Accept` header. It sends no
-  cookie, `Authorization` header, Pod token or referrer. The `fetch` option is
-  for tests; never pass a Pod transport there.
+  `referrerPolicy: 'no-referrer'` and sets only an `Accept` header. It sends no
+  cookie, `Authorization` header, Pod token or referrer. The browser still sends
+  the app's `Origin`, and the other site learns the IRI that was looked up. The
+  `fetch` option is for tests; never pass a Pod transport there.
 - **Public addresses only.** The IRI must be `https:` without user name or
-  password. It may not name `localhost` or a `.localhost`, `.local`,
-  `.internal` or `.home.arpa` host, a single-label host such as `intranet`, or
-  a loopback, private, shared, link-local, multicast, reserved or unspecified
-  IPv4 or IPv6 address literal. IPv4-mapped and NAT64 IPv6 forms count as their IPv4
-  address. The numeric forms `URL` normalises, such as `https://2130706433/`,
-  are caught as `127.0.0.1`.
+  password. It may not name `localhost` or a `.localhost`, `.localdomain`,
+  `.local`, `.internal` or `.home.arpa` host, or a single-label host such as
+  `intranet`. Address literals are refused when they are unspecified, loopback,
+  private, shared (`100.64.0.0/10`), link-local, multicast or another special
+  IPv4 range (`192.0.0.0/24`, `198.18.0.0/15`, `240.0.0.0/4`), or unique local
+  or site-local IPv6. An IPv6 literal that embeds an IPv4 address
+  (IPv4-compatible, IPv4-mapped, IPv4-translated, NAT64 or 6to4) counts as
+  that address; local-use NAT64 is refused. The numeric forms `URL`
+  normalises, such as `https://2130706433/`, are caught as `127.0.0.1`.
 - **No redirects.** A redirect fails with `redirect-blocked` before the target
   is requested. When a site redirects, as many Linked Data servers do with
   `303 See Other`, the person can look up the target IRI explicitly.
@@ -120,9 +124,15 @@ The response's `Content-Type` alone chooses the parser:
 | Media type                                | Parser                             |
 | ----------------------------------------- | ---------------------------------- |
 | `text/turtle`, `application/n-triples`    | `n3`                               |
-| `application/n-quads`, `application/trig` | `n3`; named graphs are dropped     |
+| `application/n-quads`, `application/trig` | `n3`                               |
 | `application/ld+json`                     | `jsonld`                           |
 | `text/html`, `application/xhtml+xml`      | every `application/ld+json` script |
+
+The body is read as UTF-8, which the RDF formats require; a `charset`
+parameter is ignored. Graph names are dropped: statements of named graphs,
+including JSON-LD named graphs, join the others, and a triple in several graphs
+is kept once. A JSON-LD body must be an object or an array; a bare string would
+otherwise be loaded as a document URL.
 
 HTML is parsed with `DOMParser`, which builds an inert document: no script
 runs and nothing loads. Other media types, including `application/json`,
@@ -136,8 +146,10 @@ a `subject`, `predicate` and `object` as `SparqlTerm`:
 - A language-tagged literal has its `language` and no datatype.
 - A literal of `xsd:string` has no datatype; any other datatype is kept, with
   its lexical form unchanged.
-- A literal with an RDF 1.2 base direction is an `unsupported` term that keeps
-  `xml:lang` and `its:dir`, so it is not flattened into another term.
+- A literal with a base direction (Turtle's `"…"@ar--rtl`, JSON-LD's
+  `@direction`) and an RDF 1.2 triple term are `unsupported` terms. They keep
+  the term in SPARQL 1.2 JSON form (`its:dir`, or `type: 'triple'`), so it is
+  not flattened into another term.
 
 A failed result names its `reason`:
 
@@ -167,6 +179,9 @@ are `network`. `cancelled` means the caller's `signal` aborted.
 - Focusing a large graph, following references and limiting statements belong
   to the app. The recipe looks up exactly one document per call and caches
   nothing.
+- HTML in another encoding than UTF-8 shows garbled text.
 - The SDK's tests run the recipe with both parsers against fixture answers and
-  `DOMParser` in jsdom. A real browser's CORS and redirect handling and live
-  origins are not covered.
+  `DOMParser` in jsdom. The packed consumer gates type-check it against the
+  installed parsers. That it bundles without Node polyfills and that
+  `DOMParser` runs no script were checked once in Chromium, not by a gate. A
+  real browser's CORS and redirect handling and live origins are not covered.

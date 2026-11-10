@@ -17,6 +17,7 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
+import { examplePackages } from './example-packages.mjs';
 import { chromium } from 'playwright';
 
 /** Menu language names follow the current language (Deutsch/Englisch, German/English). */
@@ -77,17 +78,9 @@ try {
   const tools = JSON.parse(
     await readFile(join(root, 'package.json'), 'utf8'),
   ).devDependencies;
-  // The example's own third-party packages, such as the public RDF recipe's
-  // parsers; the SDK packages come from the tarballs below.
-  const example = JSON.parse(
-    await readFile(join(root, 'examples/todo/package.json'), 'utf8'),
-  );
-  const own = (deps = {}) =>
-    Object.fromEntries(
-      Object.entries(deps).filter(([, spec]) => !spec.startsWith('workspace:')),
-    );
+  const example = await examplePackages(root);
   const dependencies = {
-    ...own(example.dependencies),
+    ...example.dependencies,
     react: tools.react,
     'react-dom': tools['react-dom'],
   };
@@ -107,7 +100,7 @@ try {
       type: 'module',
       dependencies,
       devDependencies: {
-        ...own(example.devDependencies),
+        ...example.devDependencies,
         typescript: tools.typescript,
         '@types/react': tools['@types/react'],
         '@types/react-dom': tools['@types/react-dom'],

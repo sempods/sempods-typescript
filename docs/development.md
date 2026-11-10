@@ -230,12 +230,14 @@ follow a replacement target, and recovery never replays the write.
 The packed customized consumer also unmounts a dirty editor screen, opens the
 same row after remount and checks the retained draft without a prompt or write.
 
-`test:todo` installs packed SDKs, plus the TODO example's own third-party
+`test:todo` installs packed SDKs, plus the TODO example's own registry
 packages (such as the public RDF recipe's parsers), and compiles the actual
-examples. The TODO's standard screen covers EN/DE sign-in, 320px light/dark
-presentation, explicit context choice, creation and guarded management with a retained draft, and the
-full CRUD, conflict/unknown-outcome, guard, keyboard/mobile and second-tab
-checks, plus the shared Node domain/edit path.
+examples; the React consumer of `test:consumers` installs the same packages
+for the shipped examples. The TODO's standard screen covers EN/DE sign-in,
+320px light/dark presentation, explicit context choice, creation and guarded
+management with a retained draft, and the full CRUD, conflict/unknown-outcome,
+guard, keyboard/mobile and second-tab checks, plus the shared Node domain/edit
+path.
 It also enables native BFCache in full Chromium and checks repeated returns,
 sign-in afterwards, saved session/Context restoration and exactly one creation
 after return. The verbatim quickstart from the installed package is bundled and
