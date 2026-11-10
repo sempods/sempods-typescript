@@ -698,8 +698,10 @@ function AccessConnections({
       ) ?? state.connections.find((entry) => entry.podUrl === target);
     if (existing) {
       if (existing.session.kind === 'restoring') return;
-      // Already read without a token: opening it again only selects it.
-      if (existing.reading === 'anonymous') {
+      // Where sign-in is not required the address only opens the Pod: a
+      // known connection, signed in or not, is selected, never signed in
+      // again. Signing in stays with its own controls.
+      if (state.signIn !== 'required') {
         await app.selectConnection(existing.id);
         return;
       }

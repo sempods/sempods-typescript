@@ -548,3 +548,38 @@ it.each(['unmount', 'activity'] as const)(
     expect(title.value).toBe('Unsaved task');
   },
 );
+
+it('opens a signed-in Pod by its address without signing in again', async () => {
+  const f = start({
+    signIn: 'optional',
+    allowedPods: [pod, 'https://pod.example/bob'],
+  });
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  await runtime.connect('https://pod.example/bob');
+  const navigations = f.navigate.mock.calls.length;
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Recipes" open />
+    </SempodsProvider>,
+  );
+  // Management's Pod chooser opens the signed-in Pod again.
+  const chooser = (await screen.findByLabelText(
+    'Pod address',
+  )) as HTMLSelectElement;
+  fireEvent.change(chooser, { target: { value: pod } });
+  const open = screen.getByRole('button', {
+    name: 'Open',
+  }) as HTMLButtonElement;
+  await act(async () => open.click());
+  // The action has ended once the controls are enabled again.
+  await waitFor(() => expect(open.disabled).toBe(false));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  expect(runtime.getSnapshot().find((c) => c.id === id)).toMatchObject({
+    session: { kind: 'active' },
+    reading: 'session',
+  });
+});
