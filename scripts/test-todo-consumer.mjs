@@ -77,7 +77,20 @@ try {
   const tools = JSON.parse(
     await readFile(join(root, 'package.json'), 'utf8'),
   ).devDependencies;
-  const dependencies = { react: tools.react, 'react-dom': tools['react-dom'] };
+  // The example's own third-party packages, such as the public RDF recipe's
+  // parsers; the SDK packages come from the tarballs below.
+  const example = JSON.parse(
+    await readFile(join(root, 'examples/todo/package.json'), 'utf8'),
+  );
+  const own = (deps = {}) =>
+    Object.fromEntries(
+      Object.entries(deps).filter(([, spec]) => !spec.startsWith('workspace:')),
+    );
+  const dependencies = {
+    ...own(example.dependencies),
+    react: tools.react,
+    'react-dom': tools['react-dom'],
+  };
   for (const name of await readdir(temp)) {
     if (!name.endsWith('.tgz')) continue;
     const manifest = JSON.parse(
@@ -94,6 +107,7 @@ try {
       type: 'module',
       dependencies,
       devDependencies: {
+        ...own(example.devDependencies),
         typescript: tools.typescript,
         '@types/react': tools['@types/react'],
         '@types/react-dom': tools['@types/react-dom'],
