@@ -623,9 +623,11 @@ export function useContextEditor<D>(
   // The definition as the editor store keys it: kept work of another
   // definition is not this editor's.
   const structure = definitionKey(definition);
+  const editorKey = structure ?? 'custom';
+  const editorDefinition = canonicalOf(definition, structure);
   const shape = useCommitted({
-    key: structure ?? 'custom',
-    definition: canonicalOf(definition, structure),
+    key: editorKey,
+    definition: editorDefinition,
   });
   const [state, setState] = useState<ContextLaneState | null>(null);
   // The latest lane state, ahead of rendering: open() and close() chained from
@@ -692,6 +694,28 @@ export function useContextEditor<D>(
     live &&
     catalogue?.kind === 'ready' &&
     catalogueLists(catalogue, lane!.target.context);
+  // Read while rendering, so its editor settling its last work (a save that
+  // answers after the session ended) runs the effect below again.
+  const stale = Boolean(
+    lane &&
+    bound &&
+    !boundCurrent &&
+    ready &&
+    !editorsOf(app).working(
+      bound,
+      lane.target.subject,
+      'connection',
+      editorKey,
+      editorDefinition,
+    ) &&
+    !editorsOf(app).kept(
+      lane.target.context,
+      lane.target.subject,
+      'connection',
+      editorKey,
+      editorDefinition,
+    ),
+  );
   useEffect(() => {
     if (!lane) return;
     if (lane.connection !== activeId) {
@@ -703,25 +727,7 @@ export function useContextEditor<D>(
       // left, or discarded) and that the controller does not keep for its
       // work follows the runtime's current view: a fresh editor that reads
       // with the access there is now. Work keeps the old binding.
-      if (
-        bound &&
-        !boundCurrent &&
-        ready &&
-        !editorsOf(app).working(
-          bound,
-          lane.target.subject,
-          'connection',
-          shape.current.key,
-          shape.current.definition,
-        ) &&
-        !editorsOf(app).kept(
-          lane.target.context,
-          lane.target.subject,
-          'connection',
-          shape.current.key,
-          shape.current.definition,
-        )
-      ) {
+      if (stale) {
         try {
           const view = app.runtime.bindContext(
             lane.connection,
@@ -776,7 +782,7 @@ export function useContextEditor<D>(
     activeId,
     binding,
     bound,
-    boundCurrent,
+    stale,
     activated,
     readable,
     ready,

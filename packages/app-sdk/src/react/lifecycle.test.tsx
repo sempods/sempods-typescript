@@ -563,3 +563,57 @@ it('starts a hidden creation draft afresh after a new authorization that came an
   await act(async () => {});
   expect(api.draft.title).toBe('');
 });
+
+it('follows the current view once a save confirmed after the session ended settles the last work', async () => {
+  const f = await signedIn('optional');
+  const response = deferred<Response>();
+  let writes = 0;
+  f.setResource(async (_url, init) => {
+    if ((init?.method ?? 'GET') === 'GET')
+      return Response.json(node, { headers: { etag: '"v1"' } });
+    writes++;
+    return response.promise;
+  });
+  let context!: ContextEditor<{ title: string }>;
+  function Form() {
+    context = useContextEditor(definition);
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Form />
+    </SempodsProvider>,
+  );
+  await act(async () => {
+    expect(await context.open({ context: work, subject: 'urn:item' })).toBe(
+      true,
+    );
+  });
+  await waitFor(() =>
+    expect(context.editor?.state.draft?.title).toBe('Original'),
+  );
+  const before = context.editor;
+  act(() => context.editor!.change({ title: 'Saved late' }));
+  let saving!: Promise<unknown>;
+  act(() => {
+    saving = context.editor!.save();
+  });
+  await waitFor(() => expect(writes).toBe(1));
+  await act(async () => {
+    await renewal(f, f.runtime, f.id, 'refused');
+  });
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]!.catalogue.kind).toBe('ready'),
+  );
+  expect(context.editor).toBe(before);
+  // The save is confirmed: no work is left on the old binding.
+  await act(async () => {
+    response.resolve(new Response(null, { status: 204 }));
+    await saving;
+  });
+  await waitFor(() => expect(context.editor).not.toBe(before));
+  await waitFor(() =>
+    expect(context.editor?.state.draft?.title).toBe('Original'),
+  );
+  expect(context.phase).toBe('ready');
+});
