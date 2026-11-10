@@ -323,6 +323,29 @@ screen can show needs a protocol decision first. Until then,
 [local testing](local-testing.md#test-an-app-that-only-reads) explains how to
 keep an app read-only and check it.
 
+## Captured work outlives access, not authorization
+
+Drafts, pending writes and unresolved outcomes of resource editors,
+creations and row updates belong to the app controller, not to a component.
+Each is bound to the view it was captured with: its origin and its only
+write authority. One rule decides how long it lasts, for selected and
+explicit Contexts alike: while that view is current; after that, only while
+it still holds work and its connection lost access without a new
+authorization (the session ended, it is restoring, or it reads without a
+token). Showing, hiding or unmounting a screen plays no part. Work kept that
+way is found again by its target (Pod, Context, subject) through the view
+that replaced its own, or without one; it is never written again without
+access. A new session, another active connection or disposal ends it, so
+earlier work is never handed to a new authorization. A sent write turns from
+pending to unresolved in one step, so its late answer is always kept.
+
+_Why:_ runtime handles are rightly replaced on every authorization change,
+but they also served as the identity of stored work, so each store and hook
+had its own rule for finding it again, and several combinations of an
+ended session and a hidden or unmounted screen lost work (#274). One
+controller-owned rule keeps the promise of same-target access loss without
+per-hook special cases.
+
 ## Public data without a token, sign-in only when the app needs it
 
 The runtime option `signIn: 'required' | 'optional' | 'none'` declares whether
@@ -335,9 +358,10 @@ There is no anonymous session state: such a connection is `signed-out`, or
 `Connection.reading` (`session`, `anonymous` or `null`). Reading without a
 token gets a lifetime and generation of its own, so no request refused with a
 token is sent again without one, and no handle survives the change. The app
-controller treats the switch as same-target access loss: while a guard holds
-a draft or an unresolved write, the selected view stays (without access) until
-that work is resolved or discarded. Writes
+controller treats the switch as same-target access loss
+([captured work](#captured-work-outlives-access-not-authorization)): while a
+guard holds a draft or an unresolved write, the selected view stays (without
+access) until that work is resolved or discarded. Writes
 follow the anonymous catalogue, which lists nothing as writable. `none` uses
 no session store or lock and needs one default Pod. Under `optional`, signing
 in adds `public-read` to the optional scopes, and required scopes are a

@@ -139,6 +139,28 @@ seconds, discovery counts as unreachable:
   ([custom layouts](react-authoring.md#custom-layouts-without-appaccess)).
   `AppAccess` keeps them enabled too.
 
+### Captured work after a session ends
+
+**Drafts and unresolved writes now outlive an ended session also in explicit
+Contexts and while their screen is away**
+([captured work](decisions.md#captured-work-outlives-access-not-authorization),
+#274). Resource editors (`useContextEditor`), creations (`useCreation` with
+`context`) and row updates (`useContextUpdate`) keep their work when the
+session ends or the connection reads without a token, also when the screen
+was hidden or unmounted, and find it again; before, it could be lost.
+
+- **Opening the same row again returns to its work.** After a session ended,
+  `useContextEditor().open()` for the row it shows no longer asks to leave
+  its draft and starts no fresh editor: it keeps the draft or review. Close
+  it (`close()`) and discard to start fresh. End-to-end tests that expected a
+  leave prompt there expect none now.
+- **A new sign-in starts fresh.** Work captured before is never handed to a
+  new authorization, as before, and a draft discarded through a leave
+  confirmation is gone: a mounted `useContextEditor` without work follows
+  the current view with a fresh editor, instead of keeping the discarded
+  text and asking about it again.
+- No public types change.
+
 ### Apps without sign-in
 
 **Apps can read public data without a session**

@@ -805,7 +805,7 @@ async function endSession(
 }
 
 it.each(['refused', 'subject-change'] as const)(
-  'keeps the editor and its draft when a %s renewal ends the session, and reopens the row in a fresh lane',
+  'keeps the editor and its draft when a %s renewal ends the session, also when the row is opened again',
   async (mode) => {
     const f = await returned();
     notes(f);
@@ -818,19 +818,21 @@ it.each(['refused', 'subject-change'] as const)(
     expect(phase()).toBe('ready');
     expect(title()).toBe(input);
     expect(input.value).toBe('Unsaved');
-    // The binding can never become valid again: reopening the same row starts a
-    // fresh lane, and the leave policy asks about the old draft first.
+    // The controller keeps the draft for this row (#274): opening the same row
+    // again returns to it, without asking.
     fireEvent.click(screen.getByText('Edit urn:a in work'));
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Keep editing' }),
-    );
-    expect(title().value).toBe('Unsaved');
-    // The declined open settles before the person clicks again.
     await act(async () => {});
-    fireEvent.click(screen.getByText('Edit urn:a in work'));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(title()).toBe(input);
+    expect(input.value).toBe('Unsaved');
+    // Closing asks about the draft; once discarded, opening the row starts a
+    // fresh lane, which waits for a session.
+    fireEvent.click(screen.getByText('Close editor'));
     fireEvent.click(
       await screen.findByRole('button', { name: 'Discard and continue' }),
     );
+    await waitFor(() => expect(phase()).toBe('idle'));
+    fireEvent.click(screen.getByText('Edit urn:a in work'));
     await waitFor(() => expect(phase()).toBe('loading'));
     expect(screen.queryByLabelText('Note title')).toBeNull();
   },
@@ -850,12 +852,10 @@ it('keeps an unconfirmed-write review when a renewal for another person ends the
   await endSession(f, 'subject-change');
   expect(phase()).toBe('ready');
   expect(screen.getByText(/unconfirmed/i)).toBeTruthy();
-  // Reopening names the unconfirmed write, and keeping it keeps the review.
+  // Opening the row again returns to the kept review (#274), without asking.
   fireEvent.click(screen.getByText('Edit urn:a in work'));
-  const dialog = await screen.findByRole('alertdialog');
-  expect(dialog.textContent).toMatch(/write is still unconfirmed/);
-  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
   await act(async () => {});
+  expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(phase()).toBe('ready');
   expect(screen.getByText(/unconfirmed/i)).toBeTruthy();
   expect(writes).toHaveLength(1);

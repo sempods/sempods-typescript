@@ -62,6 +62,20 @@ store for SDK drafts or write recovery.
 | Guarded row, Context or connection change                            | Ask about the work being left; pending writes block relevant changes. `TargetScreen` resets local state for a new target. Explicit-Context flows have their own [scope](#selection-and-draft-lifetime)                         |
 | Dispose/replace the host, reload or leave the page                   | In-memory drafts and recovery end. Saved sessions can restore. The browser asks first while unsaved work is left ([leave prompt](#selection-and-draft-lifetime)); it is not the SDK's guarded navigation                       |
 
+**Session end is same-target access loss, also while a screen is away.** A
+draft, pending write or unresolved outcome is bound to the view it was
+captured with, which stays its only write authority. When a session ends, or
+the connection reads without a token (`signIn: 'optional'`), the controller
+keeps that work for its target, including resource editors and creations in
+an explicit Context and `useContextUpdate` rows, also when their screen is
+hidden or unmounted. Showing the screen again, opening the same subject again
+or `for({ context, iri })` finds it again. Nothing of it is written again
+without access, and a new sign-in starts fresh: earlier work is never handed
+to a new authorization. The work ends when it is saved, checked and
+acknowledged, or discarded (a leave confirmation or `close()`); a
+`useContextEditor` without work then follows the current view with a fresh
+editor.
+
 Hidden Activity retains local state but disconnects effects, including an
 unsent creation form's draft guard. Keep that form outside the hidden boundary
 when navigation elsewhere must still ask about its draft. Controller-owned
@@ -1202,10 +1216,10 @@ const runtime = createBrowserRuntime({
   `signed-out` prompt asks instead of blocking. That is same-target access
   loss: while a draft or a pending or unconfirmed write remains, the screen
   keeps its earlier view (now without access) and the work stays; the view
-  that reads without a token follows once it is resolved or discarded. A
-  `useCreation` in an explicit Context keeps its binding and its pending or
-  unconfirmed creation the same way, also while the form is hidden or
-  unmounted, and its draft stays editable. Without a preset, the gate's
+  that reads without a token follows once it is resolved or discarded. Work
+  in explicit Contexts follows the same rule
+  ([state ownership and lifetime](#state-ownership-and-lifetime)). Without a
+  preset, the gate's
   address field **Open**s a Pod (`controls.open`) instead of signing in.
 - **`none`**: no prompts, no sign-in or sign-out buttons, no gate for storage.
 - A Pod without public Contexts shows `controls.noPublicData` with sign-in.

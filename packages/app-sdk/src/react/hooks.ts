@@ -56,12 +56,11 @@ import {
 } from '../authoring/lane.js';
 import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
+import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
 import {
-  lanesOf,
-  retainView,
-  type LaneKind,
-  type LaneScope,
-} from '../authoring/lanes.js';
+  sameTarget as sameViewTarget,
+  sessionsOf,
+} from '../authoring/retention.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 import {
   creationAddress,
@@ -594,8 +593,15 @@ const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
  *   target is never revived; close it, or open the row again.
  *
  * Once an editor exists, losing read access, a failed catalogue refresh or the
- * session ending keep it with its draft and any unconfirmed-write review; it is
- * never attached to another Context, connection, subject or generation. The
+ * session ending keep it with its draft and any unconfirmed-write review, also
+ * while this hook is hidden or unmounted: the controller keeps that work
+ * (`keepsWork`), and opening the same row again, also after a remount,
+ * returns to it without asking. It is never attached to another Context,
+ * connection, subject or generation, and a new sign-in starts fresh. With
+ * no work left, or its work discarded through a leave confirmation, an
+ * editor whose binding lost its authorization follows the current view: a
+ * fresh editor with the access there is now (none without a session under
+ * `signIn: 'required'`). The
  * editor is a `connection`-scoped leave guard: selecting another Context
  * neither asks about it nor discards it, while `open` with another target,
  * `close` and connection actions ask first, and its pending write blocks them.
@@ -614,6 +620,15 @@ export function useContextEditor<D>(
   definition: EditDefinition<D>,
 ): ContextEditor<D> {
   const app = useController();
+  // The definition as the editor store keys it: kept work of another
+  // definition is not this editor's.
+  const structure = definitionKey(definition);
+  const editorKey = structure ?? 'custom';
+  const editorDefinition = canonicalOf(definition, structure);
+  const shape = useCommitted({
+    key: editorKey,
+    definition: editorDefinition,
+  });
   const [state, setState] = useState<ContextLaneState | null>(null);
   // The latest lane state, ahead of rendering: open() and close() chained from
   // one render (`await open(); await close()`) act on what is current.
@@ -657,6 +672,13 @@ export function useContextEditor<D>(
   );
   const binding = state?.binding ?? null;
   const bound = binding === 'refused' ? null : binding;
+  // Whether the binding still has its authorization (a session that ended or
+  // a new one makes it stale).
+  const boundCurrent = useSyncExternalStore(
+    bound?.subscribe ?? noopSubscribe,
+    () => bound?.getSnapshot().current ?? true,
+    () => bound?.getSnapshot().current ?? true,
+  );
   const activated = state?.activated ?? false;
   const live = liveLane(state, activeId);
   // Only the originating connection may demand discovery for this target, and
@@ -672,6 +694,28 @@ export function useContextEditor<D>(
     live &&
     catalogue?.kind === 'ready' &&
     catalogueLists(catalogue, lane!.target.context);
+  // Read while rendering, so its editor settling its last work (a save that
+  // answers after the session ended) runs the effect below again.
+  const stale = Boolean(
+    lane &&
+    bound &&
+    !boundCurrent &&
+    ready &&
+    !editorsOf(app).working(
+      bound,
+      lane.target.subject,
+      'connection',
+      editorKey,
+      editorDefinition,
+    ) &&
+    !editorsOf(app).kept(
+      lane.target.context,
+      lane.target.subject,
+      'connection',
+      editorKey,
+      editorDefinition,
+    ),
+  );
   useEffect(() => {
     if (!lane) return;
     if (lane.connection !== activeId) {
@@ -679,8 +723,41 @@ export function useContextEditor<D>(
       return;
     }
     if (binding) {
+      // A binding without its authorization whose editor holds no work (none
+      // left, or discarded) and that the controller does not keep for its
+      // work follows the runtime's current view: a fresh editor that reads
+      // with the access there is now. Work keeps the old binding.
+      if (stale) {
+        try {
+          const view = app.runtime.bindContext(
+            lane.connection,
+            lane.target.context,
+          );
+          if (view !== bound)
+            update(lane, { binding: view, activated: readable });
+        } catch (error) {
+          if (!(error instanceof RuntimeError)) throw error;
+          if (error.problem === 'configuration')
+            update(lane, { binding: 'refused' });
+          else if (error.problem !== 'disconnected') throw error;
+        }
+        return;
+      }
       // Readability can arrive after the binding, for example after "Check access".
       if (bound && !activated && readable) update(lane, { activated: true });
+      return;
+    }
+    // An editor the controller keeps for its work through access loss is
+    // this row's again, through its own view (`keepsWork`).
+    const kept = editorsOf(app).kept(
+      lane.target.context,
+      lane.target.subject,
+      'connection',
+      shape.current.key,
+      shape.current.definition,
+    );
+    if (kept) {
+      update(lane, { binding: kept, activated: true });
       return;
     }
     if (!ready) return;
@@ -699,7 +776,19 @@ export function useContextEditor<D>(
         update(lane, { binding: 'refused' });
       else if (error.problem !== 'disconnected') throw error;
     }
-  }, [app, lane, activeId, binding, bound, activated, readable, ready, update]);
+  }, [
+    app,
+    lane,
+    activeId,
+    binding,
+    bound,
+    stale,
+    activated,
+    readable,
+    ready,
+    update,
+    shape,
+  ]);
   const editor = useBoundEditor(
     live && activated ? bound : null,
     live && activated ? lane!.target.subject : null,
@@ -734,8 +823,21 @@ export function useContextEditor<D>(
         liveLane(now, app.getSnapshot().activeId) &&
         sameTarget(now!.lane.target, target) &&
         // A binding that can never become valid again (session end, another
-        // subject) is replaced by a fresh lane, after the leave policy asks.
-        !(binding && binding !== 'refused' && !binding.getSnapshot().current)
+        // subject) is replaced by a fresh lane, after the leave policy asks,
+        // unless the controller keeps its editor for its work (`keepsWork`):
+        // opening the same row again returns to that work.
+        !(
+          binding &&
+          binding !== 'refused' &&
+          !binding.getSnapshot().current &&
+          !editorsOf(app).kept(
+            target.context,
+            target.subject,
+            'connection',
+            shape.current.key,
+            shape.current.definition,
+          )
+        )
       )
         return Promise.resolve(true);
       // Repeated before a re-render (a double click): share the first call.
@@ -772,7 +874,7 @@ export function useContextEditor<D>(
       opening.current = { target, result };
       return result;
     },
-    [app, apply],
+    [app, apply, shape],
   );
   const close = useCallback(() => {
     const now = latest.current;
@@ -1034,20 +1136,15 @@ export type FieldUpdate<D> = ReturnType<typeof useFieldUpdate<D>>;
  * `runtime.bindContext`. A configuration refusal (not a Context of this Pod,
  * or not the preset's) is reported; while signed out it waits. It demands
  * catalogue discovery, so its write access is known, but no selection.
- * While `hold` (unresolved work on it), a session that ended under
- * `signIn: 'optional'` is same-target access loss: the binding that lost
- * access stays, with its creation lanes (`retainView`), and the binding
- * that reads without a token follows once that work is resolved or
- * discarded. A new authorization still replaces it.
+ * It always follows the runtime's current view; work captured on an earlier
+ * one stays with that view in the controller (`keepsWork`).
  */
-function useExplicitView(context: string | undefined, hold = false) {
+function useExplicitView(context: string | undefined) {
   const app = useController();
-  const { activeId, ready, anonymous } = useAppFacts(
+  const { activeId, ready } = useAppFacts(
     (s) => ({
       activeId: s.activeId,
       ready: startupSettled(s) && s.pod !== null,
-      anonymous:
-        s.connections.find((c) => c.id === s.activeId)?.reading === 'anonymous',
     }),
     shallowEqual,
   );
@@ -1066,15 +1163,8 @@ function useExplicitView(context: string | undefined, hold = false) {
     () => bound?.getSnapshot().current ?? true,
     () => bound?.getSnapshot().current ?? true,
   );
-  // Registered while there is work, so it is in place when the session ends.
-  useLayoutEffect(
-    () => (hold && bound ? retainView(app, bound) : undefined),
-    [app, hold, bound],
-  );
-  const kept = hold && anonymous;
   useEffect(() => {
-    if (!key || !ready || current === 'refused' || (current && (live || kept)))
-      return;
+    if (!key || !ready || current === 'refused' || (current && live)) return;
     try {
       const view = app.runtime.bindContext(activeId!, context!);
       if (view !== current) setBinding({ key, view });
@@ -1084,7 +1174,7 @@ function useExplicitView(context: string | undefined, hold = false) {
         setBinding({ key, view: 'refused' });
       else if (error.problem !== 'disconnected') throw error;
     }
-  }, [app, key, ready, current, live, kept, activeId, context]);
+  }, [app, key, ready, current, live, activeId, context]);
   useContextDiscovery(current !== null && current !== 'refused');
   return {
     view: current === 'refused' ? null : current,
@@ -1131,38 +1221,54 @@ export function useCreation<D extends object>(
     readonly id?: string;
   },
 ) {
-  // Whether this form holds work (a draft, or an open creation): its explicit
-  // binding then stays through access loss, as the selected view does.
-  const [holding, setHolding] = useState(false);
-  const explicit = useExplicitView(options.context, holding);
+  const explicit = useExplicitView(options.context);
   const selected = useView();
   const fixed = options.context !== undefined;
+  // How the active connection reads, and how many sessions it began: a draft
+  // belongs to the authorization it was written under.
+  const { reading, activeId } = useAppFacts(
+    (s) => ({
+      reading: s.connections.find((c) => c.id === s.activeId)?.reading ?? null,
+      activeId: s.activeId,
+    }),
+    shallowEqual,
+  );
   const { key: shape } = useDefinition(definition, 'useCreation');
   // The address mode, address, form name and definition own the generation.
   // Distinct tuples cannot collide; old commands never follow a changed IRI.
   const address = creationAddress(options);
   const key = JSON.stringify([...address, options.id ?? '', shape]);
-  // A creation of this form name captured before the session ended keeps
-  // its explicit view and lane (`LaneGroup.holds`), also while no form was
-  // mounted: a form shown again returns to it until it is resolved.
+  // The controller owns the creation lane of this form name, with the
+  // captured creation and its recovery: every form of the name (by default all
+  // forms of that address), also one hidden, shown again or remounted, shows
+  // the same open creation and none sends it afresh. An explicit Context stays
+  // through row changes and Context selection.
+  // Without a current view (a session that ended under `signIn: 'required'`),
+  // a creation kept for its work is found through its own view.
   const app = useController();
-  const channel = lanesOf(app).channel(`forms ${key}`, 'explicit');
+  const lanes = lanesOf(app);
+  const formChannel = lanes.channel(`forms ${key}`, 'explicit');
   useSyncExternalStore(
-    channel.subscribe,
-    channel.getVersion,
-    channel.getVersion,
+    fixed ? formChannel.subscribe : noopSubscribe,
+    formChannel.getVersion,
+    formChannel.getVersion,
   );
-  const kept = fixed
-    ? channel
-        .held()
-        .find(
-          (g) =>
-            g.view !== explicit.view &&
-            g.view.contextIri === options.context &&
-            !g.view.getSnapshot().current,
-        )?.view
-    : undefined;
-  const view = fixed ? (kept ?? explicit.view) : selected;
+  const candidate = fixed
+    ? (explicit.view ??
+      lanes.kept(`forms ${key}`, 'explicit', options.context!) ??
+      null)
+    : selected;
+  const { group, shown } = useLaneGroup(
+    candidate,
+    `forms ${key}`,
+    definition,
+    fixed ? 'explicit' : 'target',
+    CreationLane<D>,
+  );
+  // An explicit target is the group's own view: one the controller keeps for
+  // its work through access loss (`keepsWork`) stays this form's target, with
+  // its write access (none), until that work is resolved.
+  const view = fixed ? (group?.view ?? null) : selected;
   const access = useWorkflowAccess();
   // An explicit Context has its own write access.
   const explicitWrite = useSyncExternalStore(
@@ -1171,18 +1277,6 @@ export function useCreation<D extends object>(
     () => (fixed ? (view?.getSnapshot().write ?? false) : false),
   );
   const writable = fixed ? explicitWrite : access.write;
-  // The controller owns the creation lane of this form name, with the
-  // captured creation and its recovery: every form of the name (by default all
-  // forms of that address), also one hidden, shown again or remounted, shows
-  // the same open creation and none sends it afresh. An explicit Context stays
-  // through row changes and Context selection.
-  const { group, shown } = useLaneGroup(
-    view,
-    `forms ${key}`,
-    definition,
-    fixed ? 'explicit' : 'target',
-    CreationLane<D>,
-  );
   const lane = group?.lanes.get('form') ?? null;
   // Commands look the lane up live: a create in the same event may have just
   // started it.
@@ -1191,22 +1285,46 @@ export function useCreation<D extends object>(
   const initial = useCommitted(options.initial);
   const copy = (draft: D) => Object.freeze({ ...draft });
   // This form's own draft and the creation it last sent from it, if any.
+  const sessions = sessionsOf(app)(activeId);
   const [state, setState] = useState(() => ({
     view,
     key,
     draft: copy(options.initial),
     sent: null as Captured<D> | null,
+    sessions,
   }));
   // The latest own state, ahead of rendering: a batch may call `change` and
   // `create` again before the next render.
   const current = useRef(state);
   const replace = (draft: D, sent: Captured<D> | null = null) => {
-    const next = { view, key, draft, sent };
+    const next = { view, key, draft, sent, sessions: current.current.sessions };
     current.current = next;
     setState(next);
   };
-  if (state.view !== view || state.key !== key) {
-    setState({ view, key, draft: copy(options.initial), sent: null });
+  // Same-target access loss (a session that ended, without a new
+  // authorization) moves this form's own draft to the view that replaced its
+  // own, also while the form was hidden; a new target or authorization starts
+  // it afresh, also one that came and went while the form was hidden. Write
+  // access follows the new view.
+  const carried =
+    fixed &&
+    state.key === key &&
+    state.view !== null &&
+    view !== null &&
+    state.view !== view &&
+    sameViewTarget(state.view, view) &&
+    !state.view.getSnapshot().current &&
+    reading !== 'session' &&
+    state.sessions === sessions;
+  if (carried) setState({ ...state, view });
+  else if (state.view !== view || state.key !== key) {
+    setState({
+      view,
+      key,
+      draft: copy(options.initial),
+      sent: null,
+      sessions,
+    });
   }
   const resetWarning = useRef(false);
   useInsertionEffect(() => {
@@ -1250,8 +1368,6 @@ export function useCreation<D extends object>(
   // Pending, unresolved or held for an explicit retry.
   const locked = (of: CreationLane<D> | null | undefined) =>
     Boolean(of?.outstanding());
-  const unresolved = dirty || locked(lane);
-  useLayoutEffect(() => setHolding(unresolved), [unresolved]);
   const valid = (value: D) => {
     try {
       return definition.valid?.(value) ?? true;

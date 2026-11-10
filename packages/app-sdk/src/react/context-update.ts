@@ -127,7 +127,12 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   const target = (context: string): Target<D> => {
     let found = contexts.get(context);
     if (found) return found;
-    const view = bindOrRefuse(app, activeId, context);
+    // Without a current view (a session that ended), writes kept for their
+    // recovery are found through their own view (`keepsWork`).
+    const view =
+      bindOrRefuse(app, activeId, context) ??
+      store.kept(name, 'explicit', context) ??
+      null;
     const bound = view && view !== 'refused' ? view : null;
     const problem = contextProblem(catalogue, context, view === 'refused');
     found = {
