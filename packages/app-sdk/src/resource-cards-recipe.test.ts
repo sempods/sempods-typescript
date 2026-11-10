@@ -481,6 +481,74 @@ describe('cards across sources', () => {
     ]);
   });
 
+  it("groups direct values by the card's rule only", async () => {
+    const photo = 'urn:v:photo';
+    const rules: readonly CardRule[] = [
+      { id: 'photos', types: ['urn:v:Album'], images: [[[photo]]], dates: [] },
+      // Unrelated to an album: it uses photo as a variant predicate.
+      {
+        id: 'other',
+        types: ['urn:v:Other'],
+        images: [[['urn:v:part'], [photo]]],
+        dates: [],
+      },
+    ];
+    const found = sourceFacts(
+      await select([
+        [iri(ada), RDF_TYPE, iri('urn:v:Album'), ctx(alice, 'a')],
+        ...[1, 2, 3, 4].map(
+          (n) =>
+            [
+              iri(ada),
+              photo,
+              iri(`https://img.example/${n}.jpg`),
+              ctx(alice, 'a'),
+            ] as const,
+        ),
+      ]),
+      ada,
+      alice,
+      rules,
+    );
+    const card = resourceCards([ada], [found], rules).get(ada)!;
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([
+      ['https://img.example/1.jpg'],
+      ['https://img.example/2.jpg'],
+      ['https://img.example/3.jpg'],
+      ['https://img.example/4.jpg'],
+    ]);
+  });
+
+  it('shows an image resource as one picture, thumbnail first', async () => {
+    const card = resourceCards(
+      [ada],
+      [
+        await facts(ada, alice, [
+          [iri(ada), RDF_TYPE, iri(`${S}ImageObject`), ctx(alice, 'a')],
+          [
+            iri(ada),
+            `${S}contentUrl`,
+            iri('https://img.example/full.jpg'),
+            ctx(alice, 'a'),
+          ],
+          [
+            iri(ada),
+            `${S}thumbnailUrl`,
+            iri('https://img.example/s.jpg'),
+            ctx(alice, 'a'),
+          ],
+        ]),
+      ],
+      exampleRules,
+    ).get(ada)!;
+    expect(card.rule).toBe('image');
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([['https://img.example/s.jpg', 'https://img.example/full.jpg']]);
+  });
+
   it('merges pictures that a shared address connects, before the limit', async () => {
     const node = (name: string) => `https://people.example/ada/${name}`;
     const rows = [

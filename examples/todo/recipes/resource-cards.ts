@@ -30,6 +30,11 @@ export interface CardRule {
   readonly images: readonly PropertyPath[];
   /** Date predicates, the preferred first. */
   readonly dates: readonly string[];
+  /**
+   * The resource is itself one picture, such as an `ImageObject`: the values
+   * of its one-step paths are variants of it. Otherwise each is a picture.
+   */
+  readonly isImage?: boolean;
 }
 
 const imageLinks = [...schema('image'), `${FOAF}img`, `${FOAF}depiction`];
@@ -59,6 +64,7 @@ export const exampleRules: readonly CardRule[] = [
     types: schema('ImageObject'),
     images: [[imageVariants]],
     dates: [],
+    isImage: true,
   },
   { id: 'resource', types: [], images: pictures, dates: [] },
 ];
@@ -149,9 +155,6 @@ function declared(rules: readonly CardRule[], aliases: readonly string[]) {
       ...rules.flatMap((rule) => rule.dates),
     ]),
     pairs: new Set(pairs),
-    variants: new Set(
-      paths.flatMap((path) => (path.length === 2 ? path[1] : [])),
-    ),
   };
 }
 
@@ -242,7 +245,7 @@ export function sourceFacts(
   rules: readonly CardRule[],
   aliases: readonly string[] = exampleAliases,
 ): SourceFacts {
-  const { direct, variants } = declared(rules, aliases);
+  const { direct } = declared(rules, aliases);
   const read = readId(result);
   const aliasSet = new Set(aliases);
   const dateSet = new Set(rules.flatMap((rule) => rule.dates));
@@ -316,11 +319,9 @@ export function sourceFacts(
       )
     ) {
       if (o.type === 'blank') continue; // A blank node is no address.
-      // The root's own variants are variants of the root as one picture.
       image(
         {
           predicate: p,
-          ...(variants.has(p) ? { node: root } : {}),
           ...(o.type === 'iri' ? { target: o.value } : {}),
           evidence: [evidence],
         },
@@ -490,16 +491,19 @@ function imagesOf(
       );
       if (path < 0) return [];
       const steps = rule.images[path]!;
+      // Only the card's rule says whether direct values are one picture.
+      const node =
+        steps.length === 1 && rule.isImage ? 'the resource itself' : match.node;
       const first = steps[0].indexOf(match.link ?? match.predicate);
       // Variant rank: the declared order of a variant predicate. A direct
       // address that is no variant of a node comes after every variant.
       const rank =
         steps.length === 2
           ? steps[1].indexOf(match.predicate)
-          : match.node !== undefined
+          : node !== undefined
             ? steps[0].indexOf(match.predicate)
             : Number.MAX_SAFE_INTEGER;
-      return [{ ...match, path, first, rank, index }];
+      return [{ ...match, node, path, first, rank, index }];
     });
   // A node this rule describes through a two-step path is no address itself.
   const described = new Set(

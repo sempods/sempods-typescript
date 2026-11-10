@@ -97,12 +97,16 @@ export const exampleRules: readonly CardRule[] = [
     types: schema('ImageObject'),
     images: [[imageVariants]],
     dates: [],
+    isImage: true,
   },
   { id: 'resource', types: [], images: pictures, dates: [] },
 ];
 ```
 
-An empty `types` list matches any resource, so that rule comes last.
+An empty `types` list matches any resource, so that rule comes last. `isImage`
+says that the resource is itself one picture, as an `ImageObject` is: its
+direct values are variants of that picture. Without it, each direct value is a
+picture of its own. Only the card's rule decides this, never another rule.
 
 A path has one or two steps, and each step lists alternative predicates:
 
