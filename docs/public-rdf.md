@@ -135,7 +135,10 @@ is kept once. A JSON-LD body must be an object or an array; a bare string would
 otherwise be loaded as a document URL.
 
 HTML is parsed with `DOMParser`, which builds an inert document: no script
-runs and nothing loads. Other media types, including `application/json`,
+runs and nothing loads. `application/xhtml+xml` is parsed as XML, so CDATA
+sections and character references read as XML defines them, and malformed XML
+fails with `parse-failed`. Relative IRIs in the scripts resolve against the
+page's first `<base href>`, or else against the document URL. Other media types, including `application/json`,
 RDF/XML and RDFa, fail with `unsupported-type`.
 
 ## Results and failures
@@ -146,10 +149,12 @@ a `subject`, `predicate` and `object` as `SparqlTerm`:
 - A language-tagged literal has its `language` and no datatype.
 - A literal of `xsd:string` has no datatype; any other datatype is kept, with
   its lexical form unchanged.
-- A literal with a base direction (Turtle's `"…"@ar--rtl`, JSON-LD's
-  `@direction`) and an RDF 1.2 triple term are `unsupported` terms. They keep
-  the term in SPARQL 1.2 JSON form (`its:dir`, or `type: 'triple'`), so it is
-  not flattened into another term.
+- A literal with a base direction (Turtle's `"…"@ar--rtl`, or JSON-LD's
+  `@direction` with `@language`) and an RDF 1.2 triple term are `unsupported`
+  terms. They keep the term in SPARQL 1.2 JSON form (`its:dir`, or
+  `type: 'triple'`), so it is not flattened into another term. A `@direction`
+  without `@language` keeps the datatype jsonld gives it, such as
+  `https://www.w3.org/ns/i18n#_rtl`.
 
 A failed result names its `reason`:
 

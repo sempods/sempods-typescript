@@ -290,9 +290,16 @@ async function parse(
     }
   }
   if (isJsonLd(contentType)) return jsonLd([body], base, contexts);
-  // DOMParser builds an inert document: no script runs, nothing loads.
+  // DOMParser builds an inert document: no script runs, nothing loads. XHTML is
+  // XML, so CDATA sections and character references read as XML defines them.
   if (typeof DOMParser === 'undefined') return 'unsupported-type';
-  const page = new DOMParser().parseFromString(body, 'text/html');
+  const xhtml = contentType === 'application/xhtml+xml';
+  const page = new DOMParser().parseFromString(
+    body,
+    xhtml ? 'application/xhtml+xml' : 'text/html',
+  );
+  if (xhtml && page.getElementsByTagName('parsererror').length > 0)
+    return 'parse-failed';
   const scripts = Array.from(
     page.querySelectorAll('script[type]'),
     (script) =>
@@ -303,7 +310,18 @@ async function parse(
   )
     .filter(([type]) => isJsonLd(type))
     .map(([, text]) => text);
-  return jsonLd(scripts, base, contexts);
+  return jsonLd(scripts, pageBase(page, base), contexts);
+}
+
+/** JSON-LD in HTML resolves against the page's first `<base href>`, if valid. */
+function pageBase(page: Document, url: string): string {
+  const href = page.querySelector('base[href]')?.getAttribute('href');
+  if (href === null || href === undefined) return url;
+  try {
+    return new URL(href, url).href;
+  } catch {
+    return url;
+  }
 }
 
 /**
@@ -322,7 +340,9 @@ async function jsonLd(
       const value: unknown = JSON.parse(text);
       // A top-level string would be loaded as a URL; only data is accepted.
       if (typeof value !== 'object' || value === null) return 'parse-failed';
-      if (Array.isArray(value)) nodes.push(...(value as object[]));
+      // A loop, not a spread: a large array would exceed the argument limit.
+      if (Array.isArray(value))
+        for (const node of value) nodes.push(node as object);
       else nodes.push(value);
     }
   } catch {
@@ -351,7 +371,7 @@ async function jsonLd(
         rdfDirection: 'i18n-datatype',
       } as Options.ToRdf,
     );
-    return statements(quads as unknown as readonly Quad[]);
+    return statements((quads as unknown as readonly Quad[]).map(directional));
   } catch {
     return remote ? 'remote-context' : 'parse-failed';
   }
@@ -393,7 +413,27 @@ function statements(quads: readonly Quad[]): readonly PublicStatement[] {
   return result;
 }
 
-const I18N = 'https://www.w3.org/ns/i18n#';
+/** jsonld's `i18n-datatype` form of `@language` with `@direction`. */
+const I18N = /^https:\/\/www\.w3\.org\/ns\/i18n#([A-Za-z0-9-]+)_(ltr|rtl)$/;
+
+/**
+ * Back from jsonld's i18n datatype to a directional literal, like Turtle's
+ * `"…"@ar--rtl`. Only an exact language and `ltr`/`rtl` match; any other
+ * datatype, also a `@direction` without a language, stays as it is.
+ */
+function directional(quad: Quad): Quad {
+  const match = I18N.exec(quad.object.datatype?.value ?? '');
+  if (quad.object.termType !== 'Literal' || !match) return quad;
+  return {
+    ...quad,
+    object: {
+      termType: 'Literal',
+      value: quad.object.value,
+      language: match[1]!.toLowerCase(),
+      direction: match[2]!,
+    },
+  };
+}
 
 /** A literal keeps its lexical form and tags; other terms stay whole. */
 function term(value: Term): SparqlTerm {
@@ -401,7 +441,7 @@ function term(value: Term): SparqlTerm {
     return { type: 'iri', value: value.value };
   if (value.termType === 'BlankNode')
     return { type: 'blank', value: value.value.replace(/^_:/, '') };
-  if (value.termType !== 'Literal' || direction(value))
+  if (value.termType !== 'Literal' || value.direction)
     // A triple term or a base direction changes the term's identity; keep it
     // whole, in SPARQL 1.2 JSON form, instead of flattening it.
     return { type: 'unsupported', term: sparqlJson(value) };
@@ -413,16 +453,6 @@ function term(value: Term): SparqlTerm {
     : { type: 'literal', value: value.value };
 }
 
-/** Turtle's `@en--ltr`, or JSON-LD's `@direction` as an i18n datatype. */
-function direction(value: Term): { language: string; dir: string } | undefined {
-  if (value.direction)
-    return { language: value.language ?? '', dir: value.direction };
-  const datatype = value.datatype?.value;
-  if (!datatype?.startsWith(I18N)) return undefined;
-  const [language = '', dir = ''] = datatype.slice(I18N.length).split('_');
-  return { language, dir };
-}
-
 function sparqlJson(value: Term): Readonly<Record<string, unknown>> {
   switch (value.termType) {
     case 'NamedNode':
@@ -430,13 +460,12 @@ function sparqlJson(value: Term): Readonly<Record<string, unknown>> {
     case 'BlankNode':
       return { type: 'bnode', value: value.value.replace(/^_:/, '') };
     case 'Literal': {
-      const tags = direction(value);
-      if (tags)
+      if (value.direction)
         return {
           type: 'literal',
           value: value.value,
-          ...(tags.language ? { 'xml:lang': tags.language } : {}),
-          'its:dir': tags.dir,
+          'xml:lang': value.language,
+          'its:dir': value.direction,
         };
       return {
         type: 'literal',

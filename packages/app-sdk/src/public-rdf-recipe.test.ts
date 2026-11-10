@@ -510,6 +510,50 @@ describe('public RDF lookup: parsed statements', () => {
     },
   );
 
+  it.each([
+    [
+      'an i18n datatype from Turtle',
+      'text/turtle',
+      `<${IRI}> <${RDFS_LABEL}> "x"^^<https://www.w3.org/ns/i18n#en_rtl> .`,
+      'https://www.w3.org/ns/i18n#en_rtl',
+    ],
+    [
+      'an i18n-like datatype that is no direction',
+      'text/turtle',
+      `<${IRI}> <${RDFS_LABEL}> "x"^^<https://www.w3.org/ns/i18n#en_custom> .`,
+      'https://www.w3.org/ns/i18n#en_custom',
+    ],
+    [
+      'a JSON-LD literal of an i18n-like datatype that is no direction',
+      'application/ld+json',
+      JSON.stringify({
+        '@id': IRI,
+        [RDFS_LABEL]: {
+          '@value': 'x',
+          '@type': 'https://www.w3.org/ns/i18n#en_custom',
+        },
+      }),
+      'https://www.w3.org/ns/i18n#en_custom',
+    ],
+    [
+      'a JSON-LD @direction without a language',
+      'application/ld+json',
+      JSON.stringify({
+        '@id': IRI,
+        [RDFS_LABEL]: { '@value': 'x', '@direction': 'rtl' },
+      }),
+      'https://www.w3.org/ns/i18n#_rtl',
+    ],
+  ])('keeps %s as a typed literal', async (_, contentType, body, datatype) => {
+    const [statement] = await loaded(body, contentType);
+
+    expect(statement!.object).toEqual({
+      type: 'literal',
+      value: 'x',
+      datatype,
+    });
+  });
+
   it('keeps an RDF 1.2 triple term whole as an unsupported term', async () => {
     const statements = await loaded(
       `<${IRI}> <${SCHEMA}subjectOf> <<( <https://s.example.org/a> <${RDFS_LABEL}> "a"@en )>> .`,
@@ -688,6 +732,62 @@ describe('public RDF lookup: parsed statements', () => {
       ]),
     );
     expect(seeAlso!.object.type).toBe('blank');
+  });
+
+  it("resolves JSON-LD in HTML against the page's base element", async () => {
+    const page = `<!doctype html><html><head>
+      <base href="/vocab/">
+      <script type="application/ld+json">{ "@id": "item", "${RDFS_LABEL}": "Item" }</script>
+    </head></html>`;
+
+    expect(await loaded(page, 'text/html')).toEqual([
+      {
+        subject: iri('https://data.example.org/vocab/item'),
+        predicate: iri(RDFS_LABEL),
+        object: { type: 'literal', value: 'Item' },
+      },
+    ]);
+  });
+
+  it('parses XHTML as XML, with CDATA and character references', async () => {
+    const page = `<?xml version="1.0"?>
+      <html xmlns="http://www.w3.org/1999/xhtml"><head>
+      <script type="application/ld+json"><![CDATA[
+        { "@id": "${IRI}", "${RDFS_LABEL}": "Berlin & Brandenburg" }
+      ]]></script>
+      <script type="application/ld+json">{ "@id": "${IRI}", "${SCHEMA}name": "A &amp; B" }</script>
+      </head></html>`;
+
+    expect(await loaded(page, 'application/xhtml+xml')).toEqual([
+      {
+        subject: iri(IRI),
+        predicate: iri(RDFS_LABEL),
+        object: { type: 'literal', value: 'Berlin & Brandenburg' },
+      },
+      {
+        subject: iri(IRI),
+        predicate: iri(`${SCHEMA}name`),
+        object: { type: 'literal', value: 'A & B' },
+      },
+    ]);
+    expect(
+      await lookupPublicRdf(IRI, {
+        fetch: serve(answer('<html><head></html>', 'application/xhtml+xml')),
+      }),
+    ).toEqual({ kind: 'failed', reason: 'parse-failed' });
+  });
+
+  it('reads a top-level JSON-LD array beyond the argument limit', async () => {
+    const nodes = Array.from({ length: 150_000 }, () => ({}));
+    nodes.push({ '@id': IRI, [RDFS_LABEL]: 'last' } as never);
+
+    expect(await loaded(JSON.stringify(nodes), 'application/ld+json')).toEqual([
+      {
+        subject: iri(IRI),
+        predicate: iri(RDFS_LABEL),
+        object: { type: 'literal', value: 'last' },
+      },
+    ]);
   });
 
   it('reads a page without JSON-LD, even one reading "too-large", as empty', async () => {
