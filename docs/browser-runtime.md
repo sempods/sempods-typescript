@@ -482,6 +482,55 @@ The full catalogue remains one response, without per-Context reads or fetches.
 Context handles, retaining cancellation, obsolete-result retirement and at most
 one recovery retry per cycle. See [React Pod overviews](react-authoring.md#pod-overviews-with-contexts-on-demand).
 
+### Bounded Pod reads
+
+An app that mounts many Pod loaders at once, such as a graph explorer with
+hundreds of nodes across Pods, bounds them on the runtime instead of queueing
+reads itself:
+
+```ts
+const runtime = createBrowserRuntime({
+  // identity and other options as usual
+  podReadLimit: { perPod: 4, total: 8 },
+});
+
+// For what the person looks at now:
+await reader.sparql.select(query, { signal, priority: 'current' });
+```
+
+Without `podReadLimit`, every read starts at once, as before. With it, an
+explicit Pod read (`BoundPod.sparql.select`/`construct`, also through
+`usePodLoad` and `createViewLoader`) beyond a limit waits for a slot:
+
+- `perPod` counts the requests in flight to one Pod URL, across its
+  connections and authorization generations; `total` counts them across all
+  Pods. Each value is a positive integer.
+- Pods with waiting reads take turns, so 200 reads for one Pod never hold
+  back another. Within a Pod, reads start in order. A `priority: 'current'`
+  read goes first, but after three in a row a waiting normal read is next;
+  priority never exceeds a limit or stops a running read. It counts when the
+  read starts: when the current resource changes, restart that read (for
+  example with a new `key`). A waiting read that is restarted loses its place.
+- A waiting read that is cancelled (`signal`, `cancel()`, unmount, a `reload()`
+  that supersedes it) or invalidated (changed grants, sign-out, disconnect)
+  leaves the queue at once and is never sent.
+- A slot is held until the request settles, also when the caller stopped
+  waiting earlier. A cancelled or invalidated read returns at once, but a
+  transport that ignores the abort keeps its slot until it answers or fails.
+  Old requests therefore still count after changed grants, and the reads of
+  the new grants wait for them. There is no timeout: a request that never
+  settles keeps its slot; the browser's `fetch` settles when it is aborted.
+- Waiting spends no recovery retry: a loader whose read only waits restarts
+  on the current grants when they change, however often. Once its request
+  was sent, the loader's one recovery per cycle applies as before. Pass the
+  loader's `signal` to the read unchanged; a read that passes another signal
+  counts as sent.
+- The one resend after a Bearer `401` stays in the read's slot, so the limit
+  holds for every request to the Pod. The credential renewal it may wait for
+  goes to the authorization server and is not counted.
+- Context reads (`BoundView`), discovery, catalogue, labels and writes are not
+  counted and never wait for Pod reads.
+
 ## Durable sessions and refresh
 
 IndexedDB stores versioned validated records with compare-and-swap revisions.

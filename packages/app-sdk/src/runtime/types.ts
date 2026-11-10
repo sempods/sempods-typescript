@@ -220,6 +220,31 @@ export interface BrowserRuntimeOptions {
    * configuration error.
    */
   readonly refreshGracePeriod?: number;
+  /**
+   * Opt-in bound for explicit Pod reads (`BoundPod.sparql.select` and
+   * `construct`, also through `usePodLoad` and `createViewLoader`). Omit it
+   * and every read starts at once, as before. `perPod` counts the reads in
+   * flight to one Pod URL, across its connections and authorization
+   * generations; `total` counts them across all Pods. A read beyond a limit
+   * waits; waiting Pods take turns, and a read with `priority: 'current'` goes
+   * first, but never more than three in a row while a normal read waits.
+   *
+   * A slot is held until the request settles, also after the caller stopped
+   * waiting (cancelled, or invalidated by a changed grant or a sign-out): a
+   * transport that ignores the abort keeps its slot until it answers or
+   * fails, and one that never settles keeps it. A waiting read that is
+   * cancelled or invalidated leaves the queue at once and is never sent; a
+   * loader restarted while its read only waits keeps its recovery retry. The
+   * one resend after a Bearer `401` stays in the read's slot; the credential
+   * renewal it may wait for is not a Pod read and is not counted. Context
+   * reads (`BoundView`), discovery, catalogue, labels and writes are not
+   * counted. Each value is a positive integer; anything else is a
+   * configuration error.
+   */
+  readonly podReadLimit?: {
+    readonly total?: number;
+    readonly perPod?: number;
+  };
 }
 /** Minimal synchronous key-value storage with the shape of `localStorage`. */
 export interface PreferenceStorage {

@@ -9,6 +9,10 @@ import type { BoundPod, BoundRead, ViewAccess } from './view.js';
 import { waitFor } from './wait.js';
 import { combineSignals } from './signals.js';
 import { observePod } from './binding.js';
+import type { Admission } from './admission.js';
+import { noticeAdmission } from './admission-notice.js';
+
+type PodReadOptions = ReadOptions & { readonly priority?: 'current' };
 
 /** The production client remains the only protocol/renewal executor. */
 export function bindPod(
@@ -16,6 +20,7 @@ export function bindPod(
   current: () => boolean,
   client: (guard: DispatchGuard) => Pod,
   subscribe: (listener: () => void) => () => void,
+  admission?: Admission,
 ): BoundPod {
   const generation = e.generation;
   const subject = e.credentials!.subject;
@@ -29,6 +34,7 @@ export function bindPod(
     e.credential !== undefined &&
     e.view.missingRequiredScopes.length === 0;
   const pod = client(readable);
+  const invalidated = { kind: 'invalidated' } as const;
   let snapshot: Pick<ViewAccess, 'current' | 'read' | 'revision'> | undefined;
   function getSnapshot() {
     const next = { current: valid(), read: readable(), revision: e.podEpoch };
@@ -43,28 +49,56 @@ export function bindPod(
   }
   async function read<T>(
     action: (options: ReadOptions) => Promise<QueryResult<T>>,
-    options?: ReadOptions,
+    options?: PodReadOptions,
   ): Promise<BoundRead<QueryResult<T>>> {
-    if (options?.signal?.aborted) return { kind: 'cancelled' };
+    const caller = options?.signal;
+    if (caller?.aborted) return { kind: 'cancelled' };
     if (!readable()) return { kind: 'invalidated' };
     const revision = e.podEpoch;
     const combined = combineSignals(
       e.podReads.signal,
       e.lifetime.signal,
-      options?.signal,
+      caller,
     );
     const { signal } = combined;
+    const stopped = () =>
+      caller?.aborted ? ({ kind: 'cancelled' } as const) : invalidated;
     try {
-      const result = await waitFor(action({ ...options, signal }), signal);
-      if (options?.signal?.aborted) return { kind: 'cancelled' };
+      // Waiting for a slot is not a request: a read that stops while it
+      // waits leaves the queue and is never sent.
+      const release = admission
+        ? await admission.acquire(
+            e.pod.podUrl,
+            options?.priority === 'current',
+            signal,
+            () => noticeAdmission(caller, 'queued'),
+          )
+        : undefined;
+      if (admission && !release) return stopped();
+      if (signal.aborted || !readable() || revision !== e.podEpoch) {
+        release?.();
+        return stopped();
+      }
+      noticeAdmission(caller, 'admitted');
+      let request: Promise<QueryResult<T>>;
+      try {
+        request = action({ signal });
+      } catch (error) {
+        release?.();
+        throw error;
+      }
+      // The slot belongs to the request until it settles, also when this
+      // caller stops waiting first (an abort-ignoring transport).
+      if (release) request.then(release, release);
+      const result = await waitFor(request, signal);
+      if (caller?.aborted) return { kind: 'cancelled' };
       if (!readable() || revision !== e.podEpoch || result.kind === 'stopped')
-        return { kind: 'invalidated' };
+        return invalidated;
       // Unlike Context reads, a Pod 403 is just this operation's refusal.
       return result;
     } catch (error) {
-      if (options?.signal?.aborted) return { kind: 'cancelled' };
-      if (!readable() || revision !== e.podEpoch)
-        return { kind: 'invalidated' };
+      if (caller?.aborted) return { kind: 'cancelled' };
+      if (!readable() || revision !== e.podEpoch) return invalidated;
       throw error;
     } finally {
       combined.dispose();

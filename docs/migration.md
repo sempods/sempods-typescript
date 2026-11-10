@@ -136,6 +136,23 @@ seconds, discovery counts as unreachable:
   which runtime actions are safe meanwhile. Which controls apps and the SDK
   components keep available while a Pod restores is settled in #238.
 
+### Bounded Pod reads
+
+**An app can bound its explicit Pod reads**
+([bounded Pod reads](browser-runtime.md#bounded-pod-reads), #244). The new
+option `podReadLimit: { perPod?, total? }` admits at most that many requests
+in flight per Pod URL and across all Pods; further reads wait, with Pods
+taking turns. Without the option nothing changes.
+
+- **Remove an app-side queue in front of `BoundPod.sparql.select`** and set
+  `podReadLimit` instead. An app queue releases its slot when a cancelled read
+  returns, before the request settles, and a loader whose read waits there
+  spends its one recovery retry on grant changes: two changes while it waits
+  end it `unavailable` without a request. The SDK holds the slot until the
+  request settles, and waiting spends no retry.
+- Pass `priority: 'current'` with the `signal` for the read of what the person
+  looks at now.
+
 ### UI kit
 
 - **The compact `Dialog` speaks the SDK's language.** Its corner close button
@@ -217,7 +234,9 @@ seconds, discovery counts as unreachable:
   or whose forgetting failed. Code that compares sessions by deep equality
   accepts these properties.
 - `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
-  `rememberPods` and `refreshGracePeriod`. Typed test doubles of the runtime need `forget`.
+  `rememberPods`, `refreshGracePeriod` and `podReadLimit`. Typed test doubles of the runtime need `forget`.
+- `BoundPod.sparql.select` and `construct` accept `priority: 'current'` beside
+  `signal`. A typed test double of `BoundPod` accepts the wider options.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
   doubles of `useApp()` need it too.
 - **Breaking for custom stores:** `SessionStore` (the `openStore` option) gains

@@ -324,10 +324,13 @@ export async function returnedSession(
   return { ...f, runtime, id: connection.id };
 }
 /** Alice (`f.id`) and Bob (`other`) signed in, with Bob active after his completed callback. */
-export async function twoPods(keep: (runtime: BrowserRuntime) => void) {
+export async function twoPods(
+  keep: (runtime: BrowserRuntime) => void,
+  overrides: Partial<BrowserRuntimeOptions> = {},
+) {
   const f = await returnedSession(
     keep,
-    fixture({ preferences: null, preset: { podUrl: pod } }),
+    fixture({ preferences: null, preset: { podUrl: pod }, ...overrides }),
   );
   await f.runtime.initialize();
   const otherUrl = 'https://pod.example/bob';

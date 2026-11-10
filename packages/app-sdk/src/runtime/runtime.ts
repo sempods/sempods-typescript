@@ -58,6 +58,7 @@ import {
   selectedTarget,
 } from './binding.js';
 import { bindPod } from './pod-binding.js';
+import { createAdmission } from './admission.js';
 import {
   loadCatalogue,
   loadContextLabels,
@@ -166,6 +167,7 @@ export function createBrowserRuntime(
   const gracePeriod = options.refreshGracePeriod ?? REFRESH_GRACE_PERIOD;
   if (!Number.isFinite(gracePeriod) || gracePeriod < 0)
     throw new RuntimeError('configuration');
+  const admission = createAdmission(options.podReadLimit);
   /** Whether a refresh first sent at `sentAt` may still be sent once more. */
   const withinGrace = (sentAt: number) => Date.now() < sentAt + gracePeriod;
   /**
@@ -1593,6 +1595,7 @@ export function createBrowserRuntime(
             listeners.delete(listener);
           };
         },
+        admission,
       );
       return e.boundPod;
     },
