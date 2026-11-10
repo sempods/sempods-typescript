@@ -6,6 +6,7 @@
  * under `signIn: 'none'`.
  */
 import { webcrypto } from 'node:crypto';
+import { useState } from 'react';
 import {
   act,
   cleanup,
@@ -20,15 +21,18 @@ import {
   catalogue,
   fixture,
   pod,
+  renewal,
   without,
   work,
 } from '../runtime/fixture.test.js';
+import { createAppController } from '../authoring/app.js';
 import type { BrowserRuntimeOptions } from '../runtime/types.js';
 import {
   AppAccess,
   SempodsProvider,
   TargetScreen,
   useAppState,
+  useDraftGuard,
 } from './index.js';
 
 const cleanups: (() => void)[] = [];
@@ -226,4 +230,111 @@ it('says when a Pod shares no public data', async () => {
     ),
   ).toBeTruthy();
   expect(gate()).toBeNull();
+});
+
+function Draft() {
+  const [draft, setDraft] = useState('');
+  useDraftGuard(draft !== '', () => setDraft(''));
+  return (
+    <input
+      aria-label="Draft"
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+    />
+  );
+}
+
+it('keeps a draft when the session ends and the app reads on without a token', async () => {
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Recipes" />
+      <TargetScreen>
+        <Draft />
+        <Reading />
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  const draft = (await screen.findByLabelText('Draft')) as HTMLInputElement;
+  fireEvent.change(draft, { target: { value: 'Unsaved work' } });
+  const before = screen.getByTestId('content');
+  await act(async () => {
+    await renewal(f, runtime, id, 'refused');
+  });
+  await waitFor(() =>
+    expect(runtime.getSnapshot()[0]!.reading).toBe('anonymous'),
+  );
+  // Same-target access loss: the screen and its draft stay mounted.
+  expect(screen.getByLabelText('Draft')).toBe(draft);
+  expect(draft.value).toBe('Unsaved work');
+  expect(screen.getByTestId('content')).toBe(before);
+  // Once the draft is resolved, the view that reads without a token follows.
+  fireEvent.change(draft, { target: { value: '' } });
+  await waitFor(() =>
+    expect(screen.getByTestId('content').textContent).toMatch(
+      /read\s+read-only/,
+    ),
+  );
+});
+
+it('keeps the view for an unconfirmed write until it is resolved', async () => {
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  const app = createAppController(runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const held = app.getSnapshot().view;
+  let unconfirmed = true;
+  const listeners = new Set<() => void>();
+  app.register({
+    dirty: () => false,
+    blocked: () => false,
+    unconfirmed: () => unconfirmed,
+    discard: () => {},
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  });
+  await renewal(f, runtime, id, 'refused');
+  await waitFor(() =>
+    expect(runtime.getSnapshot()[0]!.reading).toBe('anonymous'),
+  );
+  expect(app.getSnapshot().view).toBe(held);
+  expect(held!.getSnapshot()).toMatchObject({ current: false, write: false });
+  unconfirmed = false;
+  listeners.forEach((listener) => listener());
+  const next = app.getSnapshot().view;
+  expect(next).not.toBe(held);
+  expect(next!.getSnapshot()).toMatchObject({ current: true, write: false });
+});
+
+it('lists every Pod read without a token in the Pod selector', async () => {
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  await f.runtime.initialize();
+  await f.runtime.connect('https://pod.example/bob');
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Recipes" open />
+    </SempodsProvider>,
+  );
+  const selector = (await screen.findByLabelText(
+    'Active pod',
+  )) as HTMLSelectElement;
+  const options = [...selector.options].filter((o) => o.value);
+  expect(options).toHaveLength(2);
+  await act(async () => {
+    fireEvent.change(selector, {
+      target: { value: options.find((o) => o.value !== pod)!.value },
+    });
+  });
+  // Choosing it does not sign in.
+  expect(f.navigate).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('list', { name: 'Pods on this device' }),
+  ).toBeNull();
 });

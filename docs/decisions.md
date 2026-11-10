@@ -326,7 +326,10 @@ There is no anonymous session state: such a connection is `signed-out`, or
 `ended` in the page where its session ended, and the runtime publishes
 `Connection.reading` (`session`, `anonymous` or `null`). Reading without a
 token gets a lifetime and generation of its own, so no request refused with a
-token is sent again without one, and no handle survives the change. Writes
+token is sent again without one, and no handle survives the change. The app
+controller treats the switch as same-target access loss: while a guard holds
+a draft or an unresolved write, the selected view stays (without access) until
+that work is resolved or discarded. Writes
 follow the anonymous catalogue, which lists nothing as writable. `none` uses
 no session store or lock and needs one default Pod. Under `optional`, signing
 in adds `public-read` to the optional scopes, and required scopes are a

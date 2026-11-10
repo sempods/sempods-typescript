@@ -622,12 +622,13 @@ function AccessConnections({
   // and Forget again, so its address is not kept against the choice.
   const forgetting = (entry: Connection) =>
     entry.session.kind === 'ended' && entry.session.forget === true;
-  // The active connection reading without a token is the one connected,
-  // not a remembered one (`signIn: 'optional'`).
+  // A connection reading without a token (`signIn: 'optional'`) is a
+  // readable one, chosen in the Pod selector like a signed-in one, not a
+  // remembered one that needs signing in first.
   const remembered = state.connections.filter(
     (entry) =>
       (entry.session.kind === 'signed-out' || forgetting(entry)) &&
-      !(entry.id === state.activeId && entry.reading === 'anonymous'),
+      entry.reading !== 'anonymous',
   );
   const found = state.connections.find((entry) => entry.id === state.activeId);
   // The connection shown as connected; a remembered active one is signed in

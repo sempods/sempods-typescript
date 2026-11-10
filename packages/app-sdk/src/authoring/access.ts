@@ -288,11 +288,16 @@ export function createAccessTracker() {
       }
     }
     const kept: typeof ids = new Map();
-    // A retry of an unreachable Pod keeps its prompt's identity while it restores.
     for (const c of f.connections) {
+      // A retry of an unreachable Pod keeps its prompt's identity while it restores.
       const key = `${c.id}\nunreachable`;
       const entry = ids.get(key);
       if (entry && c.session.kind === 'restoring') kept.set(key, entry);
+      // Reading without a token lasts while another Pod is active: its
+      // prompt keeps its identity, and a dismissal, until the person signs in.
+      const anonymous = `${c.id}\nanonymous`;
+      const prompt = ids.get(anonymous);
+      if (prompt && c.reading === 'anonymous') kept.set(anonymous, prompt);
     }
     let blocking: AccessPrompt | null = null;
     const prompts: { prompt: AccessPrompt; order: number }[] = [];

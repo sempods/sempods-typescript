@@ -154,6 +154,11 @@ export interface AppSnapshot {
    * settles (`startup` or `startupError` set): while a returning sign-in
    * completes, saved sessions may already restore, and a draft started in that
    * window would be lost when the returning connection becomes active.
+   * When a session ends and the connection reads without a token
+   * (`signIn: 'optional'`), the earlier view, without access, stays while a
+   * registered guard still holds work (a draft, a pending or unconfirmed
+   * write); the view that reads without a token follows once that work is
+   * resolved or discarded.
    */
   readonly view: BoundView | null;
   /** Reader for the active signed-in Pod; independent of selected Context and catalogue. */
@@ -239,6 +244,8 @@ export function createAppController(
   let previous: Connection | undefined;
   const tracker = createAccessTracker();
   let view: BoundView | null = null;
+  /** `view` is kept for unresolved work while the runtime has a newer one. */
+  let held = false;
   let pod: BoundPod | null = null;
   let pending:
     | {
@@ -343,10 +350,26 @@ export function createAppController(
     // No Context-bound screen before startup settles, so no draft can start on
     // a connection that a returning sign-in is about to replace (#80).
     const settled = startupSettled({ startup, startupError });
+    held = false;
     if (!settled || !connection || !connection.selectedContext) view = null;
     else {
       try {
-        view = runtime.bind(connection.id);
+        const next = runtime.bind(connection.id);
+        // A session that ended by itself makes the connection read without a
+        // token (`signIn: 'optional'`): a new view of the same target. Work
+        // left on the old one (a draft, a pending or unconfirmed write) is
+        // same-target access loss: the old view, now without access, stays
+        // until that work is resolved or discarded, as without
+        // `signIn: 'optional'`. Its write authority does not come back.
+        held =
+          view !== null &&
+          next !== view &&
+          connection.reading === 'anonymous' &&
+          view.podUrl === next.podUrl &&
+          view.contextIri === next.contextIri &&
+          !view.getSnapshot().current &&
+          unresolved();
+        if (!held) view = next;
       } catch {
         // Same-target recovery must keep its editor mounted; the old view is now ineligible.
         if (
@@ -418,6 +441,17 @@ export function createAppController(
     prompting = ask;
     if (ask) window.addEventListener('beforeunload', askBeforeUnload);
     else window.removeEventListener('beforeunload', askBeforeUnload);
+  }
+  /** Whether any guard holds work: a draft, a pending or an unconfirmed write. */
+  function unresolved() {
+    return [...guards].some(
+      (g) => g.dirty() || g.blocked() || Boolean(g.unconfirmed?.()),
+    );
+  }
+  /** A guard changed: follow the leave prompt, and release a held view. */
+  function guardChanged() {
+    if (held) publish();
+    else followUnload();
   }
   /** The guards a change leaves: asked about first, discarded once it ran. */
   function leavingGuards(change: Change, retained?: ReadonlySet<LeaveGuard>) {
@@ -525,12 +559,12 @@ export function createAppController(
       guards.add(guard);
       // Its own callback: guards sharing one subscription source (the lanes
       // of a group) must not unsubscribe each other.
-      const stop = guard.subscribe?.(() => followUnload());
+      const stop = guard.subscribe?.(() => guardChanged());
       followUnload();
       return () => {
         guards.delete(guard);
         stop?.();
-        followUnload();
+        guardChanged();
       };
     },
     /**

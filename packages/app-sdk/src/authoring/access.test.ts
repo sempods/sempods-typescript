@@ -605,6 +605,29 @@ describe('without required sign-in (#240)', () => {
     expect(createAccessTracker().derive(f).prompts).toHaveLength(1);
   });
 
+  it('keeps a dismissed anonymous prompt dismissed while another Pod is active', () => {
+    const tracker = createAccessTracker();
+    const pods = [anonymous('a'), anonymous('b')];
+    const at = (activeId: string) =>
+      tracker.derive(
+        facts({ signIn: 'optional', connections: pods, activeId }),
+      );
+    const [prompt] = at('a').prompts;
+    expect(tracker.dismiss(prompt!.id)).toBe(prompt);
+    expect(at('a').prompts).toEqual([]);
+    expect(at('b').prompts.map((p) => p.connectionId)).toEqual(['b']);
+    expect(at('a').prompts).toEqual([]);
+    // Signing in ends the cause: reading without a token later is a new one.
+    tracker.derive(
+      facts({
+        signIn: 'optional',
+        connections: [connection('a'), pods[1]!],
+        activeId: 'a',
+      }),
+    );
+    expect(at('a').prompts).toHaveLength(1);
+  });
+
   it('still blocks without any connection under optional', () => {
     expect(shape(derive(facts({ signIn: 'optional' })).blocking)).toMatchObject(
       { reason: 'no-connection' },

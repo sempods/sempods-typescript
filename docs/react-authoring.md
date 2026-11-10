@@ -1193,7 +1193,10 @@ const runtime = createBrowserRuntime({
   **Forget** after the person signed out
   (`controls.anonymous`); after signing in, the app reads with the session.
   When a session ends, the app keeps reading without a token, and the
-  `signed-out` prompt asks instead of blocking. Without a preset, the gate's
+  `signed-out` prompt asks instead of blocking. That is same-target access
+  loss: while a draft or a pending or unconfirmed write remains, the screen
+  keeps its earlier view (now without access) and the work stays; the view
+  that reads without a token follows once it is resolved or discarded. Without a preset, the gate's
   address field **Open**s a Pod (`controls.open`) instead of signing in.
 - **`none`**: no prompts, no sign-in or sign-out buttons, no gate for storage.
 - A Pod without public Contexts shows `controls.noPublicData` with sign-in.
