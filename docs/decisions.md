@@ -132,6 +132,13 @@ Client-sdk and the browser runtime implement independent Pod readers.
 `BoundPod` invalidation depends on connection/session/grants, while Context
 switches and catalogue/label changes affect only Context-bound flows. The
 headless controller exposes the active reader in `AppSnapshot.pod`.
+An opt-in runtime `podReadLimit` bounds explicit Pod reads per Pod URL and in
+total, with Pods taking turns and a bounded `current` priority. Admission
+lives in the runtime, not in an app queue, for two reasons. Only the runtime
+holds a request until it settles, so a cancelled read keeps its slot until
+then. And only the runtime can tell a loader that its read merely waited, so
+waiting spends no recovery retry while the queued reads of old grants are
+still dropped. Context reads, discovery and writes stay outside the bound.
 Automatic labels load only for the selected, validated Context for every catalogue
 size, with fallback names and cache lifetime tied to access authority, so a Pod
 with thousands of Contexts never costs one description request per entry. An app

@@ -930,6 +930,11 @@ function Source(props: {
 - Which connections to read is the app's choice: filter `useConnections()`
   further, for example to the Pods the person enabled. Each source shows
   `loading` from its first render and reads as soon as it mounts.
+- Many sources at once, such as hundreds of graph nodes across Pods: set
+  `podReadLimit` on the runtime instead of queueing reads in the app. Reads
+  beyond the limit wait in `loading`, and a grant change while they wait
+  spends no retry. Pass `{ signal, priority: 'current' }` for what the person
+  looks at now ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
 
 ## Part 4: Customizing
 

@@ -335,3 +335,39 @@ it('refreshes a ready explicit read after its grants change', async () => {
   );
   expect(f.count('/_system/contexts')).toBe(0);
 });
+
+it('explicit reads wait for a podReadLimit slot and all become ready', async () => {
+  const f = await returnedSession(
+    keep,
+    fixture({ preferences: null, podReadLimit: { perPod: 1 } }),
+  );
+  await f.runtime.initialize();
+  const reader = f.runtime.bindPod(f.id);
+  const gates: (() => void)[] = [];
+  let running = 0;
+  let most = 0;
+  f.setQuery(async (_url, init) => {
+    most = Math.max(most, ++running);
+    const name = String(init?.body).split('# ')[1];
+    await new Promise<void>((resolve) => gates.push(resolve));
+    running--;
+    return Response.json([{ '@id': `urn:${name}` }]);
+  });
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <Source name="one" reader={reader} query="one" />
+      <Source name="two" reader={reader} query="two" />
+      <Source name="three" reader={reader} query="three" />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(gates).toHaveLength(1));
+  for (let answered = 0; answered < 3; answered++) {
+    await waitFor(() => expect(gates.length).toBeGreaterThan(answered));
+    act(() => gates[answered]!());
+  }
+  await waitFor(() => expect(text('three')).toBe('[{"@id":"urn:three"}]'));
+  expect(text('one')).toBe('[{"@id":"urn:one"}]');
+  expect(text('two')).toBe('[{"@id":"urn:two"}]');
+  expect(most).toBe(1);
+  expect(f.count('/_system/sparql/query')).toBe(3);
+});
