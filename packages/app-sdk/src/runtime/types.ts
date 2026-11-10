@@ -227,8 +227,9 @@ export interface BrowserRuntimeOptions {
    * flight to one Pod URL, across its connections and authorization
    * generations; `total` counts them across all Pods. A read beyond a limit
    * waits; waiting Pods take turns, and a read with `priority: 'current'` goes
-   * first, but never more than three in a row while a normal read waits,
-   * on one Pod or across all.
+   * first. After three priority reads in a row on a Pod, its waiting normal
+   * read is next on that Pod; after three across all Pods, a waiting normal
+   * read of any Pod that is below its limit is next.
    *
    * A slot is held until the request settles, also after the caller stopped
    * waiting (cancelled, or invalidated by a changed grant or a sign-out): a

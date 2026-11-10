@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createPod, type PodFetch } from '@sempods/client-sdk';
 import { createViewLoader } from '../authoring/load.js';
 import { RuntimeError } from './errors.js';
+import { watchAdmission } from './admission-notice.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import type { BoundPod } from './view.js';
 import {
@@ -422,6 +423,54 @@ it('a client that throws before sending frees the slot', async () => {
   t.answer('next');
   // This transport answers JSON-LD, not SELECT results: only dispatch counts.
   await next.catch(() => {});
+});
+
+it('a failing admission notice neither stops the read nor keeps its slot', async () => {
+  const f = await session({ perPod: 1 });
+  const t = transport(f);
+  // Notice errors are reported asynchronously; keep them from failing the run.
+  const reported: unknown[] = [];
+  const original = globalThis.queueMicrotask.bind(globalThis);
+  const report = vi
+    .spyOn(globalThis, 'queueMicrotask')
+    .mockImplementation((task) =>
+      original(() => {
+        try {
+          task();
+        } catch (error) {
+          reported.push(error);
+        }
+      }),
+    );
+  try {
+    void f.reader.sparql.construct(query('blocker'));
+    await flush();
+    const noticed = new AbortController();
+    watchAdmission(noticed.signal, () => {
+      throw new Error('notice defect');
+    });
+    // Both its `queued` and its `admitted` notice throw.
+    const read = f.reader.sparql.construct(query('noticed'), {
+      signal: noticed.signal,
+    });
+    await flush();
+    t.answer('blocker');
+    await flush();
+    expect(t.names()).toEqual(['blocker', 'noticed']);
+    t.answer('noticed');
+    expect(await read).toMatchObject({ kind: 'ok' });
+    const next = f.reader.sparql.construct(query('next'));
+    await flush();
+    expect(t.names()).toEqual(['blocker', 'noticed', 'next']);
+    t.answer('next');
+    await next;
+  } finally {
+    report.mockRestore();
+  }
+  expect(reported).toEqual([
+    new Error('notice defect'),
+    new Error('notice defect'),
+  ]);
 });
 
 it('a current read goes before older waiting reads, within the limit', async () => {

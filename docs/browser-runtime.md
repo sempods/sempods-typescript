@@ -507,9 +507,10 @@ explicit Pod read (`BoundPod.sparql.select`/`construct`, also through
   Pods. Each value is a positive integer.
 - Pods with waiting reads take turns, so 200 reads for one Pod never hold
   back another. Within a Pod, normal reads start in order, and a
-  `priority: 'current'` read goes before them. After three priority reads in a
-  row, on one Pod or across all, a waiting normal read of that Pod or of any
-  Pod is next. Priority never exceeds a limit or stops a running read. It counts when the
+  `priority: 'current'` read goes before them. After three priority reads in
+  a row on a Pod, its waiting normal read is next on that Pod; after three in
+  a row across all Pods, a waiting normal read of any Pod is next. Priority
+  never exceeds a limit or stops a running read. It counts when the
   read starts: when the current resource changes, restart that read (for
   example with a new `key`). A waiting read that is restarted loses its place.
 - A waiting read that is cancelled (`signal`, `cancel()`, unmount, a `reload()`

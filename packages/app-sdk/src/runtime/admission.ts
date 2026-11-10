@@ -101,7 +101,8 @@ export function createAdmission(
       const job = priority(true);
       if (job) return job;
     }
-    // Round robin: the eligible Pod with a normal read admitted least recently.
+    // Round robin: of the eligible Pods with a waiting normal read, the one
+    // admitted least recently (a read of either kind) goes next.
     let chosen: Job | undefined;
     let oldest = Infinity;
     for (const pod of pods) {
