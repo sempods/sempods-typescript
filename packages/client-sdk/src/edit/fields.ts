@@ -13,6 +13,7 @@ import {
   type Term,
 } from './terms.js';
 import { EMBEDDABLE_IRI } from '../iri.js';
+import { classifyDate } from './dates.js';
 
 /**
  * The conservative definition: two pure, synchronous functions. Its read set
@@ -270,37 +271,12 @@ export function date(
   });
 }
 
-/** XSD 1.1 `date` lexical form; the time zone is optional. */
-const DATE =
-  /^-?(\d*(\d{4}))-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))?$/;
-
-/**
- * XSD 1.1 `dateTime` lexical form with a mandatory time zone. The pattern
- * checks the ranges of each part; the day of the month is checked below.
- */
-const DATE_TIME =
-  /^-?(\d*(\d{4}))-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?|24:00:00(?:\.0+)?)(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
-const DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
 function isZonedDateTime(value: string): boolean {
-  return realDay(DATE_TIME.exec(value));
+  return classifyDate(value).kind === 'instant';
 }
 
 function isDateValue(value: string): boolean {
-  return realDay(DATE.exec(value));
-}
-
-/** Whether the matched year, month and day name a day of that calendar. */
-function realDay(match: RegExpExecArray | null): boolean {
-  // A year of more than four digits has no leading zero.
-  if (!match || (match[1]!.length > 4 && match[1]![0] === '0')) return false;
-  const month = Number(match[3]);
-  const day = Number(match[4]);
-  if (day > DAYS[month - 1]!) return false;
-  if (month !== 2 || day !== 29) return true;
-  // 10000 is a multiple of 400: the last four digits decide a leap year.
-  const year = Number(match[2]);
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return classifyDate(value).kind === 'day';
 }
 
 /** Whether this field reads and replaces the term. */

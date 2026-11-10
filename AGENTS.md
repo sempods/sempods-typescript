@@ -19,7 +19,9 @@ Read scoped instructions on the path to each changed file:
 [app-ui](packages/app-ui/AGENTS.md) and [documentation](docs/AGENTS.md). Sibling scopes do not govern each other.
 
 Use [issue work](docs/agents/issue-work.md) for implementation and
-[doc review](docs/agents/doc-review.md) when behavior, contracts or guides change.
+[doc review](docs/agents/doc-review.md) when behavior, contracts or guides change, and
+[test review](docs/agents/test-review.md) when tests change or a decision moves
+between modules.
 Use [release](docs/agents/release.md) only when asked to assess, prepare or publish
 a release, and [live validation](docs/agents/live-validation.md) only for an agreed
 real-Pod or device test.

@@ -64,11 +64,9 @@ try {
     );
     dependencies[manifest.name] = 'file:' + join(temp, name);
     if (manifest.name === '@sempods/app-ui') {
-      // The packed peer range names the SDK's minor; workspace: is resolved.
-      assert.equal(
-        manifest.peerDependencies['@sempods/app-sdk'],
-        '~' + manifest.version,
-      );
+      // The packed peer ranges name the SDK's minor; workspace: is resolved.
+      for (const peer of ['@sempods/app-sdk', '@sempods/client-sdk'])
+        assert.equal(manifest.peerDependencies[peer], '~' + manifest.version);
       assert.ok(!JSON.stringify(manifest).includes('workspace:'));
       const files = execFileSync('tar', ['-tf', join(temp, name)], {
         encoding: 'utf8',

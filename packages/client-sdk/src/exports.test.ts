@@ -50,6 +50,7 @@ it.each([
     () => import('./edit/index.js'),
     [
       'MappingError',
+      'classifyDate',
       'createResourceEditor',
       'date',
       'dateTime',
