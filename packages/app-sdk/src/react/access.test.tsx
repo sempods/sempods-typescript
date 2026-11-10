@@ -1411,6 +1411,66 @@ it('keeps the active-Pod selector usable in management while a saved connection 
   expectNoSurface();
 });
 
+it('keeps switching Pods and the restoring Pod’s sign-out available to a custom layout while one saved Pod restores (#253)', async () => {
+  const other = 'https://pod.example/bob';
+  const f = fixture({ allowedPods: [pod, other], preferences: null });
+  const both = await bothSignedIn(f, other);
+  // Only [pod]'s restore hangs; [other] restores.
+  const { runtime, discovery } = await restoring(f, both.runtime, (url) =>
+    url.startsWith(pod),
+  );
+  let app!: ReturnType<typeof useApp>;
+  let state!: ReturnType<typeof useAppState>;
+  function Custom() {
+    app = useApp();
+    state = useAppState();
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Custom />
+      <Started />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const kind = (id: string) =>
+    runtime.getSnapshot().find((entry) => entry.id === id)?.session.kind;
+  await waitFor(() => expect(kind(both.second)).toBe('active'));
+  expect(kind(both.first)).toBe('restoring');
+  // Startup may make either Pod active. From the usable one, choosing the
+  // restoring Pod runs through the guard; access is then pending. Choosing the
+  // usable Pod again runs although the other one still restores.
+  expect(await act(() => app.selectConnection(both.second))).toBe(true);
+  expect(state.activeId).toBe(both.second);
+  expect(await act(() => app.selectConnection(both.first))).toBe(true);
+  expect(state.activeId).toBe(both.first);
+  expect(state.access.pending).toBe(true);
+  expect(state.changing).toBe(false);
+  expect(await act(() => app.selectConnection(both.second))).toBe(true);
+  // Nothing a custom layout disables its controls on is set by the other
+  // Pod's restoration, and it raises no prompt.
+  expect(state.activeId).toBe(both.second);
+  expect(state.startup?.storage).toBe('durable');
+  expect(state.changing).toBe(false);
+  expect(state.confirmingLeave).toBe(false);
+  expect(state.access.pending).toBe(false);
+  expect(state.access.blocking).toBeNull();
+  expect(state.access.prompts).toEqual([]);
+  expectNoSurface();
+  // The restoring Pod's own sign-out runs as well and wins over its pending
+  // restoration; the usable Pod stays active.
+  expect(await act(() => app.disconnect(both.first))).toBe(true);
+  const signedOut = kind(both.first);
+  expect(signedOut).not.toBe('restoring');
+  expect(state.activeId).toBe(both.second);
+  // The late discovery answer publishes nothing.
+  await act(async () => discovery.resolve());
+  await settleLease();
+  expect(kind(both.first)).toBe(signedOut);
+  expect(state.activeId).toBe(both.second);
+  expect(kind(both.second)).toBe('active');
+});
+
 it('keeps signing in to the preset Pod and its failures in management while another saved Pod restores', async () => {
   const other = 'https://pod.example/bob';
   const f = fixture({ preset: { podUrl: other }, preferences: null });

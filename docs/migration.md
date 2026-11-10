@@ -62,7 +62,7 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
   or forget the gate offers **Try again**, not **Sign out** or **Forget**.
 - **No initial loading panel.** Before startup settles and while a saved
   session restores, `AppAccess` shows nothing: no tall loading panel, no
-  sign-in flash. A restore that never settles no longer shows the Pod selector
+  sign-in flash. A restore that has not settled no longer shows the Pod selector
   or other sign-ins inline; open management for them.
 - **Outcomes are dismissible prompts.** A failed or cancelled callback, a Pod
   whose session ended beside the active one and an unreachable Pod appear at
@@ -132,9 +132,12 @@ seconds, discovery counts as unreachable:
   whose discovery stalls stays signed in with its unspent refresh token.
 - A timeout carries no `failure` detail, unlike an offline discovery
   (`failure.code: 'discovery'`); branch on `problem` and `restorable`.
-- Other connections never waited for a restoring one; the guide now says
-  which runtime actions are safe meanwhile. Which controls apps and the SDK
-  components keep available while a Pod restores is settled in #238.
+- Other connections never waited for a restoring one. A custom layout that
+  disabled all its controls while any restore was pending, as the guide used
+  to say, now disables only the restoring connection's sign-in: adding a Pod,
+  choosing another one and the other connections' actions stay enabled
+  ([custom layouts](react-authoring.md#custom-layouts-without-appaccess)).
+  `AppAccess` keeps them enabled too.
 
 ### Apps without sign-in
 

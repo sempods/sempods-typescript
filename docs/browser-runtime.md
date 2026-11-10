@@ -160,7 +160,7 @@ connection `beginAuthorization`, `disconnect`, `forget`, `selectContext`,
 prepares a new sign-in; each wins over the pending restoration, which then
 publishes nothing. Which controls an app offers meanwhile is the app's and the
 SDK components' policy
-([#238](https://github.com/sempods/sempods-typescript/issues/238)), not a
+([custom layouts](react-authoring.md#custom-layouts-without-appaccess)), not a
 runtime restriction.
 
 Configured callback URLs may retain application query parameters, but may not
