@@ -152,7 +152,10 @@ was hidden or unmounted, and find it again; before, it could be lost.
   it (`close()`) and discard to start fresh. End-to-end tests that expected a
   leave prompt there expect none now.
 - **A new sign-in starts fresh.** Work captured before is never handed to a
-  new authorization, as before.
+  new authorization, as before, and a draft discarded through a leave
+  confirmation is gone: a mounted `useContextEditor` without work follows
+  the current view with a fresh editor, instead of keeping the discarded
+  text and asking about it again.
 - No public types change.
 
 ### Apps without sign-in

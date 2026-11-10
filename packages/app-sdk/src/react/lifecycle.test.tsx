@@ -7,7 +7,7 @@
  */
 import { webcrypto } from 'node:crypto';
 import { Activity, useState } from 'react';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   fields,
@@ -21,6 +21,7 @@ import {
   fixture,
   pod,
   renewal,
+  restored,
   work,
 } from '../runtime/fixture.test.js';
 import {
@@ -28,6 +29,7 @@ import {
   useContextEditor,
   useContextUpdate,
   useCreation,
+  useApp,
   useResourceEditor,
   type ContextEditor,
 } from './index.js';
@@ -390,4 +392,174 @@ it('opens a row with another definition through the current view, not a kept one
   });
   // The other definition reads the public Context through the current view.
   await waitFor(() => expect(next.editor?.state.draft?.note).toBe('A note'));
+});
+
+/**
+ * Signs in again in the same page: a sign-in started and left, then the page
+ * restored from the back/forward cache resumes the session under a new
+ * authorization.
+ */
+async function reauthorize(
+  f: Awaited<ReturnType<typeof signedIn>>,
+  page: EventTarget,
+  authorize: () => Promise<boolean>,
+  confirm?: string,
+) {
+  let leaving!: Promise<boolean>;
+  act(() => {
+    leaving = authorize();
+  });
+  if (confirm)
+    await act(async () =>
+      (await screen.findByRole('button', { name: confirm })).click(),
+    );
+  expect(await leaving).toBe(true);
+  await act(async () => {
+    page.dispatchEvent(
+      Object.assign(new Event('pageshow'), { persisted: true }),
+    );
+    await restored(f.runtime);
+  });
+  await waitFor(() =>
+    expect(f.runtime.getSnapshot()[0]!.reading).toBe('session'),
+  );
+}
+/** Page events the runtime listens to, for a simulated back/forward return. */
+function pageEvents() {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  return page;
+}
+
+it('ends an explicitly discarded explicit editor, also when it stays mounted through a new authorization', async () => {
+  const page = pageEvents();
+  const f = await signedIn('optional');
+  f.setResource(async () => Response.json(node, { headers: { etag: '"v1"' } }));
+  let context!: ContextEditor<{ title: string }>;
+  let app!: ReturnType<typeof useApp>;
+  function Form() {
+    context = useContextEditor(definition);
+    app = useApp();
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Form />
+    </SempodsProvider>,
+  );
+  await act(async () => {
+    expect(await context.open({ context: work, subject: 'urn:item' })).toBe(
+      true,
+    );
+  });
+  await waitFor(() =>
+    expect(context.editor?.state.draft?.title).toBe('Original'),
+  );
+  act(() => context.editor!.change({ title: 'Explicitly discarded' }));
+  await reauthorize(f, page, () => app.authorize(f.id), 'Discard and continue');
+  // The discarded draft is gone, and opening the row again asks nothing.
+  await waitFor(() =>
+    expect(context.editor?.state.draft?.title).toBe('Original'),
+  );
+  let reopening!: Promise<boolean>;
+  act(() => {
+    reopening = context.open({ context: work, subject: 'urn:item' });
+  });
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(await reopening).toBe(true);
+});
+
+it('opens a fresh editor after closing and discarding work kept through a session end', async () => {
+  const f = await signedIn('optional');
+  f.setResource(async () => Response.json(node, { headers: { etag: '"v1"' } }));
+  let context!: ContextEditor<{ title: string }>;
+  function Form() {
+    context = useContextEditor(definition);
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Form />
+    </SempodsProvider>,
+  );
+  await act(async () => {
+    expect(await context.open({ context: work, subject: 'urn:item' })).toBe(
+      true,
+    );
+  });
+  await waitFor(() =>
+    expect(context.editor?.state.draft?.title).toBe('Original'),
+  );
+  act(() => context.editor!.change({ title: 'Explicitly discarded' }));
+  await act(async () => {
+    await renewal(f, f.runtime, f.id, 'refused');
+  });
+  let closing!: Promise<boolean>;
+  act(() => {
+    closing = context.close();
+  });
+  await act(async () =>
+    (
+      await screen.findByRole('button', { name: 'Discard and continue' })
+    ).click(),
+  );
+  expect(await closing).toBe(true);
+  await act(async () => {
+    expect(await context.open({ context: work, subject: 'urn:item' })).toBe(
+      true,
+    );
+  });
+  await waitFor(() =>
+    expect(context.editor?.state.draft?.title).toBe('Original'),
+  );
+});
+
+it('starts a hidden creation draft afresh after a new authorization that came and went', async () => {
+  const page = pageEvents();
+  const f = await signedIn('optional');
+  let api!: ReturnType<typeof useCreation<{ title: string }>>;
+  let app!: ReturnType<typeof useApp>;
+  function Form() {
+    api = useCreation(definition, {
+      initial: { title: '' },
+      iri: 'urn:item',
+      context: work,
+    });
+    return null;
+  }
+  function Actions() {
+    app = useApp();
+    return null;
+  }
+  let toggle!: (show: boolean) => void;
+  function Host() {
+    const [show, setShow] = useState(true);
+    toggle = setShow;
+    return (
+      <>
+        <Actions />
+        <Activity mode={show ? 'visible' : 'hidden'}>
+          <Form />
+        </Activity>
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Host />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(api.canEdit).toBe(true));
+  act(() => api.change({ title: 'Earlier authorization' }));
+  await waitFor(() => expect(api.draft.title).toBe('Earlier authorization'));
+  // Hidden, its draft guard is disconnected: signing in again asks nothing.
+  act(() => toggle(false));
+  await reauthorize(f, page, () => app.authorize(f.id));
+  await act(async () => {
+    await renewal(f, f.runtime, f.id, 'refused');
+  });
+  act(() => toggle(true));
+  await act(async () => {});
+  expect(api.draft.title).toBe('');
 });

@@ -597,7 +597,11 @@ const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
  * while this hook is hidden or unmounted: the controller keeps that work
  * (`keepsWork`), and opening the same row again, also after a remount,
  * returns to it without asking. It is never attached to another Context,
- * connection, subject or generation, and a new sign-in starts fresh. The
+ * connection, subject or generation, and a new sign-in starts fresh. With
+ * no work left, or its work discarded through a leave confirmation, an
+ * editor whose binding lost its authorization follows the current view: a
+ * fresh editor with the access there is now (none without a session under
+ * `signIn: 'required'`). The
  * editor is a `connection`-scoped leave guard: selecting another Context
  * neither asks about it nor discards it, while `open` with another target,
  * `close` and connection actions ask first, and its pending write blocks them.
@@ -666,6 +670,13 @@ export function useContextEditor<D>(
   );
   const binding = state?.binding ?? null;
   const bound = binding === 'refused' ? null : binding;
+  // Whether the binding still has its authorization (a session that ended or
+  // a new one makes it stale).
+  const boundCurrent = useSyncExternalStore(
+    bound?.subscribe ?? noopSubscribe,
+    () => bound?.getSnapshot().current ?? true,
+    () => bound?.getSnapshot().current ?? true,
+  );
   const activated = state?.activated ?? false;
   const live = liveLane(state, activeId);
   // Only the originating connection may demand discovery for this target, and
@@ -688,6 +699,44 @@ export function useContextEditor<D>(
       return;
     }
     if (binding) {
+      // A binding without its authorization whose editor holds no work (none
+      // left, or discarded) and that the controller does not keep for its
+      // work follows the runtime's current view: a fresh editor that reads
+      // with the access there is now. Work keeps the old binding.
+      if (
+        bound &&
+        !boundCurrent &&
+        ready &&
+        !editorsOf(app).working(
+          bound,
+          lane.target.subject,
+          'connection',
+          shape.current.key,
+          shape.current.definition,
+        ) &&
+        !editorsOf(app).kept(
+          lane.target.context,
+          lane.target.subject,
+          'connection',
+          shape.current.key,
+          shape.current.definition,
+        )
+      ) {
+        try {
+          const view = app.runtime.bindContext(
+            lane.connection,
+            lane.target.context,
+          );
+          if (view !== bound)
+            update(lane, { binding: view, activated: readable });
+        } catch (error) {
+          if (!(error instanceof RuntimeError)) throw error;
+          if (error.problem === 'configuration')
+            update(lane, { binding: 'refused' });
+          else if (error.problem !== 'disconnected') throw error;
+        }
+        return;
+      }
       // Readability can arrive after the binding, for example after "Check access".
       if (bound && !activated && readable) update(lane, { activated: true });
       return;
@@ -727,6 +776,7 @@ export function useContextEditor<D>(
     activeId,
     binding,
     bound,
+    boundCurrent,
     activated,
     readable,
     ready,

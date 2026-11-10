@@ -29,6 +29,8 @@ interface Entry {
   holders: number;
   /** Whether its target is still the one it edits. */
   readonly holds: () => boolean;
+  /** A draft, pending write or review not discarded by its leave guard. */
+  readonly working: () => boolean;
   /**
    * Its view is no longer current, and only its work (a draft, a pending
    * write, a review) keeps it (`keepsWork`): what a replacing view finds.
@@ -92,6 +94,18 @@ export interface EditorStore {
     key: string,
     definition: EditDefinition<D>,
   ): BoundView | undefined;
+  /**
+   * Whether the editor of this view, subject, scope and definition still
+   * holds work (a draft, pending write or review its leave guard did not
+   * discard). A hook replaces a view without access only when it does not.
+   */
+  working<D>(
+    view: BoundView,
+    iri: string,
+    scope: LeaveGuard['scope'],
+    key: string,
+    definition: EditDefinition<D>,
+  ): boolean;
   /** Reopen a selected resource, retaining only its own same-view editor guards. */
   reopen(view: BoundView, iri: string, action: () => void): Promise<boolean>;
 }
@@ -168,14 +182,27 @@ export function editorsOf(app: AppController): EditorStore {
           if (target === 'selected') return snapshot.view === view;
           // Evaluated also while a component holds it, so a new
           // authorization is noticed (`keepsWork` remembers it).
-          const kept = keepsWork(app, connection, view, busy(editor));
+          const kept = keepsWork(app, connection, view, working());
           return (entries.get(name)?.holders ?? 0) > 0 || kept;
         };
         const editor = bindResourceEditor(view, iri, definition);
+        // A draft its leave guard discarded is no work any more, also when
+        // the editor could not drop it (no base after a read loss).
+        const abandoned = () => {
+          const own = entries.get(name);
+          return (
+            own !== undefined &&
+            'discarded' in own &&
+            own.discarded === editor.state.draft
+          );
+        };
+        const working = () => !abandoned() && busy(editor);
         const guard: LeaveGuard = {
           ...(scope ? { scope } : {}),
-          unconfirmed: () => editor.state.review?.kind === 'unconfirmed',
+          unconfirmed: () =>
+            !abandoned() && editor.state.review?.kind === 'unconfirmed',
           dirty: () =>
+            !abandoned() &&
             editor.state.phase !== 'deleted' &&
             (editor.state.dirty || editor.state.review !== null),
           blocked: () => editor.state.phase === 'saving',
@@ -215,17 +242,10 @@ export function editorsOf(app: AppController): EditorStore {
           guard,
           holders: 0,
           holds,
-          keptForWork: () => {
-            if (view.getSnapshot().current) return false;
-            // A draft its leave guard discarded is no work any more, also
-            // when the editor could not drop it (no base after a read loss).
-            const own = entries.get(name);
-            const abandoned =
-              own !== undefined &&
-              'discarded' in own &&
-              own.discarded === editor.state.draft;
-            return !abandoned && keepsWork(app, connection, view, busy(editor));
-          },
+          working,
+          keptForWork: () =>
+            !view.getSnapshot().current &&
+            keepsWork(app, connection, view, working()),
           stop: () => {
             stops.forEach((stop) => stop());
             unregister();
@@ -282,6 +302,19 @@ export function editorsOf(app: AppController): EditorStore {
         )
           return entry.view;
       return undefined;
+    },
+    working<D>(
+      view: BoundView,
+      iri: string,
+      scope: LeaveGuard['scope'],
+      key: string,
+      definition: EditDefinition<D>,
+    ) {
+      const shape =
+        key === 'custom' ? `custom ${idOf(definition as object)}` : key;
+      return (
+        entries.get(`${nameOf(view, iri, scope)} ${shape}`)?.working() ?? false
+      );
     },
     reopen(view, iri, action) {
       const retained = new Set(

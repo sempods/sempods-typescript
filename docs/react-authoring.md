@@ -72,7 +72,9 @@ hidden or unmounted. Showing the screen again, opening the same subject again
 or `for({ context, iri })` finds it again. Nothing of it is written again
 without access, and a new sign-in starts fresh: earlier work is never handed
 to a new authorization. The work ends when it is saved, checked and
-acknowledged, or discarded (a leave confirmation or `close()`).
+acknowledged, or discarded (a leave confirmation or `close()`); a
+`useContextEditor` without work then follows the current view with a fresh
+editor.
 
 Hidden Activity retains local state but disconnects effects, including an
 unsent creation form's draft guard. Keep that form outside the hidden boundary
