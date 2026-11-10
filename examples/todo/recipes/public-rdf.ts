@@ -366,11 +366,7 @@ async function jsonLd(
       nodes as Parameters<typeof jsonld.expand>[0],
       { base, documentLoader },
     );
-    // jsonld rewrites every xsd:double to its canonical form, also a string
-    // such as "01.00"; JSON-LD 1.1 does that only for JSON numbers. A
-    // placeholder datatype keeps the string as written.
-    const placeholder = `urn:uuid:${crypto.randomUUID()}`;
-    keepDoubles(expanded, placeholder);
+    const kept = keepDatatypes(expanded);
     const quads = await jsonld.toRDF(expanded, {
       documentLoader,
       // Keeps `@direction` as an i18n datatype instead of dropping it.
@@ -378,7 +374,7 @@ async function jsonLd(
     } as Options.ToRdf);
     return statements(
       (quads as unknown as readonly Quad[]).map((quad) =>
-        directional(restoreDouble(quad, placeholder)),
+        kept.restore(directional(quad)),
       ),
     );
   } catch {
@@ -423,25 +419,53 @@ function statements(quads: readonly Quad[]): readonly PublicStatement[] {
 }
 
 const XSD_DOUBLE = 'http://www.w3.org/2001/XMLSchema#double';
+const I18N_NAMESPACE = 'https://www.w3.org/ns/i18n#';
 
-/** Marks expanded value objects whose xsd:double lexical form is a string. */
-function keepDoubles(value: unknown, placeholder: string): void {
-  if (Array.isArray(value)) {
-    for (const item of value) keepDoubles(item, placeholder);
-    return;
-  }
-  if (typeof value !== 'object' || value === null) return;
-  const node = value as Record<string, unknown>;
-  if (typeof node['@value'] === 'string' && node['@type'] === XSD_DOUBLE)
-    node['@type'] = placeholder;
-  for (const item of Object.values(node)) keepDoubles(item, placeholder);
-}
-
-function restoreDouble(quad: Quad, placeholder: string): Quad {
-  if (quad.object.datatype?.value !== placeholder) return quad;
+/**
+ * Hides two kinds of datatypes from jsonld behind per-lookup placeholders:
+ * - xsd:double with a string value: jsonld rewrites every double to its
+ *   canonical form, also "01.00"; JSON-LD 1.1 does that only for JSON numbers.
+ * - an explicit i18n datatype: after conversion, only the ones jsonld made
+ *   from `@direction` may become directional literals.
+ * Only value objects change; a value's own content, such as `@json`, is data.
+ */
+function keepDatatypes(expanded: unknown): {
+  restore: (quad: Quad) => Quad;
+} {
+  const prefix = `urn:uuid:${crypto.randomUUID()}#`;
+  const originals = new Map<string, string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (typeof value !== 'object' || value === null) return;
+    const node = value as Record<string, unknown>;
+    if ('@value' in node) {
+      const type = node['@type'];
+      if (
+        typeof type === 'string' &&
+        ((typeof node['@value'] === 'string' && type === XSD_DOUBLE) ||
+          type.startsWith(I18N_NAMESPACE))
+      ) {
+        const placeholder = prefix + originals.size;
+        originals.set(placeholder, type);
+        node['@type'] = placeholder;
+      }
+      return;
+    }
+    for (const item of Object.values(node)) visit(item);
+  };
+  visit(expanded);
   return {
-    ...quad,
-    object: { ...quad.object, datatype: { value: XSD_DOUBLE } },
+    restore(quad) {
+      const original = originals.get(quad.object.datatype?.value ?? '');
+      if (original === undefined) return quad;
+      return {
+        ...quad,
+        object: { ...quad.object, datatype: { value: original } },
+      };
+    },
   };
 }
 

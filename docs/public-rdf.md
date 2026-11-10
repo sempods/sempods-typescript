@@ -156,7 +156,8 @@ a `subject`, `predicate` and `object` as `SparqlTerm`:
   terms. They keep the term in SPARQL 1.2 JSON form (`its:dir`, or
   `type: 'triple'`), so it is not flattened into another term. A `@direction`
   without `@language` keeps the datatype jsonld gives it, such as
-  `https://www.w3.org/ns/i18n#_rtl`.
+  `https://www.w3.org/ns/i18n#_rtl`, and a literal typed explicitly with an
+  i18n datatype stays a typed literal.
 
 A failed result names its `reason`:
 

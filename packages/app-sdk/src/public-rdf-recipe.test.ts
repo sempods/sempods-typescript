@@ -662,6 +662,56 @@ describe('public RDF lookup: parsed statements', () => {
     expect(statements).toHaveLength(3);
   });
 
+  it('leaves the content of a JSON literal alone', async () => {
+    const payload = { '@value': '01.00', '@type': `${XSD}double` };
+    const [statement] = await loaded(
+      JSON.stringify({
+        '@id': IRI,
+        [`${SCHEMA}value`]: { '@value': payload, '@type': '@json' },
+      }),
+      'application/ld+json',
+    );
+
+    expect(statement!.object).toEqual({
+      type: 'literal',
+      value: JSON.stringify({ '@type': `${XSD}double`, '@value': '01.00' }),
+      datatype: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON',
+    });
+  });
+
+  it('tells an explicit i18n datatype from a JSON-LD @direction', async () => {
+    const statements = await loaded(
+      JSON.stringify({
+        '@id': IRI,
+        [RDFS_LABEL]: [
+          { '@value': 'x', '@type': 'https://www.w3.org/ns/i18n#en_rtl' },
+          { '@value': 'x', '@language': 'en', '@direction': 'rtl' },
+        ],
+      }),
+      'application/ld+json',
+    );
+
+    expect(statements.map((s) => s.object)).toEqual(
+      expect.arrayContaining([
+        {
+          type: 'literal',
+          value: 'x',
+          datatype: 'https://www.w3.org/ns/i18n#en_rtl',
+        },
+        {
+          type: 'unsupported',
+          term: {
+            type: 'literal',
+            value: 'x',
+            'xml:lang': 'en',
+            'its:dir': 'rtl',
+          },
+        },
+      ]),
+    );
+    expect(statements).toHaveLength(2);
+  });
+
   it('merges the statements of JSON-LD named graphs', async () => {
     const statements = await loaded(
       JSON.stringify({
