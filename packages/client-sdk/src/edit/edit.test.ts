@@ -327,41 +327,13 @@ describe('dateTime fields', () => {
     ).toEqual({ [END]: [at('2026-10-05T09:30:00Z')] });
   });
 
-  it('makes the draft invalid unless the value is an xsd:dateTime with a time zone', () => {
-    for (const value of [
-      '2026-10-05T09:30:00Z',
-      '2026-10-05T09:30:00.123456+14:00',
-      '2026-10-05T24:00:00-14:00',
-      '2024-02-29T00:00:00+05:45',
-      '2000-02-29T12:00:00Z',
-      '0000-01-01T00:00:00Z',
-      '-0044-03-15T12:00:00+01:00',
-      '12026-01-01T00:00:00Z',
-    ])
-      expect(required.valid!({ end: value }), value).toBe(true);
-    for (const value of [
-      '',
-      '2026-10-05',
-      '2026-10-05T09:30:00',
-      '2026-10-05T09:30Z',
-      '2026-10-05 09:30:00Z',
-      '2026-10-05T09:30:00z',
-      '2026-10-05T09:30:00+0200',
-      '2026-10-05T09:30:00+15:00',
-      '2026-10-05T09:30:00+14:30',
-      '2026-10-05T25:00:00Z',
-      '2026-10-05T24:00:01Z',
-      '2026-13-05T09:30:00Z',
-      '2026-04-31T09:30:00Z',
-      '2026-02-29T09:30:00Z',
-      '1900-02-29T09:30:00Z',
-      '26-10-05T09:30:00Z',
-      '02026-10-05T09:30:00Z',
-      ' 2026-10-05T09:30:00Z',
-      '2026-10-05T09:30:00Z ',
-      '２０２６-10-05T09:30:00Z',
-    ])
-      expect(required.valid!({ end: value }), value).toBe(false);
+  it('validates only classified instants, without a display-year restriction', () => {
+    // dates.test.ts owns the lexical matrix; fields own kind and draft validity.
+    expect(required.valid!({ end: '2026-10-05T24:00:00-14:00' })).toBe(true);
+    expect(required.valid!({ end: '-0044-03-15T12:00:00+01:00' })).toBe(true);
+    expect(required.valid!({ end: '12026-01-01T00:00:00Z' })).toBe(true);
+    expect(required.valid!({ end: '2026-10-05' })).toBe(false);
+    expect(required.valid!({ end: '2026-02-29T09:30:00Z' })).toBe(false);
     expect(required.valid!({ end: null as unknown as string })).toBe(false);
     expect(required.valid!({ end: 1 as unknown as string })).toBe(false);
   });
@@ -1676,30 +1648,12 @@ describe('date fields', () => {
     ).toEqual({ [DUE]: [day('2026-10-06')] });
   });
 
-  it('accepts real days only, leap years included', () => {
-    for (const value of [
-      '2024-02-29',
-      '2000-02-29',
-      '0000-01-01',
-      '-0044-03-15',
-      '2026-10-05+02:00',
-    ])
-      expect(required.valid!({ due: value })).toBe(true);
-    for (const value of [
-      '2023-02-29',
-      '1900-02-29',
-      '2026-02-30',
-      '2026-04-31',
-      '2026-13-01',
-      '2026-10',
-      '2026',
-      '26-10-05',
-      '2026-1-5',
-      '2026-10-05T00:00:00Z',
-      ' 2026-10-05',
-      '',
-    ])
-      expect(required.valid!({ due: value })).toBe(false);
+  it('validates only classified days, without a display-year restriction', () => {
+    expect(required.valid!({ due: '2026-10-05+02:00' })).toBe(true);
+    expect(required.valid!({ due: '0000-01-01' })).toBe(true);
+    expect(required.valid!({ due: '-0044-03-15' })).toBe(true);
+    expect(required.valid!({ due: '2026-02-30' })).toBe(false);
+    expect(required.valid!({ due: '2026-10-05T00:00:00Z' })).toBe(false);
   });
 
   it('reads only xsd:date literals and preserves every other value', () => {

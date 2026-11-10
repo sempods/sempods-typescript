@@ -14,6 +14,7 @@ const { bearer, createPod, decodeCatalogue } =
 const { discoverPod, prepareAuthorization } =
   await import('@sempods/client-sdk/oauth');
 const {
+  classifyDate,
   createResourceEditor,
   dateTime,
   fields,
@@ -28,6 +29,25 @@ assert.equal(
   createLocale({ locale: 'de-DE' }).format.number(1234.5),
   '1.234,5',
 );
+// One classification of stored dates; the formatters return undefined for
+// what they cannot show.
+assert.deepEqual(classifyDate('2026-10-05+02:00'), {
+  kind: 'day',
+  year: 2026,
+  month: 10,
+  day: 5,
+  timeZone: '+02:00',
+});
+const endOfDay = classifyDate('2026-10-05T24:00:00Z');
+assert.equal(
+  endOfDay.kind === 'instant' ? endOfDay.epochMilliseconds : undefined,
+  Date.UTC(2026, 9, 6),
+);
+assert.equal(classifyDate('2026-02-30').kind, 'unsupported');
+const shownDay: string | undefined = createLocale({
+  locale: 'de-DE',
+}).format.dateOnly('2026-02-30');
+assert.equal(shownDay, undefined);
 assert.equal(
   decodeCatalogue(
     {

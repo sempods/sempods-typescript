@@ -150,6 +150,9 @@ importers:
       '@sempods/app-sdk':
         specifier: workspace:*
         version: link:../app-sdk
+      '@sempods/client-sdk':
+        specifier: workspace:*
+        version: link:../client-sdk
 
   packages/client-sdk:
     dependencies:

@@ -154,36 +154,19 @@ function visibleJson(json: string): string {
 }
 
 /**
- * Years 1000–9999 without a time zone. `format.dateOnly` also reads earlier
- * years, but shows 0050 as "50", which reads like 1950.
- */
-const DAY = /^[1-9]\d{3}-\d{2}-\d{2}$/;
-/** An `xsd:dateTime` with a time zone, so it names one instant. */
-const INSTANT =
-  /^([1-9]\d{3}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
-
-/**
  * A formatted date, or undefined to show the lexical form. Only `xsd:date`
- * and `xsd:dateTime`: a date-like `xsd:string` stays as it is.
+ * and `xsd:dateTime`: a date-like `xsd:string` stays as it is. The SDK's
+ * formatters check the XSD lexical form and return undefined for impossible
+ * days, a date with a time zone, a date-time without one, and years outside
+ * 0001–9999 (in the provider's time zone for an instant).
  */
 export function readableDate(
   value: string,
   datatype: string | undefined,
   format: Formatters,
 ): string | undefined {
-  try {
-    if (datatype === `${XSD}date` && DAY.test(value))
-      return format.dateOnly(value);
-    const instant = datatype === `${XSD}dateTime` && INSTANT.exec(value);
-    if (instant) {
-      format.dateOnly(instant[1]!); // Throws for a day such as 2026-02-30.
-      // Its offset can move an instant out of the range, such as into 0999.
-      const year = new Date(value).getUTCFullYear();
-      if (year >= 1000 && year <= 9999) return format.dateTime(value);
-    }
-  } catch {
-    // An unsupported or invalid lexical form stays exact.
-  }
+  if (datatype === `${XSD}date`) return format.dateOnly(value);
+  if (datatype === `${XSD}dateTime`) return format.dateTime(value);
   return undefined;
 }
 

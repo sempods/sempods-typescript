@@ -134,12 +134,17 @@ needs them; preserve the minimal screen's recovery when adapting it.
 - **One data meaning.** Define the type, predicates, text language and status
   values from the domain, not just the example's names. Use `fields()` and
   suitable helpers (`trim: true` for text, `dateTime` for instants, `date` for
-  calendar days). `format.dateOnly` shows a day from years 0001 to 9999
-  without a time zone, a year below 1000 with four digits (`01.03.0050`). It
-  throws a `RangeError` for other forms a `date` accepts (`2026-10-05Z`,
-  `-0044-03-15`, `0000-01-01`), so show those as stored. `format.dateTime`
-  also throws, for an invalid time or a year before 0001 in its time zone;
-  show such an instant as stored too. Keep original
+  calendar days). Show a stored date with `format.dateOnly(value) ?? value`
+  and an instant with `format.dateTime(value) ?? value`; never parse it with
+  `new Date`, which rolls `2026-02-30` over to March and reads a time without
+  a zone in the device's zone. `dateOnly` shows a day from years 0001 to 9999
+  without a time zone, a year below 1000 with four digits (`01.03.0050`).
+  `dateTime` shows an `xsd:dateTime` with a time zone whose year in the
+  formatter's zone is 0001 to 9999. Both return `undefined` for every other
+  form, such as `2026-10-05Z`, `-0044-03-15`, `0000-01-01` or
+  `2026-10-05T09:30:00`: show those as stored. Code that needs the parts uses
+  `classifyDate` from `@sempods/client-sdk/edit`, which `date`, `dateTime`
+  and both formatters share. Keep original
   list snapshots; never reconstruct them from plain values. Preserve unknown
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
