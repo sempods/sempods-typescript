@@ -166,10 +166,10 @@ export function editorsOf(app: AppController): EditorStore {
           const snapshot = app.getSnapshot();
           if (snapshot.activeId !== connection) return false;
           if (target === 'selected') return snapshot.view === view;
-          return (
-            (entries.get(name)?.holders ?? 0) > 0 ||
-            keepsWork(app, connection, view, busy(editor))
-          );
+          // Evaluated also while a component holds it, so a new
+          // authorization is noticed (`keepsWork` remembers it).
+          const kept = keepsWork(app, connection, view, busy(editor));
+          return (entries.get(name)?.holders ?? 0) > 0 || kept;
         };
         const editor = bindResourceEditor(view, iri, definition);
         const guard: LeaveGuard = {

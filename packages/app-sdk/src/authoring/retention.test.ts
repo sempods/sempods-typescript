@@ -95,8 +95,13 @@ it('keeps work only while access is lost without a new authorization', () => {
   expect(keepsWork(f.app, 'a', view, true)).toBe(true);
   f.end(null);
   expect(keepsWork(f.app, 'a', view, true)).toBe(true);
-  // A new authorization never adopts earlier work.
+  // A new authorization never adopts earlier work, also once that session
+  // ends as well.
   f.signIn();
+  expect(keepsWork(f.app, 'a', view, true)).toBe(false);
+  f.end('anonymous');
+  expect(keepsWork(f.app, 'a', view, true)).toBe(false);
+  f.end(null);
   expect(keepsWork(f.app, 'a', view, true)).toBe(false);
   // Nor does another active connection.
   f.end('anonymous');

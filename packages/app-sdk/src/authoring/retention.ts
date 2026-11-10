@@ -14,7 +14,8 @@ import type { BoundView } from '../runtime/view.js';
  * (`signIn: 'optional'`). Showing, hiding or unmounting a component is no
  * part of it. A new session for the connection, another active connection
  * or controller disposal ends it: earlier work is never adopted by a new
- * authorization, and gets no write authority back.
+ * authorization, and gets no write authority back. Once a view saw a new
+ * session, its work is never kept again, also after that session ended too.
  */
 export function keepsWork(
   app: AppController,
@@ -24,8 +25,14 @@ export function keepsWork(
 ) {
   if (app.getSnapshot().activeId !== connection) return false;
   if (view.getSnapshot().current) return true;
-  return working && accessLost(app, connection);
+  if (!accessLost(app, connection)) {
+    superseded.add(view);
+    return false;
+  }
+  return working && !superseded.has(view);
 }
+/** Views a new authorization came after: their work is never kept again. */
+const superseded = new WeakSet<BoundView>();
 
 /**
  * Whether a connection's access ended without a new authorization: it reads
