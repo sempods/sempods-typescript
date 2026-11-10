@@ -67,7 +67,7 @@ import {
 } from './catalogue.js';
 import { browserPreferences, createContextMemory } from './context-memory.js';
 
-import { assertCredentialRecipient, type Entry } from './connection.js';
+import { assertCredentialRecipient, sends, type Entry } from './connection.js';
 
 /** How long before its expiry a credential is renewed before dispatch. */
 const RENEWAL_MARGIN = 60_000;
@@ -113,29 +113,25 @@ export function createBrowserRuntime(
   const readsAnonymously = signIn !== 'required';
   if (signIn !== 'none' && !options.identity)
     throw new RuntimeError('configuration');
-  const configuredScopes = {
-    required: options.scopes?.required ?? [],
-    optional: options.scopes?.optional ?? [],
-  };
+  const configuredRequired = options.scopes?.required ?? [];
+  const configuredOptional = options.scopes?.optional ?? [];
   // An app that works without a session cannot require what only a session
   // grants; one that never signs in requests nothing.
   if (
-    (signIn === 'none' &&
-      (configuredScopes.required.length > 0 ||
-        configuredScopes.optional.length > 0)) ||
-    (signIn === 'optional' && configuredScopes.required.length > 0)
+    (readsAnonymously && configuredRequired.length > 0) ||
+    (signIn === 'none' && configuredOptional.length > 0)
   )
     throw new RuntimeError('configuration');
   const identity: ClientIdentity | undefined = options.identity
     ? Object.freeze({ ...options.identity })
     : undefined;
-  const required = scopeList(configuredScopes.required);
+  const required = scopeList(configuredRequired);
   const optional = scopeList(
     // Signing in must not hide the public Contexts the app showed without a
     // token: a session reads them only with this scope (SPS-GRANT-020).
-    signIn === 'optional' && !configuredScopes.optional.includes('public-read')
-      ? [...configuredScopes.optional, 'public-read']
-      : configuredScopes.optional,
+    signIn === 'optional' && !configuredOptional.includes('public-read')
+      ? [...configuredOptional, 'public-read']
+      : configuredOptional,
   );
   const requested = Object.freeze([...new Set([...required, ...optional])]);
   const redirect = identity
@@ -283,12 +279,13 @@ export function createBrowserRuntime(
     return kind === 'active' || kind === 'renewing' ? 'session' : null;
   }
   function publish() {
-    for (const e of entries.values()) {
-      const reading = readingOf(e);
-      if (e.view.reading !== reading) e.view = { ...e.view, reading };
-    }
     snapshot = Object.freeze(
-      [...entries.values()].map((e) => Object.freeze({ ...e.view })),
+      [...entries.values()].map((e) => {
+        // `connect()` returns `e.view`, so it carries `reading` as well.
+        const reading = readingOf(e);
+        if (e.view.reading !== reading) e.view = { ...e.view, reading };
+        return Object.freeze({ ...e.view });
+      }),
     );
     listeners.forEach((listener) => {
       try {
@@ -429,78 +426,81 @@ export function createBrowserRuntime(
    * catalogue, a pending renewal) continues, and no request refused with a
    * token is sent again without it. Publishes nothing itself.
    */
-  function settle(e: Entry) {
-    const s = e.view.session;
-    if (
-      !readsAnonymously ||
-      !initialized ||
-      disposed ||
-      e.anonymous ||
-      entries.get(e.view.id) !== e ||
-      !(
-        s.kind === 'signed-out' ||
-        (s.kind === 'ended' &&
-          !s.restorable &&
-          // A sign-out or forget in progress, or one that could not be saved,
-          // keeps the connection blocked; a session that ended by a record
-          // conflict does not.
-          !(
-            s.problem === 'disconnected' &&
-            (disconnects.has(e.view.id) || s.saved === false || s.forget)
-          ))
-      )
-    )
-      return;
-    delete e.credentials;
-    delete e.credential;
+  function settle(e: Entry): boolean {
+    if (!readsAnonymously || !initialized || disposed) return false;
+    if (e.anonymous || entries.get(e.view.id) !== e) return false;
+    if (!sessionGone(e)) return false;
+    if (e.lost) clearTimeout(e.lost.timer);
     delete e.restorable;
-    // A renewal of the ended session no longer clears these itself: its
-    // generation is gone.
-    delete e.refresh;
-    delete e.ahead;
-    if (e.lost) {
-      clearTimeout(e.lost.timer);
-      delete e.lost;
-    }
-    e.lifetime.abort(new RuntimeError('disconnected'));
-    e.lifetime = new AbortController();
-    e.generation = crypto.randomUUID();
+    renewLifetime(e, crypto.randomUUID(), new RuntimeError('disconnected'));
     e.anonymous = true;
-    invalidate(e);
-    invalidatePod(e);
-    invalidateContexts(e);
-    resetLabels(e);
-    delete e.bound;
-    delete e.boundPod;
-    delete e.explicit;
-    delete e.observations;
-    delete e.catalogue;
-    delete e.revalidation;
-    e.selectedVersion++;
     e.view = {
       ...e.view,
       catalogue: Object.freeze({ kind: 'unknown' }),
       grantedScopes: Object.freeze([]),
       missingRequiredScopes: required,
     };
+    return true;
+  }
+  /**
+   * The session is gone for good: signed out, or ended neither restorably nor
+   * by a sign-out or forget in progress or one that could not be saved, which
+   * keep the connection blocked. A session that ended by a record conflict
+   * is gone too.
+   */
+  function sessionGone(e: Entry) {
+    const s = e.view.session;
+    if (s.kind === 'signed-out') return true;
+    if (s.kind !== 'ended' || s.restorable) return false;
+    if (s.problem !== 'disconnected') return true;
+    return !disconnects.has(e.view.id) && s.saved !== false && !s.forget;
+  }
+  /**
+   * Starts a new lifetime and generation: nothing of the earlier one (its
+   * credential, renewal, reads, handles, catalogue read) continues. The view
+   * is the caller's.
+   */
+  function renewLifetime(e: Entry, generation: string, reason?: unknown) {
+    e.lifetime.abort(reason);
+    e.lifetime = new AbortController();
+    e.generation = generation;
+    delete e.anonymous;
+    delete e.credentials;
+    delete e.credential;
+    delete e.bound;
+    delete e.boundPod;
+    delete e.explicit;
+    delete e.observations;
+    delete e.refresh;
+    delete e.ahead;
+    delete e.lost;
+    delete e.catalogue;
+    delete e.revalidation;
+    invalidate(e);
+    invalidatePod(e);
+    invalidateContexts(e);
+    resetLabels(e);
+    e.selectedVersion++;
+  }
+  /** A connection without discovery or client that reads without a token. */
+  function addAnonymous(podUrl: string, id?: string) {
+    const e = createEntry(podUrl, undefined, undefined, id);
+    e.anonymous = true;
+    entries.set(e.view.id, e);
+    return e;
   }
   /**
    * Under `signIn: 'optional'` or `'none'`, the default Pod is always listed:
    * without a connection to it, one that reads without a token is added.
    */
-  function ensureDefault() {
-    if (
-      !readsAnonymously ||
-      !initialized ||
-      disposed ||
-      defaultPodUrl === undefined ||
-      [...entries.values()].some((e) => e.view.podUrl === defaultPodUrl)
-    )
-      return;
+  function ensureDefault(): boolean {
+    if (!readsAnonymously || !initialized || disposed || !defaultPodUrl)
+      return false;
+    for (const e of entries.values())
+      if (e.view.podUrl === defaultPodUrl) return false;
     // A stable id keeps the remembered Context of a Pod never signed in to.
-    const e = createEntry(defaultPodUrl, undefined, undefined, defaultPodUrl);
-    e.anonymous = true;
-    entries.set(e.view.id, e);
+    addAnonymous(defaultPodUrl, defaultPodUrl);
+    return true;
   }
   /** Deletes a record and, once it is gone, the Context choice remembered with it. */
   async function erase(id: string, revision: string) {
@@ -946,8 +946,7 @@ export function createBrowserRuntime(
       auth,
       clientPod: (options.podFactory ?? createPod)(podUrl, {
         ...protocol,
-        beforeDispatch: () =>
-          eligible(e) && (e.anonymous === true || e.credential !== undefined),
+        beforeDispatch: () => eligible(e) && sends(e),
         auth,
       }),
     };
@@ -1145,7 +1144,14 @@ export function createBrowserRuntime(
       cause = error;
     }
     if (eligible(e, generation)) {
-      setEnded(e, problem, cause);
+      e.view = {
+        ...e.view,
+        session: Object.freeze({
+          kind: 'ended',
+          problem,
+          ...runtimeFailure(cause),
+        }),
+      };
       settle(e);
       publish();
     }
@@ -1436,9 +1442,9 @@ export function createBrowserRuntime(
       if (readsAnonymously && initialized && !disposed) {
         // Remembered Pods, and attempts that ended without a session, read
         // without a token once the callback no longer needs their records.
-        for (const e of [...entries.values()]) settle(e);
-        ensureDefault();
-        publish();
+        let changed = false;
+        for (const e of entries.values()) changed = settle(e) || changed;
+        if (ensureDefault() || changed) publish();
       }
     }
   }
@@ -1603,9 +1609,7 @@ export function createBrowserRuntime(
           // Reading needs neither discovery nor a client: a sign-in
           // discovers the Pod and resolves the client itself. Creating the
           // client validates the address.
-          const e = createEntry(url, undefined, undefined);
-          e.anonymous = true;
-          entries.set(e.view.id, e);
+          const e = addAnonymous(url);
           publish();
           return e.view;
         }
@@ -1677,29 +1681,11 @@ export function createBrowserRuntime(
           shown.session.kind === 'leaving'
             ? shown.session.subject
             : undefined;
-        e.lifetime.abort();
-        e.lifetime = new AbortController();
-        e.generation = generation;
+        renewLifetime(e, generation);
         e.pod = pod;
         e.client = client;
         // Signing in again replaces a forget that could not be saved.
         delete e.forgetting;
-        delete e.anonymous;
-        delete e.credentials;
-        delete e.credential;
-        delete e.bound;
-        delete e.boundPod;
-        delete e.explicit;
-        delete e.observations;
-        delete e.refresh;
-        delete e.lost;
-        delete e.catalogue;
-        delete e.revalidation;
-        invalidate(e);
-        invalidatePod(e);
-        invalidateContexts(e);
-        resetLabels(e);
-        e.selectedVersion++;
         e.view = {
           ...shown,
           session: Object.freeze(

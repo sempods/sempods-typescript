@@ -7,7 +7,7 @@ import type {
   Cancelled,
   Stopped,
 } from '@sempods/client-sdk';
-import type { Entry } from './connection.js';
+import { sends, subjectOf, type Entry } from './connection.js';
 import type { CatalogueFact } from './types.js';
 import type { BoundView, Invalidated, ViewAccess } from './view.js';
 import { waitFor } from './wait.js';
@@ -141,17 +141,17 @@ export function bindView(
   const { contextIri } = target;
   const generation = e.generation;
   // `null` while reading without a token; a sign-in or sign-out replaces it.
-  const subject = e.credentials?.subject ?? null;
+  const subject = subjectOf(e);
   const valid = () =>
     current() &&
     e.generation === generation &&
-    (e.credentials?.subject ?? null) === subject &&
+    subjectOf(e) === subject &&
     target.holds();
   // Without a credential (a lost renewal answer waiting for its resend),
   // the handle stays current but its access is suspended.
   const permission = (write: boolean) =>
     valid() &&
-    (e.anonymous === true || e.credential !== undefined) &&
+    sends(e) &&
     e.view.missingRequiredScopes.length === 0 &&
     catalogueLists(e.view.catalogue, contextIri, write);
   let snapshot: ViewAccess | undefined;

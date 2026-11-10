@@ -18,6 +18,7 @@ import {
   useDiscoveryDemand,
   useSwitchDemand,
   useWorkflowAccess,
+  activeCatalogue,
   type AppActions,
 } from './app.js';
 import type { AppSnapshot } from '../authoring/app.js';
@@ -31,6 +32,7 @@ import type { Connection } from '../runtime/types.js';
 import {
   knownContexts,
   presentAccess,
+  reads as readsAtAll,
   type ConnectionBody,
 } from './access-presentation.js';
 import {
@@ -193,11 +195,7 @@ function Management({
 }) {
   const { messages: m } = useSdkLocale();
   const app = useApp();
-  const activeId = useAppFacts((s) => {
-    const c = s.connections.find((entry) => entry.id === s.activeId);
-    // Signed in, or reading without a token.
-    return c && c.reading !== null ? c.id : null;
-  });
+  const activeId = useAppFacts((s) => activeCatalogue(s).activeId);
   // Opening the management dialog checks the access again, so it needs no
   // separate button.
   const refreshContexts = app.refreshContexts;
@@ -641,7 +639,7 @@ function AccessConnections({
     : m.controls.disconnectHint;
   const active = c?.session.kind === 'active' || c?.session.kind === 'renewing';
   // Signed in, or reading without a token: its Contexts can be chosen.
-  const reads = c !== undefined && c.reading !== null;
+  const reads = readsAtAll(c);
   const anonymous = c?.reading === 'anonymous';
   // Adding a Pod signs in only where sign-in is required; otherwise it opens
   // the Pod to read without a token.
@@ -887,13 +885,12 @@ function AccessConnections({
       })}
     </ul>
   );
-  // Nothing to sign out of without sign-in, or before any session.
-  // A connection that reads without a token has no session to sign out of;
-  // a remembered address (or one whose session ended here) is forgotten.
+  // A connection that reads without a token (always, under `none`) has no
+  // session to sign out of; a remembered address, or one whose session ended
+  // here, is forgotten instead.
   const signsOut =
     c !== undefined &&
     !anonymous &&
-    state.signIn !== 'none' &&
     c.session.kind !== 'signed-out' &&
     (manage || c.session.kind === 'ended');
   const forgets =

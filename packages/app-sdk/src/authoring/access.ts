@@ -151,7 +151,6 @@ function connectionCause(
     // A sign-out the person chose needs no prompt beside another Pod.
     const chosen = s.problem === undefined || s.problem === 'disconnected';
     if (!active && chosen) return undefined;
-    // Read without a token: signing in is offered, not demanded.
     // Read without a token: signing in is offered, not demanded; an address
     // the person signed out of stays on this device until forgotten.
     if (chosen && c.reading === 'anonymous')
@@ -290,14 +289,16 @@ export function createAccessTracker() {
     const kept: typeof ids = new Map();
     for (const c of f.connections) {
       // A retry of an unreachable Pod keeps its prompt's identity while it restores.
-      const key = `${c.id}\nunreachable`;
-      const entry = ids.get(key);
-      if (entry && c.session.kind === 'restoring') kept.set(key, entry);
       // Reading without a token lasts while another Pod is active: its
       // prompt keeps its identity, and a dismissal, until the person signs in.
-      const anonymous = `${c.id}\nanonymous`;
-      const prompt = ids.get(anonymous);
-      if (prompt && c.reading === 'anonymous') kept.set(anonymous, prompt);
+      const lasting =
+        c.session.kind === 'restoring'
+          ? `${c.id}\nunreachable`
+          : c.reading === 'anonymous'
+            ? `${c.id}\nanonymous`
+            : undefined;
+      const entry = lasting === undefined ? undefined : ids.get(lasting);
+      if (entry) kept.set(lasting!, entry);
     }
     let blocking: AccessPrompt | null = null;
     const prompts: { prompt: AccessPrompt; order: number }[] = [];

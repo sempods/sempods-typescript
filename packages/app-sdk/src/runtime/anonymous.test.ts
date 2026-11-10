@@ -12,6 +12,7 @@ import {
   catalogue,
   deferred,
   fixture,
+  memoryStorage,
   personal,
   pod,
   renewal,
@@ -427,12 +428,7 @@ describe('signIn: none', () => {
   });
 
   it('remembers the chosen Context per Pod across starts', async () => {
-    const storage = new Map<string, string>();
-    const preferences = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => void storage.set(key, value),
-      removeItem: (key: string) => void storage.delete(key),
-    };
+    const preferences = memoryStorage();
     const f = none({ preferences });
     await f.runtime.initialize();
     await f.runtime.loadContexts(pod);

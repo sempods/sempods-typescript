@@ -25,7 +25,7 @@ import type { CatalogueFact } from '../runtime/types.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog } from './confirm.js';
 import { useCommands } from './commands.js';
-import { knownContexts } from './access-presentation.js';
+import { knownContexts, reads } from './access-presentation.js';
 import { contextName, distinctName, podName } from './names.js';
 import { editorsOf } from '../authoring/editors.js';
 const Context = createContext<{
@@ -146,7 +146,7 @@ export function useWriteGate() {
 /** Internal: the active connection, while it reads (`reading`), and its catalogue. */
 export function activeCatalogue(s: AppSnapshot) {
   const connection = s.connections.find((c) => c.id === s.activeId);
-  const reading = connection?.reading != null ? connection : undefined;
+  const reading = reads(connection) ? connection : undefined;
   return {
     activeId: reading?.id ?? null,
     catalogue: reading?.catalogue,
@@ -342,9 +342,8 @@ export function useContexts() {
     }),
     shallowEqual,
   );
-  // Signed in, or reading without a token.
-  const active = Boolean(connection && connection.reading !== null);
-  const catalogue = active ? connection!.catalogue : undefined;
+  const reading = reads(connection) ? connection : undefined;
+  const catalogue = reading?.catalogue;
   // An exact preset keeps the app in its one Context.
   const fixed =
     preset?.podUrl === connection?.podUrl ? preset?.contextIri : undefined;
@@ -352,8 +351,8 @@ export function useContexts() {
     () => contextChoices(knownContexts(catalogue), catalogue, fixed),
     [catalogue, fixed],
   );
-  const id = active ? connection!.id : null;
-  const selectedIri = active ? connection!.selectedContext : null;
+  const id = reading?.id ?? null;
+  const selectedIri = reading?.selectedContext ?? null;
   // Labels for the names, once per set of Contexts (display text only).
   const labelled =
     catalogue?.kind === 'ready'
@@ -410,7 +409,9 @@ export function useContexts() {
     select,
     /** Signed in, but no Contexts known yet. */
     loading:
-      active && !knownContexts(catalogue) && catalogue?.kind !== 'failed',
+      reading !== undefined &&
+      !knownContexts(catalogue) &&
+      catalogue?.kind !== 'failed',
     /** The catalogue failed; known Contexts may still show. */
     failed: catalogue?.kind === 'failed',
     retry,
@@ -653,19 +654,16 @@ function useDemand(active: boolean, kind: 'selection' | 'discovery') {
   if (!value) throw new Error('SempodsProvider is required.');
   // Only the facts used here: a token renewal or another connection's
   // catalogue does not re-render the host.
-  const { mode, id, undiscovered } = useAppFacts((s) => {
-    const connection = s.connections.find((c) => c.id === s.activeId);
-    return {
+  const { mode, id, undiscovered } = useAppFacts(
+    (s) => ({
       mode: s.contextSelection,
       id: s.activeId,
       // Reading (signed in, also while renewing, or without a token) with
       // no catalogue requested yet.
-      undiscovered:
-        connection !== undefined &&
-        connection.reading !== null &&
-        connection.catalogue.kind === 'unknown',
-    };
-  }, shallowEqual);
+      undiscovered: activeCatalogue(s).catalogue?.kind === 'unknown',
+    }),
+    shallowEqual,
+  );
   const retain =
     kind === 'selection' ? value.retainContext : value.retainDiscovery;
   useEffect(() => (active ? retain() : undefined), [active, retain]);

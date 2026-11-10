@@ -444,13 +444,14 @@ export function createAppController(
   }
   /** Whether any guard holds work: a draft, a pending or an unconfirmed write. */
   function unresolved() {
-    return [...guards].some(
-      (g) => g.dirty() || g.blocked() || Boolean(g.unconfirmed?.()),
-    );
+    for (const g of guards)
+      if (g.dirty() || g.blocked() || g.unconfirmed?.()) return true;
+    return false;
   }
   /** A guard changed: follow the leave prompt, and release a held view. */
   function guardChanged() {
-    if (held) publish();
+    // Every edit of a draft reports here: publish only once the work is gone.
+    if (held && !unresolved()) publish();
     else followUnload();
   }
   /** The guards a change leaves: asked about first, discarded once it ran. */

@@ -69,6 +69,15 @@ export interface Entry {
   };
 }
 
+/** Whether the entry may dispatch now: with its credential, or without a token. */
+export function sends(e: Entry): boolean {
+  return e.anonymous === true || e.credential !== undefined;
+}
+/** The subject handles are keyed with: `null` while reading without a token. */
+export function subjectOf(e: Entry): string | null {
+  return e.credentials?.subject ?? null;
+}
+
 /** Credentials never follow a subject IRI or another pod's route. */
 export function assertCredentialRecipient(
   podUrl: string,
