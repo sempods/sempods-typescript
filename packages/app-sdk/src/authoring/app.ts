@@ -358,13 +358,14 @@ export function createAppController(
         // A session that ended by itself makes the connection read without a
         // token (`signIn: 'optional'`): a new view of the same target. Work
         // left on the old one (a draft, a pending or unconfirmed write) is
-        // same-target access loss: the old view, now without access, stays
-        // until that work is resolved or discarded, as without
-        // `signIn: 'optional'`. Its write authority does not come back.
+        // same-target access loss, under the stores' rule (`keepsWork`): the
+        // old view, now without access, stays until that work is resolved or
+        // discarded. Its write authority does not come back, and a new
+        // session (another authorization) never keeps it.
         held =
           view !== null &&
           next !== view &&
-          connection.reading === 'anonymous' &&
+          connection.reading !== 'session' &&
           view.podUrl === next.podUrl &&
           view.contextIri === next.contextIri &&
           !view.getSnapshot().current &&

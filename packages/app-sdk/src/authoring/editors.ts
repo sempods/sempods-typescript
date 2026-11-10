@@ -3,6 +3,7 @@ import type { AppController, LeaveGuard } from './app.js';
 import { navigateRetaining } from './app.js';
 import type { BoundView } from '../runtime/view.js';
 import { bindResourceEditor } from './editor.js';
+import { keepsWork, sameTarget } from './retention.js';
 
 /** At most this many released editors without unsaved work stay per store. */
 const IDLE = 20;
@@ -19,12 +20,20 @@ const busy = (editor: ResourceEditor<unknown>) =>
 interface Entry {
   readonly view: BoundView;
   readonly iri: string;
+  /** The definition's identity, as in the entry's name. */
+  readonly shape: string;
+  readonly target: EditorTarget;
   readonly scope: LeaveGuard['scope'];
   readonly editor: ResourceEditor<unknown>;
   readonly guard: LeaveGuard;
   holders: number;
   /** Whether its target is still the one it edits. */
   readonly holds: () => boolean;
+  /**
+   * Its view is no longer current, and only its work (a draft, a pending
+   * write, a review) keeps it (`keepsWork`): what a replacing view finds.
+   */
+  readonly keptForWork: () => boolean;
   /**
    * The draft its leave guard discarded: a release that finds it unchanged
    * lets the editor go, also when it could not drop it (no base after a
@@ -42,8 +51,11 @@ interface Entry {
  * and a component claiming the same editor again gets it back. A released
  * editor without unsaved work stays for a while (the most recent `IDLE`), so
  * showing it again does not read afresh. Once its target no longer holds
- * (another selected view, an explicit view no longer current, another active
- * connection), it is disposed and its guard goes.
+ * (another selected view, another active connection, or an explicit view no
+ * longer current that neither a component uses nor `keepsWork` keeps for
+ * its draft, pending write or review), it is disposed and its guard goes. An
+ * explicit editor kept that way is found again through the view that
+ * replaced its own, and keeps its own view and write authority.
  */
 export interface EditorStore {
   claim<D>(
@@ -67,6 +79,16 @@ export interface EditorStore {
    * reopens: returning to it leaves nothing. It binds nothing.
    */
   retains(context: string, iri: string, scope: LeaveGuard['scope']): boolean;
+  /**
+   * The view of an explicit editor kept for its work through access loss
+   * (`keepsWork`) for this Context, subject and scope, for a hook that has no
+   * current view to claim it with (a session that ended without a token).
+   */
+  kept(
+    context: string,
+    iri: string,
+    scope: LeaveGuard['scope'],
+  ): BoundView | undefined;
   /** Reopen a selected resource, retaining only its own same-view editor guards. */
   reopen(view: BoundView, iri: string, action: () => void): Promise<boolean>;
 }
@@ -112,7 +134,21 @@ export function editorsOf(app: AppController): EditorStore {
     ) {
       const shape =
         key === 'custom' ? `custom ${idOf(definition as object)}` : key;
-      const name = `${nameOf(view, iri, scope)} ${shape}`;
+      // Work kept through access loss for the same explicit target.
+      const kept =
+        target === 'explicit'
+          ? [...entries].find(
+              ([, other]) =>
+                other.target === 'explicit' &&
+                other.view !== view &&
+                sameTarget(other.view, view) &&
+                other.iri === iri &&
+                other.scope === scope &&
+                other.shape === shape &&
+                other.keptForWork(),
+            )
+          : undefined;
+      const name = kept?.[0] ?? `${nameOf(view, iri, scope)} ${shape}`;
       let entry = entries.get(name);
       if (entry) {
         // Most recently claimed last, for the bound.
@@ -122,13 +158,14 @@ export function editorsOf(app: AppController): EditorStore {
         const connection = app.getSnapshot().activeId;
         // An explicit editor in use stays through read loss and an ended
         // session (its hook retires it on another connection); released, it
-        // goes once its view is no longer current.
+        // stays while `keepsWork` keeps its work.
         const holds = () => {
           const snapshot = app.getSnapshot();
           if (snapshot.activeId !== connection) return false;
           if (target === 'selected') return snapshot.view === view;
           return (
-            (entries.get(name)?.holders ?? 0) > 0 || view.getSnapshot().current
+            (entries.get(name)?.holders ?? 0) > 0 ||
+            keepsWork(app, connection, view, busy(editor))
           );
         };
         const editor = bindResourceEditor(view, iri, definition);
@@ -158,17 +195,34 @@ export function editorsOf(app: AppController): EditorStore {
           app.subscribe(follow),
           view.subscribe(follow),
           editor.subscribe(() => {
-            if (entries.get(name)?.holders === 0) trim();
+            const own = entries.get(name);
+            if (own?.holders !== 0) return;
+            // Kept only for its work, which has settled: it goes.
+            if (!own.holds()) remove(name);
+            else trim();
           }),
         ];
         entry = {
           view,
           iri,
+          shape,
+          target,
           scope,
           editor: editor as ResourceEditor<unknown>,
           guard,
           holders: 0,
           holds,
+          keptForWork: () => {
+            if (view.getSnapshot().current) return false;
+            // A draft its leave guard discarded is no work any more, also
+            // when the editor could not drop it (no base after a read loss).
+            const own = entries.get(name);
+            const abandoned =
+              own !== undefined &&
+              'discarded' in own &&
+              own.discarded === editor.state.draft;
+            return !abandoned && keepsWork(app, connection, view, busy(editor));
+          },
           stop: () => {
             stops.forEach((stop) => stop());
             unregister();
@@ -204,6 +258,18 @@ export function editorsOf(app: AppController): EditorStore {
           entry.scope === scope &&
           entry.holds(),
       );
+    },
+    kept(context: string, iri: string, scope: LeaveGuard['scope']) {
+      for (const entry of entries.values())
+        if (
+          entry.target === 'explicit' &&
+          entry.view.contextIri === context &&
+          entry.iri === iri &&
+          entry.scope === scope &&
+          entry.keptForWork()
+        )
+          return entry.view;
+      return undefined;
     },
     reopen(view, iri, action) {
       const retained = new Set(

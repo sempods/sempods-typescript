@@ -212,15 +212,21 @@ export class Lane<D> {
             ? { kind: 'not-removed', reason: 'failure', problem }
             : { kind: 'not-saved', reason: 'failure', problem };
     }
-    this.pending = false;
-    // Sent: the caller always learns what happened, also after the target ended.
-    if (!this.eligible()) return outcome;
+    // Decided while the write is still pending, so a target kept only for
+    // this write still holds it: pending becomes unresolved in one step.
+    const eligible = this.eligible();
+    if (!eligible) {
+      this.pending = false;
+      // Sent: the caller always learns what happened, also after the target ended.
+      return outcome;
+    }
     if (outcome.kind === 'saved' && subject) {
       spentSnapshots.set(subject, { after });
     }
     // A result may contain a read made before access was lost and regained.
     if (this.version !== version || !this.readable())
       outcome = withoutComparison(outcome)!;
+    this.pending = false;
     this.unresolved =
       outcome.kind === 'unconfirmed' || outcome.kind === 'changed-on-pod';
     this.uncertain = outcome.kind === 'unconfirmed';

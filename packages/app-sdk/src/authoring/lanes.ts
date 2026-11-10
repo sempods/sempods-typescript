@@ -3,40 +3,10 @@ import type { AppController } from './app.js';
 import type { BoundView } from '../runtime/view.js';
 import { notify, observeStarts, startCount } from './changes.js';
 import { Lane, type LaneScope } from './lane.js';
+import { keepsWork, sameTarget } from './retention.js';
 
 /** At most this many settled, unguarded lanes stay per group for feedback. */
 const SETTLED = 200;
-
-/** Explicit views kept for unresolved work, per controller, with a count. */
-const retained = new WeakMap<AppController, Map<BoundView, number>>();
-/**
- * Internal: keeps an explicit view's groups through same-target access loss
- * while a form holds work on it (a draft, a pending or unresolved creation).
- * It counts only once the connection reads without a token
- * (`signIn: 'optional'`), so a new authorization still retires it. Returns
- * the release; write access still follows the view, which has none left.
- */
-export function retainView(app: AppController, view: BoundView): () => void {
-  let views = retained.get(app);
-  if (!views) retained.set(app, (views = new Map()));
-  views.set(view, (views.get(view) ?? 0) + 1);
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    const count = (views.get(view) ?? 1) - 1;
-    if (count > 0) views.set(view, count);
-    else views.delete(view);
-  };
-}
-/** Whether the active connection reads without a token. */
-function readsAnonymously(app: AppController) {
-  const snapshot = app.getSnapshot();
-  return (
-    snapshot.connections.find((c) => c.id === snapshot.activeId)?.reading ===
-    'anonymous'
-  );
-}
 
 export type { LaneScope } from './lane.js';
 
@@ -45,10 +15,10 @@ export type { LaneScope } from './lane.js';
  * app controller rather than a component. A lane's lifetime follows its
  * target: unmounting, hiding (`<Activity>`) or remounting a screen never
  * retires it, so a write that settles meanwhile keeps its outcome and its
- * leave guard. The group retires once its target no longer holds (another
- * selected view, an explicit view no longer current and not kept for work
- * on it, or another active connection); then its lanes never update again
- * and their guards go.
+ * leave guard. The group retires once its target no longer holds: another
+ * selected view, another active connection, or an explicit view no longer
+ * current that `keepsWork` does not keep (its work resolved, or a new
+ * authorization). Then its lanes never update again and their guards go.
  */
 export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
   readonly lanes = new Map<string, L>();
@@ -58,6 +28,8 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
   private version = 0;
   private alive = true;
   private readable = false;
+  /** Forms holding a draft for this group's target (`hold`). */
+  private holders = 0;
 
   constructor(
     readonly view: BoundView,
@@ -80,16 +52,32 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     const snapshot = this.app.getSnapshot();
     if (snapshot.activeId !== this.connection) return false;
     if (this.scope === 'target') return snapshot.view === this.view;
-    if (this.view.getSnapshot().current) return true;
-    // Same-target access loss once the session ended (`signIn: 'optional'`):
-    // a form's work on it, or a captured write of its own, keeps it, also
-    // while that form is hidden or unmounted.
-    return (
-      this.scope === 'explicit' &&
-      (Boolean(retained.get(this.app)?.has(this.view)) ||
-        [...this.lanes.values()].some((lane) => lane.outstanding())) &&
-      readsAnonymously(this.app)
-    );
+    return keepsWork(this.app, this.connection, this.view, this.working());
+  }
+  /** A form's draft or a captured write that needs its recovery. */
+  working() {
+    if (this.holders > 0) return true;
+    for (const lane of this.lanes.values()) if (lane.outstanding()) return true;
+    return false;
+  }
+  /**
+   * A form holds a draft for this target: work the group keeps through
+   * access loss like its own writes. Returns the release.
+   */
+  hold(): () => void {
+    if (this.stops.length === 0) this.start();
+    this.holders++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.holders--;
+      this.settle();
+    };
+  }
+  /** Its work ended while only work kept it: it retires. */
+  private settle() {
+    if (this.alive && !this.holds()) this.retire();
   }
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -100,6 +88,8 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
   /** Changes with every lane change, for `useSyncExternalStore`. */
   readonly getVersion = () => this.version;
   private readonly changed = () => {
+    // The last work of a target kept only for it resolved: nothing keeps it.
+    if (this.alive && !this.holds()) this.expire();
     this.version++;
     // A write that settled may bring the group over its bound.
     this.evict();
@@ -261,6 +251,12 @@ export interface LaneStore {
   ): LaneGroup<D, L>;
   /** The started groups of one scope and key across views. */
   channel(key: string, scope: LaneScope): LaneChannel;
+  /**
+   * The view of an explicit group kept for its work through access loss
+   * (`keepsWork`) for this key and Context, for a hook that has no current
+   * view of it (a session that ended without a token).
+   */
+  kept(key: string, scope: LaneScope, context: string): BoundView | undefined;
 }
 
 const stores = new WeakMap<AppController, LaneStore>();
@@ -293,6 +289,18 @@ export function lanesOf(app: AppController): LaneStore {
       let byKey = groups.get(view);
       if (!byKey) groups.set(view, (byKey = new Map()));
       const name = `${scope} ${key}`;
+      // Work captured under an earlier authorization of the same target,
+      // kept through access loss, is found again through the view that
+      // replaced it (`keepsWork`), and keeps its own view and writes.
+      if (scope === 'explicit')
+        for (const kept of channel(name).groups)
+          if (
+            kept.view !== view &&
+            sameTarget(kept.view, view) &&
+            !kept.view.getSnapshot().current &&
+            kept.holds()
+          )
+            return kept as unknown as LaneGroup<D, L>;
       const known = byKey.get(name) as LaneGroup<D, L> | undefined;
       if (known?.holds()) return known;
       // Its target changed before it noticed (it follows only with lanes).
@@ -313,6 +321,16 @@ export function lanesOf(app: AppController): LaneStore {
       return group;
     },
     channel: (key: string, scope: LaneScope) => channel(`${scope} ${key}`),
+    kept(key: string, scope: LaneScope, context: string) {
+      for (const group of channel(`${scope} ${key}`).groups)
+        if (
+          group.view.contextIri === context &&
+          !group.view.getSnapshot().current &&
+          group.holds()
+        )
+          return group.view;
+      return undefined;
+    },
   };
   stores.set(app, store);
   return store;
