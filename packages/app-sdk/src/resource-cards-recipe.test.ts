@@ -82,6 +82,27 @@ describe('card query', () => {
     expect(query.match(/GRAPH/g)).toHaveLength(3);
   });
 
+  it("pairs each link only with its own path's variants", () => {
+    const rules: readonly CardRule[] = [
+      {
+        id: 'any',
+        types: [],
+        images: [
+          [['urn:v:photo'], ['urn:v:thumbnail']],
+          [['urn:v:icon'], ['urn:v:iconUrl']],
+          [['urn:v:photo']],
+        ],
+        dates: [],
+      },
+    ];
+    const query = cardQuery(ada, rules);
+    // Undeclared pairs never use up the bounded rows.
+    expect(query).toContain(
+      'VALUES (?link ?p) { (<urn:v:photo> <urn:v:thumbnail>) (<urn:v:icon> <urn:v:iconUrl>) }',
+    );
+    expect(query).not.toContain('(<urn:v:photo> <urn:v:iconUrl>)');
+  });
+
   it('refuses a root that is no IRI or would break the query', () => {
     for (const root of [
       'ada',

@@ -133,7 +133,14 @@ const list = (values: Iterable<string>) =>
 /** The predicates a set of rules declares, for the read and the facts. */
 function declared(rules: readonly CardRule[], aliases: readonly string[]) {
   const paths = rules.flatMap((rule) => rule.images);
-  const links = paths.flatMap((path) => (path.length === 2 ? path[0] : []));
+  // Only the declared pairs: a link of one path never meets another's variant.
+  const pairs = paths.flatMap((path) =>
+    path.length === 2
+      ? path[0].flatMap((link) =>
+          path[1].map((variant) => `(${iri(link)} ${iri(variant)})`),
+        )
+      : [],
+  );
   return {
     direct: new Set([
       RDF_TYPE,
@@ -141,7 +148,7 @@ function declared(rules: readonly CardRule[], aliases: readonly string[]) {
       ...paths.flatMap((path) => path[0]),
       ...rules.flatMap((rule) => rule.dates),
     ]),
-    links: new Set(links),
+    pairs: new Set(pairs),
     variants: new Set(
       paths.flatMap((path) => (path.length === 2 ? path[1] : [])),
     ),
@@ -150,7 +157,8 @@ function declared(rules: readonly CardRule[], aliases: readonly string[]) {
 
 /**
  * One SELECT for one root: the declared predicates of the root, and the
- * second step of each two-step path. Nothing else is read, and no value
+ * second step of each two-step path, as declared pairs of link and variant
+ * predicate. Nothing else is read, and no value
  * becomes another root: the enrichment is metadata only.
  */
 export function cardQuery(
@@ -158,11 +166,10 @@ export function cardQuery(
   rules: readonly CardRule[],
   aliases: readonly string[] = exampleAliases,
 ): string {
-  const { direct, links, variants } = declared(rules, aliases);
-  const linked = links.size
+  const { direct, pairs } = declared(rules, aliases);
+  const linked = pairs.size
     ? `UNION {
-    VALUES ?link { ${list(links)} }
-    VALUES ?p { ${list(variants)} }
+    VALUES (?link ?p) { ${[...pairs].join(' ')} }
     GRAPH ?origin { ${iri(root)} ?link ?s }
     GRAPH ?g { ?s ?p ?o }
   }`

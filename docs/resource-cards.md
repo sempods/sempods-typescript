@@ -125,7 +125,8 @@ so the decision waits until the rule is known.
 - the resource's types,
 - its alias statements,
 - the first step of each path,
-- the second step for the nodes it links to.
+- the second step for the nodes it links to, only in the pairs of link and
+  variant predicate that a path declares.
 
 `GRAPH ?g` names the Context of each statement. Rows are sorted, and at most 200
 are used. For the same data, a large resource loses the same rows, except
