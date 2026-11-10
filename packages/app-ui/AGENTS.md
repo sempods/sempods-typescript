@@ -1,7 +1,8 @@
 # App UI scope
 
 Read the [package overview](README.md) and its [provenance](PROVENANCE.md).
-The package depends on app-sdk's public React entry only; app-sdk and
+The package depends on app-sdk's public React entry, and on client-sdk's
+`edit` entry for the SDK's classification of stored dates; app-sdk and
 client-sdk never depend on it.
 
 Keep `src/components` close to the shadcn/ui registry output so upstream fixes

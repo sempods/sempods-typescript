@@ -16,6 +16,7 @@ import {
   catalogue,
   work,
   personal,
+  memoryStorage,
   signInAgain,
 } from './fixture.test.js';
 
@@ -23,15 +24,6 @@ const runtimes: BrowserRuntime[] = [];
 afterEach(() => {
   runtimes.splice(0).forEach((r) => r.dispose());
 });
-function memoryStorage(): PreferenceStorage & { map: Map<string, string> } {
-  const map = new Map<string, string>();
-  return {
-    map,
-    getItem: (key) => map.get(key) ?? null,
-    setItem: (key, value) => void map.set(key, value),
-    removeItem: (key) => void map.delete(key),
-  };
-}
 async function loggedIn(
   preferences: PreferenceStorage | null,
   rememberPods?: boolean,

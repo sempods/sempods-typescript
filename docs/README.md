@@ -52,7 +52,7 @@ references for the task at hand, not prerequisites to read in order.
 - [Agent instruction map](agents/ai-instructions.md),
   [documentation strategy](agents/documentation-strategy.md),
   [issue work](agents/issue-work.md), [doc review](agents/doc-review.md),
-  [release](agents/release.md) and [live validation](agents/live-validation.md).
+  [test review](agents/test-review.md), [release](agents/release.md) and [live validation](agents/live-validation.md).
 
 The [root agent map](../AGENTS.md) and [documentation scope](AGENTS.md) explain
 which instructions govern a change. Public plans live in

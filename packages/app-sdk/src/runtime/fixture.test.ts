@@ -2,7 +2,11 @@ import { IDBFactory } from 'fake-indexeddb';
 import { expect, it, vi } from 'vitest';
 import type { PodFetch } from '@sempods/client-sdk';
 import { createBrowserRuntime } from './runtime.js';
-import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
+import type {
+  BrowserRuntime,
+  BrowserRuntimeOptions,
+  PreferenceStorage,
+} from './types.js';
 import { openSessionStore } from '../sessions/store.js';
 import type { SessionStore } from '../sessions/types.js';
 
@@ -87,6 +91,26 @@ export function catalogue(
       '@id': iri,
     })),
   });
+}
+/**
+ * Clears options the fixture sets (`exactOptionalPropertyTypes` rejects an
+ * explicit `undefined`), as an app that leaves them out.
+ */
+export const without = (...keys: (keyof BrowserRuntimeOptions)[]) =>
+  Object.fromEntries(
+    keys.map((key) => [key, undefined]),
+  ) as unknown as Partial<BrowserRuntimeOptions>;
+/** In-memory `preferences`, as `localStorage` would keep them. */
+export function memoryStorage(): PreferenceStorage & {
+  map: Map<string, string>;
+} {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => void map.set(key, value),
+    removeItem: (key) => void map.delete(key),
+  };
 }
 export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
   const factory = new IDBFactory();
@@ -324,10 +348,13 @@ export async function returnedSession(
   return { ...f, runtime, id: connection.id };
 }
 /** Alice (`f.id`) and Bob (`other`) signed in, with Bob active after his completed callback. */
-export async function twoPods(keep: (runtime: BrowserRuntime) => void) {
+export async function twoPods(
+  keep: (runtime: BrowserRuntime) => void,
+  overrides: Partial<BrowserRuntimeOptions> = {},
+) {
   const f = await returnedSession(
     keep,
-    fixture({ preferences: null, preset: { podUrl: pod } }),
+    fixture({ preferences: null, preset: { podUrl: pod }, ...overrides }),
   );
   await f.runtime.initialize();
   const otherUrl = 'https://pod.example/bob';

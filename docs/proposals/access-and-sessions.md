@@ -12,7 +12,11 @@ evidence against a Pod with the grace period is still open. Access prompts
 (section 4) are implemented
 ([#238](https://github.com/sempods/sempods-typescript/issues/238)) and described
 in the [React authoring guide](../react-authoring.md#access-prompts-and-your-own-placement).
-The other sections are not implemented yet. It spans
+Access modes (section 5) are implemented
+([#240](https://github.com/sempods/sempods-typescript/issues/240)) as the
+`signIn` option and described under
+[apps without sign-in](../browser-runtime.md#apps-without-sign-in).
+The server sections are not implemented in this SDK. It spans
 [sempods-kotlin](https://github.com/sempods/sempods-kotlin), this SDK and the apps
 built on it. Implemented parts move into [architecture decisions](../decisions.md),
 the [browser runtime guide](../browser-runtime.md) and the issues listed at the end.
@@ -268,6 +272,14 @@ type AccessPrompt = {
 
 ### 5. SDK: access modes (app-sdk)
 
+Implemented in [#240](https://github.com/sempods/sempods-typescript/issues/240),
+whose specification check and decisions refine this section: the option is
+called `signIn`, a connection publishes `reading` instead of a new session
+state, requests carry no token (no anonymous `public-read` token), and `none`
+needs one default Pod. The
+[browser runtime guide](../browser-runtime.md#apps-without-sign-in) describes
+the result. What follows is the proposal as accepted.
+
 A runtime option declares what the app needs:
 
 - **`access: 'required'`** (default): today's behaviour. Without a usable
@@ -278,9 +290,9 @@ A runtime option declares what the app needs:
 - **`access: 'none'`:** only anonymous connections to preset or allowed Pods,
   with no sign-in UI.
 
-Anonymous connections need a specification check first: which catalogue and
-query endpoints answer without a token, and what an anonymous catalogue contains.
-Until then this part stays a design.
+Anonymous connections needed a specification check first: which catalogue and
+query endpoints answer without a token, and what an anonymous catalogue
+contains. It is recorded on the issue.
 
 ## Out of scope
 

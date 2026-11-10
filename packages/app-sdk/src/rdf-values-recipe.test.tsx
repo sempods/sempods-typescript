@@ -52,6 +52,16 @@ const values = {
     value: '1000-01-01T00:30:00+14:00',
     datatype: `${XSD}dateTime`,
   },
+  endOfDay: {
+    type: 'literal',
+    value: '2026-10-05T24:00:00Z',
+    datatype: `${XSD}dateTime`,
+  },
+  lateInstant: {
+    type: 'literal',
+    value: '9999-12-31T23:30:00Z',
+    datatype: `${XSD}dateTime`,
+  },
   impossibleInstant: {
     type: 'literal',
     value: '2026-02-30T10:00:00Z',
@@ -204,6 +214,21 @@ describe('RDF value recipe', () => {
     expect(presenter('Europe/Berlin')(t.instant).exact).toBe(
       `"2026-10-05T23:30:00Z"^^<${XSD}dateTime>`,
     );
+    // 24:00:00 is the next midnight (#268).
+    expect(presenter('Europe/Berlin')(t.endOfDay).text).toBe(
+      '06.10.2026, 02:00',
+    );
+  });
+
+  it('shows years below 1000 with four digits, up to 9999 in the zone (#268)', async () => {
+    const t = await terms();
+    const show = presenter('Europe/Berlin');
+    expect(show(t.shortYear).text).toBe('01.03.0050');
+    // 0999-12-31T10:30Z, in Berlin's local mean time before 1893.
+    expect(show(t.earlyInstant).text).toBe('31.12.0999, 11:23');
+    // Year 10000 in Berlin, 9999 in UTC.
+    expect(show(t.lateInstant).text).toBe(values.lateInstant.value);
+    expect(presenter('UTC')(t.lateInstant).text).toBe('31.12.9999, 23:30');
   });
 
   it('shows invalid, unsupported and non-date forms exactly as stored', async () => {
@@ -215,8 +240,6 @@ describe('RDF value recipe', () => {
       'zonedDay',
       'ancient',
       'yearZero',
-      'shortYear',
-      'earlyInstant',
       'impossibleInstant',
       'farOffset',
       'instantText',

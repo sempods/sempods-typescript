@@ -36,7 +36,8 @@ pnpm check
 On Linux, Playwright may need `--with-deps`, and the UI gate also runs
 Firefox there (`pnpm exec playwright install --with-deps chromium webkit firefox`). See
 [development evidence](development.md) for each command's scope. Add meaningful
-regressions for changed behavior. Preserve package-boundary checks and packed
+regressions for changed behavior, and use [test review](agents/test-review.md) to
+move or remove the tests of a decision that moved. Preserve package-boundary checks and packed
 consumer tests: a successful workspace build does not prove that an installed
 package works in a browser, Node or a React-free consumer.
 

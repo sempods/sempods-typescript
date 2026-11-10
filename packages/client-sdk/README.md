@@ -448,6 +448,13 @@ orDateTime: true })` owns one value that is either a day or a zoned
   `EditDefinition` (`read`/`patch`/`valid`) is the escape hatch for other
   mappings. `isFieldDefinition(definition)` tells whether a definition was
   created by `fields()` (copies and look-alikes are not).
+- `classifyDate(value)` tells what a stored lexical form names, without
+  `Date`: `{ kind: 'day', year, month, day, timeZone? }` for an `xsd:date` on
+  a real day (a stored time zone is reported, not applied),
+  `{ kind: 'instant', year, month, day, timeZone, epochMilliseconds }` for an
+  `xsd:dateTime` with a time zone, or `{ kind: 'unsupported' }`. `date` and
+  `dateTime` accept exactly these forms, and display code uses it to decide
+  what it can show, as app-sdk's `format.dateOnly` and `format.dateTime` do.
 - **Different fields both survive.** Saving is conditional on the version that
   was read. If someone else changed only _other_ fields meanwhile (a 412 whose
   current version still holds exactly the terms of the fields you changed), a

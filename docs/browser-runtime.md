@@ -291,6 +291,93 @@ Configure the policy once outside rendering and use the existing guarded actions
 for Pod/context switches; replacing the runtime first requires settling drafts
 and unresolved operations, as with presets.
 
+## Apps without sign-in
+
+Some apps show a Pod's public data: a recipe collection linked to one Pod, or
+a catalogue that people read first and sign in to only to see more or to
+change something. The `signIn` option declares what the app needs:
+
+```ts
+const runtime = createBrowserRuntime({
+  identity: {
+    kind: 'did-web',
+    clientId: 'did:web:recipes.example.org',
+    redirectUri: 'https://recipes.example.org/callback',
+  },
+  signIn: 'optional',
+  preset: { podUrl: 'https://pods.example/alice' },
+});
+
+await runtime.initialize();
+
+// The preset's Pod, read without a token until the person signs in.
+const pod = runtime.getSnapshot().find((c) => c.reading === 'anonymous');
+if (pod) await runtime.loadContexts(pod.id);
+```
+
+- **`required`** (the default) is the behaviour described above: a connection
+  reads only with a session.
+- **`optional`**: a connection without a session reads the Pod's public
+  Contexts without a token. Startup connects the default Pod (the `preset`, or
+  the sole allowed Pod), and `connect(url)` adds another Pod without discovery
+  or sign-in. `beginAuthorization(id)` signs in when the person asks for it;
+  only then is the Pod discovered and the client resolved. A session that
+  ends, or signing out, returns to reading without a token.
+- **`none`**: only an anonymous connection to the default Pod, which is
+  required. No session store and no Web Lock are used, so several tabs and an
+  installed PWA beside a browser tab work. `identity` may be omitted;
+  `beginAuthorization`, `disconnect` and `forget` reject with
+  `RuntimeError('configuration')`. `initialize()` reports
+  `storage: 'unavailable'`, which here is no failure.
+
+`Connection.reading` says how a connection sends requests:
+
+| `reading`   | Requests             | When                                                                                      |
+| ----------- | -------------------- | ----------------------------------------------------------------------------------------- |
+| `session`   | with its token       | `active` or `renewing`                                                                    |
+| `anonymous` | without a credential | `signed-out`, or `ended` without `restorable`, under `optional` or `none`                 |
+| `null`      | none                 | restoring, leaving for a sign-in, restorable, signing out, or no session under `required` |
+
+There is no session state of its own: a connection that reads without a token
+is `signed-out` (or, in the page where its session ended, `ended` with that
+cause), and the runtime publishes `reading` so the UI derives nothing.
+
+A Pod answers a request without a token with its public Contexts only
+([SPS-GRANT-031](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/grants.md#SPS-GRANT-031)).
+Its catalogue lists them as readable, never as writable
+([SPS-CTX-034](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/contexts.md#SPS-CTX-034)),
+so a bound view reports `write: false` and every write returns `not-sent`
+before dispatch. `bind`, `bindContext`, `bindPod`, `loadContexts` and
+`loadContextLabels` work as for a session. Their handles are keyed with the
+subject `null`; signing in, a session that ends and signing out replace them
+and invalidate pending reads, and the catalogue is loaded again with the new
+access. A Pod that has no public Context answers with an empty catalogue.
+
+A token the Pod rejects is never followed by the same request without it: the
+Pod does not fall back to anonymous access
+([SPS-CORE-015](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/index.md#SPS-CORE-015)),
+and neither does the runtime. A refused renewal ends the session as before;
+only after that does the connection read without a token, with new handles.
+
+Under `optional`, signing in requests `public-read` as an optional scope
+(added if the app does not list it), so a session that receives it still reads
+the public Contexts the app showed before. `scopes.required` is a
+configuration error there, as an app that works without a session cannot
+require what only a session grants. Under `none`, any `scopes` are one.
+
+A signed-out connection keeps reading without a token under `optional`, also
+with `rememberPods: false`, which then only keeps the address from the next
+start. `forget(id)` removes the connection; a forgotten default Pod is listed
+again as a new connection that was never signed in. The other-tab lease still
+applies under `optional`: a second tab reports `storage: 'busy'`.
+
+The SDK reads public data with plain requests without a token. It does not use
+the anonymous `scope=public-read&prompt=none` token some Pods offer
+([SPS-AUTH-042](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/auth.md#SPS-AUTH-042)):
+it reads nothing more, needs a redirect and a client identity, and expires
+without a refresh token. In React, see
+[apps without sign-in](react-authoring.md#apps-without-sign-in).
+
 ## Subscribe and bind
 
 ```ts
@@ -386,8 +473,8 @@ the same handle for one authorization lifetime (connection, generation and
 subject). Selection changes, including A → B → A, neither invalidate its
 pending reads nor change its target.
 
-- **Preconditions.** It needs an eligible signed-in connection and throws
-  `RuntimeError('disconnected')` otherwise. It throws
+- **Preconditions.** It needs an eligible signed-in connection, or one that
+  reads without a token, and throws `RuntimeError('disconnected')` otherwise. It throws
   `RuntimeError('configuration')` for an IRI that is not a Context of that
   connection's Pod (`isContextIri`), or for another Context than an exact
   preset `contextIri` on the preset's Pod; connections to other Pods are
@@ -434,8 +521,9 @@ if (reader.getSnapshot().read) {
 ```
 
 Binding and dispatch require no selected Context or catalogue and initiate no
-discovery. `bindPod` requires an eligible signed-in connection; it throws
-`RuntimeError('disconnected')` during restoration or after session end. A handle may be current with `read: false`
+discovery. `bindPod` requires an eligible signed-in connection, or one that
+reads without a token; it throws `RuntimeError('disconnected')` during
+restoration or after session end under `signIn: 'required'`. A handle may be current with `read: false`
 when required scopes are missing; dispatch rechecks eligibility and returns
 `invalidated` without sending. Readability means permission to attempt the read,
 not that readable data exists. The server authorizes its dataset.
@@ -481,6 +569,57 @@ The full catalogue remains one response, without per-Context reads or fetches.
 `createViewLoader(reader, read)` works with `BoundPod` and `PodRead<T>` as well as
 Context handles, retaining cancellation, obsolete-result retirement and at most
 one recovery retry per cycle. See [React Pod overviews](react-authoring.md#pod-overviews-with-contexts-on-demand).
+
+### Bounded Pod reads
+
+An app that mounts many Pod loaders at once, such as a graph explorer with
+hundreds of nodes across Pods, bounds them on the runtime instead of queueing
+reads itself:
+
+```ts
+const runtime = createBrowserRuntime({
+  // identity and other options as usual
+  podReadLimit: { perPod: 4, total: 8 },
+});
+
+// For what the person looks at now:
+await reader.sparql.select(query, { signal, priority: 'current' });
+```
+
+Without `podReadLimit`, every read starts at once, as before. With it, an
+explicit Pod read (`BoundPod.sparql.select`/`construct`, also through
+`usePodLoad` and `createViewLoader`) beyond a limit waits for a slot:
+
+- `perPod` counts the requests in flight to one Pod URL, across its
+  connections and authorization generations; `total` counts them across all
+  Pods. Each value is a positive integer.
+- Pods with waiting reads take turns, so 200 reads for one Pod never hold
+  back another. Within a Pod, normal reads start in order, and a
+  `priority: 'current'` read goes before them. After three priority reads in
+  a row on a Pod, its waiting normal read is next on that Pod; after three in
+  a row across all Pods, a waiting normal read of any Pod is next. Priority
+  never exceeds a limit or stops a running read. It counts when the
+  read starts: when the current resource changes, restart that read (for
+  example with a new `key`). A waiting read that is restarted loses its place.
+- A waiting read that is cancelled (`signal`, `cancel()`, unmount, a `reload()`
+  that supersedes it) or invalidated (changed grants, sign-out, disconnect)
+  leaves the queue at once and is never sent.
+- A slot is held until the request settles, also when the caller stopped
+  waiting earlier. A cancelled or invalidated read returns at once, but a
+  transport that ignores the abort keeps its slot until it answers or fails.
+  Old requests therefore still count after changed grants, and the reads of
+  the new grants wait for them. There is no timeout: a request that never
+  settles keeps its slot; the browser's `fetch` settles when it is aborted.
+- Waiting spends no recovery retry: a loader whose read only waits restarts
+  on the current grants when they change, however often. Once its request
+  was sent, the loader's one recovery per cycle applies as before. Pass the
+  loader's `signal` to the read unchanged; a read that passes another signal
+  counts as sent.
+- The one resend after a Bearer `401` stays in the read's slot, so the limit
+  holds for every request to the Pod. The credential renewal it may wait for
+  goes to the authorization server and is not counted.
+- Context reads (`BoundView`), discovery, catalogue, labels and writes are not
+  counted and never wait for Pod reads.
 
 ## Durable sessions and refresh
 
@@ -794,5 +933,7 @@ transfers attempts or tokens between storage containers. See
 Sign-in against a deployed Pod in a real browser is not yet recorded as evidence.
 React `AppAccess` and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
-checks. Multi-tab concurrent operation, revocation and anonymous reading are not
-implemented here.
+checks. Multi-tab concurrent operation and revocation are not implemented
+here. [Apps without sign-in](#apps-without-sign-in) are covered by fixture
+tests only; reading a deployed Pod's public data from another origin is not yet
+recorded as live evidence.

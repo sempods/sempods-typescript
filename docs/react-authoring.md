@@ -875,13 +875,12 @@ reads with the same loader as the active-Pod form, but only through that handle:
 ```tsx
 // Fragment: `runtime` is the app's one BrowserRuntime; Connection from
 // @sempods/app-sdk. describe(iri) is your CONSTRUCT for a validated IRI.
-/** Signed in: bindPod returns this connection's handle and never throws. */
-const signedIn = ({ session }: Connection) =>
-  session.kind === 'active' || session.kind === 'renewing';
+/** Reading (signed in, or without a token): bindPod never throws for it. */
+const reads = ({ reading }: Connection) => reading !== null;
 
 function Sources({ iri }: { readonly iri: string }) {
   return useConnections()
-    .filter(signedIn)
+    .filter(reads)
     .map((connection) => (
       <Source key={connection.id} connection={connection} iri={iri} />
     ));
@@ -894,7 +893,7 @@ function Source(props: {
   const { connection, iri } = props;
   const load = usePodLoad(
     // Checked again here, so Source stays safe wherever it is used.
-    signedIn(connection) ? runtime.bindPod(connection.id) : null,
+    reads(connection) ? runtime.bindPod(connection.id) : null,
     (pod, signal) => pod.sparql.construct(describe(iri), { signal }),
     { key: iri },
   );
@@ -909,10 +908,12 @@ function Source(props: {
 
 - Binding in render is cheap: `bindPod` returns the same handle while the
   connection's session lasts; a new sign-in gives a new handle and a fresh
-  read. Bind only while `session.kind` is `active` or `renewing`; otherwise
+  read. Bind only while `connection.reading` is not `null` (signed in, or
+  reading without a token under `signIn: 'optional'` or `'none'`); otherwise
   `bindPod` throws `RuntimeError('disconnected')`.
-- `useConnections()` also lists connections that are not signed in
-  (`signed-out`, `restoring`, `leaving`, `ended`). Leave them out as above: a
+- `useConnections()` also lists connections that do not read (`restoring`,
+  `leaving`, and, where sign-in is required, `signed-out` and `ended`). Leave
+  them out as above: a
   `null` handle reads `unavailable`, and `reload()` has nothing to read. For a
   remembered `signed-out` Pod, offer **Sign in** (`useApp().authorize(id)`, a
   guarded navigation to its sign-in) as `AppAccess` does.
@@ -929,6 +930,11 @@ function Source(props: {
 - Which connections to read is the app's choice: filter `useConnections()`
   further, for example to the Pods the person enabled. Each source shows
   `loading` from its first render and reads as soon as it mounts.
+- Many sources at once, such as hundreds of graph nodes across Pods: set
+  `podReadLimit` on the runtime instead of queueing reads in the app. Reads
+  beyond the limit wait in `loading`, and a grant change while they wait
+  spends no retry. Pass `{ signal, priority: 'current' }` for what the person
+  looks at now ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
 
 ## Part 4: Customizing
 
@@ -1043,6 +1049,9 @@ still do:
 - **`blocking`** (at most one, `access.blocking`): the app cannot work: show a
   sign-in screen. Startup problems, no connection, and the active connection's
   ended session, failed sign-out or missing required scopes. Never dismissible.
+  A connection that still reads without a token
+  ([apps without sign-in](#apps-without-sign-in)) never blocks: its ended
+  session is an `action`.
 - **`action`** (`access.prompts`): something needs a decision, the app stays
   usable: a dialog or banner. Another Pod's ended session, an unreachable Pod,
   a failed sign-in.
@@ -1163,6 +1172,50 @@ const runtime = createBrowserRuntime({
 
 [One known Pod](browser-runtime.md#one-known-pod) in the runtime guide covers
 validation, precedence, reload and foreign sessions.
+
+### Apps without sign-in
+
+An app that shows public data sets `signIn` in the runtime and keeps the same
+screens:
+
+```tsx
+const runtime = createBrowserRuntime({
+  identity: {
+    kind: 'did-web',
+    clientId: 'did:web:recipes.example.org',
+    redirectUri: 'https://recipes.example.org/callback',
+  },
+  signIn: 'optional', // or 'none': no identity, no sign-in at all
+  preset: { podUrl: 'https://pods.example/alice' },
+});
+// <AppAccess appName="Recipes" />
+// <TargetScreen><RecipeList /></TargetScreen>
+```
+
+- **`optional`**: the app starts reading the preset's public data, without a
+  sign-in screen. The Context chooser lists the public Contexts, and a view of
+  one reads but never writes (`write: false`; `AccessNotice` says read-only).
+  An `action` prompt with reason `anonymous` offers **Sign in**, and
+  **Forget** after the person signed out
+  (`controls.anonymous`); after signing in, the app reads with the session.
+  When a session ends, the app keeps reading without a token, and the
+  `signed-out` prompt asks instead of blocking. That is same-target access
+  loss: while a draft or a pending or unconfirmed write remains, the screen
+  keeps its earlier view (now without access) and the work stays; the view
+  that reads without a token follows once it is resolved or discarded. A
+  `useCreation` in an explicit Context keeps its binding and its pending or
+  unconfirmed creation the same way, also while the form is hidden or
+  unmounted, and its draft stays editable. Without a preset, the gate's
+  address field **Open**s a Pod (`controls.open`) instead of signing in.
+- **`none`**: no prompts, no sign-in or sign-out buttons, no gate for storage.
+- A Pod without public Contexts shows `controls.noPublicData` with sign-in.
+- `useAppState().signIn` tells custom controls which mode applies;
+  `connection.reading` (`'session'`, `'anonymous'` or `null`) tells how the
+  active connection reads. `useApp().connect(url)` opens a Pod without
+  signing in under `optional` and `none`; `authorize(id)` signs in.
+
+The [runtime guide](browser-runtime.md#apps-without-sign-in) covers requests,
+handles, scopes and the specification rules behind them.
 
 ### Shared SDK appearance
 

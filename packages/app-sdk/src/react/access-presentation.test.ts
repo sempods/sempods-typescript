@@ -2,20 +2,31 @@ import { expect, it } from 'vitest';
 import type { Connection } from '../runtime/types.js';
 import { presentAccess, type AccessFacts } from './access-presentation.js';
 
-const connected = (overrides: Partial<Connection> = {}): Connection => ({
-  id: 'alice',
-  podUrl: 'https://pod.example/alice',
-  clientKind: 'dynamic',
-  session: { kind: 'active', subject: 'urn:person' },
-  catalogue: { kind: 'unknown' },
-  requestedScopes: [],
-  requiredScopes: [],
-  optionalScopes: [],
-  grantedScopes: [],
-  missingRequiredScopes: [],
-  selectedContext: null,
-  ...overrides,
-});
+const connected = (overrides: Partial<Connection> = {}): Connection => {
+  const session = overrides.session ?? {
+    kind: 'active',
+    subject: 'urn:person',
+  };
+  return {
+    id: 'alice',
+    podUrl: 'https://pod.example/alice',
+    clientKind: 'dynamic',
+    session,
+    // As the runtime publishes it under `signIn: 'required'`.
+    reading:
+      session.kind === 'active' || session.kind === 'renewing'
+        ? 'session'
+        : null,
+    catalogue: { kind: 'unknown' },
+    requestedScopes: [],
+    requiredScopes: [],
+    optionalScopes: [],
+    grantedScopes: [],
+    missingRequiredScopes: [],
+    selectedContext: null,
+    ...overrides,
+  };
+};
 const base: AccessFacts = {
   state: { contextSelection: 'on-demand', preset: undefined },
   connection: connected(),

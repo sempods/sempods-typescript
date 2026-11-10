@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Publishes the packed tarballs in dependency order: client-sdk, app-sdk,
-// then app-ui (whose peer is app-sdk).
+// then app-ui (whose peers are app-sdk and client-sdk).
 // A prerelease (a version with `-`, such as 0.7.0-dev.1) gets the dist-tag
 // `next`, so `latest` keeps pointing at the last release; npm 11 refuses a
 // prerelease without a tag.

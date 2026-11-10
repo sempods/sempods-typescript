@@ -55,7 +55,8 @@ export interface ContextTarget {
  * - `blocked`: a pending write, or another change preparing or asking.
  * - `unavailable`: the target cannot be selected, before asking or because it
  *   disappeared while the person was asked: no such `connection`, its
- *   `session` is not signed in with the required access, its `catalogue` is
+ *   `session` neither reads (`Connection.reading`) nor holds the required
+ *   access, its `catalogue` is
  *   not loaded, the Context is `unlisted` as readable, or the `preset` names
  *   another Context of that Pod.
  */
@@ -79,9 +80,9 @@ export function targetProblem(
 ): Unavailable | null {
   const connection = connections.find((c) => c.id === target.connectionId);
   if (!connection) return 'connection';
+  // Signed in, or reading without a token (`signIn: 'optional'` or `'none'`).
   if (
-    (connection.session.kind !== 'active' &&
-      connection.session.kind !== 'renewing') ||
+    connection.reading === null ||
     connection.missingRequiredScopes.length > 0
   )
     return 'session';
@@ -120,6 +121,8 @@ function leaves(change: Change, guard: LeaveGuard) {
 export interface AppSnapshot {
   /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
   readonly contextSelection: 'required' | 'on-demand';
+  /** The runtime's `signIn` mode: whether the app offers signing in at all. */
+  readonly signIn: BrowserRuntime['signIn'];
   readonly preset: PodPreset | undefined;
   /** Immutable runtime policy; undefined means unrestricted. */
   readonly allowedPods?: readonly string[];
@@ -151,6 +154,11 @@ export interface AppSnapshot {
    * settles (`startup` or `startupError` set): while a returning sign-in
    * completes, saved sessions may already restore, and a draft started in that
    * window would be lost when the returning connection becomes active.
+   * When a session ends and the connection reads without a token
+   * (`signIn: 'optional'`), the earlier view, without access, stays while a
+   * registered guard still holds work (a draft, a pending or unconfirmed
+   * write); the view that reads without a token follows once that work is
+   * resolved or discarded.
    */
   readonly view: BoundView | null;
   /** Reader for the active signed-in Pod; independent of selected Context and catalogue. */
@@ -236,6 +244,8 @@ export function createAppController(
   let previous: Connection | undefined;
   const tracker = createAccessTracker();
   let view: BoundView | null = null;
+  /** `view` is kept for unresolved work while the runtime has a newer one. */
+  let held = false;
   let pod: BoundPod | null = null;
   let pending:
     | {
@@ -255,12 +265,14 @@ export function createAppController(
     | undefined;
   let snapshot: AppSnapshot = {
     contextSelection,
+    signIn: runtime.signIn,
     preset: runtime.preset,
     ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
     startup,
     startupError,
     callbackNotice,
     access: tracker.derive({
+      signIn: runtime.signIn,
       startup,
       startupError,
       callbackNotice,
@@ -311,6 +323,7 @@ export function createAppController(
     // Before the prompt check below: a leave prompt for a prompt's action is
     // withdrawn once that prompt is no longer current.
     const access = tracker.derive({
+      signIn: runtime.signIn,
       startup,
       startupError,
       callbackNotice,
@@ -332,19 +345,31 @@ export function createAppController(
       pending = undefined;
     }
     pod = null;
-    if (
-      connection &&
-      (connection.session.kind === 'active' ||
-        connection.session.kind === 'renewing')
-    )
+    if (connection && connection.reading !== null)
       pod = runtime.bindPod(connection.id);
     // No Context-bound screen before startup settles, so no draft can start on
     // a connection that a returning sign-in is about to replace (#80).
     const settled = startupSettled({ startup, startupError });
+    held = false;
     if (!settled || !connection || !connection.selectedContext) view = null;
     else {
       try {
-        view = runtime.bind(connection.id);
+        const next = runtime.bind(connection.id);
+        // A session that ended by itself makes the connection read without a
+        // token (`signIn: 'optional'`): a new view of the same target. Work
+        // left on the old one (a draft, a pending or unconfirmed write) is
+        // same-target access loss: the old view, now without access, stays
+        // until that work is resolved or discarded, as without
+        // `signIn: 'optional'`. Its write authority does not come back.
+        held =
+          view !== null &&
+          next !== view &&
+          connection.reading === 'anonymous' &&
+          view.podUrl === next.podUrl &&
+          view.contextIri === next.contextIri &&
+          !view.getSnapshot().current &&
+          unresolved();
+        if (!held) view = next;
       } catch {
         // Same-target recovery must keep its editor mounted; the old view is now ineligible.
         if (
@@ -356,6 +381,7 @@ export function createAppController(
     }
     snapshot = Object.freeze({
       contextSelection,
+      signIn: runtime.signIn,
       preset: runtime.preset,
       ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
       startup,
@@ -390,7 +416,8 @@ export function createAppController(
       ? connections
       : []) {
       if (
-        connection.session.kind === 'active' &&
+        (connection.session.kind === 'active' ||
+          connection.reading === 'anonymous') &&
         connection.catalogue.kind === 'unknown'
       )
         void runtime.loadContexts(connection.id).catch(() => {});
@@ -414,6 +441,27 @@ export function createAppController(
     prompting = ask;
     if (ask) window.addEventListener('beforeunload', askBeforeUnload);
     else window.removeEventListener('beforeunload', askBeforeUnload);
+  }
+  /**
+   * Whether a guard of the selected view holds work: a draft, a pending or an
+   * unconfirmed write. Guards of explicit Contexts (`connection`, `explicit`)
+   * keep their own bindings and do not hold the selected one.
+   */
+  function unresolved() {
+    for (const g of guards)
+      if (
+        g.scope !== 'connection' &&
+        g.scope !== 'explicit' &&
+        (g.dirty() || g.blocked() || g.unconfirmed?.())
+      )
+        return true;
+    return false;
+  }
+  /** A guard changed: follow the leave prompt, and release a held view. */
+  function guardChanged() {
+    // Every edit of a draft reports here: publish only once the work is gone.
+    if (held && !unresolved()) publish();
+    else followUnload();
   }
   /** The guards a change leaves: asked about first, discarded once it ran. */
   function leavingGuards(change: Change, retained?: ReadonlySet<LeaveGuard>) {
@@ -521,12 +569,12 @@ export function createAppController(
       guards.add(guard);
       // Its own callback: guards sharing one subscription source (the lanes
       // of a group) must not unsubscribe each other.
-      const stop = guard.subscribe?.(() => followUnload());
+      const stop = guard.subscribe?.(() => guardChanged());
       followUnload();
       return () => {
         guards.delete(guard);
         stop?.();
-        followUnload();
+        guardChanged();
       };
     },
     /**
@@ -668,7 +716,12 @@ export function createAppController(
         ? { kind: 'unavailable', reason: after }
         : { kind: 'declined' };
     },
-    /** Guarded like `selectConnection`. */
+    /**
+     * Adds a Pod (or reuses the default Pod's connection) and makes it
+     * active. Under `signIn: 'required'` it then starts signing in; under
+     * `'optional'` and `'none'` the connection reads without a token, and
+     * `authorize(id)` signs in. Guarded like `selectConnection`.
+     */
     connect(url = defaultPodUrl) {
       return guard(connecting(url));
     },
@@ -714,7 +767,8 @@ export function createAppController(
           : undefined) ?? (await runtime.connect(url));
       if (connection.session.kind === 'restoring')
         throw new RuntimeError('configuration');
-      await runtime.beginAuthorization(connection.id);
+      if (runtime.signIn === 'required')
+        await runtime.beginAuthorization(connection.id);
       activeId = connection.id;
       publish();
     };

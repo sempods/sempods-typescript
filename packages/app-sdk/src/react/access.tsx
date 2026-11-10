@@ -18,6 +18,7 @@ import {
   useDiscoveryDemand,
   useSwitchDemand,
   useWorkflowAccess,
+  activeCatalogue,
   type AppActions,
 } from './app.js';
 import type { AppSnapshot } from '../authoring/app.js';
@@ -31,6 +32,7 @@ import type { Connection } from '../runtime/types.js';
 import {
   knownContexts,
   presentAccess,
+  reads as readsAtAll,
   type ConnectionBody,
 } from './access-presentation.js';
 import {
@@ -193,12 +195,7 @@ function Management({
 }) {
   const { messages: m } = useSdkLocale();
   const app = useApp();
-  const activeId = useAppFacts((s) => {
-    const c = s.connections.find((entry) => entry.id === s.activeId);
-    return c?.session.kind === 'active' || c?.session.kind === 'renewing'
-      ? c.id
-      : null;
-  });
+  const activeId = useAppFacts((s) => activeCatalogue(s).activeId);
   // Opening the management dialog checks the access again, so it needs no
   // separate button.
   const refreshContexts = app.refreshContexts;
@@ -623,8 +620,13 @@ function AccessConnections({
   // and Forget again, so its address is not kept against the choice.
   const forgetting = (entry: Connection) =>
     entry.session.kind === 'ended' && entry.session.forget === true;
+  // A connection reading without a token (`signIn: 'optional'`) is a
+  // readable one, chosen in the Pod selector like a signed-in one, not a
+  // remembered one that needs signing in first.
   const remembered = state.connections.filter(
-    (entry) => entry.session.kind === 'signed-out' || forgetting(entry),
+    (entry) =>
+      (entry.session.kind === 'signed-out' || forgetting(entry)) &&
+      entry.reading !== 'anonymous',
   );
   const found = state.connections.find((entry) => entry.id === state.activeId);
   // The connection shown as connected; a remembered active one is signed in
@@ -636,6 +638,18 @@ function AccessConnections({
     ? m.controls.disconnectFailed
     : m.controls.disconnectHint;
   const active = c?.session.kind === 'active' || c?.session.kind === 'renewing';
+  // Signed in, or reading without a token: its Contexts can be chosen.
+  const reads = readsAtAll(c);
+  const anonymous = c?.reading === 'anonymous';
+  // Inline beside the content, the access prompt already offers signing in
+  // to a connection that reads without a token; management offers it too.
+  const inPrompt = anonymous && !manage;
+  // Adding a Pod signs in only where sign-in is required; otherwise it opens
+  // the Pod to read without a token.
+  const addLabel =
+    state.signIn === 'required'
+      ? m.controls.signIn
+      : (m.controls.open ?? m.controls.signIn);
   const defaultUrl =
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
@@ -658,7 +672,8 @@ function AccessConnections({
     state.changing ||
     state.confirmingLeave ||
     !state.startup ||
-    state.startup.storage !== 'durable' ||
+    // Without sign-in nothing is stored, on purpose.
+    (state.startup.storage !== 'durable' && state.signIn !== 'none') ||
     Boolean(state.startupError);
   async function act(task: () => Promise<unknown>) {
     if (inFlight.current || unavailable) return;
@@ -683,13 +698,22 @@ function AccessConnections({
       ) ?? state.connections.find((entry) => entry.podUrl === target);
     if (existing) {
       if (existing.session.kind === 'restoring') return;
+      // Where sign-in is not required the address only opens the Pod: a
+      // known connection, signed in or not, is selected, never signed in
+      // again. Signing in stays with its own controls.
+      if (state.signIn !== 'required') {
+        await app.selectConnection(existing.id);
+        return;
+      }
       // Keep the current target/drafts until preparation succeeds. The completed
       // callback activates this connection; selecting first would discard drafts
       // even if discovery or durable authorization preparation subsequently fails.
       await app.authorize(existing.id);
     } else await app.connect(target);
   }
-  const showNew = (manage && mode === 'multiple') || !c;
+  // Without sign-in only the default Pod connects: no other address to add.
+  const showNew =
+    state.signIn !== 'none' && ((manage && mode === 'multiple') || !c);
   const showDefault =
     (mode === 'multiple' || !c) &&
     defaultUrl &&
@@ -759,7 +783,7 @@ function AccessConnections({
         }
         onClick={() => void act(() => connect(defaultUrl))}
       >
-        {m.controls.signIn}
+        {addLabel}
       </button>
     </div>
   );
@@ -866,18 +890,34 @@ function AccessConnections({
       })}
     </ul>
   );
+  // A connection that reads without a token (always, under `none`) has no
+  // session to sign out of; a remembered address, or one whose session ended
+  // here, is forgotten instead.
+  const signsOut =
+    c !== undefined &&
+    !anonymous &&
+    c.session.kind !== 'signed-out' &&
+    (manage || c.session.kind === 'ended');
+  const forgets =
+    c !== undefined &&
+    anonymous &&
+    state.signIn === 'optional' &&
+    (c.session.kind === 'ended' ||
+      (c.session.kind === 'signed-out' && c.session.problem !== undefined));
   const actions = (
     <>
       {c && (
         <div className="sp-access-actions">
-          {active && (
+          {reads && (
             <>
-              <button
-                disabled={unavailable}
-                onClick={() => void act(() => app.authorize(c.id))}
-              >
-                {m.controls.updateAccess}
-              </button>
+              {active && (
+                <button
+                  disabled={unavailable}
+                  onClick={() => void act(() => app.authorize(c.id))}
+                >
+                  {m.controls.updateAccess}
+                </button>
+              )}
               {discovery && (
                 <button
                   disabled={unavailable}
@@ -888,7 +928,7 @@ function AccessConnections({
               )}
             </>
           )}
-          {(manage || c.session.kind === 'ended') && (
+          {signsOut && (
             // After a failed sign-out it is the main action: repeat it.
             <button
               className={disconnectFailed ? 'sp-access-primary' : undefined}
@@ -899,9 +939,17 @@ function AccessConnections({
               {disconnectFailed ? m.controls.retry : m.controls.disconnect}
             </button>
           )}
+          {forgets && (
+            <button
+              disabled={unavailable}
+              onClick={() => void act(() => app.forget(c.id))}
+            >
+              {m.controls.forget}
+            </button>
+          )}
         </div>
       )}
-      {c && (manage || c.session.kind === 'ended') && disconnectHint && (
+      {c && signsOut && disconnectHint && (
         <p
           id={disconnectId}
           role={disconnectFailed ? 'alert' : undefined}
@@ -951,7 +999,7 @@ function AccessConnections({
             )
           }
         >
-          {m.controls.signIn}
+          {addLabel}
         </button>
       </form>
     ) : defaultSignIn ? (
@@ -987,7 +1035,7 @@ function AccessConnections({
           className={found ? undefined : 'sp-access-primary'}
           disabled={unavailable}
         >
-          {m.controls.signIn}
+          {addLabel}
         </button>
       </form>
     ) : null;
@@ -1027,11 +1075,12 @@ function AccessConnections({
           {manage && namedAddress(c.podUrl)}
           {c.session.kind === 'ended' &&
             !disconnectFailed &&
-            !shownByNotice && (
+            !shownByNotice &&
+            !inPrompt && (
               <p role="status">{endedMessage(c.session, m, true)}</p>
             )}
           {/* After a failed sign-out, the sign-out button repeats it. */}
-          {disconnectFailed ? null : c.session.kind === 'ended' &&
+          {disconnectFailed || inPrompt ? null : c.session.kind === 'ended' &&
             c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button
@@ -1041,9 +1090,11 @@ function AccessConnections({
             >
               {m.controls.retry}
             </button>
-          ) : (
+          ) : state.signIn === 'none' ? null : (
+            // Beside a connection that reads without a token, signing in is
+            // the second action, not the main one.
             <button
-              className="sp-access-primary"
+              className={anonymous ? undefined : 'sp-access-primary'}
               disabled={unavailable}
               onClick={() => void act(() => app.authorize(c.id))}
             >
@@ -1052,14 +1103,14 @@ function AccessConnections({
           )}
         </>
       )}
-      {active && contextRequired && !fixedContext && named ? (
+      {reads && contextRequired && !fixedContext && named ? (
         // Set off below the Pod: the Context this app works in.
         <p className="sp-access-context">
           {contextLabel(named.iri)}
           {' · '}
           {accessFact(named)}
         </p>
-      ) : active &&
+      ) : reads &&
         contextRequired &&
         !fixedContext &&
         switching &&
@@ -1067,7 +1118,7 @@ function AccessConnections({
         // The app's own switch selects a first Context; this only waits. A
         // kept selection that lost access needs the chooser below instead.
         readable.length > 0 && <p role="status">{m.controls.loading}</p>
-      ) : active && contextRequired && !fixedContext ? (
+      ) : reads && contextRequired && !fixedContext ? (
         <label>
           {m.dataContext}
           <select
@@ -1094,21 +1145,27 @@ function AccessConnections({
           {selectedEntry && accessFact(selectedEntry)}
         </label>
       ) : null}
-      {active && contextRequired && fixedContext && (
+      {reads && contextRequired && fixedContext && (
         <p>
           {m.dataContext}: {contextLabel(fixedContext)}
         </p>
       )}
-      {active &&
+      {reads &&
         (contextRequired || manage) &&
         !fixedContext &&
         c?.catalogue.kind === 'ready' &&
-        readable.length === 0 && <p role="status">{m.noContexts}</p>}
+        readable.length === 0 && (
+          <p role="status">
+            {anonymous && state.signIn !== 'none'
+              ? (m.controls.noPublicData ?? m.noContexts)
+              : m.noContexts}
+          </p>
+        )}
       {manage &&
-        active &&
+        reads &&
         c?.catalogue.kind === 'loading' &&
         !c.catalogue.contexts && <p role="status">{m.cataloguePending}</p>}
-      {manage && active && !contextRequired && readable.length > 0 && (
+      {manage && reads && !contextRequired && readable.length > 0 && (
         // What the catalogue says this app may do in each readable Context:
         // caller-relative rights, not which grant or public access gave them.
         <section aria-label={m.controls.contextAccess}>

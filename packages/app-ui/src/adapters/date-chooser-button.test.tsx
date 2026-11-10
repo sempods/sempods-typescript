@@ -25,6 +25,8 @@ it.each([
   ['2026-10-30T09:30:00Z', '30.10.2026, 10:30'],
   ['2026-10-30T09:30:00.250-01:00', '30.10.2026, 11:30'],
   ['2026-10-30T24:00:00Z', '31.10.2026, 01:00'],
+  ['0050-03-01', '01.03.0050'],
+  ['0050-03-01T12:00:00Z', '01.03.0050, 12:53'],
 ])('shows %s as %s', (value, text) => {
   expect(shown(value)).toBe(text);
 });
@@ -46,6 +48,15 @@ it.each([
   ['-0001-10-29'],
   ['2026-10'],
   ['tomorrow'],
+  // Forms the SDK's date field refuses (#268).
+  ['2026-10-29+99:99'],
+  ['2026-10-29Tgarbage'],
+  ['0000-01-01'],
+  // Year 10000 in Berlin.
+  ['9999-12-31T23:30:00Z'],
+  // A written year the chooser cannot open on, though Berlin's is 9999 / 0001.
+  ['10000-01-01T00:00:00+14:00'],
+  ['0000-12-31T23:30:00-02:00'],
 ])('shows %s as stored', (value) => {
   expect(shown(value)).toBe(value);
 });

@@ -139,6 +139,43 @@ seconds, discovery counts as unreachable:
   ([custom layouts](react-authoring.md#custom-layouts-without-appaccess)).
   `AppAccess` keeps them enabled too.
 
+### Apps without sign-in
+
+**Apps can read public data without a session**
+([apps without sign-in](browser-runtime.md#apps-without-sign-in), #240). Existing
+apps keep `signIn: 'required'`, the default, and behave as before. To adopt it:
+
+- Set `signIn: 'optional'` for an app that reads public data first and offers
+  signing in, or `signIn: 'none'` with a `preset` (or one `allowedPods` entry)
+  for an app that never signs in; `none` needs no `identity`.
+- Move `scopes.required` to `scopes.optional` under `optional`; under `none`
+  remove `scopes`. Both are configuration errors otherwise.
+- Code that checks `session.kind === 'active'` to decide whether a connection
+  can be read, or bound, checks `connection.reading !== null` instead: a
+  connection reading without a token is `signed-out`.
+- `useApp().connect(url)` opens a Pod without signing in under `optional` and
+  `none`; call `authorize(id)` to sign in.
+- End-to-end tests of an `optional` app expect no sign-in screen, an
+  `anonymous` prompt with **Sign in**, and **Open** instead of **Sign in** on
+  the address field.
+
+### Bounded Pod reads
+
+**An app can bound its explicit Pod reads**
+([bounded Pod reads](browser-runtime.md#bounded-pod-reads), #244). The new
+option `podReadLimit: { perPod?, total? }` admits at most that many requests
+in flight per Pod URL and across all Pods; further reads wait, with Pods
+taking turns. Without the option nothing changes.
+
+- **Remove an app-side queue in front of `BoundPod.sparql.select`** and set
+  `podReadLimit` instead. An app queue releases its slot when a cancelled read
+  returns, before the request settles, and a loader whose read waits there
+  spends its one recovery retry on grant changes: two changes while it waits
+  end it `unavailable` without a request. The SDK holds the slot until the
+  request settles, and waiting spends no retry.
+- Pass `priority: 'current'` with the `signal` for the read of what the person
+  looks at now.
+
 ### UI kit
 
 - **The compact `Dialog` speaks the SDK's language.** Its corner close button
@@ -174,14 +211,44 @@ seconds, discovery counts as unreachable:
   and no longer `01.03.50`, which read like 1950. `DateChooser`'s button shows
   them the same way; its calendar's heading comes from React Aria and still
   shows the short year. Later years and other calendars are unchanged.
-- **Both throw a `RangeError` for a year before 0001**, such as `0000-01-01`,
-  which `dateOnly` showed as `01.01.1` without its era. For `dateTime` the year
-  in its time zone counts: `0001-01-01T00:00:00Z` throws in New York, where it
-  was 31 December of year 0. Code that shows such
-  values as stored after a `RangeError`, as the
-  [app-builder guide](ai-app-builder.md#correctness-contract) recommends, needs
-  no change. `DateChooser` shows a stored `0000-01-01` as stored and opens
-  without a chosen day; it used to treat it as `0001-01-01`.
+- **Both return `undefined` instead of throwing a `RangeError`** (#268), for
+  every value they cannot show; nothing they format throws any more. This is
+  a breaking change of the return type, `string` to `string | undefined`.
+  TypeScript reports `const text: string = format.dateOnly(value)`, but
+  `{format.dateOnly(value)}` in JSX still compiles and now renders nothing
+  where a `catch` showed the stored value. Replace each `try`/`catch` around
+  them with `format.dateOnly(value) ?? value` and
+  `format.dateTime(value) ?? value`.
+- **Both show years 0001 to 9999 only.** `0000-01-01` (1 BCE), which
+  `dateOnly` showed as `01.01.1` without its era, now gives `undefined`. For
+  `dateTime` the year in its time zone counts: `0001-01-01T00:00:00Z` gives
+  `undefined` in New York, where it is 31 December of year 0, and
+  `9999-12-31T23:30:00-01:00` gives `undefined` in UTC, where it used to show
+  as `Jan 1, 10000`.
+- **`format.dateTime` reads a string only as an `xsd:dateTime` with a time
+  zone on a real day**, the form the `dateTime` field accepts. It used to
+  format anything `new Date()` parses: `2026-10-29` and
+  `2026-10-29T10:00:00` (read in the device's zone) now give `undefined`, and
+  `2026-02-30T10:00:00Z` no longer shows as 2 March. `T24:00:00` is the next
+  midnight in every engine. A `Date` argument is formatted as before, within
+  the year range.
+- **New: `classifyDate` in `@sempods/client-sdk/edit`** tells whether a stored
+  lexical form is a calendar day (`kind: 'day'`, with a reported time zone),
+  an instant with a time zone (`kind: 'instant'`, with
+  `epochMilliseconds`) or neither (`kind: 'unsupported'`). The `date` and
+  `dateTime` fields, both formatters, `DateChooser` and the
+  [RDF value recipe](rdf-values.md) use it, so they agree on every value; what
+  the fields accept is unchanged. Code that checked XSD forms with its own
+  pattern can use it.
+- **`@sempods/app-ui` has `@sempods/client-sdk` as a peer dependency** of the
+  same minor version, as its install line already listed. `DateChooser` shows
+  a stored `0000-01-01` as stored and opens without a chosen day; it used to
+  treat it as `0001-01-01`. It also opens without a chosen day on a value the
+  `date` field rejects, such as `2026-10-29+99:99` (formerly 29 October) or a
+  date-time without a time zone, and shows those values as stored.
+- **The RDF value recipe** shows `xsd:date` and `xsd:dateTime` values from
+  0001 instead of 1000 (`01.03.0050`) and `T24:00:00` instants formatted. A
+  copied `readableDate` keeps working; the new one only picks the formatter.
 
 ### Type additions
 
@@ -190,7 +257,19 @@ seconds, discovery counts as unreachable:
   or whose forgetting failed. Code that compares sessions by deep equality
   accepts these properties.
 - `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
-  `rememberPods` and `refreshGracePeriod`. Typed test doubles of the runtime need `forget`.
+  `rememberPods`, `refreshGracePeriod` and `podReadLimit`. Typed test doubles of the runtime need `forget`.
+- `BrowserRuntimeOptions` gains `signIn`, and its `identity` becomes optional
+  in the type: it is still required unless `signIn: 'none'`, and construction
+  throws `RuntimeError('configuration')` without it. `BrowserRuntime` gains the
+  required `signIn`, and `AppSnapshot` the required `signIn`; typed test
+  doubles need them.
+- `Connection` gains the required `reading` (`'session' | 'anonymous' | null`),
+  and `clientKind` may be `null` (only under `signIn: 'none'` without an
+  identity). Test doubles that build `Connection` objects add `reading`.
+- `AccessPrompt['reason']` gains `'anonymous'`. An exhaustive `switch` over it
+  needs a case.
+- `BoundPod.sparql.select` and `construct` accept `priority: 'current'` beside
+  `signal`. A typed test double of `BoundPod` accepts the wider options.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
   doubles of `useApp()` need it too.
 - **Breaking for custom stores:** `SessionStore` (the `openStore` option) gains
@@ -198,8 +277,8 @@ seconds, discovery counts as unreachable:
   expected revision that answers `{ kind: 'removed' }` or `{ kind: 'conflict' }`.
   The default IndexedDB store implements it.
 - `UiMessages` gains `rememberedPods`, `forget`, `sessionEnded`,
-  `forgetFailed`, `dismiss` and `reload`, optional in the type; `createLocale`
-  fills them from the language defaults.
+  `forgetFailed`, `dismiss`, `reload`, `anonymous`, `open` and `noPublicData`,
+  optional in the type; `createLocale` fills them from the language defaults.
 - `AppSnapshot` gains the required `access` (`AccessState`), and
   `AppController` the method `dismiss(promptId)`. Typed test doubles of the
   snapshot need `access`. `AppSnapshot.callbackNotice` is deprecated and stays

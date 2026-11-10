@@ -117,22 +117,23 @@ The recipe formats with the provider's `format.dateOnly` and `format.dateTime`,
 the same formatters `DateChooser` in `@sempods/app-ui` uses. Headless code gets
 them from `createLocale({ locale, timeZone }).format`.
 
-- An `xsd:date` from year 1000 to 9999 without a time zone is a calendar day. It
-  shows the same day in every time zone: `2026-10-05` becomes `05.10.2026` in
-  German.
+- An `xsd:date` from year 0001 to 9999 without a time zone is a calendar day.
+  It shows the same day in every time zone: `2026-10-05` becomes `05.10.2026`
+  in German, and `0050-03-01` becomes `01.03.0050`.
 - An `xsd:dateTime` with a time zone names one instant. It shows in the
   provider's `timeZone`: `2026-10-05T23:30:00Z` becomes `06.10.2026, 01:30` in
-  Berlin and `05.10.2026, 19:30` in New York. The instant must also fall in the
-  years 1000 to 9999 in UTC.
+  Berlin and `05.10.2026, 19:30` in New York. `T24:00:00` is the next
+  midnight. The instant must fall in the years 0001 to 9999 in that zone.
 - Everything else shows as stored: impossible days (`2026-02-30`), dates with a
-  time zone (`2026-10-05Z`), years before 1000 (`0050-03-01`, `-0044-03-15`) and
-  date-times without a time zone. `format.dateOnly` would show `0050-03-01` as
-  `01.03.50`, which reads like 1950. A date-like value of another datatype also
-  stays as stored, such as `"2026-10-05"` as `xsd:string`.
+  time zone (`2026-10-05Z`), years before 0001 (`0000-01-01`, `-0044-03-15`) or
+  after 9999, and date-times without a time zone. A date-like value of another
+  datatype also stays as stored, such as `"2026-10-05"` as `xsd:string`.
 
-`format.dateTime` accepts anything `new Date()` parses, and `new Date()` reads a
-date-time without a time zone as the device's local time. The recipe's
-`readableDate` therefore checks the XSD lexical form before it formats.
+Both formatters check the XSD lexical form with the SDK's `classifyDate` and
+return `undefined` for a form they cannot show, so the recipe's `readableDate`
+only picks the formatter by datatype. Neither parses a stored value with
+`new Date()`, which would roll `2026-02-30` over to March and read a date-time
+without a time zone as the device's local time.
 
 ## Resources and web addresses
 

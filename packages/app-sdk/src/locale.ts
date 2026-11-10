@@ -1,5 +1,6 @@
 import type { ContextEditorProblem } from './authoring/contexts.js';
 import { sdkFailure, type SdkFailure } from '@sempods/client-sdk';
+import { classifyDate } from '@sempods/client-sdk/edit';
 
 export type Language = 'en' | 'de';
 export type Direction = 'ltr' | 'rtl';
@@ -58,15 +59,15 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
   });
   /**
    * The medium date style prints a year as it is, so 50 would read like 1950.
-   * A Gregorian year below 1000 is shown with four digits; a year before 1
-   * has no unambiguous form without an era and is refused.
+   * A Gregorian year below 1000 is shown with four digits. Years outside
+   * 0001–9999 are refused before: one before 1 has no unambiguous form
+   * without an era.
    */
   function withFullYear(
     formatter: Intl.DateTimeFormat,
     date: Date,
     year: number,
   ) {
-    if (year < 1) throw new RangeError('Years before 0001 are not supported.');
     if (year >= 1000 || !gregorian) return formatter.format(date);
     return formatter
       .formatToParts(date)
@@ -75,6 +76,7 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
       )
       .join('');
   }
+  const shown = (year: number) => year >= 1 && year <= 9999;
   return {
     number: (value: number) => numbers.format(value),
     list: (values: readonly string[]) => lists.format(values),
@@ -85,35 +87,46 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
       },
     ) => forms[plurals.select(count)] ?? forms.other,
     /**
-     * An instant in `timeZone`, with a Gregorian year below 1000 in four
-     * digits. Throws a `RangeError` for an invalid time or a year before 0001.
+     * An instant in `timeZone`, from years 0001 to 9999 there, with a
+     * Gregorian year below 1000 in four digits. A string must be an
+     * `xsd:dateTime` with a time zone on a real day (`classifyDate` in `@sempods/client-sdk/edit`).
+     * Returns `undefined` for anything else, an invalid `Date` included:
+     * show such a value as stored.
      */
-    dateTime(value: string | Date) {
-      const date = new Date(value);
-      if (!Number.isFinite(date.valueOf()))
-        throw new RangeError('Invalid time value.');
-      // A zone moves an instant by less than a day, so later UTC years stay.
-      if (date.getUTCFullYear() > 1000) return instants.format(date);
+    dateTime(value: string | Date): string | undefined {
+      let date: Date;
+      if (typeof value === 'string') {
+        const stored = classifyDate(value);
+        if (stored.kind !== 'instant') return undefined;
+        date = new Date(stored.epochMilliseconds);
+      } else date = new Date(value.valueOf());
+      if (!Number.isFinite(date.valueOf())) return undefined;
+      // A zone moves an instant by less than a day, so these UTC years stay.
+      const utc = date.getUTCFullYear();
+      if (utc > 1000 && utc < 9999) return instants.format(date);
       const parts = zoneYears.formatToParts(date);
-      const shown = Number(parts.find((part) => part.type === 'year')?.value);
+      const year = Number(parts.find((part) => part.type === 'year')?.value);
       const era = parts.find((part) => part.type === 'era')?.value;
-      return withFullYear(instants, date, era === 'BC' ? 1 - shown : shown);
+      const zoned = era === 'BC' ? 1 - year : year;
+      return shown(zoned) ? withFullYear(instants, date, zoned) : undefined;
     },
     /**
-     * A calendar day `YYYY-MM-DD` from 0001 to 9999, the same in every time
-     * zone, with a Gregorian year below 1000 in four digits. Throws a
-     * `RangeError` for any other form or an impossible day.
+     * A calendar day `YYYY-MM-DD` from 0001 to 9999 without a time zone, the
+     * same in every time zone, with a Gregorian year below 1000 in four
+     * digits. Returns `undefined` for any other form or an impossible day
+     * (`classifyDate` in `@sempods/client-sdk/edit`): show such a value as stored.
      */
-    dateOnly(value: string) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
-        throw new RangeError('Expected an ISO calendar date.');
-      const date = new Date(`${value}T00:00:00Z`);
+    dateOnly(value: string): string | undefined {
+      const stored = classifyDate(value);
       if (
-        !Number.isFinite(date.valueOf()) ||
-        date.toISOString().slice(0, 10) !== value
+        stored.kind !== 'day' ||
+        stored.timeZone !== undefined ||
+        !shown(stored.year)
       )
-        throw new RangeError('Invalid calendar date.');
-      return withFullYear(dates, date, date.getUTCFullYear());
+        return undefined;
+      const date = new Date(0);
+      date.setUTCFullYear(stored.year, stored.month - 1, stored.day);
+      return withFullYear(dates, date, stored.year);
     },
   };
 }
@@ -263,6 +276,15 @@ export interface UiMessages {
    */
   readonly dismiss?: string;
   readonly reload?: string;
+  /*
+   * Without required sign-in (added in 0.8.0; optional in the type,
+   * `createLocale` fills them): the prompt while the app reads only public
+   * data, the button that opens a Pod without signing in, and an anonymous
+   * catalogue without public Contexts.
+   */
+  readonly anonymous?: string;
+  readonly open?: string;
+  readonly noPublicData?: string;
 }
 
 export interface SdkMessages {
@@ -384,6 +406,11 @@ export const englishMessages: SdkMessages = {
     signInRequired: 'Sign in to use this pod.',
     dismiss: 'OK',
     reload: 'Reload',
+    anonymous:
+      'You see this Pod’s public data. Sign in to see more or to make changes.',
+    open: 'Open',
+    noPublicData:
+      'This Pod shares no public data. Sign in to see what you have access to.',
   },
   activePod: 'Active pod',
   dataContext: 'Data context',
@@ -538,6 +565,11 @@ export const germanMessages: SdkMessages = {
     signInRequired: 'Melde dich an, um diesen Pod zu nutzen.',
     dismiss: 'OK',
     reload: 'Neu laden',
+    anonymous:
+      'Du siehst die öffentlichen Daten dieses Pods. Melde dich an, um mehr zu sehen oder etwas zu ändern.',
+    open: 'Öffnen',
+    noPublicData:
+      'Dieser Pod teilt keine öffentlichen Daten. Melde dich an, um zu sehen, worauf du Zugriff hast.',
   },
   activePod: 'Aktiver Pod',
   dataContext: 'Datenkontext',
