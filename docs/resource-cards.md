@@ -110,9 +110,11 @@ A path has one or two steps, and each step lists alternative predicates:
 - `[[schema:image], [schema:thumbnailUrl, schema:contentUrl]]` takes the
   addresses of the node the resource links to, such as an `ImageObject`.
 
-A linked node is an image description only where one declared path has both
-its link and its variant predicate. Otherwise a direct path still takes the
-link's value as the address.
+The card's rule decides what a linked node is. It is an image description only
+where that rule has a path with both its link and its variant predicate. Then
+the node's own address is not tried. Otherwise a direct path of the rule still
+takes the link's value as the address. The facts of a read keep every match,
+so the decision waits until the rule is known.
 
 `schema(name)` lists both schema.org namespaces (`https:` and `http:`), and
 `pictures` is the pair of paths above with `schema:image`, `foaf:img` and
@@ -227,8 +229,8 @@ Before an address reaches `<img>`, `imageAddress` checks it. It accepts only
 `https:` addresses with a host name and without a user name or password. IP
 addresses (also IPv4 in hex or octal, which `URL` normalizes) are refused. So
 are single-label names and local-looking names such as `localhost`,
-`printer.local` or `router.home.arpa`. The card counts refused values in
-`refused`.
+`printer.local` or `router.home.arpa`. The card counts the refused values of
+its rule's paths in `refused`.
 
 This checks the initial address only. It does not check where a redirect
 leads or what a host name resolves to.
@@ -236,8 +238,12 @@ leads or what a host name resolves to.
 The preview is bounded:
 
 - A card keeps at most four pictures with up to three variants each. Variants
-  of one picture are those of the same linked node (a blank node only within
-  its read), and those that share an address: the same address from two Pods counts once. The three kept are the preferred ones, such as the thumbnail.
+  of the same linked node are one picture (a blank node only within its read).
+  So are pictures connected by a shared address, also through a chain of them.
+  The same address from two Pods or under two predicates counts once, with
+  its best rank. The three variants kept are the preferred ones, such as the
+  thumbnail. A direct address comes after a node's declared variants. The
+  limits apply after merging and ranking.
 - A preview tries the addresses in card order. When one fails to load or
   decode, it moves to the next. It never retries a failed address, and after
   six failures (`MAX_ATTEMPTS`) it tries no further address, also when new

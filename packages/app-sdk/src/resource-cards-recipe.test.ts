@@ -176,6 +176,8 @@ describe('facts of one read', () => {
         node: expect.stringContaining('_:b0'),
         link: `${S}image`,
       },
+      // The facts keep the direct value; the card's rule suppresses it.
+      { url: photo, node: undefined, link: undefined },
     ]);
     // Both statements of the path are evidence, each in its own Context.
     expect(found.images[0]!.evidence.map((e) => e.context)).toEqual([
@@ -183,6 +185,8 @@ describe('facts of one read', () => {
       ctx(alice, 'media'),
     ]);
     expect(found.images[2]!.evidence[1]!.subject).toBe('_:b0');
+    const card = resourceCards([ada], [found], exampleRules).get(ada)!;
+    expect(previewCandidates(card.images)).not.toContain(photo);
   });
 
   it('refuses unsafe image addresses and counts them', async () => {
@@ -209,8 +213,10 @@ describe('facts of one read', () => {
           [iri(ada), `${S}image`, text(value), ctx(alice, 'people')] as const,
       ),
     );
-    expect(found.images).toEqual([]);
-    expect(found.refused).toBe(values.length);
+    expect(found.images.every((match) => match.url === undefined)).toBe(true);
+    const card = resourceCards([ada], [found], exampleRules).get(ada)!;
+    expect(card.images).toEqual([]);
+    expect(card.refused).toBe(values.length);
   });
 
   it('marks a read with more than 200 rows as truncated', async () => {
@@ -407,11 +413,133 @@ describe('cards across sources', () => {
       ],
     ]);
     const found = sourceFacts(result, ada, alice, rules);
-    expect(found.refused).toBe(0);
     const card = resourceCards([ada], [found], rules).get(ada)!;
+    expect(card.refused).toBe(0);
     expect(
       card.images.map((image) => image.variants.map((v) => v.value)),
     ).toEqual([[address]]);
+  });
+
+  it("suppresses a direct address only where the card's rule describes it", async () => {
+    const photo = 'urn:v:photo';
+    const rules: readonly CardRule[] = [
+      { id: 'direct', types: ['urn:v:Direct'], images: [[[photo]]], dates: [] },
+      {
+        id: 'linked',
+        types: [],
+        images: [[[photo], ['urn:v:thumbnail']], [[photo]]],
+        dates: [],
+      },
+    ];
+    const address = 'https://img.example/photo.jpg';
+    const rows = (type: string) =>
+      select([
+        [iri(ada), RDF_TYPE, iri(type), ctx(alice, 'a')],
+        [iri(ada), photo, iri(address), ctx(alice, 'a')],
+        [
+          iri(address),
+          'urn:v:thumbnail',
+          text('https://img.example/t.jpg'),
+          ctx(alice, 'a'),
+        ],
+      ]);
+    const shown = async (type: string) => {
+      const found = sourceFacts(await rows(type), ada, alice, rules);
+      const card = resourceCards([ada], [found], rules).get(ada)!;
+      return [
+        card.rule,
+        card.images.map((image) => image.variants.map((v) => v.value)),
+      ];
+    };
+    // The direct rule has no path through the node: its address is the picture.
+    expect(await shown('urn:v:Direct')).toEqual(['direct', [[address]]]);
+    // The linked rule describes the node: its thumbnail is the picture.
+    expect(await shown('urn:v:Other')).toEqual([
+      'linked',
+      [['https://img.example/t.jpg']],
+    ]);
+  });
+
+  it('merges pictures that a shared address connects, before the limit', async () => {
+    const node = (name: string) => `https://people.example/ada/${name}`;
+    const rows = [
+      ...['a', 'b', 'c', 'd', 'e'].map(
+        (name) =>
+          [iri(ada), `${S}image`, iri(node(name)), ctx(alice, 'a')] as const,
+      ),
+      ...['a', 'b', 'c', 'd', 'e'].map(
+        (name) =>
+          [
+            iri(node(name)),
+            `${S}contentUrl`,
+            iri(`https://img.example/${name}.jpg`),
+            ctx(alice, 'a'),
+          ] as const,
+      ),
+      // A and B share their thumbnail: one picture.
+      [
+        iri(node('a')),
+        `${S}thumbnailUrl`,
+        iri('https://img.example/ab-s.jpg'),
+        ctx(alice, 'a'),
+      ] as const,
+      [
+        iri(node('b')),
+        `${S}thumbnailUrl`,
+        iri('https://img.example/ab-s.jpg'),
+        ctx(alice, 'a'),
+      ] as const,
+    ];
+    const card = resourceCards(
+      [ada],
+      [await facts(ada, alice, rows)],
+      exampleRules,
+    ).get(ada)!;
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([
+      [
+        'https://img.example/ab-s.jpg',
+        'https://img.example/a.jpg',
+        'https://img.example/b.jpg',
+      ],
+      ['https://img.example/c.jpg'],
+      ['https://img.example/d.jpg'],
+      ['https://img.example/e.jpg'],
+    ]);
+  });
+
+  it('ranks an address by its best predicate when it appears under several', async () => {
+    const photo = 'https://people.example/ada/photo';
+    const card = resourceCards(
+      [ada],
+      [
+        await facts(ada, alice, [
+          [iri(ada), `${S}image`, iri(photo), ctx(alice, 'a')],
+          ...['a', 'b', 'c', 'z'].map(
+            (name) =>
+              [
+                iri(photo),
+                `${S}contentUrl`,
+                iri(`https://img.example/${name}.jpg`),
+                ctx(alice, 'a'),
+              ] as const,
+          ),
+          [
+            iri(photo),
+            `${S}thumbnailUrl`,
+            iri('https://img.example/z.jpg'),
+            ctx(alice, 'a'),
+          ],
+        ]),
+      ],
+      exampleRules,
+    ).get(ada)!;
+    expect(card.images[0]!.variants.map((v) => v.value)).toEqual([
+      'https://img.example/z.jpg',
+      'https://img.example/a.jpg',
+      'https://img.example/b.jpg',
+    ]);
   });
 
   it('keeps the preferred variants when a picture has more than three', async () => {

@@ -98,7 +98,10 @@ interface ImageMatch {
   /** The first step's predicate when the address belongs to a linked node. */
   readonly link?: string;
   readonly predicate: string;
-  readonly url: string;
+  /** The checked address; undefined when the address guard refused it. */
+  readonly url: string | undefined;
+  /** A direct value that is an IRI: the card's rule may know it as a node. */
+  readonly target?: string;
   /**
    * The image's node: variants of one node are one picture. An IRI, or for a
    * blank node a key that is unique to its read result.
@@ -115,8 +118,6 @@ export interface SourceFacts {
   readonly aliases: readonly Fact<string>[];
   readonly images: readonly ImageMatch[];
   readonly dates: readonly (Fact<DateTerm> & { readonly predicate: string })[];
-  /** Image values the address guard refused. */
-  readonly refused: number;
   readonly truncated: boolean;
 }
 
@@ -253,7 +254,6 @@ export function sourceFacts(
   const dates: { value: DateTerm; evidence: Evidence[]; predicate: string }[] =
     [];
   const images: ImageMatch[] = [];
-  let refused = 0;
   // Second step: a link statement and a statement of the linked node, joined
   // within this read only where one declared path has both predicates.
   const joins = rows.flatMap((row) =>
@@ -268,13 +268,13 @@ export function sourceFacts(
           )
           .map((link) => ({ link, row })),
   );
-  // A linked node with a declared variant describes an image; it is no address.
-  const described = new Set(joins.map(({ row }) => exactTerm(row.s)));
-  const image = (match: Omit<ImageMatch, 'url'>, value: string | undefined) => {
-    const url = value === undefined ? undefined : imageAddress(value);
-    if (url) images.push({ ...match, url });
-    else refused++;
-  };
+  // Which matches count, and which link describes an image, depends on the
+  // card's rule: the facts keep them all.
+  const image = (match: Omit<ImageMatch, 'url'>, value: string | undefined) =>
+    images.push({
+      ...match,
+      url: value === undefined ? undefined : imageAddress(value),
+    });
   for (const { link, row } of joins)
     image(
       {
@@ -308,13 +308,13 @@ export function sourceFacts(
         rule.images.some((path) => path.length === 1 && path[0].includes(p)),
       )
     ) {
-      if (described.has(exactTerm(o))) continue;
-      if (o.type === 'blank') continue; // A blank image node without variants.
+      if (o.type === 'blank') continue; // A blank node is no address.
       // The root's own variants are variants of the root as one picture.
       image(
         {
           predicate: p,
           ...(variants.has(p) ? { node: root } : {}),
+          ...(o.type === 'iri' ? { target: o.value } : {}),
           evidence: [evidence],
         },
         addressValue(o),
@@ -328,7 +328,6 @@ export function sourceFacts(
     aliases: aliasFacts,
     images,
     dates,
-    refused,
     truncated: result.rows.length > MAX_ROWS,
   };
 }
@@ -456,20 +455,23 @@ function cardOf(
     rule: rule.id,
     types,
     sameAs,
-    images: imagesOf(rule, facts),
+    ...imagesOf(rule, facts),
     dates: datesOf(rule, facts),
-    refused: facts.reduce((sum, fact) => sum + fact.refused, 0),
     truncated: facts.some((fact) => fact.truncated),
   };
 }
 
 /**
- * Picture precedence: the rule's path order, then the declared predicate
- * order of the first step, then sources and the read's rows. The second
- * step's order sorts the variants within a picture.
+ * Pictures for the card's rule. Precedence: the rule's path order, then the
+ * first step's predicate order, then sources and the read's rows. Matches
+ * that share a node or an address are one picture; within it the declared
+ * predicate order sorts the variants. The limits apply last.
  */
-function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
-  const ranked = facts
+function imagesOf(
+  rule: CardRule,
+  facts: readonly SourceFacts[],
+): { images: CardImage[]; refused: number } {
+  const matches = facts
     .flatMap((fact) => fact.images)
     .flatMap((match, index) => {
       const path = rule.images.findIndex((path) =>
@@ -482,51 +484,86 @@ function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
       if (path < 0) return [];
       const steps = rule.images[path]!;
       const first = steps[0].indexOf(match.link ?? match.predicate);
-      const rank = steps.length === 2 ? steps[1].indexOf(match.predicate) : 0;
-      return [{ match, path, first, rank, index }];
-    })
+      // Variant rank: the declared order of a variant predicate. A direct
+      // address that is no variant of a node comes after every variant.
+      const rank =
+        steps.length === 2
+          ? steps[1].indexOf(match.predicate)
+          : match.node !== undefined
+            ? steps[0].indexOf(match.predicate)
+            : Number.MAX_SAFE_INTEGER;
+      return [{ ...match, path, first, rank, index }];
+    });
+  // A node this rule describes through a two-step path is no address itself.
+  const described = new Set(
+    matches.flatMap((match) =>
+      match.link !== undefined && match.node ? [match.node] : [],
+    ),
+  );
+  const kept = matches.filter(
+    (match) => match.target === undefined || !described.has(match.target),
+  );
+  const usable = kept
+    .flatMap((match) =>
+      match.url === undefined ? [] : [{ ...match, url: match.url }],
+    )
     .sort((a, b) => a.path - b.path || a.first - b.first || a.index - b.index);
-  const images: {
-    node?: string;
-    variants: { value: string; evidence: Evidence[]; rank: number }[];
-  }[] = [];
-  for (const { match, rank } of ranked) {
-    // One picture: the same IRI node, or a shared address (deduplicated).
-    const image = images.find(
-      (image) =>
-        (match.node !== undefined && image.node === match.node) ||
-        image.variants.some((variant) => variant.value === match.url),
-    );
-    if (!image) {
-      if (images.length < MAX_IMAGES)
-        images.push({
-          ...(match.node ? { node: match.node } : {}),
-          variants: [{ value: match.url, evidence: [...match.evidence], rank }],
-        });
-      continue;
+  // Matches connected by a node or an address, also transitively, are one picture.
+  const parent = usable.map((_, index) => index);
+  const find = (i: number): number => (parent[i] === i ? i : find(parent[i]!));
+  const seen = new Map<string, number>();
+  usable.forEach((match, index) => {
+    const keys = [`url ${match.url}`];
+    if (match.node) keys.push(`node ${match.node}`);
+    for (const key of keys) {
+      const other = seen.get(key);
+      if (other === undefined) {
+        seen.set(key, index);
+        continue;
+      }
+      const [a, b] = [find(other), find(index)];
+      // The earlier match leads, so the picture keeps its place.
+      if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
     }
-    const variant = image.variants.find(
-      (variant) => variant.value === match.url,
-    );
-    if (variant) {
+  });
+  const groups = new Map<number, typeof usable>();
+  usable.forEach((match, index) => {
+    const group = groups.get(find(index)) ?? [];
+    group.push(match);
+    groups.set(find(index), group);
+  });
+  const images = [...groups.values()].slice(0, MAX_IMAGES).map((group) => {
+    const variants: { value: string; evidence: Evidence[]; rank: number }[] =
+      [];
+    for (const match of group) {
+      const variant = variants.find((variant) => variant.value === match.url);
+      if (!variant) {
+        variants.push({
+          value: match.url,
+          evidence: [...match.evidence],
+          rank: match.rank,
+        });
+        continue;
+      }
+      // The same address under several predicates keeps its best rank.
+      variant.rank = Math.min(variant.rank, match.rank);
       for (const evidence of match.evidence)
         if (!variant.evidence.some((e) => sameEvidence(e, evidence)))
           variant.evidence.push(evidence);
-    } else
-      image.variants.push({
-        value: match.url,
-        evidence: [...match.evidence],
-        rank,
-      });
-  }
-  return images.map((image) => ({
-    variants: image.variants
-      .map((variant, index) => ({ variant, index }))
-      .sort((a, b) => a.variant.rank - b.variant.rank || a.index - b.index)
-      // The limit applies after ranking, so a thumbnail is never cut.
-      .slice(0, MAX_VARIANTS)
-      .map(({ variant: { value, evidence } }) => ({ value, evidence })),
-  }));
+    }
+    return {
+      variants: variants
+        .map((variant, index) => ({ variant, index }))
+        .sort((a, b) => a.variant.rank - b.variant.rank || a.index - b.index)
+        // The limit applies after ranking, so a thumbnail is never cut.
+        .slice(0, MAX_VARIANTS)
+        .map(({ variant: { value, evidence } }) => ({ value, evidence })),
+    };
+  });
+  return {
+    images,
+    refused: kept.filter((match) => match.url === undefined).length,
+  };
 }
 
 /** Distinct date terms in the rule's predicate order, then by source. */
