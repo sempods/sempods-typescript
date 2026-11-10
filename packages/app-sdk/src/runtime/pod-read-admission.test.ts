@@ -366,12 +366,13 @@ it('the resend after a Bearer 401 stays in its slot; the renewal is not counted'
   const second = f.reader.sparql.construct(query('second'));
   await flush();
   t.answer('first'); // the 401
-  await flush();
+  // Renewal and resend take a few turns; wait for the resend, not a fixed time.
+  await vi.waitFor(() => expect(t.names()).toHaveLength(2));
   expect(order).toEqual(['renewal']);
   expect(t.names()).toEqual(['first', 'first']);
   t.answer('first');
   expect(await first).toMatchObject({ kind: 'ok' });
-  await flush();
+  await vi.waitFor(() => expect(t.names()).toHaveLength(3));
   expect(t.names()).toEqual(['first', 'first', 'second']);
   t.answer('second');
   expect(await second).toMatchObject({ kind: 'ok' });
