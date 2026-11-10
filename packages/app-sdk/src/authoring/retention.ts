@@ -45,6 +45,44 @@ export function accessLost(app: AppController, connection: string | null) {
   return found !== undefined && found.reading !== 'session';
 }
 
+/**
+ * Internal: how many sessions each connection has begun since this
+ * controller was first asked, counted from the controller's own snapshots,
+ * so also while the screen that asks is hidden. Work captured under one
+ * count belongs to that authorization: a higher count means a new session
+ * came in between.
+ */
+export function sessionsOf(
+  app: AppController,
+): (connection: string | null) => number {
+  const known = counters.get(app);
+  if (known) return known;
+  const counts = new Map<string, number>();
+  const readings = new Map<string, unknown>();
+  const observe = () => {
+    for (const entry of app.getSnapshot().connections) {
+      const before = readings.get(entry.id);
+      if (
+        entry.reading === 'session' &&
+        readings.has(entry.id) &&
+        before !== 'session'
+      )
+        counts.set(entry.id, (counts.get(entry.id) ?? 0) + 1);
+      readings.set(entry.id, entry.reading);
+    }
+  };
+  observe();
+  app.subscribe(observe);
+  const count = (connection: string | null) =>
+    connection === null ? 0 : (counts.get(connection) ?? 0);
+  counters.set(app, count);
+  return count;
+}
+const counters = new WeakMap<
+  AppController,
+  (connection: string | null) => number
+>();
+
 /** Whether two views address the same Context of the same Pod. */
 export function sameTarget(a: BoundView, b: BoundView) {
   return a.podUrl === b.podUrl && a.contextIri === b.contextIri;

@@ -57,7 +57,10 @@ import {
 import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
 import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
-import { sameTarget as sameViewTarget } from '../authoring/retention.js';
+import {
+  sameTarget as sameViewTarget,
+  sessionsOf,
+} from '../authoring/retention.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 import {
   creationAddress,
@@ -1165,9 +1168,14 @@ export function useCreation<D extends object>(
   const explicit = useExplicitView(options.context);
   const selected = useView();
   const fixed = options.context !== undefined;
-  // How the active connection reads: a new session is a new authorization.
-  const reading = useAppFacts(
-    (s) => s.connections.find((c) => c.id === s.activeId)?.reading ?? null,
+  // How the active connection reads, and how many sessions it began: a draft
+  // belongs to the authorization it was written under.
+  const { reading, activeId } = useAppFacts(
+    (s) => ({
+      reading: s.connections.find((c) => c.id === s.activeId)?.reading ?? null,
+      activeId: s.activeId,
+    }),
+    shallowEqual,
   );
   const { key: shape } = useDefinition(definition, 'useCreation');
   // The address mode, address, form name and definition own the generation.
@@ -1221,24 +1229,27 @@ export function useCreation<D extends object>(
   const initial = useCommitted(options.initial);
   const copy = (draft: D) => Object.freeze({ ...draft });
   // This form's own draft and the creation it last sent from it, if any.
+  const sessions = sessionsOf(app)(activeId);
   const [state, setState] = useState(() => ({
     view,
     key,
     draft: copy(options.initial),
     sent: null as Captured<D> | null,
+    sessions,
   }));
   // The latest own state, ahead of rendering: a batch may call `change` and
   // `create` again before the next render.
   const current = useRef(state);
   const replace = (draft: D, sent: Captured<D> | null = null) => {
-    const next = { view, key, draft, sent };
+    const next = { view, key, draft, sent, sessions: current.current.sessions };
     current.current = next;
     setState(next);
   };
   // Same-target access loss (a session that ended, without a new
   // authorization) moves this form's own draft to the view that replaced its
   // own, also while the form was hidden; a new target or authorization starts
-  // it afresh. Write access follows the new view.
+  // it afresh, also one that came and went while the form was hidden. Write
+  // access follows the new view.
   const carried =
     fixed &&
     state.key === key &&
@@ -1247,10 +1258,17 @@ export function useCreation<D extends object>(
     state.view !== view &&
     sameViewTarget(state.view, view) &&
     !state.view.getSnapshot().current &&
-    reading !== 'session';
+    reading !== 'session' &&
+    state.sessions === sessions;
   if (carried) setState({ ...state, view });
   else if (state.view !== view || state.key !== key) {
-    setState({ view, key, draft: copy(options.initial), sent: null });
+    setState({
+      view,
+      key,
+      draft: copy(options.initial),
+      sent: null,
+      sessions,
+    });
   }
   const resetWarning = useRef(false);
   useInsertionEffect(() => {

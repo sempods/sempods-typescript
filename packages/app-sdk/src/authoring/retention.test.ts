@@ -10,7 +10,7 @@ import type { Connection } from '../runtime/types.js';
 import type { BoundView } from '../runtime/view.js';
 import { CreationLane } from './creation-lane.js';
 import { lanesOf } from './lanes.js';
-import { keepsWork } from './retention.js';
+import { keepsWork, sessionsOf } from './retention.js';
 
 const definition = fields({ title: text('urn:title', { language: null }) });
 const work = 'https://pod.example/alice/_system/contexts/work';
@@ -170,4 +170,22 @@ it('never hands kept work to a new authorization', async () => {
   expect(next.lanes.size).toBe(0);
   expect(group.holds()).toBe(false);
   expect(store.kept('rows', 'explicit', work)).toBeUndefined();
+});
+
+it('counts every new session of a connection, also while nobody renders', () => {
+  const f = fakes();
+  const sessions = sessionsOf(f.app);
+  expect(sessionsOf(f.app)).toBe(sessions);
+  expect(sessions('a')).toBe(0);
+  // A session that ends, read without a token or not at all: no new one.
+  f.end('anonymous');
+  f.end(null);
+  expect(sessions('a')).toBe(0);
+  // A new session came, and went again: the count remembers it.
+  f.signIn();
+  f.end('anonymous');
+  expect(sessions('a')).toBe(1);
+  f.signIn();
+  expect(sessions('a')).toBe(2);
+  expect(sessions(null)).toBe(0);
 });
