@@ -81,13 +81,16 @@ export interface EditorStore {
   retains(context: string, iri: string, scope: LeaveGuard['scope']): boolean;
   /**
    * The view of an explicit editor kept for its work through access loss
-   * (`keepsWork`) for this Context, subject and scope, for a hook that has no
-   * current view to claim it with (a session that ended without a token).
+   * (`keepsWork`) for this Context, subject, scope and definition (`key` and
+   * `definition` as for `claim`), for a hook that has no current view to
+   * claim it with. An editor of another definition is not this one.
    */
-  kept(
+  kept<D>(
     context: string,
     iri: string,
     scope: LeaveGuard['scope'],
+    key: string,
+    definition: EditDefinition<D>,
   ): BoundView | undefined;
   /** Reopen a selected resource, retaining only its own same-view editor guards. */
   reopen(view: BoundView, iri: string, action: () => void): Promise<boolean>;
@@ -259,13 +262,22 @@ export function editorsOf(app: AppController): EditorStore {
           entry.holds(),
       );
     },
-    kept(context: string, iri: string, scope: LeaveGuard['scope']) {
+    kept<D>(
+      context: string,
+      iri: string,
+      scope: LeaveGuard['scope'],
+      key: string,
+      definition: EditDefinition<D>,
+    ) {
+      const shape =
+        key === 'custom' ? `custom ${idOf(definition as object)}` : key;
       for (const entry of entries.values())
         if (
           entry.target === 'explicit' &&
           entry.view.contextIri === context &&
           entry.iri === iri &&
           entry.scope === scope &&
+          entry.shape === shape &&
           entry.keptForWork()
         )
           return entry.view;

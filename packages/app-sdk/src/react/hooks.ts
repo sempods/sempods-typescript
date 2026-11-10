@@ -613,6 +613,13 @@ export function useContextEditor<D>(
   definition: EditDefinition<D>,
 ): ContextEditor<D> {
   const app = useController();
+  // The definition as the editor store keys it: kept work of another
+  // definition is not this editor's.
+  const structure = definitionKey(definition);
+  const shape = useCommitted({
+    key: structure ?? 'custom',
+    definition: canonicalOf(definition, structure),
+  });
   const [state, setState] = useState<ContextLaneState | null>(null);
   // The latest lane state, ahead of rendering: open() and close() chained from
   // one render (`await open(); await close()`) act on what is current.
@@ -688,6 +695,8 @@ export function useContextEditor<D>(
       lane.target.context,
       lane.target.subject,
       'connection',
+      shape.current.key,
+      shape.current.definition,
     );
     if (kept) {
       update(lane, { binding: kept, activated: true });
@@ -709,7 +718,18 @@ export function useContextEditor<D>(
         update(lane, { binding: 'refused' });
       else if (error.problem !== 'disconnected') throw error;
     }
-  }, [app, lane, activeId, binding, bound, activated, readable, ready, update]);
+  }, [
+    app,
+    lane,
+    activeId,
+    binding,
+    bound,
+    activated,
+    readable,
+    ready,
+    update,
+    shape,
+  ]);
   const editor = useBoundEditor(
     live && activated ? bound : null,
     live && activated ? lane!.target.subject : null,
@@ -751,7 +771,13 @@ export function useContextEditor<D>(
           binding &&
           binding !== 'refused' &&
           !binding.getSnapshot().current &&
-          !editorsOf(app).kept(target.context, target.subject, 'connection')
+          !editorsOf(app).kept(
+            target.context,
+            target.subject,
+            'connection',
+            shape.current.key,
+            shape.current.definition,
+          )
         )
       )
         return Promise.resolve(true);
@@ -789,7 +815,7 @@ export function useContextEditor<D>(
       opening.current = { target, result };
       return result;
     },
-    [app, apply],
+    [app, apply, shape],
   );
   const close = useCallback(() => {
     const now = latest.current;

@@ -338,3 +338,56 @@ it.each(draftCases)(
     await waitFor(() => expect(api.draft.title).toBe('Unsent, edited'));
   },
 );
+
+it('opens a row with another definition through the current view, not a kept one', async () => {
+  const f = await signedIn('optional');
+  f.setResource(async (_url, init) =>
+    (init?.method ?? 'GET') === 'GET'
+      ? Response.json(
+          { ...node, 'urn:note': [{ '@value': 'A note' }] },
+          { headers: { etag: '"v1"' } },
+        )
+      : new Response(null, { status: 202 }),
+  );
+  const other = fields({ note: text('urn:note', { language: null }) });
+  let edit!: ContextEditor<{ title: string }>;
+  let next!: ContextEditor<{ note: string }>;
+  function First() {
+    edit = useContextEditor(definition);
+    return null;
+  }
+  function Second() {
+    next = useContextEditor(other);
+    return null;
+  }
+  let show!: (which: 'first' | 'second' | null) => void;
+  function Host() {
+    const [which, setWhich] = useState<'first' | 'second' | null>('first');
+    show = setWhich;
+    return which === 'first' ? (
+      <First />
+    ) : which === 'second' ? (
+      <Second />
+    ) : null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Host />
+    </SempodsProvider>,
+  );
+  await act(async () => {
+    expect(await edit.open({ context: work, subject: 'urn:item' })).toBe(true);
+  });
+  await waitFor(() => expect(edit.editor?.state.draft?.title).toBe('Original'));
+  act(() => edit.editor!.change({ title: 'Kept draft' }));
+  act(() => show(null));
+  await act(async () => {
+    await renewal(f, f.runtime, f.id, 'refused');
+  });
+  act(() => show('second'));
+  await act(async () => {
+    expect(await next.open({ context: work, subject: 'urn:item' })).toBe(true);
+  });
+  // The other definition reads the public Context through the current view.
+  await waitFor(() => expect(next.editor?.state.draft?.note).toBe('A note'));
+});
