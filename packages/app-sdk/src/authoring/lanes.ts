@@ -29,9 +29,8 @@ export function retainView(app: AppController, view: BoundView): () => void {
     else views.delete(view);
   };
 }
-/** Whether a view that lost access is kept for work on it, see `retainView`. */
-function retains(app: AppController, view: BoundView) {
-  if (!retained.get(app)?.has(view)) return false;
+/** Whether the active connection reads without a token. */
+function readsAnonymously(app: AppController) {
   const snapshot = app.getSnapshot();
   return (
     snapshot.connections.find((c) => c.id === snapshot.activeId)?.reading ===
@@ -47,9 +46,9 @@ export type { LaneScope } from './lane.js';
  * target: unmounting, hiding (`<Activity>`) or remounting a screen never
  * retires it, so a write that settles meanwhile keeps its outcome and its
  * leave guard. The group retires once its target no longer holds (another
- * selected view, an explicit view no longer current and not retained for
- * work on it, or another active connection); then its lanes never update
- * again and their guards go.
+ * selected view, an explicit view no longer current and not kept for work
+ * on it, or another active connection); then its lanes never update again
+ * and their guards go.
  */
 export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
   readonly lanes = new Map<string, L>();
@@ -80,10 +79,17 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     if (!this.alive) return false;
     const snapshot = this.app.getSnapshot();
     if (snapshot.activeId !== this.connection) return false;
-    return this.scope === 'target'
-      ? snapshot.view === this.view
-      : Boolean(this.view.getSnapshot().current) ||
-          retains(this.app, this.view);
+    if (this.scope === 'target') return snapshot.view === this.view;
+    if (this.view.getSnapshot().current) return true;
+    // Same-target access loss once the session ended (`signIn: 'optional'`):
+    // a form's work on it, or a captured write of its own, keeps it, also
+    // while that form is hidden or unmounted.
+    return (
+      this.scope === 'explicit' &&
+      (Boolean(retained.get(this.app)?.has(this.view)) ||
+        [...this.lanes.values()].some((lane) => lane.outstanding())) &&
+      readsAnonymously(this.app)
+    );
   }
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);

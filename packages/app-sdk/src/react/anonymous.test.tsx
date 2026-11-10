@@ -6,7 +6,7 @@
  * under `signIn: 'none'`.
  */
 import { webcrypto } from 'node:crypto';
-import { useState } from 'react';
+import { Activity, useState } from 'react';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   act,
@@ -383,7 +383,10 @@ function ExplicitCreation() {
  * token), a creation form for `work` mounted beside `AppAccess` and a title
  * typed into it. Creations are answered by `answer`.
  */
-async function explicitDraft(answer: () => Promise<Response> | Response) {
+async function explicitDraft(
+  answer: () => Promise<Response> | Response,
+  host: 'plain' | 'unmount' | 'activity' = 'plain',
+) {
   const f = start({ signIn: 'optional', preset: { podUrl: pod } });
   f.setCatalogue(async (_url, init) =>
     new Headers(init?.headers).get('authorization')
@@ -395,10 +398,22 @@ async function explicitDraft(answer: () => Promise<Response> | Response) {
   );
   const session = await f.login();
   cleanups.push(() => session.runtime.dispose());
+  let toggle!: (show: boolean) => void;
+  function Host() {
+    const [show, setShow] = useState(true);
+    toggle = setShow;
+    if (host === 'activity')
+      return (
+        <Activity mode={show ? 'visible' : 'hidden'}>
+          <ExplicitCreation />
+        </Activity>
+      );
+    return show ? <ExplicitCreation /> : null;
+  }
   render(
     <SempodsProvider runtime={session.runtime}>
       <AppAccess appName="Recipes" />
-      <ExplicitCreation />
+      <Host />
     </SempodsProvider>,
   );
   const title = (await screen.findByLabelText('Title')) as HTMLInputElement;
@@ -418,7 +433,14 @@ async function explicitDraft(answer: () => Promise<Response> | Response) {
     );
     await act(async () => {});
   }
-  return { ...f, ...session, title, state, endSession };
+  return {
+    ...f,
+    ...session,
+    title,
+    state,
+    endSession,
+    show: (visible: boolean) => act(() => toggle(visible)),
+  };
 }
 
 it('keeps an unsent explicit-Context draft, editable, when the session ends', async () => {
@@ -504,3 +526,25 @@ it('offers sharing only where the app signs in', async () => {
     cleanup();
   }
 });
+
+it.each(['unmount', 'activity'] as const)(
+  'keeps an unconfirmed explicit-Context creation while its form is away (%s) as the session ends',
+  async (host) => {
+    const f = await explicitDraft(
+      () => new Response(null, { status: 202 }),
+      host,
+    );
+    await act(async () =>
+      screen.getByRole('button', { name: 'Create' }).click(),
+    );
+    await waitFor(() => expect(f.state()).toBe('unconfirmed'));
+    // The controller owns the captured creation, not the form.
+    f.show(false);
+    await f.endSession();
+    f.show(true);
+    const title = (await screen.findByLabelText('Title')) as HTMLInputElement;
+    await waitFor(() => expect(f.state()).toBe('unconfirmed'));
+    expect(title.disabled).toBe(true);
+    expect(title.value).toBe('Unsaved task');
+  },
+);

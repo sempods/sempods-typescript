@@ -1137,20 +1137,40 @@ export function useCreation<D extends object>(
   const explicit = useExplicitView(options.context, holding);
   const selected = useView();
   const fixed = options.context !== undefined;
-  const view = fixed ? explicit.view : selected;
-  const access = useWorkflowAccess();
-  // An explicit Context has its own write access.
-  const explicitWrite = useSyncExternalStore(
-    explicit.view?.subscribe ?? noopSubscribe,
-    () => explicit.view?.getSnapshot().write ?? false,
-    () => explicit.view?.getSnapshot().write ?? false,
-  );
-  const writable = fixed ? explicitWrite : access.write;
   const { key: shape } = useDefinition(definition, 'useCreation');
   // The address mode, address, form name and definition own the generation.
   // Distinct tuples cannot collide; old commands never follow a changed IRI.
   const address = creationAddress(options);
   const key = JSON.stringify([...address, options.id ?? '', shape]);
+  // A creation of this form name captured before the session ended keeps
+  // its explicit view and lane (`LaneGroup.holds`), also while no form was
+  // mounted: a form shown again returns to it until it is resolved.
+  const app = useController();
+  const channel = lanesOf(app).channel(`forms ${key}`, 'explicit');
+  useSyncExternalStore(
+    channel.subscribe,
+    channel.getVersion,
+    channel.getVersion,
+  );
+  const kept = fixed
+    ? channel
+        .held()
+        .find(
+          (g) =>
+            g.view !== explicit.view &&
+            g.view.contextIri === options.context &&
+            !g.view.getSnapshot().current,
+        )?.view
+    : undefined;
+  const view = fixed ? (kept ?? explicit.view) : selected;
+  const access = useWorkflowAccess();
+  // An explicit Context has its own write access.
+  const explicitWrite = useSyncExternalStore(
+    view?.subscribe ?? noopSubscribe,
+    () => (fixed ? (view?.getSnapshot().write ?? false) : false),
+    () => (fixed ? (view?.getSnapshot().write ?? false) : false),
+  );
+  const writable = fixed ? explicitWrite : access.write;
   // The controller owns the creation lane of this form name, with the
   // captured creation and its recovery: every form of the name (by default all
   // forms of that address), also one hidden, shown again or remounted, shows
