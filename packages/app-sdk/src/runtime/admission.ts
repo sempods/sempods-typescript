@@ -22,7 +22,8 @@ export type Release = () => void;
  * from admission until the caller releases it, which `bindPod` does when the
  * client request settles, not when the caller stops waiting. Waiting Pods take
  * turns; a priority read goes first within its Pod and across Pods, but after
- * `PRIORITY_RUN` priority admissions in a row a waiting normal read is next.
+ * `PRIORITY_RUN` priority admissions in a row, overall or on one Pod, a
+ * waiting normal read (of any Pod, or of that Pod) is next.
  */
 export interface Admission {
   /**
@@ -57,16 +58,21 @@ export function createAdmission(
   /** Waiting reads per Pod in arrival order; a Pod without waiting reads has no entry. */
   const waiting = new Map<string, Job[]>();
   /**
-   * When each Pod last had a read admitted. The waiting Pod admitted least
-   * recently goes next, also after a Pod's queue emptied and filled again.
+   * When each Pod last had a read admitted (of either kind). The eligible Pod
+   * admitted least recently goes next, also after its queue emptied and
+   * filled again.
    */
   const turns = new Map<string, number>();
   let turn = 0;
+  /** Priority admissions since the last normal one, across all Pods. */
   let streak = 0;
+  /** Priority admissions since each Pod's last normal one. */
+  const streaks = new Map<string, number>();
   let arrivals = 0;
 
   const free = (pod: string) =>
     running < total && (inFlight.get(pod) ?? 0) < perPod;
+  const normal = (pod: string) => waiting.get(pod)!.find((j) => !j.priority);
   function take(pod: string, job: Job) {
     const queue = waiting.get(pod)!;
     queue.splice(queue.indexOf(job), 1);
@@ -77,44 +83,47 @@ export function createAdmission(
     if (running >= total) return undefined;
     const pods = [...waiting.keys()].filter(free);
     if (!pods.length) return undefined;
-    /** The oldest waiting priority read of an eligible Pod. */
-    const priority = () => {
+    /**
+     * The oldest waiting priority read of an eligible Pod. `bounded` skips a
+     * Pod whose normal read waits behind `PRIORITY_RUN` priority admissions.
+     */
+    const priority = (bounded: boolean) => {
       let oldest: Job | undefined;
       for (const pod of pods) {
+        if (bounded && (streaks.get(pod) ?? 0) >= PRIORITY_RUN && normal(pod))
+          continue;
         const job = waiting.get(pod)!.find((j) => j.priority);
         if (job && (!oldest || job.seq < oldest.seq)) oldest = job;
       }
       return oldest;
     };
     if (streak < PRIORITY_RUN) {
-      const job = priority();
-      if (job) {
-        streak++;
-        return job;
-      }
+      const job = priority(true);
+      if (job) return job;
     }
     // Round robin: the eligible Pod with a normal read admitted least recently.
     let chosen: Job | undefined;
     let oldest = Infinity;
     for (const pod of pods) {
-      const job = waiting.get(pod)!.find((j) => !j.priority);
+      const job = normal(pod);
       const at = turns.get(pod) ?? -1;
       if (job && at < oldest) {
         chosen = job;
         oldest = at;
       }
     }
-    if (chosen) {
-      streak = 0;
-      return chosen;
-    }
     // Only priority reads wait: no normal read to make room for.
-    const job = priority();
-    if (job) streak++;
-    return job;
+    return chosen ?? priority(false);
   }
-  function start(pod: string): Release {
+  function start(pod: string, priority: boolean): Release {
     turns.set(pod, turn++);
+    if (priority) {
+      streak++;
+      streaks.set(pod, (streaks.get(pod) ?? 0) + 1);
+    } else {
+      streak = 0;
+      streaks.delete(pod);
+    }
     running++;
     inFlight.set(pod, (inFlight.get(pod) ?? 0) + 1);
     let done = false;
@@ -139,7 +148,8 @@ export function createAdmission(
       if (signal.aborted) return Promise.resolve(undefined);
       // Nothing waits that this read could overtake: a free slot is never
       // left while an eligible read waits, since every release admits.
-      if (free(pod) && !waiting.has(pod)) return Promise.resolve(start(pod));
+      if (free(pod) && !waiting.has(pod))
+        return Promise.resolve(start(pod, priority));
       return new Promise((resolve) => {
         const job: Job = {
           pod,
@@ -147,18 +157,19 @@ export function createAdmission(
           seq: arrivals++,
           admit: () => {
             signal.removeEventListener('abort', abort);
-            resolve(start(pod));
+            resolve(start(pod, priority));
           },
         };
         const abort = () => {
           take(pod, job);
           resolve(undefined);
         };
+        // Before the read joins the queue, so a failing notice leaves no job.
+        queued();
         signal.addEventListener('abort', abort, { once: true });
         const queue = waiting.get(pod);
         if (queue) queue.push(job);
         else waiting.set(pod, [job]);
-        queued();
       });
     },
   };

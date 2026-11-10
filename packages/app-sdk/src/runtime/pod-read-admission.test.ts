@@ -1,7 +1,7 @@
 // `podReadLimit` (#244): bounded explicit Pod reads across loaders, on the
 // real runtime and loader. Fixture evidence only, not live Pod behaviour.
 import { afterEach, expect, it, vi } from 'vitest';
-import type { PodFetch } from '@sempods/client-sdk';
+import { createPod, type PodFetch } from '@sempods/client-sdk';
 import { createViewLoader } from '../authoring/load.js';
 import { RuntimeError } from './errors.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
@@ -82,13 +82,17 @@ const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
  * Pod handle. A renewal may only narrow grants, so `grants('ai')` and then
  * `grants('')` are two revisions.
  */
-async function session(podReadLimit: BrowserRuntimeOptions['podReadLimit']) {
+async function session(
+  podReadLimit: BrowserRuntimeOptions['podReadLimit'],
+  overrides: Partial<BrowserRuntimeOptions> = {},
+) {
   const f = await returnedSession(
     keep,
     fixture({
       preferences: null,
       scopes: { optional: ['ai', 'mcp'] },
       ...(podReadLimit ? { podReadLimit } : {}),
+      ...overrides,
     }),
   );
   f.setToken(async () =>
@@ -273,8 +277,14 @@ it('changed grants drop waiting reads of the old grants; new reads wait for old 
   const f = await session({ perPod: 2 });
   const t = transport(f);
   const all = Array.from({ length: 5 }, (_, i) => loader(f.reader, `g${i}`));
-  const seen = new Set<unknown>();
-  all.forEach((l) => l.subscribe(() => seen.add(id(l))));
+  // The dispatch index of every answer a loader showed as ready.
+  const shown: unknown[] = [];
+  all.forEach((l) =>
+    l.subscribe(() => {
+      const state = l.getSnapshot();
+      if (state.kind === 'ready') shown.push(state.data[0]!['urn:dispatch']);
+    }),
+  );
   all.forEach((l) => void l.reload());
   await flush();
   expect(t.names()).toEqual(['g0', 'g1']);
@@ -300,7 +310,10 @@ it('changed grants drop waiting reads of the old grants; new reads wait for old 
     if (state.kind === 'ready')
       expect(state.data[0]!['urn:dispatch']).toBe(last);
   }
-  expect(seen.has('ready')).toBe(false);
+  // Dispatches 0 and 1 were sent under the old grants; neither was shown.
+  expect(shown).toHaveLength(5);
+  expect(shown).not.toContain(0);
+  expect(shown).not.toContain(1);
 });
 
 it('a removed source drops its waiting reads at once; its running requests keep the shared capacity until they settle', async () => {
@@ -362,6 +375,53 @@ it('the resend after a Bearer 401 stays in its slot; the renewal is not counted'
   t.answer('second');
   expect(await second).toMatchObject({ kind: 'ok' });
   expect(t.maxima.perPod).toBe(1);
+});
+
+it('a read cancelled right after its slot was granted, before it is sent, frees the slot', async () => {
+  const f = await session({ perPod: 1 });
+  const t = transport(f);
+  const stop = new AbortController();
+  // The slot is free, so it is granted at once; the abort comes before dispatch.
+  const granted = f.reader.sparql.construct(query('granted'), {
+    signal: stop.signal,
+  });
+  stop.abort();
+  expect(await granted).toEqual({ kind: 'cancelled' });
+  const next = f.reader.sparql.construct(query('next'));
+  await flush();
+  expect(t.names()).toEqual(['next']);
+  t.answer('next');
+  expect(await next).toMatchObject({ kind: 'ok' });
+});
+
+it('a client that throws before sending frees the slot', async () => {
+  const defect = new TypeError('client defect');
+  const f = await session(
+    { perPod: 1 },
+    {
+      // An override that breaks the client contract by throwing synchronously.
+      podFactory: (url, options) => {
+        const pod = createPod(url, options);
+        return {
+          ...pod,
+          sparql: {
+            ...pod.sparql,
+            construct: () => {
+              throw defect;
+            },
+          },
+        };
+      },
+    },
+  );
+  const t = transport(f);
+  await expect(f.reader.sparql.construct(query('broken'))).rejects.toBe(defect);
+  const next = f.reader.sparql.select(`SELECT * WHERE { ?s ?p ?o } #next`);
+  await flush();
+  expect(t.names()).toEqual(['next']);
+  t.answer('next');
+  // This transport answers JSON-LD, not SELECT results: only dispatch counts.
+  await next.catch(() => {});
 });
 
 it('a current read goes before older waiting reads, within the limit', async () => {

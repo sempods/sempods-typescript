@@ -123,6 +123,35 @@ it('gives priority reads at most three admissions in a row while a normal read w
   ]);
 });
 
+it('a Pod admits its waiting normal read after three priority reads, while normal reads of another Pod keep starting', async () => {
+  const admission = createAdmission({ perPod: 1 })!;
+  const order: string[] = [];
+  const held = new Map<string, Release>();
+  const add = (name: string, pod: string, priority = false) =>
+    void admission.acquire(pod, priority, never, noop).then((release) => {
+      order.push(name);
+      held.set(pod, release!);
+    });
+  add('a', 'A');
+  add('c0', 'C');
+  add('c1', 'C');
+  add('normal', 'A');
+  add('p0', 'A', true);
+  await flush();
+  for (let i = 1; i <= 6; i++) {
+    // A waiting normal read on C starts, then a new current read and a free
+    // slot on A.
+    held.get('C')!();
+    add(`c${i + 1}`, 'C');
+    add(`p${i}`, 'A', true);
+    await flush();
+    held.get('A')!();
+    await flush();
+  }
+  const a = order.filter((name) => !name.startsWith('c'));
+  expect(a.slice(0, 5)).toEqual(['a', 'p0', 'p1', 'p2', 'normal']);
+});
+
 it('takes the oldest priority read across Pods and never exceeds a limit for it', async () => {
   const q = queue({ perPod: 1, total: 2 });
   q.add('a0', 'A');

@@ -18,5 +18,12 @@ export function noticeAdmission(
   signal: AbortSignal | undefined,
   event: AdmissionEvent,
 ) {
-  if (signal) notices.get(signal)?.(event);
+  try {
+    if (signal) notices.get(signal)?.(event);
+  } catch (error) {
+    // A notice never stops a read or leaks its slot.
+    queueMicrotask(() => {
+      throw error;
+    });
+  }
 }
