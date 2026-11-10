@@ -25,9 +25,12 @@ or removes the tests of the old place.
    consumers, the browser gate, engine or ICU differences, specification and
    interoperability cases. Keep an issue's regression unless its exact case lives
    in the owning test.
-5. Prove each removal. Name the remaining test that has the same input, or show
-   by mutation that a remaining test fails when the guard is removed (change the
-   guard, run the test, restore it). When a change must show that existing output
+5. Prove each removal. Name the remaining test that checks the same input and
+   relevant expectation at the same boundary, or show by mutation that a
+   remaining test catches the same fault (change the guard, run the test, restore
+   it). A shared input alone is not evidence: classifying a value does not prove
+   that a caller preserves it when writing or renders its fallback. Retain those
+   caller assertions. When a change must show that existing output
    stays unchanged, run the old tests on that commit first and consolidate in a
    later commit.
 6. Consolidate rather than copy: `it.each` tables, shared fixtures and builders.

@@ -133,6 +133,19 @@ describe('classifyDate: instants', () => {
     expect(kind('2026-10-29 09:30:00Z')).toBe('unsupported');
   });
 
+  // Moved from field validation: these lexical cases belong to the classifier.
+  it.each([
+    '2026-10-05T09:30:00z',
+    '2026-10-05T09:30:00+0200',
+    '26-10-05T09:30:00Z',
+    '02026-10-05T09:30:00Z',
+    ' 2026-10-05T09:30:00Z',
+    '2026-10-05T09:30:00Z ',
+    '２０２６-10-05T09:30:00Z',
+  ])('refuses the instant lexical form %j', (value) => {
+    expect(kind(value)).toBe('unsupported');
+  });
+
   it('agrees with Date on offsets from -14:00 to +14:00', () => {
     for (const zone of [
       'Z',
