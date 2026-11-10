@@ -56,7 +56,12 @@ import {
 } from '../authoring/lane.js';
 import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
-import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
+import {
+  lanesOf,
+  retainView,
+  type LaneKind,
+  type LaneScope,
+} from '../authoring/lanes.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 import {
   creationAddress,
@@ -1029,17 +1034,20 @@ export type FieldUpdate<D> = ReturnType<typeof useFieldUpdate<D>>;
  * `runtime.bindContext`. A configuration refusal (not a Context of this Pod,
  * or not the preset's) is reported; while signed out it waits. It demands
  * catalogue discovery, so its write access is known, but no selection.
- * While `hold` (unresolved work on it), a binding that lost access stays,
- * also when a new one is available: a session that ended under
- * `signIn: 'optional'` reads on without a token through a new binding only
- * once that work is resolved or discarded.
+ * While `hold` (unresolved work on it), a session that ended under
+ * `signIn: 'optional'` is same-target access loss: the binding that lost
+ * access stays, with its creation lanes (`retainView`), and the binding
+ * that reads without a token follows once that work is resolved or
+ * discarded. A new authorization still replaces it.
  */
 function useExplicitView(context: string | undefined, hold = false) {
   const app = useController();
-  const { activeId, ready } = useAppFacts(
+  const { activeId, ready, anonymous } = useAppFacts(
     (s) => ({
       activeId: s.activeId,
       ready: startupSettled(s) && s.pod !== null,
+      anonymous:
+        s.connections.find((c) => c.id === s.activeId)?.reading === 'anonymous',
     }),
     shallowEqual,
   );
@@ -1058,8 +1066,14 @@ function useExplicitView(context: string | undefined, hold = false) {
     () => bound?.getSnapshot().current ?? true,
     () => bound?.getSnapshot().current ?? true,
   );
+  // Registered while there is work, so it is in place when the session ends.
+  useLayoutEffect(
+    () => (hold && bound ? retainView(app, bound) : undefined),
+    [app, hold, bound],
+  );
+  const kept = hold && anonymous;
   useEffect(() => {
-    if (!key || !ready || current === 'refused' || (current && (live || hold)))
+    if (!key || !ready || current === 'refused' || (current && (live || kept)))
       return;
     try {
       const view = app.runtime.bindContext(activeId!, context!);
@@ -1070,7 +1084,7 @@ function useExplicitView(context: string | undefined, hold = false) {
         setBinding({ key, view: 'refused' });
       else if (error.problem !== 'disconnected') throw error;
     }
-  }, [app, key, ready, current, live, hold, activeId, context]);
+  }, [app, key, ready, current, live, kept, activeId, context]);
   useContextDiscovery(current !== null && current !== 'refused');
   return {
     view: current === 'refused' ? null : current,

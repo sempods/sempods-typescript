@@ -20,6 +20,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   catalogue,
+  deferred,
   fixture,
   pod,
   renewal,
@@ -341,36 +342,57 @@ it('lists every Pod read without a token in the Pod selector', async () => {
   ).toBeNull();
 });
 
+const task = fields(
+  { title: text('urn:title', { language: null }) },
+  { type: 'urn:Task' },
+);
 function ExplicitCreation() {
-  const creation = useCreation(
-    fields(
-      { title: text('urn:title', { language: null }) },
-      { type: 'urn:Task' },
-    ),
-    { initial: { title: '' }, collection: 'tasks', context: work },
-  );
+  const creation = useCreation(task, {
+    initial: { title: '' },
+    iri: 'urn:item',
+    context: work,
+  });
   return (
-    <input
-      aria-label="Title"
-      disabled={!creation.canEdit}
-      value={creation.draft.title}
-      onChange={(event) => creation.change({ title: event.target.value })}
-    />
+    <>
+      <input
+        aria-label="Title"
+        disabled={!creation.canEdit}
+        value={creation.draft.title}
+        onChange={(event) => creation.change({ title: event.target.value })}
+      />
+      <button type="button" onClick={() => void creation.create()}>
+        Create
+      </button>
+      <button type="button" onClick={() => creation.change({ title: '' })}>
+        Clear
+      </button>
+      <output data-testid="creation">
+        {[creation.busy ? 'busy' : '', creation.outcome?.kind ?? '']
+          .filter(Boolean)
+          .join(' ')}
+      </output>
+    </>
   );
 }
-
-it('keeps an explicit-Context creation draft when the session ends', async () => {
+/**
+ * Signed in under `optional` with `work` writable (read-only without a
+ * token), a creation form for `work` mounted beside `AppAccess` and a title
+ * typed into it. Creations are answered by `answer`.
+ */
+async function explicitDraft(answer: () => Promise<Response> | Response) {
   const f = start({ signIn: 'optional', preset: { podUrl: pod } });
-  // Signed in, `work` is writable; without a token it is read-only.
   f.setCatalogue(async (_url, init) =>
     new Headers(init?.headers).get('authorization')
       ? catalogue([work], [work])
       : catalogue([work], []),
   );
-  const { runtime, id } = await f.login();
-  cleanups.push(() => runtime.dispose());
+  f.setResource(async (_url, init) =>
+    init?.method === 'PUT' ? answer() : new Response(null, { status: 404 }),
+  );
+  const session = await f.login();
+  cleanups.push(() => session.runtime.dispose());
   render(
-    <SempodsProvider runtime={runtime}>
+    <SempodsProvider runtime={session.runtime}>
       <AppAccess appName="Recipes" />
       <ExplicitCreation />
     </SempodsProvider>,
@@ -381,14 +403,49 @@ it('keeps an explicit-Context creation draft when the session ends', async () =>
   await waitFor(() => expect(title.disabled).toBe(false));
   fireEvent.change(title, { target: { value: 'Unsaved task' } });
   await waitFor(() => expect(title.value).toBe('Unsaved task'));
-  await act(async () => {
-    await renewal(f, runtime, id, 'refused');
-  });
-  await waitFor(() =>
-    expect(runtime.getSnapshot()[0]!.reading).toBe('anonymous'),
-  );
-  // Same-target access loss: the form keeps its draft.
-  await act(async () => {});
-  expect(screen.getByLabelText('Title')).toBe(title);
-  expect(title.value).toBe('Unsaved task');
+  const state = () => screen.getByTestId('creation').textContent;
+  /** Ends the session: a refused renewal, after which it reads without a token. */
+  async function endSession() {
+    await act(async () => {
+      await renewal(f, session.runtime, session.id, 'refused');
+    });
+    await waitFor(() =>
+      expect(session.runtime.getSnapshot()[0]!.reading).toBe('anonymous'),
+    );
+    await act(async () => {});
+  }
+  return { ...f, ...session, title, state, endSession };
+}
+
+it('keeps an unsent explicit-Context draft, editable, when the session ends', async () => {
+  const f = await explicitDraft(() => new Response(null, { status: 201 }));
+  await f.endSession();
+  // Same-target access loss: the form keeps its draft and can still clear it.
+  expect(screen.getByLabelText('Title')).toBe(f.title);
+  expect(f.title.value).toBe('Unsaved task');
+  await act(async () => screen.getByRole('button', { name: 'Clear' }).click());
+  await waitFor(() => expect(f.title.value).toBe(''));
+});
+
+it('keeps an unconfirmed explicit-Context creation when the session ends', async () => {
+  // An answer that is not a confirmed creation: the outcome is unconfirmed.
+  const f = await explicitDraft(() => new Response(null, { status: 202 }));
+  await act(async () => screen.getByRole('button', { name: 'Create' }).click());
+  await waitFor(() => expect(f.state()).toBe('unconfirmed'));
+  expect(f.title.disabled).toBe(true);
+  await f.endSession();
+  expect(f.state()).toBe('unconfirmed');
+  expect(f.title.value).toBe('Unsaved task');
+});
+
+it('keeps an explicit-Context creation in flight when the session ends', async () => {
+  const held = deferred<Response>();
+  const f = await explicitDraft(() => held.promise);
+  await act(async () => screen.getByRole('button', { name: 'Create' }).click());
+  await waitFor(() => expect(f.state()).toBe('busy'));
+  await f.endSession();
+  expect(f.state()).toBe('busy');
+  await act(async () => held.resolve(new Response(null, { status: 202 })));
+  await waitFor(() => expect(f.state()).toBe('unconfirmed'));
+  expect(f.title.value).toBe('Unsaved task');
 });

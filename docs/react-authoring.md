@@ -1196,7 +1196,9 @@ const runtime = createBrowserRuntime({
   `signed-out` prompt asks instead of blocking. That is same-target access
   loss: while a draft or a pending or unconfirmed write remains, the screen
   keeps its earlier view (now without access) and the work stays; the view
-  that reads without a token follows once it is resolved or discarded. Without a preset, the gate's
+  that reads without a token follows once it is resolved or discarded. A
+  `useCreation` in an explicit Context keeps its binding and its pending or
+  unconfirmed creation the same way, and its draft stays editable. Without a preset, the gate's
   address field **Open**s a Pod (`controls.open`) instead of signing in.
 - **`none`**: no prompts, no sign-in or sign-out buttons, no gate for storage.
 - A Pod without public Contexts shows `controls.noPublicData` with sign-in.
