@@ -549,6 +549,28 @@ describe('cards across sources', () => {
     ).toEqual([['https://img.example/s.jpg', 'https://img.example/full.jpg']]);
   });
 
+  it('follows an image link back to the resource itself', async () => {
+    const card = resourceCards(
+      [ada],
+      [
+        await facts(ada, alice, [
+          [iri(ada), `${S}image`, iri(ada), ctx(alice, 'a')],
+          [
+            iri(ada),
+            `${S}thumbnailUrl`,
+            iri('https://img.example/s.jpg'),
+            ctx(alice, 'a'),
+          ],
+        ]),
+      ],
+      exampleRules,
+    ).get(ada)!;
+    // The resource is described as an image; its IRI is no address.
+    expect(previewCandidates(card.images)).toEqual([
+      'https://img.example/s.jpg',
+    ]);
+  });
+
   it('merges pictures that a shared address connects, before the limit', async () => {
     const node = (name: string) => `https://people.example/ada/${name}`;
     const rows = [

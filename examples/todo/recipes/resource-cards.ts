@@ -266,17 +266,16 @@ export function sourceFacts(
   const images: ImageMatch[] = [];
   // Second step: a link statement and a statement of the linked node, joined
   // within this read only where one declared path has both predicates.
+  // The linked node may be the root itself (`<root> schema:image <root>`).
   const joins = rows.flatMap((row) =>
-    row.own
-      ? []
-      : rows
-          .filter(
-            (link) =>
-              link.own &&
-              exactTerm(link.o) === exactTerm(row.s) &&
-              declaresPath(rules, link.p, row.p),
-          )
-          .map((link) => ({ link, row })),
+    rows
+      .filter(
+        (link) =>
+          link.own &&
+          exactTerm(link.o) === exactTerm(row.s) &&
+          declaresPath(rules, link.p, row.p),
+      )
+      .map((link) => ({ link, row })),
   );
   // Which matches count, and which link describes an image, depends on the
   // card's rule: the facts keep them all.
