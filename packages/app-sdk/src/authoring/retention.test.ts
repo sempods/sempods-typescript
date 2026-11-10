@@ -166,16 +166,3 @@ it('never hands kept work to a new authorization', async () => {
   expect(group.holds()).toBe(false);
   expect(store.kept('rows', 'explicit', work)).toBeUndefined();
 });
-
-it('keeps a group for a form draft while held, and lets it go on release', () => {
-  const f = fakes();
-  const store = lanesOf(f.app);
-  const before = f.view();
-  const group = store.group(before, 'forms', definition, 'explicit');
-  const release = group.hold();
-  f.end('anonymous');
-  expect(group.holds()).toBe(true);
-  expect(store.group(f.view(), 'forms', definition, 'explicit')).toBe(group);
-  release();
-  expect(group.holds()).toBe(false);
-});

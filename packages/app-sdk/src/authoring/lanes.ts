@@ -28,8 +28,6 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
   private version = 0;
   private alive = true;
   private readable = false;
-  /** Forms holding a draft for this group's target (`hold`). */
-  private holders = 0;
 
   constructor(
     readonly view: BoundView,
@@ -54,30 +52,10 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     if (this.scope === 'target') return snapshot.view === this.view;
     return keepsWork(this.app, this.connection, this.view, this.working());
   }
-  /** A form's draft or a captured write that needs its recovery. */
+  /** A captured write that still needs its recovery. */
   working() {
-    if (this.holders > 0) return true;
     for (const lane of this.lanes.values()) if (lane.outstanding()) return true;
     return false;
-  }
-  /**
-   * A form holds a draft for this target: work the group keeps through
-   * access loss like its own writes. Returns the release.
-   */
-  hold(): () => void {
-    if (this.stops.length === 0) this.start();
-    this.holders++;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.holders--;
-      this.settle();
-    };
-  }
-  /** Its work ended while only work kept it: it retires. */
-  private settle() {
-    if (this.alive && !this.holds()) this.retire();
   }
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);

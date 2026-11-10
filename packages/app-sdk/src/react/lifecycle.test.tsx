@@ -283,3 +283,58 @@ it.each(creationCases)(
     expect(dispatched).toBe(1);
   },
 );
+
+const draftCases = modes.flatMap((signIn) =>
+  (['never', 'before', 'after'] as const).flatMap((hidden) =>
+    [false, true].map((end) => ({ signIn, hidden, end })),
+  ),
+);
+
+it.each(draftCases)(
+  'creation: an unsent draft stays ($signIn, hidden: $hidden the session end, session ends: $end)',
+  async ({ signIn, hidden, end }) => {
+    const f = await signedIn(signIn);
+    let api!: ReturnType<typeof useCreation<{ title: string }>>;
+    function Form() {
+      api = useCreation(definition, {
+        initial: { title: '' },
+        iri: 'urn:item',
+        context: work,
+      });
+      return null;
+    }
+    let toggle!: (show: boolean) => void;
+    function Host() {
+      const [show, setShow] = useState(true);
+      toggle = setShow;
+      return (
+        <Activity mode={show ? 'visible' : 'hidden'}>
+          <Form />
+        </Activity>
+      );
+    }
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        <Host />
+      </SempodsProvider>,
+    );
+    await waitFor(() => expect(api.canEdit).toBe(true));
+    act(() => api.change({ title: 'Unsent' }));
+    await waitFor(() => expect(api.draft.title).toBe('Unsent'));
+    if (hidden === 'before') act(() => toggle(false));
+    if (end)
+      await act(async () => {
+        await renewal(f, f.runtime, f.id, 'refused');
+      });
+    if (hidden === 'after') act(() => toggle(false));
+    if (hidden !== 'never') act(() => toggle(true));
+    await act(async () => {});
+    expect(api.draft.title).toBe('Unsent');
+    // Without access it is not sent. Reading without a token, it stays
+    // editable; under `required` the sign-in screen covers the app anyway.
+    if (end) expect(api.canCreate).toBe(false);
+    if (end && signIn === 'required') return;
+    act(() => api.change({ title: 'Unsent, edited' }));
+    await waitFor(() => expect(api.draft.title).toBe('Unsent, edited'));
+  },
+);

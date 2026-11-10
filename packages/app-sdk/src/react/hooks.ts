@@ -57,6 +57,7 @@ import {
 import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
 import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
+import { sameTarget as sameViewTarget } from '../authoring/retention.js';
 import { CreationLane, type Captured } from '../authoring/creation-lane.js';
 import {
   creationAddress,
@@ -1138,6 +1139,10 @@ export function useCreation<D extends object>(
   const explicit = useExplicitView(options.context);
   const selected = useView();
   const fixed = options.context !== undefined;
+  // How the active connection reads: a new session is a new authorization.
+  const reading = useAppFacts(
+    (s) => s.connections.find((c) => c.id === s.activeId)?.reading ?? null,
+  );
   const { key: shape } = useDefinition(definition, 'useCreation');
   // The address mode, address, form name and definition own the generation.
   // Distinct tuples cannot collide; old commands never follow a changed IRI.
@@ -1204,7 +1209,21 @@ export function useCreation<D extends object>(
     current.current = next;
     setState(next);
   };
-  if (state.view !== view || state.key !== key) {
+  // Same-target access loss (a session that ended, without a new
+  // authorization) moves this form's own draft to the view that replaced its
+  // own, also while the form was hidden; a new target or authorization starts
+  // it afresh. Write access follows the new view.
+  const carried =
+    fixed &&
+    state.key === key &&
+    state.view !== null &&
+    view !== null &&
+    state.view !== view &&
+    sameViewTarget(state.view, view) &&
+    !state.view.getSnapshot().current &&
+    reading !== 'session';
+  if (carried) setState({ ...state, view });
+  else if (state.view !== view || state.key !== key) {
     setState({ view, key, draft: copy(options.initial), sent: null });
   }
   const resetWarning = useRef(false);
@@ -1249,12 +1268,6 @@ export function useCreation<D extends object>(
   // Pending, unresolved or held for an explicit retry.
   const locked = (of: CreationLane<D> | null | undefined) =>
     Boolean(of?.outstanding());
-  // A draft is work on the explicit target: the group keeps it through
-  // access loss while this form is shown (an unsent draft stays local).
-  useLayoutEffect(
-    () => (fixed && group && dirty ? group.hold() : undefined),
-    [fixed, group, dirty],
-  );
   const valid = (value: D) => {
     try {
       return definition.valid?.(value) ?? true;
