@@ -15,6 +15,7 @@ import {
   exchangeAuthorization,
   refreshAuthorization,
   OAuthError,
+  type ClientIdentity,
   type ExchangeResult,
   type OAuthClient,
   type PodDiscovery,
@@ -66,7 +67,7 @@ import {
 } from './catalogue.js';
 import { browserPreferences, createContextMemory } from './context-memory.js';
 
-import { assertCredentialRecipient, type Entry } from './connection.js';
+import { assertCredentialRecipient, sends, type Entry } from './connection.js';
 
 /** How long before its expiry a credential is renewed before dispatch. */
 const RENEWAL_MARGIN = 60_000;
@@ -105,28 +106,53 @@ function offline() {
 export function createBrowserRuntime(
   options: BrowserRuntimeOptions,
 ): BrowserRuntime {
-  const identity = Object.freeze({ ...options.identity });
-  const required = scopeList(options.scopes?.required ?? []);
-  const optional = scopeList(options.scopes?.optional ?? []);
-  const requested = Object.freeze([...new Set([...required, ...optional])]);
-  const redirect = callbackUrl(
-    identity.redirectUri,
-    options.development === 'loopback-http',
+  const signIn = options.signIn ?? 'required';
+  if (signIn !== 'required' && signIn !== 'optional' && signIn !== 'none')
+    throw new RuntimeError('configuration');
+  /** Whether a connection without a session reads without a token. */
+  const readsAnonymously = signIn !== 'required';
+  if (signIn !== 'none' && !options.identity)
+    throw new RuntimeError('configuration');
+  const configuredRequired = options.scopes?.required ?? [];
+  const configuredOptional = options.scopes?.optional ?? [];
+  // An app that works without a session cannot require what only a session
+  // grants; one that never signs in requests nothing.
+  if (
+    (readsAnonymously && configuredRequired.length > 0) ||
+    (signIn === 'none' && configuredOptional.length > 0)
+  )
+    throw new RuntimeError('configuration');
+  const identity: ClientIdentity | undefined = options.identity
+    ? Object.freeze({ ...options.identity })
+    : undefined;
+  const required = scopeList(configuredRequired);
+  const optional = scopeList(
+    // Signing in must not hide the public Contexts the app showed without a
+    // token: a session reads them only with this scope (SPS-GRANT-020).
+    signIn === 'optional' && !configuredOptional.includes('public-read')
+      ? [...configuredOptional, 'public-read']
+      : configuredOptional,
   );
+  const requested = Object.freeze([...new Set([...required, ...optional])]);
+  const redirect = identity
+    ? callbackUrl(identity.redirectUri, options.development === 'loopback-http')
+    : undefined;
   // A string is checked once; a function each time a sign-in starts, so the
   // address the person is on then (a deep link) survives the sign-in.
   const configuredReturnTo = options.returnTo ?? '/';
   const fixedReturnTo =
-    typeof configuredReturnTo === 'string'
+    identity && typeof configuredReturnTo === 'string'
       ? safeReturnTo(configuredReturnTo, identity.redirectUri)
       : undefined;
   const returnTo = () =>
     fixedReturnTo ??
-    safeReturnTo((configuredReturnTo as () => string)(), identity.redirectUri);
-  const namespace = JSON.stringify([
-    identity.kind,
-    identity.kind === 'did-web' ? identity.clientId : identity.redirectUri,
-  ]);
+    safeReturnTo((configuredReturnTo as () => string)(), identity!.redirectUri);
+  const namespace = identity
+    ? JSON.stringify([
+        identity.kind,
+        identity.kind === 'did-web' ? identity.clientId : identity.redirectUri,
+      ])
+    : JSON.stringify(['anonymous']);
   const preset = options.preset
     ? Object.freeze({ ...options.preset })
     : undefined;
@@ -161,6 +187,9 @@ export function createBrowserRuntime(
   }
   const defaultPodUrl =
     preset?.podUrl ?? (allowedPods?.length === 1 ? allowedPods[0] : undefined);
+  // Without sign-in, there is nothing to choose a Pod with.
+  if (signIn === 'none' && defaultPodUrl === undefined)
+    throw new RuntimeError('configuration');
   // Whether a Pod address outlives its session (sign-out, a session that ends).
   const rememberPods = options.rememberPods ?? true;
   const gracePeriod = options.refreshGracePeriod ?? REFRESH_GRACE_PERIOD;
@@ -243,9 +272,20 @@ export function createBrowserRuntime(
     e.podReads.abort();
     e.podReads = new AbortController();
   }
+  /** How an entry sends requests now (`Connection.reading`). */
+  function readingOf(e: Entry): Connection['reading'] {
+    if (e.anonymous) return 'anonymous';
+    const kind = e.view.session.kind;
+    return kind === 'active' || kind === 'renewing' ? 'session' : null;
+  }
   function publish() {
     snapshot = Object.freeze(
-      [...entries.values()].map((e) => Object.freeze({ ...e.view })),
+      [...entries.values()].map((e) => {
+        // `connect()` returns `e.view`, so it carries `reading` as well.
+        const reading = readingOf(e);
+        if (e.view.reading !== reading) e.view = { ...e.view, reading };
+        return Object.freeze({ ...e.view });
+      }),
     );
     listeners.forEach((listener) => {
       try {
@@ -281,19 +321,21 @@ export function createBrowserRuntime(
     if (change.kind === 'conflict') throw new RuntimeError('disconnected');
     e.revision = change.record.revision;
   }
-  function binding(e: Entry, pod = e.pod): SessionBinding {
+  /** Only for an entry with a session or a saved record, which has a client. */
+  function binding(e: Entry, pod: PodDiscovery): SessionBinding {
     return {
       configKey: namespace,
       connectionId: e.view.id,
       generation: e.generation,
       pod,
-      client: e.client,
+      client: e.client!,
       scopes: e.view.requestedScopes,
     };
   }
   function install(e: Entry, result: ExchangeResult) {
     const previous = e.view.grantedScopes;
     const previousSubject = e.credentials?.subject;
+    delete e.anonymous;
     e.credentials = result;
     e.credential = Object.freeze({
       authorization: `Bearer ${result.accessToken}`,
@@ -358,6 +400,7 @@ export function createBrowserRuntime(
       grantedScopes: Object.freeze([]),
       missingRequiredScopes: required,
     };
+    settle(e);
     const ended = e.view.session;
     publish();
     if (!retireRecord) return;
@@ -374,6 +417,90 @@ export function createBrowserRuntime(
         }
       },
     );
+  }
+  /**
+   * Under `signIn: 'optional'` or `'none'`, a connection whose session is
+   * gone reads without a token from now on: a `signed-out` one, or an `ended`
+   * one that is neither restorable nor signing out. It gets a lifetime and
+   * generation of its own, so nothing of its session (reads, handles, the
+   * catalogue, a pending renewal) continues, and no request refused with a
+   * token is sent again without it. Publishes nothing itself.
+   */
+  function settle(e: Entry): boolean {
+    if (!readsAnonymously || !initialized || disposed) return false;
+    if (e.anonymous || entries.get(e.view.id) !== e) return false;
+    if (!sessionGone(e)) return false;
+    if (e.lost) clearTimeout(e.lost.timer);
+    delete e.restorable;
+    renewLifetime(e, crypto.randomUUID(), new RuntimeError('disconnected'));
+    e.anonymous = true;
+    e.view = {
+      ...e.view,
+      catalogue: Object.freeze({ kind: 'unknown' }),
+      grantedScopes: Object.freeze([]),
+      missingRequiredScopes: required,
+    };
+    return true;
+  }
+  /**
+   * The session is gone for good: signed out, or ended neither restorably nor
+   * by a sign-out or forget in progress or one that could not be saved, which
+   * keep the connection blocked. A session that ended by a record conflict
+   * is gone too.
+   */
+  function sessionGone(e: Entry) {
+    const s = e.view.session;
+    if (s.kind === 'signed-out') return true;
+    if (s.kind !== 'ended' || s.restorable) return false;
+    if (s.problem !== 'disconnected') return true;
+    return !disconnects.has(e.view.id) && s.saved !== false && !s.forget;
+  }
+  /**
+   * Starts a new lifetime and generation: nothing of the earlier one (its
+   * credential, renewal, reads, handles, catalogue read) continues. The view
+   * is the caller's.
+   */
+  function renewLifetime(e: Entry, generation: string, reason?: unknown) {
+    e.lifetime.abort(reason);
+    e.lifetime = new AbortController();
+    e.generation = generation;
+    delete e.anonymous;
+    delete e.credentials;
+    delete e.credential;
+    delete e.bound;
+    delete e.boundPod;
+    delete e.explicit;
+    delete e.observations;
+    delete e.refresh;
+    delete e.ahead;
+    delete e.lost;
+    delete e.catalogue;
+    delete e.revalidation;
+    invalidate(e);
+    invalidatePod(e);
+    invalidateContexts(e);
+    resetLabels(e);
+    e.selectedVersion++;
+  }
+  /** A connection without discovery or client that reads without a token. */
+  function addAnonymous(podUrl: string, id?: string) {
+    const e = createEntry(podUrl, undefined, undefined, id);
+    e.anonymous = true;
+    entries.set(e.view.id, e);
+    return e;
+  }
+  /**
+   * Under `signIn: 'optional'` or `'none'`, the default Pod is always listed:
+   * without a connection to it, one that reads without a token is added.
+   */
+  function ensureDefault(): boolean {
+    if (!readsAnonymously || !initialized || disposed || !defaultPodUrl)
+      return false;
+    for (const e of entries.values())
+      if (e.view.podUrl === defaultPodUrl) return false;
+    // A stable id keeps the remembered Context of a Pod never signed in to.
+    addAnonymous(defaultPodUrl, defaultPodUrl);
+    return true;
   }
   /** Deletes a record and, once it is gone, the Context choice remembered with it. */
   async function erase(id: string, revision: string) {
@@ -427,7 +554,7 @@ export function createBrowserRuntime(
       const operation = (async () => {
         let consumed = false;
         try {
-          const pod = await discover(e.pod.podUrl, e.lifetime.signal);
+          const pod = await discover(e.view.podUrl, e.lifetime.signal);
           const claim = await serial(e, async () => {
             current(e, generation);
             if (!sessions || !e.revision) throw new RuntimeError('storage');
@@ -477,7 +604,7 @@ export function createBrowserRuntime(
               error instanceof OAuthError &&
               error.problem === 'invalid-client'
             )
-              registry.clear(e.pod.podUrl);
+              registry.clear(e.view.podUrl);
             if (!consumed && transientBeforeClaim(error)) {
               // Nothing was spent and the cause may pass (offline or failing
               // discovery, storage that could not be written): stay signed in
@@ -545,7 +672,7 @@ export function createBrowserRuntime(
     let status: number | undefined;
     try {
       const result = await refreshAuthorization(
-        { pod, client: e.client, scopes },
+        { pod, client: e.client!, scopes },
         refreshToken,
         subject,
         {
@@ -698,7 +825,7 @@ export function createBrowserRuntime(
         const signal = combineSignals(e.lifetime.signal, grace.signal);
         try {
           // Also within the discovery deadline: a shorter grace period wins.
-          pod = await discover(e.pod.podUrl, signal.signal);
+          pod = await discover(e.view.podUrl, signal.signal);
         } catch (error) {
           if (grace.signal.aborted && !e.lifetime.signal.aborted)
             throw new RuntimeError('interrupted');
@@ -722,7 +849,7 @@ export function createBrowserRuntime(
     } catch (error) {
       if (!eligible(e, generation)) return;
       if (error instanceof OAuthError && error.problem === 'invalid-client')
-        registry.clear(e.pod.podUrl);
+        registry.clear(e.view.podUrl);
       end(e, error);
     }
   }
@@ -743,15 +870,17 @@ export function createBrowserRuntime(
     if (!credentials.refreshToken && now < credentials.expiresAt) return;
     void renew(e, e.credential, undefined, true);
   }
+  /** `pod` and `client` are absent for a connection added without sign-in. */
   function createEntry(
-    pod: PodDiscovery,
-    client: OAuthClient,
+    podUrl: string,
+    pod: PodDiscovery | undefined,
+    client: OAuthClient | undefined,
     id: string = crypto.randomUUID(),
     generation: string = crypto.randomUUID(),
   ): Entry {
     const data: Omit<Entry, 'clientPod' | 'auth'> = {
-      pod,
-      client,
+      ...(pod ? { pod } : {}),
+      ...(client ? { client } : {}),
       generation,
       lifetime: new AbortController(),
       reads: new AbortController(),
@@ -763,9 +892,10 @@ export function createBrowserRuntime(
       selectedVersion: 0,
       view: {
         id,
-        podUrl: pod.podUrl,
-        clientKind: client.kind,
+        podUrl,
+        clientKind: client?.kind ?? identity?.kind ?? null,
         session: Object.freeze({ kind: 'signed-out' }),
+        reading: null,
         catalogue: Object.freeze({ kind: 'unknown' }),
         requestedScopes: requested,
         requiredScopes: required,
@@ -777,7 +907,13 @@ export function createBrowserRuntime(
     };
     const auth: Entry['auth'] = {
       async credential(request) {
-        assertCredentialRecipient(e.pod.podUrl, request.url);
+        // Without a session the request is sent without a credential, and
+        // only while this connection still reads that way.
+        if (e.anonymous) {
+          if (!eligible(e)) throw new RuntimeError('disconnected');
+          return null;
+        }
+        assertCredentialRecipient(e.view.podUrl, request.url);
         // A replacement can itself be due once the wait ends (a slow commit, a
         // suspended tab): check each new credential again, a bounded number of times.
         let checked: AuthCredential | undefined;
@@ -808,9 +944,9 @@ export function createBrowserRuntime(
     const e: Entry = {
       ...data,
       auth,
-      clientPod: (options.podFactory ?? createPod)(pod.podUrl, {
+      clientPod: (options.podFactory ?? createPod)(podUrl, {
         ...protocol,
-        beforeDispatch: () => eligible(e) && e.credential !== undefined,
+        beforeDispatch: () => eligible(e) && sends(e),
         auth,
       }),
     };
@@ -821,8 +957,10 @@ export function createBrowserRuntime(
     if (!entry) throw new RuntimeError('disconnected');
     return entry;
   }
+  /** Signed in, or reading without a token. */
   function ready(e: Entry) {
-    if (!eligible(e) || !e.credentials) throw new RuntimeError('disconnected');
+    if (!eligible(e) || (!e.credentials && !e.anonymous))
+      throw new RuntimeError('disconnected');
   }
   function load(e: Entry) {
     return loadCatalogue(e, {
@@ -861,7 +999,7 @@ export function createBrowserRuntime(
     const generation = e.generation;
     const events = onlineEvents;
     try {
-      const pod = await discover(e.pod.podUrl, e.lifetime.signal);
+      const pod = await discover(e.view.podUrl, e.lifetime.signal);
       current(e, generation);
       assertSessionBinding(saved.binding, binding(e, pod));
       e.pod = pod;
@@ -881,6 +1019,7 @@ export function createBrowserRuntime(
             ...(restorable ? { restorable: true as const } : {}),
           }),
         };
+        settle(e);
         publish();
         // The browser came back online while this attempt was under way: its
         // retry found the session still restoring, so try once more now.
@@ -927,7 +1066,7 @@ export function createBrowserRuntime(
    */
   async function resume(e: Entry, callback?: URL): Promise<boolean> {
     const generation = e.generation;
-    const pod = await discover(e.pod.podUrl, e.lifetime.signal);
+    const pod = await discover(e.view.podUrl, e.lifetime.signal);
     const change = await serial(e, async () => {
       current(e, generation);
       if (!sessions || !e.revision) throw new RuntimeError('storage');
@@ -1004,7 +1143,18 @@ export function createBrowserRuntime(
       problem = runtimeProblem(error);
       cause = error;
     }
-    if (eligible(e, generation)) setEnded(e, problem, cause);
+    if (eligible(e, generation)) {
+      e.view = {
+        ...e.view,
+        session: Object.freeze({
+          kind: 'ended',
+          problem,
+          ...runtimeFailure(cause),
+        }),
+      };
+      settle(e);
+      publish();
+    }
   }
   function setEnded(e: Entry, problem: RuntimeProblem, cause?: unknown) {
     e.view = {
@@ -1028,7 +1178,7 @@ export function createBrowserRuntime(
   ): Promise<string> {
     const e = get(id);
     const generation = e.generation;
-    const pod = await discover(e.pod.podUrl, e.lifetime.signal);
+    const pod = await discover(e.view.podUrl, e.lifetime.signal);
     const claim = await serial(e, async () => {
       current(e, generation);
       const c = await sessions!.claimCode(
@@ -1062,7 +1212,7 @@ export function createBrowserRuntime(
     } catch (error) {
       if (eligible(e, generation)) {
         if (error instanceof OAuthError && error.problem === 'invalid-client')
-          registry.clear(e.pod.podUrl);
+          registry.clear(e.view.podUrl);
         end(e, error, true, hadSession);
         await e.persistence;
       }
@@ -1075,6 +1225,14 @@ export function createBrowserRuntime(
       storage: 'unavailable',
       unreadable: [],
     };
+    if (signIn === 'none') {
+      // Nothing is stored and no tab holds a lease: only the default Pod,
+      // read without a token.
+      initialized = true;
+      ensureDefault();
+      publish();
+      return report;
+    }
     let callback = false;
     let attempted: string | undefined;
     // A callback without a matching attempt never calls a function form: on
@@ -1084,9 +1242,9 @@ export function createBrowserRuntime(
       const location = new URL(
         (options.location ?? (() => window.location.href))(),
       );
-      if (location.origin !== redirect.origin)
+      if (location.origin !== redirect!.origin)
         throw new RuntimeError('configuration');
-      callback = location.pathname === redirect.pathname;
+      callback = location.pathname === redirect!.pathname;
       lease = await acquireSessionLease(
         namespace,
         options.locks === undefined
@@ -1103,7 +1261,7 @@ export function createBrowserRuntime(
       }
       sessions = createSessionTransitions(lease.store, {
         configKey: namespace,
-        redirectUri: identity.redirectUri,
+        redirectUri: identity!.redirectUri,
         ...protocol,
       });
       const listing = await sessions.list();
@@ -1137,7 +1295,13 @@ export function createBrowserRuntime(
           forgotten.push(saved);
           continue;
         }
-        const e = createEntry(b.pod, b.client, saved.id, b.generation);
+        const e = createEntry(
+          b.pod.podUrl,
+          b.pod,
+          b.client,
+          saved.id,
+          b.generation,
+        );
         e.revision = saved.revision;
         if (saved.value.kind === 'disconnected') {
           // A retired record holds only the address (binding) and why its
@@ -1275,6 +1439,13 @@ export function createBrowserRuntime(
           options.replaceUrl ??
           ((url) => window.history.replaceState(null, '', url))
         )(destination);
+      if (readsAnonymously && initialized && !disposed) {
+        // Remembered Pods, and attempts that ended without a session, read
+        // without a token once the callback no longer needs their records.
+        let changed = false;
+        for (const e of entries.values()) changed = settle(e) || changed;
+        if (ensureDefault() || changed) publish();
+      }
     }
   }
   /**
@@ -1311,15 +1482,24 @@ export function createBrowserRuntime(
       .then(
         (kept) => {
           if (entries.get(id) === e) {
-            if (kept)
+            // Without sign-in, a sign-out keeps the connection to read
+            // without a token, also when its address is not remembered.
+            if (kept || (readsAnonymously && !forget)) {
+              // Only a remembered address keeps why it was signed out: one
+              // not kept (`rememberPods: false`) is as if never signed in.
               e.view = {
                 ...e.view,
-                session: Object.freeze({
-                  kind: 'signed-out',
-                  problem: 'disconnected',
-                }),
+                session: Object.freeze(
+                  kept
+                    ? { kind: 'signed-out', problem: 'disconnected' }
+                    : { kind: 'signed-out' },
+                ),
               };
-            else entries.delete(id);
+              settle(e);
+            } else {
+              entries.delete(id);
+              ensureDefault();
+            }
           }
           publish();
           return { kind: 'disconnected' as const };
@@ -1348,6 +1528,7 @@ export function createBrowserRuntime(
     disconnects.set(id, { erase: deleting, operation });
     delete e.credentials;
     delete e.credential;
+    delete e.anonymous;
     e.lifetime.abort();
     invalidate(e);
     invalidatePod(e);
@@ -1378,6 +1559,7 @@ export function createBrowserRuntime(
   return {
     ...(preset ? { preset } : {}),
     ...(allowedPods ? { allowedPods } : {}),
+    signIn,
     initialize() {
       // A disposed runtime processes no callback, so there is no sign-in outcome.
       if (disposed)
@@ -1398,7 +1580,13 @@ export function createBrowserRuntime(
       };
     },
     async connect(url = defaultPodUrl) {
-      if (!initialized || disposed || url === undefined || !allows(url))
+      if (
+        !initialized ||
+        disposed ||
+        url === undefined ||
+        !allows(url) ||
+        (signIn === 'none' && url !== defaultPodUrl)
+      )
         throw new RuntimeError('configuration');
       const matchesDefault = url === defaultPodUrl;
       if (matchesDefault) {
@@ -1420,10 +1608,18 @@ export function createBrowserRuntime(
         if (connectingDefault) return connectingDefault;
       }
       const operation = (async () => {
+        if (readsAnonymously) {
+          // Reading needs neither discovery nor a client: a sign-in
+          // discovers the Pod and resolves the client itself. Creating the
+          // client validates the address.
+          const e = addAnonymous(url);
+          publish();
+          return e.view;
+        }
         const pod = await discover(url, runtimeLifetime.signal);
-        const client = await registry.resolve(pod, identity);
+        const client = await registry.resolve(pod, identity!);
         if (disposed) throw new RuntimeError('disconnected');
-        const e = createEntry(pod, client);
+        const e = createEntry(url, pod, client);
         entries.set(e.view.id, e);
         publish();
         return e.view;
@@ -1436,7 +1632,8 @@ export function createBrowserRuntime(
       }
     },
     async beginAuthorization(id) {
-      if (!initialized || disposed) throw new RuntimeError('configuration');
+      if (!initialized || disposed || signIn === 'none')
+        throw new RuntimeError('configuration');
       const e = get(id);
       // An ended session has no live lifetime left. Preparing needs a fresh
       // one (and generation, so no operation of the ended one revives), which
@@ -1452,9 +1649,9 @@ export function createBrowserRuntime(
       // registration or persisting the attempt fails, nothing was reset.
       const before = e.generation;
       const signal = e.lifetime.signal;
-      const pod = await discover(e.pod.podUrl, signal);
+      const pod = await discover(e.view.podUrl, signal);
       current(e, before);
-      const client = await registry.resolve(pod, identity, { signal });
+      const client = await registry.resolve(pod, identity!, { signal });
       current(e, before);
       const generation = crypto.randomUUID();
       const { attempt, url } = await prepareSessionAuthorization(
@@ -1487,28 +1684,11 @@ export function createBrowserRuntime(
           shown.session.kind === 'leaving'
             ? shown.session.subject
             : undefined;
-        e.lifetime.abort();
-        e.lifetime = new AbortController();
-        e.generation = generation;
+        renewLifetime(e, generation);
         e.pod = pod;
         e.client = client;
         // Signing in again replaces a forget that could not be saved.
         delete e.forgetting;
-        delete e.credentials;
-        delete e.credential;
-        delete e.bound;
-        delete e.boundPod;
-        delete e.explicit;
-        delete e.observations;
-        delete e.refresh;
-        delete e.lost;
-        delete e.catalogue;
-        delete e.revalidation;
-        invalidate(e);
-        invalidatePod(e);
-        invalidateContexts(e);
-        resetLabels(e);
-        e.selectedVersion++;
         e.view = {
           ...shown,
           session: Object.freeze(
@@ -1582,7 +1762,7 @@ export function createBrowserRuntime(
         e,
         () => eligible(e),
         (guard) =>
-          (options.podFactory ?? createPod)(e.pod.podUrl, {
+          (options.podFactory ?? createPod)(e.view.podUrl, {
             ...protocol,
             auth: e.auth,
             beforeDispatch: guard,
@@ -1612,7 +1792,7 @@ export function createBrowserRuntime(
     bindContext(id, contextIri) {
       const e = get(id);
       ready(e);
-      if (!isContextIri(contextIri, e.pod.podUrl))
+      if (!isContextIri(contextIri, e.view.podUrl))
         throw new RuntimeError('configuration');
       // An exact preset is the app's only write target on its Pod.
       if (

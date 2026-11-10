@@ -1,6 +1,11 @@
 import type { AppSnapshot } from '../authoring/app.js';
 import type { CatalogueFact, Connection } from '../runtime/types.js';
 
+/** Whether a connection reads: signed in, or without a token. */
+export function reads(c: Connection | undefined): c is Connection {
+  return c !== undefined && c.reading !== null;
+}
+
 /**
  * The Contexts to show: a ready catalogue's, or the earlier ones a reload keeps
  * until it settles; none before the first catalogue or after a failure.
@@ -38,7 +43,8 @@ export function presentAccess(f: AccessFacts) {
   const discovery = f.demand !== 'none';
   const readable =
     state.contextSelection === 'on-demand' ? f.podReadable : f.viewReadable;
-  const active = c?.session.kind === 'active' || c?.session.kind === 'renewing';
+  // Signed in, or reading without a token: Context attention applies.
+  const active = reads(c);
   const missingScopes = Boolean(c?.missingRequiredScopes.length);
   const usable = active && !missingScopes;
   const catalogueFailed = c?.catalogue.kind === 'failed';

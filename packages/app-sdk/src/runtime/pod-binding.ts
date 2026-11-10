@@ -4,7 +4,7 @@ import type {
   QueryResult,
   ReadOptions,
 } from '@sempods/client-sdk';
-import type { Entry } from './connection.js';
+import { sends, subjectOf, type Entry } from './connection.js';
 import type { BoundPod, BoundRead, ViewAccess } from './view.js';
 import { waitFor } from './wait.js';
 import { combineSignals } from './signals.js';
@@ -18,16 +18,13 @@ export function bindPod(
   subscribe: (listener: () => void) => () => void,
 ): BoundPod {
   const generation = e.generation;
-  const subject = e.credentials!.subject;
+  // `null` while reading without a token; a sign-in or sign-out replaces it.
+  const subject = subjectOf(e);
   const valid = () =>
-    current() &&
-    e.generation === generation &&
-    e.credentials?.subject === subject;
+    current() && e.generation === generation && subjectOf(e) === subject;
   // Suspended without a credential, as while a lost renewal answer waits.
   const readable = () =>
-    valid() &&
-    e.credential !== undefined &&
-    e.view.missingRequiredScopes.length === 0;
+    valid() && sends(e) && e.view.missingRequiredScopes.length === 0;
   const pod = client(readable);
   let snapshot: Pick<ViewAccess, 'current' | 'read' | 'revision'> | undefined;
   function getSnapshot() {
@@ -71,8 +68,8 @@ export function bindPod(
     }
   }
   const reader = Object.freeze({
-    key: JSON.stringify([e.view.id, subject, e.pod.podUrl, generation]),
-    podUrl: e.pod.podUrl,
+    key: JSON.stringify([e.view.id, subject, e.view.podUrl, generation]),
+    podUrl: e.view.podUrl,
     getSnapshot,
     subscribe(listener) {
       let last = getSnapshot();

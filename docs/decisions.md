@@ -316,8 +316,40 @@ screen can show needs a protocol decision first. Until then,
 [local testing](local-testing.md#test-an-app-that-only-reads) explains how to
 keep an app read-only and check it.
 
+## Public data without a token, sign-in only when the app needs it
+
+The runtime option `signIn: 'required' | 'optional' | 'none'` declares whether
+an app needs a session. Under `optional` and `none` a connection without a
+session sends its requests without a credential and reads the Pod's public
+Contexts, which every read surface serves to a caller without a token
+([SPS-GRANT-031](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/grants.md#SPS-GRANT-031)).
+There is no anonymous session state: such a connection is `signed-out`, or
+`ended` in the page where its session ended, and the runtime publishes
+`Connection.reading` (`session`, `anonymous` or `null`). Reading without a
+token gets a lifetime and generation of its own, so no request refused with a
+token is sent again without one, and no handle survives the change. The app
+controller treats the switch as same-target access loss: while a guard holds
+a draft or an unresolved write, the selected view stays (without access) until
+that work is resolved or discarded. Writes
+follow the anonymous catalogue, which lists nothing as writable. `none` uses
+no session store or lock and needs one default Pod. Under `optional`, signing
+in adds `public-read` to the optional scopes, and required scopes are a
+configuration error.
+
+_Why:_ a Pod's public data is Linked Open Data, and a presented but rejected
+token never falls back to anonymous access
+([SPS-CORE-015](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/index.md#SPS-CORE-015)),
+so the client has to decide explicitly to read without one. Plain requests
+without a token read exactly what the anonymous `scope=public-read&prompt=none`
+token would, without its redirect, client identity and expiry without a refresh
+token. A separate session state would duplicate `signed-out` and its reasons,
+and break every app that switches over `session.kind`. Discovery and client
+resolution wait for an actual sign-in. The analysis is in
+[#240](https://github.com/sempods/sempods-typescript/issues/240#issuecomment-6751445738).
+
 ## Not implemented yet
 
 Preferred-language editing and multi-language maps, concurrently active tabs,
-anonymous reading, DPoP, revocation, server-side rendering, and a browser-hosted
-Pod. Each can be added behind the existing boundaries.
+an anonymous choice among several Pods, DPoP, revocation, server-side
+rendering, and a browser-hosted Pod. Each can be added behind the existing
+boundaries.

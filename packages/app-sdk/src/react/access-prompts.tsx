@@ -75,6 +75,8 @@ export function usePromptText(prompt: AccessPromptFact): string | null {
       return m.controls.signInCancelled;
     case 'sharing-unchanged':
       return m.controls.sharingUnchanged ?? m.controls.signInCancelled;
+    case 'anonymous':
+      return m.controls.anonymous ?? m.controls.signInRequired;
   }
 }
 
