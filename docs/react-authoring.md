@@ -944,6 +944,11 @@ function Source(props: {
 - Which connections to read is the app's choice: filter `useConnections()`
   further, for example to the Pods the person enabled. Each source shows
   `loading` from its first render and reads as soon as it mounts.
+- Many sources at once, such as hundreds of graph nodes across Pods: set
+  `podReadLimit` on the runtime instead of queueing reads in the app. Reads
+  beyond the limit wait in `loading`, and a grant change while they wait
+  spends no retry. Pass `{ signal, priority: 'current' }` for what the person
+  looks at now ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
 
 ## Part 4: Customizing
 
@@ -970,7 +975,7 @@ function Source(props: {
 `AppAccess` is `AccessGate` + `ContextAccess` + `AccessPrompts` + management.
 It follows `useAppState().access` ([access prompts](#access-prompts-and-your-own-placement)):
 
-- **While startup settles or a saved session restores:** nothing. The app shows
+- **While startup settles or the active connection restores:** nothing. The app shows
   its content or a skeleton; no sign-in screen flashes and no loading panel
   shifts the layout.
 - **The gate**, while the app cannot work (`access.blocking`): a full-viewport
@@ -1067,7 +1072,8 @@ still do:
 - **`info`**: nothing needs doing: a toast that disappears. A cancelled sign-in,
   unchanged sharing.
 
-While `access.pending` (startup or a restore), nothing is derived. A prompt's
+While `access.pending` (startup, or the active connection restoring), nothing
+is derived. A prompt's
 `reason` names the cause, `connectionId` its connection and `actions` the
 offered steps, the first primary. A prompt keeps its `id` while its cause
 lasts; `dismiss(id)` retires a prompt that offers `dismiss` for the
@@ -1369,18 +1375,28 @@ Keep the provider and compose `CallbackNotice`, `AccessNotice` and own controls
 from the guarded `useApp()` actions.
 
 - Call actions only from user input. Disable controls until startup storage is
-  durable and while `changing`, `confirmingLeave` or a restore is pending; show
-  errors with `useSdkLocale().error`. `false` means the leave policy declined
-  (a sign-in it cancelled is not an error).
+  durable and while `changing` or `confirmingLeave`; show errors with
+  `useSdkLocale().error`. `false` means the leave policy declined (a sign-in it
+  cancelled is not an error).
+- Restoration is per connection. While one connection is `restoring`, keep
+  global actions (adding a Pod, choosing another one) and other connections'
+  actions enabled. On the restoring connection, show its status and offer no
+  sign-in; adding its own Pod address counts as that sign-in. Its sign-out and
+  **Forget** stay available and win over the restoration. While the active
+  connection restores, `access.pending` is true: show content or a skeleton. A
+  saved session whose Pod does not answer within 15 seconds ends `restorable`
+  with the prompt `unreachable`: offer `retryRestore(id)`. A resumed
+  re-authorization that times out ends without `restorable` and asks for a new
+  sign-in.
 - Read `useAppState().access` for what needs attention, or compose the
   [access parts](#access-prompts-and-your-own-placement). A failed or cancelled
   callback activates its connection; its prompt (or the deprecated
   `callbackNotice`) tells whether a `startup.interaction` outcome is current.
-- A restoring connection waits; a `leaving` one (navigating to the Pod)
-  stays inert without a sign-in. `active` and `renewing` are authentication,
-  not Context access. A cancelled re-authorization keeps the session
-  (`startup.resumed`); an unreachable Pod at startup is `ended` with
-  `restorable: true`: offer `retryRestore(id)`.
+- A `leaving` connection (navigating to the Pod) stays inert without a
+  sign-in. `active` and `renewing` are authentication, not Context access. A
+  cancelled re-authorization keeps the session (`startup.resumed`); an
+  unreachable Pod at startup is `ended` with `restorable: true`, like a saved
+  session that timed out.
 - `access_denied` cannot tell cancel from decline and its
   `error_description` is never shown: the notice says no access was granted
   (`controls.signInCancelled`) with **Sign in**, or after a declined

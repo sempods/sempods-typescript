@@ -62,7 +62,7 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
   or forget the gate offers **Try again**, not **Sign out** or **Forget**.
 - **No initial loading panel.** Before startup settles and while a saved
   session restores, `AppAccess` shows nothing: no tall loading panel, no
-  sign-in flash. A restore that never settles no longer shows the Pod selector
+  sign-in flash. A restore that has not settled no longer shows the Pod selector
   or other sign-ins inline; open management for them.
 - **Outcomes are dismissible prompts.** A failed or cancelled callback, a Pod
   whose session ended beside the active one and an unreachable Pod appear at
@@ -132,9 +132,12 @@ seconds, discovery counts as unreachable:
   whose discovery stalls stays signed in with its unspent refresh token.
 - A timeout carries no `failure` detail, unlike an offline discovery
   (`failure.code: 'discovery'`); branch on `problem` and `restorable`.
-- Other connections never waited for a restoring one; the guide now says
-  which runtime actions are safe meanwhile. Which controls apps and the SDK
-  components keep available while a Pod restores is settled in #238.
+- Other connections never waited for a restoring one. A custom layout that
+  disabled all its controls while any restore was pending, as the guide used
+  to say, now disables only the restoring connection's sign-in: adding a Pod,
+  choosing another one and the other connections' actions stay enabled
+  ([custom layouts](react-authoring.md#custom-layouts-without-appaccess)).
+  `AppAccess` keeps them enabled too.
 
 ### Captured work after a session ends
 
@@ -177,6 +180,23 @@ apps keep `signIn: 'required'`, the default, and behave as before. To adopt it:
 - End-to-end tests of an `optional` app expect no sign-in screen, an
   `anonymous` prompt with **Sign in**, and **Open** instead of **Sign in** on
   the address field.
+
+### Bounded Pod reads
+
+**An app can bound its explicit Pod reads**
+([bounded Pod reads](browser-runtime.md#bounded-pod-reads), #244). The new
+option `podReadLimit: { perPod?, total? }` admits at most that many requests
+in flight per Pod URL and across all Pods; further reads wait, with Pods
+taking turns. Without the option nothing changes.
+
+- **Remove an app-side queue in front of `BoundPod.sparql.select`** and set
+  `podReadLimit` instead. An app queue releases its slot when a cancelled read
+  returns, before the request settles, and a loader whose read waits there
+  spends its one recovery retry on grant changes: two changes while it waits
+  end it `unavailable` without a request. The SDK holds the slot until the
+  request settles, and waiting spends no retry.
+- Pass `priority: 'current'` with the `signal` for the read of what the person
+  looks at now.
 
 ### UI kit
 
@@ -259,7 +279,7 @@ apps keep `signIn: 'required'`, the default, and behave as before. To adopt it:
   or whose forgetting failed. Code that compares sessions by deep equality
   accepts these properties.
 - `BrowserRuntime` gains `forget(id)` and `BrowserRuntimeOptions` gains
-  `rememberPods` and `refreshGracePeriod`. Typed test doubles of the runtime need `forget`.
+  `rememberPods`, `refreshGracePeriod` and `podReadLimit`. Typed test doubles of the runtime need `forget`.
 - `BrowserRuntimeOptions` gains `signIn`, and its `identity` becomes optional
   in the type: it is still required unless `signIn: 'none'`, and construction
   throws `RuntimeError('configuration')` without it. `BrowserRuntime` gains the
@@ -270,6 +290,8 @@ apps keep `signIn: 'required'`, the default, and behave as before. To adopt it:
   identity). Test doubles that build `Connection` objects add `reading`.
 - `AccessPrompt['reason']` gains `'anonymous'`. An exhaustive `switch` over it
   needs a case.
+- `BoundPod.sparql.select` and `construct` accept `priority: 'current'` beside
+  `signal`. A typed test double of `BoundPod` accepts the wider options.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
   doubles of `useApp()` need it too.
 - **Breaking for custom stores:** `SessionStore` (the `openStore` option) gains

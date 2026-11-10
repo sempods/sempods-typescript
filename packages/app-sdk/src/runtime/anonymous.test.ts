@@ -441,6 +441,34 @@ describe('signIn: none', () => {
     await g.runtime.loadContexts(pod);
     expect(g.runtime.getSnapshot()[0]!.selectedContext).toBe(work);
   });
+
+  it('bounds Pod reads without a token by podReadLimit (#244)', async () => {
+    const f = none({ podReadLimit: { perPod: 1 } });
+    const answers: ReturnType<typeof deferred<Response>>[] = [];
+    f.setQuery(() => {
+      const answer = deferred<Response>();
+      answers.push(answer);
+      return answer.promise;
+    });
+    await f.runtime.initialize();
+    const pods = f.runtime.bindPod(pod);
+    const reads = [0, 1, 2].map(() =>
+      pods.sparql.construct('CONSTRUCT {} WHERE {}'),
+    );
+    await vi.waitFor(() => expect(answers).toHaveLength(1));
+    for (let i = 0; i < 3; i++) {
+      await vi.waitFor(() => expect(answers).toHaveLength(i + 1));
+      // The next read waits until this one settles.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(answers).toHaveLength(i + 1);
+      answers[i]!.resolve(Response.json([{ '@id': 'urn:item' }]));
+    }
+    for (const read of reads) expect(await read).toMatchObject({ kind: 'ok' });
+    expect(sent(f, '/_system/sparql/query')).toEqual({
+      anonymous: 3,
+      bearer: 0,
+    });
+  });
 });
 
 describe('signIn: required', () => {

@@ -35,14 +35,21 @@ export interface BoundPod {
   getSnapshot(): Pick<ViewAccess, 'current' | 'read' | 'revision'>;
   /** No initial callback; only changes to this reader's access notify it. */
   subscribe(listener: () => void): () => void;
+  /**
+   * With `podReadLimit`, a read beyond the limit waits for a slot; pass the
+   * loader's `signal` as it is, so waiting never spends its recovery retry.
+   * `priority: 'current'` lets a read for what the user looks at now wait
+   * less; it never exceeds a limit or stops a running read. It is read when
+   * the read starts: restart the read when the current resource changes.
+   */
   readonly sparql: {
     select(
       query: string,
-      options?: ReadOptions,
+      options?: ReadOptions & { readonly priority?: 'current' },
     ): Promise<BoundRead<QueryResult<SelectResult>>>;
     construct(
       query: string,
-      options?: ReadOptions,
+      options?: ReadOptions & { readonly priority?: 'current' },
     ): Promise<BoundRead<QueryResult<readonly JsonLd[]>>>;
   };
 }

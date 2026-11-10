@@ -3,6 +3,7 @@ import type {
   BoundRead,
   AppSnapshot,
   BrowserRuntime,
+  BrowserRuntimeOptions,
   BoundView,
   LoadState,
   PodRead,
@@ -66,6 +67,12 @@ export async function read(pod: Pod) {
   void pod.subjects;
 }
 
+// The opt-in bound for explicit Pod reads is a runtime option.
+export const readLimit: BrowserRuntimeOptions['podReadLimit'] = {
+  perPod: 4,
+  total: 8,
+};
+
 // Both inference and explicit result generics retain the supplied handle type.
 export function loaders(view: BoundView, pod: BoundPod) {
   const scoped = createViewLoader(view, (target, signal) => {
@@ -82,6 +89,15 @@ export function loaders(view: BoundView, pod: BoundPod) {
     void target.subjects;
     return target.sparql.select('SELECT ?x WHERE {}', { signal });
   });
+  // A read for what the person looks at now; no other priority exists.
+  createViewLoader(pod, (target, signal) =>
+    target.sparql.construct('CONSTRUCT {} WHERE {}', {
+      signal,
+      priority: 'current',
+    }),
+  );
+  // @ts-expect-error Only 'current' is a priority.
+  void pod.sparql.select('SELECT ?x WHERE {}', { priority: 'high' });
   const state: LoadState<SelectResult> = overview.getSnapshot();
   void state;
   const podRead: PodRead<SelectResult> = (target, signal) =>

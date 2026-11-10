@@ -1,5 +1,6 @@
 import type { QueryResult } from '@sempods/client-sdk';
 import type { BoundPod, BoundRead, BoundView } from '../runtime/view.js';
+import { watchAdmission } from '../runtime/admission-notice.js';
 
 /**
  * What a loader shows for its latest read. `ok` becomes `ready`; `cancelled`
@@ -67,6 +68,9 @@ interface ViewLoader<T> {
 
 /**
  * One cancellable read, plus at most one same-target recovery retry per cycle.
+ * A read that only waits for a `podReadLimit` slot has sent nothing, so a
+ * grant change while it waits restarts it on the current grants without
+ * spending that retry; pass the callback's `signal` to the read unchanged.
  * The loader starts in `loading` without a request: call `reload()` to start
  * the first read (`useLoad` and `usePodLoad` do this after creating it).
  * The callback receives exactly the supplied handle type. Recovery reuses that
@@ -117,6 +121,13 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
   let retries = 0;
   let waiting = false;
   let running = false;
+  /**
+   * What `podReadLimit` admission did with the current run's reads: `queued`
+   * while they only waited for a slot, so nothing was sent yet. Restarting
+   * such a run is not a recovery and spends no retry.
+   */
+  let admission: 'unknown' | 'queued' | 'admitted' = 'unknown';
+  const spends = () => admission !== 'queued';
   let previous = view.getSnapshot();
   const emit = (next: LoadState<T>) => {
     state = Object.freeze(next);
@@ -152,6 +163,12 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
     abort = new AbortController();
     const signal = abort.signal;
     const ticket = ++serial;
+    admission = 'unknown';
+    watchAdmission(signal, (event) => {
+      if (ticket !== serial) return;
+      if (event === 'admitted') admission = 'admitted';
+      else if (admission === 'unknown') admission = 'queued';
+    });
     waiting = false;
     running = true;
     emit({ kind: 'loading', ...retained(access.revision) });
@@ -168,7 +185,7 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
         waiting = now.current;
         kept = undefined;
         emit({ kind: 'unavailable' });
-        if (now.current && now.read) await run(true);
+        if (now.current && now.read) await run(spends());
       } else if (result.kind === 'ok') {
         kept = { data: result.body, revision: access.revision };
         emit({ kind: 'ready', data: result.body });
@@ -204,7 +221,7 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
       // A completed Pod result belongs to its grants; a new access change starts
       // a fresh bounded cycle. Context write-only changes retain displayed data.
       if (state.kind === 'ready') retries = 0;
-      void run(true);
+      void run(spends());
     }
     // Retained Pod data belongs to its grants, also while a failed refresh
     // waits for an explicit retry.
