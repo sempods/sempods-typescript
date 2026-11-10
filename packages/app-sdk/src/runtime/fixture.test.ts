@@ -88,6 +88,14 @@ export function catalogue(
     })),
   });
 }
+/**
+ * Clears options the fixture sets (`exactOptionalPropertyTypes` rejects an
+ * explicit `undefined`), as an app that leaves them out.
+ */
+export const without = (...keys: (keyof BrowserRuntimeOptions)[]) =>
+  Object.fromEntries(
+    keys.map((key) => [key, undefined]),
+  ) as unknown as Partial<BrowserRuntimeOptions>;
 export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
   const factory = new IDBFactory();
   let held = false;

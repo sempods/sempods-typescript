@@ -38,7 +38,8 @@ export function presentAccess(f: AccessFacts) {
   const discovery = f.demand !== 'none';
   const readable =
     state.contextSelection === 'on-demand' ? f.podReadable : f.viewReadable;
-  const active = c?.session.kind === 'active' || c?.session.kind === 'renewing';
+  // Signed in, or reading without a token: Context attention applies.
+  const active = c !== undefined && c.reading !== null;
   const missingScopes = Boolean(c?.missingRequiredScopes.length);
   const usable = active && !missingScopes;
   const catalogueFailed = c?.catalogue.kind === 'failed';

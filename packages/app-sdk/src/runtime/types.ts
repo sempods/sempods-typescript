@@ -95,8 +95,24 @@ export type CatalogueFact =
 export interface Connection {
   readonly id: string;
   readonly podUrl: string;
-  readonly clientKind: ClientIdentity['kind'];
+  /** `null` only under `signIn: 'none'` without an `identity`. */
+  readonly clientKind: ClientIdentity['kind'] | null;
   readonly session: SessionFact;
+  /**
+   * How this connection sends requests now:
+   * - `session`: with its token (`active` or `renewing`).
+   * - `anonymous`: without a credential (`signIn: 'optional'` or `'none'`).
+   *   The Pod answers with its public Contexts only. The catalogue lists
+   *   nothing as writable, so writes are never dispatched. The session is
+   *   `signed-out`, or, after a session ended, `ended` without `restorable`.
+   * - `null`: it sends nothing: restoring, leaving for a sign-in, restorable,
+   *   signing out, or without a session under `signIn: 'required'`.
+   *
+   * Signing in, a session that ends and signing out change between these;
+   * pending reads are invalidated and handles replaced. A request refused
+   * with a token is never resent without one.
+   */
+  readonly reading: 'session' | 'anonymous' | null;
   readonly catalogue: CatalogueFact;
   readonly requestedScopes: readonly string[];
   readonly requiredScopes: readonly string[];
@@ -164,7 +180,26 @@ export interface BrowserRuntimeOptions {
    * This app policy does not replace server-side authorization.
    */
   readonly allowedPods?: readonly string[];
-  readonly identity: ClientIdentity;
+  /**
+   * What the app needs (default `required`):
+   * - `required`: a connection reads only with a session; without one the
+   *   app shows a sign-in screen.
+   * - `optional`: a connection without a session reads the Pod's public
+   *   Contexts without a token (`Connection.reading: 'anonymous'`). Startup
+   *   connects the default Pod (the `preset`, or the sole allowed Pod), and
+   *   `connect(url)` adds a Pod without discovery or sign-in. Signing in is
+   *   offered, never demanded. A session that ends, or signing out, returns
+   *   to reading without a token. `scopes.required` is a configuration
+   *   error; `public-read` is added to the optional scopes, so signing in
+   *   does not hide the public Contexts.
+   * - `none`: only an anonymous connection to the default Pod, which is
+   *   required. No session store or Web Lock is used, so several tabs work.
+   *   `beginAuthorization`, `disconnect` and `forget` reject with
+   *   `configuration`, and so do any `scopes`. `identity` may be omitted.
+   */
+  readonly signIn?: 'required' | 'optional' | 'none';
+  /** Required unless `signIn: 'none'`; missing, construction throws RuntimeError (configuration). */
+  readonly identity?: ClientIdentity;
   /**
    * Where the app returns after a sign-in: a same-origin path with optional
    * query and hash (default `/`), never the callback path, `//` or OAuth
@@ -232,6 +267,12 @@ export interface BrowserRuntime {
   readonly preset?: PodPreset;
   /** Frozen exact Pod restriction, or undefined for unrestricted use. */
   readonly allowedPods?: readonly string[];
+  /** The configured `signIn` mode. */
+  readonly signIn: 'required' | 'optional' | 'none';
+  /**
+   * Under `signIn: 'none'` no session store is opened: the report has
+   * `storage: 'unavailable'` and `interaction: 'none'`, and that is no failure.
+   */
   initialize(): Promise<StartupReport>;
   getSnapshot(): readonly Connection[];
   /** Listener exceptions are reported asynchronously and never interrupt session transitions. */
@@ -245,6 +286,10 @@ export interface BrowserRuntime {
    * Outside-list URLs reject with RuntimeError (configuration) before discovery.
    * A discovery that has not answered after 15 seconds rejects with
    * RuntimeError (network). Never waits for another connection's restoration.
+   * Under `signIn: 'optional'` or `'none'` it neither discovers the Pod nor
+   * resolves a client: the connection reads without a token at once, and a
+   * sign-in discovers the Pod itself. An invalid address rejects with
+   * SdkError (invalid-pod-url). Under `'none'` only the default Pod connects.
    */
   connect(url?: string): Promise<Connection>;
   /**
@@ -252,7 +297,9 @@ export interface BrowserRuntime {
    * while the current session keeps working, then navigates to the Pod's
    * provider. A discovery that has not answered after 15 seconds rejects
    * with RuntimeError (network), and a sign-out or dispose meanwhile with
-   * RuntimeError (disconnected); neither resets the connection.
+   * RuntimeError (disconnected); neither resets the connection. A connection
+   * that reads without a token keeps reading until the page leaves. Rejects
+   * with RuntimeError (configuration) under `signIn: 'none'`.
    */
   beginAuthorization(id: string): Promise<void>;
   /**
@@ -263,7 +310,10 @@ export interface BrowserRuntime {
    * `rememberPods: false` it is forgotten instead. A failed durable write
    * returns `blocked-locally` and publishes an ended session with
    * `problem: 'disconnected', saved: false`. Retry explicitly. Neither outcome
-   * revokes sharing or deletes Pod data.
+   * revokes sharing or deletes Pod data. Under `signIn: 'optional'` the
+   * connection then reads without a token, also with `rememberPods: false`
+   * (its address is only not kept for the next start). Rejects with
+   * RuntimeError (configuration) under `signIn: 'none'`.
    */
   disconnect(id: string): Promise<DisconnectResult>;
   /**
@@ -271,7 +321,9 @@ export interface BrowserRuntime {
    * record and its remembered Context choice, and removes it from the
    * snapshot. A failed durable deletion returns `blocked-locally` like
    * `disconnect`; retry explicitly. Neither revokes sharing nor deletes Pod
-   * data.
+   * data. Under `signIn: 'optional'` a forgotten default Pod is listed again
+   * as a new connection that reads without a token. Rejects with
+   * RuntimeError (configuration) under `signIn: 'none'`.
    */
   forget(id: string): Promise<DisconnectResult>;
   loadContexts(
@@ -305,7 +357,8 @@ export interface BrowserRuntime {
   selectContext(id: string, iri: string): void;
   bind(id: string): BoundView;
   /**
-   * A view of one explicit Context of a signed-in eligible connection, for
+   * A view of one explicit Context of a signed-in eligible connection, or of
+   * one that reads without a token (`reading: 'anonymous'`), for
    * example the Context a Pod-overview row names. It never changes or
    * remembers the selection and loads no label. It is always its own handle,
    * also when `contextIri` is the selected Context, and it survives selection
@@ -325,13 +378,14 @@ export interface BrowserRuntime {
    * retire its success feedback.
    *
    * Throws `RuntimeError('disconnected')` without an eligible signed-in
-   * session, and `RuntimeError('configuration')` for an IRI that is not a
+   * session or anonymous reading, and `RuntimeError('configuration')` for an IRI that is not a
    * Context of this connection's Pod, or for another Context than an exact
    * preset `contextIri` on the preset's Pod.
    */
   bindContext(id: string, contextIri: string): BoundView;
-  /** Requires a signed-in eligible connection, but neither selection nor catalogue;
-   * throws `RuntimeError('disconnected')` while restoring or after the session ended.
+  /** Requires a signed-in eligible connection, or one that reads without a token,
+   * but neither selection nor catalogue; throws `RuntimeError('disconnected')`
+   * while restoring, or after the session ended under `signIn: 'required'`.
    * Missing required scopes leave the handle current with read=false and stop dispatch.
    * Pod 403 returns refused without catalogue recovery or inferred session changes.
    */

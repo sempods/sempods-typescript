@@ -18,15 +18,16 @@ export function bindPod(
   subscribe: (listener: () => void) => () => void,
 ): BoundPod {
   const generation = e.generation;
-  const subject = e.credentials!.subject;
+  // `null` while reading without a token; a sign-in or sign-out replaces it.
+  const subject = e.credentials?.subject ?? null;
   const valid = () =>
     current() &&
     e.generation === generation &&
-    e.credentials?.subject === subject;
+    (e.credentials?.subject ?? null) === subject;
   // Suspended without a credential, as while a lost renewal answer waits.
   const readable = () =>
     valid() &&
-    e.credential !== undefined &&
+    (e.anonymous === true || e.credential !== undefined) &&
     e.view.missingRequiredScopes.length === 0;
   const pod = client(readable);
   let snapshot: Pick<ViewAccess, 'current' | 'read' | 'revision'> | undefined;
@@ -71,8 +72,8 @@ export function bindPod(
     }
   }
   const reader = Object.freeze({
-    key: JSON.stringify([e.view.id, subject, e.pod.podUrl, generation]),
-    podUrl: e.pod.podUrl,
+    key: JSON.stringify([e.view.id, subject, e.view.podUrl, generation]),
+    podUrl: e.view.podUrl,
     getSnapshot,
     subscribe(listener) {
       let last = getSnapshot();

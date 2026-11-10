@@ -1,6 +1,10 @@
 import type { SdkFailure } from '@sempods/client-sdk';
 import type { RuntimeProblem } from '../runtime/errors.js';
-import type { Connection, StartupReport } from '../runtime/types.js';
+import type {
+  BrowserRuntime,
+  Connection,
+  StartupReport,
+} from '../runtime/types.js';
 
 /**
  * One access or session outcome that needs attention, derived from runtime
@@ -24,7 +28,12 @@ export interface AccessPrompt {
     | 'missing-scopes'
     | 'sign-in-failed'
     | 'sign-in-cancelled'
-    | 'sharing-unchanged';
+    | 'sharing-unchanged'
+    /**
+     * The active connection reads without a token (`signIn: 'optional'`):
+     * only public data, no writes. An `action` with `sign-in` and `dismiss`.
+     */
+    | 'anonymous';
   /** The connection it is about; `null` for startup and callback problems without one. */
   readonly connectionId: string | null;
   /**
@@ -63,6 +72,7 @@ export interface AccessState {
 type Reason = AccessPrompt['reason'];
 type Action = AccessPrompt['actions'][number];
 interface Facts {
+  readonly signIn: BrowserRuntime['signIn'];
   readonly startup: StartupReport | undefined;
   readonly startupError: unknown;
   readonly callbackNotice: boolean;
@@ -85,8 +95,17 @@ const pendingState: AccessState = Object.freeze({
   prompts: Object.freeze([]),
 });
 
-/** The cause of one connection's prompt, from the first matching rule. */
-function connectionCause(c: Connection, active: boolean): Cause | undefined {
+/**
+ * The cause of one connection's prompt, from the first matching rule. Without
+ * required sign-in (`signIn: 'optional'`), an ended session asks for a
+ * decision instead of blocking: the connection still reads without a token.
+ * Under `'none'` nothing offers signing in.
+ */
+function connectionCause(
+  c: Connection,
+  active: boolean,
+  signIn: BrowserRuntime['signIn'],
+): Cause | undefined {
   const s = c.session;
   const cause = (
     reason: Reason,
@@ -101,11 +120,13 @@ function connectionCause(c: Connection, active: boolean): Cause | undefined {
     actions,
     ...extra,
   });
-  // Only the active connection blocks; another one asks for a decision.
+  // Only the active connection blocks; another one asks for a decision. A
+  // connection that still reads without a token never blocks.
   const severe = (reason: Reason, actions: readonly Action[], extra = {}) =>
-    active
+    active && c.reading !== 'anonymous'
       ? cause(reason, 'blocking', actions, extra)
       : cause(reason, 'action', [...actions, 'dismiss'], extra);
+  if (signIn === 'none') return undefined;
   if (s.kind === 'ended') {
     // A sign-out or forget in progress.
     if (s.problem === 'disconnected' && s.saved !== false) return undefined;
@@ -129,6 +150,9 @@ function connectionCause(c: Connection, active: boolean): Cause | undefined {
     // A sign-out the person chose needs no prompt beside another Pod.
     const chosen = s.problem === undefined || s.problem === 'disconnected';
     if (!active && chosen) return undefined;
+    // Read without a token: signing in is offered, not demanded.
+    if (chosen && c.reading === 'anonymous')
+      return cause('anonymous', 'action', ['sign-in', 'dismiss']);
     return severe('signed-out', ['sign-in', 'forget'], { problem: s.problem });
   }
   if (
@@ -194,11 +218,13 @@ export function createAccessTracker() {
       });
     if (f.startupError !== undefined) global('startup-failed', ['reload']);
     else if (f.startup?.storage === 'busy') global('other-tab', ['reload']);
-    else if (f.startup?.storage === 'unavailable') global('storage', []);
+    // Without sign-in, nothing is stored on purpose.
+    else if (f.startup?.storage === 'unavailable' && f.signIn !== 'none')
+      global('storage', []);
     else {
       if (!active) global('no-connection', ['sign-in']);
       for (const c of f.connections) {
-        const cause = connectionCause(c, c === active);
+        const cause = connectionCause(c, c === active, f.signIn);
         if (cause) causes.push(cause);
       }
       const startup = f.startup;

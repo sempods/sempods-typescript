@@ -143,15 +143,13 @@ export function useAppFacts<T>(
 export function useWriteGate() {
   return useAppFacts((s) => !s.changing && !s.confirmingLeave);
 }
-/** Internal: the active connection, while signed in, and its catalogue. */
+/** Internal: the active connection, while it reads (`reading`), and its catalogue. */
 export function activeCatalogue(s: AppSnapshot) {
   const connection = s.connections.find((c) => c.id === s.activeId);
-  const active =
-    connection?.session.kind === 'active' ||
-    connection?.session.kind === 'renewing';
+  const reading = connection?.reading != null ? connection : undefined;
   return {
-    activeId: active ? connection.id : null,
-    catalogue: active ? connection.catalogue : undefined,
+    activeId: reading?.id ?? null,
+    catalogue: reading?.catalogue,
   };
 }
 /** Pass one runtime created outside render. The provider consumes its single initializer. */
@@ -344,10 +342,9 @@ export function useContexts() {
     }),
     shallowEqual,
   );
-  const active =
-    connection?.session.kind === 'active' ||
-    connection?.session.kind === 'renewing';
-  const catalogue = active ? connection.catalogue : undefined;
+  // Signed in, or reading without a token.
+  const active = Boolean(connection && connection.reading !== null);
+  const catalogue = active ? connection!.catalogue : undefined;
   // An exact preset keeps the app in its one Context.
   const fixed =
     preset?.podUrl === connection?.podUrl ? preset?.contextIri : undefined;
@@ -355,8 +352,8 @@ export function useContexts() {
     () => contextChoices(knownContexts(catalogue), catalogue, fixed),
     [catalogue, fixed],
   );
-  const id = active ? connection.id : null;
-  const selectedIri = active ? connection.selectedContext : null;
+  const id = active ? connection!.id : null;
+  const selectedIri = active ? connection!.selectedContext : null;
   // Labels for the names, once per set of Contexts (display text only).
   const labelled =
     catalogue?.kind === 'ready'
@@ -491,10 +488,11 @@ export interface PodContextGroup {
   /** `podNames[podUrl]`, else the address without its scheme. */
   readonly name: string;
   /**
-   * The session when it is not signed in (`signed-out`, `restoring`,
-   * `leaving`, `ended`), else its catalogue (`unknown`, `loading`, `ready`,
-   * `failed`); a renewing session reports its catalogue. An ended or
-   * restoring connection is not an empty one.
+   * The session when the connection does not read (`signed-out`,
+   * `restoring`, `leaving`, `ended`), else its catalogue (`unknown`,
+   * `loading`, `ready`, `failed`); a renewing session, and a connection
+   * reading without a token (`Connection.reading`), report their catalogue.
+   * An ended or restoring connection is not an empty one.
    */
   readonly status:
     | 'signed-out'
@@ -553,9 +551,8 @@ export function usePodContexts(
   const names = podNames ? JSON.stringify(podNames) : '';
   const pods = useMemo(() => {
     const groups = connections.map((connection) => {
-      const signedIn =
-        connection.session.kind === 'active' ||
-        connection.session.kind === 'renewing';
+      // Signed in, or reading without a token.
+      const signedIn = connection.reading !== null;
       const catalogue = signedIn ? connection.catalogue : undefined;
       const fixed =
         preset?.podUrl === connection.podUrl ? preset.contextIri : undefined;
@@ -661,10 +658,11 @@ function useDemand(active: boolean, kind: 'selection' | 'discovery') {
     return {
       mode: s.contextSelection,
       id: s.activeId,
-      // Signed in (also while renewing) with no catalogue requested yet.
+      // Reading (signed in, also while renewing, or without a token) with
+      // no catalogue requested yet.
       undiscovered:
-        (connection?.session.kind === 'active' ||
-          connection?.session.kind === 'renewing') &&
+        connection !== undefined &&
+        connection.reading !== null &&
         connection.catalogue.kind === 'unknown',
     };
   }, shallowEqual);

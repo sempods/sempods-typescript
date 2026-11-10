@@ -80,17 +80,16 @@ const region = (name: string) => within(screen.getByRole('region', { name }));
 const text = (name: string) =>
   screen.getByRole('region', { name }).querySelector('output')!.textContent;
 
-/** The recipe: read only signed-in connections; bindPod never throws then. */
-const signedIn = ({ session }: Connection) =>
-  session.kind === 'active' || session.kind === 'renewing';
+/** The recipe: read only connections that read; bindPod never throws then. */
+const reads = ({ reading }: Connection) => reading !== null;
 function EachConnection({ runtime }: { readonly runtime: BrowserRuntime }) {
   return useConnections()
-    .filter(signedIn)
+    .filter(reads)
     .map((connection) => (
       <Source
         key={connection.id}
         name={connection.podUrl}
-        reader={signedIn(connection) ? runtime.bindPod(connection.id) : null}
+        reader={reads(connection) ? runtime.bindPod(connection.id) : null}
       />
     ));
 }

@@ -55,7 +55,8 @@ export interface ContextTarget {
  * - `blocked`: a pending write, or another change preparing or asking.
  * - `unavailable`: the target cannot be selected, before asking or because it
  *   disappeared while the person was asked: no such `connection`, its
- *   `session` is not signed in with the required access, its `catalogue` is
+ *   `session` neither reads (`Connection.reading`) nor holds the required
+ *   access, its `catalogue` is
  *   not loaded, the Context is `unlisted` as readable, or the `preset` names
  *   another Context of that Pod.
  */
@@ -79,9 +80,9 @@ export function targetProblem(
 ): Unavailable | null {
   const connection = connections.find((c) => c.id === target.connectionId);
   if (!connection) return 'connection';
+  // Signed in, or reading without a token (`signIn: 'optional'` or `'none'`).
   if (
-    (connection.session.kind !== 'active' &&
-      connection.session.kind !== 'renewing') ||
+    connection.reading === null ||
     connection.missingRequiredScopes.length > 0
   )
     return 'session';
@@ -120,6 +121,8 @@ function leaves(change: Change, guard: LeaveGuard) {
 export interface AppSnapshot {
   /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
   readonly contextSelection: 'required' | 'on-demand';
+  /** The runtime's `signIn` mode: whether the app offers signing in at all. */
+  readonly signIn: BrowserRuntime['signIn'];
   readonly preset: PodPreset | undefined;
   /** Immutable runtime policy; undefined means unrestricted. */
   readonly allowedPods?: readonly string[];
@@ -255,12 +258,14 @@ export function createAppController(
     | undefined;
   let snapshot: AppSnapshot = {
     contextSelection,
+    signIn: runtime.signIn,
     preset: runtime.preset,
     ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
     startup,
     startupError,
     callbackNotice,
     access: tracker.derive({
+      signIn: runtime.signIn,
       startup,
       startupError,
       callbackNotice,
@@ -311,6 +316,7 @@ export function createAppController(
     // Before the prompt check below: a leave prompt for a prompt's action is
     // withdrawn once that prompt is no longer current.
     const access = tracker.derive({
+      signIn: runtime.signIn,
       startup,
       startupError,
       callbackNotice,
@@ -332,11 +338,7 @@ export function createAppController(
       pending = undefined;
     }
     pod = null;
-    if (
-      connection &&
-      (connection.session.kind === 'active' ||
-        connection.session.kind === 'renewing')
-    )
+    if (connection && connection.reading !== null)
       pod = runtime.bindPod(connection.id);
     // No Context-bound screen before startup settles, so no draft can start on
     // a connection that a returning sign-in is about to replace (#80).
@@ -356,6 +358,7 @@ export function createAppController(
     }
     snapshot = Object.freeze({
       contextSelection,
+      signIn: runtime.signIn,
       preset: runtime.preset,
       ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
       startup,
@@ -390,7 +393,8 @@ export function createAppController(
       ? connections
       : []) {
       if (
-        connection.session.kind === 'active' &&
+        (connection.session.kind === 'active' ||
+          connection.reading === 'anonymous') &&
         connection.catalogue.kind === 'unknown'
       )
         void runtime.loadContexts(connection.id).catch(() => {});
@@ -668,7 +672,12 @@ export function createAppController(
         ? { kind: 'unavailable', reason: after }
         : { kind: 'declined' };
     },
-    /** Guarded like `selectConnection`. */
+    /**
+     * Adds a Pod (or reuses the default Pod's connection) and makes it
+     * active. Under `signIn: 'required'` it then starts signing in; under
+     * `'optional'` and `'none'` the connection reads without a token, and
+     * `authorize(id)` signs in. Guarded like `selectConnection`.
+     */
     connect(url = defaultPodUrl) {
       return guard(connecting(url));
     },
@@ -714,7 +723,8 @@ export function createAppController(
           : undefined) ?? (await runtime.connect(url));
       if (connection.session.kind === 'restoring')
         throw new RuntimeError('configuration');
-      await runtime.beginAuthorization(connection.id);
+      if (runtime.signIn === 'required')
+        await runtime.beginAuthorization(connection.id);
       activeId = connection.id;
       publish();
     };

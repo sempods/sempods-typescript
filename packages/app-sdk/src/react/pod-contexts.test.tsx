@@ -323,6 +323,7 @@ it('names why a target cannot be selected', () => {
     id: 'a',
     podUrl: 'https://pod.example/alice',
     session: { kind: 'active', subject: 'urn:alice' },
+    reading: 'session',
     missingRequiredScopes: [],
     catalogue: {
       kind: 'ready',
@@ -338,9 +339,19 @@ it('names why a target cannot be selected', () => {
       contextIri: work,
     });
   expect(at({})).toBeNull();
-  expect(at({ session: { kind: 'restoring' } } as Partial<Connection>)).toBe(
-    'session',
-  );
+  expect(
+    at({
+      session: { kind: 'restoring' },
+      reading: null,
+    } as Partial<Connection>),
+  ).toBe('session');
+  // Reading without a token (#240): selectable like a signed-in connection.
+  expect(
+    at({
+      session: { kind: 'signed-out' },
+      reading: 'anonymous',
+    } as Partial<Connection>),
+  ).toBeNull();
   expect(at({ missingRequiredScopes: ['urn:scope'] })).toBe('session');
   expect(at({ catalogue: { kind: 'loading' } })).toBe('catalogue');
   expect(

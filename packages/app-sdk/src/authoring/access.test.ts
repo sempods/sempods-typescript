@@ -23,6 +23,10 @@ function connection(
     podUrl: `https://pod.example/${id}`,
     clientKind: 'dynamic',
     session,
+    reading:
+      session.kind === 'active' || session.kind === 'renewing'
+        ? 'session'
+        : null,
     catalogue: { kind: 'unknown' },
     requestedScopes: [],
     requiredScopes: [],
@@ -35,6 +39,7 @@ function connection(
 }
 type Facts = Parameters<ReturnType<typeof createAccessTracker>['derive']>[0];
 const facts = (overrides: Partial<Facts> = {}): Facts => ({
+  signIn: 'required',
   startup: started,
   startupError: undefined,
   callbackNotice: false,
@@ -513,5 +518,122 @@ describe('identity and dismissal', () => {
     expect(tracker.current(prompt!, 'retry')).toBeUndefined();
     tracker.derive(beside(connection('b')));
     expect(tracker.current(prompt!, 'sign-in')).toBeUndefined();
+  });
+});
+
+describe('without required sign-in (#240)', () => {
+  const anonymous = (
+    id: string,
+    session: SessionFact = { kind: 'signed-out' },
+  ): Connection => connection(id, session, { reading: 'anonymous' });
+
+  it('offers signing in as an action while the active connection reads without a token', () => {
+    for (const problem of [undefined, 'disconnected'] as const) {
+      const state = derive(
+        facts({
+          signIn: 'optional',
+          connections: [
+            anonymous(
+              'a',
+              problem ? { kind: 'signed-out', problem } : undefined,
+            ),
+          ],
+          activeId: 'a',
+        }),
+      );
+      expect(state.blocking).toBeNull();
+      expect(state.prompts.map(shape)).toEqual([
+        {
+          severity: 'action',
+          reason: 'anonymous',
+          connectionId: 'a',
+          actions: ['sign-in', 'dismiss'],
+        },
+      ]);
+    }
+  });
+
+  it('asks instead of blocking once a session ended, remembered or in this page', () => {
+    for (const session of [
+      { kind: 'signed-out', problem: 'expired' },
+      { kind: 'ended', problem: 'expired' },
+    ] as const) {
+      const state = derive(
+        facts({
+          signIn: 'optional',
+          connections: [anonymous('a', session)],
+          activeId: 'a',
+        }),
+      );
+      expect(state.blocking).toBeNull();
+      expect(state.prompts.map(shape)).toEqual([
+        {
+          severity: 'action',
+          reason: 'signed-out',
+          connectionId: 'a',
+          actions: ['sign-in', 'forget', 'dismiss'],
+          problem: 'expired',
+        },
+      ]);
+    }
+  });
+
+  it('asks nothing about another connection that reads without a token', () => {
+    const state = derive(
+      facts({
+        signIn: 'optional',
+        connections: [connection('a'), anonymous('b')],
+        activeId: 'a',
+      }),
+    );
+    expect(state).toMatchObject({ blocking: null, prompts: [] });
+  });
+
+  it('dismisses the anonymous prompt for the controller lifetime', () => {
+    const tracker = createAccessTracker();
+    const f = facts({
+      signIn: 'optional',
+      connections: [anonymous('a')],
+      activeId: 'a',
+    });
+    const [prompt] = tracker.derive(f).prompts;
+    expect(tracker.dismiss(prompt!.id)).toBe(prompt);
+    expect(tracker.derive(f).prompts).toEqual([]);
+    expect(createAccessTracker().derive(f).prompts).toHaveLength(1);
+  });
+
+  it('still blocks without any connection under optional', () => {
+    expect(shape(derive(facts({ signIn: 'optional' })).blocking)).toMatchObject(
+      { reason: 'no-connection' },
+    );
+  });
+
+  it('offers no sign-in and reports no storage problem under none', () => {
+    const state = derive(
+      facts({
+        signIn: 'none',
+        startup: { ...started, storage: 'unavailable' },
+        connections: [anonymous('a')],
+        activeId: 'a',
+      }),
+    );
+    expect(state).toEqual({ pending: false, blocking: null, prompts: [] });
+  });
+
+  it('keeps blocking without sign-in required while a sign-out could not be saved', () => {
+    const state = derive(
+      facts({
+        signIn: 'optional',
+        connections: [
+          connection(
+            'a',
+            { kind: 'ended', problem: 'disconnected', saved: false },
+            { reading: null },
+          ),
+        ],
+        activeId: 'a',
+      }),
+    );
+    expect(shape(state.blocking)).toMatchObject({ reason: 'sign-out-failed' });
   });
 });

@@ -15,8 +15,15 @@ import type { Connection } from './types.js';
 import type { BoundPod, BoundView } from './view.js';
 
 export interface Entry {
-  pod: PodDiscovery;
-  client: OAuthClient;
+  /** Absent until a sign-in, restoration or saved record discovered the Pod. */
+  pod?: PodDiscovery;
+  /** Absent until a sign-in resolved the client, like `pod`. */
+  client?: OAuthClient;
+  /**
+   * Requests are sent without a credential (`signIn: 'optional'` or `'none'`,
+   * no session). Set only with a live lifetime of its own generation.
+   */
+  anonymous?: true;
   view: Connection;
   generation: string;
   lifetime: AbortController;

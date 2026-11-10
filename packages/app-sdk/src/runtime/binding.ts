@@ -140,17 +140,18 @@ export function bindView(
 ): BoundView {
   const { contextIri } = target;
   const generation = e.generation;
-  const subject = e.credentials!.subject;
+  // `null` while reading without a token; a sign-in or sign-out replaces it.
+  const subject = e.credentials?.subject ?? null;
   const valid = () =>
     current() &&
     e.generation === generation &&
-    e.credentials?.subject === subject &&
+    (e.credentials?.subject ?? null) === subject &&
     target.holds();
   // Without a credential (a lost renewal answer waiting for its resend),
   // the handle stays current but its access is suspended.
   const permission = (write: boolean) =>
     valid() &&
-    e.credential !== undefined &&
+    (e.anonymous === true || e.credential !== undefined) &&
     e.view.missingRequiredScopes.length === 0 &&
     catalogueLists(e.view.catalogue, contextIri, write);
   let snapshot: ViewAccess | undefined;
@@ -231,7 +232,7 @@ export function bindView(
     key: JSON.stringify([
       e.view.id,
       subject,
-      e.pod.podUrl,
+      e.view.podUrl,
       contextIri,
       generation,
       ...target.key,
@@ -247,7 +248,7 @@ export function bindView(
         }
       });
     },
-    podUrl: e.pod.podUrl,
+    podUrl: e.view.podUrl,
     contextIri,
     subjects: Object.freeze({
       get: (iri, options) =>
