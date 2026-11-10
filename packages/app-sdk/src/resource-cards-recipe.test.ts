@@ -2,7 +2,6 @@
 import { describe, expect, it } from 'vitest';
 import { anonymous, createPod } from '@sempods/client-sdk';
 import {
-  MAX_ATTEMPTS,
   MAX_IMAGES,
   cardQuery,
   exampleRules,
@@ -172,7 +171,8 @@ describe('facts of one read', () => {
       { url: 'https://img.example/ada-s.jpg', node: photo, link: `${S}image` },
       {
         url: 'https://img.example/ada-2.jpg',
-        node: undefined,
+        // A blank node is keyed within its read only.
+        node: JSON.stringify([alice, ada, '_:b0']),
         link: `${S}image`,
       },
     ]);
@@ -194,6 +194,8 @@ describe('facts of one read', () => {
       'https://intranet/a.jpg',
       'https://printer.local/a.jpg',
       'https://router.home.arpa/a.jpg',
+      'https://localhost../a.jpg',
+      'https://printer.local../a.jpg',
       'javascript:alert(1)',
       'data:image/png;base64,AAAA',
     ];
@@ -300,30 +302,90 @@ describe('cards across sources', () => {
     ]);
   });
 
-  it('bounds pictures per card and addresses per preview', async () => {
+  it('bounds pictures per card, keeping the preferred ones', async () => {
     const rows = Array.from(
       { length: 10 },
       (_, i) =>
         [
           iri(ada),
-          `${S}image`,
+          `http://xmlns.com/foaf/0.1/depiction`,
           text(`https://img.example/${i}.jpg`),
           ctx(alice, 'a'),
         ] as const,
     );
     const card = resourceCards(
       [ada],
-      [await facts(ada, alice, rows)],
+      [
+        await facts(ada, alice, [
+          ...rows,
+          [
+            iri(ada),
+            `${S}image`,
+            text('https://img.example/p.jpg'),
+            ctx(alice, 'a'),
+          ],
+        ]),
+      ],
       exampleRules,
     ).get(ada)!;
     expect(card.images).toHaveLength(MAX_IMAGES);
-    const many = Array.from({ length: 4 }, (_, i) => ({
-      variants: [
-        { value: `https://img.example/${i}-s.jpg`, evidence: [] },
-        { value: `https://img.example/${i}.jpg`, evidence: [] },
+    // schema:image is declared before foaf:depiction; the sorted rows are not.
+    expect(card.images[0]!.variants[0]!.value).toBe(
+      'https://img.example/p.jpg',
+    );
+  });
+
+  it('orders by declared predicate before the source', async () => {
+    const fromAlice = await facts(ada, alice, [
+      [
+        iri(ada),
+        'http://xmlns.com/foaf/0.1/img',
+        text('https://img.example/a.jpg'),
+        ctx(alice, 'a'),
       ],
-    }));
-    expect(previewCandidates(many)).toHaveLength(MAX_ATTEMPTS);
+    ]);
+    const fromBob = await facts(ada, bob, [
+      [iri(ada), `${S}image`, text('https://img.example/b.jpg'), ctx(bob, 'b')],
+    ]);
+    const card = resourceCards([ada], [fromAlice, fromBob], exampleRules).get(
+      ada,
+    )!;
+    expect(previewCandidates(card.images)).toEqual([
+      'https://img.example/b.jpg',
+      'https://img.example/a.jpg',
+    ]);
+  });
+
+  it('groups the variants of a blank image node, thumbnail first', async () => {
+    const found = await facts(ada, alice, [
+      [iri(ada), `${S}image`, blank('b0'), ctx(alice, 'a')],
+      [
+        blank('b0'),
+        `${S}contentUrl`,
+        text('https://img.example/full.jpg'),
+        ctx(alice, 'a'),
+      ],
+      [
+        blank('b0'),
+        `${S}thumbnailUrl`,
+        text('https://img.example/thumb.jpg'),
+        ctx(alice, 'a'),
+      ],
+      [iri(ada), `${S}image`, blank('b1'), ctx(alice, 'a')],
+      [
+        blank('b1'),
+        `${S}contentUrl`,
+        text('https://img.example/other.jpg'),
+        ctx(alice, 'a'),
+      ],
+    ]);
+    const card = resourceCards([ada], [found], exampleRules).get(ada)!;
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([
+      ['https://img.example/thumb.jpg', 'https://img.example/full.jpg'],
+      ['https://img.example/other.jpg'],
+    ]);
   });
 
   it('keeps conflicting dates inspectable and merges equal ones', async () => {

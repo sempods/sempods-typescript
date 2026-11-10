@@ -16,11 +16,17 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PodFetch } from '@sempods/client-sdk';
-import { SempodsProvider } from '@sempods/app-sdk/react';
+import { SdkLocaleProvider, SempodsProvider } from '@sempods/app-sdk/react';
 import {
   CardDetails,
   CardList,
+  ImagePreview,
+  useResourceCards,
 } from '../../../../examples/todo/recipes/resource-card-view.js';
+import {
+  MAX_ATTEMPTS,
+  exampleRules,
+} from '../../../../examples/todo/recipes/resource-cards.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import { deferred, pod, twoPods } from '../runtime/fixture.test.js';
 
@@ -140,32 +146,62 @@ it('merges both Pods, falls back between addresses and withdraws a source', asyn
   expect(preview('ada').querySelector('img')).toBeNull();
   expect(preview('ada').getAttribute('aria-label')).toBe('Picture unavailable');
   expect(preview('lovelace').getAttribute('aria-label')).toBe('No picture');
+  // With no reading connection after startup, nothing is "absent".
+  await act(() =>
+    runtime.disconnect(runtime.getSnapshot().find((c) => c.podUrl === pod)!.id),
+  );
+  await waitFor(() =>
+    expect(preview('lovelace').getAttribute('aria-label')).toBe(
+      'Picture unavailable',
+    ),
+  );
 });
 
 it('tells unread, unavailable and absent pictures apart', async () => {
   const { f, runtime, otherUrl } = await twoPods(keep);
   const gate = deferred<void>();
   const data = answers({});
+  const waiting: AbortSignal[] = [];
+  const dropped: AbortSignal[] = [];
   f.setQuery(async (url, init) => {
     const body = String(init?.body);
-    if (body.includes('unread'))
+    if (body.includes('unread')) {
+      if (init?.signal) waiting.push(init.signal);
       return gate.promise.then(() => data(url, init));
+    }
+    if (body.includes('dropped')) {
+      if (init?.signal) dropped.push(init.signal);
+      return new Promise<Response>(() => {});
+    }
     if (body.includes('refused') && url.startsWith(otherUrl))
       return new Response(null, { status: 403 });
     return data(url, init);
   });
-  render(
+  const list = (roots: readonly string[]) => (
     <SempodsProvider runtime={runtime} contextSelection="on-demand">
-      <CardList
-        runtime={runtime}
-        roots={['urn:x:unread', 'urn:x:refused', 'urn:x:absent']}
-      />
-    </SempodsProvider>,
+      <CardList runtime={runtime} roots={roots} />
+    </SempodsProvider>
+  );
+  const view = render(
+    list(['urn:x:unread', 'urn:x:refused', 'urn:x:absent', 'urn:x:dropped']),
   );
   const label = (name: string) => preview(name).getAttribute('aria-label');
   await waitFor(() => expect(label('refused')).toBe('Picture unavailable'));
   await waitFor(() => expect(label('absent')).toBe('No picture'));
   expect(label('unread')).toBe('Not read yet');
+  // A resource that is no longer admitted cancels its running reads.
+  await waitFor(() =>
+    expect([waiting, dropped]).toMatchObject([
+      [{}, {}],
+      [{}, {}],
+    ]),
+  );
+  view.rerender(list(['urn:x:unread', 'urn:x:refused', 'urn:x:absent']));
+  expect(screen.queryByRole('article', { name: 'dropped' })).toBeNull();
+  await waitFor(() =>
+    expect(dropped.map((signal) => signal.aborted)).toEqual([true, true]),
+  );
+  expect(waiting.map((signal) => signal.aborted)).toEqual([false, false]);
   // Once its read answers without a picture, it is absent too.
   gate.resolve();
   await waitFor(() => expect(label('unread')).toBe('No picture'));
@@ -205,4 +241,108 @@ it('reads the details before the waiting reads of the list', async () => {
   });
   // The details' read of c goes before the list's waiting b and c.
   await waitFor(() => expect(sent).toEqual(['a', 'c']));
+});
+
+it('reads once per root and Pod with inline rules', async () => {
+  const { f, runtime } = await twoPods(keep);
+  const data = answers({});
+  let reads = 0;
+  let renders = 0;
+  f.setQuery(async (url, init) => {
+    reads++;
+    return data(url, init);
+  });
+  function Inline() {
+    renders++;
+    // A new, equal array on every render.
+    const { cards, readers } = useResourceCards(runtime, ['urn:x:a'], {
+      rules: [...exampleRules],
+    });
+    return (
+      <>
+        {readers}
+        <output>{cards.get('urn:x:a')?.rule}</output>
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Inline />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(screen.getByRole('status').textContent).toBe('resource'),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const settledRenders = renders;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(renders).toBe(settledRenders);
+  expect(reads).toBe(2);
+});
+
+/** A card with the given pictures, each a list of variant addresses. */
+const cardWith = (pictures: readonly (readonly string[])[], refused = 0) => ({
+  root: 'urn:x:card',
+  members: ['urn:x:card'],
+  rule: 'resource',
+  types: [],
+  sameAs: [],
+  images: pictures.map((variants) => ({
+    variants: variants.map((value) => ({ value, evidence: [] })),
+  })),
+  dates: [],
+  refused,
+  truncated: false,
+});
+const settled = { unread: false, unavailable: false };
+const at = (n: number) => `https://img.example/${n}.jpg`;
+
+it('stops after six failed addresses, also when new ones arrive', () => {
+  const pictures = [[at(1), at(2)], [at(3), at(4)], [at(5), at(6)], [at(7)]];
+  const view = render(
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith(pictures)} status={settled} />
+    </SdkLocaleProvider>,
+  );
+  const box = screen.getByRole('img');
+  for (let n = 1; n <= MAX_ATTEMPTS; n++) {
+    expect(box.querySelector('img')!.getAttribute('src')).toBe(at(n));
+    fireEvent.error(box.querySelector('img')!);
+  }
+  expect(box.querySelector('img')).toBeNull();
+  expect(box.getAttribute('aria-label')).toBe('Picture unavailable');
+  view.rerender(
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith([[at(0)], ...pictures])} status={settled} />
+    </SdkLocaleProvider>,
+  );
+  expect(box.querySelector('img')).toBeNull();
+});
+
+it('keeps a loaded picture when a preferred one arrives', () => {
+  const view = render(
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith([[at(2)]])} status={settled} />
+    </SdkLocaleProvider>,
+  );
+  const box = screen.getByRole('img');
+  fireEvent.load(box.querySelector('img')!);
+  view.rerender(
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith([[at(1)], [at(2)]])} status={settled} />
+    </SdkLocaleProvider>,
+  );
+  expect(box.querySelector('img')!.getAttribute('src')).toBe(at(2));
+  expect(box.getAttribute('aria-label')).toBe('Picture');
+});
+
+it('shows a refused address as unavailable, not absent', () => {
+  render(
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith([], 1)} status={settled} />
+    </SdkLocaleProvider>,
+  );
+  expect(screen.getByRole('img').getAttribute('aria-label')).toBe(
+    'Picture unavailable',
+  );
 });

@@ -71,7 +71,7 @@ own layout and names.
 `<CardDetails runtime={runtime} root={selected} />` shows one selected
 resource with all its evidence. Its reads use `priority: 'current'`: while the
 list's reads still wait for a slot, the selected resource is read first. This
-reads the resource once more, at most once per Pod.
+reads the resource once more, at most once per reading connection.
 
 ## Declared paths
 
@@ -122,8 +122,9 @@ A path has one or two steps, and each step lists alternative predicates:
 - the second step for the nodes it links to.
 
 `GRAPH ?g` names the Context of each statement. Rows are sorted, and at most 200
-are used, so a large resource always loses the same rows. A read that returns
-more marks the card as `truncated`.
+are used. For the same data, a large resource loses the same rows, except
+where linked nodes are blank: their labels can change between reads. A read
+that returns more marks the card as `truncated`.
 
 The enrichment is metadata only. No value becomes another root, the recipe
 reads no linked node beyond its one declared step, and an alias is not
@@ -139,11 +140,13 @@ arrives first:
 - **Type.** The first rule in the list that matches one of the resource's
   types wins. A resource that is both a person and an event shows as a person,
   whichever Pod said so first.
-- **Pictures.** Pictures are ordered by the rule's path order first. Within a
-  step, the predicate order decides, so a thumbnail comes before the original.
-  After that comes the source: Pods in URL order (adapt it, for example to put
-  the active Pod first), then the order of the admitted resources, then the
-  read's sorted rows.
+- **Pictures.** Pictures are ordered by the rule's path order first. Then the
+  declared predicate order decides, in the first step and then in the second:
+  `schema:image` before `foaf:depiction`, and a thumbnail before the original.
+  Only after that comes the source: Pods in URL order (adapt it, for example
+  to put the active Pod first), then the order of the admitted resources, then
+  the read's sorted rows. When a card keeps only four pictures, the preferred
+  ones stay.
 - **Dates.** A card keeps every distinct date term. The first one in predicate
   and source order shows on the card. With more than one, the card says how
   many others exist, and `CardEvidence` lists each with its exact term and
@@ -194,11 +197,15 @@ its own state:
   beyond the current reads: a read that answers again brings the values back.
 - **Limits.** Reads beyond `podReadLimit` wait in `loading`. A grant change
   while they wait spends no retry.
+- **Rules.** They are compared by value, so an inline array does not read
+  again on every render. Changed rules give a new query and read again.
 
 `status(card)` tells the app what the reads of the card's members say:
 
-- `unread`: a read has not answered yet.
-- `unavailable`: a read failed, was refused or lost access.
+- `unread`: a read has not answered yet. With no reading connection, the
+  card is `unread` until startup settles.
+- `unavailable`: a read failed, was refused or lost access, or no connection
+  reads after startup.
 
 The recipe shows no retry on a card. To read again, the app remounts the
 reads. It can also show one source-level notice, for example with `LoadNotice`.
@@ -225,11 +232,12 @@ leads or what a host name resolves to.
 The preview is bounded:
 
 - A card keeps at most four pictures with up to three variants each. Variants
-  of one picture are those of the same linked node, and those that share an
-  address: the same address from two Pods counts once.
-- A preview tries at most six addresses (`MAX_ATTEMPTS`), in card order. When
-  one fails to load or decode, it moves to the next, and it never retries a
-  failed address.
+  of one picture are those of the same linked node (a blank node only within
+  its read), and those that share an address: the same address from two Pods counts once.
+- A preview tries the addresses in card order. When one fails to load or
+  decode, it moves to the next. It never retries a failed address, and after
+  six failures (`MAX_ATTEMPTS`) it tries no further address, also when new
+  ones arrive.
 - A loaded picture stays while its address is still a candidate. A better
   candidate that arrives later does not replace it.
 

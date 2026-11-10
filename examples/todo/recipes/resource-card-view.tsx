@@ -7,6 +7,7 @@ import {
 } from 'react';
 import type { BoundPod, BrowserRuntime, Connection } from '@sempods/app-sdk';
 import {
+  useAppState,
   useConnections,
   useMessages,
   usePodLoad,
@@ -21,6 +22,7 @@ import {
 import {
   cardQuery,
   exampleRules,
+  MAX_ATTEMPTS,
   previewCandidates,
   resourceCards,
   sourceFacts,
@@ -81,6 +83,7 @@ export interface CardStatus {
 }
 
 export interface CardOptions {
+  /** Compared by value: changed rules read again with the new query. */
   readonly rules?: readonly CardRule[];
   /** For what the person looks at now, such as the details of one resource. */
   readonly priority?: 'current';
@@ -94,8 +97,15 @@ export interface CardOptions {
 export function useResourceCards(
   runtime: BrowserRuntime,
   roots: readonly string[],
-  { rules = exampleRules, priority }: CardOptions = {},
+  { rules: given = exampleRules, priority }: CardOptions = {},
 ) {
+  // An inline rules array is new on every render; keep the equal one.
+  const [rules, setRules] = useState(given);
+  if (rules !== given && JSON.stringify(rules) !== JSON.stringify(given))
+    setRules(given);
+  // A card without any reading connection is unread until startup settles.
+  const { startup, startupError } = useAppState();
+  const settled = startup !== undefined || startupError !== undefined;
   // Source precedence needs a stable order: Pod URL, then connection.
   // Adapt it, for example to put the active Pod first.
   const connections = useConnections()
@@ -128,6 +138,7 @@ export function useResourceCards(
     const own = pairs
       .filter(({ root }) => card.members.includes(root))
       .map(({ key }) => reports.get(key));
+    if (own.length === 0) return { unread: !settled, unavailable: settled };
     return {
       unread: own.some((read) => !read?.settled),
       unavailable: own.some((read) => read?.failed),
@@ -158,14 +169,16 @@ function CardRead(props: {
   readonly report: (key: string, value?: Report) => void;
 }) {
   const { id, pod, podUrl, root, rules, priority, report } = props;
+  const query = cardQuery(root, rules);
+  // The query is the read's input: new rules read again.
   const load = usePodLoad(
     pod,
     (reader, signal) =>
-      reader.sparql.select(cardQuery(root, rules), {
+      reader.sparql.select(query, {
         signal,
         ...(priority ? { priority } : {}),
       }),
-    { key: root },
+    { key: query },
   );
   const data = load.data;
   const facts = useMemo(
@@ -206,10 +219,13 @@ export function ImagePreview({
   const [failed, setFailed] = useState<readonly string[]>([]);
   const [loaded, setLoaded] = useState<readonly string[]>([]);
   // Keep a loaded picture while it is still a candidate; a withdrawn address
-  // is no candidate, so its element is removed in this render.
+  // is no candidate, so its element is removed in this render. After
+  // MAX_ATTEMPTS failures, the preview tries no further address.
   const url =
     urls.find((value) => loaded.includes(value) && !failed.includes(value)) ??
-    urls.find((value) => !failed.includes(value));
+    (failed.length < MAX_ATTEMPTS
+      ? urls.find((value) => !failed.includes(value))
+      : undefined);
   const ready = url !== undefined && loaded.includes(url);
   const state: PreviewState = ready
     ? 'shown'

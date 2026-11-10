@@ -73,7 +73,7 @@ export const MAX_ROWS = 200;
 /** Pictures per card, and variants (thumbnail, original, direct) per picture. */
 export const MAX_IMAGES = 4;
 export const MAX_VARIANTS = 3;
-/** Image addresses one preview tries before it shows "unavailable". */
+/** Failed image addresses after which a preview stops and shows "unavailable". */
 export const MAX_ATTEMPTS = 6;
 
 /** Where one value comes from: one statement in one Context of one Pod. */
@@ -99,7 +99,10 @@ interface ImageMatch {
   readonly link?: string;
   readonly predicate: string;
   readonly url: string;
-  /** The image's node, if it is an IRI: variants of one node are one picture. */
+  /**
+   * The image's node: variants of one node are one picture. An IRI, or for a
+   * blank node a key that is unique to its read (Pod, root and label).
+   */
   readonly node?: string;
   readonly evidence: readonly Evidence[];
 }
@@ -250,7 +253,10 @@ export function sourceFacts(
           {
             link: linkRow.p,
             predicate: p,
-            ...(row.s.type === 'iri' ? { node: row.s.value } : {}),
+            node:
+              row.s.type === 'iri'
+                ? row.s.value
+                : JSON.stringify([pod, root, exactTerm(row.s)]),
             evidence: [linkRow.evidence, evidence],
           },
           addressValue(o),
@@ -311,9 +317,10 @@ export function imageAddress(value: string): string | undefined {
   if (!address) return undefined;
   const url = new URL(address.href);
   if (url.protocol !== 'https:') return undefined;
-  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  const host = url.hostname.toLowerCase().replace(/\.+$/, '');
   if (
     host.includes(':') ||
+    host.split('.').some((label) => !label) ||
     /^[\d.]+$/.test(host) ||
     !host.includes('.') ||
     /(^|\.)(localhost|localdomain|local|internal|home|lan|arpa|test|invalid)$/.test(
@@ -429,7 +436,10 @@ function cardOf(
   };
 }
 
-/** Value precedence: the rule's path order, then the predicate order in a step, then sources. */
+/**
+ * Value precedence: the rule's path order, then the declared predicate order
+ * of the first step and of the second, then sources and the read's rows.
+ */
 function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
   const ranked = facts
     .flatMap((fact) => fact.images)
@@ -442,10 +452,18 @@ function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
           : match.link === undefined && path[0].includes(match.predicate),
       );
       if (path < 0) return [];
-      const step = rule.images[path]!.at(-1)!;
-      return [{ match, path, rank: step.indexOf(match.predicate), index }];
+      const steps = rule.images[path]!;
+      const first = steps[0].indexOf(match.link ?? match.predicate);
+      const rank = steps.length === 2 ? steps[1].indexOf(match.predicate) : 0;
+      return [{ match, path, first, rank, index }];
     })
-    .sort((a, b) => a.path - b.path || a.index - b.index);
+    .sort(
+      (a, b) =>
+        a.path - b.path ||
+        a.first - b.first ||
+        a.rank - b.rank ||
+        a.index - b.index,
+    );
   const images: {
     node?: string;
     variants: { value: string; evidence: Evidence[]; rank: number }[];
@@ -502,13 +520,12 @@ function datesOf(
   return dates;
 }
 
-/** The addresses a preview tries, in order: deduplicated and bounded. */
-export function previewCandidates(
-  images: readonly CardImage[],
-  max = MAX_ATTEMPTS,
-): string[] {
-  const urls = new Set(
-    images.flatMap((image) => image.variants.map((v) => v.value)),
-  );
-  return [...urls].slice(0, max);
+/**
+ * The addresses a preview may try, in order and deduplicated. The preview
+ * bounds its attempts with `MAX_ATTEMPTS`.
+ */
+export function previewCandidates(images: readonly CardImage[]): string[] {
+  return [
+    ...new Set(images.flatMap((image) => image.variants.map((v) => v.value))),
+  ];
 }
