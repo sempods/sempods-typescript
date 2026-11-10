@@ -148,7 +148,9 @@ a `subject`, `predicate` and `object` as `SparqlTerm`:
 
 - A language-tagged literal has its `language` and no datatype.
 - A literal of `xsd:string` has no datatype; any other datatype is kept, with
-  its lexical form unchanged.
+  its lexical form unchanged. A JSON number in JSON-LD has no lexical form and
+  gets the canonical one (`1.5` becomes `"1.5E0"^^xsd:double`); a string such
+  as `"01.00"` with `xsd:double` stays as written.
 - A literal with a base direction (Turtle's `"…"@ar--rtl`, or JSON-LD's
   `@direction` with `@language`) and an RDF 1.2 triple term are `unsupported`
   terms. They keep the term in SPARQL 1.2 JSON form (`its:dir`, or

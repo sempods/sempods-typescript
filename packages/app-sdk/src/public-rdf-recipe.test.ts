@@ -634,6 +634,34 @@ describe('public RDF lookup: parsed statements', () => {
     expect(statements).toHaveLength(5);
   });
 
+  it('keeps the lexical form of a JSON-LD xsd:double string', async () => {
+    const statements = await loaded(
+      JSON.stringify({
+        '@context': {
+          xsd: XSD,
+          ratio: { '@id': `${SCHEMA}ratio`, '@type': 'xsd:double' },
+        },
+        '@id': IRI,
+        ratio: '01.00',
+        [`${SCHEMA}value`]: [
+          { '@value': '1e1', '@type': `${XSD}double` },
+          { '@value': 1.5 },
+        ],
+      }),
+      'application/ld+json',
+    );
+
+    expect(statements.map((s) => s.object)).toEqual(
+      expect.arrayContaining([
+        { type: 'literal', value: '01.00', datatype: `${XSD}double` },
+        { type: 'literal', value: '1e1', datatype: `${XSD}double` },
+        // A JSON number has no lexical form; JSON-LD gives it the canonical one.
+        { type: 'literal', value: '1.5E0', datatype: `${XSD}double` },
+      ]),
+    );
+    expect(statements).toHaveLength(3);
+  });
+
   it('merges the statements of JSON-LD named graphs', async () => {
     const statements = await loaded(
       JSON.stringify({

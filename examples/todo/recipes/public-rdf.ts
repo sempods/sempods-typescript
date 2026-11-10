@@ -362,16 +362,25 @@ async function jsonLd(
     };
   };
   try {
-    const quads = await jsonld.toRDF(
-      nodes as Parameters<typeof jsonld.toRDF>[0],
-      {
-        base,
-        documentLoader,
-        // Keeps `@direction` as an i18n datatype instead of dropping it.
-        rdfDirection: 'i18n-datatype',
-      } as Options.ToRdf,
+    const expanded = await jsonld.expand(
+      nodes as Parameters<typeof jsonld.expand>[0],
+      { base, documentLoader },
     );
-    return statements((quads as unknown as readonly Quad[]).map(directional));
+    // jsonld rewrites every xsd:double to its canonical form, also a string
+    // such as "01.00"; JSON-LD 1.1 does that only for JSON numbers. A
+    // placeholder datatype keeps the string as written.
+    const placeholder = `urn:uuid:${crypto.randomUUID()}`;
+    keepDoubles(expanded, placeholder);
+    const quads = await jsonld.toRDF(expanded, {
+      documentLoader,
+      // Keeps `@direction` as an i18n datatype instead of dropping it.
+      rdfDirection: 'i18n-datatype',
+    } as Options.ToRdf);
+    return statements(
+      (quads as unknown as readonly Quad[]).map((quad) =>
+        directional(restoreDouble(quad, placeholder)),
+      ),
+    );
   } catch {
     return remote ? 'remote-context' : 'parse-failed';
   }
@@ -411,6 +420,29 @@ function statements(quads: readonly Quad[]): readonly PublicStatement[] {
     result.push(statement);
   }
   return result;
+}
+
+const XSD_DOUBLE = 'http://www.w3.org/2001/XMLSchema#double';
+
+/** Marks expanded value objects whose xsd:double lexical form is a string. */
+function keepDoubles(value: unknown, placeholder: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) keepDoubles(item, placeholder);
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  const node = value as Record<string, unknown>;
+  if (typeof node['@value'] === 'string' && node['@type'] === XSD_DOUBLE)
+    node['@type'] = placeholder;
+  for (const item of Object.values(node)) keepDoubles(item, placeholder);
+}
+
+function restoreDouble(quad: Quad, placeholder: string): Quad {
+  if (quad.object.datatype?.value !== placeholder) return quad;
+  return {
+    ...quad,
+    object: { ...quad.object, datatype: { value: XSD_DOUBLE } },
+  };
 }
 
 /** jsonld's `i18n-datatype` form of `@language` with `@direction`. */
