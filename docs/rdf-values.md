@@ -189,7 +189,7 @@ app, and record them in the app's notes.
 
 - Numbers and booleans show their stored text, not a localized form.
 - The recipe shows no images or other media, and it does not look labels up on
-  the web.
+  the web. For pictures, see [resource cards](resource-cards.md).
 - `webAddress` checks the form of an address, not its destination: a loopback or
   private-network host is offered as a link too.
 - The SDK's tests run the recipe through the SELECT decoder and render it in
