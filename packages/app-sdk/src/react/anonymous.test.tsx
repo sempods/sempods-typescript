@@ -352,6 +352,7 @@ function ExplicitCreation() {
   return (
     <input
       aria-label="Title"
+      disabled={!creation.canEdit}
       value={creation.draft.title}
       onChange={(event) => creation.change({ title: event.target.value })}
     />
@@ -375,10 +376,11 @@ it('keeps an explicit-Context creation draft when the session ends', async () =>
     </SempodsProvider>,
   );
   const title = (await screen.findByLabelText('Title')) as HTMLInputElement;
-  await waitFor(() => {
-    fireEvent.change(title, { target: { value: 'Unsaved task' } });
-    expect(title.value).toBe('Unsaved task');
-  });
+  // Change it once the form can edit: changing inside `waitFor` would
+  // re-run on every DOM mutation the ignored change causes.
+  await waitFor(() => expect(title.disabled).toBe(false));
+  fireEvent.change(title, { target: { value: 'Unsaved task' } });
+  await waitFor(() => expect(title.value).toBe('Unsaved task'));
   await act(async () => {
     await renewal(f, runtime, id, 'refused');
   });
