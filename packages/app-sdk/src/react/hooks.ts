@@ -1029,8 +1029,12 @@ export type FieldUpdate<D> = ReturnType<typeof useFieldUpdate<D>>;
  * `runtime.bindContext`. A configuration refusal (not a Context of this Pod,
  * or not the preset's) is reported; while signed out it waits. It demands
  * catalogue discovery, so its write access is known, but no selection.
+ * While `hold` (unresolved work on it), a binding that lost access stays,
+ * also when a new one is available: a session that ended under
+ * `signIn: 'optional'` reads on without a token through a new binding only
+ * once that work is resolved or discarded.
  */
-function useExplicitView(context: string | undefined) {
+function useExplicitView(context: string | undefined, hold = false) {
   const app = useController();
   const { activeId, ready } = useAppFacts(
     (s) => ({
@@ -1055,7 +1059,8 @@ function useExplicitView(context: string | undefined) {
     () => bound?.getSnapshot().current ?? true,
   );
   useEffect(() => {
-    if (!key || !ready || current === 'refused' || (current && live)) return;
+    if (!key || !ready || current === 'refused' || (current && (live || hold)))
+      return;
     try {
       const view = app.runtime.bindContext(activeId!, context!);
       if (view !== current) setBinding({ key, view });
@@ -1065,7 +1070,7 @@ function useExplicitView(context: string | undefined) {
         setBinding({ key, view: 'refused' });
       else if (error.problem !== 'disconnected') throw error;
     }
-  }, [app, key, ready, current, live, activeId, context]);
+  }, [app, key, ready, current, live, hold, activeId, context]);
   useContextDiscovery(current !== null && current !== 'refused');
   return {
     view: current === 'refused' ? null : current,
@@ -1112,7 +1117,10 @@ export function useCreation<D extends object>(
     readonly id?: string;
   },
 ) {
-  const explicit = useExplicitView(options.context);
+  // Whether this form holds work (a draft, or an open creation): its explicit
+  // binding then stays through access loss, as the selected view does.
+  const [holding, setHolding] = useState(false);
+  const explicit = useExplicitView(options.context, holding);
   const selected = useView();
   const fixed = options.context !== undefined;
   const view = fixed ? explicit.view : selected;
@@ -1203,14 +1211,13 @@ export function useCreation<D extends object>(
     if (current.current.view !== view || current.current.key !== key) return;
     replace(copy(initial.current));
   };
-  useDraftGuard(
-    JSON.stringify(draft) !== JSON.stringify(options.initial),
-    reset,
-    fixed ? 'explicit' : 'target',
-  );
+  const dirty = JSON.stringify(draft) !== JSON.stringify(options.initial);
+  useDraftGuard(dirty, reset, fixed ? 'explicit' : 'target');
   // Pending, unresolved or held for an explicit retry.
   const locked = (of: CreationLane<D> | null | undefined) =>
     Boolean(of?.outstanding());
+  const unresolved = dirty || locked(lane);
+  useLayoutEffect(() => setHolding(unresolved), [unresolved]);
   const valid = (value: D) => {
     try {
       return definition.valid?.(value) ?? true;

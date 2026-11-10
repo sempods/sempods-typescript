@@ -7,6 +7,7 @@
  */
 import { webcrypto } from 'node:crypto';
 import { useState } from 'react';
+import { fields, text } from '@sempods/client-sdk/edit';
 import {
   act,
   cleanup,
@@ -32,6 +33,7 @@ import {
   SempodsProvider,
   TargetScreen,
   useAppState,
+  useCreation,
   useDraftGuard,
 } from './index.js';
 
@@ -337,4 +339,54 @@ it('lists every Pod read without a token in the Pod selector', async () => {
   expect(
     screen.queryByRole('list', { name: 'Pods on this device' }),
   ).toBeNull();
+});
+
+function ExplicitCreation() {
+  const creation = useCreation(
+    fields(
+      { title: text('urn:title', { language: null }) },
+      { type: 'urn:Task' },
+    ),
+    { initial: { title: '' }, collection: 'tasks', context: work },
+  );
+  return (
+    <input
+      aria-label="Title"
+      value={creation.draft.title}
+      onChange={(event) => creation.change({ title: event.target.value })}
+    />
+  );
+}
+
+it('keeps an explicit-Context creation draft when the session ends', async () => {
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  // Signed in, `work` is writable; without a token it is read-only.
+  f.setCatalogue(async (_url, init) =>
+    new Headers(init?.headers).get('authorization')
+      ? catalogue([work], [work])
+      : catalogue([work], []),
+  );
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Recipes" />
+      <ExplicitCreation />
+    </SempodsProvider>,
+  );
+  const title = (await screen.findByLabelText('Title')) as HTMLInputElement;
+  await waitFor(() => {
+    fireEvent.change(title, { target: { value: 'Unsaved task' } });
+    expect(title.value).toBe('Unsaved task');
+  });
+  await act(async () => {
+    await renewal(f, runtime, id, 'refused');
+  });
+  await waitFor(() =>
+    expect(runtime.getSnapshot()[0]!.reading).toBe('anonymous'),
+  );
+  // Same-target access loss: the form keeps its draft.
+  await act(async () => {});
+  expect(screen.getByLabelText('Title')).toBe(title);
+  expect(title.value).toBe('Unsaved task');
 });
