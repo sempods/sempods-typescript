@@ -707,7 +707,9 @@ function AccessConnections({
       await app.authorize(existing.id);
     } else await app.connect(target);
   }
-  const showNew = (manage && mode === 'multiple') || !c;
+  // Without sign-in only the default Pod connects: no other address to add.
+  const showNew =
+    state.signIn !== 'none' && ((manage && mode === 'multiple') || !c);
   const showDefault =
     (mode === 'multiple' || !c) &&
     defaultUrl &&
@@ -885,11 +887,20 @@ function AccessConnections({
     </ul>
   );
   // Nothing to sign out of without sign-in, or before any session.
+  // A connection that reads without a token has no session to sign out of;
+  // a remembered address (or one whose session ended here) is forgotten.
   const signsOut =
     c !== undefined &&
+    !anonymous &&
     state.signIn !== 'none' &&
     c.session.kind !== 'signed-out' &&
     (manage || c.session.kind === 'ended');
+  const forgets =
+    c !== undefined &&
+    anonymous &&
+    state.signIn === 'optional' &&
+    (c.session.kind === 'ended' ||
+      (c.session.kind === 'signed-out' && c.session.problem !== undefined));
   const actions = (
     <>
       {c && (
@@ -923,6 +934,14 @@ function AccessConnections({
               onClick={() => void act(() => app.disconnect(c.id))}
             >
               {disconnectFailed ? m.controls.retry : m.controls.disconnect}
+            </button>
+          )}
+          {forgets && (
+            <button
+              disabled={unavailable}
+              onClick={() => void act(() => app.forget(c.id))}
+            >
+              {m.controls.forget}
             </button>
           )}
         </div>

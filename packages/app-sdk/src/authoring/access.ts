@@ -31,7 +31,8 @@ export interface AccessPrompt {
     | 'sharing-unchanged'
     /**
      * The active connection reads without a token (`signIn: 'optional'`):
-     * only public data, no writes. An `action` with `sign-in` and `dismiss`.
+     * only public data, no writes. An `action` with `sign-in` and `dismiss`,
+     * and `forget` once the person signed out (the address is remembered).
      */
     | 'anonymous';
   /** The connection it is about; `null` for startup and callback problems without one. */
@@ -151,8 +152,16 @@ function connectionCause(
     const chosen = s.problem === undefined || s.problem === 'disconnected';
     if (!active && chosen) return undefined;
     // Read without a token: signing in is offered, not demanded.
+    // Read without a token: signing in is offered, not demanded; an address
+    // the person signed out of stays on this device until forgotten.
     if (chosen && c.reading === 'anonymous')
-      return cause('anonymous', 'action', ['sign-in', 'dismiss']);
+      return cause(
+        'anonymous',
+        'action',
+        s.problem === 'disconnected'
+          ? ['sign-in', 'forget', 'dismiss']
+          : ['sign-in', 'dismiss'],
+      );
     return severe('signed-out', ['sign-in', 'forget'], { problem: s.problem });
   }
   if (

@@ -547,7 +547,10 @@ describe('without required sign-in (#240)', () => {
           severity: 'action',
           reason: 'anonymous',
           connectionId: 'a',
-          actions: ['sign-in', 'dismiss'],
+          // A Pod the person signed out of is remembered: it can be forgotten.
+          actions: problem
+            ? ['sign-in', 'forget', 'dismiss']
+            : ['sign-in', 'dismiss'],
         },
       ]);
     }

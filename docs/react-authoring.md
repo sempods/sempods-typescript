@@ -1189,7 +1189,8 @@ const runtime = createBrowserRuntime({
 - **`optional`**: the app starts reading the preset's public data, without a
   sign-in screen. The Context chooser lists the public Contexts, and a view of
   one reads but never writes (`write: false`; `AccessNotice` says read-only).
-  An `action` prompt with reason `anonymous` offers **Sign in**
+  An `action` prompt with reason `anonymous` offers **Sign in**, and
+  **Forget** after the person signed out
   (`controls.anonymous`); after signing in, the app reads with the session.
   When a session ends, the app keeps reading without a token, and the
   `signed-out` prompt asks instead of blocking. Without a preset, the gate's

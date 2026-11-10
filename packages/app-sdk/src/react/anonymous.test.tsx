@@ -148,7 +148,47 @@ it('offers no sign-in under none and explains read-only access in German', async
   expect(prompts()).toEqual([]);
   expect(screen.queryByRole('button', { name: 'Anmelden' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Abmelden' })).toBeNull();
+  // Only the default Pod connects: no address to add another one.
+  expect(screen.queryByLabelText('Pod-Adresse')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Öffnen' })).toBeNull();
   expect(f.navigate).not.toHaveBeenCalled();
+});
+
+it('lets the person forget a Pod they signed out of, while reading on', async () => {
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  expect(await runtime.disconnect(id)).toEqual({ kind: 'disconnected' });
+  expect(runtime.getSnapshot()[0]).toMatchObject({
+    session: { kind: 'signed-out', problem: 'disconnected' },
+    reading: 'anonymous',
+  });
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Recipes" open />
+    </SempodsProvider>,
+  );
+  const prompt = await waitFor(() => {
+    const [shown] = prompts();
+    expect(shown?.dataset.reason).toBe('anonymous');
+    return shown!;
+  });
+  expect(within(prompt).getByRole('button', { name: 'Forget' })).toBeTruthy();
+  // Management offers it too, and no sign-out without a session.
+  const management = document.querySelector<HTMLElement>(
+    '[data-sempods-access]:not([hidden])',
+  )!;
+  expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  await act(async () =>
+    within(management).getByRole('button', { name: 'Forget' }).click(),
+  );
+  // Forgotten: the default Pod is listed again, never signed in to.
+  await waitFor(() =>
+    expect(runtime.getSnapshot()).toMatchObject([
+      { session: { kind: 'signed-out' }, reading: 'anonymous' },
+    ]),
+  );
+  expect(runtime.getSnapshot()[0]!.session).toEqual({ kind: 'signed-out' });
 });
 
 it('shows the anonymous prompt in German', async () => {

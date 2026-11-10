@@ -439,7 +439,15 @@ export function createBrowserRuntime(
       entries.get(e.view.id) !== e ||
       !(
         s.kind === 'signed-out' ||
-        (s.kind === 'ended' && !s.restorable && s.problem !== 'disconnected')
+        (s.kind === 'ended' &&
+          !s.restorable &&
+          // A sign-out or forget in progress, or one that could not be saved,
+          // keeps the connection blocked; a session that ended by a record
+          // conflict does not.
+          !(
+            s.problem === 'disconnected' &&
+            (disconnects.has(e.view.id) || s.saved === false || s.forget)
+          ))
       )
     )
       return;
