@@ -56,8 +56,12 @@ export function createAdmission(
   const inFlight = new Map<string, number>();
   /** Waiting reads per Pod in arrival order; a Pod without waiting reads has no entry. */
   const waiting = new Map<string, Job[]>();
-  /** The Pod whose turn came last, for round-robin admission. */
-  let last: string | undefined;
+  /**
+   * When each Pod last had a read admitted. The waiting Pod admitted least
+   * recently goes next, also after a Pod's queue emptied and filled again.
+   */
+  const turns = new Map<string, number>();
+  let turn = 0;
   let streak = 0;
   let arrivals = 0;
 
@@ -89,18 +93,20 @@ export function createAdmission(
         return job;
       }
     }
-    // Round robin over the Pods, starting after the one served last.
-    const all = [...waiting.keys()];
-    const start = last === undefined ? 0 : all.indexOf(last) + 1;
-    for (let i = 0; i < all.length; i++) {
-      const pod = all[(start + i) % all.length]!;
-      if (!free(pod)) continue;
+    // Round robin: the eligible Pod with a normal read admitted least recently.
+    let chosen: Job | undefined;
+    let oldest = Infinity;
+    for (const pod of pods) {
       const job = waiting.get(pod)!.find((j) => !j.priority);
-      if (job) {
-        last = pod;
-        streak = 0;
-        return job;
+      const at = turns.get(pod) ?? -1;
+      if (job && at < oldest) {
+        chosen = job;
+        oldest = at;
       }
+    }
+    if (chosen) {
+      streak = 0;
+      return chosen;
     }
     // Only priority reads wait: no normal read to make room for.
     const job = priority();
@@ -108,6 +114,7 @@ export function createAdmission(
     return job;
   }
   function start(pod: string): Release {
+    turns.set(pod, turn++);
     running++;
     inFlight.set(pod, (inFlight.get(pod) ?? 0) + 1);
     let done = false;

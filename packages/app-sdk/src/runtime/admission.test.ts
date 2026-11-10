@@ -73,6 +73,25 @@ it('admits up to the per-Pod and total limits and lets waiting Pods take turns',
   expect(q.order.indexOf('a5')).toBeLessThan(q.order.indexOf('b5') + 3);
 });
 
+it('serves every waiting Pod before a Pod whose queue emptied and filled again', async () => {
+  const q = queue({ total: 1 });
+  for (let i = 0; i < 5; i++) q.add(`a${i}`, 'A');
+  for (const pod of ['B', 'C', 'D', 'E']) q.add(pod.toLowerCase(), pod);
+  await flush();
+  while (q.held.length) await q.finish();
+  expect(q.order).toEqual(['a0', 'b', 'c', 'd', 'e', 'a1', 'a2', 'a3', 'a4']);
+  // A Pod that waited longest goes first, though it arrived after A again.
+  const r = queue({ total: 1 });
+  r.add('a0', 'A');
+  r.add('b0', 'B');
+  r.add('b1', 'B');
+  await flush();
+  await r.finish(); // a0; A's queue is empty now, B's turn
+  r.add('a1', 'A');
+  while (r.held.length) await r.finish();
+  expect(r.order).toEqual(['a0', 'b0', 'a1', 'b1']);
+});
+
 it('a free slot goes to a read of another Pod while one Pod is at its limit', async () => {
   const q = queue({ perPod: 1, total: 4 });
   q.add('a0', 'A');
