@@ -196,6 +196,7 @@ describe('facts of one read', () => {
       'https://router.home.arpa/a.jpg',
       'https://localhost../a.jpg',
       'https://printer.local../a.jpg',
+      'https://a..img.example/a.jpg',
       'javascript:alert(1)',
       'data:image/png;base64,AAAA',
     ];

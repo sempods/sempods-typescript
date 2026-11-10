@@ -169,16 +169,17 @@ function CardRead(props: {
   readonly report: (key: string, value?: Report) => void;
 }) {
   const { id, pod, podUrl, root, rules, priority, report } = props;
-  const query = cardQuery(root, rules);
-  // The query is the read's input: new rules read again.
+  const query = queryFor(root, rules);
+  // The query is the read's input: new rules read again. A root that is no
+  // IRI is not read: without a handle, the read becomes unavailable.
   const load = usePodLoad(
-    pod,
+    query === undefined ? null : pod,
     (reader, signal) =>
-      reader.sparql.select(query, {
+      reader.sparql.select(query ?? '', {
         signal,
         ...(priority ? { priority } : {}),
       }),
-    { key: query },
+    { key: query ?? root },
   );
   const data = load.data;
   const facts = useMemo(
@@ -196,6 +197,14 @@ function CardRead(props: {
   // Unmount (root no longer admitted, connection gone) withdraws the facts.
   useEffect(() => () => report(id), [id, report]);
   return null;
+}
+
+function queryFor(root: string, rules: readonly CardRule[]) {
+  try {
+    return cardQuery(root, rules);
+  } catch {
+    return undefined;
+  }
 }
 
 type PreviewState = 'shown' | 'loading' | 'unread' | 'unavailable' | 'absent';

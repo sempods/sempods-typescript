@@ -243,20 +243,22 @@ it('reads the details before the waiting reads of the list', async () => {
   await waitFor(() => expect(sent).toEqual(['a', 'c']));
 });
 
-it('reads once per root and Pod with inline rules', async () => {
+it('reads once per root and Pod with inline rules, again for new rules', async () => {
   const { f, runtime } = await twoPods(keep);
   const data = answers({});
   let reads = 0;
   let renders = 0;
+  const queries: string[] = [];
   f.setQuery(async (url, init) => {
     reads++;
+    queries.push(String(init?.body));
     return data(url, init);
   });
-  function Inline() {
+  function Inline({ only = false }: { readonly only?: boolean }) {
     renders++;
     // A new, equal array on every render.
     const { cards, readers } = useResourceCards(runtime, ['urn:x:a'], {
-      rules: [...exampleRules],
+      rules: only ? exampleRules.slice(-1) : [...exampleRules],
     });
     return (
       <>
@@ -265,7 +267,7 @@ it('reads once per root and Pod with inline rules', async () => {
       </>
     );
   }
-  render(
+  const view = render(
     <SempodsProvider runtime={runtime} contextSelection="on-demand">
       <Inline />
     </SempodsProvider>,
@@ -277,6 +279,39 @@ it('reads once per root and Pod with inline rules', async () => {
   const settledRenders = renders;
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(renders).toBe(settledRenders);
+  expect(reads).toBe(2);
+  // Other rules declare other predicates: each Pod reads the new query.
+  view.rerender(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Inline only />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(reads).toBe(4));
+  expect(queries[2]).not.toBe(queries[0]);
+  expect(queries[2]).not.toContain('startDate');
+});
+
+it('shows a root that is no IRI as unavailable without reading it', async () => {
+  const { f, runtime } = await twoPods(keep);
+  const data = answers({});
+  let reads = 0;
+  f.setQuery(async (url, init) => {
+    reads++;
+    return data(url, init);
+  });
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <CardList runtime={runtime} roots={['urn:x:bad>', 'urn:x:good']} />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(preview('bad>').getAttribute('aria-label')).toBe(
+      'Picture unavailable',
+    ),
+  );
+  await waitFor(() =>
+    expect(preview('good').getAttribute('aria-label')).toBe('No picture'),
+  );
   expect(reads).toBe(2);
 });
 

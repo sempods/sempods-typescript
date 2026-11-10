@@ -437,8 +437,9 @@ function cardOf(
 }
 
 /**
- * Value precedence: the rule's path order, then the declared predicate order
- * of the first step and of the second, then sources and the read's rows.
+ * Picture precedence: the rule's path order, then the declared predicate
+ * order of the first step, then sources and the read's rows. The second
+ * step's order sorts the variants within a picture.
  */
 function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
   const ranked = facts
@@ -457,13 +458,7 @@ function imagesOf(rule: CardRule, facts: readonly SourceFacts[]): CardImage[] {
       const rank = steps.length === 2 ? steps[1].indexOf(match.predicate) : 0;
       return [{ match, path, first, rank, index }];
     })
-    .sort(
-      (a, b) =>
-        a.path - b.path ||
-        a.first - b.first ||
-        a.rank - b.rank ||
-        a.index - b.index,
-    );
+    .sort((a, b) => a.path - b.path || a.first - b.first || a.index - b.index);
   const images: {
     node?: string;
     variants: { value: string; evidence: Evidence[]; rank: number }[];
