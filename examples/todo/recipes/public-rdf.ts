@@ -63,7 +63,7 @@ export type PublicRdfFailure =
 export type PublicRdfResult =
   | {
       readonly kind: 'loaded';
-      /** The document the statements came from (the IRI without fragment). */
+      /** The document: the IRI as given, without its fragment. */
       readonly source: string;
       readonly contentType: string;
       readonly statements: readonly PublicStatement[];
@@ -126,10 +126,13 @@ export async function lookupPublicRdf(
 ): Promise<PublicRdfResult> {
   const address = publicAddress(iri);
   if (address.kind === 'failed') return address;
-  // A fragment is never sent; the document is the IRI without it.
+  // A fragment is never sent; the document is the IRI without it. `url` is the
+  // normalised form to request; `documentIri` keeps the caller's exact
+  // spelling for the source and the base, so `<#item>` means what they asked.
   const document = new URL(address.url);
   document.hash = '';
   const url = document.href;
+  const documentIri = iri.trim().split('#')[0]!;
   const outer = options.signal;
   if (outer?.aborted) return { kind: 'cancelled' };
 
@@ -206,14 +209,19 @@ export async function lookupPublicRdf(
     const parsed = await parse(
       body.text,
       contentType,
-      url,
+      documentIri,
       options.contexts ?? {},
     );
     // Parsing is bounded by the byte cap, not by the deadline.
     const late = stopped();
     if (late?.kind === 'cancelled') return late;
     if (typeof parsed === 'string') return { kind: 'failed', reason: parsed };
-    return { kind: 'loaded', source: url, contentType, statements: parsed };
+    return {
+      kind: 'loaded',
+      source: documentIri,
+      contentType,
+      statements: parsed,
+    };
   } finally {
     clearTimeout(timer);
     outer?.removeEventListener('abort', cancel);

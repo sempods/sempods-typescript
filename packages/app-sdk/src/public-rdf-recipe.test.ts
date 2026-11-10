@@ -115,6 +115,30 @@ describe('public RDF lookup: request policy', () => {
     });
   });
 
+  it('keeps the IRI as given for the source and the base', async () => {
+    const given = 'https://DATA.example.org:443/a#item';
+    const fetch = serve(
+      answer(`<#item> <${RDFS_LABEL}> "Item" .`, 'text/turtle'),
+    );
+
+    const result = await lookupPublicRdf(given, { fetch });
+
+    // The request goes to the normalised URL; the statements keep the spelling.
+    expect(fetch.mock.calls[0]![0]).toBe('https://data.example.org/a');
+    expect(result).toEqual({
+      kind: 'loaded',
+      source: 'https://DATA.example.org:443/a',
+      contentType: 'text/turtle',
+      statements: [
+        {
+          subject: iri(given),
+          predicate: iri(RDFS_LABEL),
+          object: { type: 'literal', value: 'Item' },
+        },
+      ],
+    });
+  });
+
   it.each([
     ['not an IRI', 'invalid-iri'],
     ['http://data.example.org/a', 'unsupported-scheme'],

@@ -76,9 +76,11 @@ path:
 - **Exact identity.** An IRI is compared as received: `http://` and `https://`,
   a trailing slash and letter case make different IRIs. The lookup normalises
   nothing.
-- **Separate source.** The statements belong to `result.source`, the document
-  URL (the IRI without its fragment). Keep them under that source. Do not write
-  them to a Pod or merge them into the results of a Pod read.
+- **Separate source.** The statements belong to `result.source`, the IRI as
+  given without its fragment; relative IRIs in the document resolve against
+  it. Only the request goes to its normalised URL. Keep the statements under
+  that source. Do not write them to a Pod or merge them into the results of a
+  Pod read.
 - **Withdrawal.** When a Pod source goes away (access lost, a Context
   deselected, the session ended), remove what it described. A public source
   loaded before stays as it is, and it does not take the place of the withdrawn
@@ -138,8 +140,9 @@ HTML is parsed with `DOMParser`, which builds an inert document: no script
 runs and nothing loads. `application/xhtml+xml` is parsed as XML, so CDATA
 sections and character references read as XML defines them, and malformed XML
 fails with `parse-failed`. Relative IRIs in the scripts resolve against the
-page's first `<base href>`, or else against the document URL. Other media types, including `application/json`,
-RDF/XML and RDFa, fail with `unsupported-type`.
+page's first `<base href>`, or else against `result.source`. Other media
+types, including `application/json`, RDF/XML and RDFa, fail with
+`unsupported-type`.
 
 ## Results and failures
 
