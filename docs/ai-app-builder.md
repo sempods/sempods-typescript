@@ -96,6 +96,7 @@ entire SDK or protocol before implementing an ordinary screen.
 | Several lists or an overview                  | [Context choices](react-authoring.md#choose-the-app-shape)                                                        |
 | Values of any vocabulary from a SPARQL read   | [RDF values](rdf-values.md)                                                                                       |
 | Cards or pictures of resources across Pods    | [Resource cards](resource-cards.md)                                                                               |
+| Public RDF about an IRI no Pod describes      | [Public RDF](public-rdf.md)                                                                                       |
 | App texts or a custom layout                  | [Customizing](react-authoring.md#part-4-customizing)                                                              |
 | A real-Pod exercise                           | [Local testing](local-testing.md)                                                                                 |
 | Deployment or installation                    | [Deployment](deployment.md), then [PWA](pwa.md) if needed                                                         |

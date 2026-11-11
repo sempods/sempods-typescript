@@ -17,6 +17,7 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
+import { examplePackages } from './example-packages.mjs';
 import { chromium } from 'playwright';
 
 /** Menu language names follow the current language (Deutsch/Englisch, German/English). */
@@ -77,7 +78,12 @@ try {
   const tools = JSON.parse(
     await readFile(join(root, 'package.json'), 'utf8'),
   ).devDependencies;
-  const dependencies = { react: tools.react, 'react-dom': tools['react-dom'] };
+  const example = await examplePackages(root);
+  const dependencies = {
+    ...example.dependencies,
+    react: tools.react,
+    'react-dom': tools['react-dom'],
+  };
   for (const name of await readdir(temp)) {
     if (!name.endsWith('.tgz')) continue;
     const manifest = JSON.parse(
@@ -94,6 +100,7 @@ try {
       type: 'module',
       dependencies,
       devDependencies: {
+        ...example.devDependencies,
         typescript: tools.typescript,
         '@types/react': tools['@types/react'],
         '@types/react-dom': tools['@types/react-dom'],
