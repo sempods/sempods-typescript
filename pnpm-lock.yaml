@@ -41,6 +41,9 @@ importers:
       jsdom:
         specifier: 31.0.0
         version: 31.0.0
+      oxigraph:
+        specifier: 0.5.13
+        version: 0.5.13
       playwright:
         specifier: 1.64.1
         version: 1.64.1
@@ -1812,6 +1815,9 @@ packages:
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
     engines: {node: '>= 0.8.0'}
+
+  oxigraph@0.5.13:
+    resolution: {integrity: sha512-nD9pc9lhwzVUeEIeEc3ds4MyYphOW8fXsOf8Zeu8uKcGNn5KNIVQBHPNNp0jHMNKFVvmZH8BKDGcjVLmTus9DA==}
 
   p-limit@3.1.0:
     resolution: {integrity: sha512-TYOanM3wGwNGsZN2cVTYPArw454xnXj5qmWF1bEoAc4+cU/ol7GVh7odevjp1FNHduHc3KZMcFduxU5Xc6uJRQ==}
@@ -4120,6 +4126,8 @@ snapshots:
       prelude-ls: 1.2.1
       type-check: 0.4.0
       word-wrap: 1.2.5
+
+  oxigraph@0.5.13: {}
 
   p-limit@3.1.0:
     dependencies:

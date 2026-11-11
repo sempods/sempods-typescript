@@ -158,12 +158,10 @@ export function cardQuery(
   rules: readonly CardRule[],
   aliases: readonly string[] = exampleAliases,
 ): string {
-  const direct = [
-    RDF_TYPE,
-    ...aliases,
-    ...rules.flatMap((rule) => rule.images.map((path) => path[0]).flat()),
-    ...rules.flatMap((rule) => rule.dates),
-  ];
+  const facts = [RDF_TYPE, ...aliases, ...rules.flatMap((rule) => rule.dates)];
+  const firstSteps = rules.flatMap((rule) =>
+    rule.images.flatMap((path) => path[0]),
+  );
   const pairs = [
     ...new Set(
       pairsOf(rules).map(
@@ -171,24 +169,36 @@ export function cardQuery(
       ),
     ),
   ];
-  const linked = pairs.length
-    ? `UNION {
+  // Sort order: the root's types, aliases and dates first; then one block per
+  // image node (`?node`), its link and its variants together. A long read is
+  // cut by whole pictures, never before the root's own facts.
+  const branches = [
+    `{
+    VALUES ?p { ${list(facts)} }
+    GRAPH ?g { ${iri(root)} ?p ?o }
+    BIND(${iri(root)} AS ?s)
+    BIND(0 AS ?order)
+  }`,
+  ];
+  if (firstSteps.length)
+    branches.push(`{
+    VALUES ?p { ${list(firstSteps)} }
+    GRAPH ?g { ${iri(root)} ?p ?o }
+    BIND(${iri(root)} AS ?s)
+    BIND(1 AS ?order)
+    BIND(?o AS ?node)
+  }`);
+  if (pairs.length)
+    branches.push(`{
     VALUES (?link ?p) { ${pairs.join(' ')} }
     GRAPH ?origin { ${iri(root)} ?link ?s }
     GRAPH ?g { ?s ?p ?o }
     BIND(1 AS ?order)
-  }`
-    : '';
-  // The root's own statements sort first: a long list of linked nodes is cut
-  // before the root's types, aliases and dates are.
+    BIND(?s AS ?node)
+  }`);
   return `SELECT DISTINCT ?s ?p ?o ?g WHERE {
-  {
-    VALUES ?p { ${list(direct)} }
-    GRAPH ?g { ${iri(root)} ?p ?o }
-    BIND(${iri(root)} AS ?s)
-    BIND(0 AS ?order)
-  } ${linked}
-} ORDER BY ?order ?s ?p ?g ?o LIMIT ${MAX_ROWS + 1}`;
+  ${branches.join(' UNION ')}
+} ORDER BY ?order ?node ?s ?p ?g ?o LIMIT ${MAX_ROWS + 1}`;
 }
 
 /** Adds `evidence` unless the list already holds that statement. */

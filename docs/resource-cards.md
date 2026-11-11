@@ -133,8 +133,9 @@ so the decision waits until the rule is known.
   variant predicate that a path declares.
 
 `GRAPH ?g` names the Context of each statement. Rows are sorted, and at most 200
-are used. The resource's own statements come first, so a long list of linked
-nodes is cut before its types, aliases and dates are. For the same data, a
+are used. The resource's types, aliases and dates come first. Then each image
+node follows as one block, with its link and its variants, so a long read is
+cut by whole pictures and never before the resource's own facts. For the same data, a
 large resource loses the same rows, except where linked nodes are blank: their
 labels can change between reads. A read that returns more marks the card as
 `truncated`.
@@ -300,7 +301,9 @@ promise, and it needs no SDK media API.
   query with `VALUES`. It then needs a stable way to keep batches when the
   admitted resources change.
 - A card from a truncated read may miss values; `truncated` says so.
-- Evidence comes from the SDK's tests: the SELECT decoder, and React in jsdom
-  on two fixture Pods. jsdom loads no image, and no real Pod answered. Display
+- Evidence comes from the SDK's tests: the SELECT decoder, the generated
+  query evaluated by the Oxigraph SPARQL engine, and React in jsdom on two
+  fixture Pods. Oxigraph is not a Pod, jsdom loads no image, and no real Pod
+  answered. Display
   with cookies, in other browsers and under third-party cookie restrictions
   needs its own validation.

@@ -1,6 +1,7 @@
 /** The React-free resource card recipe (#245), on the SDK's SELECT decoder. */
 import { describe, expect, it } from 'vitest';
 import { anonymous, createPod } from '@sempods/client-sdk';
+import { createRequire } from 'node:module';
 import {
   MAX_IMAGES,
   cardQuery,
@@ -77,12 +78,14 @@ describe('card query', () => {
     expect(query).toContain(`<${RDF_TYPE}>`);
     expect(query).toContain(`<${SAME_AS}>`);
     expect(query).toContain(`<${S}thumbnailUrl>`);
-    // The root's own rows come first, so truncation cuts linked nodes first.
+    // The root's facts first, then one block per image node.
     expect(query).toContain('BIND(0 AS ?order)');
-    expect(query).toContain('BIND(1 AS ?order)');
-    expect(query).toContain('ORDER BY ?order ?s ?p ?g ?o LIMIT 201');
+    expect(query).toContain('BIND(?o AS ?node)');
+    expect(query).toContain('BIND(?s AS ?node)');
+    expect(query).toContain('ORDER BY ?order ?node ?s ?p ?g ?o LIMIT 201');
     // Values are never read as roots of further reads.
-    expect(query.match(/GRAPH/g)).toHaveLength(3);
+    // Facts, links and linked nodes: no pattern reads beyond them.
+    expect(query.match(/GRAPH/g)).toHaveLength(4);
   });
 
   it("pairs each link only with its own path's variants", () => {
@@ -896,5 +899,116 @@ describe('guide', () => {
     );
     expect(blocks.length).toBeGreaterThan(0);
     for (const block of blocks) expect(recipe).toContain(block);
+  });
+});
+
+/**
+ * Oxigraph 0.5.13 ships declarations that fail `skipLibCheck: false`
+ * (`UInt8Array`), so the test loads it with the few members it uses.
+ */
+interface OxigraphStore {
+  load(input: string, options: { readonly format: string }): void;
+  query(query: string, options: { readonly results_format: string }): unknown;
+}
+const { Store } = createRequire(import.meta.url)('oxigraph') as {
+  readonly Store: new () => OxigraphStore;
+};
+
+describe('card query on a SPARQL engine', () => {
+  /** Runs the generated query on Oxigraph, then decodes it as a Pod answer. */
+  async function cardRead(nquads: string, root: string) {
+    const store = new Store();
+    store.load(nquads, { format: 'application/n-quads' });
+    const query = cardQuery(root, exampleRules);
+    const json = store.query(query, {
+      results_format: 'application/sparql-results+json',
+    });
+    if (typeof json !== 'string') throw new Error('Expected SPARQL JSON');
+    const pod = createPod(alice, {
+      auth: anonymous(),
+      fetch: async () =>
+        new Response(json, {
+          headers: { 'content-type': 'application/sparql-results+json' },
+        }),
+    });
+    const answer = await pod.sparql.select(query);
+    if (answer.kind !== 'ok') throw new Error(answer.kind);
+    return answer.body;
+  }
+  const g = (name: string) => `<${ctx(alice, name)}>`;
+
+  it('reads declared paths only, across Contexts and node kinds', async () => {
+    const photo = 'https://people.example/ada/photo';
+    const result = await cardRead(
+      [
+        `<${ada}> <${RDF_TYPE}> <${S}Person> ${g('people')} .`,
+        `<${ada}> <${S}name> "Ada" ${g('people')} .`,
+        `<${ada}> <${S}image> <${photo}> ${g('people')} .`,
+        `<${photo}> <${S}contentUrl> <https://img.example/full.jpg> ${g('media')} .`,
+        `<${photo}> <${S}thumbnailUrl> <https://img.example/s.jpg> ${g('media')} .`,
+        // Declared nowhere as a pair with schema:image: never read.
+        `<${photo}> <urn:v:iconUrl> <https://img.example/icon.jpg> ${g('media')} .`,
+        `<${ada}> <${S}image> _:b0 ${g('people')} .`,
+        `_:b0 <${S}contentUrl> "https://img.example/b.jpg" ${g('people')} .`,
+        `<${ada}> <http://xmlns.com/foaf/0.1/img> "https://img.example/direct.jpg" ${g('people')} .`,
+        `<${talk}> <${RDF_TYPE}> <${S}Event> ${g('people')} .`,
+      ].join('\n'),
+      ada,
+    );
+    const predicates = result.rows.map((row) =>
+      row['p']?.type === 'iri' ? row['p'].value : undefined,
+    );
+    expect(predicates).not.toContain('urn:v:iconUrl');
+    expect(predicates).not.toContain(`${S}name`);
+    expect(
+      result.rows.every(
+        (row) => !(row['s']?.type === 'iri' && row['s'].value === talk),
+      ),
+    ).toBe(true);
+    const card = resourceCards(
+      [ada],
+      [sourceFacts(result, ada, alice, exampleRules)],
+      exampleRules,
+    ).get(ada)!;
+    expect(card.rule).toBe('person');
+    // Linked pictures first (blank before IRI in the read's order), then direct.
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([
+      ['https://img.example/b.jpg'],
+      ['https://img.example/s.jpg', 'https://img.example/full.jpg'],
+      ['https://img.example/direct.jpg'],
+    ]);
+    expect(card.images[1]!.variants[0]!.evidence.map((e) => e.context)).toEqual(
+      [ctx(alice, 'people'), ctx(alice, 'media')],
+    );
+  });
+
+  it("keeps the root's own statements when many linked nodes truncate the read", async () => {
+    const result = await cardRead(
+      [
+        `<${talk}> <${RDF_TYPE}> <${S}Event> ${g('a')} .`,
+        `<${talk}> <${S}startDate> "2026-10-05"^^<${XSD}date> ${g('a')} .`,
+        `<${talk}> <${SAME_AS}> <${lovelace}> ${g('a')} .`,
+        ...Array.from({ length: 250 }, (_, i) =>
+          [
+            `<${talk}> <${S}image> _:n${i} ${g('a')} .`,
+            `_:n${i} <${S}contentUrl> "https://img.example/${i}.jpg" ${g('a')} .`,
+          ].join('\n'),
+        ),
+      ].join('\n'),
+      talk,
+    );
+    expect(result.rows).toHaveLength(201);
+    const found = sourceFacts(result, talk, alice, exampleRules);
+    expect(found.truncated).toBe(true);
+    const card = resourceCards([talk, lovelace], [found], exampleRules).get(
+      talk,
+    )!;
+    expect(card.rule).toBe('event');
+    expect(card.dates.map((d) => d.value.value)).toEqual(['2026-10-05']);
+    expect(card.members).toEqual([talk, lovelace]);
+    // Each link arrives with its variant: the kept rows still show pictures.
+    expect(card.images).toHaveLength(MAX_IMAGES);
   });
 });
