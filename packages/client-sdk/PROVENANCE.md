@@ -66,7 +66,10 @@ Find (#233) was checked against `sempods/sempods-spec` at
 -018–020. The named-graph JSON-LD form was cross-read in `sempods/sempods-kotlin`
 at `d72098f85a50df421e75a02a5cb13a8d7f2f0307` (`FindEndpoint`, `FindPostRequest`,
 `RdfWriterUtil.toJsonLdNamedGraphs`). This is source reading and deterministic
-fixtures, not live wire evidence.
+fixtures, not live wire evidence. Kotlin treats `contexts: []` as an empty scope; the spec
+leaves an empty downscope to SPS-CRUD-014
+([sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129)), so
+the SDK rejects any group in the answer to `[]`.
 
 No source licence file was found at the source revisions above; they and this
 port are by the same author. Since 0.1.0 this package, including the ported code,

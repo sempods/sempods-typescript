@@ -79,8 +79,9 @@ export interface ReadOptions {
 export interface FindOptions extends ReadOptions {
   /**
    * The read downscope. Omitted: every Context the caller may read. A list:
-   * exactly those Contexts of this Pod, unreadable ones dropped by the Pod;
-   * `[]` finds nothing. Never widened, also not on an authentication resend.
+   * exactly those Contexts of this Pod, unreadable ones dropped by the Pod.
+   * `[]` asks for none: any group in the answer rejects it. Never widened,
+   * also not on an authentication resend.
    */
   readonly contexts?: readonly string[];
   /** A positive integer; the Pod applies its own default and maximum. */

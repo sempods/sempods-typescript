@@ -169,11 +169,15 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
 
 - Without `contexts`, the Pod searches every Context the caller may read. With
   `contexts`, it searches only those Contexts of this Pod and silently drops
-  the unreadable ones. `[]` finds nothing.
+  the unreadable ones. `[]` asks for no Context: the SDK sends it as given,
+  and any group in the answer rejects with `response/body`.
 - Nothing found, or nothing readable, is `ok` with an empty body, not
   `refused`. Find has no `not-found`.
-- Each `FindGraph` names its source Context. Its `nodes` are JSON-LD node
-  objects as answered, without the canonical resource shape. The Pod usually
+- The answer must be a top-level array of named graphs,
+  `[{ "@id": <context>, "@graph": [<node>…] }]`; a flat `{"@graph": [...]}`
+  rejects with `response/body`. Each `FindGraph` names its source Context. Its
+  `nodes` are JSON-LD node objects as answered, not guaranteed to have the
+  canonical resource shape. The Pod usually
   includes each hit's type and label, with no marker that separates a hit from
   that expansion.
 - The request is always `POST` with `include_contexts`. An authentication
@@ -325,7 +329,7 @@ not silently emulated:
 | `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -058 | JSON-LD only; no provenance per value                                                 |
 | Slots, single edges and the `outcome` representation               | SPS-CRUD-041–057               | Merge-patch replaces a predicate wholesale (SPS-CRUD-038)                             |
 | SPARQL ASK                                                         | `sparql.md`                    | Pod SELECT/CONSTRUCT or Context CONSTRUCT                                             |
-| The Find `type` filter, N-Quads and the flat Find form             | SPS-FIND-006–008, -018–020     | `pod.find` always asks for the Context-grouped JSON-LD form                           |
+| The Find `type` filter, the flat Find form and N-Quads             | SPS-FIND-006–008, -018, -020   | `pod.find` always asks for the Context-grouped JSON-LD form                           |
 | Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`       | Out of scope for the client                                                           |
 | Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                    | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |
 

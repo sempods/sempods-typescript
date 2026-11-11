@@ -135,10 +135,11 @@ it('one loader per Pod: changed grants refresh a ready source while another stil
     'ai',
   );
   const bobAnswer = deferred<Response>();
+  const aliceRefresh = deferred<Response>();
   let aliceFinds = 0;
   f.setFind(async (url) => {
     if (url.startsWith(otherUrl)) return bobAnswer.promise;
-    return hit(pod, `alice-${++aliceFinds}`);
+    return ++aliceFinds === 1 ? hit(pod, 'alice-1') : aliceRefresh.promise;
   });
   const load = (reader: BoundPod) => {
     const l = createViewLoader(reader, (p, signal) =>
@@ -162,8 +163,6 @@ it('one loader per Pod: changed grants refresh a ready source while another stil
   expect(hits(bob)).toBe('loading');
 
   // Alice's grants narrow (a renewal after a 401) while Bob still loads.
-  const shown: unknown[] = [];
-  alice.subscribe(() => shown.push(hits(alice)));
   f.setToken(async () =>
     Response.json({
       access_token: jwt({ scope: '' }),
@@ -178,9 +177,13 @@ it('one loader per Pod: changed grants refresh a ready source while another stil
   const revision = runtime.bindPod(f.id).getSnapshot().revision;
   await runtime.bindPod(f.id).sparql.construct('CONSTRUCT WHERE { ?s ?p ?o }');
   expect(runtime.bindPod(f.id).getSnapshot().revision).toBe(revision + 1);
+  // The answer read under the old grants is withdrawn at once, before the
+  // refresh under the new grants answers.
+  expect(hits(alice)).toBe('loading');
+  await vi.waitFor(() => expect(aliceFinds).toBe(2));
+  expect(hits(alice)).toBe('loading');
+  aliceRefresh.resolve(hit(pod, 'alice-2'));
   await vi.waitFor(() => expect(hits(alice)).toEqual([`${pod}/alice-2`]));
-  // The first answer is never shown again under the new grants.
-  expect(shown).not.toContainEqual([`${pod}/alice-1`]);
   expect(hits(bob)).toBe('loading');
 
   bobAnswer.resolve(hit(otherUrl, 'bob-1'));

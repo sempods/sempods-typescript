@@ -176,6 +176,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Switch across Pods](#one-chooser-across-pods)                          | `usePodContexts` (React)                                                   | Optional `podNames`; `select({ connectionId, contextIri })`                  |
 | [Create in another Context](#creating-in-an-explicit-context)           | `useCreation` with `context` (React), `bindCreation` (app)                 | The Context IRI; one hook per Context                                        |
 | [Read across the Pod](#pod-overviews-with-contexts-on-demand)           | `usePodLoad` (React)                                                       | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
+| [Search across Pods](#search-across-pods)                               | `usePodLoad` with `runtime.bindPod(id)` (React)                            | `pod.find(text)`; one source per connection                                  |
 | [One type across Contexts](#pod-overviews-with-contexts-on-demand)      | `usePodList` + `LoadNotice` (React)                                        | A `fields()` definition with a `type`                                        |
 | [One-click overview rows](#one-click-overview-rows)                     | `useContextUpdate` (React)                                                 | The same definition as `usePodList`                                          |
 | [Edit a Pod-overview row](#editing-an-overview-row)                     | `useContextEditor`, `ResourceEditor` (React)                               | The row's subject and `GRAPH` Context                                        |
@@ -953,11 +954,12 @@ function Source(props: {
 #### Search across Pods
 
 A search box uses the same pattern. Each `Source` finds through its own handle,
-and `key` restarts the search when the text changes:
+and `key` restarts the search when the text changes. Pass `null` while the box
+is empty: `find` refuses blank text, and every source would fail.
 
 ```tsx
 const load = usePodLoad(
-  reads(connection) ? runtime.bindPod(connection.id) : null,
+  reads(connection) && text.trim() ? runtime.bindPod(connection.id) : null,
   (pod, signal) => pod.find(text, { signal, limit: 20 }),
   { key: text },
 );
@@ -968,14 +970,15 @@ the hits by source Context (`FindGraph`). The SDK neither merges Pods nor
 ranks hits. To show one merged list, combine the **current** state of every
 source on each render, never results kept from a settled promise. Then a
 source whose grants changed, or that was cancelled or signed out, drops out
-by itself:
+by itself. A source's hits are its `load.data` (`shownData(state)`):
 
-| Source state                          | Its hits                   | Counts as failed |
-| ------------------------------------- | -------------------------- | ---------------- |
-| `ready`, also with no hits            | yes (`data`)               | no               |
-| `failed` with a `refused` error       | no                         | yes, access      |
-| `failed` otherwise                    | no                         | yes              |
-| `loading`, `cancelled`, `unavailable` | only `previous` (`retain`) | no               |
+| Source state                    | Its hits                                   | Counts as failed |
+| ------------------------------- | ------------------------------------------ | ---------------- |
+| `ready`, also with no hits      | `data`                                     | no               |
+| `loading`                       | only `previous` with `retain`              | no               |
+| `failed` with a `refused` error | only `previous` with `retain`, unconfirmed | yes, access      |
+| `failed` otherwise              | only `previous` with `retain`, unconfirmed | yes              |
+| `cancelled`, `unavailable`      | none                                       | no               |
 
 "Nothing could be searched" means at least one source, and every source is
 `failed`. No sources, or only `loading`, `cancelled` or `unavailable` ones, is
