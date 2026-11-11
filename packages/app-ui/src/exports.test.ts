@@ -67,6 +67,7 @@ it('exports the adapters, the router and the shadcn/ui components', async () => 
     'Toggle',
     'ToggleGroup',
     'ToggleGroupItem',
+    'WorkspacePanel',
     'badgeVariants',
     'buttonVariants',
     'replaceUrl',

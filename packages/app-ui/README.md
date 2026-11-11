@@ -632,6 +632,26 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   chosen chip is filled with the primary role and shows a check mark, so its
   state does not rest on colour alone. Tab reaches the group once, arrow keys
   move between chips, and Space or Enter chooses one.
+- **`WorkspacePanel`**: a nonmodal panel over a workspace, such as filters
+  or details beside a canvas or a map that stays usable behind it. It is a
+  region named by its heading, with optional `actions` and Close; there is no
+  backdrop, no focus trap, and a press beside it does not close it. Like
+  `ScreenDialog` it is controlled: Close and Escape, while the focus is in
+  the panel, call `onRequestClose`, and it closes when `open` turns false.
+  Opening moves the focus into the panel (`autoFocus={false}` keeps it where
+  it is, for a panel that follows a selection); closing with the focus in it
+  returns the focus to the element it opened from, or to `focusTarget`, and
+  focus the person moved to the workspace stays there. It floats over the
+  workspace instead of taking its space, so the workspace keeps its size and
+  stays mounted. From 640px it floats at the `end` (default) or `start` edge,
+  up to 22rem wide and as high as its content; below, it fills the width at
+  the bottom, up to 70% of the height. Its content scrolls inside it, and it
+  keeps clear of the device's safe-area insets. Its surface is the theme's
+  `popover` role, slightly translucent with a blur where the browser blurs,
+  solid with reduced transparency or more contrast. It sits below SDK
+  dialogs, confirmations and prompts and below `ScreenDialog`, which covers
+  it while open. Show one panel at a time on phones, where panels share the
+  bottom edge.
 
 A main action usually stands alone above a group of the others, as in the
 reference screen's Zen view:
@@ -925,6 +945,74 @@ export function ListMenu({ shareMore }: { readonly shareMore: () => void }) {
         </DropdownMenuItem>
       </DropdownMenu>
     </DropdownMenuTrigger>
+  );
+}
+```
+
+A workspace with a canvas and a filter panel. The canvas keeps its size and
+element while the panel opens and closes, and stays usable beside it:
+
+```tsx
+// workspace.tsx
+import { useState } from 'react';
+import { SlidersHorizontalIcon } from 'lucide-react';
+import { useMessages } from '@sempods/app-sdk/react';
+import { ActionButton, Chip, ChipGroup, WorkspacePanel } from '@sempods/app-ui';
+
+const texts = {
+  en: {
+    graph: 'Graph',
+    filters: 'Filters',
+    show: 'Show',
+    tasks: 'Tasks',
+    notes: 'Notes',
+  },
+  de: {
+    graph: 'Graph',
+    filters: 'Filter',
+    show: 'Anzeigen',
+    tasks: 'Aufgaben',
+    notes: 'Notizen',
+  },
+};
+
+export function Workspace() {
+  const t = useMessages(texts);
+  const [filters, setFilters] = useState(false);
+  const [shown, setShown] = useState(new Set<string | number>(['tasks']));
+  return (
+    // The app places the workspace; the panel floats over it.
+    <div className="absolute inset-0 overflow-hidden">
+      {/* Focusable for its own keys; Escape here belongs to the canvas. */}
+      <canvas className="size-full" tabIndex={0} aria-label={t.graph} />
+      <div className="absolute top-4 right-4">
+        <ActionButton
+          variant="secondary"
+          shape="round-sm"
+          label={t.filters}
+          aria-expanded={filters}
+          onPress={() => setFilters((open) => !open)}
+        >
+          <SlidersHorizontalIcon />
+        </ActionButton>
+      </div>
+      <WorkspacePanel
+        title={t.filters}
+        side="start"
+        open={filters}
+        onRequestClose={() => setFilters(false)}
+      >
+        <ChipGroup
+          label={t.show}
+          selectionMode="multiple"
+          selectedKeys={shown}
+          onSelectionChange={(keys) => setShown(new Set(keys))}
+        >
+          <Chip id="tasks">{t.tasks}</Chip>
+          <Chip id="notes">{t.notes}</Chip>
+        </ChipGroup>
+      </WorkspacePanel>
+    </div>
   );
 }
 ```

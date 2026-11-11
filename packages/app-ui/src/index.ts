@@ -7,6 +7,7 @@ export * from './adapters/screen-dialog.js';
 // React Aria's locale for the kit's controls, which otherwise follow the
 // browser: wrap the app in it with the SDK provider's locale.
 export { I18nProvider, type I18nProviderProps } from 'react-aria-components';
+export * from './adapters/workspace-panel.js';
 // The router over the app's address model, under the SDK's leave policy.
 export * from './router/nav.js';
 // shadcn/ui (aria-nova) components on React Aria Components.

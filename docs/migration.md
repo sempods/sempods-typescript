@@ -236,6 +236,14 @@ source Context, and a refusal stays distinct from an empty answer.
   with more than four digits or a minus sign. Other days and zoned date-times
   are shown as before.
 
+- **New: `WorkspacePanel`** for filters or details over a canvas or a map
+  that stays usable behind them (the UI kit's README, "Adapters"). An
+  app-owned panel composed from `ActionButton` and theme roles can move
+  to it: it is a region named by its heading, takes the focus when it opens
+  and returns it on Close or Escape, traps nothing, keeps the workspace's
+  size and element, and keeps clear of safe-area insets. Remove the app's own
+  Escape handling and focus return for it.
+
 - **`ScreenDialog` keeps clear of device insets on phones.** Full screen
   (below 640px), its heading and scrolling content add
   `env(safe-area-inset-*)` to their padding, so in an app with
