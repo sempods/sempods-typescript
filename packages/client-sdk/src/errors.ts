@@ -5,7 +5,8 @@ export type SdkFailure =
   /** Programming misuse: an argument the client refuses before any request. */
   | {
       readonly code: 'invalid-argument';
-      readonly argument: 'iri' | 'context' | 'query' | 'condition';
+      readonly argument:
+        'iri' | 'context' | 'query' | 'condition' | 'text' | 'limit';
     }
   | {
       readonly code: 'discovery';

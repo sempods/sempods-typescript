@@ -137,6 +137,7 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
       refresh_token: 'refresh-private',
     });
   let query: PodFetch = async () => Response.json([{ '@id': 'urn:item' }]);
+  let find: PodFetch = async () => Response.json([]);
   let resource: PodFetch = async () =>
     Response.json({ '@id': 'urn:item' }, { headers: { etag: '"v1"' } });
   let contexts: PodFetch = async () => catalogue();
@@ -177,6 +178,7 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
     if (url.endsWith('/_system/contexts')) return contexts(url, init);
     if (url.includes('/_system/contexts/')) return descriptions(url, init);
     if (url.includes('/_system/sparql/query')) return query(url, init);
+    if (url.endsWith('/_system/find')) return find(url, init);
     if (url.includes('/_system/resources/')) return resource(url, init);
     throw new Error('Unexpected fixture route.');
   });
@@ -237,6 +239,9 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
     },
     setQuery: (fn: PodFetch) => {
       query = fn;
+    },
+    setFind: (fn: PodFetch) => {
+      find = fn;
     },
     setResource: (fn: PodFetch) => {
       resource = fn;
@@ -347,15 +352,27 @@ export async function returnedSession(
   keep(runtime);
   return { ...f, runtime, id: connection.id };
 }
-/** Alice (`f.id`) and Bob (`other`) signed in, with Bob active after his completed callback. */
+/**
+ * Alice (`f.id`) and Bob (`other`) signed in, with Bob active after his
+ * completed callback. `scope` is what both sessions are granted.
+ */
 export async function twoPods(
   keep: (runtime: BrowserRuntime) => void,
   overrides: Partial<BrowserRuntimeOptions> = {},
+  scope = '',
 ) {
   const f = await returnedSession(
     keep,
     fixture({ preferences: null, preset: { podUrl: pod }, ...overrides }),
   );
+  if (scope)
+    f.setToken(async () =>
+      Response.json({
+        access_token: jwt({ scope }),
+        token_type: 'Bearer',
+        refresh_token: 'initial',
+      }),
+    );
   await f.runtime.initialize();
   const otherUrl = 'https://pod.example/bob';
   const other = await f.runtime.connect(otherUrl);
@@ -364,7 +381,7 @@ export async function twoPods(
   await settleLease();
   f.setToken(async (url) =>
     Response.json({
-      access_token: jwt({ iss: url.split('/_system')[0] }),
+      access_token: jwt({ iss: url.split('/_system')[0], scope }),
       token_type: 'Bearer',
       refresh_token: 'fresh',
     }),

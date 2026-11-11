@@ -2,7 +2,7 @@
 
 Portable browser/Node protocol primitives. Current supported exports:
 
-- `.`: `createPod`, Pod SELECT/CONSTRUCT, context reads/writes, `bearer`/`anonymous`, `PodAuth`,
+- `.`: `createPod`, Pod SELECT/CONSTRUCT and Find, context reads/writes, `bearer`/`anonymous`, `PodAuth`,
   `decodeCatalogue`, `isContextIri`, result/failure and transport types. Membership never implies
   context access.
 - `./oauth`: `discoverPod`, `createClientRegistry`, `prepareAuthorization`,
@@ -148,6 +148,43 @@ defers catalogue discovery until a Context flow is requested. The compatibility
 default is `'required'`. See
 [React Pod overviews](https://github.com/sempods/sempods-typescript/blob/v0.7.0/docs/react-authoring.md#pod-overviews-with-contexts-on-demand).
 
+### Finding resources
+
+`pod.find(text, options)` uses the Pod's Find primitive: text in, the matching
+resources out, grouped by the Context each statement came from. The Pod decides
+how it matches; there is no mode, rank or cursor.
+
+```ts
+import type { Pod } from '@sempods/client-sdk';
+
+export async function search(pod: Pod, text: string, signal: AbortSignal) {
+  const result = await pod.find(text, { limit: 20, signal });
+  if (result.kind !== 'ok') return result;
+  for (const { context, nodes } of result.body) {
+    for (const node of nodes) console.log(node['@id'], 'in', context);
+  }
+  return result;
+}
+```
+
+- Without `contexts`, the Pod searches every Context the caller may read. With
+  `contexts`, it searches only those Contexts of this Pod and silently drops
+  the unreadable ones. `[]` asks for no Context: the SDK sends it as given,
+  and any group in the answer rejects with `response/body`.
+- Nothing found, or nothing readable, is `ok` with an empty body, not
+  `refused`. Find has no `not-found`.
+- The answer must be a top-level array of named graphs,
+  `[{ "@id": <context>, "@graph": [<node>…] }]`; a flat `{"@graph": [...]}`
+  rejects with `response/body`. Each `FindGraph` names its source Context. Its
+  `nodes` are JSON-LD node objects as answered, not guaranteed to have the
+  canonical resource shape. The Pod usually
+  includes each hit's type and label, with no marker that separates a hit from
+  that expansion.
+- The request is always `POST` with `include_contexts`. An authentication
+  resend repeats it unchanged, and the SDK never retries it without the
+  downscope. A group without a source Context of this Pod, or one outside
+  `contexts`, rejects the whole read with `response/body`.
+
 ## Reading and writing one context
 
 A host supplies the context view and authentication; the
@@ -200,6 +237,7 @@ Supported operations:
 | `pod.sparql.select(query)`                    | `POST {pod}/_system/sparql/query`, accepts SPARQL Results JSON; no SDK-added dataset parameters     | `ok` (`SelectResult`) · `refused` · `cancelled` · `stopped`                                                                      |
 | `pod.sparql.construct(query)`                 | Same route, accepts JSON-LD; no SDK-added dataset parameters                                        | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `view.sparql.construct(query)`                | `POST {pod}/_system/sparql/query` with `default-graph-uri` and `named-graph-uri` = the view context | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
+| `pod.find(text, options)`                     | `POST {pod}/_system/find` (JSON body, `include_contexts: true`); accepts JSON-LD                    | `ok` (`FindGraph` per source Context) · `refused` · `cancelled` · `stopped`                                                      |
 
 ### JSON-LD read bodies
 
@@ -290,7 +328,8 @@ not silently emulated:
 | Union or multi-context CRUD reads (no or repeated `?context=`)     | SPS-CRUD-014–017               | Use Pod SPARQL for cross-Context queries; CRUD stays Context-bound                    |
 | `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -058 | JSON-LD only; no provenance per value                                                 |
 | Slots, single edges and the `outcome` representation               | SPS-CRUD-041–057               | Merge-patch replaces a predicate wholesale (SPS-CRUD-038)                             |
-| SPARQL ASK and the find primitive                                  | `sparql.md`, `find.md`         | Pod SELECT/CONSTRUCT or Context CONSTRUCT                                             |
+| SPARQL ASK                                                         | `sparql.md`                    | Pod SELECT/CONSTRUCT or Context CONSTRUCT                                             |
+| The Find `type` filter, the flat Find form and N-Quads             | SPS-FIND-006–008, -018, -020   | `pod.find` always asks for the Context-grouped JSON-LD form                           |
 | Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`       | Out of scope for the client                                                           |
 | Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                    | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |
 

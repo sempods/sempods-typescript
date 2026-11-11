@@ -198,6 +198,22 @@ taking turns. Without the option nothing changes.
 - Pass `priority: 'current'` with the `signal` for the read of what the person
   looks at now.
 
+### Find
+
+**Pods can be searched through the SDK** (#233).
+[`pod.find(text, options)`](../packages/client-sdk/README.md#finding-resources)
+and `BoundPod.find` call the Pod's Find primitive. The answer is grouped by
+source Context, and a refusal stays distinct from an empty answer.
+
+- **Replace a hand-built `/_system/find` request** with `find`. The SDK sends
+  the request and keeps credentials and the downscope on every attempt. The
+  answer is JSON-LD grouped by Context (`FindGraph`), not N-Quads. Derive hits
+  from `nodes` and the source from `context`.
+- **Search several Pods with one loader per Pod**
+  ([search across Pods](react-authoring.md#search-across-pods)), not with
+  `Promise.allSettled`: a result kept from a settled promise outlives its
+  grants.
+
 ### UI kit
 
 - **The compact `Dialog` speaks the SDK's language.** Its corner close button
@@ -292,6 +308,10 @@ taking turns. Without the option nothing changes.
   needs a case.
 - `BoundPod.sparql.select` and `construct` accept `priority: 'current'` beside
   `signal`. A typed test double of `BoundPod` accepts the wider options.
+- `Pod` (client-sdk) gains `find`, and `BoundPod` gains `find`. A custom
+  `podFactory` result or a typed test double of `Pod` or `BoundPod` needs it.
+  New client-sdk types: `FindOptions` and `FindGraph`. The `invalid-argument`
+  failure's `argument` gains `'text'` and `'limit'`.
 - `AppActions` (from `useApp()`) gains the required method `forget`. Typed test
   doubles of `useApp()` need it too.
 - **Breaking for custom stores:** `SessionStore` (the `openStore` option) gains
