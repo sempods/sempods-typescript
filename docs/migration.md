@@ -353,6 +353,13 @@ source Context, and a refusal stays distinct from an empty answer.
   unavailable choices or a quiet trigger can return to `HeaderMenu` or to the
   UI kit guide's recipes ([UI kit guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.1/packages/app-ui/README.md#secondary-actions-on-rows)).
 
+- `@sempods/app-ui` re-exports React Aria's `I18nProvider` and its props type.
+  The kit's components (menus, selects, calendars) take their locale from
+  React Aria, which follows the browser without a provider; wrap the app's
+  content in `<I18nProvider locale={locale}>` with the locale passed to
+  `SempodsProvider`, especially in an app with a fixed or chosen language.
+  `DateChooser` already followed the SDK's locale and is unchanged.
+
 - `usePodLoad` gains the form `usePodLoad(pod, read, options?)` for an explicit
   `BoundPod` from `runtime.bindPod(id)`
   ([reads per connection](react-authoring.md#reads-per-connection)). An app

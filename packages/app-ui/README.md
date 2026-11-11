@@ -363,6 +363,37 @@ export function QuickEdit({
 }
 ```
 
+React Aria gives the components their locale: the order of typeahead,
+number and date formats, the reading direction and the texts it announces
+itself. Without a provider they follow the browser, so an app wraps its
+content in the re-exported `I18nProvider` with the locale it passes to the
+SDK's provider, and the kit follows the app's language and region:
+
+```tsx
+// app-locale.tsx
+import type { ReactNode } from 'react';
+import { SempodsProvider } from '@sempods/app-sdk/react';
+import type { BrowserRuntime } from '@sempods/app-sdk';
+import { I18nProvider } from '@sempods/app-ui';
+
+export function AppProviders(props: {
+  readonly runtime: BrowserRuntime;
+  readonly language: 'en' | 'de';
+  readonly locale: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <SempodsProvider
+      runtime={props.runtime}
+      language={props.language}
+      locale={props.locale}
+    >
+      <I18nProvider locale={props.locale}>{props.children}</I18nProvider>
+    </SempodsProvider>
+  );
+}
+```
+
 A component the package lacks can be added with `shadcn add` (the CLI as a
 development dependency). A component copied out of the package to change it
 becomes the app's own: package updates no longer reach it, so do that on
