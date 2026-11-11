@@ -970,7 +970,8 @@ the hits by source Context (`FindGraph`). The SDK neither merges Pods nor
 ranks hits. To show one merged list, combine the **current** state of every
 source on each render, never results kept from a settled promise. Then a
 source whose grants changed, or that was cancelled or signed out, drops out
-by itself. A source's hits are its `load.data` (`shownData(state)`):
+by itself. A source's hits are its `load.data`: `data` when `ready`,
+otherwise `previous` when present:
 
 | Source state                    | Its hits                                   | Counts as failed |
 | ------------------------------- | ------------------------------------------ | ---------------- |
