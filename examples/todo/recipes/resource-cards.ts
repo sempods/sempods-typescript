@@ -101,16 +101,15 @@ export interface Fact<T> {
 export type DateTerm = Extract<SparqlTerm, { type: 'literal' }>;
 
 interface ImageMatch {
-  /** The first step's predicate when the address belongs to a linked node. */
-  readonly link?: string;
-  readonly predicate: string;
+  /** The predicates walked: `[predicate]`, or `[link, variant]` for a linked node. */
+  readonly steps: readonly [string] | readonly [string, string];
   /** The checked address; undefined when the address guard refused it. */
   readonly url: string | undefined;
   /** A direct value that is an IRI: the card's rule may know it as a node. */
   readonly target?: string;
   /**
-   * The image's node: variants of one node are one picture. An IRI, or for a
-   * blank node a key that is unique to its read result.
+   * A linked node: its variants are one picture. An IRI, or for a blank node
+   * a key that is unique to its read result.
    */
   readonly node?: string;
   readonly evidence: readonly Evidence[];
@@ -119,13 +118,15 @@ interface ImageMatch {
 /** What one read of one root in one Pod found. Rule-independent. */
 export interface SourceFacts {
   readonly root: string;
-  readonly pod: string;
   readonly types: readonly Fact<string>[];
   readonly aliases: readonly Fact<string>[];
   readonly images: readonly ImageMatch[];
   readonly dates: readonly (Fact<DateTerm> & { readonly predicate: string })[];
   readonly truncated: boolean;
 }
+
+/** A fact while it is being collected. */
+type Collecting<T> = { value: T; evidence: Evidence[] };
 
 const iri = (value: string) => {
   // Roots come from decoded terms; this is a second check, not a sanitizer.
@@ -136,43 +137,43 @@ const iri = (value: string) => {
 const list = (values: Iterable<string>) =>
   [...new Set(values)].map(iri).join(' ');
 
-/** The predicates a set of rules declares, for the read and the facts. */
-function declared(rules: readonly CardRule[], aliases: readonly string[]) {
-  const paths = rules.flatMap((rule) => rule.images);
-  // Only the declared pairs: a link of one path never meets another's variant.
-  const pairs = paths.flatMap((path) =>
-    path.length === 2
-      ? path[0].flatMap((link) =>
-          path[1].map((variant) => `(${iri(link)} ${iri(variant)})`),
-        )
-      : [],
-  );
-  return {
-    direct: new Set([
-      RDF_TYPE,
-      ...aliases,
-      ...paths.flatMap((path) => path[0]),
-      ...rules.flatMap((rule) => rule.dates),
-    ]),
-    pairs: new Set(pairs),
-  };
-}
+/** Link and variant predicate of each declared two-step path. */
+const pairsOf = (rules: readonly CardRule[]) =>
+  rules
+    .flatMap((rule) => rule.images)
+    .flatMap((path) =>
+      path.length === 2
+        ? path[0].flatMap((link) => path[1].map((variant) => [link, variant]))
+        : [],
+    );
 
 /**
  * One SELECT for one root: the declared predicates of the root, and the
  * second step of each two-step path, as declared pairs of link and variant
- * predicate. Nothing else is read, and no value
- * becomes another root: the enrichment is metadata only.
+ * predicate. Nothing else is read, and no value becomes another root: the
+ * enrichment is metadata only.
  */
 export function cardQuery(
   root: string,
   rules: readonly CardRule[],
   aliases: readonly string[] = exampleAliases,
 ): string {
-  const { direct, pairs } = declared(rules, aliases);
-  const linked = pairs.size
+  const direct = [
+    RDF_TYPE,
+    ...aliases,
+    ...rules.flatMap((rule) => rule.images.map((path) => path[0]).flat()),
+    ...rules.flatMap((rule) => rule.dates),
+  ];
+  const pairs = [
+    ...new Set(
+      pairsOf(rules).map(
+        ([link, variant]) => `(${iri(link!)} ${iri(variant!)})`,
+      ),
+    ),
+  ];
+  const linked = pairs.length
     ? `UNION {
-    VALUES (?link ?p) { ${[...pairs].join(' ')} }
+    VALUES (?link ?p) { ${pairs.join(' ')} }
     GRAPH ?origin { ${iri(root)} ?link ?s }
     GRAPH ?g { ?s ?p ?o }
   }`
@@ -186,23 +187,27 @@ export function cardQuery(
 } ORDER BY ?s ?p ?g ?o LIMIT ${MAX_ROWS + 1}`;
 }
 
+/** Adds `evidence` unless the list already holds that statement. */
+function addEvidence(list: Evidence[], evidence: Evidence) {
+  const same = (e: Evidence) =>
+    e.pod === evidence.pod &&
+    e.context === evidence.context &&
+    e.subject === evidence.subject &&
+    e.predicate === evidence.predicate;
+  if (!list.some(same)) list.push(evidence);
+}
+
 /** Adds `evidence` to the fact with an equal key, or appends a new fact. */
 function add<T>(
-  facts: { value: T; evidence: Evidence[] }[],
+  facts: Collecting<T>[],
   value: T,
   evidence: Evidence,
   key: (value: T) => string = String,
 ) {
   const found = facts.find((fact) => key(fact.value) === key(value));
-  if (!found) facts.push({ value, evidence: [evidence] });
-  else if (!found.evidence.some((e) => sameEvidence(e, evidence)))
-    found.evidence.push(evidence);
+  if (found) addEvidence(found.evidence, evidence);
+  else facts.push({ value, evidence: [evidence] });
 }
-const sameEvidence = (a: Evidence, b: Evidence) =>
-  a.pod === b.pod &&
-  a.context === b.context &&
-  a.subject === b.subject &&
-  a.predicate === b.predicate;
 
 /** An address value: an IRI, or a literal without a language or datatype. */
 function addressValue(term: SparqlTerm) {
@@ -211,20 +216,6 @@ function addressValue(term: SparqlTerm) {
   const plain = !term.datatype || term.datatype === `${XSD}string`;
   return plain || term.datatype === `${XSD}anyURI` ? term.value : undefined;
 }
-
-const declaresPath = (
-  rules: readonly CardRule[],
-  link: string,
-  predicate: string,
-) =>
-  rules.some((rule) =>
-    rule.images.some(
-      (path) =>
-        path.length === 2 &&
-        path[0].includes(link) &&
-        path[1].includes(predicate),
-    ),
-  );
 
 /** A number per read result, so blank nodes of two reads never meet. */
 const reads = new WeakMap<SelectResult, number>();
@@ -245,10 +236,16 @@ export function sourceFacts(
   rules: readonly CardRule[],
   aliases: readonly string[] = exampleAliases,
 ): SourceFacts {
-  const { direct } = declared(rules, aliases);
   const read = readId(result);
   const aliasSet = new Set(aliases);
   const dateSet = new Set(rules.flatMap((rule) => rule.dates));
+  const paths = rules.flatMap((rule) => rule.images);
+  const oneStep = new Set(
+    paths.flatMap((path) => (path.length === 1 ? path[0] : [])),
+  );
+  const twoStep = new Set(
+    pairsOf(rules).map(([link, variant]) => `${link} ${variant}`),
+  );
   const rows = result.rows.slice(0, MAX_ROWS).flatMap((row) => {
     const { s, p, o, g } = row;
     if (!s || !o || p?.type !== 'iri' || g?.type !== 'iri') return [];
@@ -259,78 +256,67 @@ export function sourceFacts(
       { s, p: p.value, o, evidence, own: s.type === 'iri' && s.value === root },
     ];
   });
-  const types: { value: string; evidence: Evidence[] }[] = [];
-  const aliasFacts: { value: string; evidence: Evidence[] }[] = [];
-  const dates: { value: DateTerm; evidence: Evidence[]; predicate: string }[] =
-    [];
-  const images: ImageMatch[] = [];
-  // Second step: a link statement and a statement of the linked node, joined
-  // within this read only where one declared path has both predicates.
-  // The linked node may be the root itself (`<root> schema:image <root>`).
-  const joins = rows.flatMap((row) =>
-    rows
-      .filter(
-        (link) =>
-          link.own &&
-          exactTerm(link.o) === exactTerm(row.s) &&
-          declaresPath(rules, link.p, row.p),
-      )
-      .map((link) => ({ link, row })),
-  );
+  const types: Collecting<string>[] = [];
+  const aliasFacts: Collecting<string>[] = [];
+  const dates: (Collecting<DateTerm> & { predicate: string })[] = [];
   // Which matches count, and which link describes an image, depends on the
   // card's rule: the facts keep them all.
+  const images: ImageMatch[] = [];
   const image = (match: Omit<ImageMatch, 'url'>, value: string | undefined) =>
     images.push({
       ...match,
       url: value === undefined ? undefined : imageAddress(value),
     });
-  for (const { link, row } of joins)
-    image(
-      {
-        link: link.p,
-        predicate: row.p,
-        // A blank node's label means nothing outside its read.
-        node:
-          row.s.type === 'iri'
-            ? row.s.value
-            : JSON.stringify([read, exactTerm(row.s)]),
-        evidence: [link.evidence, row.evidence],
-      },
-      addressValue(row.o),
-    );
-  for (const row of rows) {
-    const { o, p, evidence } = row;
-    if (!row.own || !direct.has(p)) continue;
+  // Second step: a link statement of the root and a statement of the node it
+  // links to, joined within this read only as a declared pair. The node may
+  // be the root itself (`<root> schema:image <root>`).
+  const links = new Map<string, typeof rows>();
+  for (const row of rows)
+    if (row.own) {
+      const node = exactTerm(row.o);
+      links.set(node, [...(links.get(node) ?? []), row]);
+    }
+  for (const row of rows)
+    for (const link of links.get(row.evidence.subject) ?? [])
+      if (twoStep.has(`${link.p} ${row.p}`))
+        image(
+          {
+            steps: [link.p, row.p],
+            // A blank node's label means nothing outside its read.
+            node:
+              row.s.type === 'iri'
+                ? row.s.value
+                : JSON.stringify([read, row.evidence.subject]),
+            evidence: [link.evidence, row.evidence],
+          },
+          addressValue(row.o),
+        );
+  for (const { o, p, evidence, own } of rows) {
+    if (!own) continue;
     if (p === RDF_TYPE && o.type === 'iri') add(types, o.value, evidence);
     if (aliasSet.has(p) && o.type === 'iri' && o.value !== root)
       add(aliasFacts, o.value, evidence);
     if (dateSet.has(p) && o.type === 'literal') {
-      const existing = dates.find(
+      const date = dates.find(
         (date) =>
           date.predicate === p && exactTerm(date.value) === exactTerm(o),
       );
-      if (existing) existing.evidence.push(evidence);
+      if (date) addEvidence(date.evidence, evidence);
       else dates.push({ value: o, evidence: [evidence], predicate: p });
     }
-    if (
-      rules.some((rule) =>
-        rule.images.some((path) => path.length === 1 && path[0].includes(p)),
-      )
-    ) {
-      if (o.type === 'blank') continue; // A blank node is no address.
+    // A blank node is no address.
+    if (oneStep.has(p) && o.type !== 'blank')
       image(
         {
-          predicate: p,
+          steps: [p],
           ...(o.type === 'iri' ? { target: o.value } : {}),
           evidence: [evidence],
         },
         addressValue(o),
       );
-    }
   }
   return {
     root,
-    pod,
     types,
     aliases: aliasFacts,
     images,
@@ -388,6 +374,36 @@ export interface ResourceCard {
 }
 
 /**
+ * Groups of items connected by a shared key, also through a chain of items.
+ * The earliest item leads its group; groups follow their first items.
+ */
+function connected<T>(
+  items: readonly T[],
+  keysOf: (item: T) => readonly string[],
+): T[][] {
+  const parent = items.map((_, index) => index);
+  const find = (i: number): number => (parent[i] === i ? i : find(parent[i]!));
+  const seen = new Map<string, number>();
+  items.forEach((item, index) => {
+    for (const key of keysOf(item)) {
+      const other = seen.get(key);
+      if (other === undefined) {
+        seen.set(key, index);
+        continue;
+      }
+      const [a, b] = [find(other), find(index)];
+      if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+    }
+  });
+  const groups = new Map<number, T[]>();
+  items.forEach((item, index) => {
+    const lead = find(index);
+    groups.set(lead, [...(groups.get(lead) ?? []), item]);
+  });
+  return [...groups.values()];
+}
+
+/**
  * Cards for the admitted `roots`, from the facts of every current read. The
  * order of `facts` is the source precedence (for example the person's Pod
  * first). Recomputed from the facts each time: removing a source's facts
@@ -400,34 +416,21 @@ export function resourceCards(
   rules: readonly CardRule[],
 ): ReadonlyMap<string, ResourceCard> {
   const admitted = [...new Set(roots)];
-  const order = new Map(admitted.map((root, index) => [root, index]));
-  const ranked = facts.filter((fact) => order.has(fact.root));
-  // Union of admitted roots joined by an alias; an alias to anything else is
-  // kept as a fact but never read.
-  const parent = new Map(admitted.map((root) => [root, root]));
-  const find = (root: string): string => {
-    const up = parent.get(root)!;
-    return up === root ? root : find(up);
-  };
-  for (const fact of ranked)
-    for (const alias of fact.aliases) {
-      if (!order.has(alias.value)) continue;
-      const [a, b] = [find(fact.root), find(alias.value)];
-      if (a === b) continue;
-      // The earlier admitted root represents the group.
-      if (order.get(a)! < order.get(b)!) parent.set(b, a);
-      else parent.set(a, b);
-    }
+  const ranked = facts.filter((fact) => admitted.includes(fact.root));
+  // Admitted roots joined by an alias share a card, the earliest leading. An
+  // alias to anything else is kept as a fact but never read.
+  const aliasesOf = (root: string) =>
+    ranked
+      .filter((fact) => fact.root === root)
+      .flatMap((fact) => fact.aliases.map((alias) => alias.value))
+      .filter((alias) => admitted.includes(alias));
   const cards = new Map<string, ResourceCard>();
-  const groups = new Map<string, string[]>();
-  for (const root of admitted) {
-    const group = groups.get(find(root)) ?? [];
-    group.push(root);
-    groups.set(find(root), group);
-  }
-  for (const [root, members] of groups) {
+  for (const members of connected(admitted, (root) => [
+    root,
+    ...aliasesOf(root),
+  ])) {
     const own = ranked.filter((fact) => members.includes(fact.root));
-    const card = cardOf(root, members, own, rules);
+    const card = cardOf(members[0]!, members, own, rules);
     for (const member of members) cards.set(member, card);
   }
   return cards;
@@ -439,18 +442,18 @@ function cardOf(
   facts: readonly SourceFacts[],
   rules: readonly CardRule[],
 ): ResourceCard {
-  const types: { value: string; evidence: Evidence[] }[] = [];
+  const types: Collecting<string>[] = [];
   for (const fact of facts)
     for (const type of fact.types)
       for (const evidence of type.evidence) add(types, type.value, evidence);
   // Type precedence is the rules' order, never the order of sources or types.
   const rule =
-    rules.find((rule) =>
-      rule.types.length === 0
-        ? true
-        : types.some((type) => rule.types.includes(type.value)),
+    rules.find(
+      (rule) =>
+        rule.types.length === 0 ||
+        types.some((type) => rule.types.includes(type.value)),
     ) ?? rules.at(-1)!;
-  const sameAs: { value: string; evidence: Evidence[] }[] = [];
+  const sameAs: Collecting<string>[] = [];
   for (const fact of facts)
     for (const alias of fact.aliases)
       if (members.includes(alias.value))
@@ -471,8 +474,9 @@ function cardOf(
 /**
  * Pictures for the card's rule. Precedence: the rule's path order, then the
  * first step's predicate order, then sources and the read's rows. Matches
- * that share a node or an address are one picture; within it the declared
- * predicate order sorts the variants. The limits apply last.
+ * that share a node or an address are one picture. Its variants follow the
+ * path order, then the predicate order of the path's last step. The limits
+ * apply last.
  */
 function imagesOf(
   rule: CardRule,
@@ -480,79 +484,52 @@ function imagesOf(
 ): { images: CardImage[]; refused: number } {
   const matches = facts
     .flatMap((fact) => fact.images)
-    .flatMap((match, index) => {
-      const path = rule.images.findIndex((path) =>
-        path.length === 2
-          ? match.link !== undefined &&
-            path[0].includes(match.link) &&
-            path[1].includes(match.predicate)
-          : match.link === undefined && path[0].includes(match.predicate),
+    .flatMap((match) => {
+      const path = rule.images.findIndex(
+        (path) =>
+          path.length === match.steps.length &&
+          path.every((step, i) => step.includes(match.steps[i]!)),
       );
       if (path < 0) return [];
-      const steps = rule.images[path]!;
+      const ranks = rule.images[path]!.map((step, i) =>
+        step.indexOf(match.steps[i]!),
+      );
       // Only the card's rule says whether direct values are one picture.
       const node =
-        steps.length === 1 && rule.isImage ? 'the resource itself' : match.node;
-      const first = steps[0].indexOf(match.link ?? match.predicate);
-      // Variant rank: the declared order of a variant predicate. A direct
-      // address that is no variant of a node comes after every variant.
-      const rank =
-        steps.length === 2
-          ? steps[1].indexOf(match.predicate)
-          : node !== undefined
-            ? steps[0].indexOf(match.predicate)
-            : Number.MAX_SAFE_INTEGER;
-      return [{ ...match, node, path, first, rank, index }];
+        match.steps.length === 2
+          ? match.node
+          : rule.isImage
+            ? 'the resource itself'
+            : undefined;
+      return [{ ...match, node, path, first: ranks[0]!, last: ranks.at(-1)! }];
     });
   // A node this rule describes through a two-step path is no address itself.
   const described = new Set(
     matches.flatMap((match) =>
-      match.link !== undefined && match.node ? [match.node] : [],
+      match.steps.length === 2 && match.node ? [match.node] : [],
     ),
   );
   const kept = matches.filter(
     (match) => match.target === undefined || !described.has(match.target),
   );
+  // Stable sort: sources and rows keep their order within equal ranks.
   const usable = kept
     .flatMap((match) =>
       match.url === undefined ? [] : [{ ...match, url: match.url }],
     )
-    .sort((a, b) => a.path - b.path || a.first - b.first || a.index - b.index);
-  // Matches connected by a node or an address, also transitively, are one picture.
-  const parent = usable.map((_, index) => index);
-  const find = (i: number): number => (parent[i] === i ? i : find(parent[i]!));
-  const seen = new Map<string, number>();
-  usable.forEach((match, index) => {
-    const keys = [`url ${match.url}`];
-    if (match.node) keys.push(`node ${match.node}`);
-    for (const key of keys) {
-      const other = seen.get(key);
-      if (other === undefined) {
-        seen.set(key, index);
-        continue;
-      }
-      const [a, b] = [find(other), find(index)];
-      // The earlier match leads, so the picture keeps its place.
-      if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
-    }
-  });
-  const groups = new Map<number, typeof usable>();
-  usable.forEach((match, index) => {
-    const group = groups.get(find(index)) ?? [];
-    group.push(match);
-    groups.set(find(index), group);
-  });
-  const images = [...groups.values()].slice(0, MAX_IMAGES).map((group) => {
-    const variants: {
-      value: string;
-      evidence: Evidence[];
-      path: number;
-      rank: number;
-    }[] = [];
-    // Variant preference: the path's order first, then the predicate's
-    // order within the path's last step.
-    const better = (a: { path: number; rank: number }, b: typeof a) =>
-      a.path - b.path || a.rank - b.rank;
+    .sort((a, b) => a.path - b.path || a.first - b.first);
+  const pictures = connected(usable, (match) =>
+    match.node
+      ? [`url ${match.url}`, `node ${match.node}`]
+      : [`url ${match.url}`],
+  );
+  const better = (
+    a: { path: number; last: number },
+    b: { path: number; last: number },
+  ) => a.path - b.path || a.last - b.last;
+  const images = pictures.slice(0, MAX_IMAGES).map((group) => {
+    const variants: (Collecting<string> & { path: number; last: number })[] =
+      [];
     for (const match of group) {
       const variant = variants.find((variant) => variant.value === match.url);
       if (!variant) {
@@ -560,24 +537,22 @@ function imagesOf(
           value: match.url,
           evidence: [...match.evidence],
           path: match.path,
-          rank: match.rank,
+          last: match.last,
         });
         continue;
       }
       // The same address under several predicates keeps its best preference.
       if (better(match, variant) < 0)
-        Object.assign(variant, { path: match.path, rank: match.rank });
+        Object.assign(variant, { path: match.path, last: match.last });
       for (const evidence of match.evidence)
-        if (!variant.evidence.some((e) => sameEvidence(e, evidence)))
-          variant.evidence.push(evidence);
+        addEvidence(variant.evidence, evidence);
     }
     return {
+      // The limit applies after ranking, so a thumbnail is never cut.
       variants: variants
-        .map((variant, index) => ({ variant, index }))
-        .sort((a, b) => better(a.variant, b.variant) || a.index - b.index)
-        // The limit applies after ranking, so a thumbnail is never cut.
+        .sort(better)
         .slice(0, MAX_VARIANTS)
-        .map(({ variant: { value, evidence } }) => ({ value, evidence })),
+        .map(({ value, evidence }) => ({ value, evidence })),
     };
   });
   return {
@@ -591,7 +566,7 @@ function datesOf(
   rule: CardRule,
   facts: readonly SourceFacts[],
 ): Fact<DateTerm>[] {
-  const dates: { value: DateTerm; evidence: Evidence[] }[] = [];
+  const dates: Collecting<DateTerm>[] = [];
   for (const predicate of rule.dates)
     for (const fact of facts)
       for (const date of fact.dates)

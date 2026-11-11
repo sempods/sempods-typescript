@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -13,12 +14,7 @@ import {
   usePodLoad,
   useSdkLocale,
 } from '@sempods/app-sdk/react';
-import {
-  commonVocabulary,
-  describeValue,
-  exactTerm,
-  labelFor,
-} from './rdf-values.js';
+import { commonVocabulary, describeValue, labelFor } from './rdf-values.js';
 import {
   cardQuery,
   exampleRules,
@@ -27,7 +23,9 @@ import {
   resourceCards,
   sourceFacts,
   type CardRule,
+  type DateTerm,
   type Evidence,
+  type Fact,
   type ResourceCard,
   type SourceFacts,
 } from './resource-cards.js';
@@ -159,7 +157,8 @@ export function useResourceCards(
   return { cards, status, readers };
 }
 
-function CardRead(props: {
+// Memoized: a report from one read re-renders the host, not every read.
+const CardRead = memo(function CardRead(props: {
   readonly id: string;
   readonly pod: BoundPod;
   readonly podUrl: string;
@@ -169,7 +168,7 @@ function CardRead(props: {
   readonly report: (key: string, value?: Report) => void;
 }) {
   const { id, pod, podUrl, root, rules, priority, report } = props;
-  const query = queryFor(root, rules);
+  const query = useMemo(() => queryFor(root, rules), [root, rules]);
   // The query is the read's input: new rules read again. A root that is no
   // IRI is not read: without a handle, the read becomes unavailable.
   const load = usePodLoad(
@@ -197,7 +196,7 @@ function CardRead(props: {
   // Unmount (root no longer admitted, connection gone) withdraws the facts.
   useEffect(() => () => report(id), [id, report]);
   return null;
-}
+});
 
 function queryFor(root: string, rules: readonly CardRule[]) {
   try {
@@ -208,6 +207,22 @@ function queryFor(root: string, rules: readonly CardRule[]) {
 }
 
 type PreviewState = 'shown' | 'loading' | 'unread' | 'unavailable' | 'absent';
+
+function previewState(
+  ready: boolean,
+  url: string | undefined,
+  urls: readonly string[],
+  status: CardStatus,
+  card: ResourceCard,
+): PreviewState {
+  if (ready) return 'shown';
+  if (url) return 'loading';
+  // Every address failed, or the attempts are used up.
+  if (urls.length > 0) return 'unavailable';
+  if (status.unread) return 'unread';
+  if (status.unavailable || card.refused > 0) return 'unavailable';
+  return 'absent';
+}
 
 /**
  * A bounded preview: ordinary `<img>` elements tried in order, at most
@@ -236,17 +251,7 @@ export function ImagePreview({
       ? urls.find((value) => !failed.includes(value))
       : undefined);
   const ready = url !== undefined && loaded.includes(url);
-  const state: PreviewState = ready
-    ? 'shown'
-    : url
-      ? 'loading'
-      : urls.length > 0
-        ? 'unavailable'
-        : status.unread
-          ? 'unread'
-          : status.unavailable || card.refused > 0
-            ? 'unavailable'
-            : 'absent';
+  const state = previewState(ready, url, urls, status, card);
   const cell = { gridArea: '1 / 1', width: size, height: size };
   return (
     <span
@@ -284,8 +289,8 @@ function useDescribe() {
   return {
     t,
     language,
-    describe: (card: ResourceCard['dates'][number]) =>
-      describeValue(card.value, {
+    describe: (date: Fact<DateTerm>) =>
+      describeValue(date.value, {
         format,
         language,
         vocabulary: commonVocabulary,
@@ -323,7 +328,7 @@ export function ResourceCardView({
 }
 
 function Sources({ evidence }: { readonly evidence: readonly Evidence[] }) {
-  const { t } = useDescribe();
+  const t = useMessages(texts);
   return (
     <ul>
       {evidence.map((e) => (
@@ -351,7 +356,7 @@ export function CardEvidence({ card }: { readonly card: ResourceCard }) {
                 {shown.text}
               </span>{' '}
               <code dir="ltr" style={{ whiteSpace: 'pre-wrap' }}>
-                {exactTerm(date.value)}
+                {shown.exact}
               </code>
               <Sources evidence={date.evidence} />
             </dd>

@@ -147,7 +147,7 @@ describe('facts of one read', () => {
     ]);
     expect(found.images).toEqual([
       {
-        predicate: `${S}image`,
+        steps: [`${S}image`],
         url: 'https://img.example/ada.jpg',
         evidence: [
           {
@@ -187,18 +187,26 @@ describe('facts of one read', () => {
       ],
     ]);
     expect(
-      found.images.map(({ url, node, link }) => ({ url, node, link })),
+      found.images.map(({ url, node, steps }) => ({ url, node, steps })),
     ).toEqual([
-      { url: 'https://img.example/ada.jpg', node: photo, link: `${S}image` },
-      { url: 'https://img.example/ada-s.jpg', node: photo, link: `${S}image` },
+      {
+        url: 'https://img.example/ada.jpg',
+        node: photo,
+        steps: [`${S}image`, `${S}contentUrl`],
+      },
+      {
+        url: 'https://img.example/ada-s.jpg',
+        node: photo,
+        steps: [`${S}image`, `${S}thumbnailUrl`],
+      },
       {
         url: 'https://img.example/ada-2.jpg',
         // A blank node is keyed within its read only.
         node: expect.stringContaining('_:b0'),
-        link: `${S}image`,
+        steps: [`${S}image`, `${S}contentUrl`],
       },
       // The facts keep the direct value; the card's rule suppresses it.
-      { url: photo, node: undefined, link: undefined },
+      { url: photo, node: undefined, steps: [`${S}image`] },
     ]);
     // Both statements of the path are evidence, each in its own Context.
     expect(found.images[0]!.evidence.map((e) => e.context)).toEqual([
