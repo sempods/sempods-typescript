@@ -117,6 +117,14 @@ export function WorkspacePanel({
     // outside the panel's element, or a dialog inside it.
     const target = event.target as Element;
     if (!panel.current?.contains(target) || target.closest('dialog')) return;
+    // An open combo box, such as a SuggestField's, closes its suggestions
+    // first; React Aria lets that Escape through, so the panel waits for the
+    // next one.
+    if (
+      target.getAttribute('role') === 'combobox' &&
+      target.getAttribute('aria-expanded') === 'true'
+    )
+      return;
     event.preventDefault();
     onRequestClose();
   };

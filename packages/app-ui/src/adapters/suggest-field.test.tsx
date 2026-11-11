@@ -142,3 +142,17 @@ it('shows the exact value and the source with the label', async () => {
   expect(option.textContent).toContain('Work');
   expect(option.getAttribute('aria-labelledby')).toBeTruthy();
 });
+
+it('calls the latest onSelect for suggestions it keeps across a rerender', async () => {
+  const first = vi.fn();
+  const latest = vi.fn();
+  const items = [alice, bob];
+  const { rerender } = render(<Field items={items} onSelect={first} />);
+  await type('al');
+  // The same suggestion objects, a new handler with the app's newer state.
+  rerender(<Field items={items} onSelect={latest} />);
+  await key('ArrowDown');
+  await key('Enter');
+  expect(latest).toHaveBeenCalledWith(alice);
+  expect(first).not.toHaveBeenCalled();
+});

@@ -8,6 +8,7 @@ import {
   render,
   screen,
 } from '@testing-library/react';
+import { SuggestField, type Suggestion } from './suggest-field.js';
 import { WorkspacePanel } from './workspace-panel.js';
 
 afterEach(cleanup);
@@ -150,4 +151,49 @@ it('returns the focus to focusTarget and takes another close label', async () =>
   await press(screen.getByRole('button', { name: 'Hide details' }));
   expect(screen.queryByRole('region', { name: 'Details' })).toBeNull();
   expect(document.activeElement).toBe(target.current);
+});
+
+it('lets the first Escape close the suggestions of a SuggestField in it', async () => {
+  const closed = vi.fn();
+  const alice: Suggestion = { id: 'alice', label: 'Alice' };
+  function Search() {
+    const [open, setOpen] = useState(true);
+    const [value, setValue] = useState('');
+    return (
+      <WorkspacePanel
+        title="Search"
+        open={open}
+        onRequestClose={() => {
+          closed();
+          setOpen(false);
+        }}
+      >
+        <SuggestField
+          label="Search"
+          value={value}
+          onChange={setValue}
+          items={[alice]}
+          onSelect={() => {}}
+        />
+      </WorkspacePanel>
+    );
+  }
+  render(<Search />);
+  const field = screen.getByRole('combobox', { name: 'Search' });
+  await act(async () => {
+    field.focus();
+    fireEvent.change(field, { target: { value: 'al' } });
+  });
+  expect(field.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => {
+    fireEvent.keyDown(field, { key: 'Escape' });
+  });
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(closed).not.toHaveBeenCalled();
+  expect(screen.queryByRole('region', { name: 'Search' })).not.toBeNull();
+  // The next Escape closes the panel.
+  await act(async () => {
+    fireEvent.keyDown(field, { key: 'Escape' });
+  });
+  expect(closed).toHaveBeenCalledTimes(1);
 });

@@ -637,7 +637,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   region named by its heading, with optional `actions` and Close; there is no
   backdrop, no focus trap, and a press beside it does not close it. Like
   `ScreenDialog` it is controlled: Close and Escape, while the focus is in
-  the panel, call `onRequestClose`, and it closes when `open` turns false.
+  the panel, call `onRequestClose`, and it closes when `open` turns false. An
+  open combo box in it, such as a `SuggestField`'s suggestions, takes the
+  first Escape.
   Opening moves the focus into the panel (`autoFocus={false}` keeps it where
   it is, for a panel that follows a selection); closing with the focus in it
   returns the focus to the element it opened from, or to `focusTarget`, and

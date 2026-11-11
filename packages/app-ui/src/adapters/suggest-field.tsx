@@ -1,4 +1,10 @@
-import { useContext, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useContext,
+  useLayoutEffect,
+  useRef,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { ComboBoxStateContext, Label, Text } from 'react-aria-components';
 import { cn } from 'cn';
 import {
@@ -94,6 +100,13 @@ export function SuggestField<T extends Suggestion>(
     className,
   } = props;
   const t = useAdapterTexts();
+  // React Aria keeps rendered suggestions while their objects stay the same,
+  // so a choice calls the latest onSelect through this reference, not the
+  // one of the render that first showed the suggestion.
+  const select = useRef(onSelect);
+  useLayoutEffect(() => {
+    select.current = onSelect;
+  });
   const status = statusText(t, props);
   const typed = value.trim() !== '';
   return (
@@ -142,7 +155,7 @@ export function SuggestField<T extends Suggestion>(
             <ComboboxItem
               id={item.id}
               textValue={item.label}
-              onAction={() => onSelect(item)}
+              onAction={() => select.current(item)}
               className="grid min-h-11 gap-0.5 py-1.5 pr-2"
             >
               <Text slot="label" className="line-clamp-2 wrap-anywhere">
