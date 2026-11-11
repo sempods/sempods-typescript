@@ -950,6 +950,37 @@ function Source(props: {
   spends no retry. Pass `{ signal, priority: 'current' }` for what the person
   looks at now ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
 
+#### Search across Pods
+
+A search box uses the same pattern. Each `Source` finds through its own handle,
+and `key` restarts the search when the text changes:
+
+```tsx
+const load = usePodLoad(
+  reads(connection) ? runtime.bindPod(connection.id) : null,
+  (pod, signal) => pod.find(text, { signal, limit: 20 }),
+  { key: text },
+);
+```
+
+Each [Find](../packages/client-sdk/README.md#finding-resources) answer groups
+the hits by source Context (`FindGraph`). The SDK neither merges Pods nor
+ranks hits. To show one merged list, combine the **current** state of every
+source on each render, never results kept from a settled promise. Then a
+source whose grants changed, or that was cancelled or signed out, drops out
+by itself:
+
+| Source state                          | Its hits                   | Counts as failed |
+| ------------------------------------- | -------------------------- | ---------------- |
+| `ready`, also with no hits            | yes (`data`)               | no               |
+| `failed` with a `refused` error       | no                         | yes, access      |
+| `failed` otherwise                    | no                         | yes              |
+| `loading`, `cancelled`, `unavailable` | only `previous` (`retain`) | no               |
+
+"Nothing could be searched" means at least one source, and every source is
+`failed`. No sources, or only `loading`, `cancelled` or `unavailable` ones, is
+not a failure. A `ready` source with no hits is a successful empty answer.
+
 ## Part 4: Customizing
 
 ### AppAccess props

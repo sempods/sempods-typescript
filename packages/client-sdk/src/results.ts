@@ -75,6 +75,28 @@ export interface ReadOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Options of `Pod.find`. */
+export interface FindOptions extends ReadOptions {
+  /**
+   * The read downscope. Omitted: every Context the caller may read. A list:
+   * exactly those Contexts of this Pod, unreadable ones dropped by the Pod;
+   * `[]` finds nothing. Never widened, also not on an authentication resend.
+   */
+  readonly contexts?: readonly string[];
+  /** A positive integer; the Pod applies its own default and maximum. */
+  readonly limit?: number;
+}
+
+/**
+ * What one source Context contributed to a Find answer: its Context IRI and
+ * the JSON-LD node objects as answered (raw, like CONSTRUCT nodes). The
+ * answer has no rank and no marker separating a hit from its expansion.
+ */
+export interface FindGraph {
+  readonly context: string;
+  readonly nodes: readonly JsonLd[];
+}
+
 export interface WriteOptions {
   /** Before dispatch: `not-sent`. After dispatch: `uncertain`. */
   readonly signal?: AbortSignal;

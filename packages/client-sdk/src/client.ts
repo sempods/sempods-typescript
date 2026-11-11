@@ -23,6 +23,8 @@ import { canonicalPodUrl } from './pod-url.js';
 import type {
   Cancelled,
   CreateCondition,
+  FindGraph,
+  FindOptions,
   GetResult,
   JsonLd,
   MatchCondition,
@@ -357,6 +359,48 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
       construct: (query: string, options: ReadOptions = {}) =>
         sparql(query, JSON_LD, constructBody, podGuards, options),
     }),
+    async find(
+      text: string,
+      options: FindOptions = {},
+    ): Promise<QueryResult<readonly FindGraph[]>> {
+      if (typeof text !== 'string' || !text.trim())
+        throw failure({ code: 'invalid-argument', argument: 'text' });
+      const { contexts, limit } = options;
+      if (
+        contexts !== undefined &&
+        (!Array.isArray(contexts) ||
+          !contexts.every(
+            (iri) => typeof iri === 'string' && isContextIri(iri, base),
+          ))
+      )
+        throw failure({ code: 'invalid-argument', argument: 'context' });
+      if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0))
+        throw failure({ code: 'invalid-argument', argument: 'limit' });
+      const scope = contexts && [...contexts];
+      // One body for every dispatch: an authentication resend repeats it, so
+      // the downscope (also an empty one) is never dropped.
+      const body = JSON.stringify({
+        text,
+        include_contexts: true,
+        ...(scope ? { contexts: scope } : {}),
+        ...(limit === undefined ? {} : { limit }),
+      });
+      const url = `${base}/_system/find`;
+      const exchange = await execute(
+        request(
+          'POST',
+          url,
+          { accept: JSON_LD, 'content-type': 'application/json' },
+          podGuards,
+          options.signal,
+          body,
+        ),
+      );
+      return read(exchange, url, options.signal, async (response) => ({
+        kind: 'ok' as const,
+        body: findBody(await json(response), base, scope),
+      }));
+    },
     async catalogue(
       options: ReadOptions = {},
     ): Promise<QueryResult<readonly CatalogueContext[]>> {
@@ -425,6 +469,36 @@ function constructBody(body: unknown): readonly JsonLd[] {
   if (!Array.isArray(body) || !body.every(isNode))
     throw failure({ code: 'response', problem: 'body' });
   return Object.freeze(body);
+}
+
+/**
+ * Named-graph JSON-LD (SPS-FIND-019): every group names its source Context.
+ * A group without one, of another Pod, or outside the requested downscope
+ * (SPS-FIND-010) makes the whole answer untrusted; nodes stay as answered.
+ */
+function findBody(
+  body: unknown,
+  base: string,
+  scope: readonly string[] | undefined,
+): readonly FindGraph[] {
+  const requested = scope && new Set(scope);
+  if (!Array.isArray(body))
+    throw failure({ code: 'response', problem: 'body' });
+  return Object.freeze(
+    body.map((group: unknown) => {
+      const context = isNode(group) ? group['@id'] : undefined;
+      const nodes = isNode(group) ? group['@graph'] : undefined;
+      if (
+        typeof context !== 'string' ||
+        !isContextIri(context, base) ||
+        (requested && !requested.has(context)) ||
+        !Array.isArray(nodes) ||
+        !nodes.every(isNode)
+      )
+        throw failure({ code: 'response', problem: 'body' });
+      return Object.freeze({ context, nodes: Object.freeze(nodes) });
+    }),
+  );
 }
 
 function isNode(value: unknown): value is JsonLd {

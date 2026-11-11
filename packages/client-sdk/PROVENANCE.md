@@ -61,6 +61,13 @@ Pod or 10,000-Context backend scalability. Dataset downscope clarification remai
 owned by [sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129);
 Context failure has no unscoped fallback.
 
+Find (#233) was checked against `sempods/sempods-spec` at
+`c6308c157d8c78be0ba6e9d91dba39a11a9ce883` (`spec/core/find.md`, 2026-11-02): SPS-FIND-004, -005, -009–015 and
+-018–020. The named-graph JSON-LD form was cross-read in `sempods/sempods-kotlin`
+at `d72098f85a50df421e75a02a5cb13a8d7f2f0307` (`FindEndpoint`, `FindPostRequest`,
+`RdfWriterUtil.toJsonLdNamedGraphs`). This is source reading and deterministic
+fixtures, not live wire evidence.
+
 No source licence file was found at the source revisions above; they and this
 port are by the same author. Since 0.1.0 this package, including the ported code,
 is licensed under the Apache License, Version 2.0 (see LICENSE and NOTICE).

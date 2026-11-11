@@ -121,6 +121,18 @@ export function bindPod(
       construct: (query, options) =>
         read((o) => pod.sparql.construct(query, o), options),
     }),
+    find: (text, options) =>
+      read(
+        (o) =>
+          pod.find(text, {
+            ...(options?.contexts === undefined
+              ? {}
+              : { contexts: options.contexts }),
+            ...(options?.limit === undefined ? {} : { limit: options.limit }),
+            ...o,
+          }),
+        options,
+      ),
   } satisfies BoundPod);
   observePod(reader, e);
   return reader;

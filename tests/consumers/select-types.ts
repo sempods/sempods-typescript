@@ -11,6 +11,8 @@ import type {
 } from '@sempods/app-sdk';
 import { createViewLoader } from '@sempods/app-sdk';
 import type {
+  FindGraph,
+  FindOptions,
   Pod,
   QueryResult,
   SelectResult,
@@ -65,6 +67,10 @@ export async function read(pod: Pod) {
   }
   // @ts-expect-error Pod reads expose no write operations.
   void pod.subjects;
+  const found: QueryResult<readonly FindGraph[]> = await pod.find('x');
+  // Refused and empty are different answers.
+  if (found.kind === 'refused') void found.status;
+  else if (found.kind === 'ok' && found.body.length === 0) void found;
 }
 
 // The opt-in bound for explicit Pod reads is a runtime option.
@@ -98,6 +104,16 @@ export function loaders(view: BoundView, pod: BoundPod) {
   );
   // @ts-expect-error Only 'current' is a priority.
   void pod.sparql.select('SELECT ?x WHERE {}', { priority: 'high' });
+  // Find through the same handle and loader, grouped by source Context.
+  const scope: FindOptions = { contexts: [], limit: 10 };
+  const search: PodRead<readonly FindGraph[]> = (target, signal) =>
+    target.find('konzert', { ...scope, signal, priority: 'current' });
+  const found = createViewLoader(pod, search).getSnapshot();
+  if (found.kind === 'ready')
+    for (const graph of found.data)
+      void [graph.context, graph.nodes[0]?.['@id']];
+  // @ts-expect-error Find takes no type filter in this version.
+  void pod.find('x', { types: ['urn:T'] });
   const state: LoadState<SelectResult> = overview.getSnapshot();
   void state;
   const podRead: PodRead<SelectResult> = (target, signal) =>
