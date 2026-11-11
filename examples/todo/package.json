@@ -4,9 +4,15 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@sempods/client-sdk": "workspace:*",
     "@sempods/app-sdk": "workspace:*",
+    "@sempods/client-sdk": "workspace:*",
+    "jsonld": "9.0.0",
+    "n3": "2.13.12",
     "react": "19.3.1",
     "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/jsonld": "1.5.15",
+    "@types/n3": "1.26.6"
   }
 }

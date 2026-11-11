@@ -29,6 +29,8 @@ references for the task at hand, not prerequisites to read in order.
   [task-with-note](../examples/todo/recipes/task-with-note.tsx) recipes.
 - [RDF values](rdf-values.md): readable text, exact terms, dates and web
   addresses for values a SPARQL read returns.
+- [Public RDF](public-rdf.md): one explicit, credential-free lookup of an IRI's
+  own RDF document, kept apart from Pod data.
 - [TODO example](../examples/todo/README.md) and
   [Node example](../examples/node-script/README.md).
 
