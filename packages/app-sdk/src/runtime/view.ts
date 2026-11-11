@@ -1,5 +1,7 @@
 import type {
   ContextView,
+  FindGraph,
+  FindOptions,
   GetResult,
   JsonLd,
   QueryResult,
@@ -52,6 +54,15 @@ export interface BoundPod {
       options?: ReadOptions & { readonly priority?: 'current' },
     ): Promise<BoundRead<QueryResult<readonly JsonLd[]>>>;
   };
+  /**
+   * The client `Pod.find` through this handle, with the same lifetime,
+   * admission and `priority` as `sparql`. Each source Context's statements
+   * stay in their own group; merging across Pods is the app's choice.
+   */
+  find(
+    text: string,
+    options?: FindOptions & { readonly priority?: 'current' },
+  ): Promise<BoundRead<QueryResult<readonly FindGraph[]>>>;
 }
 
 /**

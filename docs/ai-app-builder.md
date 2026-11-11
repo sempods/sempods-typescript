@@ -94,6 +94,7 @@ entire SDK or protocol before implementing an ordinary screen.
 | SDK integration in an existing React project  | [Quickstart](quickstart.md)                                                                                       |
 | A hook, component or its lifecycle            | [API map](react-authoring.md#api-at-a-glance), [state ownership](react-authoring.md#state-ownership-and-lifetime) |
 | Several lists or an overview                  | [Context choices](react-authoring.md#choose-the-app-shape)                                                        |
+| A search across one or several Pods           | [Search across Pods](react-authoring.md#search-across-pods)                                                       |
 | Values of any vocabulary from a SPARQL read   | [RDF values](rdf-values.md)                                                                                       |
 | Cards or pictures of resources across Pods    | [Resource cards](resource-cards.md)                                                                               |
 | Public RDF about an IRI no Pod describes      | [Public RDF](public-rdf.md)                                                                                       |

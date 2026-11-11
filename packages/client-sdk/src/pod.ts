@@ -3,6 +3,8 @@ import type {
   CatalogueResult,
   ContextDescriptionResult,
   CreateCondition,
+  FindGraph,
+  FindOptions,
   GetResult,
   JsonLd,
   MatchCondition,
@@ -62,6 +64,17 @@ export interface Pod {
       options?: ReadOptions,
     ): Promise<QueryResult<readonly JsonLd[]>>;
   };
+  /**
+   * The Pod's Find primitive (sempods-spec `find.md`): text in, the matching
+   * resources (usually with their type and label), grouped by source Context.
+   * Always sent as `POST` with `include_contexts`. Nothing readable or nothing
+   * found is `ok` with an empty body, not `refused`. A group that names no
+   * Context of this Pod, or one outside `contexts`, rejects the whole answer.
+   */
+  find(
+    text: string,
+    options?: FindOptions,
+  ): Promise<QueryResult<readonly FindGraph[]>>;
   /** Operations bound to one explicitly selected context. Never "all contexts". */
   context(contextIri: string, options?: ContextOptions): ContextView;
   /** The caller-relative context catalogue: known access facts, not server authority. */

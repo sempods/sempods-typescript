@@ -26,6 +26,8 @@ export type {
   CatalogueResult,
   ContextDescriptionResult,
   CreateCondition,
+  FindGraph,
+  FindOptions,
   GetResult,
   JsonLd,
   MatchCondition,

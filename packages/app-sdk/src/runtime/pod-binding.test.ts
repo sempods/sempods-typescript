@@ -105,6 +105,7 @@ it('binds and queries without any catalogue or Context, over the same guarded pr
   expect(f.runtime.bindPod(f.id)).toBe(f.reader);
   expect(f.reader.getSnapshot()).toMatchObject({ current: true, read: true });
   expect(Object.keys(f.reader).sort()).toEqual([
+    'find',
     'getSnapshot',
     'key',
     'podUrl',
