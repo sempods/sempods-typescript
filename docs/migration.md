@@ -6,7 +6,9 @@ automatic conversion of legacy app data or stored credentials.
 
 ## From 0.7.0 to 0.8.0
 
-0.8.0 is not released yet; this section collects its upgrade steps.
+0.8.0 is not released yet; this section collects its upgrade steps. The
+prerelease `0.8.0-dev.1` carries them, and the
+[0.8.0 release notes](releases/0.8.0.md) list the changes.
 
 ### Remembered Pods
 
@@ -104,8 +106,8 @@ seconds, the sempods server's default).
   endpoint still ends with `exchange`.
 - **A token request is given up after 20 seconds** and counts as lost; there
   was no limit before. An answer that is neither a token response nor an OAuth
-  error (`400`, `401`), such as a `5xx`, `403` or `429` from a proxy, counts as
-  lost too.
+  error (`400`, `401`), such as a `5xx`, `403`, `404`, `408` or `429` from a
+  proxy, counts as lost too.
 - **Downgrading to 0.7** reads such a claim as `interrupted` and leaves it
   stored, with its refresh token, until the person signs in again or signs
   out.
