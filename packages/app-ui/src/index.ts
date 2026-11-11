@@ -4,6 +4,7 @@ export * from './adapters/chips.js';
 export { DateChooser, type DateChooserProps } from './adapters/date-chooser.js';
 export * from './adapters/header-menu.js';
 export * from './adapters/screen-dialog.js';
+export * from './adapters/workspace-panel.js';
 // The router over the app's address model, under the SDK's leave policy.
 export * from './router/nav.js';
 // shadcn/ui (aria-nova) components on React Aria Components.

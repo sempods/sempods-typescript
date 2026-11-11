@@ -3105,6 +3105,325 @@ async function insets({ browser, origin, engine }) {
   return results;
 }
 
+/**
+ * The README's workspace (`?workspace`): a canvas with a nonmodal filter
+ * panel (WorkspacePanel, sempods-apps-template#143). The panel takes the
+ * focus and gives it back, traps nothing, ignores presses beside it, sits
+ * below SDK management and never resizes or remounts the canvas.
+ */
+async function workspace({ browser, origin, engine }) {
+  const { context, page, errors } = await newPage(browser);
+  await signIn(page, origin);
+  const cdp =
+    engine === 'chromium' ? await context.newCDPSession(page) : undefined;
+  const toggle = page.getByRole('button', { name: /^(Filters|Filter)$/ });
+  const panel = page.getByRole('region', { name: /^(Filters|Filter)$/ });
+  const canvas = page.locator('canvas[aria-label=Graph]');
+  const load = async (width = 1280, height = 800, query = '') => {
+    await page.setViewportSize({ width, height });
+    await page.goto(origin + '/?workspace' + query);
+    await canvas.first().waitFor();
+    await settle(page);
+  };
+  /** Opens the panel from its toggle by keyboard. */
+  const openByKeyboard = async () => {
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await panel.waitFor();
+    await settle(page);
+  };
+  const where = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      const region = document.querySelector(
+        '[data-sempods-ui=workspace-panel]',
+      );
+      if (!el || el === document.body) return 'body';
+      if (region && el === region) return 'panel';
+      if (region?.contains(el)) return 'in-panel';
+      return el.tagName.toLowerCase() + (el.getAttribute('aria-label') ?? '');
+    });
+  const box = (locator) =>
+    locator.first().evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, right: r.right, bottom: r.bottom, left: r.left };
+    });
+  const checks = {
+    // Opening moves the focus into the named region; Escape inside closes
+    // it and returns the focus to the toggle.
+    async 'workspace-panel-focus-entry-escape'() {
+      await load();
+      await openByKeyboard();
+      const entered = await where();
+      await page.keyboard.press('Tab');
+      const tabbed = await where();
+      await page.keyboard.press('Escape');
+      const closed = await hidden(panel);
+      const back = await where();
+      return {
+        pass:
+          entered === 'panel' &&
+          tabbed === 'in-panel' &&
+          closed &&
+          /^button(Filters|Filter)$/.test(back),
+        entered,
+        tabbed,
+        back,
+      };
+    },
+    // Close by pointer returns the focus to the toggle as well.
+    async 'workspace-panel-close-returns-focus'() {
+      await load();
+      await toggle.click();
+      await panel.waitFor();
+      await panel.getByRole('button', { name: 'Close', exact: true }).click();
+      const closed = await hidden(panel);
+      const back = await where();
+      return {
+        pass: closed && /^button(Filters|Filter)$/.test(back),
+        back,
+      };
+    },
+    // No focus trap: Tab and Shift+Tab leave the panel while it stays open.
+    async 'workspace-panel-no-trap'() {
+      await load();
+      await openByKeyboard();
+      const leave = async (key) => {
+        await panel.focus();
+        for (let i = 0; i < 12; i++) {
+          await page.keyboard.press(key);
+          const at = await where();
+          if (at !== 'panel' && at !== 'in-panel') return at;
+        }
+        return 'trapped';
+      };
+      const forward = await leave(tabKey(engine));
+      const backward = await leave(
+        engine === 'webkit' && process.platform === 'darwin'
+          ? 'Alt+Shift+Tab'
+          : 'Shift+Tab',
+      );
+      const open = await panel.isVisible();
+      return {
+        pass: forward !== 'trapped' && backward !== 'trapped' && open,
+        forward,
+        backward,
+      };
+    },
+    // A press on the canvas beside the panel reaches the canvas and keeps
+    // the panel; Escape in the canvas is the canvas's.
+    async 'workspace-panel-press-beside'() {
+      await load();
+      await toggle.click();
+      await panel.waitFor();
+      const p = await box(panel);
+      const c = await box(canvas);
+      const x = Math.round((p.right + c.right) / 2);
+      const y = Math.round((c.top + c.bottom) / 2);
+      const hit = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.tagName.toLowerCase(),
+        [x, y],
+      );
+      await page.mouse.click(x, y);
+      await canvas.first().focus();
+      await page.keyboard.press('Escape');
+      await settle(page);
+      const open = await panel.isVisible();
+      const focus = await where();
+      return {
+        pass: hit === 'canvas' && open && focus === 'canvasGraph',
+        hit,
+        open,
+        focus,
+      };
+    },
+    // Opening and closing keep the canvas element and its size, on desktop
+    // and on a phone.
+    async 'workspace-panel-canvas-kept'() {
+      const runs = [];
+      for (const [width, height] of [
+        [1280, 800],
+        [375, 667],
+      ]) {
+        await load(width, height);
+        await canvas.first().evaluate((el) => (el.dataset.kept = 'yes'));
+        const before = await box(canvas);
+        await toggle.click();
+        await panel.waitFor();
+        await settle(page);
+        const during = await box(canvas);
+        await panel.getByRole('button', { name: 'Close', exact: true }).click();
+        await hidden(panel);
+        await settle(page);
+        const after = await box(canvas);
+        const kept = await page.evaluate(
+          () =>
+            document.querySelectorAll('canvas').length === 1 &&
+            document.querySelector('canvas')?.dataset.kept === 'yes',
+        );
+        runs.push({
+          width,
+          kept,
+          same:
+            JSON.stringify(before) === JSON.stringify(during) &&
+            JSON.stringify(before) === JSON.stringify(after),
+          before,
+          during,
+        });
+      }
+      return { pass: runs.every((r) => r.kept && r.same), runs };
+    },
+    // Phones: the full width at the bottom, up to 70% of the height, with
+    // the canvas visible above; its content scrolls when it is too long.
+    async 'workspace-panel-phone-bounds'() {
+      await load(375, 667);
+      await toggle.click();
+      await panel.waitFor();
+      await settle(page);
+      const tall = await box(panel);
+      await page.setViewportSize({ width: 375, height: 160 });
+      await settle(page);
+      const low = await panel.evaluate((el) => {
+        const [header, content] = el.children;
+        const r = el.getBoundingClientRect();
+        return {
+          top: r.top,
+          bottom: r.bottom,
+          headerTop: header.getBoundingClientRect().top,
+          scrolls: content.scrollHeight > content.clientHeight,
+          overflow: getComputedStyle(content).overflowY,
+        };
+      });
+      return {
+        pass:
+          tall.left === 0 &&
+          tall.right === 375 &&
+          Math.abs(tall.bottom - 667) < 1 &&
+          tall.top >= 667 * 0.3 - 1 &&
+          low.top >= 160 * 0.3 - 1 &&
+          low.headerTop >= 0 &&
+          low.scrolls &&
+          low.overflow === 'auto',
+        tall,
+        low,
+      };
+    },
+    // SDK management opens above the panel and covers it; closing it
+    // returns to the menu and leaves the panel open.
+    async 'workspace-panel-below-management'() {
+      await load();
+      await toggle.click();
+      await panel.waitFor();
+      const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      const sheet = page.getByRole('dialog', { name: /Pods & sharing/ });
+      await menu.click();
+      await page.getByRole('menuitem', { name: 'Pods & sharing' }).click();
+      await sheet.waitFor();
+      await gone(page.getByRole('menu'));
+      await settle(page);
+      const p = await box(panel);
+      const covered = await page.evaluate(
+        ([x, y]) =>
+          !document
+            .querySelector('[data-sempods-ui=workspace-panel]')
+            ?.contains(document.elementFromPoint(x, y)),
+        [Math.round((p.left + p.right) / 2), Math.round(p.top + 20)],
+      );
+      await page.keyboard.press('Escape');
+      const closed = await hidden(sheet);
+      const focus = await focusUntil(page, /Menu/);
+      const open = await panel.isVisible();
+      return {
+        pass: covered && closed && /Menu/.test(focus) && open,
+        covered,
+        focus,
+        open,
+      };
+    },
+    // German: the SDK's close text.
+    async 'workspace-panel-german'() {
+      await load(1280, 800, '&lang=de');
+      await toggle.click();
+      await panel.waitFor();
+      const close = await panel
+        .getByRole('button', { name: 'Schließen', exact: true })
+        .count();
+      return { pass: close === 1, close };
+    },
+    // Safe-area insets: the phone's content clears the home indicator, the
+    // landscape panel clears the side cutout.
+    'workspace-panel-insets': async () => {
+      if (!cdp) return { pass: false, skip: 'no safe-area emulation' };
+      const setInsets = (insets = {}) =>
+        cdp.send('Emulation.setSafeAreaInsetsOverride', {
+          insets: { top: 0, bottom: 0, left: 0, right: 0, ...insets },
+        });
+      try {
+        await setInsets({ bottom: 34 });
+        await load(375, 667);
+        await toggle.click();
+        await panel.waitFor();
+        await settle(page);
+        const phone = await panel.evaluate(
+          (el) => getComputedStyle(el.children[1]).paddingBottom,
+        );
+        await setInsets({ left: 47, right: 47, bottom: 21 });
+        await load(844, 390);
+        await toggle.click();
+        await panel.waitFor();
+        await settle(page);
+        const landscape = await box(panel);
+        return {
+          pass:
+            phone === `${16 + 34}px` &&
+            landscape.left >= 47 + 16 - 0.5 &&
+            landscape.bottom <= 390 - 21 - 16 + 0.5,
+          phone,
+          landscape,
+        };
+      } finally {
+        await setInsets();
+      }
+    },
+    // Translucent where the browser blurs, solid with reduced transparency.
+    'workspace-panel-reduced-transparency': async () => {
+      if (!cdp)
+        return {
+          pass: false,
+          skip: 'no prefers-reduced-transparency emulation',
+        };
+      const alpha = () =>
+        panel.evaluate((el) => {
+          const probe = document.createElement('canvas').getContext('2d');
+          probe.fillStyle = getComputedStyle(el).backgroundColor;
+          probe.fillRect(0, 0, 1, 1);
+          return probe.getImageData(0, 0, 1, 1).data[3] / 255;
+        });
+      try {
+        await load();
+        await toggle.click();
+        await panel.waitFor();
+        await settle(page);
+        const normal = await alpha();
+        await cdp.send('Emulation.setEmulatedMedia', {
+          features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }],
+        });
+        await settle(page);
+        const reduced = await alpha();
+        return { pass: normal < 1 && reduced === 1, normal, reduced };
+      } finally {
+        await cdp.send('Emulation.setEmulatedMedia', { features: [] });
+      }
+    },
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(checks))
+    results.push(await attemptOn(errors, id, run));
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   gate,
   roundtrip,
@@ -3115,4 +3434,5 @@ export const suites = {
   theme,
   compact,
   insets,
+  workspace,
 };

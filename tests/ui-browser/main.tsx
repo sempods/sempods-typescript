@@ -5,11 +5,12 @@
 // ResourceEditor, its "Not today" action address, a creation address and
 // explicit not-found pages, a calendar-date chooser inside the editor fields.
 // With `?dialog=compact`, a task address opens the compact quick edit
-// instead of the task dialog.
+// instead of the task dialog. With `?workspace`, the screen is the README's
+// workspace with its nonmodal filter panel instead of the tasks.
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
-// the quick edit, quick-edit.tsx, and the address model, places.ts, are the
-// package README's examples, which
+// the quick edit, quick-edit.tsx, the workspace, workspace.tsx, and the
+// address model, places.ts, are the package README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
 import { StrictMode, useRef, useState } from 'react';
@@ -41,6 +42,7 @@ import { places, type Place } from './places';
 import { checkTheme, readTheme } from '@sempods/app-ui/theme-check';
 import { TaskDialog, taskFields } from './task-dialog';
 import { QuickEdit } from './quick-edit';
+import { Workspace } from './workspace';
 import './index.css';
 
 Object.assign(window, { checkTheme, readTheme });
@@ -108,6 +110,7 @@ const Icon = ({ path }: { readonly path: string }) => (
 const settings = new URLSearchParams(location.search);
 const language = settings.get('lang') === 'de' ? 'de' : 'en';
 const compact = settings.get('dialog') === 'compact';
+const workspace = settings.has('workspace');
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -205,7 +208,13 @@ function Frame() {
       />
       {/* An address that names its source opens without a selected Context:
           no TargetScreen, so AppAccess asks for no choice. */}
-      {place.kind === 'task' && place.context && !target ? (
+      {workspace ? (
+        header && (
+          <div className="gate-workspace">
+            <Workspace />
+          </div>
+        )
+      ) : place.kind === 'task' && place.context && !target ? (
         header && (
           <TaskDialog
             subject={place.subject}
