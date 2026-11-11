@@ -227,7 +227,7 @@ function previewState(
 ): PreviewState {
   if (ready) return 'shown';
   if (url) return 'loading';
-  // Every address failed, or the attempts are used up.
+  // Every address failed, or MAX_ATTEMPTS addresses were tried.
   if (urls.length > 0) return 'unavailable';
   if (status.unread) return 'unread';
   if (status.unavailable || card.refused > 0) return 'unavailable';
@@ -235,10 +235,10 @@ function previewState(
 }
 
 /**
- * A bounded preview: ordinary `<img>` elements tried in order. After
- * `MAX_ATTEMPTS` failed addresses it tries no further one. The browser loads
- * them as it loads any image, without a Pod token. The placeholder keeps its
- * size in every state.
+ * A bounded preview: ordinary `<img>` elements tried in order, at most
+ * `MAX_ATTEMPTS` distinct addresses over its lifetime, whether they load or
+ * fail. The browser loads them as it loads any image, without a Pod token.
+ * The placeholder keeps its size in every state.
  */
 export function ImagePreview({
   card,
@@ -251,17 +251,26 @@ export function ImagePreview({
 }) {
   const t = useMessages(texts);
   const urls = previewCandidates(card.images);
+  // Every address this preview mounted, loaded or not: at most MAX_ATTEMPTS.
+  const [attempted, setAttempted] = useState<readonly string[]>([]);
   const [failed, setFailed] = useState<readonly string[]>([]);
-  const [loaded, setLoaded] = useState<readonly string[]>([]);
-  // Keep a loaded picture while it is still a candidate; a withdrawn address
-  // is no candidate, so its element is removed in this render. After
-  // MAX_ATTEMPTS failures, the preview tries no further address.
+  // The address on display, once its element loaded.
+  const [shown, setShown] = useState<string>();
+  // A withdrawn address is no candidate: its element goes in this render,
+  // and if it returns, its new element is not ready before it loads again.
+  if (shown !== undefined && !urls.includes(shown)) setShown(undefined);
+  const usable = (value: string) =>
+    !failed.includes(value) &&
+    (attempted.includes(value) || attempted.length < MAX_ATTEMPTS);
+  // The picture on display stays while it is a candidate; a candidate that
+  // arrives or returns later does not replace it.
   const url =
-    urls.find((value) => loaded.includes(value) && !failed.includes(value)) ??
-    (failed.length < MAX_ATTEMPTS
-      ? urls.find((value) => !failed.includes(value))
-      : undefined);
-  const ready = url !== undefined && loaded.includes(url);
+    shown !== undefined && urls.includes(shown) && !failed.includes(shown)
+      ? shown
+      : urls.find(usable);
+  if (url !== undefined && !attempted.includes(url))
+    setAttempted([...attempted, url]);
+  const ready = url !== undefined && url === shown;
   const state = previewState(ready, url, urls, status, card);
   const cell = { gridArea: '1 / 1', width: size, height: size };
   return (
@@ -283,7 +292,7 @@ export function ImagePreview({
           decoding="async"
           referrerPolicy="no-referrer"
           style={{ ...cell, objectFit: 'cover', opacity: ready ? 1 : 0 }}
-          onLoad={() => setLoaded((old) => [...old, url])}
+          onLoad={() => setShown(url)}
           onError={() => setFailed((old) => [...old, url])}
         />
       )}

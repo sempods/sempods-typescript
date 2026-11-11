@@ -417,3 +417,57 @@ it('starts the details preview afresh for another resource', async () => {
     ),
   );
 });
+
+it('mounts at most six distinct addresses, also when they load', () => {
+  const preview = (n: number) => (
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith([[at(n)]])} status={settled} />
+    </SdkLocaleProvider>
+  );
+  const view = render(preview(1));
+  const box = screen.getByRole('img');
+  for (let n = 1; n <= MAX_ATTEMPTS; n++) {
+    view.rerender(preview(n));
+    expect(box.querySelector('img')!.getAttribute('src')).toBe(at(n));
+    fireEvent.load(box.querySelector('img')!);
+  }
+  // A seventh address after six loaded and withdrawn ones is not mounted.
+  view.rerender(preview(MAX_ATTEMPTS + 1));
+  expect(box.querySelector('img')).toBeNull();
+  expect(box.getAttribute('aria-label')).toBe('Picture unavailable');
+});
+
+it('keeps the displayed picture when an earlier one returns', () => {
+  const preview = (pictures: readonly (readonly string[])[]) => (
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith(pictures)} status={settled} />
+    </SdkLocaleProvider>
+  );
+  const view = render(preview([[at(1)], [at(2)]]));
+  const box = screen.getByRole('img');
+  fireEvent.load(box.querySelector('img')!);
+  view.rerender(preview([[at(2)]]));
+  expect(box.querySelector('img')!.getAttribute('src')).toBe(at(2));
+  expect(box.getAttribute('aria-label')).toBe('Loading picture');
+  fireEvent.load(box.querySelector('img')!);
+  view.rerender(preview([[at(1)], [at(2)]]));
+  expect(box.querySelector('img')!.getAttribute('src')).toBe(at(2));
+  expect(box.getAttribute('aria-label')).toBe('Picture');
+});
+
+it('shows a returning address only after its new element loads', () => {
+  const preview = (pictures: readonly (readonly string[])[]) => (
+    <SdkLocaleProvider language="en">
+      <ImagePreview card={cardWith(pictures)} status={settled} />
+    </SdkLocaleProvider>
+  );
+  const view = render(preview([[at(1)]]));
+  const box = screen.getByRole('img');
+  fireEvent.load(box.querySelector('img')!);
+  view.rerender(preview([]));
+  view.rerender(preview([[at(1)]]));
+  expect(box.querySelector('img')!.getAttribute('src')).toBe(at(1));
+  expect(box.getAttribute('aria-label')).toBe('Loading picture');
+  fireEvent.load(box.querySelector('img')!);
+  expect(box.getAttribute('aria-label')).toBe('Picture');
+});

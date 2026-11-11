@@ -134,8 +134,9 @@ so the decision waits until the rule is known.
 
 `GRAPH ?g` names the Context of each statement. Rows are sorted, and at most 200
 are used. The resource's types, aliases and dates come first. Then each image
-node follows as one block, with its link and its variants, so a long read is
-cut by whole pictures and never before the resource's own facts. For the same data, a
+node follows as one block: its link first, then its variants. A long read is
+never cut before the resource's own facts. It can cut a picture partway, but
+the kept rows of that picture still include its link, so they still count. For the same data, a
 large resource loses the same rows, except where linked nodes are blank: their
 labels can change between reads. A read that returns more marks the card as
 `truncated`.
@@ -255,11 +256,13 @@ The preview is bounded:
   thumbnail. A direct address comes after a node's declared variants. The
   limits apply after merging and ranking.
 - A preview tries the addresses in card order. When one fails to load or
-  decode, it moves to the next. It never retries a failed address, and after
-  six failures (`MAX_ATTEMPTS`) it tries no further address, also when new
-  ones arrive.
-- A loaded picture stays while its address is still a candidate. A better
-  candidate that arrives later does not replace it.
+  decode, it moves to the next, and it never retries a failed address. Over
+  its lifetime it mounts at most six distinct addresses (`MAX_ATTEMPTS`),
+  whether they load or fail, also when sources come and go.
+- The picture on display stays while its address is still a candidate. A
+  candidate that arrives or returns later does not replace it. An address
+  that was withdrawn and returns is shown again only after its new element
+  loads.
 
 The placeholder keeps its size in every state. Its accessible name says which
 state it is in:

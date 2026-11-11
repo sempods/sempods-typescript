@@ -79,7 +79,7 @@ export const MAX_ROWS = 200;
 /** Pictures per card, and variants (thumbnail, original, direct) per picture. */
 export const MAX_IMAGES = 4;
 export const MAX_VARIANTS = 3;
-/** Failed image addresses after which a preview stops and shows "unavailable". */
+/** Distinct addresses one preview tries over its lifetime, loaded or failed. */
 export const MAX_ATTEMPTS = 6;
 
 /** Where one value comes from: one statement in one Context of one Pod. */
@@ -170,8 +170,9 @@ export function cardQuery(
     ),
   ];
   // Sort order: the root's types, aliases and dates first; then one block per
-  // image node (`?node`), its link and its variants together. A long read is
-  // cut by whole pictures, never before the root's own facts.
+  // image node (`?node`), its link first (`?step`) and then its variants. A
+  // long read is never cut before the root's own facts, and the kept rows of
+  // a cut picture still include the link they need to join.
   const branches = [
     `{
     VALUES ?p { ${list(facts)} }
@@ -187,6 +188,7 @@ export function cardQuery(
     BIND(${iri(root)} AS ?s)
     BIND(1 AS ?order)
     BIND(?o AS ?node)
+    BIND(0 AS ?step)
   }`);
   if (pairs.length)
     branches.push(`{
@@ -195,10 +197,11 @@ export function cardQuery(
     GRAPH ?g { ?s ?p ?o }
     BIND(1 AS ?order)
     BIND(?s AS ?node)
+    BIND(1 AS ?step)
   }`);
   return `SELECT DISTINCT ?s ?p ?o ?g WHERE {
   ${branches.join(' UNION ')}
-} ORDER BY ?order ?node ?s ?p ?g ?o LIMIT ${MAX_ROWS + 1}`;
+} ORDER BY ?order ?node ?step ?s ?p ?g ?o LIMIT ${MAX_ROWS + 1}`;
 }
 
 /** Adds `evidence` unless the list already holds that statement. */

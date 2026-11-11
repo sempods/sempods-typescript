@@ -4,6 +4,7 @@ import { anonymous, createPod } from '@sempods/client-sdk';
 import { createRequire } from 'node:module';
 import {
   MAX_IMAGES,
+  MAX_VARIANTS,
   cardQuery,
   exampleRules,
   imageAddress,
@@ -82,7 +83,9 @@ describe('card query', () => {
     expect(query).toContain('BIND(0 AS ?order)');
     expect(query).toContain('BIND(?o AS ?node)');
     expect(query).toContain('BIND(?s AS ?node)');
-    expect(query).toContain('ORDER BY ?order ?node ?s ?p ?g ?o LIMIT 201');
+    expect(query).toContain(
+      'ORDER BY ?order ?node ?step ?s ?p ?g ?o LIMIT 201',
+    );
     // Values are never read as roots of further reads.
     // Facts, links and linked nodes: no pattern reads beyond them.
     expect(query.match(/GRAPH/g)).toHaveLength(4);
@@ -1010,5 +1013,27 @@ describe('card query on a SPARQL engine', () => {
     expect(card.members).toEqual([talk, lovelace]);
     // Each link arrives with its variant: the kept rows still show pictures.
     expect(card.images).toHaveLength(MAX_IMAGES);
+  });
+
+  it('keeps the link of one large image node that truncates the read', async () => {
+    const result = await cardRead(
+      [
+        `<${ada}> <${RDF_TYPE}> <${S}Person> ${g('a')} .`,
+        `<${ada}> <${S}image> _:big ${g('a')} .`,
+        ...Array.from(
+          { length: 199 },
+          (_, i) =>
+            `_:big <${S}contentUrl> "https://img.example/${i}.jpg" ${g('a')} .`,
+        ),
+      ].join('\n'),
+      ada,
+    );
+    expect(result.rows).toHaveLength(201);
+    const found = sourceFacts(result, ada, alice, exampleRules);
+    expect(found.truncated).toBe(true);
+    const card = resourceCards([ada], [found], exampleRules).get(ada)!;
+    // The link sorts first in its block, so the kept variants still join.
+    expect(card.images).toHaveLength(1);
+    expect(card.images[0]!.variants).toHaveLength(MAX_VARIANTS);
   });
 });
