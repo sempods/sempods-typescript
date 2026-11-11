@@ -6,7 +6,7 @@
 // in each browser: Chromium and WebKit, plus Firefox on Linux.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets]
+//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
@@ -119,11 +119,10 @@ try {
   );
   const app = join(temp, 'app');
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
-  // The installed README's examples: its task dialog, its quick edit and its
-  // address model are the reference screen's, so the checks run them as
-  // shipped; other TSX
-  // examples are only compiled. Its stylesheet setup is the one the screen
-  // uses.
+  // The installed README's examples: its task dialog, its quick edit, its
+  // workspace and its address model are the reference screen's, so the
+  // checks run them as shipped; other TSX examples are only compiled. Its
+  // stylesheet setup is the one the screen uses.
   const readme = await readFile(
     join(temp, 'node_modules/@sempods/app-ui/README.md'),
     'utf8',
@@ -142,6 +141,7 @@ try {
   const shipped = [
     await ship('tsx', 'task-dialog.tsx'),
     await ship('tsx', 'quick-edit.tsx'),
+    await ship('tsx', 'workspace.tsx'),
   ];
   for (const [i, example] of blocks('tsx').entries())
     if (!shipped.includes(example))

@@ -56,7 +56,7 @@ layer statement puts the SDK's own styles (layer `sempods`) above Tailwind's
 reset and below the utilities: package components keep their look inside SDK
 surfaces such as the `ResourceEditor`, and the SDK's confirmations stay
 centred. The SDK's
-[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.1/docs/react-authoring.md#cascade-layer-order)
+[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.2/docs/react-authoring.md#cascade-layer-order)
 explains the order and which app rules still override SDK rules.
 
 `styles.css` adds:
@@ -263,9 +263,9 @@ the browser gate.
 The shadcn/ui components keep shadcn's names and React Aria's props
 (`onPress`, `isDisabled`, `isOpen`, …): `Badge`, `Button`, `LinkButton`,
 `Calendar`, `RangeCalendar`, `Dialog` and its parts, `DropdownMenu` and its
-parts, `Input`, `InputGroup` and its parts, `Popover` and its parts, `Select`
-and its parts, `Textarea`, `Toggle`, and `ToggleGroup` with
-`ToggleGroupItem`. `Badge` suits read-only tags. shadcn's
+parts, `Input`, `InputGroup` and its parts, `Combobox` and its parts,
+`Popover` and its parts, `Select` and its parts, `Textarea`, `Toggle`, and
+`ToggleGroup` with `ToggleGroupItem`. `Badge` suits read-only tags. shadcn's
 [aria-nova documentation](https://ui.shadcn.com/docs/components) describes
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
@@ -359,6 +359,37 @@ export function QuickEdit({
         </ResourceEditor>
       )}
     </Dialog>
+  );
+}
+```
+
+React Aria gives the components their locale: the order of typeahead,
+number and date formats, the reading direction and the texts it announces
+itself. Without a provider they follow the browser, so an app wraps its
+content in the re-exported `I18nProvider` with the locale it passes to the
+SDK's provider, and the kit follows the app's language and region:
+
+```tsx
+// app-locale.tsx
+import type { ReactNode } from 'react';
+import { SempodsProvider } from '@sempods/app-sdk/react';
+import type { BrowserRuntime } from '@sempods/app-sdk';
+import { I18nProvider } from '@sempods/app-ui';
+
+export function AppProviders(props: {
+  readonly runtime: BrowserRuntime;
+  readonly language: 'en' | 'de';
+  readonly locale: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <SempodsProvider
+      runtime={props.runtime}
+      language={props.language}
+      locale={props.locale}
+    >
+      <I18nProvider locale={props.locale}>{props.children}</I18nProvider>
+    </SempodsProvider>
   );
 }
 ```
@@ -548,9 +579,17 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   and in the centred dialog nothing changes, so an app's own inset padding
   around it can go.
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
-  menu of actions, separators (`null`) and submenus of checked choices
+  menu of actions, separators (`null`) and groups of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
-  when their labels can repeat). An action's own `icon` is a decorative
+  when their labels can repeat). A group opens as a submenu, or with
+  `display: 'section'` lists its choices in the menu under its label as a
+  heading: for two or three choices, such as a View with Zen and List, a
+  section shows the current one at once and needs no second layer on a phone.
+  A choice's `description` adds a second line ("Can read") that describes it
+  without becoming part of its name. `disabled` on an action or a choice keeps
+  it visible but out of reach: a press does nothing and arrow keys skip it.
+  `variant="ghost"` shows only the icon until it is hovered, pressed or open,
+  for a menu repeated on every row, with the same 44px target. An action's own `icon` is a decorative
   leading icon (`{ label, onSelect, icon: <UsersIcon /> }`, shown at 16px,
   so give it no size of its own): it is hidden from assistive technology, so
   the label stays the item's name and leads typeahead. Once one action has an
@@ -593,6 +632,48 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   chosen chip is filled with the primary role and shows a check mark, so its
   state does not rest on colour alone. Tab reaches the group once, arrow keys
   move between chips, and Space or Enter chooses one.
+- **`WorkspacePanel`**: a nonmodal panel over a workspace, such as filters
+  or details beside a canvas or a map that stays usable behind it. It is a
+  region named by its heading, with optional `actions` and Close; there is no
+  backdrop, no focus trap, and a press beside it does not close it. Like
+  `ScreenDialog` it is controlled: Close and Escape, while the focus is in
+  the panel, call `onRequestClose`, and it closes when `open` turns false. An
+  open combo box in it, such as a `SuggestField`'s suggestions, takes the
+  first Escape.
+  Opening moves the focus into the panel (`autoFocus={false}` keeps it where
+  it is, for a panel that follows a selection); closing with the focus in it
+  returns the focus to the element it opened from, or to `focusTarget`, and
+  focus the person moved to the workspace stays there. It floats over the
+  workspace instead of taking its space, so the workspace keeps its size and
+  stays mounted. From 640px it floats at the `end` (default) or `start` edge,
+  up to 22rem wide and as high as its content; below, it fills the width at
+  the bottom, up to 70% of the height. Its content scrolls inside it, and it
+  keeps clear of the device's safe-area insets. Its surface is the theme's
+  `popover` role, slightly translucent with a blur where the browser blurs,
+  solid with reduced transparency or more contrast. It sits below SDK
+  dialogs, confirmations and prompts and below `ScreenDialog`, which covers
+  it while open. Show one panel at a time on phones, where panels share the
+  bottom edge.
+- **`SuggestField`**: a text field with suggestions the app finds as the
+  person types, such as a search or address bar, on React Aria's combo box.
+  It is controlled (`value`, `onChange`) and only shows: the app searches for
+  `value`, passes the `items` it found (`{ id, label, detail?, source? }`)
+  with `loading` and `failed` (`'some'` or `'all'` of its sources), and
+  cancels a search whose text has changed. The input keeps the focus; arrow
+  keys move through the suggestions, Enter or a press chooses one
+  (`onSelect`), and Escape closes them. Enter, or a phone's Go key, with no
+  suggestion active submits the typed text (`onSubmit`), for example an
+  address to open, so the bar needs no Open button; an input method that
+  is still composing text never submits it. The suggestion the keyboard is
+  on keeps its place by `id` while results arrive and reorder. A label wraps
+  to two lines, `detail` (an exact IRI) stays on one line and is cut off
+  only visually, and `source` names where it was found in a few words;
+  assistive technology reads both in full as the suggestion's description. The field announces the number
+  of suggestions, a search still running, one that found nothing or failed
+  in part or completely, in the SDK provider's language. It is 44px high,
+  as are the suggestions, and draws one focus cue, the outline around the
+  whole field. `labelHidden` names it for assistive technology only, for a
+  bar whose placeholder and place say what it is.
 
 A main action usually stands alone above a group of the others, as in the
 reference screen's Zen view:
@@ -708,8 +789,338 @@ export function AppMenu() {
 }
 ```
 
-The adapters' texts ("Menu", "No date", "Apply", "Remove date") follow the
-SDK provider's language (English or German) and can be passed as props.
+A View with two choices as a section, and an action that is not available
+yet. The menu opens on the checked view; a choice closes the menu before it
+navigates:
+
+```tsx
+// view-menu.tsx
+import { HeaderMenu } from '@sempods/app-ui';
+
+export function ViewMenu(props: {
+  readonly view: 'zen' | 'list';
+  readonly show: (view: 'zen' | 'list') => void;
+  readonly canExport: boolean;
+  readonly exportTasks: () => void;
+}) {
+  return (
+    <HeaderMenu
+      label="Menu"
+      items={[
+        {
+          label: 'View',
+          display: 'section',
+          choices: [
+            {
+              label: 'Zen',
+              checked: props.view === 'zen',
+              onSelect: () => props.show('zen'),
+            },
+            {
+              label: 'List',
+              checked: props.view === 'list',
+              onSelect: () => props.show('list'),
+            },
+          ],
+        },
+        null,
+        {
+          label: 'Export',
+          onSelect: props.exportTasks,
+          disabled: !props.canExport,
+        },
+      ]}
+    />
+  );
+}
+```
+
+### Secondary actions on rows
+
+Repeated rows, such as Pods and their filters in a side panel, need quieter
+actions than a screen: the screen's own actions use `ActionButton` (56px
+pills and round buttons in the theme's action variants), a row's actions the
+compact `Button` with `variant="ghost"` and a 44px height (`min-h-11`), and a
+row's menu `HeaderMenu` with `icon="more"` and `variant="ghost"`. The row's
+name wraps instead of being cut off, a count stays secondary text, and each
+action keeps its own name, so the keyboard reaches them one by one and focus
+returns to the menu's button when its menu closes:
+
+```tsx
+// source-row.tsx
+import { Button, HeaderMenu } from '@sempods/app-ui';
+
+export function SourceRow(props: {
+  readonly name: string;
+  readonly count: number;
+  readonly shown: boolean;
+  readonly toggle: () => void;
+  readonly rename: () => void;
+  readonly remove: () => void;
+}) {
+  return (
+    <li className="flex min-h-12 items-center gap-1">
+      <span className="grid min-w-0 flex-1 px-2">
+        <span className="wrap-anywhere">{props.name}</span>
+        <span className="text-sm text-muted-foreground">
+          {props.count} resources
+        </span>
+      </span>
+      <Button
+        variant="ghost"
+        className="min-h-11 px-3"
+        aria-pressed={props.shown}
+        onPress={props.toggle}
+      >
+        {props.shown ? 'Hide' : 'Show'}
+      </Button>
+      <HeaderMenu
+        icon="more"
+        variant="ghost"
+        label={`${props.name}: more`}
+        items={[
+          { label: 'Rename', onSelect: props.rename },
+          { label: 'Remove', onSelect: props.remove },
+        ]}
+      />
+    </li>
+  );
+}
+```
+
+### A list menu with unavailable choices
+
+A switch between lists, labelled with the current one, shows every list the
+SDK knows, also one it reports as not selectable right now (`selectable` of
+`usePodContexts`, for example while its Pod reloads): it stays visible and
+checked choices keep their mark, but neither a press nor the keyboard
+chooses it, and arrow keys move only between the available ones. A
+read-only list the SDK reports as selectable stays selectable. Escape closes
+the menu with focus back on its button:
+
+```tsx
+// list-menu.tsx
+import { usePodContexts, useSdkLocale } from '@sempods/app-sdk/react';
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@sempods/app-ui';
+import { ChevronDownIcon } from 'lucide-react';
+
+export function ListMenu({ shareMore }: { readonly shareMore: () => void }) {
+  const lists = usePodContexts();
+  const { messages } = useSdkLocale();
+  const current = lists.selected;
+  return (
+    <DropdownMenuTrigger>
+      <Button
+        variant="ghost"
+        className="h-11 max-w-full justify-start gap-2 px-2 text-xl font-semibold"
+        aria-label={current ? `List: ${current.name}` : 'List'}
+      >
+        <span className="truncate">{current?.name ?? 'List'}</span>
+        <ChevronDownIcon />
+      </Button>
+      <DropdownMenu
+        placement="bottom start"
+        className="w-max min-w-56 max-w-[min(24rem,calc(100vw-2rem))]"
+      >
+        {lists.pods.map((pod) => (
+          <DropdownMenuGroup
+            key={pod.connectionId}
+            selectionMode="single"
+            selectedKeys={current ? [current.key] : []}
+          >
+            {/* With several Pods, each one heads its lists. */}
+            {lists.pods.length > 1 && (
+              <DropdownMenuLabel>{pod.name}</DropdownMenuLabel>
+            )}
+            {pod.choices.map((choice) => (
+              <DropdownMenuItem
+                key={choice.key}
+                id={choice.key}
+                className="min-h-11"
+                textValue={choice.name}
+                isDisabled={!choice.selectable}
+                onAction={() => void lists.select(choice)}
+              >
+                <span className="grid min-w-0 wrap-anywhere">
+                  {choice.name}
+                  <span className="text-sm text-muted-foreground">
+                    {choice.writable
+                      ? messages.controls.canChange
+                      : messages.controls.canRead}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem id="share" className="min-h-11" onAction={shareMore}>
+          Share more lists …
+        </DropdownMenuItem>
+      </DropdownMenu>
+    </DropdownMenuTrigger>
+  );
+}
+```
+
+A workspace with a canvas and a filter panel. The canvas keeps its size and
+element while the panel opens and closes, and stays usable beside it:
+
+```tsx
+// workspace.tsx
+import { useState } from 'react';
+import { SlidersHorizontalIcon } from 'lucide-react';
+import { useMessages } from '@sempods/app-sdk/react';
+import { ActionButton, Chip, ChipGroup, WorkspacePanel } from '@sempods/app-ui';
+
+const texts = {
+  en: {
+    graph: 'Graph',
+    filters: 'Filters',
+    show: 'Show',
+    tasks: 'Tasks',
+    notes: 'Notes',
+  },
+  de: {
+    graph: 'Graph',
+    filters: 'Filter',
+    show: 'Anzeigen',
+    tasks: 'Aufgaben',
+    notes: 'Notizen',
+  },
+};
+
+export function Workspace() {
+  const t = useMessages(texts);
+  const [filters, setFilters] = useState(false);
+  const [shown, setShown] = useState(new Set<string | number>(['tasks']));
+  return (
+    // The app places the workspace; the panel floats over it.
+    <div className="absolute inset-0 overflow-hidden">
+      {/* Focusable for its own keys; Escape here belongs to the canvas. */}
+      <canvas className="size-full" tabIndex={0} aria-label={t.graph} />
+      <div className="absolute top-4 right-4">
+        <ActionButton
+          variant="secondary"
+          shape="round-sm"
+          label={t.filters}
+          aria-expanded={filters}
+          onPress={() => setFilters((open) => !open)}
+        >
+          <SlidersHorizontalIcon />
+        </ActionButton>
+      </div>
+      <WorkspacePanel
+        title={t.filters}
+        side="start"
+        open={filters}
+        onRequestClose={() => setFilters(false)}
+      >
+        <ChipGroup
+          label={t.show}
+          selectionMode="multiple"
+          selectedKeys={shown}
+          onSelectionChange={(keys) => setShown(new Set(keys))}
+        >
+          <Chip id="tasks">{t.tasks}</Chip>
+          <Chip id="notes">{t.notes}</Chip>
+        </ChipGroup>
+      </WorkspacePanel>
+    </div>
+  );
+}
+```
+
+A search bar that opens a resource from several sources, or an address
+typed into it. The app's `search` runs per text and stops when its signal
+aborts; it is app code, for example one `pod.find` per connected Pod with
+the sources' names. The bar keeps the earlier suggestions while the next
+search runs, so the one the keyboard is on stays:
+
+```tsx
+// resource-search.tsx
+import { useEffect, useState } from 'react';
+import { SuggestField, type Suggestion } from '@sempods/app-ui';
+
+/** The app's search over its sources; it stops when `signal` aborts. */
+export type Search = (
+  text: string,
+  signal: AbortSignal,
+) => Promise<{
+  readonly items: readonly Suggestion[];
+  /** Sources whose search failed: some or all of them. */
+  readonly failed?: 'some' | 'all';
+}>;
+
+interface Found {
+  readonly text: string;
+  readonly items: readonly Suggestion[];
+  readonly failed?: 'some' | 'all';
+}
+
+export function ResourceSearch({
+  search,
+  onOpen,
+}: {
+  readonly search: Search;
+  /** Opens a resource by its IRI. */
+  readonly onOpen: (iri: string) => void;
+}) {
+  const [text, setText] = useState('');
+  const [found, setFound] = useState<Found>({ text: '', items: [] });
+  const query = text.trim();
+  useEffect(() => {
+    if (!query) return;
+    const controller = new AbortController();
+    // Waits for a pause in typing; a newer text aborts this search.
+    const timer = setTimeout(() => {
+      search(query, controller.signal).then(
+        (result) => {
+          if (!controller.signal.aborted) setFound({ text: query, ...result });
+        },
+        () => {
+          if (!controller.signal.aborted)
+            setFound({ text: query, items: [], failed: 'all' });
+        },
+      );
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, search]);
+  const current = found.text === query;
+  return (
+    <SuggestField
+      label="Address or search"
+      labelHidden
+      placeholder="Search or enter an address"
+      value={text}
+      onChange={setText}
+      items={query ? found.items : []}
+      loading={query !== '' && !current}
+      failed={current ? found.failed : undefined}
+      onSelect={(item) => onOpen(item.id)}
+      onSubmit={(value) => {
+        if (URL.canParse(value)) onOpen(value);
+      }}
+    />
+  );
+}
+```
+
+The adapters' texts ("Menu", "No date", "Apply", "Remove date", the
+suggestion field's announcements) follow the SDK provider's language
+(English or German); the menu's and the date chooser's can be passed as
+props.
 
 ## Router
 

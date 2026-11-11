@@ -16,6 +16,12 @@
     gap: 8px;
     padding-bottom: 16px;
   }
+  /* The README's workspace fills the rest of the screen. */
+  .gate-workspace {
+    position: relative;
+    flex: 1;
+    min-height: 240px;
+  }
   .gate-header h1 {
     font-size: 1.15rem;
     font-weight: 600;
@@ -60,10 +66,18 @@
     margin: auto;
     color: var(--muted-foreground);
   }
+  .gate-list li {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+  }
   .gate-list a {
     display: block;
+    flex: 1;
+    min-width: 0;
     padding: 14px 4px;
-    border-bottom: 1px solid var(--border);
     color: var(--foreground);
+    overflow-wrap: anywhere;
   }
 }

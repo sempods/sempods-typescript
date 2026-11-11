@@ -4,12 +4,18 @@ export * from './adapters/chips.js';
 export { DateChooser, type DateChooserProps } from './adapters/date-chooser.js';
 export * from './adapters/header-menu.js';
 export * from './adapters/screen-dialog.js';
+export * from './adapters/suggest-field.js';
+export * from './adapters/workspace-panel.js';
+// React Aria's locale for the kit's controls, which otherwise follow the
+// browser: wrap the app in it with the SDK provider's locale.
+export { I18nProvider, type I18nProviderProps } from 'react-aria-components';
 // The router over the app's address model, under the SDK's leave policy.
 export * from './router/nav.js';
 // shadcn/ui (aria-nova) components on React Aria Components.
 export * from './components/badge.js';
 export * from './components/button.js';
 export * from './components/calendar.js';
+export * from './components/combobox.js';
 export * from './components/dialog.js';
 export * from './components/dropdown-menu.js';
 export * from './components/input-group.js';

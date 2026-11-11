@@ -7,7 +7,7 @@ automatic conversion of legacy app data or stored credentials.
 ## From 0.7.0 to 0.8.0
 
 0.8.0 is not released yet; this section collects its upgrade steps. The
-prerelease `0.8.0-dev.1` carries them, and the
+prerelease `0.8.0-dev.2` carries them, and the
 [0.8.0 release notes](releases/0.8.0.md) list the changes.
 
 ### Remembered Pods
@@ -236,6 +236,14 @@ source Context, and a refusal stays distinct from an empty answer.
   with more than four digits or a minus sign. Other days and zoned date-times
   are shown as before.
 
+- **New: `WorkspacePanel`** for filters or details over a canvas or a map
+  that stays usable behind them (the UI kit's README, "Adapters"). An
+  app-owned panel composed from `ActionButton` and theme roles can move
+  to it: it is a region named by its heading, takes the focus when it opens
+  and returns it on Close or Escape, traps nothing, keeps the workspace's
+  size and element, and keeps clear of safe-area insets. Remove the app's own
+  Escape handling and focus return for it.
+
 - **`ScreenDialog` keeps clear of device insets on phones.** Full screen
   (below 640px), its heading and scrolling content add
   `env(safe-area-inset-*)` to their padding, so in an app with
@@ -243,6 +251,15 @@ source Context, and a refusal stays distinct from an empty answer.
   or the home indicator. Without insets, and in the centred dialog, the layout
   is unchanged. Remove app CSS that added these insets around or inside a
   `ScreenDialog`, or they count twice.
+- **New: `SuggestField` and `Combobox`** for a search or address bar with
+  suggestions the app finds as the person types
+  ([UI kit guide](../packages/app-ui/README.md#adapters)). An app that
+  composed its own combo box from `Input` and a `Popover`, with its own
+  keyboard handling and `aria-activedescendant`, can use `SuggestField`: it
+  takes the suggestions with `loading` and `failed`, announces them,
+  submits typed text with Enter (`onSubmit`) and keeps the active suggestion
+  while results reorder. Searching, cancelling a stale search and resolving
+  an address stay the app's.
 
 ### Dates
 
@@ -343,6 +360,22 @@ source Context, and a refusal stays distinct from an empty answer.
   accessible name and leads typeahead; text-only menus render as before. Apps
   that composed `DropdownMenu` directly only to place an icon can return to
   `HeaderMenu`.
+
+- `@sempods/app-ui`: a `HeaderMenu` group of choices (the new exported type
+  `HeaderMenuChoices`) gains `display: 'section'`, which lists its choices in
+  the menu under its label instead of a submenu; `HeaderMenuChoice` gains
+  `description` and `disabled`, `HeaderMenuAction` gains `disabled`, and
+  `HeaderMenuProps` gains `variant: 'ghost'` for a quiet button. Without
+  them menus render as before. An app that copied a menu to show sections,
+  unavailable choices or a quiet trigger can return to `HeaderMenu` or to the
+  UI kit guide's recipes ([UI kit guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.2/packages/app-ui/README.md#secondary-actions-on-rows)).
+
+- `@sempods/app-ui` re-exports React Aria's `I18nProvider` and its props type.
+  The kit's components (menus, selects, calendars) take their locale from
+  React Aria, which follows the browser without a provider; wrap the app's
+  content in `<I18nProvider locale={locale}>` with the locale passed to
+  `SempodsProvider`, especially in an app with a fixed or chosen language.
+  `DateChooser` already followed the SDK's locale and is unchanged.
 
 - `usePodLoad` gains the form `usePodLoad(pod, read, options?)` for an explicit
   `BoundPod` from `runtime.bindPod(id)`

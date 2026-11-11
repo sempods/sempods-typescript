@@ -183,3 +183,173 @@ it('takes no icon on a submenu', async () => {
   for (const item of screen.getAllByRole('menuitem'))
     expect(item.querySelector('span[aria-hidden=true]')).toBeNull();
 });
+
+const press = async (element: Element, key: string) => {
+  await act(async () => {
+    fireEvent.keyDown(element, { key });
+    fireEvent.keyUp(element, { key });
+  });
+};
+
+it('lists a section of choices in the menu, checked, and closes on a choice', async () => {
+  const list = vi.fn();
+  render(
+    <HeaderMenu
+      label="Menu"
+      items={[
+        {
+          label: 'View',
+          display: 'section',
+          choices: [
+            { label: 'Zen', checked: true, onSelect: () => {} },
+            { label: 'List', checked: false, onSelect: list },
+          ],
+        },
+        null,
+        { label: 'Print', onSelect: () => {} },
+      ]}
+    />,
+  );
+  await openMenu();
+  // No submenu: the group is named by its heading.
+  expect(screen.queryByRole('menuitem', { name: 'View' })).toBeNull();
+  const group = screen.getByRole('group', { name: 'View' });
+  const choices = screen.getAllByRole('menuitemradio');
+  expect(choices.map((c) => group.contains(c))).toEqual([true, true]);
+  expect(choices.map((c) => c.getAttribute('aria-checked'))).toEqual([
+    'true',
+    'false',
+  ]);
+  for (const c of choices) expect(c.className).toMatch(/\bmin-h-11\b/);
+  await press(screen.getByRole('menuitemradio', { name: 'List' }), 'Enter');
+  expect(list).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('menu')).toBeNull();
+});
+
+it('keeps an unavailable choice visible, but neither a press nor arrow keys reach it', async () => {
+  const work = vi.fn();
+  const archive = vi.fn();
+  render(
+    <HeaderMenu
+      label="Menu"
+      items={[
+        {
+          label: 'List',
+          display: 'section',
+          choices: [
+            {
+              id: 'work',
+              label: 'Work',
+              description: 'Can change',
+              checked: true,
+              onSelect: work,
+            },
+            {
+              id: 'archive',
+              label: 'Archive',
+              description: 'Not available',
+              checked: false,
+              disabled: true,
+              onSelect: archive,
+            },
+            {
+              id: 'home',
+              label: 'Home',
+              description: 'Can read',
+              checked: false,
+              onSelect: () => {},
+            },
+          ],
+        },
+        null,
+        { label: 'Share', onSelect: () => {}, disabled: true },
+        { label: 'Print', onSelect: () => {} },
+      ]}
+    />,
+  );
+  await openMenu();
+  const unavailable = screen.getByRole('menuitemradio', { name: 'Archive' });
+  expect(unavailable.getAttribute('aria-disabled')).toBe('true');
+  // The label names the choice; the second line describes it.
+  const home = screen.getByRole('menuitemradio', { name: 'Home' });
+  const described = home.getAttribute('aria-describedby') ?? '';
+  expect(
+    described
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent)
+      .join(' '),
+  ).toContain('Can read');
+  // Arrow keys move from Work past Archive to Home, and past Share to Print.
+  const work0 = screen.getByRole('menuitemradio', { name: 'Work' });
+  await act(async () => work0.focus());
+  await act(async () => {
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  });
+  expect(document.activeElement).toBe(home);
+  await act(async () => {
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  });
+  expect(document.activeElement).toBe(
+    screen.getByRole('menuitem', { name: 'Print' }),
+  );
+  expect(
+    screen
+      .getByRole('menuitem', { name: 'Share' })
+      .getAttribute('aria-disabled'),
+  ).toBe('true');
+  // A press on the unavailable choice does nothing and keeps the menu open.
+  await act(async () => {
+    fireEvent.click(unavailable);
+  });
+  await press(unavailable, 'Enter');
+  expect(archive).not.toHaveBeenCalled();
+  expect(screen.getByRole('menu')).toBeTruthy();
+});
+
+it('disables a choice in a submenu too', async () => {
+  const archive = vi.fn();
+  render(
+    <HeaderMenu
+      label="Menu"
+      items={[
+        {
+          label: 'List',
+          choices: [
+            { label: 'Work', checked: true, onSelect: () => {} },
+            {
+              label: 'Archive',
+              checked: false,
+              disabled: true,
+              onSelect: archive,
+            },
+          ],
+        },
+      ]}
+    />,
+  );
+  await openMenu();
+  await act(async () => {
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'List' }), {
+      key: 'ArrowRight',
+    });
+  });
+  const unavailable = screen.getByRole('menuitemradio', { name: 'Archive' });
+  expect(unavailable.getAttribute('aria-disabled')).toBe('true');
+  await press(unavailable, 'Enter');
+  expect(archive).not.toHaveBeenCalled();
+});
+
+it('has a quiet ghost button with the same 44px target', () => {
+  render(
+    <>
+      <HeaderMenu label="Row menu" icon="more" variant="ghost" items={[]} />
+      <HeaderMenu label="Menu" items={[]} />
+    </>,
+  );
+  const quiet = screen.getByRole('button', { name: 'Row menu' });
+  const filled = screen.getByRole('button', { name: 'Menu' });
+  expect(quiet.dataset.variant).toBe('ghost');
+  expect(filled.dataset.variant).toBe('secondary');
+  for (const button of [quiet, filled])
+    expect(button.className).toMatch(/\bsize-11\b/);
+});
