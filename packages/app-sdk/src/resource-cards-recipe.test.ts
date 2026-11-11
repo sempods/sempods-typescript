@@ -77,7 +77,10 @@ describe('card query', () => {
     expect(query).toContain(`<${RDF_TYPE}>`);
     expect(query).toContain(`<${SAME_AS}>`);
     expect(query).toContain(`<${S}thumbnailUrl>`);
-    expect(query).toContain('ORDER BY ?s ?p ?g ?o LIMIT 201');
+    // The root's own rows come first, so truncation cuts linked nodes first.
+    expect(query).toContain('BIND(0 AS ?order)');
+    expect(query).toContain('BIND(1 AS ?order)');
+    expect(query).toContain('ORDER BY ?order ?s ?p ?g ?o LIMIT 201');
     // Values are never read as roots of further reads.
     expect(query.match(/GRAPH/g)).toHaveLength(3);
   });

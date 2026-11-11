@@ -133,9 +133,11 @@ so the decision waits until the rule is known.
   variant predicate that a path declares.
 
 `GRAPH ?g` names the Context of each statement. Rows are sorted, and at most 200
-are used. For the same data, a large resource loses the same rows, except
-where linked nodes are blank: their labels can change between reads. A read
-that returns more marks the card as `truncated`.
+are used. The resource's own statements come first, so a long list of linked
+nodes is cut before its types, aliases and dates are. For the same data, a
+large resource loses the same rows, except where linked nodes are blank: their
+labels can change between reads. A read that returns more marks the card as
+`truncated`.
 
 The enrichment is metadata only. No value becomes another root, the recipe
 reads no linked node beyond its one declared step, and an alias is not
@@ -209,8 +211,9 @@ its own state:
   beyond the current reads: a read that answers again brings the values back.
 - **Limits.** Reads beyond `podReadLimit` wait in `loading`. A grant change
   while they wait spends no retry.
-- **Rules.** They are compared by value, so an inline array does not read
-  again on every render. Changed rules give a new query and read again.
+- **Rules.** Pass a module-level constant. Another array is compared by
+  value, so an inline array does not read again on every render. Changed
+  rules give a new query and read again.
 
 `status(card)` tells the app what the reads of the card's members say:
 

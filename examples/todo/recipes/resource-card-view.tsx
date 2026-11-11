@@ -81,7 +81,10 @@ export interface CardStatus {
 }
 
 export interface CardOptions {
-  /** Compared by value: changed rules read again with the new query. */
+  /**
+   * Pass a module-level constant. Another array is compared by value, so
+   * inline rules do not read again on every render; changed rules do.
+   */
   readonly rules?: readonly CardRule[];
   /** For what the person looks at now, such as the details of one resource. */
   readonly priority?: 'current';
@@ -97,10 +100,17 @@ export function useResourceCards(
   roots: readonly string[],
   { rules: given = exampleRules, priority }: CardOptions = {},
 ) {
-  // An inline rules array is new on every render; keep the equal one.
-  const [rules, setRules] = useState(given);
-  if (rules !== given && JSON.stringify(rules) !== JSON.stringify(given))
-    setRules(given);
+  // An inline rules array is new on every render; keep the equal one. The
+  // stored form is serialized once, so a constant costs no comparison.
+  const [stored, setStored] = useState(() => ({
+    rules: given,
+    json: JSON.stringify(given),
+  }));
+  if (stored.rules !== given) {
+    const json = JSON.stringify(given);
+    if (json !== stored.json) setStored({ rules: given, json });
+  }
+  const { rules } = stored;
   // A card without any reading connection is unread until startup settles.
   const { startup, startupError } = useAppState();
   const settled = startup !== undefined || startupError !== undefined;
@@ -225,9 +235,10 @@ function previewState(
 }
 
 /**
- * A bounded preview: ordinary `<img>` elements tried in order, at most
- * `MAX_ATTEMPTS` addresses. The browser loads them as it loads any image,
- * without a Pod token. The placeholder keeps its size in every state.
+ * A bounded preview: ordinary `<img>` elements tried in order. After
+ * `MAX_ATTEMPTS` failed addresses it tries no further one. The browser loads
+ * them as it loads any image, without a Pod token. The placeholder keeps its
+ * size in every state.
  */
 export function ImagePreview({
   card,

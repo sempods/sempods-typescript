@@ -176,15 +176,19 @@ export function cardQuery(
     VALUES (?link ?p) { ${pairs.join(' ')} }
     GRAPH ?origin { ${iri(root)} ?link ?s }
     GRAPH ?g { ?s ?p ?o }
+    BIND(1 AS ?order)
   }`
     : '';
+  // The root's own statements sort first: a long list of linked nodes is cut
+  // before the root's types, aliases and dates are.
   return `SELECT DISTINCT ?s ?p ?o ?g WHERE {
   {
     VALUES ?p { ${list(direct)} }
     GRAPH ?g { ${iri(root)} ?p ?o }
     BIND(${iri(root)} AS ?s)
+    BIND(0 AS ?order)
   } ${linked}
-} ORDER BY ?s ?p ?g ?o LIMIT ${MAX_ROWS + 1}`;
+} ORDER BY ?order ?s ?p ?g ?o LIMIT ${MAX_ROWS + 1}`;
 }
 
 /** Adds `evidence` unless the list already holds that statement. */
@@ -274,7 +278,9 @@ export function sourceFacts(
   for (const row of rows)
     if (row.own) {
       const node = exactTerm(row.o);
-      links.set(node, [...(links.get(node) ?? []), row]);
+      const linked = links.get(node);
+      if (linked) linked.push(row);
+      else links.set(node, [row]);
     }
   for (const row of rows)
     for (const link of links.get(row.evidence.subject) ?? [])
@@ -398,7 +404,9 @@ function connected<T>(
   const groups = new Map<number, T[]>();
   items.forEach((item, index) => {
     const lead = find(index);
-    groups.set(lead, [...(groups.get(lead) ?? []), item]);
+    const group = groups.get(lead);
+    if (group) group.push(item);
+    else groups.set(lead, [item]);
   });
   return [...groups.values()];
 }
