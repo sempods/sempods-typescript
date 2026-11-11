@@ -254,6 +254,20 @@
       outline-offset: 2px;
     }
   }
+  /* A suggest field has one focus cue, the outline around the whole field:
+     its input draws none of its own, and the field's border and ring stay
+     as they are (SuggestField). */
+  :where([data-slot='suggest-field'] [data-slot='input-group-control']) {
+    &:focus-visible {
+      outline: none;
+    }
+  }
+  :where([data-slot='suggest-field'] [data-slot='input-group']):has(
+    [data-slot='input-group-control']:focus-visible
+  ) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   /* Inside the row: the scrolling menu would clip an outline outside it. */
   :where([data-slot][role^='menuitem'])[data-focus-visible] {
     outline-offset: -2px;

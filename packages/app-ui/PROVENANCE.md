@@ -11,7 +11,8 @@
 were taken on 2026-11-02 from the same style's registry
 (`https://ui.shadcn.com/r/styles/aria-nova/<name>.json`) for chips
 (sempods/sempods-typescript#216), with the same mechanical changes and no
-others.
+others. `combobox` was taken on 2026-11-11 from the same registry for
+suggestion fields (sempods/sempods-apps-template#144).
 
 Changes against the registry output:
 
@@ -48,6 +49,15 @@ Changes against the registry output:
   visible month; later months show their own heading.
 - `select.tsx`: `SelectValue` keeps children it is given; the selected-text
   fallback applies only without children.
+- `combobox.tsx`: without the parts for choosing several values
+  (`ComboboxChips`, `ComboboxChip`, `ComboboxChipList`,
+  `ComboboxChipsInput`, `ComboboxValue`) and without `ComboboxClear` and
+  `ComboboxInput`'s `showClear`, whose button had an English name only; the
+  icons are lucide's (`ChevronDownIcon`, `CheckIcon`) in place of the
+  registry's icon placeholder. `ComboboxContent` drops the registry's
+  `cn-menu-target` and `cn-menu-translucent` hooks, which this package does
+  not define, and the 10% text colour it mixed into a focused row, as the
+  menu does (#232).
 - All files: relative imports with `.js` extensions, no `"use client"`
   directive, Prettier formatting.
 
@@ -63,6 +73,9 @@ components. Changed on the way: the SDK bridge uses the SDK's field, action and
 focus tokens (sempods/sempods-typescript#200), the date chooser takes the SDK
 `date` field's value and offers removing it, texts come from the SDK provider's
 language, and palette defaults sit in the `theme` layer without specificity.
+`SuggestField` (`src/adapters/suggest-field.tsx`) and its single focus cue
+in `styles.css` are this package's own, written on the registry's combo box
+for sempods/sempods-apps-template#144.
 
 The browser gate (`scripts/test-ui-consumer.mjs`, `scripts/ui-checks.mjs`,
 `scripts/ui-contrast.js`, `scripts/ui-pod.mjs` and `tests/ui-browser/`) ports

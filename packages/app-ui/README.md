@@ -263,9 +263,9 @@ the browser gate.
 The shadcn/ui components keep shadcn's names and React Aria's props
 (`onPress`, `isDisabled`, `isOpen`, …): `Badge`, `Button`, `LinkButton`,
 `Calendar`, `RangeCalendar`, `Dialog` and its parts, `DropdownMenu` and its
-parts, `Input`, `InputGroup` and its parts, `Popover` and its parts, `Select`
-and its parts, `Textarea`, `Toggle`, and `ToggleGroup` with
-`ToggleGroupItem`. `Badge` suits read-only tags. shadcn's
+parts, `Input`, `InputGroup` and its parts, `Combobox` and its parts,
+`Popover` and its parts, `Select` and its parts, `Textarea`, `Toggle`, and
+`ToggleGroup` with `ToggleGroupItem`. `Badge` suits read-only tags. shadcn's
 [aria-nova documentation](https://ui.shadcn.com/docs/components) describes
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
@@ -593,6 +593,26 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   chosen chip is filled with the primary role and shows a check mark, so its
   state does not rest on colour alone. Tab reaches the group once, arrow keys
   move between chips, and Space or Enter chooses one.
+- **`SuggestField`**: a text field with suggestions the app finds as the
+  person types, such as a search or address bar, on React Aria's combo box.
+  It is controlled (`value`, `onChange`) and only shows: the app searches for
+  `value`, passes the `items` it found (`{ id, label, detail?, source? }`)
+  with `loading` and `failed` (`'some'` or `'all'` of its sources), and
+  cancels a search whose text has changed. The input keeps the focus; arrow
+  keys move through the suggestions, Enter or a press chooses one
+  (`onSelect`), and Escape closes them. Enter, or a phone's Go key, with no
+  suggestion active submits the typed text (`onSubmit`), for example an
+  address to open, so the bar needs no Open button; an input method that
+  is still composing text never submits it. The suggestion the keyboard is
+  on keeps its place by `id` while results arrive and reorder. A label wraps
+  to two lines, `detail` (an exact IRI) stays on one line and is cut off
+  only visually, and `source` names where it was found in a few words;
+  assistive technology reads both in full as the suggestion's description. The field announces the number
+  of suggestions, a search still running, one that found nothing or failed
+  in part or completely, in the SDK provider's language. It is 44px high,
+  as are the suggestions, and draws one focus cue, the outline around the
+  whole field. `labelHidden` names it for assistive technology only, for a
+  bar whose placeholder and place say what it is.
 
 A main action usually stands alone above a group of the others, as in the
 reference screen's Zen view:
@@ -708,8 +728,88 @@ export function AppMenu() {
 }
 ```
 
-The adapters' texts ("Menu", "No date", "Apply", "Remove date") follow the
-SDK provider's language (English or German) and can be passed as props.
+A search bar that opens a resource from several sources, or an address
+typed into it. The app's `search` runs per text and stops when its signal
+aborts; it is app code, for example one `pod.find` per connected Pod with
+the sources' names. The bar keeps the earlier suggestions while the next
+search runs, so the one the keyboard is on stays:
+
+```tsx
+// resource-search.tsx
+import { useEffect, useState } from 'react';
+import { SuggestField, type Suggestion } from '@sempods/app-ui';
+
+/** The app's search over its sources; it stops when `signal` aborts. */
+export type Search = (
+  text: string,
+  signal: AbortSignal,
+) => Promise<{
+  readonly items: readonly Suggestion[];
+  /** Sources whose search failed: some or all of them. */
+  readonly failed?: 'some' | 'all';
+}>;
+
+interface Found {
+  readonly text: string;
+  readonly items: readonly Suggestion[];
+  readonly failed?: 'some' | 'all';
+}
+
+export function ResourceSearch({
+  search,
+  onOpen,
+}: {
+  readonly search: Search;
+  /** Opens a resource by its IRI. */
+  readonly onOpen: (iri: string) => void;
+}) {
+  const [text, setText] = useState('');
+  const [found, setFound] = useState<Found>({ text: '', items: [] });
+  const query = text.trim();
+  useEffect(() => {
+    if (!query) return;
+    const controller = new AbortController();
+    // Waits for a pause in typing; a newer text aborts this search.
+    const timer = setTimeout(() => {
+      search(query, controller.signal).then(
+        (result) => {
+          if (!controller.signal.aborted) setFound({ text: query, ...result });
+        },
+        () => {
+          if (!controller.signal.aborted)
+            setFound({ text: query, items: [], failed: 'all' });
+        },
+      );
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, search]);
+  const current = found.text === query;
+  return (
+    <SuggestField
+      label="Address or search"
+      labelHidden
+      placeholder="Search or enter an address"
+      value={text}
+      onChange={setText}
+      items={query ? found.items : []}
+      loading={query !== '' && !current}
+      failed={current ? found.failed : undefined}
+      onSelect={(item) => onOpen(item.id)}
+      onSubmit={(value) => {
+        if (URL.canParse(value)) onOpen(value);
+      }}
+    />
+  );
+}
+```
+
+The adapters' texts ("Menu", "No date", "Apply", "Remove date", the
+suggestion field's announcements) follow the SDK provider's language
+(English or German); the menu's and the date chooser's can be passed as
+props.
 
 ## Router
 

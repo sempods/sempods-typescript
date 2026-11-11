@@ -3105,6 +3105,266 @@ async function insets({ browser, origin, engine }) {
   return results;
 }
 
+/**
+ * The search bar with suggestions (SuggestField) on `?screen=search`: its
+ * keyboard, its states as announced and its layout. The checks set what the
+ * app's search found through `window.searchGate`.
+ */
+async function search({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser);
+  const field = page.getByRole('combobox', {
+    name: /^(Address or search|Adresse oder Suche)$/,
+  });
+  const listbox = page.getByRole('listbox');
+  const status = page.getByRole('status');
+  const opened = page.getByRole('list', { name: 'Opened' });
+  const suggestion = (id, label, source) => ({
+    id: `https://pod.example/${id}`,
+    label,
+    detail: `https://pod.example/${id}`,
+    ...(source ? { source } : {}),
+  });
+  const alice = suggestion('alice#me', 'Alice', 'Work');
+  const bob = suggestion('bob#me', 'Bob');
+  const carol = suggestion('carol#me', 'Carol', 'Home');
+  const found = (state) =>
+    page.evaluate((state) => window.searchGate(state), state);
+  /** The announcement once it says `text`, or what it says after 3s. */
+  const announced = async (text) => {
+    await page
+      .waitForFunction(
+        (text) =>
+          document.querySelector('[role="status"][data-live-announcer]')
+            ?.textContent === text,
+        text,
+        { timeout: 3000 },
+      )
+      .catch(() => {});
+    return status.textContent();
+  };
+  const open = async ({ width = 1280, lang = 'en' } = {}) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto(
+      origin + `/?screen=search${lang === 'de' ? '&lang=de' : ''}`,
+    );
+    await field.waitFor();
+  };
+  /** The label of the suggestion the keyboard is on, if any. */
+  const active = () =>
+    field.evaluate((input) => {
+      const id = input.getAttribute('aria-activedescendant');
+      const option = id ? document.getElementById(id) : null;
+      return option?.querySelector('[slot="label"]')?.textContent ?? null;
+    });
+  const focused = () =>
+    page.evaluate(() => document.activeElement?.getAttribute('role') ?? null);
+  const log = async () =>
+    (await opened.getByRole('listitem').allTextContents()).map((t) => t.trim());
+  const checks = {
+    // Typing opens the suggestions; arrows move, Enter chooses one and the
+    // focus stays in the field.
+    async 'search-arrow-enter-chooses'() {
+      await open();
+      await field.click();
+      await page.keyboard.type('a');
+      await found({ items: [alice, bob] });
+      await listbox.waitFor();
+      await page.keyboard.press('ArrowDown');
+      const first = await active();
+      await page.keyboard.press('ArrowDown');
+      const second = await active();
+      await page.keyboard.press('Enter');
+      await hidden(listbox);
+      const entries = await log();
+      return {
+        pass:
+          first === 'Alice' &&
+          second === 'Bob' &&
+          entries.join() === 'select ' + bob.id &&
+          (await focused()) === 'combobox',
+        first,
+        second,
+        entries,
+      };
+    },
+    // Enter with no suggestion active submits the typed address, while
+    // suggestions show and without them.
+    async 'search-enter-submits-text'() {
+      await open();
+      await field.click();
+      await page.keyboard.type('https://pod.example/dan');
+      await found({ items: [alice] });
+      await listbox.waitFor();
+      await page.keyboard.press('Enter');
+      await hidden(listbox);
+      await page.keyboard.press('End');
+      await page.keyboard.type('#me');
+      await found({ items: [] });
+      await page.keyboard.press('Enter');
+      const entries = await log();
+      return {
+        pass:
+          entries.join() ===
+          'submit https://pod.example/dan,submit https://pod.example/dan#me',
+        entries,
+      };
+    },
+    // Escape closes the suggestions and keeps the focus and the text in the
+    // field.
+    async 'search-escape-keeps-focus'() {
+      await open();
+      await field.click();
+      await page.keyboard.type('bo');
+      await found({ items: [bob] });
+      await listbox.waitFor();
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Escape');
+      await hidden(listbox);
+      const value = await field.inputValue();
+      const entries = await log();
+      return {
+        pass:
+          value === 'bo' &&
+          (await focused()) === 'combobox' &&
+          entries.length === 0,
+        value,
+        entries,
+      };
+    },
+    // Results that arrive and reorder keep the suggestion the keyboard is
+    // on.
+    async 'search-reorder-keeps-active'() {
+      await open();
+      await field.click();
+      await page.keyboard.type('o');
+      await found({ items: [alice, bob], loading: true });
+      await listbox.waitFor();
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      const before = await active();
+      await found({ items: [carol, bob, alice] });
+      await listbox.getByRole('option').nth(2).waitFor();
+      const after = await active();
+      await page.keyboard.press('ArrowDown');
+      const next = await active();
+      return {
+        pass: before === 'Bob' && after === 'Bob' && next === 'Alice',
+        before,
+        after,
+        next,
+      };
+    },
+    // Each state is announced, also while the suggestions hide the rest of
+    // the page from assistive technology.
+    async 'search-states-announced'() {
+      await open();
+      await field.click();
+      await page.keyboard.type('x');
+      const seen = {};
+      await found({ items: [], loading: true });
+      seen.loading = await announced('Searching …');
+      seen.openWhileLoading = await listbox.isVisible();
+      await found({ items: [] });
+      seen.empty = await announced('No suggestions.');
+      await found({ items: [alice], loading: true, failed: 'some' });
+      seen.partial = await announced(
+        '1 suggestion. Searching for more … Some sources could not be searched.',
+      );
+      await found({ items: [], failed: 'all' });
+      seen.failed = await announced('The search failed.');
+      await open({ lang: 'de' });
+      await field.click();
+      await page.keyboard.type('x');
+      await found({ items: [], loading: true });
+      seen.german = await announced('Suche läuft …');
+      return {
+        pass:
+          seen.loading === 'Searching …' &&
+          seen.openWhileLoading &&
+          seen.empty === 'No suggestions.' &&
+          seen.partial ===
+            '1 suggestion. Searching for more … Some sources could not be searched.' &&
+          seen.failed === 'The search failed.' &&
+          seen.german === 'Suche läuft …',
+        ...seen,
+      };
+    },
+    // At 375px: 44px targets, labels on at most two lines, the exact address
+    // on one cut-off line, nothing wider than the screen, one focus cue.
+    async 'search-phone-layout'() {
+      await open({ width: 375 });
+      await field.click();
+      await page.keyboard.type('a');
+      const long = {
+        ...suggestion(
+          'a-very-long-resource-name-without-any-spaces-that-keeps-going#it',
+          'A very long resource label that goes on and on across more than two lines on a phone screen of 375 pixels',
+          'A Pod with a long name',
+        ),
+      };
+      await found({ items: [long, bob] });
+      await listbox.waitFor();
+      await settle(page);
+      const m = await page.evaluate(() => {
+        const input = document.querySelector('[role="combobox"]');
+        const group = input.closest('[data-slot="input-group"]');
+        const options = [...document.querySelectorAll('[role="option"]')];
+        const label = options[0].querySelector('[slot="label"]');
+        const detail = options[0].querySelector('[slot="description"] span');
+        const popover = document.querySelector(
+          '[data-slot="combobox-content"]',
+        );
+        const lineHeight = parseFloat(getComputedStyle(label).lineHeight);
+        return {
+          input: group.getBoundingClientRect().height,
+          options: options.map((o) => o.getBoundingClientRect().height),
+          labelLines: Math.round(
+            label.getBoundingClientRect().height / lineHeight,
+          ),
+          detailCut: detail.scrollWidth > detail.clientWidth,
+          detailFull: detail.textContent,
+          popoverRight: popover.getBoundingClientRect().right,
+          pageWidth: document.documentElement.scrollWidth,
+          viewport: innerWidth,
+          inputOutline: getComputedStyle(input).outlineStyle,
+          groupOutline: getComputedStyle(group).outlineStyle,
+          groupRing: getComputedStyle(group).boxShadow,
+        };
+      });
+      return {
+        pass:
+          m.input >= 44 &&
+          m.options.every((h) => h >= 44) &&
+          m.labelLines <= 2 &&
+          m.detailCut &&
+          m.detailFull.endsWith('keeps-going#it') &&
+          m.popoverRight <= m.viewport &&
+          m.pageWidth <= m.viewport &&
+          m.inputOutline === 'none' &&
+          m.groupOutline === 'solid',
+        ...m,
+      };
+    },
+    // A press chooses a suggestion too.
+    async 'search-press-chooses'() {
+      await open();
+      await field.click();
+      await page.keyboard.type('c');
+      await found({ items: [alice, carol] });
+      await listbox.getByRole('option', { name: /Carol/ }).click();
+      await hidden(listbox);
+      const entries = await log();
+      return { pass: entries.join() === 'select ' + carol.id, entries };
+    },
+  };
+  const results = [];
+  for (const [id, run] of Object.entries(checks))
+    results.push(await attemptOn(errors, id, run));
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   gate,
   roundtrip,
@@ -3115,4 +3375,5 @@ export const suites = {
   theme,
   compact,
   insets,
+  search,
 };
