@@ -178,6 +178,18 @@ try {
     join(root, 'tests/consumers/rdf-values.mts'),
     join(plain, 'rdf-values.mts'),
   );
+  // The resource card recipe builds on it and runs from the package too.
+  await cp(
+    join(
+      plain,
+      'node_modules/@sempods/app-sdk/examples/todo/recipes/resource-cards.ts',
+    ),
+    join(plain, 'resource-cards.ts'),
+  );
+  await cp(
+    join(root, 'tests/consumers/resource-cards.mts'),
+    join(plain, 'resource-cards.mts'),
+  );
   await json(join(plain, 'tsconfig.node.json'), {
     compilerOptions: {
       ...strict,
@@ -187,7 +199,7 @@ try {
       types: ['node'],
       outDir: 'out',
     },
-    files: ['node.mts', 'rdf-values.mts'],
+    files: ['node.mts', 'rdf-values.mts', 'resource-cards.mts'],
   });
   run(
     process.execPath,
@@ -196,6 +208,7 @@ try {
   );
   run(process.execPath, ['out/node.mjs'], plain);
   run(process.execPath, ['out/rdf-values.mjs'], plain);
+  run(process.execPath, ['out/resource-cards.mjs'], plain);
 
   // Sparse SELECT bindings must remain optional for consumers that turn off
   // noUncheckedIndexedAccess. Compile every portable README recipe verbatim too.

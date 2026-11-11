@@ -950,6 +950,8 @@ function Source(props: {
   beyond the limit wait in `loading`, and a grant change while they wait
   spends no retry. Pass `{ signal, priority: 'current' }` for what the person
   looks at now ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
+  [Resource cards](resource-cards.md) is a complete recipe for this: cards
+  with pictures from every reading connection.
 
 #### Search across Pods
 
