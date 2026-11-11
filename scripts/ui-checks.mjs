@@ -3241,7 +3241,10 @@ async function workspace({ browser, origin, engine }) {
       if (!el || el === document.body) return 'body';
       if (region && el === region) return 'panel';
       if (region?.contains(el)) return 'in-panel';
-      return el.tagName.toLowerCase() + (el.getAttribute('aria-label') ?? '');
+      return (
+        el.tagName.toLowerCase() +
+        (el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '')
+      );
     });
   const box = (locator) =>
     locator.first().evaluate((el) => {
@@ -3297,6 +3300,8 @@ async function workspace({ browser, origin, engine }) {
         }
         return 'trapped';
       };
+      // The page has a link after the panel (main.tsx), so Tab leaves the
+      // panel into the page in every engine.
       const forward = await leave(tabKey(engine));
       const backward = await leave(
         engine === 'webkit' && process.platform === 'darwin'
@@ -3305,7 +3310,8 @@ async function workspace({ browser, origin, engine }) {
       );
       const open = await panel.isVisible();
       return {
-        pass: forward !== 'trapped' && backward !== 'trapped' && open,
+        pass:
+          /After the workspace/.test(forward) && backward !== 'trapped' && open,
         forward,
         backward,
       };

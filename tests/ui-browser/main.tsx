@@ -284,6 +284,12 @@ function Frame() {
         header && (
           <div className="gate-workspace">
             <Workspace />
+            {/* After the panel in the tab order, so leaving it forward lands
+                in the page, not in the browser's own controls, where
+                engines differ in what they report as focused. */}
+            <a href="#after-workspace" id="after-workspace" className="sr-only">
+              After the workspace
+            </a>
           </div>
         )
       ) : place.kind === 'task' && place.context && !target ? (
