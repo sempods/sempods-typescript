@@ -7,7 +7,7 @@ automatic conversion of legacy app data or stored credentials.
 ## From 0.7.0 to 0.8.0
 
 0.8.0 is not released yet; this section collects its upgrade steps. The
-prerelease `0.8.0-dev.1` carries them, and the
+prerelease `0.8.0-dev.2` carries them, and the
 [0.8.0 release notes](releases/0.8.0.md) list the changes.
 
 ### Remembered Pods
@@ -368,7 +368,7 @@ source Context, and a refusal stays distinct from an empty answer.
   `HeaderMenuProps` gains `variant: 'ghost'` for a quiet button. Without
   them menus render as before. An app that copied a menu to show sections,
   unavailable choices or a quiet trigger can return to `HeaderMenu` or to the
-  UI kit guide's recipes ([UI kit guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.1/packages/app-ui/README.md#secondary-actions-on-rows)).
+  UI kit guide's recipes ([UI kit guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.2/packages/app-ui/README.md#secondary-actions-on-rows)).
 
 - `@sempods/app-ui` re-exports React Aria's `I18nProvider` and its props type.
   The kit's components (menus, selects, calendars) take their locale from
