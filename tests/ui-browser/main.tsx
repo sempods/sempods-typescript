@@ -6,14 +6,17 @@
 // explicit not-found pages, a calendar-date chooser inside the editor fields.
 // With `?dialog=compact`, a task address opens the compact quick edit
 // instead of the task dialog. With `?workspace`, the screen is the README's
-// workspace with its nonmodal filter panel instead of the tasks.
+// workspace with its nonmodal filter panel instead of the tasks. With
+// `?screen=search`, the page is a search bar with suggestions (SuggestField)
+// whose results the checks set through `window.searchGate`, as an app's
+// search would.
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, and the
 // address model, places.ts, are the package README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
-import { StrictMode, useRef, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { UsersIcon } from 'lucide-react';
 import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
@@ -34,9 +37,11 @@ import {
   ChipGroup,
   HeaderMenu,
   ScreenDialog,
+  SuggestField,
   replaceUrl,
   useNav,
   type Nav,
+  type Suggestion,
 } from '@sempods/app-ui';
 import { places, type Place } from './places';
 import { checkTheme, readTheme } from '@sempods/app-ui/theme-check';
@@ -177,6 +182,7 @@ const settings = new URLSearchParams(location.search);
 const language = settings.get('lang') === 'de' ? 'de' : 'en';
 const compact = settings.get('dialog') === 'compact';
 const workspace = settings.has('workspace');
+const search = settings.get('screen') === 'search';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -210,7 +216,7 @@ function App() {
       language={language}
       locale={language === 'de' ? 'de-DE' : 'en-GB'}
     >
-      <Frame />
+      {search ? <SearchGate /> : <Frame />}
     </SempodsProvider>
   );
 }
@@ -450,6 +456,49 @@ function Tasks({
         <p>{t.newTaskText}</p>
       </ScreenDialog>
     </>
+  );
+}
+
+/** What the app's search has found for the typed text, set by the checks. */
+interface SearchState {
+  readonly items: readonly Suggestion[];
+  readonly loading?: boolean;
+  readonly failed?: 'some' | 'all';
+}
+
+function SearchGate() {
+  const [text, setText] = useState('');
+  const [found, setFound] = useState<SearchState>({ items: [] });
+  // What a choice or Enter opened, for the checks to read.
+  const [opened, setOpened] = useState<readonly string[]>([]);
+  useEffect(() => {
+    Object.assign(window, { searchGate: setFound });
+  }, []);
+  return (
+    <main className="gate-main">
+      <h1 className="mb-4 text-lg font-semibold">Explorer</h1>
+      <SuggestField
+        label={language === 'de' ? 'Adresse oder Suche' : 'Address or search'}
+        labelHidden
+        placeholder={
+          language === 'de'
+            ? 'Suchen oder Adresse eingeben'
+            : 'Search or enter an address'
+        }
+        value={text}
+        onChange={setText}
+        items={text.trim() ? found.items : []}
+        loading={found.loading}
+        failed={found.failed}
+        onSelect={(item) => setOpened((o) => [...o, 'select ' + item.id])}
+        onSubmit={(value) => setOpened((o) => [...o, 'submit ' + value])}
+      />
+      <ol aria-label="Opened" className="mt-4">
+        {opened.map((entry, i) => (
+          <li key={i}>{entry}</li>
+        ))}
+      </ol>
+    </main>
   );
 }
 

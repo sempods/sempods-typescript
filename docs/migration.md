@@ -251,6 +251,15 @@ source Context, and a refusal stays distinct from an empty answer.
   or the home indicator. Without insets, and in the centred dialog, the layout
   is unchanged. Remove app CSS that added these insets around or inside a
   `ScreenDialog`, or they count twice.
+- **New: `SuggestField` and `Combobox`** for a search or address bar with
+  suggestions the app finds as the person types
+  ([UI kit guide](../packages/app-ui/README.md#adapters)). An app that
+  composed its own combo box from `Input` and a `Popover`, with its own
+  keyboard handling and `aria-activedescendant`, can use `SuggestField`: it
+  takes the suggestions with `loading` and `failed`, announces them,
+  submits typed text with Enter (`onSubmit`) and keeps the active suggestion
+  while results reorder. Searching, cancelling a stale search and resolving
+  an address stay the app's.
 
 ### Dates
 
