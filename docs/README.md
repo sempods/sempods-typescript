@@ -39,7 +39,8 @@ references for the task at hand, not prerequisites to read in order.
 - [Local testing](local-testing.md), [deployment](deployment.md),
   [PWA](pwa.md) and [migration/recovery](migration.md).
 
-- [0.7.0 release notes](releases/0.7.0.md) and the earlier
+- [0.8.0 release notes](releases/0.8.0.md) (in preparation), the
+  [0.7.0 release notes](releases/0.7.0.md) and the earlier
   [0.6.0 release notes and template adoption](releases/0.6.0.md).
 
 ## Understand and maintain the SDK

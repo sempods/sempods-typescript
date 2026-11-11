@@ -56,7 +56,7 @@ layer statement puts the SDK's own styles (layer `sempods`) above Tailwind's
 reset and below the utilities: package components keep their look inside SDK
 surfaces such as the `ResourceEditor`, and the SDK's confirmations stay
 centred. The SDK's
-[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.7.0/docs/react-authoring.md#cascade-layer-order)
+[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.1/docs/react-authoring.md#cascade-layer-order)
 explains the order and which app rules still override SDK rules.
 
 `styles.css` adds:
