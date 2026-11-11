@@ -571,6 +571,55 @@ describe('cards across sources', () => {
     ]);
   });
 
+  it('ranks variants by path before predicate', async () => {
+    const photo = 'urn:v:photo';
+    const node = 'https://people.example/ada/photo';
+    const rules: readonly CardRule[] = [
+      {
+        id: 'any',
+        types: [],
+        images: [
+          [[photo], ['urn:v:preferredThumbnail', 'urn:v:alternateThumbnail']],
+          [[photo], ['urn:v:contentUrl']],
+        ],
+        dates: [],
+      },
+    ];
+    const found = sourceFacts(
+      await select([
+        [iri(ada), photo, iri(node), ctx(alice, 'a')],
+        [
+          iri(node),
+          'urn:v:alternateThumbnail',
+          iri('https://img.example/s.jpg'),
+          ctx(alice, 'a'),
+        ],
+        ...[1, 2, 3].map(
+          (n) =>
+            [
+              iri(node),
+              'urn:v:contentUrl',
+              iri(`https://img.example/${n}.jpg`),
+              ctx(alice, 'a'),
+            ] as const,
+        ),
+      ]),
+      ada,
+      alice,
+      rules,
+    );
+    const card = resourceCards([ada], [found], rules).get(ada)!;
+    expect(
+      card.images.map((image) => image.variants.map((v) => v.value)),
+    ).toEqual([
+      [
+        'https://img.example/s.jpg',
+        'https://img.example/1.jpg',
+        'https://img.example/2.jpg',
+      ],
+    ]);
+  });
+
   it('merges pictures that a shared address connects, before the limit', async () => {
     const node = (name: string) => `https://people.example/ada/${name}`;
     const rows = [

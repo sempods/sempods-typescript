@@ -153,8 +153,9 @@ arrives first:
   whichever Pod said so first.
 - **Pictures.** Pictures are ordered by the rule's path order first. Then the
   declared predicate order of the first step decides: `schema:image` before
-  `foaf:depiction`. Within a picture, the second step orders the variants: a
-  thumbnail before the original. Only after that comes the source: Pods in URL order (adapt it, for example
+  `foaf:depiction`. Within a picture, the variants follow the path order, then
+  the predicate order of the path's last step: a thumbnail before the
+  original. Only after that comes the source: Pods in URL order (adapt it, for example
   to put the active Pod first), then the order of the admitted resources, then
   the read's sorted rows. When a card keeps only four pictures, the preferred
   ones stay.

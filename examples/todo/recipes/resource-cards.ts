@@ -543,20 +543,30 @@ function imagesOf(
     groups.set(find(index), group);
   });
   const images = [...groups.values()].slice(0, MAX_IMAGES).map((group) => {
-    const variants: { value: string; evidence: Evidence[]; rank: number }[] =
-      [];
+    const variants: {
+      value: string;
+      evidence: Evidence[];
+      path: number;
+      rank: number;
+    }[] = [];
+    // Variant preference: the path's order first, then the predicate's
+    // order within the path's last step.
+    const better = (a: { path: number; rank: number }, b: typeof a) =>
+      a.path - b.path || a.rank - b.rank;
     for (const match of group) {
       const variant = variants.find((variant) => variant.value === match.url);
       if (!variant) {
         variants.push({
           value: match.url,
           evidence: [...match.evidence],
+          path: match.path,
           rank: match.rank,
         });
         continue;
       }
-      // The same address under several predicates keeps its best rank.
-      variant.rank = Math.min(variant.rank, match.rank);
+      // The same address under several predicates keeps its best preference.
+      if (better(match, variant) < 0)
+        Object.assign(variant, { path: match.path, rank: match.rank });
       for (const evidence of match.evidence)
         if (!variant.evidence.some((e) => sameEvidence(e, evidence)))
           variant.evidence.push(evidence);
@@ -564,7 +574,7 @@ function imagesOf(
     return {
       variants: variants
         .map((variant, index) => ({ variant, index }))
-        .sort((a, b) => a.variant.rank - b.variant.rank || a.index - b.index)
+        .sort((a, b) => better(a.variant, b.variant) || a.index - b.index)
         // The limit applies after ranking, so a thumbnail is never cut.
         .slice(0, MAX_VARIANTS)
         .map(({ variant: { value, evidence } }) => ({ value, evidence })),
