@@ -344,6 +344,15 @@ source Context, and a refusal stays distinct from an empty answer.
   that composed `DropdownMenu` directly only to place an icon can return to
   `HeaderMenu`.
 
+- `@sempods/app-ui`: a `HeaderMenu` group of choices (the new exported type
+  `HeaderMenuChoices`) gains `display: 'section'`, which lists its choices in
+  the menu under its label instead of a submenu; `HeaderMenuChoice` gains
+  `description` and `disabled`, `HeaderMenuAction` gains `disabled`, and
+  `HeaderMenuProps` gains `variant: 'ghost'` for a quiet button. Without
+  them menus render as before. An app that copied a menu to show sections,
+  unavailable choices or a quiet trigger can return to `HeaderMenu` or to the
+  UI kit guide's recipes ([UI kit guide](https://github.com/sempods/sempods-typescript/blob/v0.8.0-dev.1/packages/app-ui/README.md#secondary-actions-on-rows)).
+
 - `usePodLoad` gains the form `usePodLoad(pod, read, options?)` for an explicit
   `BoundPod` from `runtime.bindPod(id)`
   ([reads per connection](react-authoring.md#reads-per-connection)). An app

@@ -998,6 +998,106 @@ async function interaction({ browser, origin, engine }) {
         afterClose,
       };
     },
+    // A row's quiet menu (sempods-apps-template#145, #116, #141): a ghost
+    // button with a 44px target and no fill until it is used; its Priority
+    // choices are a section of the menu, not a submenu; the unavailable
+    // Urgent stays visible, arrow keys skip it and a press neither chooses
+    // it nor closes the menu; a choice closes the menu and stays checked;
+    // Escape returns the focus to the row's button.
+    async 'row-menu-section'() {
+      await page.goto(origin + '/list');
+      await page.locator('.gate-list a').first().waitFor();
+      const row = page.getByRole('button', { name: /: more$/ }).first();
+      const button = await row.evaluate((el) => {
+        const s = getComputedStyle(el);
+        const box = el.getBoundingClientRect();
+        return {
+          variant: el.dataset.variant,
+          width: box.width,
+          height: box.height,
+          filled: !/^(rgba\(\d+, \d+, \d+, 0\)|transparent)$/.test(
+            s.backgroundColor,
+          ),
+        };
+      });
+      await row.focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('menu').waitFor();
+      const submenu = await page
+        .getByRole('menuitem', { name: 'Priority' })
+        .count();
+      const group = await page
+        .getByRole('group', { name: 'Priority' })
+        .getByRole('menuitemradio')
+        .count();
+      const urgent = page.getByRole('menuitemradio', { name: 'Urgent' });
+      const urgentDisabled = await urgent.getAttribute('aria-disabled');
+      const visited = [await focused(page)];
+      for (let i = 0; i < 4; i++) {
+        await page.keyboard.press('ArrowDown');
+        await page.waitForTimeout(100);
+        visited.push(await focused(page));
+      }
+      const skipped = !visited.some((f) => /Urgent/.test(f));
+      await urgent.click({ force: true });
+      await settle(page);
+      const openAfterPress = await page.getByRole('menu').isVisible();
+      const urgentChecked = await urgent.getAttribute('aria-checked');
+      // The press leaves the focus in the menu: an arrow key moves on to an
+      // available choice or action.
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(150);
+      const afterPress = await focused(page);
+      await focusItem(page, 'High');
+      const onHigh = await focused(page);
+      await page.keyboard.press('Enter');
+      const closed = await hidden(page.getByRole('menu'));
+      const onRow = () => row.evaluate((el) => el === document.activeElement);
+      await focusUntil(page, /button/, focused);
+      const backOnRow = await onRow();
+      await page.keyboard.press('Enter');
+      await page.getByRole('menu').waitFor();
+      const highChecked = await page
+        .getByRole('menuitemradio', { name: 'High' })
+        .getAttribute('aria-checked');
+      await page.keyboard.press('Escape');
+      const escaped = await hidden(page.getByRole('menu'));
+      await focusUntil(page, /button/, focused);
+      const afterEscape = await onRow();
+      return {
+        pass:
+          button.variant === 'ghost' &&
+          button.width >= 44 &&
+          button.height >= 44 &&
+          !button.filled &&
+          submenu === 0 &&
+          group === 3 &&
+          urgentDisabled === 'true' &&
+          skipped &&
+          openAfterPress &&
+          urgentChecked === 'false' &&
+          /^menuitem/.test(afterPress) &&
+          !/Urgent/.test(afterPress) &&
+          closed &&
+          backOnRow &&
+          highChecked === 'true' &&
+          escaped &&
+          afterEscape,
+        button,
+        submenu,
+        group,
+        urgentDisabled,
+        visited,
+        openAfterPress,
+        urgentChecked,
+        afterPress,
+        onHigh,
+        closed,
+        backOnRow,
+        highChecked,
+        afterEscape,
+      };
+    },
     // A decorative leading icon (#231): Pods & sharing keeps its label as
     // its whole name and leads typeahead; every row's label starts in one
     // column next to the 16px icon, and rows stay 44px high. Right to left

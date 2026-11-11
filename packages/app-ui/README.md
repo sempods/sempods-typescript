@@ -548,9 +548,17 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   and in the centred dialog nothing changes, so an app's own inset padding
   around it can go.
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
-  menu of actions, separators (`null`) and submenus of checked choices
+  menu of actions, separators (`null`) and groups of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
-  when their labels can repeat). An action's own `icon` is a decorative
+  when their labels can repeat). A group opens as a submenu, or with
+  `display: 'section'` lists its choices in the menu under its label as a
+  heading: for two or three choices, such as a View with Zen and List, a
+  section shows the current one at once and needs no second layer on a phone.
+  A choice's `description` adds a second line ("Can read") that describes it
+  without becoming part of its name. `disabled` on an action or a choice keeps
+  it visible but out of reach: a press does nothing and arrow keys skip it.
+  `variant="ghost"` shows only the icon until it is hovered, pressed or open,
+  for a menu repeated on every row, with the same 44px target. An action's own `icon` is a decorative
   leading icon (`{ label, onSelect, icon: <UsersIcon /> }`, shown at 16px,
   so give it no size of its own): it is hidden from assistive technology, so
   the label stays the item's name and leads typeahead. Once one action has an
@@ -704,6 +712,188 @@ export function AppMenu() {
         focusTarget={menu}
       />
     </>
+  );
+}
+```
+
+A View with two choices as a section, and an action that is not available
+yet. The menu opens on the checked view; a choice closes the menu before it
+navigates:
+
+```tsx
+// view-menu.tsx
+import { HeaderMenu } from '@sempods/app-ui';
+
+export function ViewMenu(props: {
+  readonly view: 'zen' | 'list';
+  readonly show: (view: 'zen' | 'list') => void;
+  readonly canExport: boolean;
+  readonly exportTasks: () => void;
+}) {
+  return (
+    <HeaderMenu
+      label="Menu"
+      items={[
+        {
+          label: 'View',
+          display: 'section',
+          choices: [
+            {
+              label: 'Zen',
+              checked: props.view === 'zen',
+              onSelect: () => props.show('zen'),
+            },
+            {
+              label: 'List',
+              checked: props.view === 'list',
+              onSelect: () => props.show('list'),
+            },
+          ],
+        },
+        null,
+        {
+          label: 'Export',
+          onSelect: props.exportTasks,
+          disabled: !props.canExport,
+        },
+      ]}
+    />
+  );
+}
+```
+
+### Secondary actions on rows
+
+Repeated rows, such as Pods and their filters in a side panel, need quieter
+actions than a screen: the screen's own actions use `ActionButton` (56px
+pills and round buttons in the theme's action variants), a row's actions the
+compact `Button` with `variant="ghost"` and a 44px height (`min-h-11`), and a
+row's menu `HeaderMenu` with `icon="more"` and `variant="ghost"`. The row's
+name wraps instead of being cut off, a count stays secondary text, and each
+action keeps its own name, so the keyboard reaches them one by one and focus
+returns to the menu's button when its menu closes:
+
+```tsx
+// source-row.tsx
+import { Button, HeaderMenu } from '@sempods/app-ui';
+
+export function SourceRow(props: {
+  readonly name: string;
+  readonly count: number;
+  readonly shown: boolean;
+  readonly toggle: () => void;
+  readonly rename: () => void;
+  readonly remove: () => void;
+}) {
+  return (
+    <li className="flex min-h-12 items-center gap-1">
+      <span className="grid min-w-0 flex-1 px-2">
+        <span className="wrap-anywhere">{props.name}</span>
+        <span className="text-sm text-muted-foreground">
+          {props.count} resources
+        </span>
+      </span>
+      <Button
+        variant="ghost"
+        className="min-h-11 px-3"
+        aria-pressed={props.shown}
+        onPress={props.toggle}
+      >
+        {props.shown ? 'Hide' : 'Show'}
+      </Button>
+      <HeaderMenu
+        icon="more"
+        variant="ghost"
+        label={`${props.name}: more`}
+        items={[
+          { label: 'Rename', onSelect: props.rename },
+          { label: 'Remove', onSelect: props.remove },
+        ]}
+      />
+    </li>
+  );
+}
+```
+
+### A list menu with unavailable choices
+
+A switch between lists, labelled with the current one, shows every list the
+SDK knows, also one it reports as not selectable right now (`selectable` of
+`usePodContexts`, for example while its Pod reloads): it stays visible and
+checked choices keep their mark, but neither a press nor the keyboard
+chooses it, and arrow keys move only between the available ones. A
+read-only list the SDK reports as selectable stays selectable. Escape closes
+the menu with focus back on its button:
+
+```tsx
+// list-menu.tsx
+import { usePodContexts, useSdkLocale } from '@sempods/app-sdk/react';
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@sempods/app-ui';
+import { ChevronDownIcon } from 'lucide-react';
+
+export function ListMenu({ shareMore }: { readonly shareMore: () => void }) {
+  const lists = usePodContexts();
+  const { messages } = useSdkLocale();
+  const current = lists.selected;
+  return (
+    <DropdownMenuTrigger>
+      <Button
+        variant="ghost"
+        className="h-11 max-w-full justify-start gap-2 px-2 text-xl font-semibold"
+        aria-label={current ? `List: ${current.name}` : 'List'}
+      >
+        <span className="truncate">{current?.name ?? 'List'}</span>
+        <ChevronDownIcon />
+      </Button>
+      <DropdownMenu
+        placement="bottom start"
+        className="w-max min-w-56 max-w-[min(24rem,calc(100vw-2rem))]"
+      >
+        {lists.pods.map((pod) => (
+          <DropdownMenuGroup
+            key={pod.connectionId}
+            selectionMode="single"
+            selectedKeys={current ? [current.key] : []}
+          >
+            {/* With several Pods, each one heads its lists. */}
+            {lists.pods.length > 1 && (
+              <DropdownMenuLabel>{pod.name}</DropdownMenuLabel>
+            )}
+            {pod.choices.map((choice) => (
+              <DropdownMenuItem
+                key={choice.key}
+                id={choice.key}
+                className="min-h-11"
+                textValue={choice.name}
+                isDisabled={!choice.selectable}
+                onAction={() => void lists.select(choice)}
+              >
+                <span className="grid min-w-0 wrap-anywhere">
+                  {choice.name}
+                  <span className="text-sm text-muted-foreground">
+                    {choice.writable
+                      ? messages.controls.canChange
+                      : messages.controls.canRead}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem id="share" className="min-h-11" onAction={shareMore}>
+          Share more lists …
+        </DropdownMenuItem>
+      </DropdownMenu>
+    </DropdownMenuTrigger>
   );
 }
 ```

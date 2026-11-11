@@ -65,6 +65,13 @@ const texts = {
     show: 'Show',
     open: 'Open',
     all: 'All',
+    more: 'more',
+    priority: 'Priority',
+    high: 'High',
+    normal: 'Normal',
+    urgent: 'Urgent',
+    needsDue: 'Needs a due date',
+    details: 'Open details',
   },
   de: {
     menu: 'Menü',
@@ -85,8 +92,67 @@ const texts = {
     show: 'Anzeigen',
     open: 'Offen',
     all: 'Alle',
+    more: 'mehr',
+    priority: 'Priorität',
+    high: 'Hoch',
+    normal: 'Normal',
+    urgent: 'Dringend',
+    needsDue: 'Braucht ein Fälligkeitsdatum',
+    details: 'Details öffnen',
   },
 };
+
+/**
+ * A row's quiet menu (#145): a section of choices with an unavailable one
+ * (#116, #141) and an action. The priority stays in the page.
+ */
+function RowMenu({
+  title,
+  open,
+}: {
+  readonly title: string;
+  readonly open: () => void;
+}) {
+  const t = useMessages(texts);
+  const [priority, setPriority] = useState<'high' | 'normal'>('normal');
+  return (
+    <HeaderMenu
+      icon="more"
+      variant="ghost"
+      label={`${title}: ${t.more}`}
+      items={[
+        {
+          label: t.priority,
+          display: 'section',
+          choices: [
+            {
+              id: 'high',
+              label: t.high,
+              checked: priority === 'high',
+              onSelect: () => setPriority('high'),
+            },
+            {
+              id: 'normal',
+              label: t.normal,
+              checked: priority === 'normal',
+              onSelect: () => setPriority('normal'),
+            },
+            {
+              id: 'urgent',
+              label: t.urgent,
+              description: t.needsDue,
+              checked: false,
+              disabled: true,
+              onSelect: () => {},
+            },
+          ],
+        },
+        null,
+        { label: t.details, onSelect: open },
+      ]}
+    />
+  );
+}
 
 const Icon = ({ path }: { readonly path: string }) => (
   <svg
@@ -279,6 +345,10 @@ function Tasks({
               (item) => (
                 <li key={item.iri}>
                   <a {...nav.link(task(item.iri))}>{item.data.title}</a>
+                  <RowMenu
+                    title={item.data.title}
+                    open={() => nav.go(task(item.iri))}
+                  />
                 </li>
               ),
             )}

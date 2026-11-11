@@ -60,10 +60,18 @@
     margin: auto;
     color: var(--muted-foreground);
   }
+  .gate-list li {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+  }
   .gate-list a {
     display: block;
+    flex: 1;
+    min-width: 0;
     padding: 14px 4px;
-    border-bottom: 1px solid var(--border);
     color: var(--foreground);
+    overflow-wrap: anywhere;
   }
 }
