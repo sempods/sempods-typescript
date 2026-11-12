@@ -38,6 +38,21 @@ app CSS that only enlarged `[data-slot=dialog-close]` (a minimum width or
 height, padding) and check a header with its own right padding. Other
 `icon-sm` buttons keep their 28px size.
 
+## Pending release: app settings in the access gate
+
+The source adds `settings` to `AppAccess` and `AccessGate` in
+`@sempods/app-sdk/react`: a corner button in the gate opens the app's own
+settings, such as language and appearance, above the gate. This is not part
+of published 0.8.0. After upgrading to the containing release, replace a
+composition that hides the gate while an app settings modal is open (a
+settings button in `description` together with `only="management"`) by
+`settings={{ label, content }}`, reusing the controls of the app's settings
+dialog. Keep the header settings entry for the signed-in app. See
+[settings before sign-in](react-authoring.md#app-settings-before-sign-in).
+The gate also shows again, with the focus kept, when a browser closes it on a
+repeated Escape: browsers let a close request through uncancelled when no
+other input came between two of them.
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

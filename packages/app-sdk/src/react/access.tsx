@@ -92,6 +92,26 @@ export interface AppAccessProps {
    * transition ends. Visible retry or error feedback does not trigger this.
    */
   readonly focusTarget?: RefObject<HTMLElement | null>;
+  /**
+   * The app's own settings while the gate blocks, such as language and
+   * appearance: a button in the gate's top inline-end corner opens `content`
+   * in a modal dialog above the gate. The gate stays open and the content
+   * behind it stays covered; nothing about sessions or data changes. Only the
+   * gate offers it: the app keeps its own settings entry otherwise.
+   *
+   * Put device-local presentation choices here, not data or account actions.
+   * `content` renders inside the dialog, so use controls without a portal
+   * (radio groups, toggles, switches): a popover, menu or dialog that renders
+   * into `document.body` is inert below the gate.
+   */
+  readonly settings?: {
+    /** The button's accessible name and tooltip, and the dialog's title. */
+    readonly label: string;
+    /** The controls; applied immediately, since closing saves nothing. */
+    readonly content: ReactNode;
+    /** Decorative icon of the button; a gear by default. */
+    readonly icon?: ReactNode;
+  };
   readonly components?: {
     readonly Connections?: ComponentType<ConnectionsProps>;
   };
@@ -108,6 +128,7 @@ export type AccessGateProps = Pick<
   | 'podNames'
   | 'podAddress'
   | 'focusTarget'
+  | 'settings'
   | 'className'
   | 'style'
 >;
@@ -151,6 +172,7 @@ export function AppAccess({
   only,
   open = false,
   onClose,
+  settings,
   ...props
 }: AppAccessProps) {
   const asDialog = open && Boolean(onClose);
@@ -164,7 +186,7 @@ export function AppAccess({
   if (only === 'management') return management;
   return (
     <>
-      <Gate {...props} />
+      <Gate {...props} {...(settings ? { settings } : {})} />
       {/* Management in place already shows the connection view. */}
       {!(open && !asDialog) && <AccessSection {...props} manage={false} />}
       <AccessPrompts focusTarget={props.focusTarget} />
@@ -190,7 +212,7 @@ function Management({
   onClose,
   focusTarget,
   ...props
-}: Omit<AppAccessProps, 'open' | 'only' | 'onClose'> & {
+}: Omit<AppAccessProps, 'open' | 'only' | 'onClose' | 'settings'> & {
   readonly onClose: () => void;
 }) {
   const { messages: m } = useSdkLocale();
@@ -203,13 +225,14 @@ function Management({
     if (activeId) void refreshContexts(activeId).catch(() => {});
   }, [activeId, refreshContexts]);
   return (
-    <ManagementDialog
+    <AccessDialog
+      ui="management"
       title={m.controls.dataAccess}
       onClose={onClose}
       {...(focusTarget ? { returnFocus: focusTarget } : {})}
     >
       <AccessSection {...props} manage asDialog />
-    </ManagementDialog>
+    </AccessDialog>
   );
 }
 
@@ -390,6 +413,7 @@ const signInReasons = new Set<AccessPromptFact['reason']>([
  * (keeping `allowedPods`). Every other reason shows its own actions only.
  * `className` and `style` apply to its access surface as in `AppAccess`;
  * custom properties such as `--sempods-*` tokens also cover the whole layer.
+ * With `settings`, a corner button opens the app's settings above it.
  */
 export function AccessGate(props: AccessGateProps) {
   return <Gate {...props} />;
@@ -415,6 +439,7 @@ function GateDialog({
   podNames,
   podAddress = 'visible',
   focusTarget,
+  settings,
   components,
   className,
   style,
@@ -424,25 +449,28 @@ function GateDialog({
   readonly blocking: AccessPromptFact;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const surface = useRef<HTMLElement>(null);
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  // Where the focus was at the last close request, to keep it on reopening.
+  const lastFocus = useRef<HTMLElement | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const label = useId();
   const { messages: m, direction } = useSdkLocale();
+  // Declared before the gate's own dialog effect, so its cleanup runs first:
+  // when the gate goes with its settings open, close them, or the focus
+  // target behind them is still inert when the gate returns the focus.
+  useLayoutEffect(
+    () => () => {
+      dialog.current
+        ?.querySelector<HTMLDialogElement>('dialog[data-sempods-ui="settings"]')
+        ?.close?.();
+    },
+    [],
+  );
   useModalDialog(dialog, true, focusTarget);
   useLayoutEffect(() => {
-    // A gate that opens after management or a leave confirmation must not
-    // cover them: the top layer stacks by opening order, so raise them again.
-    const above =
-      dialog.current?.ownerDocument.querySelectorAll<HTMLDialogElement>(
-        'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]',
-      );
-    for (const element of above ?? []) {
-      if (typeof element.showModal !== 'function') continue;
-      const focused = element.contains(element.ownerDocument.activeElement)
-        ? (element.ownerDocument.activeElement as HTMLElement)
-        : null;
-      element.close();
-      element.showModal();
-      focused?.focus();
-    }
+    focusView(dialog.current, settingsButton.current, surface.current);
+    raiseAbove(dialog.current);
   }, []);
   const text = usePromptText(blocking);
   const signIn = signInReasons.has(blocking.reason);
@@ -462,13 +490,64 @@ function GateDialog({
       // Custom properties (--sempods-* tokens) also cover the whole layer.
       style={tokensOf(style)}
       // The gate ends only with its cause.
-      onCancel={(event) => event.preventDefault()}
+      onCancel={(event) => {
+        event.preventDefault();
+        const focused = event.currentTarget.ownerDocument.activeElement;
+        lastFocus.current = event.currentTarget.contains(focused)
+          ? (focused as HTMLElement)
+          : null;
+      }}
+      onClose={(event) => {
+        // A repeated close request without user activation cannot be
+        // cancelled (close watchers): show the gate again while it lasts.
+        const element = event.currentTarget;
+        if (
+          !element.isConnected ||
+          element.open ||
+          typeof element.showModal !== 'function'
+        )
+          return;
+        element.showModal();
+        const back = lastFocus.current;
+        if (back && element.contains(back)) back.focus();
+        else focusView(element, settingsButton.current, surface.current);
+        raiseAbove(element);
+      }}
     >
       <SdkStyles />
       <style href="sempods-access" precedence="sempods">
         {layered(styles)}
       </style>
+      {settings && (
+        <button
+          ref={settingsButton}
+          type="button"
+          className="sp-access-settings"
+          aria-haspopup="dialog"
+          aria-label={settings.label}
+          title={settings.label}
+          onClick={() => setSettingsOpen(true)}
+        >
+          {settings.icon ?? (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          )}
+        </button>
+      )}
+      {settings && settingsOpen && (
+        <AccessDialog
+          ui="settings"
+          title={settings.label}
+          onClose={() => setSettingsOpen(false)}
+          returnFocus={settingsButton}
+        >
+          <div className="sp-access-settings-content">{settings.content}</div>
+        </AccessDialog>
+      )}
       <section
+        ref={surface}
         data-sempods-access=""
         data-sempods-ui="access"
         aria-label={m.controls.dataAccess}
@@ -521,15 +600,55 @@ function GateDialog({
 }
 
 /**
- * Management as a native modal dialog in the top layer: the app behind it is
- * inert, and a leave confirmation still opens above it.
+ * The settings button comes first, at the top; opening the gate still
+ * focuses the first control of its own view, as without settings.
  */
-function ManagementDialog({
+function focusView(
+  gate: HTMLDialogElement | null,
+  button: HTMLButtonElement | null,
+  view: HTMLElement | null,
+) {
+  if (!gate || !button || gate.ownerDocument.activeElement !== button) return;
+  view?.querySelector<HTMLElement>(focusable)?.focus();
+}
+
+/**
+ * A gate that opens after management or a leave confirmation must not cover
+ * them: the top layer stacks by opening order, so raise them again.
+ */
+function raiseAbove(gate: HTMLDialogElement | null) {
+  const above = gate?.ownerDocument.querySelectorAll<HTMLDialogElement>(
+    'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]',
+  );
+  for (const element of above ?? []) {
+    if (typeof element.showModal !== 'function') continue;
+    const focused = element.contains(element.ownerDocument.activeElement)
+      ? (element.ownerDocument.activeElement as HTMLElement)
+      : null;
+    element.close();
+    element.showModal();
+    focused?.focus();
+  }
+}
+
+/** What the browser focuses first in a dialog: enabled, tabbable controls. */
+const focusable =
+  'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Management, or the app's settings above the gate, as a native modal dialog
+ * in the top layer: the app behind it is inert, and a leave confirmation
+ * still opens above it.
+ */
+function AccessDialog({
+  ui,
   title,
   onClose,
   returnFocus,
   children,
 }: {
+  /** `data-sempods-ui`: the gate raises open management above itself. */
+  readonly ui: 'management' | 'settings';
   readonly title: string;
   readonly onClose: () => void;
   /** Focus after closing (`focusTarget`); otherwise the element focused before. */
@@ -544,7 +663,7 @@ function ManagementDialog({
     <dialog
       ref={dialog}
       aria-labelledby={label}
-      data-sempods-ui="management"
+      data-sempods-ui={ui}
       className="sp-sdk-dialog sp-access-dialog"
       dir={direction}
       onCancel={(event) => {
@@ -1255,6 +1374,12 @@ const styles = `
 .sp-access-gate { position:fixed; inset:0; width:100%; height:100%; max-width:none; max-height:none; margin:0; padding:0; border:0; background:var(--sp-bg); color:var(--sp-text); overflow:auto; }
 .sp-access-gate[open] { display:grid; align-items:center; }
 .sp-access-gate::backdrop { background:var(--sp-bg); }
+.sp-access-settings { position:absolute; inset-block-start:calc(8px + env(safe-area-inset-top,0px)); inset-inline-end:8px; z-index:1; width:44px; height:44px; display:grid; place-items:center; padding:0; font:inherit; color:var(--sp-text); background:transparent; border:1px solid transparent; border-radius:calc(var(--sp-radius) * .625); cursor:pointer; }
+.sp-access-settings:hover { background:color-mix(in oklch,transparent,var(--sp-text) 8%); }
+.sp-access-settings:focus-visible { outline:2px solid var(--sp-focus); outline-offset:3px; }
+.sp-access-settings > * { width:22px; height:22px; }
+.sp-access-settings svg { fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
+.sp-access-settings-content { padding:8px 24px 24px; }
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
 .sp-access-dialog-header h2 { flex:1; margin:0; }

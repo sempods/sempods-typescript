@@ -164,6 +164,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Bind the UI](#runtime-and-provider)                                    | `SempodsProvider`, `TargetScreen` (React)                                  | The runtime; your screen inside `TargetScreen`                               |
 | [Sign-in, Context choice, recovery](#appaccess-props)                   | `AppAccess` (React)                                                        | `appName`; a host button sets `open`                                         |
 | [Place access prompts yourself](#access-prompts-and-your-own-placement) | `AccessGate`, `ContextAccess`, `AccessPrompts`, `useAccessPrompts` (React) | `AppAccess only="management"` for management                                 |
+| [App settings before sign-in](#app-settings-before-sign-in)             | `AppAccess`, `AccessGate` (React)                                          | `settings={{ label, content }}` with the app's own controls                  |
 | [Describe your data](#field-definitions)                                | `fields`, `text`, `flag`, `iri`, `dateTime`, `date` (edit)                 | Type and predicate IRIs, explicit text language, `trim: true` for text       |
 | [Show a list](#lists-uselist-and-loadnotice)                            | `useList`, `LoadNotice` (React)                                            | The definition; render `list.data?.items` and `<LoadNotice {...list} />`     |
 | [Add an item](#creating-usecreation)                                    | `useCreation` (React)                                                      | `{ initial, collection }`; inputs to `canEdit`, submit to `canCreate`        |
@@ -1014,6 +1015,7 @@ not a failure. A `ready` source with no hits is a successful empty answer.
 | `onClose`                | `() => void`                      | Management as a modal dialog; Escape, **Close** and a click beside it call this to reset `open`. Without it, management is in place |
 | `only`                   | `'management'`                    | Renders management alone (while `open`), for an app that places the gate, Context surface and prompts itself                        |
 | `focusTarget`            | `RefObject<HTMLElement \| null>`  | Focus returns here when the focused surface hides after its guarded transition (not for visible retry or error feedback)            |
+| `settings`               | `{ label, content, icon? }`       | The app's own settings while the gate blocks, in a dialog above it; see [settings before sign-in](#app-settings-before-sign-in)     |
 | `mode`                   | `'single'` \| `'multiple'`        | `'single'` hides adding another Pod once one is selected; presentation only, enforce with runtime `allowedPods`                     |
 | `headingLevel`           | `1` \| `2`                        | Default: `h1` for first sign-in, `h2` for recovery and management. Use `2` under a host title                                       |
 | `components.Connections` | `ComponentType<ConnectionsProps>` | Replaces the connection view; see [replacing it](#replacing-the-connection-view)                                                    |
@@ -1036,7 +1038,8 @@ It follows `useAppState().access` ([access prompts](#access-prompts-and-your-own
   (see [sign-in](#sign-in-and-pod-addresses)); a failed or cancelled callback
   names its cause there. A startup failure or a second tab offer **Reload**,
   unavailable session storage only explains; a sign-out or forget that could
-  not be saved offers **Try again** and never a sign-in.
+  not be saved offers **Try again** and never a sign-in. With `settings`, a
+  corner button opens the app's own settings above it, for every reason.
 - **The Context surface**, while the active connection is usable and a flow
   needs a Context: the first catalogue load, the **Data context** chooser, an
   empty or unreadable catalogue, a failed one with **Check access**, an
@@ -1101,6 +1104,55 @@ function AppContent() {
 - These are the catalogue's rights for this session, not whether a Context is
   shared or public; changing them is the Pod's consent behind **Change
   sharing**. It sends one catalogue request and no extra label reads.
+
+### App settings before sign-in
+
+People may need to change the app's language or appearance before they can
+read the sign-in screen. The gate is a native modal layer: a header button
+behind it is inert, and an app dialog that renders into `document.body` (as
+the UI kit's `Dialog` does) stays below it. Give the gate the app's settings
+instead:
+
+```tsx
+// SettingChoices, LanguageSetting and texts are the app's own.
+function Access({ language, setLanguage }: LanguageSetting) {
+  const t = useMessages(texts);
+  return (
+    <AppAccess
+      appName="My tasks"
+      settings={{
+        label: t.settings,
+        // The same controls as the app's own Settings dialog after sign-in.
+        content: (
+          <SettingChoices language={language} setLanguage={setLanguage} />
+        ),
+      }}
+    />
+  );
+}
+```
+
+- `AccessGate` takes the same prop; `ContextAccess` and management do not
+  show it. The app keeps its own settings entry for the signed-in screen.
+- The gate shows a 44px button in its top inline-end corner, named and titled
+  by `label` (a gear unless `icon` is given). The gate still opens on its
+  sign-in view; the button comes first in the Tab order.
+- The button opens `content` in a modal dialog with `label` as its title and
+  **Close**, above the gate: a bottom sheet up to 30rem wide, centred above.
+  **Close**, Escape and a click beside it close only this dialog and return
+  focus to the button. The gate stays open throughout, so the content behind
+  it stays covered and mounted, drafts included.
+- Apply each choice at once; closing saves nothing. When the gate's cause
+  ends while the dialog is open, both go and focus follows `focusTarget`.
+- Change the language through the provider's `language`/`locale`: the gate
+  and the dialog re-render in place, and the runtime is not created or
+  initialized again. Do not key the provider or the runtime on the language.
+- Use controls that render in place, such as radio groups, toggles and
+  switches. A popover, menu, select or dialog that renders into
+  `document.body` is inert below the gate. Plain controls get the SDK's
+  defaults; the app's own classes take precedence.
+- Only device-local presentation choices belong here. The gate grants no
+  session or write access: no data or account actions.
 
 ### Access prompts and your own placement
 
