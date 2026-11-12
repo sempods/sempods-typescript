@@ -775,8 +775,11 @@ device's clock from the first send; a clock set back extends it on the client
 only, and the Pod still refuses a late resend. Should a page close before an ended
 session's claim is retired, the next start within the grace period may send
 that claim's token once more; its result passes the same continuity checks.
-These are fixture tests; evidence against a deployed Pod with the grace period
-is still open ([#239](https://github.com/sempods/sempods-typescript/issues/239)).
+Besides fixture tests, these outcomes have
+[live evidence](https://github.com/sempods/sempods-typescript/issues/239#issuecomment-6827365012)
+for 0.8.0 against a deployed Pod with the 60-second grace period. The lost
+answers were simulated in the page, so a real network loss and the `online`
+resend are covered by fixture tests only.
 A code exchange is never resent.
 
 `beginAuthorization()` prepares first (discovery, client resolution, the stored
