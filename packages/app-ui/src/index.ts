@@ -3,6 +3,7 @@ export * from './adapters/action-button.js';
 export * from './adapters/chips.js';
 export { DateChooser, type DateChooserProps } from './adapters/date-chooser.js';
 export * from './adapters/header-menu.js';
+export * from './adapters/context-switch.js';
 export * from './adapters/screen-dialog.js';
 export * from './adapters/suggest-field.js';
 export * from './adapters/workspace-panel.js';

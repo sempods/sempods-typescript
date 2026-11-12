@@ -26,7 +26,7 @@ import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog } from './confirm.js';
 import { useCommands } from './commands.js';
 import { knownContexts, reads } from './access-presentation.js';
-import { contextName, distinctName, podName } from './names.js';
+import { contextName, distinctName, podName, podLabel } from './names.js';
 import { editorsOf } from '../authoring/editors.js';
 const Context = createContext<{
   readonly controller: AppController;
@@ -317,6 +317,8 @@ export interface ContextChoice {
   readonly iri: string;
   /** Its label, else a readable last path segment; duplicates add the IRI. */
   readonly name: string;
+  /** Name within its Pod, including same-Pod disambiguation; never adds a Pod. */
+  readonly label: string;
   /** Whether this app may change data there, not only read it. */
   readonly writable: boolean;
 }
@@ -463,11 +465,10 @@ function contextChoices(
       ];
     }),
   );
-  return readable.map((entry) => ({
-    iri: entry.iri,
-    name: distinctName(entry.iri, iris, (iri) => candidate.get(iri)!),
-    writable: entry.writable,
-  }));
+  return readable.map((entry) => {
+    const label = distinctName(entry.iri, iris, (iri) => candidate.get(iri)!);
+    return { iri: entry.iri, name: label, label, writable: entry.writable };
+  });
 }
 
 /**
@@ -475,6 +476,10 @@ function contextChoices(
  * `ContextTarget` it can be passed to `select` itself.
  */
 export interface PodContextChoice extends ContextChoice, ContextTarget {
+  /** Presentation-only Pod label for a standalone choice or two-line trigger. */
+  readonly podLabel: string;
+  /** Exact Pod address for details; never derive a target from display labels. */
+  readonly podUrl: string;
   readonly connectionId: string;
   /** The same as `iri`. */
   readonly contextIri: string;
@@ -493,6 +498,8 @@ export interface PodContextGroup {
   readonly podUrl: string;
   /** `podNames[podUrl]`, else the address without its scheme. */
   readonly name: string;
+  /** Configured Pod name, else host/path without a terminal slash. Display only. */
+  readonly label: string;
   /**
    * The session when the connection does not read (`signed-out`,
    * `restoring`, `leaving`, `ended`), else its catalogue (`unknown`,
@@ -582,12 +589,15 @@ export function usePodContexts(
       connectionId: connection.id,
       podUrl: connection.podUrl,
       name,
+      label: podLabel(connection.podUrl, podNames),
       status,
       ...('restorable' in connection.session && connection.session.restorable
         ? { restorable: true as const }
         : {}),
       choices: choices.map((choice): PodContextChoice => ({
         ...choice,
+        podLabel: podLabel(connection.podUrl, podNames),
+        podUrl: connection.podUrl,
         name:
           all.filter((n) => n === choice.name).length > 1
             ? `${choice.name} · ${name}`

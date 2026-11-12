@@ -162,6 +162,18 @@ it("lists every Pod's readable Contexts and tells equal names apart by Pod", asy
     ),
   );
   expect(pod(api, bob).name).toBe('Bob');
+  expect(pod(api, bob).label).toBe('Bob');
+  expect(api.list.choices.filter((c) => c.label === 'Shopping')).toHaveLength(
+    2,
+  );
+  expect(pod(api, bob).choices[0]).toMatchObject({
+    label: 'Shopping',
+    podLabel: 'Bob',
+    podUrl: bobUrl,
+    contextIri: shop,
+    iri: shop,
+    key: `${bob}\n${shop}`,
+  });
   expect(pod(api, alice).name).toBe('pod.example/alice');
   expect(
     Object.fromEntries(api.list.choices.map((c) => [c.iri, c.writable])),

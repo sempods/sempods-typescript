@@ -590,32 +590,33 @@ with a "read only" hint and **Share more lists**.
 
 #### One chooser across Pods
 
-With several connected Pods, `usePodContexts({ podNames })` lists every Pod's
-readable Contexts for one chooser, and `select({ connectionId, contextIri })`
-(also `useApp().selectTarget`) switches Pod and Context in one guarded step:
+For the default UI, use `ContextSwitch` from `@sempods/app-ui`. It supplies
+Pod groups, a two-line trigger, permission icons and their visible legend,
+full-address details, per-Pod recovery and guarded selection feedback:
 
 ```tsx
-function ListChooser() {
-  const lists = usePodContexts({ podNames: { [bobPod]: 'Bob' } });
-  return lists.pods.map((pod) => (
-    <section key={pod.connectionId} aria-label={pod.name}>
-      {pod.choices.map((choice) => (
-        <button
-          key={choice.key}
-          aria-pressed={lists.selected?.key === choice.key}
-          disabled={!choice.selectable}
-          onClick={() => void lists.select(choice)}
-        >
-          {choice.name}
-        </button>
-      ))}
-      {pod.status === 'failed' && (
-        <button onClick={() => void pod.retry()}>Try again</button>
-      )}
-    </section>
-  ));
-}
+import { ContextSwitch } from '@sempods/app-ui';
+
+// Mount in the header, outside TargetScreen. Keep AppAccess for sign-in and management.
+<ContextSwitch
+  title="Groceries"
+  label="List"
+  texts={{ shareMore: 'Share more lists …' }}
+/>;
 ```
+
+For a custom presentation, `usePodContexts({ podNames })` supplies the facts.
+`pod.label` is the configured name or a host/path fallback without a terminal
+slash. `choice.label` is disambiguated **within** its Pod, without adding that
+Pod. A standalone trigger combines `choice.label` with `choice.podLabel`.
+`pod.podUrl`, `choice.podUrl` and `choice.contextIri` retain exact identities
+for details; no app should strip suffixes from `name` or construct targets
+from labels. A supplied name ending in `/` is not an address to normalize.
+The existing `name` fields keep their previous behavior for compatibility.
+
+`select(choice)` (also `useApp().selectTarget`) switches Pod and Context in
+one guarded step. A custom presentation must implement the complete feedback
+contract below; the standard component already does so.
 
 - `pods` keeps each connection's `status`: its session while it is not signed
   in (`signed-out`, `restoring`, `leaving`, `ended`), else its catalogue

@@ -578,6 +578,33 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   landscape cutout, the last action above the home indicator. Without insets
   and in the centred dialog nothing changes, so an app's own inset padding
   around it can go.
+- **`ContextSwitch`**: the standard header chooser for an app working in one
+  Context at a time, across all connected Pods. Supply the app's `title`, an
+  optional decorative `icon`, its word for a Context (`label`, e.g. "List"),
+  optional `texts.shareMore`, and optional `podNames` keyed by exact Pod URL.
+  Mount outside `TargetScreen`, alongside `AppAccess`. It initially selects
+  the active Pod's first writable, else readable Context when none was
+  remembered or configured, just like `useContexts`.
+
+  The two-line trigger shows the Context and Pod, with 16px inline padding,
+  a 12px gap and a 64px height. The menu groups concise Context names under
+  their Pod, with 52px minimum rows. A fixed pencil/eye column identifies
+  write/read-only access; the check marks selection separately. A visible
+  localized legend explains the icons, and each row has an accessible access
+  description. Long names wrap in the menu; the trigger keeps the full name
+  available to assistive technology. The address disclosure shows exact Pod
+  URLs and Context IRIs. Only URL fallbacks lose a terminal slash; supplied
+  names keep theirs. Opening the details focuses a named address region;
+  keyboard scrolling reaches its final address even in a short viewport,
+  and Escape closes the popup and returns focus to the trigger.
+
+  The adapter owns loading, empty, signed-out and failed groups, per-Pod
+  retry/sign-in, unavailable retained choices, blocked selection and share
+  errors. SDK actions still own draft/pending/unconfirmed-write guards. Apps
+  supply domain words and content, not a second catalogue, guard or generic
+  recovery UI. `AppAccess` keeps access management and its own focus target.
+  No global Button or menu padding changes are needed.
+
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and groups of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`

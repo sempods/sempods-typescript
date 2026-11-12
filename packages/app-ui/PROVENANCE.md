@@ -77,6 +77,11 @@ language, and palette defaults sit in the `theme` layer without specificity.
 in `styles.css` are this package's own, written on the registry's combo box
 for sempods/sempods-apps-template#144.
 
+`ContextSwitch` (`src/adapters/context-switch.tsx`) is an SDK-aware composition
+for sempods/sempods-typescript#290 and sempods/sempods-apps-template#155.
+Its spacing, Pod groups, permission legend and address disclosure belong to
+this adapter; the registry Button and menu primitives are unchanged.
+
 The browser gate (`scripts/test-ui-consumer.mjs`, `scripts/ui-checks.mjs`,
 `scripts/ui-contrast.js`, `scripts/ui-pod.mjs` and `tests/ui-browser/`) ports
 the spike's `scripts/gate.mjs`, `roundtrip.mjs`, `interaction.mjs`,

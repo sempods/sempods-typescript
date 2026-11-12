@@ -99,7 +99,7 @@ export async function startPod(dist) {
   const server = createServer(async (req, res) => {
     const origin = 'http://' + req.headers.host;
     const url = new URL(req.url ?? '/', origin);
-    const base = origin + '/alice';
+    const base = origin + (url.pathname.startsWith('/bob') ? '/bob' : '/alice');
     tasks ??= seed(base);
     const json = (body, status = 200, headers = {}) => {
       res.writeHead(status, { 'content-type': 'application/json', ...headers });
@@ -110,7 +110,10 @@ export async function startPod(dist) {
       return json({ ok: true });
     }
     if (url.pathname === '/__store') return json([...tasks.values()]);
-    if (!url.pathname.startsWith('/alice')) {
+    if (
+      !url.pathname.startsWith('/alice') &&
+      !url.pathname.startsWith('/bob')
+    ) {
       // The app: a file of the build, otherwise its index (callback, routes).
       const file = normalize(url.pathname).replace(/^(\.\.[/\\])+/, '');
       const path = join(dist, extname(file) ? file : 'index.html');
