@@ -15,6 +15,16 @@ permission rows and label parsing: a custom chooser reads `contextLabel`,
 `qualifier` and `podLabel` instead of splitting `name` or `label`. Keep domain data operations and `AppAccess`.
 See [the chooser guide](react-authoring.md#one-chooser-across-pods).
 
+## Pending release: 44px corner Close in the compact Dialog
+
+The source makes the corner Close of `@sempods/app-ui`'s compact `Dialog` a
+44px target around the same 16px glyph, and a `DialogHeader` or `DialogTitle`
+placed directly in that `Dialog` keeps 40px clear on its right for it. This is
+not part of published 0.8.0. After upgrading to the containing release, remove
+app CSS that only enlarged `[data-slot=dialog-close]` (a minimum width or
+height, padding) and check a header with its own right padding. Other
+`icon-sm` buttons keep their 28px size.
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

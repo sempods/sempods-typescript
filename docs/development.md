@@ -133,7 +133,10 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     the SDK's question, and Cancel in its delete question, keep the dialog
     and the draft; a press beside it asks, and discarding closes it unsaved;
     an unreadable source Context shows its problem instead of an editor; its
-    close button is named in German;
+    close button is named in German; its corner Close is a 44px target around
+    a 16px glyph, inside the dialog and clear of its title and fields, at
+    375px and 1280px in light and dark, and closes it by pointer anywhere in
+    the target and by keyboard;
   - `ScreenDialog` full screen with safe-area insets, emulated through the
     DevTools protocol in Chromium only (other engines report a skip): Close
     below a 47px top inset, the last action after scrolling above a 34px
