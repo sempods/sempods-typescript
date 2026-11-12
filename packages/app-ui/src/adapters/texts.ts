@@ -14,6 +14,7 @@ const texts = {
     podLeaving: 'Opening sign-in …',
     podSignedOut: 'Sign in to use this Pod.',
     signInPod: 'Sign in',
+    podActions: 'Pod actions',
     noPods: 'Connect a Pod to choose a context.',
     switchBlocked: 'Wait for the current change to finish, then try again.',
     switchUnavailable: 'This context is currently unavailable.',
@@ -45,6 +46,7 @@ const texts = {
     podLeaving: 'Anmeldung wird geöffnet …',
     podSignedOut: 'Melde dich an, um diesen Pod zu nutzen.',
     signInPod: 'Anmelden',
+    podActions: 'Pod-Aktionen',
     noPods: 'Verbinde einen Pod, um einen Kontext auszuwählen.',
     switchBlocked:
       'Warte, bis die aktuelle Änderung abgeschlossen ist, und versuche es erneut.',

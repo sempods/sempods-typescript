@@ -18,6 +18,7 @@ import {
   TargetScreen,
   useContexts,
   useDraftGuard,
+  type ContextList,
 } from './index.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import {
@@ -65,8 +66,10 @@ const labelled = (labels: Record<string, string>) => async (url: string) =>
 
 const outcomes: boolean[] = [];
 /** The switch as an app renders it, plus a draft that asks before leaving. */
+let seen: ContextList | undefined;
 function Switch() {
   const lists = useContexts();
+  seen = lists;
   const [dirty, setDirty] = useState(false);
   useDraftGuard(dirty, () => setDirty(false));
   return (
@@ -83,7 +86,7 @@ function Switch() {
                 void lists.select(c.iri).then((ok) => outcomes.push(ok))
               }
             >
-              {c.label}
+              {c.name}
             </button>
             {c.writable ? 'can change' : 'read only'}
           </li>
@@ -186,6 +189,26 @@ it('adds the IRI when a label equals the short name of another list', async () =
       `Tasks · work · ${errands}can change`,
     ]),
   );
+  // The structured parts stay unique without the full IRI (#290).
+  expect(
+    seen?.contexts.map(({ contextLabel, qualifier, label }) => ({
+      contextLabel,
+      qualifier,
+      label,
+    })),
+  ).toEqual([
+    {
+      contextLabel: 'Tasks',
+      qualifier: '_system/contexts/work',
+      label: 'Tasks · _system/contexts/work',
+    },
+    { contextLabel: 'Tasks', qualifier: 'personal', label: 'Tasks · personal' },
+    {
+      contextLabel: 'Tasks · work',
+      qualifier: 'errands',
+      label: 'Tasks · work · errands',
+    },
+  ]);
 });
 
 it('keeps a preset Context and offers only that one', async () => {
