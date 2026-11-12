@@ -15,6 +15,19 @@ permission rows and label parsing: a custom chooser reads `contextLabel`,
 `qualifier` and `podLabel` instead of splitting `name` or `label`. Keep domain data operations and `AppAccess`.
 See [the chooser guide](react-authoring.md#one-chooser-across-pods).
 
+## Pending release: change a waiting Pod read's priority in place
+
+The source adds `priority` to the `usePodLoad` options and `setPriority` to
+the loader that `createViewLoader(pod, …)` returns. This is not part of
+published 0.8.0. A changed value moves that loader's waiting reads ahead (or
+back) under `podReadLimit` without restarting them; a running request keeps
+its signal. After upgrading to the containing release, remove reloads or
+`key` changes that only restarted a read to change its priority, and pass
+`priority: selected ? 'current' : undefined` to `usePodLoad` instead of
+choosing `priority` inside the read callback. A read's own
+`priority: 'current'` keeps working for a read that is always current. See
+[bounded Pod reads](browser-runtime.md#bounded-pod-reads).
+
 ## Pending release: 44px corner Close in the compact Dialog
 
 The source makes the corner Close of `@sempods/app-ui`'s compact `Dialog` a

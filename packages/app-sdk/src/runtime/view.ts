@@ -41,8 +41,11 @@ export interface BoundPod {
    * With `podReadLimit`, a read beyond the limit waits for a slot; pass the
    * loader's `signal` as it is, so waiting never spends its recovery retry.
    * `priority: 'current'` lets a read for what the user looks at now wait
-   * less; it never exceeds a limit or stops a running read. It is read when
-   * the read starts: restart the read when the current resource changes.
+   * less; it never exceeds a limit or stops a running read. It holds for this
+   * read. To change it while a read waits, set it on the loader instead
+   * (`usePodLoad`'s `priority`, `setPriority`): its reads that receive the
+   * loader's `signal` follow it in place. Do not restart a read for that; it
+   * may already run, and the restart aborts its request.
    */
   readonly sparql: {
     select(

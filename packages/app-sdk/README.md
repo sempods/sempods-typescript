@@ -129,6 +129,8 @@ still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
 for example one read per connection, each with its own state and retry.
 With many readers at once, the runtime option `podReadLimit: { perPod, total }`
 bounds the requests in flight; further reads wait without spending their retry.
+`usePodLoad`'s `priority: 'current'` moves the selected resource's waiting
+read ahead in place, without restarting a running one.
 
 An app that switches Contexts in its own UI, such as a list switch, uses
 `useContexts()`: readable Contexts with names and access, a guarded `select`,
