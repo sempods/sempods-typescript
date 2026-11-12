@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu, Popover, Text } from 'react-aria-components';
 import { ChevronDownIcon, EyeIcon, PencilIcon } from 'lucide-react';
 import {
@@ -58,6 +58,10 @@ export function ContextSwitch({
   const selected = lists.selected;
   const [open, setOpen] = useState(false);
   const [addresses, setAddresses] = useState(false);
+  const addressRegion = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (addresses) addressRegion.current?.focus();
+  }, [addresses]);
   const [problem, setProblem] = useState<string | null>(null);
   const run = async (action: () => Promise<void>) => {
     setProblem(null);
@@ -102,7 +106,13 @@ export function ContextSwitch({
   return (
     <div className="grid min-w-0 max-w-full gap-1" data-slot="context-switch">
       <h1 className="sr-only">{title}</h1>
-      <DropdownMenuTrigger isOpen={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        isOpen={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setAddresses(false);
+        }}
+      >
         <Button
           variant="ghost"
           className="h-16 min-w-48 max-w-full justify-start gap-3 rounded-xl px-4 text-start whitespace-normal"
@@ -256,7 +266,13 @@ export function ContextSwitch({
               </span>
             </div>
             {addresses && (
-              <div className="grid gap-2 pb-3 wrap-anywhere">
+              <div
+                ref={addressRegion}
+                role="region"
+                aria-label={t.addresses}
+                tabIndex={0}
+                className="mt-3 grid gap-2 rounded-sm p-1 pb-3 wrap-anywhere outline-none focus-visible:outline-2 focus-visible:outline-ring"
+              >
                 {lists.pods.map((pod) => (
                   <dl key={pod.connectionId}>
                     <dt className="font-medium">{pod.label}</dt>

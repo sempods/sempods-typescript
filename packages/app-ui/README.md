@@ -594,7 +594,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   description. Long names wrap in the menu; the trigger keeps the full name
   available to assistive technology. The address disclosure shows exact Pod
   URLs and Context IRIs. Only URL fallbacks lose a terminal slash; supplied
-  names keep theirs.
+  names keep theirs. Opening the details focuses a named address region;
+  keyboard scrolling reaches its final address even in a short viewport,
+  and Escape closes the popup and returns focus to the trigger.
 
   The adapter owns loading, empty, signed-out and failed groups, per-Pod
   retry/sign-in, unavailable retained choices, blocked selection and share

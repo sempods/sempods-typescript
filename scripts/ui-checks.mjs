@@ -3887,11 +3887,39 @@ async function contexts({ browser, origin }) {
         pass: await trigger().evaluate((el) => el === document.activeElement),
       });
     }
+    await page.setViewportSize({ width: 375, height: 400 });
     await trigger().click();
     await page
       .getByRole('menuitem', { name: 'Pod- und Kontextadressen anzeigen' })
       .focus();
     await page.keyboard.press('Enter');
+    const addresses = page.getByRole('region', {
+      name: 'Pod- und Kontextadressen',
+      exact: true,
+    });
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute('role') === 'region',
+    );
+    await page.keyboard.press('End');
+    // Native scroll is animated on some engines: wait for the final address,
+    // not merely for a rendered element below the viewport.
+    await page.waitForFunction(() => {
+      const region = document.querySelector('[role=region][tabindex="0"]');
+      const last = region?.querySelector('dl:last-child dd:last-child');
+      if (!region || !last) return false;
+      const r = region.getBoundingClientRect(),
+        d = last.getBoundingClientRect(),
+        popup = region.closest('[role="dialog"]')?.getBoundingClientRect();
+      return (
+        d.bottom <=
+          Math.min(r.bottom, popup?.bottom ?? innerHeight, innerHeight) + 1 &&
+        d.top >= Math.max(r.top, popup?.top ?? 0, 0)
+      );
+    });
+    results.push({
+      id: 'address-keyboard-scroll',
+      pass: await addresses.evaluate((el) => el === document.activeElement),
+    });
     results.push({
       id: 'exact-address-details',
       pass:
@@ -3904,6 +3932,10 @@ async function contexts({ browser, origin }) {
           .isVisible()),
     });
     await page.keyboard.press('Escape');
+    await page.waitForFunction(() =>
+      document.activeElement?.getAttribute('aria-label')?.startsWith('List:'),
+    );
+    await page.setViewportSize({ width: 375, height: 812 });
     await page.getByRole('button', { name: 'Keep a draft' }).click();
     await trigger().click();
     await page
@@ -3975,7 +4007,22 @@ async function contexts({ browser, origin }) {
       ),
     });
   } catch (error) {
-    results.push({ id: 'chooser-journey', pass: false, error: String(error) });
+    results.push({
+      id: 'chooser-journey',
+      pass: false,
+      error: String(error),
+      details: await page.evaluate(() => {
+        const region = document.querySelector('[role=region][tabindex="0"]');
+        const last = region?.querySelector('dl:last-child dd:last-child');
+        return {
+          focus: document.activeElement?.outerHTML.slice(0, 250),
+          region: region?.getBoundingClientRect().toJSON(),
+          last: last?.getBoundingClientRect().toJSON(),
+          scroll: region?.scrollTop,
+          scrollHeight: region?.scrollHeight,
+        };
+      }),
+    });
   }
   results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
   await context.close();
