@@ -4027,6 +4027,227 @@ async function contextQualifiers({ browser, origin }) {
   return results;
 }
 
+/**
+ * The app's settings in the access gate (#282): a corner button opens them
+ * above the gate, which stays open; language and appearance change in place;
+ * Escape closes only the settings, also on repeated presses; on a phone they
+ * are a bottom sheet. Then the gate of a remembered Pod: the same settings,
+ * and Forget without a write to the Pod.
+ */
+async function accessSettings({ browser, origin, engine }) {
+  const results = [];
+  const { context, page, errors } = await newPage(browser);
+  const gateOpen = () =>
+    page.evaluate(() => {
+      const gate = document.querySelector('dialog[data-sempods-ui="gate"]');
+      return Boolean(gate?.open && gate.matches(':modal'));
+    });
+  const settings = page.locator('dialog[data-sempods-ui="settings"]');
+  const button = page.locator(
+    'dialog[data-sempods-ui="gate"] > .sp-access-settings',
+  );
+  try {
+    await fetch(origin + '/__reset');
+    await page.goto(origin + '/');
+    await page.locator('dialog[data-sempods-ui="gate"]').waitFor();
+    results.push(
+      await attempt('settings-button-in-corner', async () => {
+        const box = await button.boundingBox();
+        const name = await button.getAttribute('aria-label');
+        // The gate opens on its own sign-in view, not on the settings button.
+        const focus = await page.evaluate(() => ({
+          inView: Boolean(
+            document.activeElement?.closest(
+              'dialog[data-sempods-ui="gate"] [data-sempods-access]',
+            ),
+          ),
+          tag: document.activeElement?.tagName,
+        }));
+        return {
+          pass:
+            name === 'Settings' &&
+            box !== null &&
+            box.width >= 44 &&
+            box.height >= 44 &&
+            box.x + box.width >= 1280 - 60 &&
+            box.y <= 60 &&
+            focus.inView,
+          name,
+          box,
+          focus,
+        };
+      }),
+    );
+    results.push(
+      await attempt('settings-above-the-open-gate', async () => {
+        await button.click();
+        await settings.waitFor();
+        const top = await settings.evaluate((dialog) => {
+          const box = dialog.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          );
+          return {
+            hit: dialog.contains(hit),
+            focusInside: dialog.contains(document.activeElement),
+            modal: dialog.matches(':modal'),
+          };
+        });
+        return {
+          pass: top.hit && top.focusInside && top.modal && (await gateOpen()),
+          ...top,
+        };
+      }),
+    );
+    results.push(
+      await attempt('language-and-appearance-in-place', async () => {
+        await page.evaluate(() => {
+          window.sameDocument = true;
+        });
+        await settings.getByRole('radio', { name: 'Deutsch' }).check();
+        await page.getByRole('dialog', { name: 'Einstellungen' }).waitFor();
+        await settings.getByRole('radio', { name: 'Dunkel' }).check();
+        const after = await page.evaluate(() => {
+          const gate = document.querySelector('dialog[data-sempods-ui="gate"]');
+          const rgb = getComputedStyle(gate)
+            .backgroundColor.match(/[\d.]+/g)
+            .slice(0, 3)
+            .map(Number);
+          return {
+            sameDocument: window.sameDocument === true,
+            signIn: [...gate.querySelectorAll('button')].some(
+              (b) => b.textContent === 'Anmelden',
+            ),
+            dark: rgb.reduce((a, b) => a + b, 0) < 150,
+            rgb,
+          };
+        });
+        return {
+          pass:
+            after.sameDocument &&
+            after.signIn &&
+            after.dark &&
+            (await gateOpen()),
+          ...after,
+        };
+      }),
+    );
+    results.push(
+      await attempt('escape-closes-only-the-settings', async () => {
+        await page.keyboard.press('Escape');
+        const closed = await gone(settings);
+        const focus = await focusUntil(page, /Einstellungen/, (p) =>
+          p.evaluate(
+            () => document.activeElement?.getAttribute('aria-label') ?? '',
+          ),
+        );
+        // No activation in between: a close watcher lets a repeated close
+        // request through uncancelled; the gate shows again, focus kept.
+        await page.keyboard.press('Escape');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(100);
+        const kept = await page.evaluate(
+          () => document.activeElement?.getAttribute('aria-label') ?? '',
+        );
+        return {
+          pass:
+            closed &&
+            focus === 'Einstellungen' &&
+            kept === 'Einstellungen' &&
+            (await gateOpen()),
+          closed,
+          focus,
+          kept,
+        };
+      }),
+    );
+    results.push(
+      await attempt('phone-bottom-sheet-and-backdrop', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        const corner = await button.boundingBox();
+        await button.click();
+        await settings.waitFor();
+        const sheet = await settings.boundingBox();
+        // A press beside the sheet, on its backdrop, closes it.
+        await page.mouse.click(187, 20);
+        const closed = await gone(settings);
+        return {
+          pass:
+            corner !== null &&
+            corner.x + corner.width <= 375 &&
+            sheet !== null &&
+            Math.abs(sheet.width - 375) <= 1 &&
+            Math.abs(sheet.y + sheet.height - 812) <= 2 &&
+            closed &&
+            (await gateOpen()),
+          corner,
+          sheet,
+          closed,
+        };
+      }),
+    );
+  } finally {
+    await context.close();
+  }
+  // A remembered Pod: signed in, then signed out through management.
+  const remembered = await newPage(browser);
+  try {
+    const p = remembered.page;
+    results.push(
+      await attempt(
+        'remembered-pod-gate-and-forget-without-writes',
+        async () => {
+          await signIn(p, origin);
+          await p.getByRole('button', { name: 'Menu', exact: true }).click();
+          await p.getByRole('menuitem', { name: 'Pods & sharing' }).click();
+          // Management stays open above the gate after the sign-out.
+          const sheet = p.getByRole('dialog', { name: /Pods & sharing/ });
+          await sheet.getByRole('button', { name: 'Sign out' }).click();
+          const gate = p.locator('dialog[data-sempods-ui="gate"]');
+          await gate
+            .getByRole('list', { name: 'Pods on this device' })
+            .waitFor();
+          await sheet.getByRole('button', { name: 'Close' }).click();
+          await gone(sheet);
+          await gate.getByRole('button', { name: 'Settings' }).click();
+          const dialog = p.locator('dialog[data-sempods-ui="settings"]');
+          await dialog.getByRole('radio', { name: 'Deutsch' }).check();
+          await dialog.getByRole('button', { name: 'Schließen' }).click();
+          await gone(dialog);
+          const list = gate.getByRole('list', {
+            name: 'Pods auf diesem Gerät',
+          });
+          const kept = await shown(list);
+          const writes = [];
+          p.on('request', (request) => {
+            if (request.method() !== 'GET' && request.url().startsWith(origin))
+              writes.push(request.method() + ' ' + request.url());
+          });
+          await list.getByRole('button', { name: 'Vergessen' }).click();
+          const forgotten = await gone(list);
+          await p.waitForTimeout(200);
+          return {
+            pass: kept && forgotten && writes.length === 0,
+            kept,
+            forgotten,
+            writes,
+          };
+        },
+      ),
+    );
+  } finally {
+    await remembered.context.close();
+  }
+  results.push({
+    id: 'no-page-errors',
+    pass: errors.length === 0 && remembered.errors.length === 0,
+    errors: [...errors, ...remembered.errors],
+    engine,
+  });
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -4041,6 +4262,7 @@ export const suites = {
   insets,
   workspace,
   search,
+  accessSettings,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */

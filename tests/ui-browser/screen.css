@@ -80,4 +80,24 @@
     color: var(--foreground);
     overflow-wrap: anywhere;
   }
+  /* The app's appearance setting, chosen in the access gate's settings. */
+  :root[data-appearance='light'] {
+    color-scheme: light;
+  }
+  :root[data-appearance='dark'] {
+    color-scheme: dark;
+  }
+  /* The app's settings inside the access gate's settings dialog. */
+  .gate-settings {
+    border: 0;
+    margin: 0 0 16px;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 16px;
+  }
+  .gate-settings legend {
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
 }

@@ -132,7 +132,10 @@ needs them; preserve the minimal screen's recovery when adapting it.
 - **One host.** Keep one stable runtime outside rendering and one provider for
   its controller. `AppAccess` handles access beside `TargetScreen`. Use the
   host's lifecycle and generated identity configuration; a language or visual
-  change must not replace the runtime. In a custom routed host, use `returnTo`
+  change must not replace the runtime. App language or appearance settings
+  also go to `AppAccess` `settings`, so they work before sign-in
+  ([settings before sign-in](react-authoring.md#app-settings-before-sign-in)).
+  In a custom routed host, use `returnTo`
   to preserve the route through login, as in the
   [runtime setup](react-authoring.md#runtime-and-provider).
 - **One data meaning.** Define the type, predicates, text language and status

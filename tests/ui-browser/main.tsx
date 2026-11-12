@@ -9,14 +9,15 @@
 // workspace with its nonmodal filter panel instead of the tasks. With
 // `?screen=search`, the page is a search bar with suggestions (SuggestField)
 // whose results the checks set through `window.searchGate`, as an app's
-// search would.
+// search would. The access gate offers the app's language and appearance
+// settings (`AppAccess` `settings`), applied in place.
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, and the
 // address model, places.ts, are the package README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
-import { StrictMode, useEffect, useRef, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { UsersIcon } from 'lucide-react';
 import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
@@ -202,7 +203,80 @@ for (const key of ['theme', 'actions', 'secondary']) {
 
 let runtime: BrowserRuntime | undefined;
 
+/**
+ * The app's own device-local settings, as Focus offers them before sign-in:
+ * applied at once, with plain radio buttons (no portal), in the gate's
+ * settings dialog.
+ */
+function SettingsChoices({
+  lang,
+  setLang,
+}: {
+  lang: 'en' | 'de';
+  setLang: (value: 'en' | 'de') => void;
+}) {
+  // screen.css maps the choice to color-scheme, in a stylesheet rule that
+  // the build's light-dark() fallback follows (as Focus does).
+  const [scheme, setScheme] = useState(
+    () => document.documentElement.dataset.appearance ?? 'system',
+  );
+  const choose = (value: string) => {
+    if (value === 'system') delete document.documentElement.dataset.appearance;
+    else document.documentElement.dataset.appearance = value;
+    setScheme(value);
+  };
+  const de = lang === 'de';
+  return (
+    <>
+      <fieldset className="gate-settings">
+        <legend>{de ? 'Sprache' : 'Language'}</legend>
+        {(
+          [
+            ['en', 'English'],
+            ['de', 'Deutsch'],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value} lang={value}>
+            <input
+              type="radio"
+              name="gate-language"
+              checked={lang === value}
+              onChange={() => setLang(value)}
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="gate-settings">
+        <legend>{de ? 'Erscheinungsbild' : 'Appearance'}</legend>
+        {(
+          [
+            ['system', 'System'],
+            ['light', de ? 'Hell' : 'Light'],
+            ['dark', de ? 'Dunkel' : 'Dark'],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value}>
+            <input
+              type="radio"
+              name="gate-appearance"
+              checked={scheme === value}
+              onChange={() => choose(value)}
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+    </>
+  );
+}
+
 function App() {
+  // Changing the language re-renders the provider; the runtime stays.
+  const [lang, setLang] = useState<'en' | 'de'>(language);
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
   runtime ??= createBrowserRuntime({
     identity: {
       kind: 'dynamic',
@@ -224,21 +298,30 @@ function App() {
       // A TargetScreen asks for a Context; a task address with its source
       // opens without one.
       contextSelection="on-demand"
-      language={language}
-      locale={language === 'de' ? 'de-DE' : 'en-GB'}
+      language={lang}
+      locale={lang === 'de' ? 'de-DE' : 'en-GB'}
     >
       {contextSwitch ? (
         <ContextSwitchGate />
       ) : search ? (
         <SearchGate />
       ) : (
-        <Frame />
+        <Frame
+          settings={{
+            label: lang === 'de' ? 'Einstellungen' : 'Settings',
+            content: <SettingsChoices lang={lang} setLang={setLang} />,
+          }}
+        />
       )}
     </SempodsProvider>
   );
 }
 
-function Frame() {
+function Frame({
+  settings,
+}: {
+  settings: { readonly label: string; readonly content: ReactNode };
+}) {
   const [managing, setManaging] = useState(false);
   // Closing Pods & sharing returns here: the menu item is gone by then.
   const menu = useRef<HTMLButtonElement>(null);
@@ -294,6 +377,7 @@ function Frame() {
         open={managing}
         onClose={() => setManaging(false)}
         focusTarget={menu}
+        settings={settings}
       />
       {/* An address that names its source opens without a selected Context:
           no TargetScreen, so AppAccess asks for no choice. */}
