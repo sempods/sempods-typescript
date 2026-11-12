@@ -207,10 +207,11 @@ its own state:
 
 - **Cancellation.** A resource that is no longer admitted unmounts its reads,
   which cancels a read that is still running.
-- **Withdrawal.** When a Pod signs out, disconnects or loses read access, its
-  values leave the cards. A connection that no longer reads drops out in the
-  same render; a read that loses access reports no data. Nothing is cached
-  beyond the current reads: a read that answers again brings the values back.
+- **Withdrawal.** When a Pod signs out, disconnects, loses read access or
+  changes its grants, its values leave the cards in the same render. Each
+  report carries the handle and read revision it was read with; a report of
+  an older one no longer counts. Nothing is cached beyond the current reads:
+  a read that answers again brings the values back.
 - **Limits.** Reads beyond `podReadLimit` wait in `loading`. A grant change
   while they wait spends no retry.
 - **Rules.** Pass a module-level constant. Another array is compared by
