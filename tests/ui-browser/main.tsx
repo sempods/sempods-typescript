@@ -10,7 +10,10 @@
 // `?screen=search`, the page is a search bar with suggestions (SuggestField)
 // whose results the checks set through `window.searchGate`, as an app's
 // search would. The access gate offers the app's language and appearance
-// settings (`AppAccess` `settings`), applied in place.
+// settings (`AppAccess` `settings`), applied in place. With
+// `?screen=gate-settings`, sign-in is optional and the page is only the
+// gate with a fixed focus target; the checks end the gate's cause through
+// `window.gateRuntime`, as the app's own code could.
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, and the
@@ -195,6 +198,7 @@ const language =
 const compact = settings.get('dialog') === 'compact';
 const workspace = settings.has('workspace');
 const search = settings.get('screen') === 'search';
+const gateSettings = settings.get('screen') === 'gate-settings';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -291,7 +295,14 @@ function App() {
         : location.pathname + location.search,
     replaceUrl,
     development: 'loopback-http',
+    // Reading without a token: opening a Pod ends the gate in place.
+    ...(gateSettings ? { signIn: 'optional' as const } : {}),
   });
+  if (gateSettings) Object.assign(window, { gateRuntime: runtime });
+  const appSettings = {
+    label: lang === 'de' ? 'Einstellungen' : 'Settings',
+    content: <SettingsChoices lang={lang} setLang={setLang} />,
+  };
   return (
     <SempodsProvider
       runtime={runtime}
@@ -305,13 +316,10 @@ function App() {
         <ContextSwitchGate />
       ) : search ? (
         <SearchGate />
+      ) : gateSettings ? (
+        <GateSettingsScreen settings={appSettings} />
       ) : (
-        <Frame
-          settings={{
-            label: lang === 'de' ? 'Einstellungen' : 'Settings',
-            content: <SettingsChoices lang={lang} setLang={setLang} />,
-          }}
-        />
+        <Frame settings={appSettings} />
       )}
     </SempodsProvider>
   );
@@ -571,6 +579,23 @@ interface SearchState {
   readonly items: readonly Suggestion[];
   readonly loading?: boolean;
   readonly failed?: 'some' | 'all';
+}
+
+/** Only the gate with the app's settings, and a target outside it. */
+function GateSettingsScreen({
+  settings,
+}: {
+  settings: { readonly label: string; readonly content: ReactNode };
+}) {
+  const target = useRef<HTMLButtonElement>(null);
+  return (
+    <main className="gate-main">
+      <button ref={target} type="button" id="gate-focus-target">
+        Back to the app
+      </button>
+      <AppAccess appName="Focus" settings={settings} focusTarget={target} />
+    </main>
+  );
 }
 
 function SearchGate() {

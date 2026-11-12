@@ -4190,6 +4190,39 @@ async function accessSettings({ browser, origin, engine }) {
   } finally {
     await context.close();
   }
+  // The gate's cause ends while its settings are open: both dialogs go and
+  // the focus target outside them gets the focus, which a still modal
+  // settings dialog would otherwise keep inert.
+  const ending = await newPage(browser);
+  try {
+    const q = ending.page;
+    results.push(
+      await attempt('cause-ends-with-settings-open', async () => {
+        await fetch(origin + '/__reset');
+        await q.goto(origin + '/?screen=gate-settings');
+        const gate = q.locator('dialog[data-sempods-ui="gate"]');
+        await gate.getByRole('button', { name: 'Settings' }).click();
+        const dialog = q.locator('dialog[data-sempods-ui="settings"]');
+        await dialog.getByRole('radio', { name: 'English' }).focus();
+        // Opening a Pod to read without a token ends the gate in place.
+        await q.evaluate(
+          (pod) => window.gateRuntime.connect(pod),
+          origin + '/alice',
+        );
+        const closed = (await gone(gate)) && (await gone(dialog));
+        const focus = await focusUntil(q, /gate-focus-target/, (p) =>
+          p.evaluate(() => document.activeElement?.id || 'BODY'),
+        );
+        return {
+          pass: closed && focus === 'gate-focus-target',
+          closed,
+          focus,
+        };
+      }),
+    );
+  } finally {
+    await ending.context.close();
+  }
   // A remembered Pod: signed in, then signed out through management.
   const remembered = await newPage(browser);
   try {
@@ -4241,8 +4274,11 @@ async function accessSettings({ browser, origin, engine }) {
   }
   results.push({
     id: 'no-page-errors',
-    pass: errors.length === 0 && remembered.errors.length === 0,
-    errors: [...errors, ...remembered.errors],
+    pass:
+      errors.length === 0 &&
+      ending.errors.length === 0 &&
+      remembered.errors.length === 0,
+    errors: [...errors, ...ending.errors, ...remembered.errors],
     engine,
   });
   return results;

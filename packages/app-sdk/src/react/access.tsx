@@ -456,6 +456,17 @@ function GateDialog({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const label = useId();
   const { messages: m, direction } = useSdkLocale();
+  // Declared before the gate's own dialog effect, so its cleanup runs first:
+  // when the gate goes with its settings open, close them, or the focus
+  // target behind them is still inert when the gate returns the focus.
+  useLayoutEffect(
+    () => () => {
+      dialog.current
+        ?.querySelector<HTMLDialogElement>('dialog[data-sempods-ui="settings"]')
+        ?.close?.();
+    },
+    [],
+  );
   useModalDialog(dialog, true, focusTarget);
   useLayoutEffect(() => {
     focusView(dialog.current, settingsButton.current, surface.current);
