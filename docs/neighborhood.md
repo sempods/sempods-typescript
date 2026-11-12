@@ -54,7 +54,7 @@ Examples are not complete. They show that other predicates exist.
 `morePredicates` says that there are more than 16. Only the pages are
 complete, once the last page is not full. A statement that a later page
 holds shows once, as a page statement. When all pages are read, the examples
-are gone.
+and `morePredicates` are gone.
 
 ## Hidden Contexts
 
@@ -76,7 +76,8 @@ Each page and each sample is its own `usePodLoad` with the connection's
 
 - reads wait for the runtime's limit,
 - a failed sample leaves the pages usable, and each read retries alone,
-- a Pod that signs out or loses access takes its statements with it,
+- a Pod that signs out, loses access or changes its grants takes its
+  statements with it in the same render,
 - a new resource cancels the old reads; their late answers never show.
 
 ## Limits

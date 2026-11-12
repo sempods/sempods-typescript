@@ -1,4 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type {
   BoundPod,
   BrowserRuntime,
@@ -71,6 +78,44 @@ const stateOf = (state: LoadState<unknown>): ReadState =>
 interface Report {
   readonly data: Page | Sample | undefined;
   readonly kind: ReadState;
+  /** The handle and access the data was read with. */
+  readonly stamp: string;
+}
+
+/** Changes when a handle is replaced, or its grants or read access change. */
+function stampOf(pod: BoundPod | null) {
+  if (!pod) return '';
+  const { revision, read } = pod.getSnapshot();
+  return JSON.stringify([pod.key, revision, read]);
+}
+const noSubscribe = () => () => {};
+
+/** The current stamp of each handle, updated in the same render as a change. */
+function useStamps(runtime: BrowserRuntime, ids: readonly string[]) {
+  const joined = ids.join('\n');
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const pods = joined ? joined.split('\n') : [];
+      const stops = pods.map((id) => runtime.bindPod(id).subscribe(listener));
+      return () => stops.forEach((stop) => stop());
+    },
+    [runtime, joined],
+  );
+  const stamps = useSyncExternalStore(
+    ids.length ? subscribe : noSubscribe,
+    () =>
+      JSON.stringify(
+        ids.map((id) => {
+          // A connection that just stopped reading has no handle any more.
+          try {
+            return stampOf(runtime.bindPod(id));
+          } catch {
+            return '';
+          }
+        }),
+      ),
+  );
+  return JSON.parse(stamps) as string[];
 }
 type Reporter = (id: string, value?: Report) => void;
 type Register = (id: string, reload?: () => void) => void;
@@ -141,13 +186,24 @@ export function useNeighborhood(
   }, []);
   // A root that is no IRI is not read.
   const valid = isIri(root);
-  const sources = connections.flatMap((connection) =>
+  const stamps = useStamps(
+    runtime,
+    valid ? connections.map((connection) => connection.id) : [],
+  );
+  const sources = connections.flatMap((connection, index) =>
     directions.map((direction) => {
+      // A report from an older handle or older grants does not count, also
+      // before its reader has reported again.
+      const stamp = stamps[index] ?? '';
+      const current = (id: string) => {
+        const report = reports.get(id);
+        return report?.stamp === stamp ? report : undefined;
+      };
       const base = JSON.stringify([connection.id, root, direction]);
       const count = counts.get(base) ?? 1;
       const pages = Array.from({ length: count }, (_, index) => {
         const id = JSON.stringify(['page', base, index]);
-        return { id, offset: index * PAGE_SIZE, report: reports.get(id) };
+        return { id, offset: index * PAGE_SIZE, report: current(id) };
       });
       const first = pages[0]!.report;
       // Only the first page decides the sample.
@@ -169,7 +225,7 @@ export function useNeighborhood(
         pages,
         input,
         sampleId,
-        sample: sampleId ? reports.get(sampleId) : undefined,
+        sample: sampleId ? current(sampleId) : undefined,
       };
     }),
   );
@@ -190,10 +246,11 @@ export function useNeighborhood(
   const status = sources.map(
     ({ connection, direction, base, count, pages, sampleId, sample }) => {
       const states = pages.map(({ report }) => report?.kind ?? 'loading');
-      const last = pages.at(-1)!.report;
-      const more =
-        states.every((state) => state === 'ready') &&
-        (last?.data as Page | undefined)?.truncated === true;
+      const last = pages.at(-1)!.report?.data as Page | undefined;
+      const read = states.every((state) => state === 'ready');
+      const more = read && last?.truncated === true;
+      // Complete pages hold everything: the sample no longer counts.
+      const complete = read && last?.truncated === false;
       return {
         connection: connection.id,
         pod: connection.podUrl,
@@ -204,7 +261,9 @@ export function useNeighborhood(
         more,
         sample: sampleId ? (sample?.kind ?? 'loading') : 'none',
         morePredicates:
-          sample?.kind === 'ready' && (sample.data as Sample).morePredicates,
+          !complete &&
+          sample?.kind === 'ready' &&
+          (sample.data as Sample).morePredicates,
         // A double click reads one page, not two.
         loadMore: () => {
           if (more)
@@ -264,6 +323,7 @@ export function useNeighborhood(
 /** Reports data, state and retry of one read until it unmounts. */
 function useReport(
   id: string,
+  pod: BoundPod | null,
   load: {
     readonly state: LoadState<Page | Sample>;
     readonly data: Page | Sample | undefined;
@@ -274,7 +334,16 @@ function useReport(
 ) {
   const kind = stateOf(load.state);
   const { data, reload } = load;
-  useEffect(() => report(id, { data, kind }), [id, data, kind, report]);
+  // Read in the same render as the data, so both belong together.
+  const subscribe = useCallback(
+    (listener: () => void) => pod?.subscribe(listener) ?? (() => {}),
+    [pod],
+  );
+  const stamp = useSyncExternalStore(subscribe, () => stampOf(pod));
+  useEffect(
+    () => report(id, { data, kind, stamp }),
+    [id, data, kind, stamp, report],
+  );
   useEffect(() => () => report(id), [id, report]);
   useEffect(() => {
     register(id, () => void reload());
@@ -300,7 +369,7 @@ const PageReader = memo(function PageReader(props: {
       pageRead(root, direction, offset, priority)(target, signal),
     { key: id },
   );
-  useReport(id, load, props.report, props.register);
+  useReport(id, pod, load, props.report, props.register);
   return null;
 });
 
@@ -319,7 +388,7 @@ const SampleReader = memo(function SampleReader(props: {
     (target, signal) => sampleRead(input, priority)(target, signal),
     { key: id },
   );
-  useReport(id, load, props.report, props.register);
+  useReport(id, pod, load, props.report, props.register);
   return null;
 });
 

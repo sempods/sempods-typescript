@@ -17,14 +17,15 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PodFetch } from '@sempods/client-sdk';
-import { SempodsProvider } from '@sempods/app-sdk/react';
+import { useLayoutEffect } from 'react';
+import { SempodsProvider, useConnections } from '@sempods/app-sdk/react';
 import { NeighborhoodList } from '../../../../examples/todo/recipes/neighborhood-view.js';
 import {
   PAGE_SIZE,
   type Area,
 } from '../../../../examples/todo/recipes/neighborhood.js';
 import type { BrowserRuntime } from '../runtime/types.js';
-import { deferred, pod, twoPods } from '../runtime/fixture.test.js';
+import { deferred, jwt, pod, twoPods } from '../runtime/fixture.test.js';
 
 interface OxigraphStore {
   load(input: string, options: { readonly format: string }): void;
@@ -380,4 +381,96 @@ it('sends pages and samples through the shared read admission', async () => {
   await waitFor(() => expect(examples()).toHaveLength(2));
   expect(most).toBe(1);
   expect(answers.sent).toHaveLength(8);
+});
+
+it('never commits statements of older grants, also before the reads answer again', async () => {
+  const { f, runtime } = await twoPods(
+    keep,
+    { scopes: { optional: ['ai'] } },
+    'ai',
+  );
+  const answers = engines({ [pod]: statements(pod), [bob]: '' });
+  f.setQuery(answers.fetch);
+  // Statements in the DOM of every commit after Alice lost the grant.
+  const committed: number[] = [];
+  function Probe() {
+    const alice = useConnections().find((c) => c.podUrl === pod);
+    const lost = alice !== undefined && !alice.grantedScopes.includes('ai');
+    useLayoutEffect(() => {
+      if (lost)
+        committed.push(
+          screen
+            .queryAllByRole('listitem')
+            .map((item) => item.textContent!)
+            .filter(fromPod(pod)).length,
+        );
+    });
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <NeighborhoodList runtime={runtime} root={ada} />
+      <Probe />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(listed().filter(fromPod(pod))).toHaveLength(PAGE_SIZE + 1),
+  );
+  // One 401 renews Alice's token without `ai`; the new reads then wait.
+  let unauthorized = true;
+  const held = deferred<void>();
+  f.setQuery(async (url, init) => {
+    if (!url.startsWith(`${pod}/`)) return answers.fetch(url, init);
+    if (unauthorized) {
+      unauthorized = false;
+      return new Response(null, {
+        status: 401,
+        headers: { 'www-authenticate': 'Bearer' },
+      });
+    }
+    if (String(init?.body).startsWith('CONSTRUCT')) return Response.json([]);
+    await held.promise;
+    return answers.fetch(url, init);
+  });
+  f.setToken(async (url) =>
+    Response.json({
+      access_token: jwt({ iss: url.split('/_system')[0] }),
+      token_type: 'Bearer',
+      refresh_token: 'rotated',
+    }),
+  );
+  await act(() =>
+    runtime.bindPod(f.id).sparql.construct('CONSTRUCT {} WHERE {}'),
+  );
+  await waitFor(() => expect(committed.length).toBeGreaterThan(0));
+  await settle();
+  expect(committed.every((count) => count === 0)).toBe(true);
+  // The reads of the new grants bring the statements back.
+  held.resolve();
+  await waitFor(() =>
+    expect(listed().filter(fromPod(pod))).toHaveLength(PAGE_SIZE + 1),
+  );
+});
+
+it('drops the more-predicates notice once all pages are read', async () => {
+  const { f, runtime } = await twoPods(keep);
+  const many = Array.from(
+    { length: 20 },
+    (_, i) =>
+      `<https://people.example/m> <${P}m${String(i).padStart(2, '0')}> <${ada}> <${ctx(pod, 'z-many')}> .`,
+  );
+  const answers = engines({
+    [pod]: `${statements(pod)}\n${many.join('\n')}`,
+    [bob]: '',
+  });
+  f.setQuery(answers.fetch);
+  render(show(runtime));
+  const incoming = () => controls(pod, 'incoming');
+  await waitFor(() =>
+    expect(incoming().getByText('There are more predicates')).toBeTruthy(),
+  );
+  fireEvent.click(incoming().getByRole('button', { name: 'Load more' }));
+  await waitFor(() => expect(incoming().queryByRole('button')).toBeNull());
+  expect(incoming().queryByText('There are more predicates')).toBeNull();
+  expect(examples()).toEqual([]);
 });
