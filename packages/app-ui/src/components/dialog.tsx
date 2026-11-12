@@ -106,15 +106,21 @@ function Dialog({
           className,
         )}
       >
+        {/* The corner Close is a 44px target around the compact glyph; a
+            header or title beside it keeps clear of that target. */}
         <DialogPrimitive
           data-slot="dialog"
-          className="[display:inherit] [gap:inherit] outline-none"
+          className={cn(
+            '[display:inherit] [gap:inherit] outline-none',
+            showCloseButton &&
+              '*:data-[slot=dialog-header]:pr-10 *:data-[slot=dialog-title]:pr-10',
+          )}
         >
           {children}
           {showCloseButton && (
             <DialogClose
               variant="ghost"
-              className="absolute top-2 right-2"
+              className="absolute top-1 right-1 size-11"
               size="icon-sm"
             >
               <XIcon />
