@@ -938,10 +938,13 @@ so the callback must land in the storage that holds the attempt; the runtime nev
 transfers attempts or tokens between storage containers. See
 [supported environments](../README.md#supported-environments).
 
-Sign-in against a deployed Pod in a real browser is not yet recorded as evidence.
+Sign-in against a deployed Kotlin Pod in Chrome is recorded as live evidence for
+a dynamic client on a loopback origin; a deployed `did:web` origin is not.
 React `AppAccess` and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
 checks. Multi-tab concurrent operation and revocation are not implemented
-here. [Apps without sign-in](#apps-without-sign-in) are covered by fixture
-tests only; reading a deployed Pod's public data from another origin is not yet
-recorded as live evidence.
+here. [Apps without sign-in](#apps-without-sign-in) have
+[live evidence](https://github.com/sempods/sempods-typescript/issues/240#issuecomment-6824544194)
+for 0.8.0: a deployed Pod's public data read from another origin, signing in
+and out under `optional`, and two tabs under `none`. A session that ends through
+a refused renewal is covered by fixture tests only.
