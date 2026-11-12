@@ -155,6 +155,21 @@ const examples = () => {
 const controls = (owner: string, direction: 'incoming' | 'outgoing') =>
   within(screen.getByRole('group', { name: `${owner} ${direction}` }));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+/** The Pod and Context a listed statement names, compared exactly. */
+const sourceOf = (text: string) => {
+  const [before = '', context = ''] = text.split(' · ');
+  return { pod: before.split(' ').at(-1), context };
+};
+const fromPod = (owner: string) => (text: string) =>
+  sourceOf(text).pod === owner;
+const inContext = (context: string) => (text: string) =>
+  sourceOf(text).context === context;
+/** The resource a query reads around, compared exactly. */
+const rootOf = (query: string) =>
+  /GRAPH \?g \{ (?:<([^>]+)> \?p \?other|\?other \?p <([^>]+)>) \}/
+    .exec(query)
+    ?.slice(1)
+    .find(Boolean);
 
 it('samples both Pods in bounded requests and keeps pages and examples apart', async () => {
   const { f, runtime } = await twoPods(keep);
@@ -209,9 +224,7 @@ it('loads more pages without another sample, and the pages replace the examples'
   // Alice's pages are complete: her examples are ordinary statements now,
   // each once. Bob's examples stay.
   expect(listed()).toHaveLength(60 + 2 + PAGE_SIZE + 1);
-  expect(
-    listed().filter((text) => text.includes(ctx(pod, 'z-notes'))),
-  ).toHaveLength(2);
+  expect(listed().filter(inContext(ctx(pod, 'z-notes')))).toHaveLength(2);
   expect(examples()).toEqual([
     `incoming <${P}likes> <https://people.example/ada-fan> ${bob} · ${ctx(bob, 'z-notes')}`,
   ]);
@@ -231,7 +244,8 @@ it('keeps the page when the sample fails, and retries each read alone', async ()
       if (
         sent.pod === pod &&
         sent.kind === 'page' &&
-        sent.query.includes(`?other ?p <${ada}>`) &&
+        sent.query.includes('?other ?p <') &&
+        rootOf(sent.query) === ada &&
         failPage
       ) {
         failPage = false;
@@ -250,10 +264,8 @@ it('keeps the page when the sample fails, and retries each read alone', async ()
   const retryPage = await waitFor(() =>
     controls(pod, 'incoming').getByRole('button', { name: 'Retry' }),
   );
-  expect(listed().filter((text) => text.includes(bob))).toHaveLength(
-    PAGE_SIZE + 1,
-  );
-  expect(listed().filter((text) => text.includes(pod))).toHaveLength(1);
+  expect(listed().filter(fromPod(bob))).toHaveLength(PAGE_SIZE + 1);
+  expect(listed().filter(fromPod(pod))).toHaveLength(1);
   expect(examples()).toEqual([]);
   const before = answers.sent.length;
   fireEvent.click(retrySample);
@@ -285,7 +297,7 @@ it('withdraws a source, and never shows an obsolete answer', async () => {
       if (
         sent.pod === pod &&
         sent.kind === 'examples' &&
-        sent.query.includes(ada)
+        rootOf(sent.query) === ada
       )
         await gate.promise;
       return answer();
@@ -294,18 +306,18 @@ it('withdraws a source, and never shows an obsolete answer', async () => {
   f.setQuery(answers.fetch);
   const view = render(show(runtime));
   await waitFor(() => expect(examples()).toHaveLength(1));
-  expect(examples()[0]).toContain(bob);
+  expect(examples().map(fromPod(bob))).toEqual([true]);
   // Bob's Pod leaves: his statements and examples go in the same render.
   await act(() => runtime.disconnect(other.id));
   await waitFor(() => expect(examples()).toEqual([]));
-  expect(listed().some((text) => text.includes(bob))).toBe(false);
+  expect(listed().some(fromPod(bob))).toBe(false);
   // The person moves on while Alice's examples for ada are still pending.
   view.rerender(show(runtime, lovelace));
   await waitFor(() =>
     expect(listed().some((text) => text.includes('lovelace-f'))).toBe(true),
   );
   const pending = answers.sent.find(
-    (s) => s.kind === 'examples' && s.query.includes(ada),
+    (s) => s.kind === 'examples' && rootOf(s.query) === ada,
   )!;
   expect(pending.signal?.aborted).toBe(true);
   gate.resolve();
@@ -328,12 +340,8 @@ it('hides a Context at once and samples again without it, pages unchanged', asyn
   const hidden = [{ pod, context: ctx(pod, 'z-notes') }];
   view.rerender(show(runtime, ada, hidden));
   // Hidden statements leave in the same render.
-  expect(examples().some((text) => text.includes(ctx(pod, 'z-notes')))).toBe(
-    false,
-  );
-  expect(listed().some((text) => text.includes(ctx(pod, 'z-notes')))).toBe(
-    false,
-  );
+  expect(examples().some(inContext(ctx(pod, 'z-notes')))).toBe(false);
+  expect(listed().some(inContext(ctx(pod, 'z-notes')))).toBe(false);
   await waitFor(() => expect(answers.count(pod, 'kinds')).toBe(2));
   const kinds = answers.sent.filter((s) => s.pod === pod && s.kind === 'kinds');
   expect(kinds[1]!.query).toContain(
@@ -345,7 +353,7 @@ it('hides a Context at once and samples again without it, pages unchanged', asyn
   expect(answers.count(bob, 'kinds')).toBe(1);
   expect(answers.count(pod, 'examples')).toBe(1);
   expect(examples()).toHaveLength(1);
-  expect(examples()[0]).toContain(bob);
+  expect(examples().map(fromPod(bob))).toEqual([true]);
   // An equal inline array reads nothing again.
   view.rerender(show(runtime, ada, [...hidden]));
   await settle();
