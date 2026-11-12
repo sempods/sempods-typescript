@@ -56,6 +56,11 @@ export function ContextSwitch({
   const t = useAdapterTexts();
   const noun = label ?? t.context;
   const selected = lists.selected;
+  const activePod = lists.pods.find((pod) => pod.connectionId === activeId);
+  const shareLabel = texts?.shareMore ?? t.shareContexts;
+  const shareEmpty = (pod: PodContextGroup) =>
+    signIn !== 'none' && pod.status === 'ready' && pod.choices.length === 0;
+  const shareActive = active.canShare && activePod && !shareEmpty(activePod);
   const [open, setOpen] = useState(false);
   const [addresses, setAddresses] = useState(false);
   const addressRegion = useRef<HTMLDivElement>(null);
@@ -95,6 +100,32 @@ export function ContextSwitch({
         return pod.choices.length === 0 ? t.contextsEmpty : null;
     }
   };
+  const shareItem = (pod: PodContextGroup, showPod = false) => (
+    <DropdownMenuItem
+      key={`share:${pod.connectionId}`}
+      id={`share:${pod.connectionId}`}
+      textValue={`${shareLabel}: ${pod.label}`}
+      aria-label={`${shareLabel}: ${pod.label}`}
+      className="min-h-11 px-4 py-2"
+      onAction={() =>
+        void run(async () => {
+          if (!(await actions.authorize(pod.connectionId)))
+            setProblem(t.actionNotCompleted);
+        })
+      }
+    >
+      <Text
+        slot="label"
+        className="sr-only"
+      >{`${shareLabel}: ${pod.label}`}</Text>
+      <span aria-hidden="true" className="grid min-w-0 wrap-anywhere">
+        <span>{shareLabel}</span>
+        {showPod && (
+          <span className="text-xs text-muted-foreground">{pod.label}</span>
+        )}
+      </span>
+    </DropdownMenuItem>
+  );
   const permission = (writable: boolean) =>
     writable ? messages.controls.canChange : messages.controls.canRead;
   const permissionIcon = (writable: boolean) =>
@@ -151,77 +182,95 @@ export function ContextSwitch({
           <Menu aria-label={noun} className="outline-none">
             {lists.pods.map((pod) => (
               <Fragment key={pod.connectionId}>
-                <DropdownMenuGroup
-                  selectionMode="single"
-                  selectedKeys={
-                    selected?.connectionId === pod.connectionId
-                      ? [selected.key]
-                      : []
-                  }
-                >
-                  <DropdownMenuLabel className="px-4 py-2 wrap-anywhere">
-                    {pod.label}
-                  </DropdownMenuLabel>
-                  {pod.choices.map((choice) => (
-                    <DropdownMenuItem
-                      key={choice.key}
-                      id={choice.key}
-                      textValue={choice.label}
-                      isDisabled={!choice.selectable}
-                      onAction={() => select(choice)}
-                      className="min-h-13 gap-3 py-3 ps-4 pe-10 [&>[data-slot=dropdown-menu-radio-item-indicator]]:right-4"
-                    >
-                      {permissionIcon(choice.writable)}
-                      <Text slot="label" className="min-w-0 wrap-anywhere">
-                        {choice.label}
-                      </Text>
-                      <Text
-                        slot="description"
-                        className="sr-only"
-                      >{`${pod.label} · ${permission(choice.writable)}${choice.selectable ? '' : ` · ${t.switchUnavailable}`}`}</Text>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-                <DropdownMenuGroup aria-label={pod.label}>
-                  {status(pod) && (
-                    <DropdownMenuItem
-                      id={`status:${pod.connectionId}`}
-                      textValue={status(pod)!}
-                      isDisabled
-                      className="min-h-11 px-4 py-2 whitespace-normal"
-                    >
-                      {status(pod)}
-                    </DropdownMenuItem>
-                  )}
-                  {(pod.status === 'failed' || pod.restorable) && (
-                    <DropdownMenuItem
-                      id={`retry:${pod.connectionId}`}
-                      textValue={`${messages.controls.retry}: ${pod.label}`}
-                      aria-label={`${messages.controls.retry}: ${pod.label}`}
-                      shouldCloseOnSelect={false}
-                      className="min-h-11 px-4"
-                      onAction={() => void run(() => pod.retry())}
-                    >
-                      {messages.controls.retry}
-                    </DropdownMenuItem>
-                  )}
-                  {(pod.status === 'signed-out' || pod.status === 'ended') &&
-                    !pod.restorable &&
-                    signIn !== 'none' && (
+                {pod.choices.length > 0 && (
+                  <DropdownMenuGroup
+                    selectionMode="single"
+                    selectedKeys={
+                      selected?.connectionId === pod.connectionId
+                        ? [selected.key]
+                        : []
+                    }
+                  >
+                    <DropdownMenuLabel className="px-4 py-2 wrap-anywhere">
+                      {pod.label}
+                    </DropdownMenuLabel>
+                    {pod.choices.map((choice) => (
                       <DropdownMenuItem
-                        id={`signin:${pod.connectionId}`}
-                        className="min-h-11 px-4"
-                        onAction={() =>
-                          void run(async () => {
-                            if (!(await actions.authorize(pod.connectionId)))
-                              setProblem(t.actionNotCompleted);
-                          })
-                        }
+                        key={choice.key}
+                        id={choice.key}
+                        textValue={choice.label}
+                        isDisabled={!choice.selectable}
+                        onAction={() => select(choice)}
+                        className="min-h-13 gap-3 py-3 ps-4 pe-10 [&>[data-slot=dropdown-menu-radio-item-indicator]]:right-4"
                       >
-                        {t.signInPod}
+                        {permissionIcon(choice.writable)}
+                        <Text slot="label" className="min-w-0 wrap-anywhere">
+                          {choice.label}
+                        </Text>
+                        <Text
+                          slot="description"
+                          className="sr-only"
+                        >{`${pod.label} · ${permission(choice.writable)}${choice.selectable ? '' : ` · ${t.switchUnavailable}`}`}</Text>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                )}
+                {(status(pod) || pod.restorable) && (
+                  <DropdownMenuGroup
+                    aria-label={
+                      pod.choices.length > 0
+                        ? `${pod.label}: ${t.podActions}`
+                        : undefined
+                    }
+                  >
+                    {pod.choices.length === 0 && (
+                      <DropdownMenuLabel className="px-4 py-2 wrap-anywhere">
+                        {pod.label}
+                      </DropdownMenuLabel>
+                    )}
+                    {status(pod) && (
+                      <DropdownMenuItem
+                        id={`status:${pod.connectionId}`}
+                        textValue={status(pod)!}
+                        isDisabled
+                        className="min-h-11 px-4 py-2 whitespace-normal"
+                      >
+                        {status(pod)}
                       </DropdownMenuItem>
                     )}
-                </DropdownMenuGroup>
+                    {(pod.status === 'failed' || pod.restorable) && (
+                      <DropdownMenuItem
+                        id={`retry:${pod.connectionId}`}
+                        textValue={`${messages.controls.retry}: ${pod.label}`}
+                        aria-label={`${messages.controls.retry}: ${pod.label}`}
+                        shouldCloseOnSelect={false}
+                        className="min-h-11 px-4"
+                        onAction={() => void run(() => pod.retry())}
+                      >
+                        {messages.controls.retry}
+                      </DropdownMenuItem>
+                    )}
+                    {(pod.status === 'signed-out' || pod.status === 'ended') &&
+                      !pod.restorable &&
+                      signIn !== 'none' && (
+                        <DropdownMenuItem
+                          id={`signin:${pod.connectionId}`}
+                          textValue={`${t.signInPod}: ${pod.label}`}
+                          aria-label={`${t.signInPod}: ${pod.label}`}
+                          className="min-h-11 px-4"
+                          onAction={() =>
+                            void run(async () => {
+                              if (!(await actions.authorize(pod.connectionId)))
+                                setProblem(t.actionNotCompleted);
+                            })
+                          }
+                        >
+                          {t.signInPod}
+                        </DropdownMenuItem>
+                      )}
+                    {shareEmpty(pod) && shareItem(pod)}
+                  </DropdownMenuGroup>
+                )}
               </Fragment>
             ))}
             {lists.pods.length === 0 && (
@@ -229,21 +278,8 @@ export function ContextSwitch({
                 {t.noPods}
               </DropdownMenuItem>
             )}
-            {active.canShare && <DropdownMenuSeparator />}
-            {active.canShare && (
-              <DropdownMenuItem
-                id="share"
-                className="min-h-11 px-4"
-                onAction={() =>
-                  void run(async () => {
-                    if (activeId && !(await actions.authorize(activeId)))
-                      setProblem(t.actionNotCompleted);
-                  })
-                }
-              >
-                {texts?.shareMore ?? t.shareContexts}
-              </DropdownMenuItem>
-            )}
+            {shareActive && <DropdownMenuSeparator />}
+            {shareActive && shareItem(activePod, true)}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               id="addresses"

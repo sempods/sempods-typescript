@@ -3940,6 +3940,7 @@ async function contexts({ browser, origin }) {
     viewport: { width: 375, height: 812 },
   });
   let failed = false;
+  let emptyBob = false;
   await page.route('**/_system/contexts', async (route) => {
     if (failed && route.request().url().includes('/bob/'))
       return route.fulfill({ status: 503, body: '{}' });
@@ -3948,6 +3949,11 @@ async function contexts({ browser, origin }) {
     body['https://schema.sempods.org/writableContext'] = body[
       'https://schema.sempods.org/writableContext'
     ].filter((c) => c['@id'].endsWith('/work'));
+    if (emptyBob && route.request().url().includes('/bob/')) {
+      body['http://www.w3.org/ns/sparql-service-description#namedGraph'] = [];
+      body['https://schema.sempods.org/readableContext'] = [];
+      body['https://schema.sempods.org/writableContext'] = [];
+    }
     await route.fulfill({ json: body });
   });
   await page.route('**/_system/contexts/*', (route) => {
@@ -4135,6 +4141,67 @@ async function contexts({ browser, origin }) {
         '/personal',
       ),
     });
+    await trigger().click();
+    await page
+      .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
+      .filter({ hasText: 'Privat ·' })
+      .click();
+    await page
+      .getByRole('button', {
+        name: 'List: Einkaufsliste · Privat',
+        exact: true,
+      })
+      .waitFor();
+    emptyBob = true;
+    await page.getByRole('button', { name: 'Reload second Pod' }).click();
+    await trigger().click();
+    await page.getByText('Keine lesbaren Kontexte freigegeben.').waitFor();
+    const groups = page.getByRole('group');
+    results.push({
+      id: 'one-group-per-ready-or-empty-pod',
+      pass:
+        (await groups.count()) === 2 &&
+        (await page
+          .getByRole('group', { name: 'Familie/', exact: true })
+          .count()) === 1,
+    });
+    const share = page.getByRole('menuitem', {
+      name: 'Weitere Kontexte freigeben …: Familie/',
+      exact: true,
+    });
+    // A dirty draft must still guard sharing on the inactive empty Pod.
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Keep a draft' }).click();
+    await trigger().click();
+    await share.click();
+    await page
+      .getByRole('button', { name: 'Weiter bearbeiten', exact: true })
+      .click();
+    results.push({
+      id: 'empty-pod-sharing-keeps-declined-draft',
+      pass:
+        (await page.getByLabel('target').textContent()).includes('/alice/') &&
+        (await page.getByLabel('draft').textContent()) === 'dirty',
+    });
+    await trigger().click();
+    await share.click();
+    emptyBob = false;
+    const authorization = page.waitForRequest((request) =>
+      new URL(request.url()).pathname.endsWith('/_system/auth/authorize'),
+    );
+    await page
+      .getByRole('button', { name: 'Verwerfen und fortfahren', exact: true })
+      .click();
+    const requested = await authorization;
+    await page.waitForFunction(() =>
+      document
+        .querySelector('[aria-label="target"]')
+        ?.textContent.includes('/bob/'),
+    );
+    results.push({
+      id: 'share-empty-inactive-pod',
+      pass: new URL(requested.url()).pathname === '/bob/_system/auth/authorize',
+    });
   } catch (error) {
     results.push({
       id: 'chooser-journey',
@@ -4145,6 +4212,13 @@ async function contexts({ browser, origin }) {
         const last = region?.querySelector('dl:last-child dd:last-child');
         return {
           focus: document.activeElement?.outerHTML.slice(0, 250),
+          items: Array.from(document.querySelectorAll('[role="menuitem"]')).map(
+            (el) => ({
+              text: el.textContent,
+              label: el.getAttribute('aria-label'),
+              labelledBy: el.getAttribute('aria-labelledby'),
+            }),
+          ),
           region: region?.getBoundingClientRect().toJSON(),
           last: last?.getBoundingClientRect().toJSON(),
           scroll: region?.scrollTop,
