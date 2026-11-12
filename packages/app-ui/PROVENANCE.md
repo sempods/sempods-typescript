@@ -42,6 +42,9 @@ Changes against the registry output:
   SDK confirmation, never closes `Dialog`; an app's
   `shouldCloseOnInteractOutside` applies on top
   (sempods/sempods-typescript#229).
+- `dialog.tsx`: the built-in corner Close has a 44px target with a compact
+  16px glyph and an 8px inset. While shown, it reserves height and inline-end
+  space in `DialogTitle`, including in right-to-left layouts (#288).
 - `calendar.tsx`: without the registry's `showWeekNumber` option, which only
   shifted the cells' rounding: React Aria renders no week-number column.
 - `calendar.tsx`: with `captionLayout="dropdown"` and several months, only

@@ -273,6 +273,12 @@ menus, dates and actions.
 The compact `Dialog` names its close buttons (the corner one and
 `DialogFooter`'s `showCloseButton`) with the SDK's "Close" text in the
 provider's language, or English without a provider; `closeLabel` replaces it.
+Its corner Close has a 44px target around a 16px glyph, inset 8px from the
+top and inline end. `DialogTitle` reserves space beside and below that target
+while it is shown, so long titles wrap without overlapping it. Consumers need
+no close-button sizing or title-padding workaround. `showCloseButton={false}`
+removes both the control and its reserved title space; busy flows still set
+their dismissal guards explicitly.
 A press in an SDK confirmation (a native modal `<dialog>`) never counts as a
 press beside it, also with the app's own `shouldCloseOnInteractOutside`, so
 cancelling the question keeps the dialog and the draft. Around an SDK editor,

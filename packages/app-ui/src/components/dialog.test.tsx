@@ -90,3 +90,23 @@ it('closes on a press beside it unless the app filter keeps it', async () => {
   expect(kept).not.toHaveBeenCalled();
   outside.remove();
 });
+
+it('keeps a busy dialog open without a close control', async () => {
+  const closed = vi.fn();
+  render(
+    <Dialog
+      isOpen
+      showCloseButton={false}
+      isDismissable={false}
+      isKeyboardDismissDisabled
+      onOpenChange={closed}
+    >
+      <DialogTitle>Removing bought items</DialogTitle>
+    </Dialog>,
+  );
+  expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+  const dialog = screen.getByRole('dialog');
+  fireEvent.keyDown(dialog, { key: 'Escape' });
+  await pressOutside(document.body);
+  expect(closed).not.toHaveBeenCalled();
+});

@@ -2948,11 +2948,14 @@ async function compact({ browser, origin }) {
   const dialog = page.getByRole('dialog', { name: /^(Rename|Umbenennen)$/ });
   const confirm = page.getByRole('alertdialog');
   const title = dialog.getByLabel(/^(Title|Titel)$/);
-  const open = async (lang = 'en') => {
+  const open = async (lang = 'en', keyboard = false) => {
     await page.goto(
       origin + `/?dialog=compact${lang === 'de' ? '&lang=de' : ''}`,
     );
-    await page.locator('.zen-title').click();
+    if (keyboard) {
+      await page.locator('.zen-title').focus();
+      await page.keyboard.press('Enter');
+    } else await page.locator('.zen-title').click();
     await title.waitFor();
     await settle(page);
   };
@@ -3065,6 +3068,71 @@ async function compact({ browser, origin }) {
       return { pass: names.join() === 'Schließen', names };
     },
   };
+  for (const width of [375, 1280]) {
+    for (const colorScheme of ['light', 'dark']) {
+      checks[`compact-close-target-${width}-${colorScheme}`] = async () => {
+        await page.setViewportSize({ width, height: 800 });
+        await page.emulateMedia({ colorScheme });
+        await open('en', true);
+        const heading = dialog.locator('[data-slot=dialog-title]');
+        await heading.evaluate((el) => {
+          el.textContent =
+            'Rename this shared shopping entry with a long title';
+        });
+        const modal = page.locator('[data-slot=dialog-content]');
+        const geometry = await modal.evaluate((el) => {
+          const close = el.querySelector('[data-slot=dialog-close]');
+          const button = close.getBoundingClientRect();
+          const icon = close.querySelector('svg').getBoundingClientRect();
+          const heading = el.querySelector('[data-slot=dialog-title]');
+          const range = document.createRange();
+          range.selectNodeContents(heading);
+          const lines = [...range.getClientRects()];
+          const content = el.getBoundingClientRect();
+          return {
+            target: button.width >= 44 && button.height >= 44,
+            compactIcon: icon.width === 16 && icon.height === 16,
+            inset:
+              button.right <= content.right - 8 &&
+              button.top >= content.top + 8,
+            titleClear: lines.every(
+              (line) =>
+                line.right <= button.left - 8 || line.top >= button.bottom,
+            ),
+            insideViewport: content.left >= 0 && content.right <= innerWidth,
+          };
+        });
+        const closeButton = modal.getByRole('button', {
+          name: 'Close',
+          exact: true,
+        });
+        await closeButton.focus();
+        await page.keyboard.press('Enter');
+        const closed = await gone(modal);
+        await settle(page);
+        const focusReturned = await page
+          .locator('.zen-title')
+          .evaluate((el) => el === document.activeElement);
+        // Reopen and use the enlarged edge, outside the former 28px target.
+        await open();
+        await dialog
+          .getByRole('button', { name: 'Close', exact: true })
+          .click({ position: { x: 3, y: 40 } });
+        const pointerClosed = await gone(dialog);
+        return {
+          pass:
+            Object.values(geometry).every(Boolean) &&
+            closed &&
+            focusReturned &&
+            pointerClosed,
+          ...geometry,
+          closed,
+          focusReturned,
+          pointerClosed,
+        };
+      };
+    }
+  }
   const results = [];
   for (const [id, run] of Object.entries(checks)) {
     await page.setViewportSize({ width: 1280, height: 800 });

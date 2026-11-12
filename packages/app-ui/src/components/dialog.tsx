@@ -108,14 +108,18 @@ function Dialog({
       >
         <DialogPrimitive
           data-slot="dialog"
-          className="[display:inherit] [gap:inherit] outline-none"
+          className={cn(
+            '[display:inherit] [gap:inherit] outline-none',
+            showCloseButton &&
+              '[&_[data-slot=dialog-title]]:min-h-9 [&_[data-slot=dialog-title]]:pe-12',
+          )}
         >
           {children}
           {showCloseButton && (
             <DialogClose
               variant="ghost"
-              className="absolute top-2 right-2"
-              size="icon-sm"
+              className="absolute top-2 end-2 size-11"
+              size="icon"
             >
               <XIcon />
               <span className="sr-only">
