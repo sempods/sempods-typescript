@@ -566,7 +566,7 @@ example `remove`). SDK texts and formats: [messages and language](#messages-and-
 
 ```tsx
 const lists = useContexts();
-// lists.contexts: [{ iri, name, label, writable }] of the readable Contexts
+// lists.contexts: [{ iri, name, label, contextLabel, qualifier?, writable }]
 // lists.selected: the selected one or null
 // lists.select(iri): guarded; resolves false when refused or not selectable
 // lists.loading / lists.failed / lists.retry(): catalogue state
@@ -577,7 +577,10 @@ const lists = useContexts();
 - Mount it outside `TargetScreen`, so it can select before a view exists. It
   loads the catalogue in both modes, reads up to 20 labels once and keeps known
   Contexts during a reload. Equal names add the short name ("Tasks · work"),
-  then the IRI.
+  then the IRI. For display, `contextLabel` is the label (or readable last
+  segment) alone and `qualifier` is set only where that would repeat within
+  the Pod: the short name, then the path below the Pod, then the IRI.
+  `label` joins both (`Tasks · work`) and is unique within the Pod.
 - Without a remembered or preset Context it selects the first writable, else
   the first readable; an exact preset keeps only its Context.
 - `select` and `share()` (the Pod's consent page) run under the leave policy.
@@ -606,9 +609,14 @@ import { ContextSwitch } from '@sempods/app-ui';
 ```
 
 For a custom presentation, `usePodContexts({ podNames })` supplies the facts.
-`pod.label` is the configured name or a host/path fallback without a terminal
-slash. `choice.label` is disambiguated **within** its Pod, without adding that
-Pod. A standalone trigger combines `choice.label` with `choice.podLabel`.
+`pod.label` is the configured name as given, else the host and decoded path
+without scheme and terminal slash; where that fallback would equal another
+Pod's label, it is the exact address. In a Pod section, show
+`choice.contextLabel` and, when present, `choice.qualifier` more quietly;
+equal names on different Pods get no qualifier, since their sections differ.
+`choice.label` joins both and is unique within its Pod, without adding that
+Pod. A standalone trigger shows the Context above `choice.podLabel`, and its
+accessible name keeps both (`List: Tasks · work · Privat`).
 `pod.podUrl`, `choice.podUrl` and `choice.contextIri` retain exact identities
 for details; no app should strip suffixes from `name` or construct targets
 from labels. A supplied name ending in `/` is not an address to normalize.

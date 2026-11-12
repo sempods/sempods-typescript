@@ -588,13 +588,14 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 
   The two-line trigger shows the Context and Pod, with 16px inline padding,
   a 12px gap and a 64px height. The menu groups concise Context names under
-  their Pod, with 52px minimum rows. A fixed pencil/eye column identifies
+  their Pod, with 52px minimum rows. Equal names within one Pod show their
+  `qualifier` more quietly; equal names on different Pods need none. A fixed pencil/eye column identifies
   write/read-only access; the check marks selection separately. A visible
   localized legend explains the icons, and each row has an accessible access
   description. Long names wrap in the menu; the trigger keeps the full name
   available to assistive technology. The address disclosure shows exact Pod
-  URLs and Context IRIs. Only URL fallbacks lose a terminal slash; supplied
-  names keep theirs. Opening the details focuses a named address region;
+  URLs and Context IRIs. Only URL fallbacks lose a terminal slash (and are
+  decoded); supplied names keep theirs. Opening the details focuses a named address region;
   keyboard scrolling reaches its final address even in a short viewport,
   and Escape closes the popup and returns focus to the trigger.
 
