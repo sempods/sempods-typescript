@@ -3919,8 +3919,117 @@ async function search({ browser, origin }) {
   return results;
 }
 
+/**
+ * Equal Context labels within one Pod (#290): each row names its quieter
+ * qualifier, the trigger keeps the Pod beneath, at 320px in both schemes.
+ */
+async function contextQualifiers({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser, {
+    viewport: { width: 320, height: 700 },
+  });
+  await page.route('**/_system/contexts', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body['https://schema.sempods.org/writableContext'] = body[
+      'https://schema.sempods.org/writableContext'
+    ].filter((c) => c['@id'].endsWith('/work'));
+    await route.fulfill({ json: body });
+  });
+  await page.route('**/_system/contexts/*', (route) => {
+    const iri = route.request().url();
+    return route.fulfill({
+      json: {
+        '@id': iri,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': iri },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': false }],
+        'http://www.w3.org/2000/01/rdf-schema#label': [
+          { '@value': 'Einkaufsliste' },
+        ],
+      },
+    });
+  });
+  const results = [];
+  try {
+    await signIn(page, origin, '/?screen=contexts&lang=de', { choose: false });
+    const trigger = page.getByRole('button', {
+      name: 'List: Einkaufsliste · work · Privat',
+      exact: true,
+    });
+    await trigger.waitFor();
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await trigger.click();
+      const rows = ['work', 'personal'].map((q) =>
+        page.getByRole('menuitemradio', {
+          name: `Einkaufsliste · ${q}`,
+          exact: true,
+        }),
+      );
+      await rows[1].waitFor();
+      await settle(page);
+      const popup = page.locator('[role="dialog"]:has([role="menu"])');
+      const measured = await popup.evaluate((el) => {
+        const quiet = [...el.querySelectorAll('[role=menuitemradio] span')]
+          .filter((s) => s.textContent?.startsWith(' · '))
+          .map((s) => getComputedStyle(s).color);
+        const label = el.querySelector('[role=menuitemradio] [slot=label]');
+        return {
+          quiet,
+          label: label && getComputedStyle(label).color,
+          right: Math.max(
+            ...[...el.querySelectorAll('[role=menuitemradio]')].map(
+              (r) => r.getBoundingClientRect().right,
+            ),
+          ),
+          // The fixture's own target output may be wider; the chooser not.
+          popup: el.getBoundingClientRect().right,
+          trigger: document
+            .querySelector('[data-slot=context-switch] button')
+            ?.getBoundingClientRect().right,
+        };
+      });
+      results.push({
+        id: `qualifier-${scheme}`,
+        pass:
+          (await rows[0].count()) === 1 &&
+          (await rows[1].count()) === 1 &&
+          (await page
+            .getByRole('group', { name: 'Privat', exact: true })
+            .count()) === 1 &&
+          measured.quiet.length === 2 &&
+          measured.quiet.every((c) => c !== measured.label) &&
+          Math.max(measured.right, measured.popup, measured.trigger) <= 320,
+        measured,
+      });
+      await page.addScriptTag({ content: contrastScript });
+      const failing = await popup.evaluate((el) =>
+        window.uiContrast(el).filter((r) => !r.pass),
+      );
+      results.push({
+        id: `qualifier-contrast-${scheme}`,
+        pass: failing.length === 0,
+        failing,
+      });
+      await page.keyboard.press('Escape');
+    }
+  } catch (error) {
+    results.push({
+      id: 'qualifier-journey',
+      pass: false,
+      error: String(error),
+    });
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   contexts,
+  contextQualifiers,
   gate,
   roundtrip,
   interaction,

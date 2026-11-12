@@ -166,8 +166,15 @@ it("lists every Pod's readable Contexts and tells equal names apart by Pod", asy
   expect(api.list.choices.filter((c) => c.label === 'Shopping')).toHaveLength(
     2,
   );
+  // Equal names across Pods need no qualifier: the Pod tells them apart.
+  expect(
+    api.list.choices.filter((c) => c.contextLabel === 'Shopping'),
+  ).toHaveLength(2);
+  expect(api.list.choices.some((c) => 'qualifier' in c)).toBe(false);
+  expect(pod(api, alice).label).toBe('pod.example/alice');
   expect(pod(api, bob).choices[0]).toMatchObject({
     label: 'Shopping',
+    contextLabel: 'Shopping',
     podLabel: 'Bob',
     podUrl: bobUrl,
     contextIri: shop,

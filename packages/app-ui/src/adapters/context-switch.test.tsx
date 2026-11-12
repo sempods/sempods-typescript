@@ -48,6 +48,7 @@ beforeEach(() => {
         key: `${id}\nshop`,
         name: `Shopping · ${id}`,
         label: 'Shopping',
+        contextLabel: 'Shopping',
         writable: id === 'alice',
         selectable: true,
       },
@@ -273,4 +274,56 @@ it('updates the sharing target when the active Pod changes while the menu is ope
     screen.getByRole('menuitem', { name: 'Share more contexts …: bob' }),
   );
   expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob');
+});
+
+it('tells equal names within one Pod apart by a quieter qualifier, keeping it in accessible names', async () => {
+  const [alice] = api.list.pods;
+  const first = alice!.choices[0]!;
+  const second = {
+    ...first,
+    iri: first.iri.replace('shop', 'shop-2'),
+    contextIri: first.iri.replace('shop', 'shop-2'),
+    key: 'alice\nshop-2',
+    name: 'Shopping · shop-2',
+    label: 'Shopping · shop-2',
+    contextLabel: 'Shopping',
+    qualifier: 'shop-2',
+  };
+  const both = [
+    {
+      ...first,
+      name: 'Shopping · shop',
+      label: 'Shopping · shop',
+      qualifier: 'shop',
+    },
+    second,
+  ];
+  api.list = {
+    ...api.list,
+    pods: [{ ...alice!, choices: both }],
+    choices: both,
+    selected: second,
+  };
+  show();
+  const trigger = screen.getByRole('button', {
+    name: 'List: Shopping · shop-2 · alice',
+  });
+  expect(within(trigger).getByText('· shop-2').className).toContain(
+    'text-muted-foreground',
+  );
+  await open();
+  const rows = screen.getAllByRole('menuitemradio');
+  // Each row is labelled by its whole unique label, the Pod only described.
+  const labelText = (row: HTMLElement) =>
+    document.getElementById(row.getAttribute('aria-labelledby')!)?.textContent;
+  expect(rows.map(labelText)).toEqual(['Shopping · shop', 'Shopping · shop-2']);
+  const chosen = rows[1]!;
+  expect(chosen.getAttribute('aria-checked')).toBe('true');
+  // The Pod stays in the description, not repeated in the row.
+  expect(
+    document.getElementById(chosen.getAttribute('aria-describedby')!)
+      ?.textContent,
+  ).toBe('alice · Read and write');
+  await press(chosen);
+  expect(api.list.select).toHaveBeenCalledWith(second);
 });
