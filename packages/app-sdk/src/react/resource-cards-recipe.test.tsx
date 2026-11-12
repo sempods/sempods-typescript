@@ -16,7 +16,12 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PodFetch } from '@sempods/client-sdk';
-import { SdkLocaleProvider, SempodsProvider } from '@sempods/app-sdk/react';
+import { useLayoutEffect } from 'react';
+import {
+  SdkLocaleProvider,
+  SempodsProvider,
+  useConnections,
+} from '@sempods/app-sdk/react';
 import {
   CardDetails,
   CardList,
@@ -28,7 +33,7 @@ import {
   exampleRules,
 } from '../../../../examples/todo/recipes/resource-cards.js';
 import type { BrowserRuntime } from '../runtime/types.js';
-import { deferred, pod, twoPods } from '../runtime/fixture.test.js';
+import { deferred, jwt, pod, twoPods } from '../runtime/fixture.test.js';
 
 const runtimes: BrowserRuntime[] = [];
 beforeEach(async () => {
@@ -470,4 +475,74 @@ it('shows a returning address only after its new element loads', () => {
   expect(box.getAttribute('aria-label')).toBe('Loading picture');
   fireEvent.load(box.querySelector('img')!);
   expect(box.getAttribute('aria-label')).toBe('Picture');
+});
+
+it('never commits values of older grants, also before the reads answer again', async () => {
+  const { f, runtime } = await twoPods(
+    keep,
+    { scopes: { optional: ['ai'] } },
+    'ai',
+  );
+  const data = answers({ [pod]: [[ada, RDF_TYPE, `${S}Person`, 'people']] });
+  f.setQuery(data);
+  // The card's rule in every commit after Alice lost the grant.
+  const committed: (string | undefined)[] = [];
+  function Probe() {
+    const alice = useConnections().find((c) => c.podUrl === pod);
+    const lost = alice !== undefined && !alice.grantedScopes.includes('ai');
+    useLayoutEffect(() => {
+      if (lost)
+        committed.push(
+          screen.queryByRole('article', { name: 'ada' })?.dataset['rule'],
+        );
+    });
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <CardList runtime={runtime} roots={[ada]} />
+      <Probe />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(screen.getByRole('article', { name: 'ada' }).dataset['rule']).toBe(
+      'person',
+    ),
+  );
+  // One 401 renews Alice's token without `ai`; the new reads then wait.
+  let unauthorized = true;
+  const held = deferred<void>();
+  f.setQuery(async (url, init) => {
+    if (!url.startsWith(`${pod}/`)) return data(url, init);
+    if (unauthorized) {
+      unauthorized = false;
+      return new Response(null, {
+        status: 401,
+        headers: { 'www-authenticate': 'Bearer' },
+      });
+    }
+    if (String(init?.body).startsWith('CONSTRUCT')) return Response.json([]);
+    await held.promise;
+    return data(url, init);
+  });
+  f.setToken(async (url) =>
+    Response.json({
+      access_token: jwt({ iss: url.split('/_system')[0] }),
+      token_type: 'Bearer',
+      refresh_token: 'rotated',
+    }),
+  );
+  await act(() =>
+    runtime.bindPod(f.id).sparql.construct('CONSTRUCT {} WHERE {}'),
+  );
+  await waitFor(() => expect(committed.length).toBeGreaterThan(0));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(committed).not.toContain('person');
+  // The read of the new grants brings the type back.
+  held.resolve();
+  await waitFor(() =>
+    expect(screen.getByRole('article', { name: 'ada' }).dataset['rule']).toBe(
+      'person',
+    ),
+  );
 });

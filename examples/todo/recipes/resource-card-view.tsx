@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import type { BoundPod, BrowserRuntime, Connection } from '@sempods/app-sdk';
@@ -70,6 +71,43 @@ interface Report {
   readonly facts: SourceFacts | undefined;
   readonly settled: boolean;
   readonly failed: boolean;
+  /** The handle and access the facts were read with. */
+  readonly stamp: string;
+}
+
+/** Changes when a handle is replaced, or its grants or read access change. */
+function stampOf(pod: BoundPod) {
+  const { revision, read } = pod.getSnapshot();
+  return JSON.stringify([pod.key, revision, read]);
+}
+const noSubscribe = () => () => {};
+
+/** The current stamp of each handle, updated in the same render as a change. */
+function useStamps(runtime: BrowserRuntime, ids: readonly string[]) {
+  const joined = ids.join('\n');
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const pods = joined ? joined.split('\n') : [];
+      const stops = pods.map((id) => runtime.bindPod(id).subscribe(listener));
+      return () => stops.forEach((stop) => stop());
+    },
+    [runtime, joined],
+  );
+  const stamps = useSyncExternalStore(
+    ids.length ? subscribe : noSubscribe,
+    () =>
+      JSON.stringify(
+        ids.map((id) => {
+          // A connection that just stopped reading has no handle any more.
+          try {
+            return stampOf(runtime.bindPod(id));
+          } catch {
+            return '';
+          }
+        }),
+      ),
+  );
+  return new Map(ids.map((id, i) => [id, (JSON.parse(stamps) as string[])[i]]));
 }
 
 /** What the current reads of a card's members say beyond its values. */
@@ -139,13 +177,25 @@ export function useResourceCards(
       root,
     })),
   );
-  // Only current pairs count, also before a removed reader's cleanup ran.
-  const facts = pairs.flatMap(({ key }) => reports.get(key)?.facts ?? []);
+  // Only current pairs count, also before a removed reader's cleanup ran. A
+  // report from an older handle or older grants does not count either, also
+  // before its reader has reported again.
+  const stamps = useStamps(
+    runtime,
+    connections.map((connection) => connection.id),
+  );
+  const current = (key: string, connection: Connection) => {
+    const read = reports.get(key);
+    return read?.stamp === stamps.get(connection.id) ? read : undefined;
+  };
+  const facts = pairs.flatMap(
+    ({ key, connection }) => current(key, connection)?.facts ?? [],
+  );
   const cards = resourceCards(admitted, facts, rules);
   const status = (card: ResourceCard): CardStatus => {
     const own = pairs
       .filter(({ root }) => card.members.includes(root))
-      .map(({ key }) => reports.get(key));
+      .map(({ key, connection }) => current(key, connection));
     if (own.length === 0) return { unread: !settled, unavailable: settled };
     return {
       unread: own.some((read) => !read?.settled),
@@ -199,9 +249,11 @@ const CardRead = memo(function CardRead(props: {
   const settled = kind !== 'loading';
   // Failed, refused, cancelled, or withdrawn: no data from this source.
   const failed = settled && kind !== 'ready';
+  // Read in the same render as the data, so both belong together.
+  const stamp = useSyncExternalStore(pod.subscribe, () => stampOf(pod));
   useEffect(
-    () => report(id, { facts, settled, failed }),
-    [id, facts, settled, failed, report],
+    () => report(id, { facts, settled, failed, stamp }),
+    [id, facts, settled, failed, stamp, report],
   );
   // Unmount (root no longer admitted, connection gone) withdraws the facts.
   useEffect(() => () => report(id), [id, report]);
