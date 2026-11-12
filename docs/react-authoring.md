@@ -957,8 +957,11 @@ function Source(props: {
 - Many sources at once, such as hundreds of graph nodes across Pods: set
   `podReadLimit` on the runtime instead of queueing reads in the app. Reads
   beyond the limit wait in `loading`, and a grant change while they wait
-  spends no retry. Pass `{ signal, priority: 'current' }` for what the person
-  looks at now ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
+  spends no retry. For what the person looks at now, such as the selected
+  node, pass `priority: selected ? 'current' : undefined` to `usePodLoad`: a
+  change moves a waiting read ahead in place and never restarts a running
+  one, unlike a new `key`
+  ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
   [Resource cards](resource-cards.md) is a complete recipe for this: cards
   with pictures from every reading connection.
 

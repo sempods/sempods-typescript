@@ -138,7 +138,10 @@ lives in the runtime, not in an app queue, for two reasons. Only the runtime
 holds a request until it settles, so a cancelled read keeps its slot until
 then. And only the runtime can tell a loader that its read merely waited, so
 waiting spends no recovery retry while the queued reads of old grants are
-still dropped. Context reads, discovery and writes stay outside the bound.
+still dropped. For the same reason a loader's priority is a live value that
+admission asks while its reads wait, not a restart: only the runtime knows
+whether a read still waits or already runs, and a restart would abort a running
+request that keeps its slot. Context reads, discovery and writes stay outside the bound.
 Automatic labels load only for the selected, validated Context for every catalogue
 size, with fallback names and cache lifetime tied to access authority, so a Pod
 with thousands of Contexts never costs one description request per entry. An app

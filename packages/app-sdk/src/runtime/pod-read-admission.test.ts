@@ -527,3 +527,117 @@ it('without podReadLimit every read starts at once', async () => {
     expect(all.every((l) => l.getSnapshot().kind === 'ready')).toBe(true),
   );
 });
+
+// #287: `setPriority` changes a loader's waiting reads in place.
+it('promotes a waiting read under saturated capacity without restarting or sending it twice', async () => {
+  const f = await session({ perPod: 1 });
+  const t = transport(f);
+  const [a, b, c] = ['a', 'b', 'c'].map((name) => loader(f.reader, name));
+  for (const l of [a!, b!, c!]) void l.reload();
+  await sent(t, ['a']);
+  await flush();
+  c!.setPriority('current');
+  await flush();
+  // Nothing was restarted or admitted by the change itself.
+  expect(t.names()).toEqual(['a']);
+  t.answer('a');
+  await sent(t, ['a', 'c']);
+  t.answer('c');
+  await sent(t, ['a', 'c', 'b']);
+  t.answer('b');
+  await vi.waitFor(() =>
+    expect([a, b, c].map((l) => id(l!))).toEqual(['urn:a', 'urn:b', 'urn:c']),
+  );
+  expect(t.dispatched).toHaveLength(3);
+});
+
+it('keeps an admitted read’s request and signal; its later reads start with the new priority', async () => {
+  const f = await session({ perPod: 1 });
+  const t = transport(f);
+  const signals: AbortSignal[] = [];
+  // Two requests in one run, as an overview followed by its examples.
+  const x = createViewLoader(f.reader, async (pod, signal) => {
+    signals.push(signal);
+    const first = await pod.sparql.construct(query('x1'), { signal });
+    if (first.kind !== 'ok') return first;
+    return pod.sparql.construct(query('x2'), { signal });
+  });
+  loaders.push(x);
+  void x.reload();
+  await sent(t, ['x1']);
+  const y = loader(f.reader, 'y');
+  const z = loader(f.reader, 'z');
+  void y.reload();
+  void z.reload();
+  await flush();
+  x.setPriority('current');
+  await flush();
+  expect(signals).toHaveLength(1);
+  expect(signals[0]!.aborted).toBe(false);
+  // The freed slot goes to y, which waited; x2 then goes before z.
+  t.answer('x1');
+  await sent(t, ['x1', 'y']);
+  await flush();
+  t.answer('y');
+  await sent(t, ['x1', 'y', 'x2']);
+  t.answer('x2');
+  await sent(t, ['x1', 'y', 'x2', 'z']);
+  t.answer('z');
+  await vi.waitFor(() => expect(id(x)).toBe('urn:x2'));
+  expect(signals).toHaveLength(1);
+  expect(signals[0]!.aborted).toBe(false);
+});
+
+it('rapid focus changes across loaders do not starve background reads', async () => {
+  const f = await session({ perPod: 1 });
+  const t = transport(f);
+  const background = Array.from({ length: 4 }, (_, i) =>
+    loader(f.reader, `n${i}`),
+  );
+  const focused = Array.from({ length: 12 }, (_, i) =>
+    loader(f.reader, `f${i}`),
+  );
+  void f.reader.sparql.construct(query('blocker'));
+  await sent(t, ['blocker']);
+  for (const l of [...background, ...focused]) void l.reload();
+  await flush();
+  for (let i = 0; t.pending.length; i++) {
+    // The person moves on before each read finishes.
+    focused[i - 1]?.setPriority(undefined);
+    focused[i]?.setPriority('current');
+    t.answer();
+    await flush();
+  }
+  // After three focused reads a background read goes next. A read that lost
+  // focus before its turn (f3, f7) waits at its arrival place, after the
+  // background reads, instead of being restarted.
+  expect(t.names().slice(1).join(' ')).toBe(
+    'f0 f1 f2 n0 f4 f5 f6 n1 f8 f9 f10 n2 n3 f3 f7 f11',
+  );
+});
+
+it('a retired loader cannot reprioritize the reads of its successor', async () => {
+  const f = await session({ perPod: 1 });
+  const t = transport(f);
+  void f.reader.sparql.construct(query('blocker'));
+  await sent(t, ['blocker']);
+  const old = loader(f.reader, 'old');
+  void old.reload();
+  await flush();
+  // A grant change replaces nothing here, so retire the loader the way a new
+  // handle or an unmount does: its waiting read leaves the queue unsent.
+  old.dispose();
+  const first = loader(f.reader, 'first');
+  const second = loader(f.reader, 'second');
+  void first.reload();
+  void second.reload();
+  await flush();
+  old.setPriority('current');
+  old.setPriority(undefined);
+  old.setPriority('current');
+  t.answer('blocker');
+  await sent(t, ['blocker', 'first']);
+  t.answer('first');
+  await sent(t, ['blocker', 'first', 'second']);
+  t.answer('second');
+});

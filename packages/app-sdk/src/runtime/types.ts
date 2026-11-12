@@ -264,7 +264,9 @@ export interface BrowserRuntimeOptions {
    * waits; waiting Pods take turns, and a read with `priority: 'current'` goes
    * first. After three priority reads in a row on a Pod, its waiting normal
    * read is next on that Pod; after three across all Pods, a waiting normal
-   * read of any Pod that is below its limit is next.
+   * read of any Pod that is below its limit is next. A loader's priority
+   * (`usePodLoad`'s `priority`, `setPriority`) changes its waiting reads in
+   * place: they keep their arrival order and are sent once.
    *
    * A slot is held until the request settles, also after the caller stopped
    * waiting (cancelled, or invalidated by a changed grant or a sign-out): a
