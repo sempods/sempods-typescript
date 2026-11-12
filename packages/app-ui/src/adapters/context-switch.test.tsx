@@ -15,17 +15,21 @@ const api = vi.hoisted(() => ({
   list: {} as PodContextList,
   authorize: vi.fn(),
   canShare: true,
+  activeId: 'alice',
+  signIn: 'required' as 'required' | 'none',
 }));
 vi.mock('@sempods/app-sdk/react', async (original) => ({
   ...(await original<object>()),
   usePodContexts: () => api.list,
   useContexts: () => ({ canShare: api.canShare }),
   useApp: () => ({ authorize: api.authorize }),
-  useAppState: () => ({ signIn: 'required', activeId: 'alice' }),
+  useAppState: () => ({ signIn: api.signIn, activeId: api.activeId }),
 }));
 afterEach(cleanup);
 beforeEach(() => {
   api.canShare = true;
+  api.activeId = 'alice';
+  api.signIn = 'required';
   api.authorize.mockReset().mockResolvedValue(true);
   const pods = ['alice', 'bob'].map((id) => ({
     connectionId: id,
@@ -75,12 +79,16 @@ const press = async (el: HTMLElement) => {
   });
 };
 const open = async () => {
-  await press(screen.getByRole('button', { name: 'List: Shopping · alice' }));
+  await press(screen.getByRole('button', { name: /^List:/ }));
 };
 
 it('groups concise names, announces access, and selects by the pair of identities', async () => {
   show();
   await open();
+  const menu = within(screen.getByRole('menu'));
+  expect(menu.getAllByRole('group')).toHaveLength(2);
+  expect(menu.getByRole('group', { name: 'alice' })).toBeTruthy();
+  expect(menu.getByRole('group', { name: 'bob' })).toBeTruthy();
   const rows = screen.getAllByRole('menuitemradio', { name: 'Shopping' });
   expect(rows.map((r) => r.getAttribute('aria-checked'))).toEqual([
     'true',
@@ -136,6 +144,7 @@ it('keeps a failed Pod distinct from empty, disables its retained choices, and r
     screen.getAllByRole('menuitemradio')[1]!.getAttribute('aria-disabled'),
   ).toBe('true');
   expect(screen.getByText('Contexts could not be loaded.')).toBeTruthy();
+  expect(screen.getByRole('group', { name: 'bob: Pod actions' })).toBeTruthy();
   await press(screen.getByRole('menuitem', { name: 'Try again: bob' }));
   expect(failed.retry).toHaveBeenCalledOnce();
   expect(api.list.pods[0]!.retry).not.toHaveBeenCalled();
@@ -164,7 +173,7 @@ it('shows loading, empty, and signed-out Pods as different states', async () => 
     'Sign in to use this Pod.',
   ])
     expect(screen.getByText(text)).toBeTruthy();
-  await press(screen.getByRole('menuitem', { name: 'Sign in' }));
+  await press(screen.getByRole('menuitem', { name: 'Sign in: bob' }));
   expect(api.authorize).toHaveBeenCalledWith('ended');
 });
 
@@ -172,12 +181,96 @@ it('localizes authorization errors through the SDK and allows another attempt', 
   api.authorize.mockRejectedValueOnce(new Error('private diagnostics'));
   show();
   await open();
-  await press(screen.getByRole('menuitem', { name: 'Share more contexts …' }));
+  await press(
+    screen.getByRole('menuitem', { name: 'Share more contexts …: alice' }),
+  );
   expect(screen.getByRole('alert').textContent).not.toContain(
     'private diagnostics',
   );
   await open();
-  await press(screen.getByRole('menuitem', { name: 'Share more contexts …' }));
+  await press(
+    screen.getByRole('menuitem', { name: 'Share more contexts …: alice' }),
+  );
   expect(screen.queryByRole('alert')).toBeNull();
   expect(api.authorize).toHaveBeenCalledTimes(2);
+});
+
+it('offers sharing directly on an empty inactive Pod without selecting it first', async () => {
+  api.list = {
+    ...api.list,
+    pods: [api.list.pods[0]!, { ...api.list.pods[1]!, choices: [] }],
+  };
+  show();
+  await open();
+  const bob = within(screen.getByRole('group', { name: 'bob' }));
+  expect(screen.getAllByRole('group')).toHaveLength(2);
+  expect(bob.getByText('No readable contexts shared.')).toBeTruthy();
+  await press(
+    bob.getByRole('menuitem', { name: 'Share more contexts …: bob' }),
+  );
+  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob');
+  expect(api.list.select).not.toHaveBeenCalled();
+});
+
+it('offers one share action per empty Pod, with no duplicate active-Pod action', async () => {
+  api.list = {
+    ...api.list,
+    selected: null,
+    pods: api.list.pods.map((p) => ({ ...p, choices: [] })),
+  };
+  show();
+  await open();
+  expect(screen.getAllByRole('group')).toHaveLength(2);
+  expect(
+    screen.getAllByRole('menuitem', { name: /^Share more contexts/ }),
+  ).toHaveLength(2);
+  await press(
+    screen.getByRole('menuitem', { name: 'Share more contexts …: alice' }),
+  );
+  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('alice');
+});
+
+it('distinguishes sign-in actions for two ended Pods and retains one group each', async () => {
+  api.canShare = false;
+  api.list = {
+    ...api.list,
+    selected: null,
+    pods: api.list.pods.map((p) => ({ ...p, status: 'ended', choices: [] })),
+  };
+  show();
+  await open();
+  expect(screen.getAllByRole('group')).toHaveLength(2);
+  expect(screen.getByRole('menuitem', { name: 'Sign in: alice' })).toBeTruthy();
+  await press(screen.getByRole('menuitem', { name: 'Sign in: bob' }));
+  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob');
+});
+
+it('offers no sharing or sign-in when signIn is none', async () => {
+  api.canShare = false;
+  api.signIn = 'none';
+  api.list = {
+    ...api.list,
+    selected: null,
+    pods: [
+      { ...api.list.pods[0]!, choices: [] },
+      { ...api.list.pods[1]!, status: 'ended', choices: [] },
+    ],
+  };
+  show();
+  await open();
+  expect(
+    screen.queryByRole('menuitem', { name: /^(Sign in:|Share more contexts)/ }),
+  ).toBeNull();
+});
+
+it('updates the sharing target when the active Pod changes while the menu is open', async () => {
+  const { rerender } = render(<ContextSwitch title="Groceries" label="List" />);
+  await open();
+  api.activeId = 'bob';
+  api.list = { ...api.list, selected: api.list.pods[1]!.choices[0]! };
+  rerender(<ContextSwitch title="Groceries" label="List" />);
+  await press(
+    screen.getByRole('menuitem', { name: 'Share more contexts …: bob' }),
+  );
+  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob');
 });

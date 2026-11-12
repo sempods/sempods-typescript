@@ -566,7 +566,7 @@ example `remove`). SDK texts and formats: [messages and language](#messages-and-
 
 ```tsx
 const lists = useContexts();
-// lists.contexts: [{ iri, name, writable }] of the readable Contexts
+// lists.contexts: [{ iri, name, label, writable }] of the readable Contexts
 // lists.selected: the selected one or null
 // lists.select(iri): guarded; resolves false when refused or not selectable
 // lists.loading / lists.failed / lists.retry(): catalogue state
