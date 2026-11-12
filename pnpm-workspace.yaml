@@ -3,3 +3,12 @@ packages:
   - 'examples/*'
 allowBuilds:
   esbuild: true
+overrides:
+  # GHSA-g3hv-75wg-m249: minimatch < 11.0.1 amplifies glob patterns. eslint,
+  # typescript-eslint and the remark toolchain still ask for minimatch 9/10 and
+  # call only APIs that minimatch 11 keeps (minimatch(), match(), Minimatch#match).
+  # glob 10 (via unified-engine and @npmcli) reads minimatch's RegExp parts, which
+  # minimatch 11 removed; glob 14 uses minimatch 11 and keeps glob()/hasMagic().
+  # Drop both entries once the upstream ranges reach minimatch 11.
+  'minimatch@<11.0.1': ^11.0.7
+  'glob@10': ^14.0.5
