@@ -273,6 +273,10 @@ menus, dates and actions.
 The compact `Dialog` names its close buttons (the corner one and
 `DialogFooter`'s `showCloseButton`) with the SDK's "Close" text in the
 provider's language, or English without a provider; `closeLabel` replaces it.
+The corner Close is a 44px target around a 16px glyph, without app CSS; a
+`DialogHeader` or `DialogTitle` placed directly in the `Dialog` keeps its right
+edge clear of it. `showCloseButton={false}` removes both, for example while the
+app runs a batch that must not be left.
 A press in an SDK confirmation (a native modal `<dialog>`) never counts as a
 press beside it, also with the app's own `shouldCloseOnInteractOutside`, so
 cancelling the question keeps the dialog and the draft. Around an SDK editor,
@@ -1487,7 +1491,8 @@ against the installed packages and runs in Chromium and WebKit, and in
 Firefox on the Linux CI runner. It checks Escape in fields, in SDK
 confirmations, on Close, in menus and in the date chooser; focus trap and
 restore; Save after cancelled closes; closing right after opening; cancelled
-SDK questions above the compact quick edit and its German Close; the full
+SDK questions above the compact quick edit, its German Close and its 44px
+corner Close by pointer and keyboard at 375px and 1280px, light and dark; the full
 screen dialog with emulated safe-area insets (Chromium only); resizing
 with a draft; Back and Forward with a dirty draft; the calendar-date roundtrip
 in three time zones; keyboard use of menus, the calendar and filter chips;

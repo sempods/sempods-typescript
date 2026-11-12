@@ -2941,8 +2941,9 @@ async function theme({ browser, origin }) {
  * The README's quick edit (#229): a compact `Dialog` around an SDK editor.
  * Cancelling an SDK question above it keeps the dialog and the draft, its
  * corner Close asks through the editor, and it speaks the SDK's language.
+ * Its corner Close is a 44px target with the package's stylesheet alone (#288).
  */
-async function compact({ browser, origin }) {
+async function compact({ browser, origin, engine }) {
   const { context, page, errors } = await newPage(browser);
   await signIn(page, origin);
   const dialog = page.getByRole('dialog', { name: /^(Rename|Umbenennen)$/ });
@@ -3063,6 +3064,134 @@ async function compact({ browser, origin }) {
         .locator('[data-slot=dialog-close]')
         .evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim()));
       return { pass: names.join() === 'Schließen', names };
+    },
+    // The corner Close is a 44px target around a compact glyph (#288), with
+    // the stylesheet the README documents and no app CSS: inside the dialog
+    // and clear of its title and fields, at 375px and on the desktop, light
+    // and dark. A press anywhere in the target closes the dialog, and the
+    // keyboard reaches and presses it.
+    async 'compact-close-target'() {
+      const tab = tabKey(engine);
+      const corner = dialog.locator(':scope > [data-slot=dialog-close]');
+      const cases = [];
+      try {
+        for (const width of [375, 1280])
+          for (const scheme of ['light', 'dark']) {
+            const height = width === 375 ? 812 : 800;
+            await page.setViewportSize({ width, height });
+            await page.emulateMedia({ colorScheme: scheme });
+            await open();
+            const m = await dialog.evaluate((el) => {
+              const close = el.querySelector(
+                ':scope > [data-slot=dialog-close]',
+              );
+              const box = close.getBoundingClientRect();
+              const glyph = close.querySelector('svg').getBoundingClientRect();
+              const content = el.closest('[data-slot=dialog-content]');
+              const frame = content.getBoundingClientRect();
+              // Only what a child shows counts: a header's padding may lie
+              // under the target.
+              const shown = (node) => {
+                const r = node.getBoundingClientRect();
+                const pad = getComputedStyle(node);
+                return {
+                  top: r.top,
+                  bottom: r.bottom,
+                  left: r.left + parseFloat(pad.paddingLeft),
+                  right: r.right - parseFloat(pad.paddingRight),
+                };
+              };
+              const clear = [...el.children]
+                .filter((child) => child !== close)
+                .every((child) => {
+                  const r = shown(child);
+                  return (
+                    r.right <= box.left ||
+                    r.left >= box.right ||
+                    r.bottom <= box.top ||
+                    r.top >= box.bottom
+                  );
+                });
+              // Rounded corners take no press: the middle of each edge does.
+              const x = (box.left + box.right) / 2;
+              const y = (box.top + box.bottom) / 2;
+              const hits = [
+                [box.left + 2, y],
+                [box.right - 2, y],
+                [x, box.top + 2],
+                [x, box.bottom - 2],
+              ].every(([px, py]) =>
+                close.contains(document.elementFromPoint(px, py)),
+              );
+              return {
+                target: [box.width, box.height],
+                glyph: Math.max(glyph.width, glyph.height),
+                inside:
+                  box.top >= frame.top &&
+                  box.right <= frame.right &&
+                  frame.left >= 16 &&
+                  frame.right <= innerWidth - 16 &&
+                  frame.top >= 0 &&
+                  frame.bottom <= innerHeight,
+                clear,
+                hits,
+                colour: getComputedStyle(close).color,
+                surface: getComputedStyle(content).backgroundColor,
+                // A point in the target outside the registry's 28px box.
+                rim: { x: box.left + 2, y },
+              };
+            });
+            const { rim, ...measured } = m;
+            await page.mouse.click(rim.x, rim.y);
+            const pointer = await gone(dialog);
+            await open();
+            await title.focus();
+            let reached = false;
+            for (let i = 0; i < 8 && !reached; i++) {
+              await page.keyboard.press(tab);
+              reached = await corner.evaluate(
+                (b) => document.activeElement === b,
+              );
+            }
+            const ring = reached
+              ? await corner.getAttribute('data-focus-visible')
+              : null;
+            if (reached) await page.keyboard.press('Enter');
+            const keyboard = reached && (await gone(dialog));
+            cases.push({
+              width,
+              scheme,
+              ...measured,
+              pointer,
+              keyboard,
+              ring: ring !== null,
+            });
+          }
+      } finally {
+        await page.emulateMedia({ colorScheme: null });
+      }
+      const surfaces = (width) =>
+        new Set(cases.filter((c) => c.width === width).map((c) => c.surface))
+          .size === 2;
+      return {
+        pass:
+          cases.length === 4 &&
+          cases.every(
+            (c) =>
+              Math.min(...c.target) >= 44 &&
+              c.glyph <= 16 &&
+              c.inside &&
+              c.clear &&
+              c.hits &&
+              c.colour !== c.surface &&
+              c.pointer &&
+              c.keyboard &&
+              c.ring,
+          ) &&
+          surfaces(375) &&
+          surfaces(1280),
+        cases,
+      };
     },
   };
   const results = [];
