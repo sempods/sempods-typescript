@@ -371,3 +371,69 @@ it('explicit reads wait for a podReadLimit slot and all become ready', async () 
   expect(most).toBe(1);
   expect(f.count('/_system/sparql/query')).toBe(3);
 });
+
+it('a changed priority promotes a waiting read in place and never restarts a running one (#287)', async () => {
+  const f = await returnedSession(
+    keep,
+    fixture({ preferences: null, podReadLimit: { perPod: 1 } }),
+  );
+  await f.runtime.initialize();
+  const reader = f.runtime.bindPod(f.id);
+  const gates: { name: string; signal: AbortSignal; open: () => void }[] = [];
+  f.setQuery(async (_url, init) => {
+    const name = String(init?.body).split('# ')[1]!;
+    // Ignores the abort, like a transport that keeps its slot.
+    await new Promise<void>((open) =>
+      gates.push({ name, signal: init!.signal!, open }),
+    );
+    return Response.json([{ '@id': `urn:${name}` }]);
+  });
+  const calls: string[] = [];
+  function Node({ name, selected }: { name: string; selected: boolean }) {
+    const load = usePodLoad(
+      reader,
+      (target, signal) => {
+        calls.push(name);
+        return target.sparql.construct(`CONSTRUCT {} WHERE {} # ${name}`, {
+          signal,
+        });
+      },
+      { key: name, priority: selected ? 'current' : undefined },
+    );
+    return (
+      <section aria-label={name}>
+        <output>{load.state.kind}</output>
+      </section>
+    );
+  }
+  const nodes = (selected: string) => (
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      {['one', 'two', 'three'].map((name) => (
+        <Node key={name} name={name} selected={name === selected} />
+      ))}
+    </SempodsProvider>
+  );
+  const view = render(nodes(''));
+  await waitFor(() => expect(gates.map((g) => g.name)).toEqual(['one']));
+  // Selecting the running read changes nothing; selecting a waiting one
+  // moves it ahead of `two` without a new read.
+  view.rerender(nodes('one'));
+  view.rerender(nodes('three'));
+  await act(async () => {});
+  expect(calls).toEqual(['one', 'two', 'three']);
+  expect(gates[0]!.signal.aborted).toBe(false);
+  act(() => gates[0]!.open());
+  await waitFor(() =>
+    expect(gates.map((g) => g.name)).toEqual(['one', 'three']),
+  );
+  act(() => gates[1]!.open());
+  await waitFor(() =>
+    expect(gates.map((g) => g.name)).toEqual(['one', 'three', 'two']),
+  );
+  act(() => gates[2]!.open());
+  await waitFor(() => expect(text('two')).toBe('ready'));
+  expect(text('one')).toBe('ready');
+  expect(text('three')).toBe('ready');
+  expect(calls).toEqual(['one', 'two', 'three']);
+  expect(f.count('/_system/sparql/query')).toBe(3);
+});

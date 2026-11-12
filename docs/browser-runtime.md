@@ -590,7 +590,14 @@ const runtime = createBrowserRuntime({
   podReadLimit: { perPod: 4, total: 8 },
 });
 
-// For what the person looks at now:
+// For what the person looks at now, such as the selected graph node. A
+// changed value reprioritizes the loader's waiting reads; it restarts nothing.
+usePodLoad(reader, read, {
+  key: iri,
+  priority: selected ? 'current' : undefined,
+});
+
+// A single read that is always current:
 await reader.sparql.select(query, { signal, priority: 'current' });
 ```
 
@@ -606,9 +613,19 @@ explicit Pod read (`BoundPod.sparql.select`/`construct` or `find`, also through
   `priority: 'current'` read goes before them. After three priority reads in
   a row on a Pod, its waiting normal read is next on that Pod; after three in
   a row across all Pods, a waiting normal read of any Pod is next. Priority
-  never exceeds a limit or stops a running read. It counts when the
-  read starts: when the current resource changes, restart that read (for
-  example with a new `key`). A waiting read that is restarted loses its place.
+  never exceeds a limit or stops a running read.
+- When the current resource changes, change the priority, not the read:
+  `usePodLoad`'s `priority` option, or `setPriority` of a
+  `createViewLoader(pod, …)` loader. A waiting read of that loader then goes
+  first or back to normal in place: it keeps its arrival order, is not
+  restarted and is sent once. A read already admitted keeps its request and
+  signal; the loader's later reads (a second query in the same callback, a
+  `reload()`, a recovery) start with the priority set then. A disposed loader
+  ignores it, and it never reaches another loader's reads. Only reads that
+  receive the loader's `signal` unchanged follow it; a read's own
+  `priority: 'current'` stays. Do not restart a read to change its priority:
+  `loading` covers both waiting and running reads, and a restart aborts a
+  running request, whose slot an abort-ignoring transport keeps.
 - A waiting read that is cancelled (`signal`, `cancel()`, unmount, a `reload()`
   that supersedes it) or invalidated (changed grants, sign-out, disconnect)
   leaves the queue at once and is never sent.
