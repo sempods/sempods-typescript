@@ -4,6 +4,16 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## Pending release: standard grouped Context chooser
+
+The source adds `ContextSwitch` to `@sempods/app-ui` and additive display
+labels to `useContexts`/`usePodContexts`. This is not part of published 0.8.0;
+upgrade all three SDK packages together after the containing release exists.
+Replace a copied list chooser with the standard component, retaining domain
+words and scope configuration. Remove app-owned generic selection feedback,
+permission rows and label parsing. Keep domain data operations and `AppAccess`.
+See [the chooser guide](react-authoring.md#one-chooser-across-pods).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

@@ -37,3 +37,13 @@ export function distinctName(
     ? `${label} · ${iri}`
     : label;
 }
+
+/** A compact address fallback only; a configured label may intentionally end in /. */
+export function podLabel(
+  url: string,
+  names?: Readonly<Record<string, string>>,
+) {
+  return (
+    names?.[url]?.trim() || url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+  );
+}

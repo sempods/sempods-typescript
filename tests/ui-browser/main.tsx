@@ -49,6 +49,7 @@ import { TaskDialog, taskFields } from './task-dialog';
 import { QuickEdit } from './quick-edit';
 import { Workspace } from './workspace';
 import './index.css';
+import { ContextSwitchGate } from './context-switch';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -179,7 +180,17 @@ const Icon = ({ path }: { readonly path: string }) => (
 // they load; the address model does not know these, so the router replaces
 // them by the canonical address. Read once, at load.
 const settings = new URLSearchParams(location.search);
-const language = settings.get('lang') === 'de' ? 'de' : 'en';
+if (settings.get('screen') === 'contexts')
+  sessionStorage.setItem('contexts-gate', settings.toString());
+const contextSettings =
+  location.pathname === '/callback'
+    ? new URLSearchParams(sessionStorage.getItem('contexts-gate') ?? '')
+    : settings;
+const contextSwitch = contextSettings.get('screen') === 'contexts';
+const language =
+  (contextSwitch ? contextSettings : settings).get('lang') === 'de'
+    ? 'de'
+    : 'en';
 const compact = settings.get('dialog') === 'compact';
 const workspace = settings.has('workspace');
 const search = settings.get('screen') === 'search';
@@ -216,7 +227,13 @@ function App() {
       language={language}
       locale={language === 'de' ? 'de-DE' : 'en-GB'}
     >
-      {search ? <SearchGate /> : <Frame />}
+      {contextSwitch ? (
+        <ContextSwitchGate />
+      ) : search ? (
+        <SearchGate />
+      ) : (
+        <Frame />
+      )}
     </SempodsProvider>
   );
 }

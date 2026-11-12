@@ -83,7 +83,7 @@ function Switch() {
                 void lists.select(c.iri).then((ok) => outcomes.push(ok))
               }
             >
-              {c.name}
+              {c.label}
             </button>
             {c.writable ? 'can change' : 'read only'}
           </li>

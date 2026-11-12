@@ -3791,6 +3791,7 @@ async function search({ browser, origin }) {
 }
 
 export const suites = {
+  contexts,
   gate,
   roundtrip,
   interaction,
@@ -3803,3 +3804,180 @@ export const suites = {
   workspace,
   search,
 };
+
+/** The shipped chooser, with two fixture Pods and SDK draft guards. */
+async function contexts({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser, {
+    viewport: { width: 375, height: 812 },
+  });
+  let failed = false;
+  await page.route('**/_system/contexts', async (route) => {
+    if (failed && route.request().url().includes('/bob/'))
+      return route.fulfill({ status: 503, body: '{}' });
+    const response = await route.fetch();
+    const body = await response.json();
+    body['https://schema.sempods.org/writableContext'] = body[
+      'https://schema.sempods.org/writableContext'
+    ].filter((c) => c['@id'].endsWith('/work'));
+    await route.fulfill({ json: body });
+  });
+  await page.route('**/_system/contexts/*', (route) => {
+    const iri = route.request().url();
+    const label = iri.endsWith('/work')
+      ? 'Einkaufsliste'
+      : '夏の買い物 / Dinge für die nächste gemeinsame Reise'.repeat(2);
+    return route.fulfill({
+      json: {
+        '@id': iri,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': iri },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': false }],
+        'http://www.w3.org/2000/01/rdf-schema#label': [{ '@value': label }],
+      },
+    });
+  });
+  const trigger = () => page.getByRole('button', { name: /^List:/ });
+  const results = [];
+  try {
+    await signIn(page, origin, '/?screen=contexts&lang=de', { choose: false });
+    await page
+      .getByRole('button', { name: 'List: Einkaufsliste · Privat' })
+      .waitFor();
+    await page.getByRole('button', { name: 'Connect second Pod' }).click();
+    await page
+      .getByRole('button', { name: 'List: Einkaufsliste · Familie/' })
+      .waitFor();
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await trigger().focus();
+      await page.keyboard.press('Enter');
+      const rows = page.getByRole('menuitemradio');
+      await rows.first().waitFor();
+      const geometry = await rows.evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return { height: r.height, left: r.left, right: r.right };
+        }),
+      );
+      const rect = await trigger().boundingBox();
+      results.push({
+        id: `grouped-${scheme}`,
+        pass:
+          (await rows.count()) === 4 &&
+          (await page
+            .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
+            .count()) === 2 &&
+          geometry.every(
+            (r) => r.height >= 52 && r.left >= 0 && r.right <= 375,
+          ) &&
+          rect.height >= 64 &&
+          (await page
+            .getByText('Lesen und schreiben', { exact: true })
+            .count()) === 1,
+        geometry,
+      });
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() =>
+        document.activeElement?.getAttribute('aria-label')?.startsWith('List:'),
+      );
+      results.push({
+        id: `escape-${scheme}`,
+        pass: await trigger().evaluate((el) => el === document.activeElement),
+      });
+    }
+    await trigger().click();
+    await page
+      .getByRole('menuitem', { name: 'Pod- und Kontextadressen anzeigen' })
+      .focus();
+    await page.keyboard.press('Enter');
+    results.push({
+      id: 'exact-address-details',
+      pass:
+        (await page
+          .getByText(origin + '/alice', { exact: true })
+          .isVisible()) &&
+        (await page
+          .locator('dd')
+          .filter({ hasText: origin + '/bob/_system/contexts/work' })
+          .isVisible()),
+    });
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Keep a draft' }).click();
+    await trigger().click();
+    await page
+      .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
+      .filter({ hasText: 'Privat ·' })
+      .click();
+    await page
+      .getByRole('button', { name: 'Weiter bearbeiten', exact: true })
+      .click();
+    results.push({
+      id: 'declined-cross-pod-draft',
+      pass:
+        (await page.getByLabel('target').textContent()).includes('/bob/') &&
+        (await page.getByLabel('draft').textContent()) === 'dirty',
+    });
+    await trigger().click();
+    await page
+      .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
+      .filter({ hasText: 'Privat ·' })
+      .click();
+    await page
+      .getByRole('button', { name: /Verwerfen und fortfahren/i })
+      .click();
+    results.push({
+      id: 'accepted-cross-pod-draft',
+      pass:
+        (await page.getByLabel('target').textContent()).includes('/alice/') &&
+        (await page.getByLabel('draft').textContent()) === 'clean',
+    });
+    failed = true;
+    await page.getByRole('button', { name: 'Reload second Pod' }).click();
+    await trigger().click();
+    await page.getByText('Kontexte konnten nicht geladen werden.').waitFor();
+    results.push({
+      id: 'partial-failure',
+      pass:
+        (await page.getByRole('menuitemradio', { disabled: true }).count()) ===
+          2 &&
+        (await page.getByRole('menuitemradio', { disabled: false }).count()) ===
+          2,
+    });
+    failed = false;
+    await page.getByRole('menuitem', { name: /Familie/ }).click();
+    await page
+      .getByText('Kontexte konnten nicht geladen werden.')
+      .waitFor({ state: 'hidden' });
+    await page.waitForFunction(
+      () => !document.querySelector('[role=menuitemradio][aria-disabled=true]'),
+    );
+    results.push({
+      id: 'per-pod-retry',
+      pass:
+        (await page.getByRole('menuitemradio', { disabled: true }).count()) ===
+        0,
+    });
+    await page
+      .getByRole('menuitemradio')
+      .filter({ hasText: 'Familie/ · Nur lesen' })
+      .click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector('[aria-label=target]')
+        ?.textContent?.endsWith('/bob/_system/contexts/personal'),
+    );
+    results.push({
+      id: 'read-only-target',
+      pass: (await page.getByLabel('target').textContent()).endsWith(
+        '/personal',
+      ),
+    });
+  } catch (error) {
+    results.push({ id: 'chooser-journey', pass: false, error: String(error) });
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}

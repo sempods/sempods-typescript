@@ -152,8 +152,8 @@ needs them; preserve the minimal screen's recovery when adapting it.
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
   do not implement your own Context enumeration, consent handling, token store,
-  credential-bearing fetch or OAuth callback handler. Use `useContexts` for a
-  Context picker and `usePodList`/`usePodLoad` for Pod-wide reads;
+  credential-bearing fetch or OAuth callback handler. Use `ContextSwitch` from `@sempods/app-ui` for the standard
+  Context picker (`useContexts`/`usePodContexts` supply custom headless views) and `usePodList`/`usePodLoad` for Pod-wide reads;
   [one read per connection](react-authoring.md#reads-per-connection) passes
   each `runtime.bindPod(id)` handle to `usePodLoad`, not an own loader hook.
   Every write names a Context; an empty selection never means all Contexts.
