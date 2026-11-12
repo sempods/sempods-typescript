@@ -11,8 +11,9 @@ origin. The recipe uses a plain `fetch` and two parsers the app installs, so no
 SDK import brings a parser along. Copy and adapt it:
 
 - [`public-rdf.ts`](../examples/todo/recipes/public-rdf.ts) has
-  `lookupPublicRdf(iri, options)` and `publicAddress(iri)`. It has no React
-  dependency.
+  `lookupPublicRdf(iri, options)`, its
+  [dataset variant](#keep-named-graphs) `lookupPublicRdfDataset(iri, options)`
+  and `publicAddress(iri)`. It has no React dependency.
 - It imports [`n3`](https://www.npmjs.com/package/n3) and
   [`jsonld`](https://www.npmjs.com/package/jsonld) lazily, on the first lookup
   that needs them. Add both to the app, and `@types/n3` and `@types/jsonld` for
@@ -89,6 +90,41 @@ path:
   all JSON-LD scripts form one dataset, as JSON-LD 1.1 requires: `_:x` in two
   scripts of the page names one node.
 
+## Keep named graphs
+
+`lookupPublicRdf` answers what a document says. An app that shows where each
+statement came from, such as an RDF inspector, needs the graphs of a TriG,
+N-Quads or JSON-LD dataset as well. `lookupPublicRdfDataset` takes the same
+options and has the same request, limits and failures; a loaded result has
+`quads` instead of `statements`. In this fragment, `showQuad` is the app's own:
+
+```ts
+const result = await lookupPublicRdfDataset(iri, {
+  signal: lookup.signal,
+  contexts: bundledContexts,
+});
+
+if (result.kind === 'loaded')
+  for (const { subject, predicate, object, graph } of result.quads)
+    showQuad(result.source, graph, { subject, predicate, object });
+```
+
+- **Default and named graphs.** `graph` is `{ type: 'default' }` for the
+  document's default graph, or the graph name as a `SparqlTerm`: an IRI, or a
+  blank node. A JSON-LD `@graph` with an `@id` is a named graph; a top-level
+  `@graph` without one is the default graph.
+- **One assertion per graph.** The same triple in the default graph and in two
+  named graphs is three quads. Only identical quads, graph included, are kept
+  once.
+- **Blank nodes within one response.** A blank node label is the same node
+  wherever it appears in one result: as graph name, subject or object, also
+  across the JSON-LD scripts of a page. Another lookup, even of the same
+  document, may reuse or change the label; compare blank nodes only within one
+  result, and keep each result under its `source`.
+- **No traversal.** The lookup reads exactly the one document. It does not
+  follow graph names, authorize anything at a Pod or merge graphs into Pod
+  data.
+
 ## What the lookup sends and accepts
 
 - **No credentials.** The request uses `credentials: 'omit'`,
@@ -131,10 +167,11 @@ The response's `Content-Type` alone chooses the parser:
 | `text/html`, `application/xhtml+xml`      | every `application/ld+json` script |
 
 The body is read as UTF-8, which the RDF formats require; a `charset`
-parameter is ignored. Graph names are dropped: statements of named graphs,
-including JSON-LD named graphs, join the others, and a triple in several graphs
-is kept once. A JSON-LD body must be an object or an array; a bare string would
-otherwise be loaded as a document URL.
+parameter is ignored. `lookupPublicRdf` drops graph names: statements of named
+graphs, including JSON-LD named graphs, join the others, and a triple in several
+graphs is kept once. `lookupPublicRdfDataset` [keeps them](#keep-named-graphs).
+A JSON-LD body must be an object or an array; a bare string would otherwise be
+loaded as a document URL.
 
 HTML is parsed with `DOMParser`, which builds an inert document: no script
 runs and nothing loads. `application/xhtml+xml` is parsed as XML, so CDATA
@@ -146,8 +183,9 @@ types, including `application/json`, RDF/XML and RDFa, fail with
 
 ## Results and failures
 
-A loaded result has `source`, `contentType` and `statements`. Each statement has
-a `subject`, `predicate` and `object` as `SparqlTerm`:
+A loaded result has `source`, `contentType` and `statements`, or `quads` for
+the dataset variant. Each statement has a `subject`, `predicate` and `object` as
+`SparqlTerm`, and each quad also a `graph`:
 
 - A language-tagged literal has its `language` and no datatype.
 - A literal of `xsd:string` has no datatype; any other datatype is kept, with
@@ -179,14 +217,59 @@ A failed result names its `reason`:
 A browser reports a missing CORS permission like an unreachable host, so both
 are `network`. `cancelled` means the caller's `signal` aborted.
 
+## Parse off the UI thread
+
+Both lookups use only `fetch`, the parsers and plain data, so a module worker
+can run them and post the result back unchanged. In this fragment,
+`bundledContexts`, `show` and the message shape are the app's own:
+
+```ts
+// public-rdf.worker.ts
+import { lookupPublicRdfDataset } from './public-rdf';
+
+const running = new Map<number, AbortController>();
+
+self.onmessage = async (event: MessageEvent<{ id: number; iri?: string }>) => {
+  const { id, iri } = event.data;
+  if (iri === undefined) {
+    running.get(id)?.abort();
+    return;
+  }
+  const lookup = new AbortController();
+  running.set(id, lookup);
+  const result = await lookupPublicRdfDataset(iri, {
+    signal: lookup.signal,
+    contexts: bundledContexts,
+  });
+  running.delete(id);
+  self.postMessage({ id, result });
+};
+```
+
+```ts
+// In the app: start a lookup, and cancel it when the person moves on.
+const worker = new Worker(new URL('./public-rdf.worker.ts', import.meta.url), {
+  type: 'module',
+});
+worker.onmessage = (event) => show(event.data.id, event.data.result);
+
+worker.postMessage({ id: 1, iri });
+worker.postMessage({ id: 1 });
+```
+
+A worker has no `DOMParser`, so an HTML or XHTML answer fails there with
+`unsupported-type`. An app that reads JSON-LD in web pages looks those up on
+the main thread.
+
 ## Limits
 
 - Only origins that allow cross-origin reads can be looked up from a browser.
   The recipe uses no proxy.
 - Hostnames are not resolved. A public name that resolves to a private address
   (DNS rebinding) is not caught.
-- Parsing runs on the main thread after the body is complete. The byte cap
-  bounds its work; the deadline does not interrupt it.
+- Parsing runs where the lookup runs, after the body is complete. The byte cap
+  bounds its work; the deadline does not interrupt it. For large documents, run
+  the lookup [in a worker](#parse-off-the-ui-thread).
 - Focusing a large graph, following references and limiting statements belong
   to the app. The recipe looks up exactly one document per call and caches
   nothing.
@@ -196,3 +279,4 @@ are `network`. `cancelled` means the caller's `signal` aborted.
   installed parsers. That it bundles without Node polyfills and that
   `DOMParser` runs no script were checked once in Chromium, not by a gate. A
   real browser's CORS and redirect handling and live origins are not covered.
+  No gate compiles or runs the worker fragment.
