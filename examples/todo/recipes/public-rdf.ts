@@ -3,6 +3,7 @@
  * App-local recipe code on public types, without React: copy and adapt it.
  * Its parsers (`n3`, `jsonld`) are the app's dependencies, loaded lazily; the
  * SDK packages have none. Graph focusing and traversal limits stay in the app.
+ * `lookupPublicRdf` reads triples; `lookupPublicRdfDataset` keeps graph names.
  */
 import type { SparqlTerm } from '@sempods/client-sdk';
 import type { Options } from 'jsonld';
@@ -47,6 +48,21 @@ export interface PublicStatement {
   readonly object: SparqlTerm;
 }
 
+/**
+ * The graph a quad belongs to: the document's default graph, or the term that
+ * names the graph, an IRI or a blank node.
+ */
+export type PublicGraph = { readonly type: 'default' } | SparqlTerm;
+
+/**
+ * One quad: a triple and its graph. A blank node label is the same node
+ * wherever it occurs in one result, as graph name, subject or object; it means
+ * nothing across results.
+ */
+export interface PublicQuad extends PublicStatement {
+  readonly graph: PublicGraph;
+}
+
 export type PublicRdfFailure =
   | 'invalid-iri'
   | 'unsupported-scheme'
@@ -75,6 +91,17 @@ export type PublicRdfResult =
       /** The HTTP status for `http-error`. */
       readonly status?: number;
     };
+
+/** Like `PublicRdfResult`, with quads instead of statements. */
+export type PublicRdfDatasetResult =
+  | {
+      readonly kind: 'loaded';
+      /** The document: the IRI as given, without its fragment. */
+      readonly source: string;
+      readonly contentType: string;
+      readonly quads: readonly PublicQuad[];
+    }
+  | Exclude<PublicRdfResult, { readonly kind: 'loaded' }>;
 
 export type PublicAddress =
   | { readonly kind: 'allowed'; readonly url: URL }
@@ -118,12 +145,28 @@ export function publicAddress(iri: string): PublicAddress {
 /**
  * Fetch and parse the public RDF document at `iri`, once. Sends no cookies,
  * `Authorization` or referrer, follows no redirect and never loads a remote
- * JSON-LD context. Statements keep the IRI's exact identity.
+ * JSON-LD context. Statements keep the IRI's exact identity. Graph names are
+ * dropped, and a triple in several graphs is kept once.
  */
 export async function lookupPublicRdf(
   iri: string,
   options: PublicRdfOptions = {},
 ): Promise<PublicRdfResult> {
+  const result = await lookupPublicRdfDataset(iri, options);
+  if (result.kind !== 'loaded') return result;
+  const { quads, ...loaded } = result;
+  return { ...loaded, statements: statements(quads) };
+}
+
+/**
+ * `lookupPublicRdf` with graph names kept: the same request, limits and
+ * failures, but each quad keeps its graph. A triple in several graphs stays
+ * one quad per graph; only an identical quad is kept once.
+ */
+export async function lookupPublicRdfDataset(
+  iri: string,
+  options: PublicRdfOptions = {},
+): Promise<PublicRdfDatasetResult> {
   const address = publicAddress(iri);
   if (address.kind === 'failed') return address;
   // A fragment is never sent; the document is the IRI without it. `url` is the
@@ -146,7 +189,7 @@ export async function lookupPublicRdf(
   }, options.timeoutMs ?? PUBLIC_RDF_TIMEOUT_MS);
   const cancel = () => deadline.abort();
   outer?.addEventListener('abort', cancel, { once: true });
-  const stopped = (): PublicRdfResult | null =>
+  const stopped = (): PublicRdfDatasetResult | null =>
     outer?.aborted
       ? { kind: 'cancelled' }
       : timedOut
@@ -220,7 +263,7 @@ export async function lookupPublicRdf(
       kind: 'loaded',
       source: documentIri,
       contentType,
-      statements: parsed,
+      quads: dataset(parsed),
     };
   } finally {
     clearTimeout(timer);
@@ -286,13 +329,11 @@ async function parse(
   contentType: string,
   base: string,
   contexts: Readonly<Record<string, unknown>>,
-): Promise<readonly PublicStatement[] | ParseFailure> {
+): Promise<readonly Quad[] | ParseFailure> {
   if (N3_TYPES.has(contentType)) {
     try {
       const { Parser } = await import('n3');
-      return statements(
-        new Parser({ format: contentType, baseIRI: base }).parse(body),
-      );
+      return new Parser({ format: contentType, baseIRI: base }).parse(body);
     } catch {
       return 'parse-failed';
     }
@@ -335,28 +376,26 @@ function pageBase(page: Document, url: string): string {
 /**
  * All documents as one: JSON-LD 1.1 merges the scripts of an HTML page into one
  * dataset, and the same blank node label in two scripts names one node. Each
- * script keeps its own `@context`.
+ * script is expanded on its own, with its own `@context`, so a top-level
+ * `@graph` without `@id` stays the default graph.
  */
 async function jsonLd(
   documents: readonly string[],
   base: string,
   contexts: Readonly<Record<string, unknown>>,
-): Promise<readonly PublicStatement[] | ParseFailure> {
-  const nodes: object[] = [];
+): Promise<readonly Quad[] | ParseFailure> {
+  const values: object[] = [];
   try {
     for (const text of documents) {
       const value: unknown = JSON.parse(text);
       // A top-level string would be loaded as a URL; only data is accepted.
       if (typeof value !== 'object' || value === null) return 'parse-failed';
-      // A loop, not a spread: a large array would exceed the argument limit.
-      if (Array.isArray(value))
-        for (const node of value) nodes.push(node as object);
-      else nodes.push(value);
+      values.push(value);
     }
   } catch {
     return 'parse-failed';
   }
-  if (nodes.length === 0) return [];
+  if (values.length === 0) return [];
   const { default: jsonld } = await import('jsonld');
   let remote = false;
   const documentLoader = async (url: string): Promise<RemoteDocument> => {
@@ -370,20 +409,25 @@ async function jsonLd(
     };
   };
   try {
-    const expanded = await jsonld.expand(
-      nodes as Parameters<typeof jsonld.expand>[0],
-      { base, documentLoader },
-    );
+    // Blank node labels stay as written until `toRDF` issues them once for
+    // all scripts together.
+    const expanded: Awaited<ReturnType<typeof jsonld.expand>> = [];
+    for (const value of values) {
+      const nodes = await jsonld.expand(
+        value as Parameters<typeof jsonld.expand>[0],
+        { base, documentLoader },
+      );
+      // A loop, not a spread: a large array would exceed the argument limit.
+      for (const node of nodes) expanded.push(node);
+    }
     const kept = keepDatatypes(expanded);
     const quads = await jsonld.toRDF(expanded, {
       documentLoader,
       // Keeps `@direction` as an i18n datatype instead of dropping it.
       rdfDirection: 'i18n-datatype',
     } as Options.ToRdf);
-    return statements(
-      (quads as unknown as readonly Quad[]).map((quad) =>
-        kept.restore(directional(quad)),
-      ),
+    return (quads as unknown as readonly Quad[]).map((quad) =>
+      kept.restore(directional(quad)),
     );
   } catch {
     return remote ? 'remote-context' : 'parse-failed';
@@ -395,6 +439,7 @@ interface Quad {
   readonly subject: Term;
   readonly predicate: Term;
   readonly object: Term;
+  readonly graph: Term;
 }
 interface Term {
   readonly termType: string;
@@ -408,22 +453,41 @@ interface Term {
   readonly object?: Term;
 }
 
-/** Graph names are dropped; a triple in several graphs is kept once. */
-function statements(quads: readonly Quad[]): readonly PublicStatement[] {
-  const seen = new Set<string>();
-  const result: PublicStatement[] = [];
-  for (const quad of quads) {
-    const statement = {
+/** Each quad once, compared as a whole, including its graph. */
+function dataset(quads: readonly Quad[]): readonly PublicQuad[] {
+  return unique(
+    quads.map((quad) => ({
       subject: term(quad.subject),
       predicate: term(quad.predicate),
       object: term(quad.object),
-    };
-    const key = JSON.stringify(statement);
-    if (seen.has(key)) continue;
+      graph:
+        quad.graph.termType === 'DefaultGraph'
+          ? { type: 'default' }
+          : term(quad.graph),
+    })),
+  );
+}
+
+/** Graph names are dropped; a triple in several graphs is kept once. */
+function statements(quads: readonly PublicQuad[]): readonly PublicStatement[] {
+  return unique(
+    quads.map(({ subject, predicate, object }) => ({
+      subject,
+      predicate,
+      object,
+    })),
+  );
+}
+
+/** The first of equal values, in order. Terms have a fixed key order. */
+function unique<T>(values: readonly T[]): readonly T[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = JSON.stringify(value);
+    if (seen.has(key)) return false;
     seen.add(key);
-    result.push(statement);
-  }
-  return result;
+    return true;
+  });
 }
 
 const XSD_DOUBLE = 'http://www.w3.org/2001/XMLSchema#double';
