@@ -326,11 +326,10 @@ export function neighborhood(
   sources: readonly SourceRead[],
   hidden: readonly Area[],
 ): Neighborhood {
-  const hides = new Set(hidden.map((area) => JSON.stringify(area)));
-  const visible = (statement: Statement) =>
-    !hides.has(
-      JSON.stringify({ pod: statement.pod, context: statement.context }),
-    );
+  // By value: the order or extra properties of an Area never matter.
+  const area = ({ pod, context }: Area) => JSON.stringify([pod, context]);
+  const hides = new Set(hidden.map(area));
+  const visible = (statement: Statement) => !hides.has(area(statement));
   const seen = new Set<string>();
   const statements: Statement[] = [];
   for (const { pages } of sources)

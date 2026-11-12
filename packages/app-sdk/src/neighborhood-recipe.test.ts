@@ -430,6 +430,9 @@ describe('several Pods and Contexts', () => {
       [alice, ctx(alice, 'y')],
       [bob, ctx(bob, 'x')],
     ]);
+    // An equal Area hides the same, whatever its property order or extras.
+    const reordered = { label: 'X', context: ctx(alice, 'x'), pod: alice };
+    expect(neighborhood(sources, [reordered])).toEqual(hidden);
   });
 
   it('keeps blank nodes of two reads apart, and one statement on two pages once', async () => {
