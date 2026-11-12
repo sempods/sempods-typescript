@@ -600,7 +600,10 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 
   The adapter owns loading, empty, signed-out and failed groups, per-Pod
   retry/sign-in, unavailable retained choices, blocked selection and share
-  errors. SDK actions still own draft/pending/unconfirmed-write guards. Apps
+  errors. An empty ready Pod offers sharing directly for that Pod, including
+  an inactive one. The general sharing action names the active Pod; sign-in
+  and retry actions identify their Pod for assistive technology and typeahead.
+  SDK actions still own draft/pending/unconfirmed-write guards. Apps
   supply domain words and content, not a second catalogue, guard or generic
   recovery UI. `AppAccess` keeps access management and its own focus target.
   No global Button or menu padding changes are needed.
