@@ -31,8 +31,8 @@ references for the task at hand, not prerequisites to read in order.
   addresses for values a SPARQL read returns.
 - [Resource cards](resource-cards.md): cards with pictures and dates from
   every connected Pod, with the source of each value and bounded reads.
-- [Neighborhood](neighborhood.md): the statements around a resource in pages,
-  with bounded examples of the kinds a cut first page hides.
+- [Neighborhood](neighborhood.md): the statements around a resource, page by
+  page, with a few examples of other predicates.
 - [Public RDF](public-rdf.md): one explicit, credential-free lookup of an IRI's
   own RDF document, kept apart from Pod data.
 - [TODO example](../examples/todo/README.md) and

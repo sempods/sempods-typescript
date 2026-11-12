@@ -5,8 +5,8 @@ import {
   MAX_EXAMPLES,
   PAGE_SIZE,
   examplesQuery,
-  kindsOf,
-  kindsQuery,
+  predicatesOf,
+  predicatesQuery,
   neighborhood,
   pageOf,
   pageQuery,
@@ -60,9 +60,9 @@ assert.equal(first.truncated, true);
 const input = sampleInput(ada, 'in', first, []);
 assert.ok(input);
 assert.deepEqual(input.shown, ['urn:p:follows']);
-const found = kindsOf(await select(kindsQuery(input)), input);
+const found = predicatesOf(await select(predicatesQuery(input)), input);
 const sample = sampleOf(
-  await select(examplesQuery(input, found.kinds)),
+  await select(examplesQuery(input, found.predicates)),
   alice,
   input,
   found,

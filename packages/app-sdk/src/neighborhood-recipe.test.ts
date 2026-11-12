@@ -8,12 +8,12 @@ import { anonymous, createPod, type SelectResult } from '@sempods/client-sdk';
 import { createRequire } from 'node:module';
 import {
   MAX_EXAMPLES,
-  MAX_KINDS,
+  MAX_PREDICATES,
   PAGE_SIZE,
   examplesQuery,
   hiddenIn,
-  kindsOf,
-  kindsQuery,
+  predicatesOf,
+  predicatesQuery,
   neighborhood,
   pageOf,
   pageQuery,
@@ -82,10 +82,10 @@ function engine(pod: string, nquads: readonly string[]) {
       ),
     /** Both sample queries, as `sampleRead` sends them. */
     async sample(input: SampleInput): Promise<Sample> {
-      const found = kindsOf(await select(kindsQuery(input)), input);
-      if (found.kinds.length === 0) return { ...found, statements: [] };
+      const found = predicatesOf(await select(predicatesQuery(input)), input);
+      if (found.predicates.length === 0) return { ...found, statements: [] };
       return sampleOf(
-        await select(examplesQuery(input, found.kinds)),
+        await select(examplesQuery(input, found.predicates)),
         pod,
         input,
         found,
@@ -107,7 +107,7 @@ const brief = (statement: Statement) => [
   statement.other.type === 'unsupported' ? undefined : statement.other.value,
   statement.context,
 ];
-const kindsIn = (statements: readonly Statement[]) => [
+const predicatesIn = (statements: readonly Statement[]) => [
   ...new Set(statements.map((statement) => statement.predicate)),
 ];
 
@@ -123,20 +123,20 @@ describe('queries', () => {
     expect(pageQuery(ada, 'out', 100)).toContain(
       `LIMIT ${PAGE_SIZE + 1} OFFSET 100`,
     );
-    const kinds = kindsQuery(input);
+    const kinds = predicatesQuery(input);
     expect(kinds).toContain(`?other ?p <${ada}>`);
     expect(kinds).toContain(`FILTER(?g NOT IN (<${ctx(alice, 'private')}>))`);
     expect(kinds).toContain(`FILTER(?p NOT IN (<${P}a-follows>))`);
-    expect(kinds).toContain(`LIMIT ${MAX_KINDS + 1}`);
+    expect(kinds).toContain(`LIMIT ${MAX_PREDICATES + 1}`);
     const many = Array.from({ length: 40 }, (_, i) => `${P}k${i}`);
     const examples = examplesQuery(input, many);
-    // One limited subquery per kind, at most MAX_KINDS of them.
-    expect(examples.match(/VALUES \?p/g)).toHaveLength(MAX_KINDS);
+    // One limited subquery per kind, at most MAX_PREDICATES of them.
+    expect(examples.match(/VALUES \?p/g)).toHaveLength(MAX_PREDICATES);
     expect(
       examples.match(new RegExp(`LIMIT ${MAX_EXAMPLES}\\b`, 'g')),
-    ).toHaveLength(MAX_KINDS);
-    expect(examples.match(/FILTER\(\?g NOT IN/g)).toHaveLength(MAX_KINDS);
-    expect(examples).toContain(`LIMIT ${MAX_KINDS * MAX_EXAMPLES}`);
+    ).toHaveLength(MAX_PREDICATES);
+    expect(examples.match(/FILTER\(\?g NOT IN/g)).toHaveLength(MAX_PREDICATES);
+    expect(examples).toContain(`LIMIT ${MAX_PREDICATES * MAX_EXAMPLES}`);
   });
 
   it('refuses a root, kind or Context that would break the query', () => {
@@ -147,8 +147,8 @@ describe('queries', () => {
       'urn:a\u0000',
     ]) {
       expect(() => pageQuery(bad, 'out', 0)).toThrow();
-      expect(() => kindsQuery({ ...input, root: bad })).toThrow();
-      expect(() => kindsQuery({ ...input, hidden: [bad] })).toThrow();
+      expect(() => predicatesQuery({ ...input, root: bad })).toThrow();
+      expect(() => predicatesQuery({ ...input, hidden: [bad] })).toThrow();
       expect(() => examplesQuery(input, [bad])).toThrow();
     }
     expect(() => pageQuery(ada, 'out', -1)).toThrow();
@@ -159,7 +159,7 @@ describe('queries', () => {
 describe('a dense first page', () => {
   const data = [
     ...dense(60),
-    // Other kinds in a Context that sorts after the dense ones.
+    // Other predicates in a Context that sorts after the dense ones.
     `<https://people.example/bo> <${P}likes> <${ada}> ${g(alice, 'z-notes')} .`,
     `_:x <${P}mentions> <${ada}> ${g(alice, 'z-notes')} .`,
     ...Array.from(
@@ -170,14 +170,14 @@ describe('a dense first page', () => {
     `<${ada}> <${P}born> "1815-12-10"^^<${XSD}date> ${g(alice, 'z-notes')} .`,
   ];
 
-  it('shows one kind, and the sample adds the other kinds of both directions', async () => {
+  it('shows one predicate, and the sample adds the others of both directions', async () => {
     const pod = engine(alice, data);
     const result: Statement[] = [];
     for (const direction of ['in', 'out'] as const) {
       const first = await pod.page(ada, direction);
       expect(first.truncated).toBe(true);
       expect(first.statements).toHaveLength(PAGE_SIZE);
-      expect(kindsIn(first.statements)).toEqual([
+      expect(predicatesIn(first.statements)).toEqual([
         direction === 'in' ? `${P}a-follows` : `${P}a-tag`,
       ]);
       const input = sampleInput(ada, direction, first, [])!;
@@ -204,7 +204,7 @@ describe('a dense first page', () => {
     expect(pod.queries).toHaveLength(6);
   });
 
-  it('reads no sample for a complete first page, and one query without missing kinds', async () => {
+  it('reads no sample for a complete first page, and one query when no predicate is missing', async () => {
     const pod = engine(alice, dense(10));
     const first = await pod.page(ada, 'in');
     expect(first.truncated).toBe(false);
@@ -214,8 +214,8 @@ describe('a dense first page', () => {
     const cut = engine(alice, dense(60));
     const input = sampleInput(ada, 'in', await cut.page(ada, 'in'), [])!;
     expect(await cut.sample(input)).toEqual({
-      kinds: [],
-      moreKinds: false,
+      predicates: [],
+      morePredicates: false,
       statements: [],
     });
     expect(cut.queries).toHaveLength(2);
@@ -223,7 +223,7 @@ describe('a dense first page', () => {
 });
 
 describe('bounds', () => {
-  it('caps kinds and examples, however many the Pod has', async () => {
+  it('caps predicates and examples, however many the Pod has', async () => {
     const pod = engine(alice, [
       ...dense(60),
       ...Array.from({ length: 40 }, (_, k) =>
@@ -235,15 +235,15 @@ describe('bounds', () => {
       ).flat(),
     ]);
     const input = sampleInput(ada, 'in', await pod.page(ada, 'in'), [])!;
-    const kinds = await pod.select(kindsQuery(input));
-    expect(kinds.rows).toHaveLength(MAX_KINDS + 1);
-    const found = kindsOf(kinds, input);
-    expect(found.kinds).toHaveLength(MAX_KINDS);
-    expect(found.moreKinds).toBe(true);
-    const examples = await pod.select(examplesQuery(input, found.kinds));
-    expect(examples.rows).toHaveLength(MAX_KINDS * MAX_EXAMPLES);
+    const kinds = await pod.select(predicatesQuery(input));
+    expect(kinds.rows).toHaveLength(MAX_PREDICATES + 1);
+    const found = predicatesOf(kinds, input);
+    expect(found.predicates).toHaveLength(MAX_PREDICATES);
+    expect(found.morePredicates).toBe(true);
+    const examples = await pod.select(examplesQuery(input, found.predicates));
+    expect(examples.rows).toHaveLength(MAX_PREDICATES * MAX_EXAMPLES);
     const sample = sampleOf(examples, alice, input, found);
-    for (const kind of found.kinds)
+    for (const kind of found.predicates)
       expect(
         sample.statements.filter((s) => s.predicate === kind),
       ).toHaveLength(MAX_EXAMPLES);
@@ -269,8 +269,8 @@ describe('bounds', () => {
     const all = await pod.select(
       `SELECT ?g ?p ?other WHERE { GRAPH ?g { ?other ?p <${ada}> } } ORDER BY ?g ?p ?other`,
     );
-    const found = kindsOf(all, input);
-    expect(found.kinds).toEqual([`${P}likes`]);
+    const found = predicatesOf(all, input);
+    expect(found.predicates).toEqual([`${P}likes`]);
     const sample = sampleOf(all, alice, input, found);
     expect(sample.statements).toHaveLength(MAX_EXAMPLES);
     expect(sample.statements.map((s) => s.context)).not.toContain(
@@ -284,7 +284,7 @@ describe('hidden Contexts', () => {
     const hidden: Area[] = [{ pod: alice, context: ctx(alice, 'a-hidden') }];
     const pod = engine(alice, [
       ...dense(60),
-      // Twenty kinds in a hidden Context, sorting before the visible ones.
+      // Twenty predicates in a hidden Context, sorting before the visible ones.
       ...Array.from(
         { length: 20 },
         (_, k) =>
@@ -303,8 +303,8 @@ describe('hidden Contexts', () => {
     const input = sampleInput(ada, 'in', first, hiddenIn(hidden, alice))!;
     expect(input.hidden).toEqual([ctx(alice, 'a-hidden')]);
     const sample = await pod.sample(input);
-    expect(sample.kinds).toEqual([`${P}cites`, `${P}likes`]);
-    expect(sample.moreKinds).toBe(false);
+    expect(sample.predicates).toEqual([`${P}cites`, `${P}likes`]);
+    expect(sample.morePredicates).toBe(false);
     expect(sample.statements.map(brief)).toEqual([
       ['in', `${P}cites`, 'https://people.example/cy', ctx(alice, 'z-visible')],
       ['in', `${P}likes`, 'https://people.example/bo', ctx(alice, 'z-visible')],
@@ -351,7 +351,7 @@ describe('later pages', () => {
     const pod = engine(alice, data);
     const first = await pod.page(ada, 'in');
     const sample = await pod.sample(sampleInput(ada, 'in', first, [])!);
-    expect(sample.kinds).toEqual([`${P}z-blank`, `${P}z-other`]);
+    expect(sample.predicates).toEqual([`${P}z-blank`, `${P}z-other`]);
     expect(
       neighborhood([{ pages: [first], sample }], []).examples,
     ).toHaveLength(1 + MAX_EXAMPLES);
@@ -384,7 +384,7 @@ describe('later pages', () => {
     const shown = neighborhood([{ pages: [first, second], sample }], []);
     // Page two holds z-other and the first zz-later statements: their
     // examples are now ordinary statements, each once.
-    expect(kindsIn(sample.statements)).toEqual([
+    expect(predicatesIn(sample.statements)).toEqual([
       `${P}z-blank`,
       `${P}z-other`,
       `${P}zz-later`,

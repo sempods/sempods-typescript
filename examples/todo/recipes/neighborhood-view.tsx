@@ -29,102 +29,96 @@ import { exactTerm } from './rdf-values.js';
 
 const texts = {
   en: {
-    statements: 'Relationships',
-    examples: 'Examples of other kinds',
-    examplesNote:
-      'A few examples per kind, not all of them. Load more pages for the complete list.',
+    statements: 'Statements',
+    examples: 'Examples',
+    examplesNote: 'A few statements per predicate, not all of them.',
     out: 'outgoing',
     in: 'incoming',
     loading: 'Loading',
     loadMore: 'Load more',
     retry: 'Retry',
     retryExamples: 'Retry examples',
-    moreKinds: 'More kinds exist than examples show',
+    morePredicates: 'There are more predicates',
     from: (pod: string, context: string) => `${pod} · ${context}`,
   },
   de: {
-    statements: 'Beziehungen',
-    examples: 'Beispiele weiterer Arten',
-    examplesNote:
-      'Einige Beispiele je Art, nicht alle. Weitere Seiten laden für die vollständige Liste.',
+    statements: 'Aussagen',
+    examples: 'Beispiele',
+    examplesNote: 'Einige Aussagen je Prädikat, nicht alle.',
     out: 'ausgehend',
     in: 'eingehend',
     loading: 'Wird geladen',
     loadMore: 'Mehr laden',
     retry: 'Erneut versuchen',
     retryExamples: 'Beispiele erneut laden',
-    moreKinds: 'Es gibt mehr Arten, als Beispiele zeigen',
+    morePredicates: 'Es gibt weitere Prädikate',
     from: (pod: string, context: string) => `${pod} · ${context}`,
   },
 };
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-/** Reading (signed in, or without a token): bindPod never throws for it. */
+/** A connection that can read: bindPod never throws for it. */
 const reads = ({ reading }: Connection) => reading !== null;
 
 const directions: readonly Direction[] = ['out', 'in'];
 
-type Kind = 'loading' | 'ready' | 'failed';
-/** Failed, refused, cancelled or withdrawn: no data from this read. */
-const kindOf = (state: LoadState<unknown>): Kind =>
+/** `failed` also covers refused, cancelled and lost access. */
+type ReadState = 'loading' | 'ready' | 'failed';
+const stateOf = (state: LoadState<unknown>): ReadState =>
   state.kind === 'loading' || state.kind === 'ready' ? state.kind : 'failed';
 
 interface Report {
   readonly data: Page | Sample | undefined;
-  readonly kind: Kind;
+  readonly kind: ReadState;
 }
 type Reporter = (id: string, value?: Report) => void;
 type Register = (id: string, reload?: () => void) => void;
 
-/** What one direction of one reading connection says beyond its statements. */
+/** The state of one direction of one Pod. */
 export interface SourceStatus {
   readonly connection: string;
   readonly pod: string;
   readonly direction: Direction;
-  /** Ordinary pages requested so far. */
+  /** Pages asked for so far. */
   readonly pages: number;
-  /** A page has not answered yet. */
   readonly loading: boolean;
-  /** A page failed, was refused, cancelled or lost access. */
+  /** A page could not be read. */
   readonly failed: boolean;
-  /** Every page answered and the last one was cut: `loadMore` reads the next. */
+  /** There is a next page: `loadMore` reads it. */
   readonly more: boolean;
-  /** `none`: the first page is complete or has not answered. */
-  readonly sample: 'none' | Kind;
-  /** The sample found more kinds than it shows. */
-  readonly moreKinds: boolean;
+  /** `none`: no sample, because the first page is not full or not read. */
+  readonly sample: 'none' | ReadState;
+  readonly morePredicates: boolean;
   readonly loadMore: () => void;
-  /** Reads the failed pages of this source again. */
+  /** Reads the failed pages again. */
   readonly retry: () => void;
-  /** Reads the sample again; the pages stay. */
+  /** Reads the sample again. */
   readonly retrySample: () => void;
 }
 
 export interface NeighborhoodOptions {
-  /** Contexts the app hides. An inline array is fine: it is compared by value. */
+  /** Contexts to hide. An inline array is fine. */
   readonly hidden?: readonly Area[];
-  /** For what the person looks at now, such as the selected resource. */
+  /** For what the person looks at now. */
   readonly priority?: 'current';
 }
 
 /**
- * The neighborhood of `root` from every reading connection: per direction,
- * the ordinary pages the app asked for, and a sample when the first page is
- * cut. Render `readers` once; they render nothing. `podReadLimit` on the
- * runtime bounds the requests; the app decides when to load more.
+ * The statements around `root` in every Pod that can be read: pages per
+ * direction, and a sample when the first page is full. Render `readers`
+ * once; they render nothing.
  */
 export function useNeighborhood(
   runtime: BrowserRuntime,
   root: string,
   { hidden = [], priority }: NeighborhoodOptions = {},
 ) {
-  // Source order: Pod URL, then connection. Adapt it, for example to put the
-  // active Pod first.
+  // Order by Pod URL. Adapt it, for example to put the active Pod first.
   const connections = useConnections()
     .filter(reads)
     .sort((a, b) => compare(a.podUrl, b.podUrl) || compare(a.id, b.id));
-  // Pages per source and direction; the first is always read.
+  // Pages per Pod and direction; the first is always read.
   const [counts, setCounts] = useState<ReadonlyMap<string, number>>(
     () => new Map(),
   );
@@ -139,13 +133,13 @@ export function useNeighborhood(
       return next;
     });
   }, []);
-  // Retries are actions, not state: keeping them renders nothing.
+  // Retries are kept outside of state: they never cause a render.
   const reloads = useRef(new Map<string, () => void>());
   const register = useCallback<Register>((id, reload) => {
     if (reload) reloads.current.set(id, reload);
     else reloads.current.delete(id);
   }, []);
-  // A root that is no IRI is not read: its sources become unavailable.
+  // A root that is no IRI is not read.
   const valid = isIri(root);
   const sources = connections.flatMap((connection) =>
     directions.map((direction) => {
@@ -156,7 +150,7 @@ export function useNeighborhood(
         return { id, offset: index * PAGE_SIZE, report: reports.get(id) };
       });
       const first = pages[0]!.report;
-      // Only the first page decides the sample: later pages never restart it.
+      // Only the first page decides the sample.
       const input =
         first?.kind === 'ready'
           ? sampleInput(
@@ -179,7 +173,7 @@ export function useNeighborhood(
       };
     }),
   );
-  // Only current reads count, also before a removed reader's cleanup ran.
+  // Only current reads count.
   const { statements, examples } = neighborhood(
     sources.map((source) => ({
       pages: source.pages.map(
@@ -195,24 +189,23 @@ export function useNeighborhood(
   );
   const status = sources.map(
     ({ connection, direction, base, count, pages, sampleId, sample }) => {
-      const kinds = pages.map(({ report }) => report?.kind ?? 'loading');
+      const states = pages.map(({ report }) => report?.kind ?? 'loading');
       const last = pages.at(-1)!.report;
       const more =
-        kinds.every((kind) => kind === 'ready') &&
+        states.every((state) => state === 'ready') &&
         (last?.data as Page | undefined)?.truncated === true;
       return {
         connection: connection.id,
         pod: connection.podUrl,
         direction,
         pages: count,
-        loading: kinds.includes('loading'),
-        failed: kinds.includes('failed'),
+        loading: states.includes('loading'),
+        failed: states.includes('failed'),
         more,
         sample: sampleId ? (sample?.kind ?? 'loading') : 'none',
-        moreKinds:
-          sample?.kind === 'ready' && (sample.data as Sample).moreKinds,
-        // Compared with the count it was offered for: a double click reads
-        // one page, not two.
+        morePredicates:
+          sample?.kind === 'ready' && (sample.data as Sample).morePredicates,
+        // A double click reads one page, not two.
         loadMore: () => {
           if (more)
             setCounts((old) =>
@@ -268,7 +261,7 @@ export function useNeighborhood(
   return { statements, examples, sources: status, readers };
 }
 
-/** Reports a read's data and state, and its retry, until it unmounts. */
+/** Reports data, state and retry of one read until it unmounts. */
 function useReport(
   id: string,
   load: {
@@ -279,10 +272,9 @@ function useReport(
   report: Reporter,
   register: Register,
 ) {
-  const kind = kindOf(load.state);
+  const kind = stateOf(load.state);
   const { data, reload } = load;
   useEffect(() => report(id, { data, kind }), [id, data, kind, report]);
-  // Unmount (root changed, connection gone, new sample input) withdraws it.
   useEffect(() => () => report(id), [id, report]);
   useEffect(() => {
     register(id, () => void reload());
@@ -290,7 +282,7 @@ function useReport(
   }, [id, reload, register]);
 }
 
-// Memoized: a report from one read re-renders the host, not every read.
+// Memoized: one report re-renders the host, not every reader.
 const PageReader = memo(function PageReader(props: {
   readonly id: string;
   readonly pod: BoundPod | null;
@@ -321,8 +313,7 @@ const SampleReader = memo(function SampleReader(props: {
   readonly register: Register;
 }) {
   const { id, pod, input, priority } = props;
-  // The id holds the whole input: a new input is a new reader, and the old
-  // one's late answer never shows.
+  // A new input is a new reader: a late answer of the old one never shows.
   const load = usePodLoad<Page | Sample>(
     pod,
     (target, signal) => sampleRead(input, priority)(target, signal),
@@ -347,9 +338,8 @@ function StatementView({ statement }: { readonly statement: Statement }) {
 }
 
 /**
- * App placeholder: the statements, the examples apart from them, and one row
- * of controls per source and direction. The app's own graph and the place of
- * its load-more controls replace it.
+ * App placeholder: statements, examples apart from them, and controls per
+ * Pod and direction. Replace it with the app's own view.
  */
 export function NeighborhoodList({
   runtime,
@@ -410,7 +400,7 @@ export function NeighborhoodList({
               {t.retryExamples}
             </button>
           )}
-          {source.moreKinds && <small>{t.moreKinds}</small>}
+          {source.morePredicates && <small>{t.morePredicates}</small>}
         </div>
       ))}
     </>

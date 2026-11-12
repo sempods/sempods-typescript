@@ -1,76 +1,66 @@
 /**
- * The RDF neighborhood of one resource: ordinary pages plus, when the first
- * page is cut, a bounded sample of the relationship kinds it does not show.
- * App-local recipe code on public types, without React: copy and adapt it.
- * The page size, the caps and the presentation belong to the app.
+ * The statements around one resource, page by page. When the first page is
+ * full, a small sample adds examples of the predicates it does not show.
+ * React-free recipe code on public types: copy and adapt it.
  */
 import type { PodRead } from '@sempods/app-sdk';
 import type { SelectResult, SparqlTerm } from '@sempods/client-sdk';
 import { exactTerm } from './rdf-values.js';
 
-/** `out`: the resource is the subject. `in`: the resource is the object. */
+/** `out`: the resource is the subject. `in`: it is the object. */
 export type Direction = 'out' | 'in';
 
-/** Statements per ordinary page; one more row marks the page as truncated. */
+/** Statements per page. */
 export const PAGE_SIZE = 50;
-/** Relationship kinds one sample discovers at most beyond the first page. */
-export const MAX_KINDS = 16;
-/** Example statements per discovered kind. */
+/** Predicates a sample finds at most. */
+export const MAX_PREDICATES = 16;
+/** Examples per predicate. */
 export const MAX_EXAMPLES = 3;
 
 /** A Context of one Pod that the app hides. */
 export interface Area {
   readonly pod: string;
-  /** The Context IRI (the SPARQL graph). */
   readonly context: string;
 }
 
-/** One statement between the resource and another term, in one Context. */
+/** One statement about the resource, in one Context of one Pod. */
 export interface Statement {
   readonly pod: string;
   readonly context: string;
   readonly direction: Direction;
   readonly predicate: string;
-  /**
-   * The other end, exact as received: the object of an outgoing statement,
-   * the subject of an incoming one.
-   */
+  /** The other end, exactly as received. */
   readonly other: SparqlTerm;
-  /**
-   * Equal for the same statement in the same Pod and Context. A blank node is
-   * local to its read: its statements are equal only within that read.
-   */
+  /** Equal for the same statement. A blank node counts only within its read. */
   readonly key: string;
 }
 
-/** One ordinary page of one direction in one Pod. */
 export interface Page {
   readonly statements: readonly Statement[];
-  /** The Pod has more: the next page starts at the next offset. */
+  /** The Pod has more: there is a next page. */
   readonly truncated: boolean;
 }
 
-/** What a sample reads: everything its two queries depend on. */
+/** Everything a sample depends on. */
 export interface SampleInput {
   readonly root: string;
   readonly direction: Direction;
-  /** Predicates the first page shows in visible Contexts, sorted. */
+  /** Predicates the first page shows, sorted. */
   readonly shown: readonly string[];
-  /** Contexts of this Pod the app hides, sorted. */
+  /** Hidden Contexts of this Pod, sorted. */
   readonly hidden: readonly string[];
 }
 
-/** Example statements of relationship kinds the first page does not show. */
+/** A few examples of predicates the first page does not show. */
 export interface Sample {
-  /** The discovered kinds, at most `MAX_KINDS`, sorted. */
-  readonly kinds: readonly string[];
-  /** The Pod has more kinds than `MAX_KINDS` beyond the first page. */
-  readonly moreKinds: boolean;
-  /** At most `MAX_EXAMPLES` per kind: examples, never all of a kind. */
+  readonly predicates: readonly string[];
+  /** The Pod has more predicates than `MAX_PREDICATES`. */
+  readonly morePredicates: boolean;
+  /** At most `MAX_EXAMPLES` per predicate: examples, not all. */
   readonly statements: readonly Statement[];
 }
 
-/** Whether `value` can stand verbatim in `<…>` of a query. */
+/** Whether `value` can stand in `<…>` of a query. */
 export function isIri(value: string): boolean {
   return (
     /^[a-z][a-z\d+.-]*:/i.test(value) && !/[\p{Cc}\s<>"{}|^`\\]/u.test(value)
@@ -78,7 +68,6 @@ export function isIri(value: string): boolean {
 }
 
 const iri = (value: string) => {
-  // Values come from decoded terms; this is a second check, not a sanitizer.
   if (!isIri(value)) throw new Error(`Not an IRI for a query: ${value}`);
   return `<${value}>`;
 };
@@ -90,11 +79,7 @@ const edge = (root: string, direction: Direction) =>
   direction === 'out' ? `${iri(root)} ?p ?other` : `?other ?p ${iri(root)}`;
 const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
 
-/**
- * One ordinary page: the statements of every Context, sorted, so that the
- * next offset continues where this page stopped. The app may keep its own
- * page query; the sample needs only `?g ?p ?other` of its first page.
- */
+/** One page. One extra row tells that there is a next page. */
 export function pageQuery(
   root: string,
   direction: Direction,
@@ -108,32 +93,31 @@ export function pageQuery(
 }
 
 /**
- * The first query of a sample: kinds in visible Contexts that the first page
- * does not show. Hidden Contexts are excluded before the limit, so they never
- * use it up. One more row says that more kinds exist.
+ * Sample, step 1: predicates the first page does not show. Hidden Contexts
+ * are filtered before the limit. One extra row tells that there are more.
  */
-export function kindsQuery(input: SampleInput): string {
+export function predicatesQuery(input: SampleInput): string {
   return `SELECT DISTINCT ?p WHERE {
   GRAPH ?g { ${edge(input.root, input.direction)} }
   ${notIn('?g', input.hidden)}
   ${notIn('?p', input.shown)}
-} ORDER BY ?p LIMIT ${MAX_KINDS + 1}`;
+} ORDER BY ?p LIMIT ${MAX_PREDICATES + 1}`;
 }
 
 /**
- * The second query: up to `MAX_EXAMPLES` statements of each kind, one limited
- * subquery per kind, so that a dense kind cannot crowd out the others.
+ * Sample, step 2: a few statements per predicate. Each predicate has its own
+ * limit, so one frequent predicate cannot crowd out the others.
  */
 export function examplesQuery(
   input: SampleInput,
-  kinds: readonly string[],
+  predicates: readonly string[],
 ): string {
-  const branches = sorted(kinds)
-    .slice(0, MAX_KINDS)
+  const branches = sorted(predicates)
+    .slice(0, MAX_PREDICATES)
     .map(
-      (kind) => `{
+      (predicate) => `{
     SELECT DISTINCT ?g ?p ?other WHERE {
-      VALUES ?p { ${iri(kind)} }
+      VALUES ?p { ${iri(predicate)} }
       GRAPH ?g { ${edge(input.root, input.direction)} }
       ${notIn('?g', input.hidden)}
     } ORDER BY ?g ?other LIMIT ${MAX_EXAMPLES}
@@ -141,10 +125,10 @@ export function examplesQuery(
     );
   return `SELECT ?g ?p ?other WHERE {
   ${branches.join(' UNION ')}
-} ORDER BY ?p ?g ?other LIMIT ${MAX_KINDS * MAX_EXAMPLES}`;
+} ORDER BY ?p ?g ?other LIMIT ${MAX_PREDICATES * MAX_EXAMPLES}`;
 }
 
-/** A number per read result, so blank nodes of two reads never meet. */
+// A number per read, so blank nodes of two reads never match.
 const reads = new WeakMap<SelectResult, number>();
 let lastRead = 0;
 const readId = (result: SelectResult) => {
@@ -152,7 +136,6 @@ const readId = (result: SelectResult) => {
   return reads.get(result)!;
 };
 
-/** The statements of one read, at most `limit`; incomplete rows are ignored. */
 function statementsOf(
   result: SelectResult,
   pod: string,
@@ -171,7 +154,6 @@ function statementsOf(
   });
 }
 
-/** One ordinary page from the answer to `pageQuery`. */
 export function pageOf(
   result: SelectResult,
   pod: string,
@@ -183,7 +165,7 @@ export function pageOf(
   };
 }
 
-/** The hidden Contexts of one Pod, sorted. */
+/** The hidden Contexts of one Pod. */
 export function hiddenIn(hidden: readonly Area[], pod: string): string[] {
   return sorted(
     hidden.filter((area) => area.pod === pod).map((area) => area.context),
@@ -191,9 +173,8 @@ export function hiddenIn(hidden: readonly Area[], pod: string): string[] {
 }
 
 /**
- * What a sample of this direction reads, or undefined: a first page that is
- * complete shows every kind already. Depends on the first page only, so later
- * pages never start another sample.
+ * The sample for a full first page, or undefined. Only the first page
+ * counts, so loading more pages never starts another sample.
  */
 export function sampleInput(
   root: string,
@@ -215,45 +196,43 @@ export function sampleInput(
   };
 }
 
-/** The kinds from the answer to `kindsQuery`. */
-export function kindsOf(
+export function predicatesOf(
   result: SelectResult,
   input: SampleInput,
-): Pick<Sample, 'kinds' | 'moreKinds'> {
-  const kinds = result.rows.flatMap(({ p }) =>
+): Pick<Sample, 'predicates' | 'morePredicates'> {
+  const predicates = result.rows.flatMap(({ p }) =>
     p?.type === 'iri' && !input.shown.includes(p.value) ? [p.value] : [],
   );
   return {
-    kinds: sorted(kinds).slice(0, MAX_KINDS),
-    moreKinds: result.rows.length > MAX_KINDS,
+    predicates: sorted(predicates).slice(0, MAX_PREDICATES),
+    morePredicates: result.rows.length > MAX_PREDICATES,
   };
 }
 
-/** The sample from the answer to `examplesQuery`, within its caps. */
 export function sampleOf(
   result: SelectResult,
   pod: string,
   input: SampleInput,
-  found: Pick<Sample, 'kinds' | 'moreKinds'>,
+  found: Pick<Sample, 'predicates' | 'morePredicates'>,
 ): Sample {
-  const per = new Map<string, number>();
+  const count = new Map<string, number>();
+  // Check the limits again: a Pod may ignore them.
   const statements = statementsOf(
     result,
     pod,
     input.direction,
-    MAX_KINDS * MAX_EXAMPLES,
-  ).filter((statement) => {
-    // A Pod is not trusted to have applied the filters and limits.
-    if (!found.kinds.includes(statement.predicate)) return false;
-    if (input.hidden.includes(statement.context)) return false;
-    const count = per.get(statement.predicate) ?? 0;
-    per.set(statement.predicate, count + 1);
-    return count < MAX_EXAMPLES;
+    MAX_PREDICATES * MAX_EXAMPLES,
+  ).filter(({ predicate, context }) => {
+    if (!found.predicates.includes(predicate)) return false;
+    if (input.hidden.includes(context)) return false;
+    const n = count.get(predicate) ?? 0;
+    count.set(predicate, n + 1);
+    return n < MAX_EXAMPLES;
   });
   return { ...found, statements };
 }
 
-/** A read of one ordinary page through an explicit handle. */
+/** Reads one page through a `BoundPod`. */
 export function pageRead(
   root: string,
   direction: Direction,
@@ -272,24 +251,23 @@ export function pageRead(
 }
 
 /**
- * The two sample queries through an explicit handle: at most two requests,
- * and none after the first when no kind is missing. Both go through the
- * handle's read admission and stop with the same signal.
+ * Reads a sample through a `BoundPod`: two requests at most, one when no
+ * predicate is missing.
  */
 export function sampleRead(
   input: SampleInput,
   priority?: 'current',
 ): PodRead<Sample> {
-  const query = kindsQuery(input);
+  const query = predicatesQuery(input);
   return async (pod, signal) => {
     const options = { signal, ...(priority ? { priority } : {}) };
     const first = await pod.sparql.select(query, options);
     if (first.kind !== 'ok') return first;
-    const found = kindsOf(first.body, input);
-    if (found.kinds.length === 0)
+    const found = predicatesOf(first.body, input);
+    if (found.predicates.length === 0)
       return { kind: 'ok', body: { ...found, statements: [] } };
     const second = await pod.sparql.select(
-      examplesQuery(input, found.kinds),
+      examplesQuery(input, found.predicates),
       options,
     );
     if (second.kind !== 'ok') return second;
@@ -300,56 +278,45 @@ export function sampleRead(
   };
 }
 
-/** What one direction of one source has read so far. */
+/** What one direction of one Pod has read so far. */
 export interface SourceRead {
-  /** The ordinary pages in order; undefined for a page without data. */
+  /** The pages in order; undefined for a page without data. */
   readonly pages: readonly (Page | undefined)[];
   readonly sample?: Sample | undefined;
 }
 
 export interface Neighborhood {
-  /** Statements of the ordinary pages, in source and page order, each once. */
+  /** The statements of the pages, each once. */
   readonly statements: readonly Statement[];
-  /**
-   * Sample statements that no loaded page holds: examples of other kinds,
-   * not a complete list. Empty once the pages of their source are complete.
-   */
+  /** Sample statements that no page holds yet. Empty once all pages are read. */
   readonly examples: readonly Statement[];
 }
 
-/**
- * The statements to show, without hidden Contexts. Recomputed from the
- * current reads every time: a withdrawn source takes its statements along,
- * and a later page that holds an example replaces it.
- */
+/** What to show, without hidden Contexts. Recompute it on every change. */
 export function neighborhood(
   sources: readonly SourceRead[],
   hidden: readonly Area[],
 ): Neighborhood {
-  // By value: the order or extra properties of an Area never matter.
   const area = ({ pod, context }: Area) => JSON.stringify([pod, context]);
   const hides = new Set(hidden.map(area));
   const visible = (statement: Statement) => !hides.has(area(statement));
   const seen = new Set<string>();
+  const add = (list: Statement[], statement: Statement) => {
+    if (!visible(statement) || seen.has(statement.key)) return;
+    seen.add(statement.key);
+    list.push(statement);
+  };
   const statements: Statement[] = [];
   for (const { pages } of sources)
     for (const page of pages)
       for (const statement of page?.statements ?? [])
-        if (visible(statement) && !seen.has(statement.key)) {
-          seen.add(statement.key);
-          statements.push(statement);
-        }
+        add(statements, statement);
   const examples: Statement[] = [];
   for (const { pages, sample } of sources) {
-    // All pages read and the last one not cut: the pages hold everything.
+    // All pages read, the last one not full: the pages hold everything.
     const last = pages.at(-1);
-    const complete = pages.every(Boolean) && last && !last.truncated;
-    if (complete || !sample) continue;
-    for (const statement of sample.statements)
-      if (visible(statement) && !seen.has(statement.key)) {
-        seen.add(statement.key);
-        examples.push(statement);
-      }
+    if (pages.every(Boolean) && last && !last.truncated) continue;
+    for (const statement of sample?.statements ?? []) add(examples, statement);
   }
   return { statements, examples };
 }

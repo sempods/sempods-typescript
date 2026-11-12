@@ -139,12 +139,12 @@ function show(runtime: BrowserRuntime, root = ada, hidden?: readonly Area[]) {
   );
 }
 const listed = () =>
-  within(screen.getByRole('list', { name: 'Relationships' }))
+  within(screen.getByRole('list', { name: 'Statements' }))
     .queryAllByRole('listitem')
     .map((item) => item.textContent!);
 const examples = () => {
   const region = screen.queryByRole('region', {
-    name: 'Examples of other kinds',
+    name: 'Examples',
   });
   return region
     ? within(region)
