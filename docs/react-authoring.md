@@ -1033,8 +1033,8 @@ It follows `useAppState().access` ([access prompts](#access-prompts-and-your-own
   modal layer with the app's name, `icon` and `description`. The content stays
   mounted and inert behind it, and Escape does not close it. Without a
   connection, after a sign-out or an ended session and with missing required
-  scopes it is the sign-in view: remembered Pods with **Sign in** and
-  **Forget**, the Pod selector, and without a connection the address input
+  scopes it is the sign-in view: one Pod choice and one main action,
+  with another address and saved-address management as secondary steps
   (see [sign-in](#sign-in-and-pod-addresses)); a failed or cancelled callback
   names its cause there. A startup failure or a second tab offer **Reload**,
   unavailable session storage only explains; a sign-out or forget that could
@@ -1236,20 +1236,32 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 ### Sign-in and Pod addresses
 
-- One `allowedPods` entry or a preset needs no URL input; several get a finite
-  picker (choosing does not sign in); unrestricted apps show a **Pod address**
-  field. With a connection, adding another Pod is secondary.
+- On a first visit, unrestricted apps show a **Pod address** field. One
+  `allowedPods` entry or a preset needs no URL input; several get a finite
+  choice. Remembered Pods are offered before asking for another address.
+- Choose a Pod, then use the single main action. Choosing a radio option alone
+  never switches the active connection, navigates or discards a draft. A working
+  session offers **Open**, missing scopes offer **Change sharing**, and an
+  unreachable retained session offers **Try again**.
+- **Use another Pod** opens the address field where configuration allows it;
+  **Use a saved Pod** returns to the choice. **Manage saved Pods** separates
+  removal from sign-in. **Remove from this device** deletes the address and its
+  local session record, never Pod data. Errors and guarded leave decisions stay
+  with the SDK.
 - Input may omit `https://`; surrounding whitespace and one trailing slash are
   removed, other noncanonical input is rejected. Configured URLs must be
   canonical. Enter `http://127.0.0.1:…` explicitly for local HTTP.
-- `controls.podHint` and `controls.loginHint` are empty by default.
+- `controls.podHint` explains what a Pod is; `controls.loginHint` explains that
+  sign-in happens at the Pod. Override either through provider messages; an
+  empty string omits it. Choice and management labels are localized too.
 - No silent auth or automatic redirect; login and consent use the Pod's UI.
 - `podAddress="hidden"` works only while exactly one Pod is permitted, also
   when signing in again. A `podNames` name remains; without one no Pod line
   shows and duplicate saved connections are numbered. With several or
   unrestricted Pods (including a preset without `allowedPods`) the address
   stays, as does management's and **Full addresses**. A custom
-  `components.Connections` does not receive it; CSS on SDK markup is no stable
+  `components.Connections` receives this presentation preference; a replacement
+  must enforce the same single-permitted-Pod rule. CSS on SDK markup is no stable
   way to hide it.
 
 ### One known Pod
@@ -1432,9 +1444,11 @@ does not move them off centre.
 
 ### Replacing the connection view
 
-`components={{ Connections: MyPicker }}` replaces the connection view and keeps
-startup and callback presentation. It receives `ConnectionsProps` (`mode`,
-`podNames`) and uses `useConnections`, `useAppState` and guarded `useApp()`
+`components={{ Connections: MyPicker }}` replaces the connection view in the
+sign-in gate, Context surface and management while keeping startup and callback
+presentation. Standalone `AccessGate` accepts the same replacement. It receives
+`ConnectionsProps` (`mode`, `podNames`, `podAddress` and `surface`, which is
+`sign-in`, `context` or `management`) and uses `useConnections`, `useAppState` and guarded `useApp()`
 actions, never raw runtime selection. The **Pods & sharing** button opens it;
 access loss and toggling keep mounted content and drafts.
 

@@ -4,6 +4,24 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## Pending release: simpler AppAccess sign-in
+
+The default sign-in shows one Pod choice and one main action. Another address
+opens with **Use another Pod**; removal lives under **Manage saved Pods** and
+says **Remove from this device**. Pod and sign-in hints now have EN/DE defaults;
+set them to an empty string through provider messages to omit them. Existing
+message overrides, app identity and theme tokens still apply. Primary colour
+no longer forces a row action to full width.
+
+`ConnectionsProps` adds optional `surface` and `podAddress` presentation props.
+Standalone `AccessGate` now also accepts `components.Connections`. Existing
+replacements keep compiling; replacements can distinguish sign-in, Context and
+management rather than inferring it from session state. Use guarded `useApp()`
+actions, as before. See [custom connection views](react-authoring.md#replacing-the-connection-view).
+
+No app should copy the default login or session logic. Upgrade to the containing
+SDK release to receive it; this source change is not in published 0.8.0.
+
 ## Pending release: remembered Pod deduplication
 
 `runtime.connect(url)` now reuses a matching connection for any Pod, not only

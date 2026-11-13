@@ -4239,7 +4239,7 @@ async function accessSettings({ browser, origin, engine }) {
           await sheet.getByRole('button', { name: 'Sign out' }).click();
           const gate = p.locator('dialog[data-sempods-ui="gate"]');
           await gate
-            .getByRole('list', { name: 'Pods on this device' })
+            .getByRole('button', { name: 'Sign in', exact: true })
             .waitFor();
           await sheet.getByRole('button', { name: 'Close' }).click();
           await gone(sheet);
@@ -4248,6 +4248,9 @@ async function accessSettings({ browser, origin, engine }) {
           await dialog.getByRole('radio', { name: 'Deutsch' }).check();
           await dialog.getByRole('button', { name: 'Schließen' }).click();
           await gone(dialog);
+          await gate
+            .getByText('Gespeicherte Pods verwalten', { exact: true })
+            .click();
           const list = gate.getByRole('list', {
             name: 'Pods auf diesem Gerät',
           });
@@ -4257,7 +4260,9 @@ async function accessSettings({ browser, origin, engine }) {
             if (request.method() !== 'GET' && request.url().startsWith(origin))
               writes.push(request.method() + ' ' + request.url());
           });
-          await list.getByRole('button', { name: 'Vergessen' }).click();
+          await list
+            .getByRole('button', { name: 'Von diesem Gerät entfernen' })
+            .click();
           const forgotten = await gone(list);
           await p.waitForTimeout(200);
           return {

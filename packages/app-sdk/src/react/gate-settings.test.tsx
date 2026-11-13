@@ -287,7 +287,9 @@ it('offers settings beside a remembered Pod after a reload and forgets it withou
   // Forget still works from the same gate, and sends nothing to the Pod.
   const before = writes(f).length;
   await act(async () =>
-    within(list).getByRole('button', { name: 'Forget' }).click(),
+    within(list)
+      .getByRole('button', { name: 'Remove from this device' })
+      .click(),
   );
   await waitFor(() => expect(next.getSnapshot()).toEqual([]));
   expect(writes(f)).toHaveLength(before);

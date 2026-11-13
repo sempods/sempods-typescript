@@ -67,7 +67,10 @@ screen and access-management controls, follow the complete
 `AppAccess` provides login, context choice and recovery without a mandatory app
 frame: a sign-in gate above the content while the app cannot work, the Context
 choice, and dismissible prompts for the rest. It hides when access is usable,
-including read-only access; apps can also place these parts themselves. The app owns
+including read-only access; apps can also place these parts themselves. Sign-in
+uses one Pod choice and one main action, with another address and device-local
+saved-address management as secondary steps. Theme tokens, provider messages and
+`components.Connections` customize it without replacing session behavior. The app owns
 its layout and a **Pods & sharing** button that opens management (`open`). The
 [API table](https://github.com/sempods/sempods-typescript/blob/v0.8.0/docs/react-authoring.md#api-at-a-glance)
 maps each screen task (lists, creation, row updates, editors, notices) to its

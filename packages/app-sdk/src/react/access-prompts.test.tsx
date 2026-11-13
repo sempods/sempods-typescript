@@ -287,10 +287,10 @@ it.each(
       await act(async () => fireEvent.submit(input.closest('form')!));
     } else if (name === 'several allowed Pods') {
       expect(within(shown).queryByRole('textbox')).toBeNull();
-      const picker = within(shown).getByRole('combobox', {
-        name: 'Pod address',
+      const picker = within(shown).getByRole('radio', {
+        name: 'pod.example/bob',
       });
-      fireEvent.change(picker, { target: { value: bob } });
+      fireEvent.click(picker);
       target = bob;
       await act(async () => fireEvent.submit(picker.closest('form')!));
     } else {

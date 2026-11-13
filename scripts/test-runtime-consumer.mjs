@@ -1386,9 +1386,15 @@ try {
           language === 'en' ? 'Pods on this device' : 'Pods auf diesem Gerät',
         exact: true,
       });
-      await remembered
-        .getByRole('button', { name: signIn, exact: true })
-        .waitFor();
+      await page.getByRole('button', { name: signIn, exact: true }).waitFor();
+      await page
+        .getByText(
+          language === 'en'
+            ? 'Manage saved Pods'
+            : 'Gespeicherte Pods verwalten',
+          { exact: true },
+        )
+        .click();
       assert.equal(
         await page.getByLabel('Connections', { exact: true }).textContent(),
         '1',
@@ -1400,7 +1406,10 @@ try {
       assert.equal(await page.getByRole('alert').count(), 0);
       await remembered
         .getByRole('button', {
-          name: language === 'en' ? 'Forget' : 'Vergessen',
+          name:
+            language === 'en'
+              ? 'Remove from this device'
+              : 'Von diesem Gerät entfernen',
           exact: true,
         })
         .click();
@@ -1549,7 +1558,7 @@ try {
         ).includes(origin.replace(/^https?:\/\//, '') + '/alice'),
       );
     } else if (mode === 'set') {
-      await page.getByLabel('Pod address').selectOption(origin + '/alice');
+      await page.getByRole('radio', { name: /Personal/ }).check();
       assert.equal(await page.getByRole('textbox').count(), 0);
       await address.waitFor();
     } else
@@ -1731,13 +1740,10 @@ try {
   assert.ok(!accessText.includes('draft'), accessText);
   assert.ok(!accessText.includes('not signed in to the app'), accessText);
   assert.equal(exchanges, beforeLoginRequired);
-  const activePod = access.getByLabel('Active pod', { exact: true });
-  assert.ok(
-    (await activePod.locator('option:checked').textContent()).endsWith(
-      '/refusing',
-    ),
-  );
-  await activePod.selectOption({ label: 'Personal' });
+  const activePod = access.getByRole('radio', { name: /Personal/ });
+  assert.ok(await access.getByRole('radio', { name: /refusing/ }).isChecked());
+  await activePod.check();
+  await access.getByRole('button', { name: 'Open', exact: true }).click();
   await access.waitFor({ state: 'hidden' });
   // The refusing Pod is now another Pod whose session ended: one prompt.
   const ended = page.locator(
@@ -1762,14 +1768,14 @@ try {
     'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.',
   );
   assert.ok(!(await zugriff.textContent()).includes('Entwurf'));
+  await zugriff
+    .getByText('Gespeicherte Pods verwalten', { exact: true })
+    .click();
   await zugriff.getByRole('button', { name: 'Abmelden', exact: true }).click();
-  await page.getByLabel('Pod-Adresse').waitFor();
+  await page.getByRole('button', { name: 'Anmelden', exact: true }).waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
-  // The signed-out Pod stays remembered above the address field (#237).
-  await page
-    .getByRole('list', { name: 'Pods auf diesem Gerät', exact: true })
-    .getByRole('button', { name: 'Anmelden', exact: true })
-    .waitFor();
+  // The signed-out Pod offers one sign-in; another address is secondary.
+  await page.getByRole('button', { name: 'Anderen Pod verwenden' }).waitFor();
   assert.equal(
     await page.getByLabel('Connections', { exact: true }).textContent(),
     '1',

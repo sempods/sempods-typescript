@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * AppAccess lists remembered Pods (#237) above the address field, each with
- * its own sign-in and a way to forget it on this device.
+ * AppAccess offers remembered Pods with one sign-in action and device-local
+ * management (#237, #310).
  */
 import { webcrypto } from 'node:crypto';
 import { IDBFactory } from 'fake-indexeddb';
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -52,14 +53,14 @@ const texts = {
   en: {
     list: 'Pods on this device',
     signIn: 'Sign in',
-    forget: 'Forget',
+    forget: 'Remove from this device',
     address: 'Pod address',
     ended: 'The session ended. Sign in again to continue.',
   },
   de: {
     list: 'Pods auf diesem Gerät',
     signIn: 'Anmelden',
-    forget: 'Vergessen',
+    forget: 'Von diesem Gerät entfernen',
     address: 'Pod-Adresse',
     ended: 'Die Sitzung wurde beendet. Melde dich erneut an, um fortzufahren.',
   },
@@ -98,29 +99,24 @@ function show(runtime: BrowserRuntime, language: 'en' | 'de' = 'en') {
 }
 
 it.each(['en', 'de'] as const)(
-  'lists a remembered Pod above the address field and signs in to it (%s)',
+  'offers a remembered Pod with one sign-in and keeps another address secondary (%s)',
   async (language) => {
     const t = texts[language];
     const { f, runtime, id } = await remembered('sign-out');
     show(runtime, language);
-    const list = await screen.findByRole('list', { name: t.list });
-    const item = within(list).getByRole('listitem');
-    expect(within(item).getByText('pod.example/alice')).toBeTruthy();
-    // A sign-out is not an ended session: no note.
-    expect(within(item).queryByText(t.ended)).toBeNull();
-    const signIn = within(item).getByRole('button', { name: t.signIn });
+    const signIn = await screen.findByRole('button', { name: t.signIn });
+    expect(screen.getByText('pod.example/alice')).toBeTruthy();
+    expect(screen.queryByText(t.ended)).toBeNull();
+    expect(screen.getAllByRole('button', { name: t.signIn })).toHaveLength(1);
+    expect(screen.queryByRole('textbox', { name: t.address })).toBeNull();
     expect(
-      document.getElementById(signIn.getAttribute('aria-describedby')!)
-        ?.textContent,
-    ).toBe('pod.example/alice');
-    // The address field follows the list, for another Pod.
-    const input = screen.getByRole('textbox', { name: t.address });
-    expect(
-      list.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING,
+      screen.getByRole('button', {
+        name: language === 'en' ? 'Use another Pod' : 'Anderen Pod verwenden',
+      }),
     ).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Sign out|Abmelden/ })).toBe(
-      null,
-    );
+    expect(
+      screen.queryByRole('button', { name: /Sign out|Abmelden/ }),
+    ).toBeNull();
     const navigations = f.navigate.mock.calls.length;
     await act(async () => signIn.click());
     await waitFor(() =>
@@ -164,8 +160,8 @@ it.each(['en', 'de'] as const)(
       problem: expect.any(String),
     });
     show(runtime, language);
-    const list = await screen.findByRole('list', { name: t.list });
-    expect(within(list).getByText(t.ended)).toBeTruthy();
+    await screen.findByRole('list', { name: t.list });
+    expect(screen.getByText(t.ended)).toBeTruthy();
   },
 );
 
@@ -174,9 +170,8 @@ it('offers the remembered preset Pod once, without another default sign-in', asy
     preset: { podUrl: pod },
   });
   show(runtime);
-  const list = await screen.findByRole('list', { name: texts.en.list });
+  await screen.findByRole('button', { name: 'Sign in' });
   expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(1);
-  expect(within(list).getByRole('button', { name: 'Sign in' })).toBeTruthy();
   // The preset fixes the Pod: no address field.
   expect(screen.queryByRole('textbox')).toBeNull();
 });
@@ -341,4 +336,54 @@ it('names the active Pod in management beside a remembered one', async () => {
     .filter((element) => !list.contains(element));
   expect(named).toHaveLength(1);
   expect(within(list).getByText('pod.example/bob')).toBeTruthy();
+});
+
+it('chooses among remembered Pods without selecting or authorizing until the main action', async () => {
+  const { f, runtime, other } = await twoPods((r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  for (const c of runtime.getSnapshot()) await runtime.disconnect(c.id);
+  const next = await restart(f, runtime, (r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  show(next);
+  const choices = await screen.findAllByRole('radio');
+  expect(choices).toHaveLength(2);
+  const before = f.navigate.mock.calls.length;
+  const ids = next.getSnapshot().map((c) => c.id);
+  await act(async () =>
+    screen.getByRole('radio', { name: 'pod.example/bob' }).click(),
+  );
+  expect(f.navigate).toHaveBeenCalledTimes(before);
+  expect(next.getSnapshot().every((c) => c.session.kind === 'signed-out')).toBe(
+    true,
+  );
+  expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(1);
+  expect(screen.queryByRole('textbox')).toBeNull();
+  await act(async () =>
+    screen.getByRole('button', { name: 'Sign in' }).click(),
+  );
+  await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(before + 1));
+  expect(next.getSnapshot().find((c) => c.id === other.id)?.session.kind).toBe(
+    'leaving',
+  );
+  expect(next.getSnapshot().map((c) => c.id)).toEqual(ids);
+});
+
+it('opens another address on request and reuses a saved Pod entered there', async () => {
+  const { f, runtime, id } = await remembered('sign-out');
+  show(runtime);
+  await act(async () =>
+    (await screen.findByRole('button', { name: 'Use another Pod' })).click(),
+  );
+  const field = screen.getByRole('textbox', { name: 'Pod address' });
+  fireEvent.change(field, { target: { value: '  pod.example/alice/  ' } });
+  await act(async () => fireEvent.submit(field.closest('form')!));
+  await waitFor(() =>
+    expect(runtime.getSnapshot()[0]?.session.kind).toBe('leaving'),
+  );
+  expect(runtime.getSnapshot().map((c) => c.id)).toEqual([id]);
+  expect(f.navigate.mock.calls.at(-1)![0]).toContain(
+    pod + '/_system/auth/authorize',
+  );
 });

@@ -15,6 +15,8 @@ import {
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AccessNotice,
+  AccessGate,
+  type ConnectionsProps,
   AppAccess,
   SempodsProvider,
   TargetScreen,
@@ -292,9 +294,7 @@ it.each([
   );
   await screen.findByRole('button', { name: 'Sign in' });
   if ('allowedPods' in options)
-    fireEvent.change(screen.getByLabelText('Pod address'), {
-      target: { value: pod },
-    });
+    fireEvent.click(screen.getByRole('radio', { name: /Personal/ }));
   expect(screen.getByText(pod)).toBeTruthy();
 });
 
@@ -346,12 +346,12 @@ it('offers only the permitted finite choices, disambiguates names and does not s
       />
     </SempodsProvider>,
   );
-  const picker = await screen.findByLabelText('Pod address');
+  const picker = await screen.findByRole('radio', {
+    name: `My Pod · ${other}`,
+  });
   expect(screen.queryByRole('textbox')).toBeNull();
-  expect(
-    screen.getByRole('option', { name: `My Pod · ${other}` }),
-  ).toBeTruthy();
-  fireEvent.change(picker, { target: { value: other } });
+  expect(screen.getAllByRole('radio')).toHaveLength(2);
+  fireEvent.click(picker);
   expect(f.fetch).not.toHaveBeenCalled();
   expect(f.navigate).not.toHaveBeenCalled();
   await act(async () =>
@@ -397,6 +397,9 @@ it('keeps an unrestricted preset a default and offers another Pod in the managem
   const dialog = document.querySelector<HTMLElement>(
     '[data-sempods-ui="management"]',
   )!;
+  fireEvent.click(
+    within(dialog).getByRole('button', { name: 'Use another Pod' }),
+  );
   const input = within(dialog).getByRole('textbox', { name: 'Pod address' });
   fireEvent.change(input, { target: { value: 'https://pod.example/bob' } });
   await act(async () => fireEvent.submit(input.closest('form')!));
@@ -450,7 +453,7 @@ it.each([
   ['en', 'Pod address', 'Sign in'],
   ['de', 'Pod-Adresse', 'Anmelden'],
 ] as const)(
-  'labels the free Pod input neutrally and adds no hint lines by default (%s)',
+  'labels and explains the Pod input and the sign-in destination (%s)',
   async (language, label, signIn) => {
     const f = fixture();
     cleanups.push(() => f.runtime.dispose());
@@ -460,9 +463,16 @@ it.each([
       </SempodsProvider>,
     );
     const input = await screen.findByRole('textbox', { name: label });
-    expect(input.getAttribute('aria-describedby')).toBeNull();
+    expect(
+      document.getElementById(input.getAttribute('aria-describedby')!)
+        ?.textContent,
+    ).toBe(
+      language === 'en'
+        ? 'A Pod is where your data lives.'
+        : 'Ein Pod ist der Ort, an dem deine Daten liegen.',
+    );
     const region = input.closest('[data-sempods-access]')!;
-    expect(region.querySelectorAll('.sp-access-hint')).toHaveLength(0);
+    expect(region.querySelectorAll('.sp-access-hint')).toHaveLength(2);
     // No empty paragraph keeps spacing between the field and the button.
     for (const paragraph of region.querySelectorAll('p'))
       expect(paragraph.textContent).not.toBe('');
@@ -551,10 +561,8 @@ it('omits the sign-out note and its description when an app clears it', async ()
   const signOut = await screen.findByRole('button', { name: 'Sign out' });
   expect(signOut.getAttribute('aria-describedby')).toBeNull();
   expect(
-    signOut
-      .closest('[data-sempods-access]')!
-      .querySelectorAll('.sp-access-hint'),
-  ).toHaveLength(0);
+    screen.queryByText('Signing out only applies to this device.'),
+  ).toBeNull();
 });
 
 const fieldsForDraft = fields({ title: text('urn:title', { language: null }) });
@@ -794,16 +802,21 @@ it.each(['select', 'disconnect'] as const)(
     expect(
       runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
     ).toMatchObject({ kind: 'ended', problem: 'login-required' });
-    const picker = screen.getByLabelText<HTMLSelectElement>('Active pod');
-    expect(picker.value).toBe(bob.id);
+    const picker = screen.getByRole<HTMLInputElement>('radio', {
+      name: 'pod.example/bob',
+    });
+    expect(picker.checked).toBe(true);
     expect(f.count('/token')).toBe(1);
-    if (action === 'select')
+    if (action === 'select') {
+      fireEvent.click(screen.getByRole('radio', { name: 'pod.example/alice' }));
       await act(async () =>
-        fireEvent.change(picker, { target: { value: session.id } }),
+        screen.getByRole('button', { name: 'Open' }).click(),
       );
-    else
+    } else
       await act(async () =>
-        screen.getByRole('button', { name: 'Sign out' }).click(),
+        within(screen.getByText(other, { selector: 'p' }).closest('li')!)
+          .getByRole('button', { name: 'Sign out' })
+          .click(),
       );
     // Signed out, Bob's Pod stays remembered; the gate closes as it starts.
     await waitFor(() =>
@@ -909,13 +922,10 @@ it('numbers saved duplicates of the one permitted Pod instead of showing its hid
       <AppAccess appName="Shopping" podAddress="hidden" />
     </SempodsProvider>,
   );
-  const picker = await screen.findByRole('combobox', { name: 'Active pod' });
-  expect(
-    within(picker)
-      .getAllByRole('option')
-      .slice(1)
-      .map((option) => option.textContent),
-  ).toEqual(['1', '2']);
+  const choices = await screen.findAllByRole('radio');
+  expect(choices.map((choice) => choice.closest('label')?.textContent)).toEqual(
+    ['1', '2'],
+  );
   expect(screen.queryByText(pod.replace(/^https?:\/\//, ''))).toBeNull();
 });
 
@@ -2055,4 +2065,36 @@ it('keeps the active Pod address beside several named connections in management'
     .find((entry) => entry.id === (picker as HTMLSelectElement).value)!;
   // The selector shows names; the Pod the actions target keeps its address.
   expect(within(dialog).getByText(active.podUrl)).toBeTruthy();
+});
+
+it('passes presentation context to replacements, including a standalone AccessGate', async () => {
+  const f = fixture({ allowedPods: [pod] });
+  cleanups.push(() => f.runtime.dispose());
+  function Replacement(props: ConnectionsProps) {
+    return (
+      <p>
+        {props.surface}:{props.podAddress}:{props.podNames?.[pod]}
+      </p>
+    );
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AccessGate
+        appName="Shopping"
+        podAddress="hidden"
+        podNames={{ [pod]: 'Home' }}
+        components={{ Connections: Replacement }}
+      />
+      <AppAccess
+        appName="Shopping"
+        only="management"
+        open
+        podNames={{ [pod]: 'Home' }}
+        components={{ Connections: Replacement }}
+      />
+    </SempodsProvider>,
+  );
+  expect(await screen.findByText('sign-in:hidden:Home')).toBeTruthy();
+  // Management without a dialog is hidden behind a blocking gate.
+  expect(screen.queryByText('management:visible:Home')).toBeNull();
 });
