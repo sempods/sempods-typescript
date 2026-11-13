@@ -29,10 +29,18 @@ const PROGRESS_DELAY = 350;
 const selectStarting = (s: AppSnapshot) => s.starting;
 
 /** The mounted `AppStartup` instances of one provider, oldest first. */
+/**
+ * What one `AppStartup` registers: its props and the locale where it is
+ * mounted, as the host renders outside a nested `SdkLocaleProvider`.
+ */
+interface Shown {
+  readonly props: AppStartupProps;
+  readonly locale: ReturnType<typeof useSdkLocale>;
+}
 interface Hosts {
-  readonly mounted: { props: AppStartupProps | null }[];
+  readonly mounted: { shown: Shown | null }[];
   readonly listeners: Set<() => void>;
-  shown: AppStartupProps | null;
+  shown: Shown | null;
 }
 const registry = new WeakMap<object, Hosts>();
 function hostsOf(app: object) {
@@ -44,7 +52,7 @@ function hostsOf(app: object) {
   return hosts;
 }
 function changed(hosts: Hosts) {
-  const shown = hosts.mounted[0]?.props ?? null;
+  const shown = hosts.mounted[0]?.shown ?? null;
   if (shown === hosts.shown) return;
   hosts.shown = shown;
   hosts.listeners.forEach((listener) => listener());
@@ -76,9 +84,10 @@ function useShown() {
  */
 export function AppStartup(props: AppStartupProps) {
   const hosts = hostsOf(useController());
-  const [entry] = useState<{ props: AppStartupProps | null }>(() => ({
-    props: null,
-  }));
+  // The texts and direction where it is mounted, also under a nested
+  // `SdkLocaleProvider`: the host renders beside the content, outside it.
+  const locale = useSdkLocale();
+  const [entry] = useState<{ shown: Shown | null }>(() => ({ shown: null }));
   // Before paint, so the first frame already shows the screen. Registered
   // once; the props follow below.
   useLayoutEffect(() => {
@@ -91,8 +100,8 @@ export function AppStartup(props: AppStartupProps) {
     };
   }, [hosts, entry]);
   useLayoutEffect(() => {
-    if (entry.props === props) return;
-    entry.props = props;
+    if (entry.shown?.props === props && entry.shown.locale === locale) return;
+    entry.shown = { props, locale };
     changed(hosts);
   });
   return null;
@@ -109,11 +118,19 @@ export function useStartupCover() {
 export function StartupHost() {
   const starting = useAppFacts(selectStarting);
   const shown = useShown();
-  return starting && shown ? <StartupLayer {...shown} /> : null;
+  return starting && shown ? (
+    <StartupLayer {...shown.props} locale={shown.locale} />
+  ) : null;
 }
 
-function StartupLayer({ appName, icon, className, style }: AppStartupProps) {
-  const { messages: m, direction } = useSdkLocale();
+function StartupLayer({
+  appName,
+  icon,
+  className,
+  style,
+  locale,
+}: AppStartupProps & { readonly locale: Shown['locale'] }) {
+  const { messages: m, direction } = locale;
   const [progress, setProgress] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setProgress(true), PROGRESS_DELAY);

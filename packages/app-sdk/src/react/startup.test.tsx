@@ -12,6 +12,7 @@ import {
   AppAccess,
   AppStartup,
   ContextAccess,
+  SdkLocaleProvider,
   SempodsProvider,
   TargetScreen,
   useAppState,
@@ -334,4 +335,24 @@ it('keeps prompts about other Pods until startup ends, and never shows the Pod c
   );
   expect(frames.some((f) => f.startup && f.access)).toBe(false);
   expect(frames.some((f) => f.gate)).toBe(false);
+});
+
+it('speaks the language of a nested locale provider around AppAccess', async () => {
+  const s = await staged();
+  render(
+    <SempodsProvider runtime={s.runtime} language="en">
+      <SdkLocaleProvider language="de" direction="rtl">
+        <AppAccess appName="Einkauf" />
+      </SdkLocaleProvider>
+      <Content />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const layer = document.querySelector('[data-sempods-startup]')!;
+  expect(layer.getAttribute('dir')).toBe('rtl');
+  await waitFor(() =>
+    expect(layer.querySelector('[role="status"]')?.textContent).toBe(
+      'Wird gestartet…',
+    ),
+  );
 });
