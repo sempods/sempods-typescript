@@ -29,7 +29,7 @@ const styles = `
   --sp-line:var(--sempods-line,light-dark(#e5e7eb,#2d3138));
   --sp-accent:var(--sempods-accent,light-dark(#3e6b56,#a2cbb4));
   --sp-on-accent:var(--sempods-on-accent,light-dark(#f7f9f7,#131b18));
-  --sp-field-line:var(--sempods-field-line,light-dark(#84958b,#738b7c));
+  --sp-field-line:var(--sempods-field-line,light-dark(#7e8d83,#738b7c));
   --sp-primary-bg:var(--sempods-primary-bg,var(--sp-bg));
   --sp-primary-text:var(--sempods-primary-text,var(--sp-accent));
   --sp-primary-border:var(--sempods-primary-border,var(--sp-accent));

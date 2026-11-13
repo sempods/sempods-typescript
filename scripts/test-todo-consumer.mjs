@@ -967,7 +967,7 @@ try {
         '13px',
         '1px rgb(62, 107, 86)',
       ],
-      ['1px', 'rgb(132, 149, 139)', '14px'],
+      ['1px', 'rgb(126, 141, 131)', '14px'],
     ]);
     await page.evaluate(() => {
       const root = document.documentElement.style;
@@ -1204,7 +1204,7 @@ try {
       }),
       [
         '1px',
-        appearance === 'light' ? 'rgb(132, 149, 139)' : 'rgb(115, 139, 124)',
+        appearance === 'light' ? 'rgb(126, 141, 131)' : 'rgb(115, 139, 124)',
         '12px',
       ],
     );
@@ -1259,7 +1259,7 @@ try {
     }, tokens);
     assert.equal(
       await field.evaluate((input) => getComputedStyle(input).borderTopColor),
-      appearance === 'light' ? 'rgb(132, 149, 139)' : 'rgb(115, 139, 124)',
+      appearance === 'light' ? 'rgb(126, 141, 131)' : 'rgb(115, 139, 124)',
     );
     await page.evaluate(() =>
       document.documentElement.style.setProperty(
