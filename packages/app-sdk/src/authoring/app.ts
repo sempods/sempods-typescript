@@ -5,6 +5,7 @@ import type {
   PodPreset,
 } from '../runtime/types.js';
 import { RuntimeError } from '../runtime/errors.js';
+import { activeMemories } from '../runtime/context-memory.js';
 import type { BoundPod, BoundView } from '../runtime/view.js';
 import {
   createAccessTracker,
@@ -108,6 +109,28 @@ export function startupSettled(
 ) {
   return snapshot.startup !== undefined || snapshot.startupError !== undefined;
 }
+/**
+ * How long the startup choice waits for the remembered connection while
+ * another already works (#305). A reasoned starting value, not a measured
+ * limit: a healthy discovery answers well within a second.
+ */
+const STARTUP_GRACE = 5_000;
+/** Signed in with every required scope: the app can work with it. */
+function works(c: Connection) {
+  return c.reading === 'session' && c.missingRequiredScopes.length === 0;
+}
+/**
+ * A connection the app cannot work with although it had a session: ended
+ * (not by a chosen sign-out; also unreachable) or missing required scopes.
+ */
+function cannotWork(c: Connection) {
+  const s = c.session;
+  if (s.kind === 'ended') return s.problem !== 'disconnected';
+  return (
+    (s.kind === 'active' || s.kind === 'renewing') &&
+    c.missingRequiredScopes.length > 0
+  );
+}
 /** A guarded change: row navigation, a Context selection, or a connection action. */
 type Change = 'navigate' | 'context' | 'connection';
 /** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
@@ -144,9 +167,21 @@ export interface AppSnapshot {
   readonly access: AccessState;
   readonly connections: readonly Connection[];
   /**
-   * The connection the app works with. Without an earlier choice it is the
-   * preset's Pod, else the first connection that is not merely remembered
-   * (`signed-out`), else the first remembered one.
+   * The connection the app works with. Without an earlier choice it is among
+   * the preset's Pod's connections (with a preset), else among all: the one
+   * the app last worked with while it has a session, else the first that is
+   * not merely remembered (`signed-out`), else the first remembered one.
+   *
+   * While that startup choice is open, it gives way to another connection
+   * that works (signed in with every required scope): when it cannot work
+   * itself (its session ended, it is unreachable, or a required scope is
+   * missing), or when it still restores after a grace period of 5 seconds.
+   * Ended or unreachable while another still restores, the choice waits for
+   * that one (`access.pending`). It never switches back. The choice closes
+   * once the active connection works, the person starts a guarded action, or
+   * the active connection's outcome shows; a returning sign-in's connection,
+   * and one the person chose, never give way. No switch happens while a
+   * guard holds work. See the multi-Pod startup table in `browser-runtime.md`.
    */
   readonly activeId: string | null;
   /**
@@ -240,6 +275,20 @@ export function createAppController(
   let startupError: unknown;
   let callbackNotice = false;
   let activeId: string | null = null;
+  /** The runtime's memory of the connection the app last worked with. */
+  const memory = activeMemories.get(runtime);
+  /** The connection last written to `memory` by this controller. */
+  let remembered: string | undefined;
+  /**
+   * How the active connection was chosen: by the startup rule, as a
+   * fallback for one that could not work (not remembered), or by the person
+   * (or a returning sign-in), which never gives way.
+   */
+  let chosenBy: 'start' | 'fallback' | 'person' = 'start';
+  /** The startup choice may still give way to another connection (#305). */
+  let choosing = true;
+  let graceExpired = false;
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
   /** The active connection at the last publish (snapshots are immutable), to notice a sign-out. */
   let previous: Connection | undefined;
   const tracker = createAccessTracker();
@@ -297,6 +346,56 @@ export function createAppController(
   }
   /** One with a session (signed in, restoring or ended), not merely remembered. */
   const inSession = (c: Connection) => c.session.kind !== 'signed-out';
+  /** Whether nothing a change would leave holds work: no automatic switch otherwise. */
+  function quiet() {
+    return (
+      !blocked('connection') &&
+      !leavingGuards('connection').some((g) => g.dirty() || g.unconfirmed?.())
+    );
+  }
+  /**
+   * The startup choice (#305): whether the active connection gives way to
+   * another that works, and whether the choice still waits. Returns the
+   * connection to work with and whether nothing should be derived yet.
+   */
+  function choose(
+    connection: Connection | undefined,
+    connections: readonly Connection[],
+  ): { connection: Connection | undefined; waiting: boolean } {
+    if (!choosing || chosenBy === 'person' || !connection)
+      return { connection, waiting: false };
+    if (works(connection)) {
+      choosing = false;
+      return { connection, waiting: false };
+    }
+    const failed = cannotWork(connection);
+    const restoring = connection.session.kind === 'restoring';
+    if (!failed && !restoring) {
+      // Settled without a session to fall back from (reading without a
+      // token, a remembered Pod): nothing to choose.
+      choosing = false;
+      return { connection, waiting: false };
+    }
+    if (!failed && !graceExpired) return { connection, waiting: false };
+    if (!quiet()) {
+      choosing = false;
+      return { connection, waiting: false };
+    }
+    const others = candidates(connections, connection.id);
+    const replacement = others.find(works);
+    if (replacement) {
+      chosenBy = 'fallback';
+      choosing = false;
+      view = null;
+      return { connection: replacement, waiting: false };
+    }
+    if (!failed) return { connection, waiting: false };
+    if (others.some((c) => c.session.kind === 'restoring'))
+      return { connection, waiting: true };
+    // Nothing can take over: its gate or prompt shows, as before.
+    choosing = false;
+    return { connection, waiting: false };
+  }
   function publish() {
     const connections = runtime.getSnapshot();
     let connection = connections.find((c) => c.id === activeId);
@@ -311,12 +410,32 @@ export function createAppController(
       const next = candidates(connections, activeId!).find(inSession);
       if (next) {
         connection = next;
+        chosenBy = 'start';
         view = null;
       }
     }
     if (!connection) {
       const options = candidates(connections);
-      connection = options.find(inSession) ?? options[0];
+      const preferred = memory?.recall();
+      connection =
+        options.find((c) => c.id === preferred && inSession(c)) ??
+        options.find(inSession) ??
+        options[0];
+      if (connection) chosenBy = 'start';
+    }
+    const chosen = choose(connection, connections);
+    connection = chosen.connection;
+    if (!choosing) stopGrace();
+    // The connection the app works with is preferred on the next start,
+    // unless it only stood in for one that could not work.
+    if (
+      connection &&
+      connection.id !== remembered &&
+      works(connection) &&
+      chosenBy !== 'fallback'
+    ) {
+      remembered = connection.id;
+      memory?.remember(connection.id);
     }
     activeId = connection?.id ?? null;
     previous = connection;
@@ -329,6 +448,7 @@ export function createAppController(
       callbackNotice,
       connections,
       activeId,
+      choosing: chosen.waiting,
     });
     // A prompt is about the connection it was asked for. That connection
     // stopping being active without a guarded action (a returning sign-in, a
@@ -484,6 +604,9 @@ export function createAppController(
     available?: () => Availability,
   ): Promise<boolean> {
     if (changing || pending || blocked(change)) return false;
+    // The person acts: the startup choice no longer changes the connection.
+    choosing = false;
+    stopGrace();
     if (!leavingGuards(change, retained).some((g) => g.dirty())) {
       changing = true;
       publish();
@@ -507,6 +630,11 @@ export function createAppController(
       publish();
     });
   }
+  function stopGrace() {
+    if (graceTimer === undefined) return;
+    clearTimeout(graceTimer);
+    graceTimer = undefined;
+  }
   const controller = {
     runtime,
     getSnapshot: () => snapshot,
@@ -518,6 +646,12 @@ export function createAppController(
     },
     start() {
       const version = ++startVersion;
+      if (choosing && !graceExpired && graceTimer === undefined)
+        graceTimer = setTimeout(() => {
+          graceTimer = undefined;
+          graceExpired = true;
+          if (version === startVersion && choosing) publish();
+        }, STARTUP_GRACE);
       unsubscribe ??= runtime.subscribe(publish);
       publish();
       void runtime.initialize().then(
@@ -541,8 +675,10 @@ export function createAppController(
                 returned.session.kind === 'signed-out' &&
                 returned.session.problem !== undefined
               )
-            )
+            ) {
               activeId = returned.id;
+              chosenBy = 'person';
+            }
             callbackNotice =
               report.interaction === 'failed' ||
               report.interaction === 'cancelled';
@@ -560,6 +696,7 @@ export function createAppController(
     /** Provider cleanup does not dispose a caller-owned runtime (including StrictMode probes). */
     stop() {
       startVersion++;
+      stopGrace();
       unsubscribe?.();
       unsubscribe = undefined;
       pending?.resolve(false);
@@ -638,6 +775,7 @@ export function createAppController(
         if (!runtime.getSnapshot().some((c) => c.id === id))
           throw new RuntimeError('disconnected');
         activeId = id;
+        chosenBy = 'person';
         view = null;
         callbackNotice = false;
         publish();
@@ -688,6 +826,7 @@ export function createAppController(
             runtime.selectContext(id, iri);
             if (id !== activeId) {
               activeId = id;
+              chosenBy = 'person';
               view = null;
               callbackNotice = false;
               publish();
@@ -771,6 +910,7 @@ export function createAppController(
       if (runtime.signIn === 'required')
         await runtime.beginAuthorization(connection.id);
       activeId = connection.id;
+      chosenBy = 'person';
       publish();
     };
   }

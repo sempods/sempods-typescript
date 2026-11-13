@@ -80,6 +80,47 @@ The gate also shows again, with the focus kept, when a browser closes it on a
 repeated Escape: browsers let a close request through uncancelled when no
 other input came between two of them.
 
+## Pending release: the last active Pod at startup
+
+With several saved Pods, the app controller now makes the Pod active that the
+app last worked with, remembered in `preferences` (localStorage by default),
+instead of the first in the session store's order. At startup, an active Pod
+whose session ended, that is unreachable, that lacks a required scope, or
+that still restores after 5 seconds gives way to another Pod that works. The
+other Pod then shows as an action prompt instead of the gate. A saved credential that is due
+is renewed while it restores, so an expired grant ends as `restoring` →
+`ended` rather than after `active`; restoration of such a credential can take
+up to 20 seconds longer than its discovery. This is not part of published
+0.8.0. After upgrading to the containing release, remove app code that stored
+or reselected the last active Pod itself, or that offered a switch to another
+Pod beside the gate at startup. `preferences: null` also disables the
+remembered Pod. See
+[several Pods at startup](browser-runtime.md#several-pods-at-startup).
+
+## Pending release: rdf:langString in the preferred-language recipe
+
+`selectTextVariant` and `patchTextVariant` in `@sempods/client-sdk/edit` now
+also read a language literal that states its implied `@type` `rdf:langString`.
+This is not part of published 0.8.0. After upgrading to the containing release,
+remove an app-owned projection that only dropped that `@type` before the
+helpers and restored retained terms in the patch: unedited terms keep their
+representation, and an edit writes one plain value in the selected language.
+See [the recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant).
+
+## Pending release: structured values in recovery comparisons
+
+`ResourceEditor`'s review and `UpdateNotice` now show structured draft values
+instead of `[object Object]`. This is not part of published 0.8.0. A
+`TextVariant` shows its language tag, and several values in one language list
+each of them; no value (missing, `null`, an empty list) reads "No value" and
+empty text "Empty text" instead of a shared dash; lists and nested objects show
+their parts. After upgrading to the containing release, remove an app-owned
+comparison or a draft flattened only to make this readable, and keep the
+`TextVariant` in the draft. A complete custom message catalog may set the new
+optional `controls` messages `noValue`, `emptyText` and `severalValues`;
+`createLocale` fills English and German defaults. See
+[notices](react-authoring.md#notices-updatenotice).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

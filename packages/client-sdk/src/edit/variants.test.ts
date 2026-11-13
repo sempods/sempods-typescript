@@ -1,7 +1,8 @@
 /**
  * Selecting and writing one language variant of a text predicate (#192),
  * including the cases Focus found: untagged selected as `null`, statement
- * order, fallbacks, case-equivalent tags and regional variants.
+ * order, fallbacks, case-equivalent tags, regional variants and language
+ * literals that state `rdf:langString` (#303).
  */
 import { describe, expect, it } from 'vitest';
 import type { JsonLd } from '../results.js';
@@ -231,6 +232,144 @@ describe('patchTextVariant', () => {
     expect(
       patchTextVariant(empty, NAME, editTextVariant(variant, 'Neu')),
     ).toEqual({ [NAME]: [{ '@value': 'Neu', '@language': 'de' }] });
+  });
+});
+
+describe('language literals that state rdf:langString (#303)', () => {
+  const LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
+  const typed = (value: string, language: string) => ({
+    '@value': value,
+    '@language': language,
+    '@type': LANG_STRING,
+  });
+
+  it('selects them like the plain form', () => {
+    expect(
+      selectTextVariant(node(typed('Titel', 'de')), NAME, [null, 'de', '*']),
+    ).toEqual({
+      language: 'de',
+      value: 'Titel',
+      values: ['Titel'],
+      ambiguous: false,
+    });
+  });
+
+  it('keeps the order’s priority and regional ranges', () => {
+    const resource = node(typed('English', 'en'), typed('Schweiz', 'de-CH'), {
+      '@value': 'Italiano',
+      '@language': 'it',
+    });
+    for (const r of [resource, reversed(resource)]) {
+      expect(selectTextVariant(r, NAME, order)).toMatchObject({
+        language: 'de-ch',
+        value: 'Schweiz',
+      });
+      expect(selectTextVariant(r, NAME, ['en', '*'])).toMatchObject({
+        language: 'en',
+        value: 'English',
+      });
+    }
+  });
+
+  it('reports a typed and a plain value in case-equivalent tags as a conflict', () => {
+    const resource = node(
+      { '@value': 'Eins', '@language': 'de' },
+      typed('Zwei', 'DE'),
+    );
+    expect(selectTextVariant(resource, NAME, order)).toEqual({
+      language: 'de',
+      value: null,
+      values: ['Eins', 'Zwei'],
+      ambiguous: true,
+    });
+  });
+
+  it('ignores rdf:langString without a language, like any typed literal', () => {
+    const resource = node(
+      { '@value': 'Kein Tag', '@type': LANG_STRING },
+      { '@value': 'English', '@language': 'en' },
+    );
+    expect(selectTextVariant(resource, NAME, order)).toMatchObject({
+      language: 'en',
+      value: 'English',
+    });
+    const variant = selectTextVariant(resource, NAME, [null, 'en']);
+    expect(variant).toMatchObject({ language: 'en', value: 'English' });
+    expect(
+      patchTextVariant(resource, NAME, editTextVariant(variant, 'Changed')),
+    ).toEqual({
+      [NAME]: [
+        { '@value': 'Kein Tag', '@type': LANG_STRING },
+        { '@value': 'Changed', '@language': 'en' },
+      ],
+    });
+  });
+
+  const mixed = node(
+    typed('Deutsch', 'de'),
+    typed('English', 'en'),
+    { '@value': 'Deutschland', '@language': 'de-DE' },
+    { '@value': '2026', '@type': 'http://www.w3.org/2001/XMLSchema#gYear' },
+    { '@id': 'urn:x' },
+  );
+
+  it('writes nothing for an untouched variant', () => {
+    const variant = selectTextVariant(mixed, NAME, ['de', 'en']);
+    expect(variant.value).toBe('Deutsch');
+    expect(patchTextVariant(mixed, NAME, variant)).toEqual({});
+  });
+
+  it('replaces the selected value once and keeps every other term as read', () => {
+    const variant = selectTextVariant(mixed, NAME, ['de', 'en']);
+    expect(
+      patchTextVariant(mixed, NAME, editTextVariant(variant, 'Neu')),
+    ).toEqual({
+      [NAME]: [
+        typed('English', 'en'),
+        { '@value': 'Deutschland', '@language': 'de-DE' },
+        { '@value': '2026', '@type': 'http://www.w3.org/2001/XMLSchema#gYear' },
+        { '@id': 'urn:x' },
+        { '@value': 'Neu', '@language': 'de' },
+      ],
+    });
+  });
+
+  it('replaces a conflict of typed and plain values with one value', () => {
+    const resource = node(
+      typed('Eins', 'DE'),
+      { '@value': 'Zwei', '@language': 'de' },
+      typed('One', 'en'),
+    );
+    const variant = selectTextVariant(resource, NAME, order);
+    expect(patchTextVariant(resource, NAME, variant)).toEqual({});
+    expect(
+      patchTextVariant(resource, NAME, editTextVariant(variant, 'Zwei')),
+    ).toEqual({
+      [NAME]: [typed('One', 'en'), { '@value': 'Zwei', '@language': 'de' }],
+    });
+  });
+
+  it('removes a typed value with null', () => {
+    const only = node(typed('Deutsch', 'de'));
+    const variant = selectTextVariant(only, NAME, ['de']);
+    expect(
+      patchTextVariant(only, NAME, editTextVariant(variant, null)),
+    ).toEqual({ [NAME]: null });
+  });
+
+  it('an edit of another predicate leaves typed values unpatched', () => {
+    const resource: JsonLd = {
+      '@id': 'urn:a',
+      [NAME]: [typed('Aufgabe', 'de')],
+      [DESCRIPTION]: [typed('Beschreibung', 'de')],
+    };
+    const name = selectTextVariant(resource, NAME, order);
+    const description = selectTextVariant(resource, DESCRIPTION, order);
+    expect(description.value).toBe('Beschreibung');
+    expect({
+      ...patchTextVariant(resource, NAME, editTextVariant(name, 'Neu')),
+      ...patchTextVariant(resource, DESCRIPTION, description),
+    }).toEqual({ [NAME]: [{ '@value': 'Neu', '@language': 'de' }] });
   });
 });
 

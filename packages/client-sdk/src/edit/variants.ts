@@ -3,6 +3,24 @@ import { EMBEDDABLE_IRI } from '../iri.js';
 import { LANGUAGE_TAG } from './fields.js';
 import { hasLanguage, isText, sameData, termsOf, type Term } from './terms.js';
 
+const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
+
+/**
+ * A text value of the recipe: a plain literal, or a language literal that
+ * also states its implied `rdf:langString` datatype (RDF 1.1), as a SPARQL
+ * SELECT projection may report it. `rdf:langString` without a language is not
+ * a language literal; like any other typed literal it is never selected and
+ * stays as it is.
+ */
+function isVariantText(term: Term): boolean {
+  return (
+    isText(term) ||
+    (typeof term['@value'] === 'string' &&
+      term['@type'] === RDF_LANG_STRING &&
+      typeof term['@language'] === 'string')
+  );
+}
+
 /**
  * Which language variant of a text predicate to show and edit, in order.
  * `null` is the untagged value, `'de'` that tag exactly (tags compare
@@ -86,8 +104,10 @@ function variantOf(language: string | null, values: readonly string[]) {
 
 /**
  * The variant of `predicate` to show under the app's order of languages.
- * Throws `MappingError` when the predicate's values are not value objects and
- * `TypeError` for an invalid order or predicate.
+ * Text values are plain literals; a language literal may also carry its
+ * implied `@type` `rdf:langString`. Typed literals of any other datatype and
+ * IRIs are never selected. Throws `MappingError` when the predicate's values
+ * are not value objects and `TypeError` for an invalid order or predicate.
  */
 export function selectTextVariant(
   resource: JsonLd,
@@ -96,7 +116,7 @@ export function selectTextVariant(
 ): TextVariant {
   const create = checkOrder(order);
   const candidates = textTerms(resource, predicate)
-    .filter(isText)
+    .filter(isVariantText)
     .map((term) => {
       const tag = term['@language'] as string | undefined;
       return {
@@ -116,7 +136,7 @@ export function selectTextVariant(
     );
   const language = candidates.length > 0 ? candidates[0]!.tag : create;
   const values = textTerms(resource, predicate)
-    .filter((term) => isText(term) && hasLanguage(term, language))
+    .filter((term) => isVariantText(term) && hasLanguage(term, language))
     .map((term) => term['@value'] as string);
   return variantOf(language, values);
 }
@@ -134,7 +154,9 @@ export function editTextVariant(
  * those on the resource (an untouched draft, also an unresolved conflict),
  * otherwise `predicate` with every value of the variant's language
  * (case-insensitively) replaced and all other terms unchanged, or `null` when
- * none remain. A written value carries the lower-case tag.
+ * none remain. A written value carries the lower-case tag and no `@type`,
+ * also where it replaces an `rdf:langString`-typed one; every term it keeps is
+ * written in the representation it was read in.
  */
 export function patchTextVariant(
   resource: JsonLd,
@@ -143,7 +165,7 @@ export function patchTextVariant(
 ): JsonLd {
   const terms = textTerms(resource, predicate);
   const mine = (term: Term) =>
-    isText(term) && hasLanguage(term, variant.language);
+    isVariantText(term) && hasLanguage(term, variant.language);
   if (
     sameData(
       terms.filter(mine).map((term) => term['@value']),

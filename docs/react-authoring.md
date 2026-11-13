@@ -203,7 +203,8 @@ of trimming before `create()`.
 - `text()` edits one fixed language. To show and edit whichever variant the app
   prefers, define the custom mapping once at module level with the
   [preferred-language recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant)
-  and use it with `useResourceEditor`.
+  and use it with `useResourceEditor`. `ResourceEditor` compares the variants
+  with their language and conflicts after a conflicting or unconfirmed write.
 
 ### Lists: useList and LoadNotice
 
@@ -508,6 +509,12 @@ change is optimistic; an unconfirmed write stays visible and is never replayed.
   absence; acknowledgement is explicit and enabled only by a successful check.
   A present resource the definition cannot read sets `unreadable`. Pass
   `labels={{ title: 'Task' }}` to name fields; values are localized.
+- The comparison shows structured draft values as they are, in `UpdateNotice`
+  and in `ResourceEditor`'s review alike: a `TextVariant` with its language
+  tag, and a conflict (several values in one language) as the list of all of
+  them. No value (a missing field, `null`, an empty list) reads differently
+  from empty text, and lists and nested objects show their parts. Keep such
+  values in the draft as read; do not flatten them for the comparison.
 - `checked` decides the acknowledgement button; pass it through to a custom
   recovery UI (without it, a caller keeps the state set by its `onCheck`).
 - Lost read access clears comparison values, `checked`, `outcome.current` and
@@ -1499,8 +1506,12 @@ from the guarded `useApp()` actions.
   sign-in; adding its own Pod address counts as that sign-in. Its sign-out and
   **Forget** stay available and win over the restoration. While the active
   connection restores, `access.pending` is true: show content or a skeleton. A
-  saved session whose Pod does not answer within 15 seconds ends `restorable`
-  with the prompt `unreachable`: offer `retryRestore(id)`. A resumed
+  saved session whose Pod does not answer its discovery within 15 seconds ends
+  `restorable` with the prompt `unreachable`: offer `retryRestore(id)`. A due
+  credential is renewed while it restores, which can take up to 20 seconds
+  more. With several Pods, a working one takes over from an active one that
+  cannot work, or that still restores after 5 seconds
+  ([several Pods at startup](browser-runtime.md#several-pods-at-startup)). A resumed
   re-authorization that times out ends without `restorable` and asks for a new
   sign-in.
 - Read `useAppState().access` for what needs attention, or compose the

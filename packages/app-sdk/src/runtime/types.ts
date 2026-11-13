@@ -26,6 +26,13 @@ export type SessionFact =
    * `beginAuthorization(id)` signs in again at the remembered address.
    */
   | { readonly kind: 'signed-out'; readonly problem?: RuntimeProblem }
+  /**
+   * A saved session is restored: its Pod's discovery (at most 15 seconds),
+   * and, for a credential that is due, its renewal (a token request of at
+   * most 20 seconds, resent once after a lost answer). Nothing is dispatched
+   * meanwhile. It ends `active`, or `ended` (with `restorable` when only the
+   * Pod or storage was unavailable).
+   */
   | { readonly kind: 'restoring' }
   | { readonly kind: 'active' | 'renewing'; readonly subject: string }
   /**
@@ -224,8 +231,9 @@ export interface BrowserRuntimeOptions {
   readonly locks?: SessionLocks | null;
   /**
    * Remembers each connection's last chosen context for the next start; it is
-   * reselected only while still readable. Defaults to localStorage; `null`
-   * disables remembering.
+   * reselected only while still readable. The app controller also keeps the
+   * connection the app last worked with here, preferred at the next start.
+   * Defaults to localStorage; `null` disables remembering.
    */
   readonly preferences?: PreferenceStorage | null;
   /**
