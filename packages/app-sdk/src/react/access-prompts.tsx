@@ -272,14 +272,16 @@ function TimedPrompt({
  * Info prompts hide after about 6 seconds unless focused or hovered, which
  * dismisses them; action prompts stay until dismissed or resolved. Each
  * prompt gets `focusTarget` (see `AccessPrompt`). Shows nothing while a
- * blocking prompt holds the gate.
+ * blocking prompt holds the gate or the app still starts.
  */
 export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const { blocking, prompts } = useAccessPrompts();
   const { direction } = useSdkLocale();
   // One stack per provider, also with several AppAccess instances.
   const first = useFirst('prompts');
-  const shown = blocking || !first ? [] : prompts;
+  // Prompts about other Pods wait for the startup screen to end.
+  const starting = useAppFacts((s) => s.starting);
+  const shown = blocking || !first || starting ? [] : prompts;
   return (
     <div
       data-sempods-ui="prompts"

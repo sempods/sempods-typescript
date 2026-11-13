@@ -3,6 +3,7 @@ import {
   Fragment,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useSyncExternalStore,
   useState,
@@ -19,13 +20,14 @@ import {
   type LocaleOptions,
   type TargetSelection,
 } from '../index.js';
-import { targetProblem } from '../authoring/app.js';
+import { demandSelection, targetProblem } from '../authoring/app.js';
 import type { CatalogueContext } from '@sempods/client-sdk';
 import type { CatalogueFact } from '../runtime/types.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog } from './confirm.js';
 import { useCommands } from './commands.js';
 import { knownContexts, reads } from './access-presentation.js';
+import { StartupHost, useStartupCover } from './startup.js';
 import {
   contextLabels,
   contextName,
@@ -226,6 +228,10 @@ export function SempodsProvider({
     [selection, discovery, switching],
   );
   const app = owner.controller;
+  // Before start, so the first startup snapshot already knows the demand.
+  useLayoutEffect(() => {
+    demandSelection(app, selection);
+  }, [app, selection]);
   useEffect(() => {
     app.start();
     return () => app.stop();
@@ -235,6 +241,7 @@ export function SempodsProvider({
       <Context.Provider value={value}>
         <Demand.Provider value={demand}>
           <GuardedContent>{children}</GuardedContent>
+          <StartupHost />
           <LeaveConfirmation />
         </Demand.Provider>
       </Context.Provider>
@@ -242,6 +249,9 @@ export function SempodsProvider({
   );
 }
 function GuardedContent({ children }: { readonly children: ReactNode }) {
+  // Behind the startup screen the content stays mounted, inert and hidden
+  // from assistive technology, as behind the gate.
+  const covered = useStartupCover();
   const { changing, confirmingLeave, leaving } = useAppFacts(
     (s) => ({
       changing: s.changing,
@@ -256,7 +266,7 @@ function GuardedContent({ children }: { readonly children: ReactNode }) {
   );
   return (
     <div
-      inert={changing || confirmingLeave || leaving}
+      inert={changing || confirmingLeave || leaving || covered}
       style={{ display: 'contents' }}
     >
       {children}

@@ -1022,6 +1022,18 @@ function expectNoSurface() {
   expect(document.querySelector('[data-sempods-ui="prompt"]')).toBeNull();
 }
 /** While a connection validates, the surface shows its heading and loading status only. */
+/**
+ * The startup screen covers the first catalogue load (#304): the app's name,
+ * no controls, and no access surface beside it.
+ */
+function expectStartupOnly() {
+  const layer = document.querySelector<HTMLElement>('[data-sempods-startup]');
+  expect(layer).not.toBeNull();
+  expect(within(layer!).getByRole('heading').textContent).toBe('Shopping');
+  expect(within(layer!).queryAllByRole('button')).toHaveLength(0);
+  expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
+  expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull();
+}
 function expectLoadingOnly() {
   const region = screen.getByRole('region', { name: 'Pods & sharing' });
   expect(within(region).getByRole('status').textContent).toBe('Loading…');
@@ -1161,7 +1173,7 @@ it.each([
   ['on-demand', 'callback'],
   ['on-demand', 'restore'],
 ] as const)(
-  'shows only the loading status while a demanded catalogue loads (%s, %s)',
+  'shows the startup screen while the first demanded catalogue loads (%s, %s)',
   async (mode, phase) => {
     const f = fixture({ preset: { podUrl: pod, contextIri: work } });
     let runtime: BrowserRuntime;
@@ -1199,18 +1211,19 @@ it.each([
       expect(runtime.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
     );
     expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
-    expectLoadingOnly();
+    expectStartupOnly();
     await act(async () => answer.resolve());
     await screen.findByText('Context screen');
     expect(screen.queryByRole('region', { name: 'Pods & sharing' })).toBeNull();
+    expect(document.querySelector('[data-sempods-startup]')).toBeNull();
     // The preset Context settles the target: nothing for the person to decide.
-    // Before startup settles, nothing shows (no initial loading panel).
-    expect(states).toEqual(['hidden', 'loading', 'hidden']);
+    // The access surface never shows, not even a loading card.
+    expect(states).toEqual(['hidden']);
   },
 );
 
 it.each(['required', 'on-demand'] as const)(
-  'ends a demanded catalogue load at the chooser or the failure view (%s)',
+  'ends the startup screen at the chooser or the failure view (%s)',
   async (mode) => {
     for (const outcome of ['choice', 'failure'] as const) {
       const f = fixture({ preferences: null });
@@ -1241,7 +1254,7 @@ it.each(['required', 'on-demand'] as const)(
       await waitFor(() =>
         expect(runtime.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
       );
-      expectLoadingOnly();
+      expectStartupOnly();
       await act(async () => answer.resolve());
       if (outcome === 'choice')
         await screen.findByRole('combobox', { name: 'Data context' });
@@ -1249,7 +1262,8 @@ it.each(['required', 'on-demand'] as const)(
         await screen.findByText(
           'Context catalogue unavailable. Access is unknown.',
         );
-      expect(states, outcome).toEqual(['hidden', 'loading', 'connection']);
+      expect(states, outcome).toEqual(['hidden', 'connection']);
+      expect(document.querySelector('[data-sempods-startup]')).toBeNull();
       // A reload the person starts keeps the connection view and its focus.
       const check = screen.getByRole('button', { name: 'Check access' });
       check.focus();
@@ -1266,7 +1280,7 @@ it.each(['required', 'on-demand'] as const)(
       expect(document.activeElement).toBe(check);
       await act(async () => again.resolve());
       await screen.findByRole('combobox', { name: 'Data context' });
-      expect(states, outcome).toEqual(['hidden', 'loading', 'connection']);
+      expect(states, outcome).toEqual(['hidden', 'connection']);
       view.unmount();
       runtime.dispose();
       await settleLease();
@@ -1307,10 +1321,12 @@ it('loads the first catalogue again after the host replaces the runtime', async 
   // The same connection ID restored by another runtime has not settled here.
   expect(second.getSnapshot()[0]?.id).toBe(signed.id);
   expect(second.getSnapshot()[0]?.session.kind).toBe('active');
-  expectLoadingOnly();
+  // A new runtime starts the app again: its startup screen covers the load.
+  expectStartupOnly();
   await act(async () => answer.resolve());
   await screen.findByText('Context screen');
   expect(states).not.toContain('connection');
+  expect(states).not.toContain('loading');
 });
 
 /** Restarts [f]'s saved sessions with Pod discovery held (for [held] URLs) until the gate settles. */

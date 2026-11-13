@@ -1778,7 +1778,8 @@ try {
     'Packed AppAccess, provider login_required callback: specific EN/DE cause once on its connection, no kept-draft claim or provider text, cleared by selecting another Pod or disconnecting passed.',
   );
   // One permitted Pod, Contexts on demand: while the callback or restore is
-  // pending nothing shows, never the connection view with "Full addresses".
+  // pending the access surface shows nothing (the startup screen covers the
+  // app), never the connection view with "Full addresses".
   // The gate (ended session, missing required scopes) still appears directly.
   const accessTrace = () => page.evaluate(() => window.accessTrace);
   const settled = (state) =>
@@ -1832,10 +1833,16 @@ try {
   console.log(
     'Packed AppAccess, one Pod on demand: nothing while the callback or restore of the delayed Pod is pending; an unreachable Pod offers Try again in a prompt and restores, an ended session and missing required scopes show the gate directly passed.',
   );
-  // A demanded Context catalogue that answers after a delay: with a preset
-  // Context the target settles by itself, so sign-in and restore show only the
-  // loading status before hiding. Without one the trace ends at the chooser,
-  // and a failing catalogue at its failure view.
+  // A demanded Context catalogue that answers after a delay: the startup
+  // screen covers the first catalogue (#304), so the access surface never
+  // shows a loading card. With a preset Context the target settles by
+  // itself; without one the trace ends at the chooser, and a failing
+  // catalogue at its failure view.
+  const startupSeen = () => page.evaluate(() => window.startupTrace.seen);
+  const startupGone = () =>
+    page.waitForFunction(
+      () => !document.querySelector('[data-sempods-startup]'),
+    );
   for (const mode of ['required', 'on-demand']) {
     const app = origin + '/app?identity=access-catalogue-' + mode;
     await page.goto(app);
@@ -1846,19 +1853,15 @@ try {
     await page.waitForURL(app);
     await page.getByText('Context screen').waitFor();
     await settled('hidden');
-    assert.deepEqual(
-      await accessTrace(),
-      ['hidden', 'loading', 'hidden'],
-      mode,
-    );
+    await startupGone();
+    assert.deepEqual(await accessTrace(), ['hidden'], mode);
+    assert.ok(await startupSeen(), mode);
     await page.reload();
     await page.getByText('Context screen').waitFor();
     await settled('hidden');
-    assert.deepEqual(
-      await accessTrace(),
-      ['hidden', 'loading', 'hidden'],
-      mode,
-    );
+    await startupGone();
+    assert.deepEqual(await accessTrace(), ['hidden'], mode);
+    assert.ok(await startupSeen(), mode);
   }
   const choice = origin + '/app?identity=access-catalogue-choice';
   await page.goto(choice);
@@ -1868,16 +1871,18 @@ try {
   ]);
   await page.waitForURL(choice);
   await page.getByLabel('Data context', { exact: true }).waitFor();
-  assert.deepEqual(await accessTrace(), ['hidden', 'loading', 'connection']);
+  assert.deepEqual(await accessTrace(), ['hidden', 'connection']);
+  assert.ok(await startupSeen());
   slowCatalogueFailing = true;
   await page.reload();
   await page
     .getByText('Context catalogue unavailable. Access is unknown.')
     .waitFor();
-  assert.deepEqual(await accessTrace(), ['hidden', 'loading', 'connection']);
+  assert.deepEqual(await accessTrace(), ['hidden', 'connection']);
+  assert.ok(await startupSeen());
   slowCatalogueFailing = false;
   console.log(
-    'Packed AppAccess, delayed Context catalogue (required and on-demand with TargetScreen): preset sign-in and restore pass loading -> hidden only; without a preset the chooser, and a failing catalogue its failure view, follow loading directly passed.',
+    'Packed AppAccess, delayed Context catalogue (required and on-demand with TargetScreen): the startup screen covers the first catalogue, no loading card; without a preset the chooser, and a failing catalogue its failure view, follow it directly passed.',
   );
   // The copyable recipe, installed archives and native browser storage: a Pod
   // overview loads/restores/renews without touching Context discovery.

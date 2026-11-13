@@ -53,6 +53,26 @@ The gate also shows again, with the focus kept, when a browser closes it on a
 repeated Escape: browsers let a close request through uncancelled when no
 other input came between two of them.
 
+## Pending release: a startup screen instead of a blank page or the access card
+
+The source adds `AppSnapshot.starting` (`useAppState().starting`) and the
+startup screen `AppStartup` to `@sempods/app-sdk/react`. `AppAccess` places
+it by default while the app starts: from the saved records through
+restoration to the first catalogue a Context needs. This is not part of
+published 0.8.0. In 0.8.0 `AppAccess` showed nothing while a saved session
+restored and its access card with "Loading…" (or the Pod chooser) during the
+first catalogue. Now one calm screen with the app's icon and name covers both.
+The content stays mounted and inert behind it, and prompts wait until it
+ends. After upgrading to the containing release, remove app code that
+combined `startup`, `access.pending`, the session kind and readability to
+tell "starting" from "nothing to show", and pass `icon` to `AppAccess` if the
+app has one. Match a static HTML splash to it (see
+[the startup sequence](react-authoring.md#startup-screen-and-static-splash)).
+`startup="none"` keeps the 0.8.0 behaviour for the restoration and leaves
+the screen to the app; the Context surface still waits for `starting` to end.
+A complete custom `messages.controls` may add `starting`; otherwise `loading`
+shows.
+
 ## Pending release: the last active Pod at startup
 
 With several saved Pods, the app controller now makes the Pod active that the
