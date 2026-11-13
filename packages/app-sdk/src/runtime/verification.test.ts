@@ -11,6 +11,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { IDBObjectStore } from 'fake-indexeddb';
 import type { PodFetch } from '@sempods/client-sdk';
 import { openSessionStore } from '../sessions/store.js';
+import type { SessionRecord } from '../sessions/records.js';
 import type { BrowserRuntime } from './types.js';
 import { createBrowserRuntime } from './runtime.js';
 import {
@@ -20,8 +21,8 @@ import {
   deferred,
   jwt,
   catalogue,
-  pod,
   personal,
+  work,
 } from './fixture.test.js';
 
 const runtimes: BrowserRuntime[] = [];
@@ -280,24 +281,42 @@ it('B2/B5: a newer attempt supersedes an older one for the same connection', asy
   expect(f.count('/token')).toBe(tokens + 1);
 });
 
-it('B3: invalid_client drops only that Pod registration; the next sign-in registers again', async () => {
+it('B3: invalid_client drops only that Pod registration; a legacy second session registers again', async () => {
   const f = await logged();
-  // Cache registrations in this runtime: a second Alice connection and Bob.
-  const again = await f.runtime.connect(pod);
-  const bob = await f.runtime.connect('https://pod.example/bob');
+  // Preserve the cross-connection regression: older SDKs could save a second
+  // independent session at this URL. Ordinary connect now reuses the first.
+  const store = await openSessionStore(namespace, f.factory);
+  const value = (await store.list()).records[0]!.value as SessionRecord;
+  if (value.kind !== 'ready') throw new Error('expected session');
+  await store.commit('legacy-alice', null, {
+    ...value,
+    binding: { ...value.binding, connectionId: 'legacy-alice' },
+  });
+  store.close();
+  f.runtime.dispose();
+  await settleLease();
+  const runtime = createBrowserRuntime(f.options);
+  runtimes.push(runtime);
+  await runtime.initialize();
+  await restored(runtime);
+  await runtime.loadContexts(f.id);
+  runtime.selectContext(f.id, work);
+  const view = runtime.bind(f.id);
+  const again = runtime.getSnapshot().find((c) => c.id === 'legacy-alice')!;
+  expect(again.id).not.toBe(f.id);
+  const bob = await runtime.connect('https://pod.example/bob');
   const registered = f.count('/register');
   f.setToken(async () =>
     Response.json({ error: 'invalid_client' }, { status: 400 }),
   );
   f.setQuery(async () => refused());
-  expect(await f.view.sparql.construct(query)).toEqual({ kind: 'invalidated' });
+  expect(await view.sparql.construct(query)).toEqual({ kind: 'invalidated' });
   expect(
-    f.runtime.getSnapshot().find((c) => c.id === f.id)?.session,
+    runtime.getSnapshot().find((c) => c.id === f.id)?.session,
   ).toMatchObject({ kind: 'ended', problem: 'invalid-client' });
-  // Bob's cached registration is kept; Alice's is resolved afresh.
-  await f.runtime.beginAuthorization(bob.id);
+  await runtime.beginAuthorization(bob.id);
   expect(f.count('/register')).toBe(registered);
-  await f.runtime.beginAuthorization(again.id);
+  await runtime.beginAuthorization(again.id);
   expect(f.count('/register')).toBe(registered + 1);
 });
 

@@ -60,6 +60,19 @@ export function SignInConnections({
     (mode === 'multiple' ||
       !connections.some((entry) => entry.session.kind !== 'signed-out'));
   const field = options.length === 0 || (free && entering);
+  const entered = field
+    ? (connections.find(
+        (entry) =>
+          entry.id === state.activeId && entry.podUrl === enteredPod(url),
+      ) ?? connections.find((entry) => entry.podUrl === enteredPod(url)))
+    : undefined;
+  const targetConnection = field ? entered : c;
+  const failedRetirement =
+    targetConnection?.session.kind === 'ended' &&
+    targetConnection.session.saved === false;
+  const forgetFailed =
+    targetConnection?.session.kind === 'ended' &&
+    targetConnection.session.forget === true;
   const hiddenAddress =
     podAddress === 'hidden' &&
     surface === 'sign-in' &&
@@ -71,7 +84,7 @@ export function SignInConnections({
     !state.startup ||
     (state.startup.storage !== 'durable' && state.signIn !== 'none') ||
     Boolean(state.startupError);
-  const restoring = !field && c?.session.kind === 'restoring';
+  const restoring = targetConnection?.session.kind === 'restoring';
   const leaving = connections.some(
     (entry) => entry.id === state.activeId && entry.session.kind === 'leaving',
   );
@@ -81,14 +94,15 @@ export function SignInConnections({
     c !== undefined &&
     c.missingRequiredScopes.length === 0;
   const retry = !field && c?.session.kind === 'ended' && c.session.restorable;
-  const label = retry
-    ? m.controls.retry
-    : readable || state.signIn !== 'required'
-      ? (m.controls.open ?? m.controls.signIn)
-      : !field &&
-          (c?.session.kind === 'active' || c?.session.kind === 'renewing')
-        ? m.controls.updateAccess
-        : m.controls.signIn;
+  const label =
+    retry || failedRetirement
+      ? m.controls.retry
+      : readable || state.signIn !== 'required'
+        ? (m.controls.open ?? m.controls.signIn)
+        : !field &&
+            (c?.session.kind === 'active' || c?.session.kind === 'renewing')
+          ? m.controls.updateAccess
+          : m.controls.signIn;
   const saved = connections.filter(
     (entry) =>
       entry.session.kind === 'signed-out' ||
@@ -138,12 +152,16 @@ export function SignInConnections({
     }
   }
   async function proceed() {
+    // A failed retirement remains a retry even when its Pod is not the active
+    // connection (and therefore has no blocking gate), or its address is typed.
+    if (failedRetirement && targetConnection) {
+      if (forgetFailed) await app.forget(targetConnection.id);
+      else await app.disconnect(targetConnection.id);
+      return;
+    }
     if (field) {
       const target = enteredPod(url);
-      const existing =
-        connections.find(
-          (entry) => entry.id === state.activeId && entry.podUrl === target,
-        ) ?? connections.find((entry) => entry.podUrl === target);
+      const existing = entered;
       if (existing?.session.kind === 'restoring') return;
       if (existing) {
         if (state.signIn === 'required') await app.authorize(existing.id);
@@ -189,7 +207,9 @@ export function SignInConnections({
               </p>
             )}
           </>
-        ) : (
+        ) : hiddenAddress &&
+          options.length === 1 &&
+          !podNames?.[selected?.url ?? '']?.trim() ? null : (
           <fieldset className="sp-sign-in-choices" disabled={unavailable}>
             <legend>
               {options.length > 1
@@ -222,7 +242,8 @@ export function SignInConnections({
                     name(option.url) === podNames[option.url]?.trim() && (
                       <span className="sp-access-address">{option.url}</span>
                     )}
-                  {!hiddenAddress &&
+                  {(!hiddenAddress ||
+                    Boolean(podNames?.[option.url]?.trim())) &&
                     options.filter((o) => o.url === option.url).length > 1 &&
                     ` · ${index + 1}`}
                 </span>
@@ -236,8 +257,18 @@ export function SignInConnections({
           c.session.problem !== 'disconnected' && (
             <p role="status">{m.controls.sessionEnded}</p>
           )}
-        {!field && c?.session.kind === 'ended' && !callbackExplains && (
-          <p role="status">{endedMessage(c.session, m, true)}</p>
+        {!field &&
+          c?.session.kind === 'ended' &&
+          !failedRetirement &&
+          !callbackExplains && (
+            <p role="status">{endedMessage(c.session, m, true)}</p>
+          )}
+        {failedRetirement && (
+          <p role="alert">
+            {forgetFailed
+              ? m.controls.forgetFailed
+              : m.controls.disconnectFailed}
+          </p>
         )}
         {restoring && <p role="status">{m.controls.loading}</p>}
         <button
@@ -288,15 +319,16 @@ export function SignInConnections({
                     {m.controls.removeSavedPod ?? m.controls.forget}
                   </button>
                 )}
-                {entry.session.kind !== 'signed-out' && (
-                  <button
-                    disabled={unavailable}
-                    aria-describedby={`${id}-${entry.id}`}
-                    onClick={() => void act(() => app.disconnect(entry.id))}
-                  >
-                    {m.controls.disconnect}
-                  </button>
-                )}
+                {entry.session.kind !== 'signed-out' &&
+                  !(entry.session.kind === 'ended' && entry.session.forget) && (
+                    <button
+                      disabled={unavailable}
+                      aria-describedby={`${id}-${entry.id}`}
+                      onClick={() => void act(() => app.disconnect(entry.id))}
+                    >
+                      {m.controls.disconnect}
+                    </button>
+                  )}
               </li>
             ))}
           </ul>

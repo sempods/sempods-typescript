@@ -894,40 +894,47 @@ it('keeps the address of the one permitted Pod hidden when signing in again', as
   expect(screen.getByText(pod)).toBeTruthy();
 });
 
-it('numbers saved duplicates of the one permitted Pod instead of showing its hidden address', async () => {
-  const f = fixture();
-  await f.runtime.initialize();
-  await f.runtime.beginAuthorization((await f.runtime.connect(pod)).id);
-  // An older SDK could save another independent attempt for the same Pod.
-  const store = await openSessionStore(
-    JSON.stringify(['dynamic', 'https://app.example/oauth/callback']),
-    f.factory,
-  );
-  const value = (await store.list()).records[0]!.value as SessionRecord;
-  if (value.kind !== 'authorizing') throw new Error('expected attempt');
-  await store.commit('legacy-attempt', null, {
-    ...value,
-    attempt: {
-      ...value.attempt,
-      connectionId: 'legacy-attempt',
-    },
-  });
-  store.close();
-  f.runtime.dispose();
-  await settleLease();
-  const runtime = createBrowserRuntime({ ...f.options, allowedPods: [pod] });
-  cleanups.push(() => runtime.dispose());
-  render(
-    <SempodsProvider runtime={runtime}>
-      <AppAccess appName="Shopping" podAddress="hidden" />
-    </SempodsProvider>,
-  );
-  const choices = await screen.findAllByRole('radio');
-  expect(choices.map((choice) => choice.closest('label')?.textContent)).toEqual(
-    ['1', '2'],
-  );
-  expect(screen.queryByText(pod.replace(/^https?:\/\//, ''))).toBeNull();
-});
+it.each([false, true])(
+  'numbers saved duplicates with a hidden address (named: %s)',
+  async (named) => {
+    const f = fixture();
+    await f.runtime.initialize();
+    await f.runtime.beginAuthorization((await f.runtime.connect(pod)).id);
+    // An older SDK could save another independent attempt for the same Pod.
+    const store = await openSessionStore(
+      JSON.stringify(['dynamic', 'https://app.example/oauth/callback']),
+      f.factory,
+    );
+    const value = (await store.list()).records[0]!.value as SessionRecord;
+    if (value.kind !== 'authorizing') throw new Error('expected attempt');
+    await store.commit('legacy-attempt', null, {
+      ...value,
+      attempt: {
+        ...value.attempt,
+        connectionId: 'legacy-attempt',
+      },
+    });
+    store.close();
+    f.runtime.dispose();
+    await settleLease();
+    const runtime = createBrowserRuntime({ ...f.options, allowedPods: [pod] });
+    cleanups.push(() => runtime.dispose());
+    render(
+      <SempodsProvider runtime={runtime}>
+        <AppAccess
+          appName="Shopping"
+          podAddress="hidden"
+          {...(named ? { podNames: { [pod]: 'Home' } } : {})}
+        />
+      </SempodsProvider>,
+    );
+    const choices = await screen.findAllByRole('radio');
+    expect(
+      choices.map((choice) => choice.closest('label')?.textContent),
+    ).toEqual(named ? ['Home · 1', 'Home · 2'] : ['1', '2']);
+    expect(screen.queryByText(pod.replace(/^https?:\/\//, ''))).toBeNull();
+  },
+);
 
 it('preserves cancelled callback feedback and supports custom connection replacement', async () => {
   const f = fixture();

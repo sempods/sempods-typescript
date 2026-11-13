@@ -387,3 +387,84 @@ it('opens another address on request and reuses a saved Pod entered there', asyn
     pod + '/_system/auth/authorize',
   );
 });
+
+it.each(['gate', 'management'] as const)(
+  'retries an inactive Pod removal instead of authorizing it from %s',
+  async (surface) => {
+    const { f, runtime, other } = await twoPods((r) =>
+      cleanups.push(() => r.dispose()),
+    );
+    for (const c of runtime.getSnapshot()) await runtime.disconnect(c.id);
+    let failing = true;
+    const next = await restart(
+      f,
+      runtime,
+      (r) => cleanups.push(() => r.dispose()),
+      {
+        preset: { podUrl: pod },
+        openStore: storeWith(f.factory, (store) => ({
+          remove: (...args) =>
+            failing && args[0] === other.id
+              ? Promise.reject(new Error('storage failure'))
+              : store.remove(...args),
+        })),
+      },
+    );
+    render(
+      <SempodsProvider runtime={next}>
+        <AppAccess
+          appName="Shopping"
+          {...(surface === 'management'
+            ? { open: true, onClose: () => {} }
+            : {})}
+        />
+      </SempodsProvider>,
+    );
+    const view = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        `[data-sempods-ui="${surface}"]`,
+      );
+      expect(element).toBeTruthy();
+      return element!;
+    });
+    fireEvent.click(
+      within(view).getByRole('radio', { name: 'pod.example/bob' }),
+    );
+    const record = within(view)
+      .getByText('https://pod.example/bob', { selector: 'p' })
+      .closest('li')!;
+    const before = f.navigate.mock.calls.length;
+    await act(async () =>
+      within(record)
+        .getByRole('button', { name: 'Remove from this device' })
+        .click(),
+    );
+    await within(view).findByText(
+      'This Pod was not forgotten on this device. Try forgetting it again.',
+    );
+    expect(
+      within(view).queryByRole('button', { name: 'Sign in', exact: true }),
+    ).toBeNull();
+    expect(
+      within(view).getByRole('button', { name: 'Try again' }),
+    ).toBeTruthy();
+    // Entering the same URL cannot bypass the retained removal intent either.
+    fireEvent.click(
+      within(view).getByRole('button', { name: 'Use another Pod' }),
+    );
+    fireEvent.change(within(view).getByRole('textbox'), {
+      target: { value: 'pod.example/bob' },
+    });
+    expect(
+      within(view).queryByRole('button', { name: 'Sign in', exact: true }),
+    ).toBeNull();
+    failing = false;
+    await act(async () =>
+      within(view).getByRole('button', { name: 'Try again' }).click(),
+    );
+    await waitFor(() =>
+      expect(next.getSnapshot().some((c) => c.id === other.id)).toBe(false),
+    );
+    expect(f.navigate).toHaveBeenCalledTimes(before);
+  },
+);

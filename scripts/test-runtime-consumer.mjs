@@ -1386,7 +1386,61 @@ try {
           language === 'en' ? 'Pods on this device' : 'Pods auf diesem Gerät',
         exact: true,
       });
-      await page.getByRole('button', { name: signIn, exact: true }).waitFor();
+      const mainSignIn = page.getByRole('button', {
+        name: signIn,
+        exact: true,
+      });
+      await mainSignIn.waitFor();
+      assert.equal(await mainSignIn.count(), 1);
+      assert.equal(await page.getByRole('textbox').count(), 0);
+      const beforeChoice = exchanges;
+      const another = page.getByRole('button', {
+        name: language === 'en' ? 'Use another Pod' : 'Anderen Pod verwenden',
+      });
+      await another.focus();
+      await page.keyboard.press('Enter');
+      const addressInput = page.getByRole('textbox', {
+        name: language === 'en' ? 'Pod address' : 'Pod-Adresse',
+      });
+      assert.ok(
+        await addressInput.evaluate(
+          (input) => input === document.activeElement,
+        ),
+      );
+      await page
+        .getByRole('button', {
+          name:
+            language === 'en'
+              ? 'Use a saved Pod'
+              : 'Gespeicherten Pod verwenden',
+        })
+        .click();
+      assert.ok(
+        await mainSignIn.evaluate(
+          (button) => button === document.activeElement,
+        ),
+      );
+      assert.equal(exchanges, beforeChoice);
+      const viewport = page.viewportSize();
+      for (const width of [320, 1280])
+        for (const colorScheme of ['light', 'dark']) {
+          await page.setViewportSize({ width, height: 812 });
+          await page.emulateMedia({ colorScheme });
+          assert.ok(
+            await page
+              .locator('[data-sempods-ui="gate"]')
+              .evaluate((gate) => gate.scrollWidth <= gate.clientWidth),
+          );
+          if (process.env.SEMPODS_UI_PREVIEW_DIR)
+            await page.screenshot({
+              path: join(
+                process.env.SEMPODS_UI_PREVIEW_DIR,
+                `login-remembered-${language}-${width}-${colorScheme}.png`,
+              ),
+            });
+        }
+      if (viewport) await page.setViewportSize(viewport);
+      await page.emulateMedia({ colorScheme: 'light' });
       await page
         .getByText(
           language === 'en'
