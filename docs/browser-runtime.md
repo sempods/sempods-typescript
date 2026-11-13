@@ -898,11 +898,13 @@ The app controller does not make a remembered Pod active while another
 connection has a session (signed in, restoring or ended), and when the active
 connection signs out it gives way to such a connection, as a removed one did.
 A remembered Pod the person selects stays active, ready to sign in.
-`AppAccess` lists remembered Pods on its gate's sign-in view, above the address
-field, each with **Sign in** and **Forget** (`controls.rememberedPods`,
-`controls.forget`; `controls.sessionEnded` notes an ended session); management
-lists them under **Connect another Pod**. A Pod whose forgetting failed shows
-`controls.forgetFailed` with **Try again** only, which forgets it.
+`AppAccess` offers remembered Pods as a choice with one main action; another
+address opens on request. **Manage saved Pods** separates removal from sign-in,
+and `controls.sessionEnded` notes an ended session. Connected management also
+lists other Pods under **Connect another Pod**. Failed retirement offers its
+failure and retry, never sign-in to that connection, even when it is not the
+active Pod. The [React guide](react-authoring.md#sign-in-and-pod-addresses)
+describes the default presentation and its customization.
 
 A custom `SessionStore` (`openStore`) implements `remove(id, expectedRevision)`
 for this: an atomic delete at the expected revision, `conflict` otherwise.

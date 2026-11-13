@@ -166,7 +166,7 @@ export interface UiMessages {
   readonly disconnectFailed?: string;
   /*
    * Remembered Pods (added in 0.8.0; optional in the type, `createLocale`
-   * fills them): the list of signed-out Pods on the sign-in view, the action
+   * fills them): the saved-Pod management list, the action
    * that removes one from this device, and the note under a Pod whose session
    * ended rather than being signed out.
    */

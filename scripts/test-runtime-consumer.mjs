@@ -2133,8 +2133,10 @@ try {
     await pods.selectOption(value);
   };
   // The failed sign-in to the second Pod blocks: the gate offers the other Pod.
-  await page.locator('[data-sempods-ui="gate"]').waitFor();
-  await choosePod('overview-pod');
+  const overviewGate = page.locator('[data-sempods-ui="gate"]');
+  await overviewGate.waitFor();
+  await overviewGate.getByRole('radio', { name: /overview-pod/ }).check();
+  await overviewGate.getByRole('button', { name: 'Open', exact: true }).click();
   await page.locator('[data-sempods-ui="gate"]').waitFor({ state: 'detached' });
   // The second Pod's failed sign-in is now a prompt beside it: dismiss it.
   await page

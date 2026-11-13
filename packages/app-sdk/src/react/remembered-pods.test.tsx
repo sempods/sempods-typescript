@@ -338,37 +338,52 @@ it('names the active Pod in management beside a remembered one', async () => {
   expect(within(list).getByText('pod.example/bob')).toBeTruthy();
 });
 
-it('chooses among remembered Pods without selecting or authorizing until the main action', async () => {
-  const { f, runtime, other } = await twoPods((r) =>
-    cleanups.push(() => r.dispose()),
-  );
-  for (const c of runtime.getSnapshot()) await runtime.disconnect(c.id);
-  const next = await restart(f, runtime, (r) =>
-    cleanups.push(() => r.dispose()),
-  );
-  show(next);
-  const choices = await screen.findAllByRole('radio');
-  expect(choices).toHaveLength(2);
-  const before = f.navigate.mock.calls.length;
-  const ids = next.getSnapshot().map((c) => c.id);
-  await act(async () =>
-    screen.getByRole('radio', { name: 'pod.example/bob' }).click(),
-  );
-  expect(f.navigate).toHaveBeenCalledTimes(before);
-  expect(next.getSnapshot().every((c) => c.session.kind === 'signed-out')).toBe(
-    true,
-  );
-  expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(1);
-  expect(screen.queryByRole('textbox')).toBeNull();
-  await act(async () =>
-    screen.getByRole('button', { name: 'Sign in' }).click(),
-  );
-  await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(before + 1));
-  expect(next.getSnapshot().find((c) => c.id === other.id)?.session.kind).toBe(
-    'leaving',
-  );
-  expect(next.getSnapshot().map((c) => c.id)).toEqual(ids);
-});
+it.each(['choice', 'address'] as const)(
+  'authorizes an inactive remembered Pod once through %s and shows departure',
+  async (entry) => {
+    const { f, runtime, other } = await twoPods((r) =>
+      cleanups.push(() => r.dispose()),
+    );
+    for (const c of runtime.getSnapshot()) await runtime.disconnect(c.id);
+    const next = await restart(f, runtime, (r) =>
+      cleanups.push(() => r.dispose()),
+    );
+    show(next);
+    const choices = await screen.findAllByRole('radio');
+    expect(choices).toHaveLength(2);
+    const before = f.navigate.mock.calls.length;
+    const ids = next.getSnapshot().map((c) => c.id);
+    await act(async () =>
+      screen.getByRole('radio', { name: 'pod.example/bob' }).click(),
+    );
+    expect(f.navigate).toHaveBeenCalledTimes(before);
+    expect(
+      next.getSnapshot().every((c) => c.session.kind === 'signed-out'),
+    ).toBe(true);
+    expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(1);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    if (entry === 'address') {
+      fireEvent.click(screen.getByRole('button', { name: 'Use another Pod' }));
+      fireEvent.change(screen.getByRole('textbox'), {
+        target: { value: 'pod.example/bob' },
+      });
+    }
+    await act(async () =>
+      screen.getByRole('button', { name: 'Sign in' }).click(),
+    );
+    await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(before + 1));
+    expect(
+      next.getSnapshot().find((c) => c.id === other.id)?.session.kind,
+    ).toBe('leaving');
+    expect(next.getSnapshot().map((c) => c.id)).toEqual(ids);
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe(
+      'Opening your Pod’s sign-in…',
+    );
+  },
+);
 
 it('opens another address on request and reuses a saved Pod entered there', async () => {
   const { f, runtime, id } = await remembered('sign-out');
@@ -388,9 +403,14 @@ it('opens another address on request and reuses a saved Pod entered there', asyn
   );
 });
 
-it.each(['gate', 'management'] as const)(
-  'retries an inactive Pod removal instead of authorizing it from %s',
-  async (surface) => {
+it.each([
+  ['gate', true],
+  ['gate', false],
+  ['management', true],
+  ['management', false],
+] as const)(
+  'reports and retries an inactive Pod removal from %s (selected: %s)',
+  async (surface, selected) => {
     const { f, runtime, other } = await twoPods((r) =>
       cleanups.push(() => r.dispose()),
     );
@@ -427,9 +447,10 @@ it.each(['gate', 'management'] as const)(
       expect(element).toBeTruthy();
       return element!;
     });
-    fireEvent.click(
-      within(view).getByRole('radio', { name: 'pod.example/bob' }),
-    );
+    if (selected)
+      fireEvent.click(
+        within(view).getByRole('radio', { name: 'pod.example/bob' }),
+      );
     const record = within(view)
       .getByText('https://pod.example/bob', { selector: 'p' })
       .closest('li')!;
@@ -443,10 +464,31 @@ it.each(['gate', 'management'] as const)(
       'This Pod was not forgotten on this device. Try forgetting it again.',
     );
     expect(
-      within(view).queryByRole('button', { name: 'Sign in', exact: true }),
-    ).toBeNull();
+      within(record).getByRole('button', { name: 'Try again' }),
+    ).toBeTruthy();
+    if (!selected) {
+      expect(within(record).getByRole('alert').textContent).toContain(
+        'not forgotten',
+      );
+      // Alice stays usable; Bob's failure and retry remain attached to his row.
+      expect(
+        within(view).getByRole('button', { name: 'Sign in' }),
+      ).toBeTruthy();
+      failing = false;
+      await act(async () =>
+        within(record).getByRole('button', { name: 'Try again' }).click(),
+      );
+      await waitFor(() =>
+        expect(next.getSnapshot().some((c) => c.id === other.id)).toBe(false),
+      );
+      expect(f.navigate).toHaveBeenCalledTimes(before);
+      return;
+    }
+    expect(within(view).queryByRole('button', { name: 'Sign in' })).toBeNull();
     expect(
-      within(view).getByRole('button', { name: 'Try again' }),
+      within(view.querySelector('form')!).getByRole('button', {
+        name: 'Try again',
+      }),
     ).toBeTruthy();
     // Entering the same URL cannot bypass the retained removal intent either.
     fireEvent.click(
@@ -455,12 +497,12 @@ it.each(['gate', 'management'] as const)(
     fireEvent.change(within(view).getByRole('textbox'), {
       target: { value: 'pod.example/bob' },
     });
-    expect(
-      within(view).queryByRole('button', { name: 'Sign in', exact: true }),
-    ).toBeNull();
+    expect(within(view).queryByRole('button', { name: 'Sign in' })).toBeNull();
     failing = false;
     await act(async () =>
-      within(view).getByRole('button', { name: 'Try again' }).click(),
+      within(view.querySelector('form')!)
+        .getByRole('button', { name: 'Try again' })
+        .click(),
     );
     await waitFor(() =>
       expect(next.getSnapshot().some((c) => c.id === other.id)).toBe(false),

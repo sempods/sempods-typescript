@@ -736,8 +736,8 @@ function AccessConnections({
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
   // Remembered Pods: signed out at a known address (see `rememberPods`). The
-  // sign-in view lists them above the address field, each with its own
-  // sign-in and a way to forget it on this device. A Pod being forgotten
+  // connected management view lists them under the other-Pod action;
+  // the gate uses SignInConnections. A Pod being forgotten
   // stays in that list; if forgetting could not be saved, with the failure
   // and Forget again, so its address is not kept against the choice.
   const forgetting = (entry: Connection) =>

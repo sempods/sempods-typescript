@@ -85,9 +85,7 @@ export function SignInConnections({
     (state.startup.storage !== 'durable' && state.signIn !== 'none') ||
     Boolean(state.startupError);
   const restoring = targetConnection?.session.kind === 'restoring';
-  const leaving = connections.some(
-    (entry) => entry.id === state.activeId && entry.session.kind === 'leaving',
-  );
+  const leaving = connections.some((entry) => entry.session.kind === 'leaving');
   const readable =
     !field &&
     c?.reading !== null &&
@@ -306,6 +304,15 @@ export function SignInConnections({
             {saved.map((entry) => (
               <li key={entry.id}>
                 <p id={`${id}-${entry.id}`}>{entry.podUrl}</p>
+                {entry.id !== targetConnection?.id &&
+                  entry.session.kind === 'ended' &&
+                  entry.session.saved === false && (
+                    <p role="alert">
+                      {entry.session.forget
+                        ? m.controls.forgetFailed
+                        : m.controls.disconnectFailed}
+                    </p>
+                  )}
                 {(entry.session.kind === 'signed-out' ||
                   entry.session.kind === 'ended') && (
                   <button
@@ -316,7 +323,11 @@ export function SignInConnections({
                       void act(() => app.forget(entry.id));
                     }}
                   >
-                    {m.controls.removeSavedPod ?? m.controls.forget}
+                    {entry.session.kind === 'ended' &&
+                    entry.session.saved === false &&
+                    entry.session.forget
+                      ? m.controls.retry
+                      : (m.controls.removeSavedPod ?? m.controls.forget)}
                   </button>
                 )}
                 {entry.session.kind !== 'signed-out' &&
@@ -326,7 +337,10 @@ export function SignInConnections({
                       aria-describedby={`${id}-${entry.id}`}
                       onClick={() => void act(() => app.disconnect(entry.id))}
                     >
-                      {m.controls.disconnect}
+                      {entry.session.kind === 'ended' &&
+                      entry.session.saved === false
+                        ? m.controls.retry
+                        : m.controls.disconnect}
                     </button>
                   )}
               </li>
