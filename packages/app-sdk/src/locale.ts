@@ -252,6 +252,16 @@ export interface UiMessages {
   readonly yes: string;
   readonly no: string;
   readonly mine: string;
+  /*
+   * Comparison values (added after 0.8.0; optional in the type,
+   * `createLocale` fills them), shown by `ResourceEditor` and `UpdateNotice`:
+   * a field without a value (missing, `null`, no list items, a text variant
+   * without values), a field holding empty text, and the note above a text
+   * variant with several values in one language.
+   */
+  readonly noValue?: string;
+  readonly emptyText?: string;
+  readonly severalValues?: string;
   readonly alongside: string;
   readonly dataAccess: string;
   /** Label of the Pod address field; also a Pod that shares a context with the person. */
@@ -399,6 +409,9 @@ export const englishMessages: SdkMessages = {
     yes: 'Yes',
     no: 'No',
     mine: 'Your draft',
+    noValue: 'No value',
+    emptyText: 'Empty text',
+    severalValues: 'Several values in this language',
     alongside: 'Saved alongside changes to other fields.',
     dataAccess: 'Pods & sharing',
     yourPod: 'Pod address',
@@ -559,6 +572,9 @@ export const germanMessages: SdkMessages = {
     yes: 'Ja',
     no: 'Nein',
     mine: 'Dein Entwurf',
+    noValue: 'Kein Wert',
+    emptyText: 'Leerer Text',
+    severalValues: 'Mehrere Werte in dieser Sprache',
     alongside: 'Zusammen mit Änderungen an anderen Feldern gespeichert.',
     dataAccess: 'Pods & Freigaben',
     yourPod: 'Pod-Adresse',

@@ -204,7 +204,8 @@ of trimming before `create()`.
 - `text()` edits one fixed language. To show and edit whichever variant the app
   prefers, define the custom mapping once at module level with the
   [preferred-language recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant)
-  and use it with `useResourceEditor`.
+  and use it with `useResourceEditor`. `ResourceEditor` compares the variants
+  with their language and conflicts after a conflicting or unconfirmed write.
 
 ### Lists: useList and LoadNotice
 
@@ -509,6 +510,12 @@ change is optimistic; an unconfirmed write stays visible and is never replayed.
   absence; acknowledgement is explicit and enabled only by a successful check.
   A present resource the definition cannot read sets `unreadable`. Pass
   `labels={{ title: 'Task' }}` to name fields; values are localized.
+- The comparison shows structured draft values as they are, in `UpdateNotice`
+  and in `ResourceEditor`'s review alike: a `TextVariant` with its language
+  tag, and a conflict (several values in one language) as the list of all of
+  them. No value (a missing field, `null`, an empty list) reads differently
+  from empty text, and lists and nested objects show their parts. Keep such
+  values in the draft as read; do not flatten them for the comparison.
 - `checked` decides the acknowledgement button; pass it through to a custom
   recovery UI (without it, a caller keeps the state set by its `onCheck`).
 - Lost read access clears comparison values, `checked`, `outcome.current` and

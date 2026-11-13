@@ -100,6 +100,20 @@ helpers and restored retained terms in the patch: unedited terms keep their
 representation, and an edit writes one plain value in the selected language.
 See [the recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant).
 
+## Pending release: structured values in recovery comparisons
+
+`ResourceEditor`'s review and `UpdateNotice` now show structured draft values
+instead of `[object Object]`. This is not part of published 0.8.0. A
+`TextVariant` shows its language tag, and several values in one language list
+each of them; no value (missing, `null`, an empty list) reads "No value" and
+empty text "Empty text" instead of a shared dash; lists and nested objects show
+their parts. After upgrading to the containing release, remove an app-owned
+comparison or a draft flattened only to make this readable, and keep the
+`TextVariant` in the draft. A complete custom message catalog may set the new
+optional `controls` messages `noValue`, `emptyText` and `severalValues`;
+`createLocale` fills English and German defaults. See
+[notices](react-authoring.md#notices-updatenotice).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to
