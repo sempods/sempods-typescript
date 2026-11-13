@@ -289,8 +289,8 @@ it('UpdateNotice shows missing, empty and structured values apart', () => {
     'tags: aEmpty textNo value',
     'none: No value',
     'nested: start1.5openYes',
-    'due: Nov 13, 2026, 9:30 AM',
-    // A locale form would drop the seconds; the exact instant stays.
+    'due: Nov 13, 2026, 9:30:00 AM UTC',
+    // The locale form shows whole seconds; milliseconds keep the exact instant.
     'exact: 2026-11-13T09:30:15.250Z',
   ]);
   expect(list.querySelector('[lang]')).toBeNull();
@@ -345,5 +345,31 @@ it('a review lists a field the current version lacks as no value', async () => {
   ).toEqual([
     ['title: Mine', 'note: Kept'],
     ['title: Theirs', 'note: No value'],
+  ]);
+});
+
+it('the hour repeated when the clocks go back keeps two instants apart', () => {
+  const f = fixture();
+  runtimes.push(f.runtime);
+  render(
+    <SempodsProvider runtime={f.runtime} timeZone="Europe/Berlin">
+      <UpdateNotice
+        outcome={{ kind: 'unconfirmed' }}
+        current={{
+          summer: new Date('2026-10-25T00:30:00Z'),
+          winter: new Date('2026-10-25T01:30:00Z'),
+        }}
+      />
+    </SempodsProvider>,
+  );
+  expect(
+    rows(
+      screen
+        .getByRole('region')
+        .querySelector('dl[data-sempods-ui="comparison"]')!,
+    ),
+  ).toEqual([
+    'summer: Oct 25, 2026, 2:30:00 AM GMT+2',
+    'winter: Oct 25, 2026, 2:30:00 AM GMT+1',
   ]);
 });

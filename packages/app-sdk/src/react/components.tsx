@@ -468,7 +468,7 @@ function Shown({
   readonly value: unknown;
   readonly seen?: readonly object[];
 }) {
-  const { messages, locale, format } = useSdkLocale();
+  const { messages, locale, timeZone } = useSdkLocale();
   const m = messages.controls;
   const none = <span className="sp-sdk-none">{m.noValue ?? '—'}</span>;
   const text = (v: string, language?: string | null) =>
@@ -483,14 +483,22 @@ function Shown({
   if (typeof value === 'number') return <>{exactNumber(value, locale)}</>;
   if (typeof value !== 'object') return <>{String(value)}</>;
   if (value instanceof Date) {
-    // Shown in the locale only where it loses nothing (whole minutes).
-    const whole = value.valueOf() % 60000 === 0;
+    // The locale's form only where it loses nothing: whole seconds, a
+    // four-digit year, and the zone's offset, so the hour repeated when the
+    // clocks go back cannot make two instants look alike. Otherwise ISO.
+    const time = value.valueOf();
+    const year = Number.isFinite(time) ? value.getUTCFullYear() : 0;
     return (
       <>
-        {(whole && format.dateTime(value)) ||
-          (Number.isFinite(value.valueOf())
-            ? value.toISOString()
-            : String(value))}
+        {!Number.isFinite(time)
+          ? String(value)
+          : time % 1000 === 0 && year > 1000 && year < 9999
+            ? new Intl.DateTimeFormat(locale, {
+                dateStyle: 'medium',
+                timeStyle: 'long',
+                timeZone,
+              }).format(value)
+            : value.toISOString()}
       </>
     );
   }
