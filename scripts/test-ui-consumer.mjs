@@ -6,7 +6,7 @@
 // in each browser: Chromium and WebKit, plus Firefox on Linux.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings]
+//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';

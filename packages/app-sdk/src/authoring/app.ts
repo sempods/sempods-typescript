@@ -152,6 +152,23 @@ export interface AppSnapshot {
   readonly startup: StartupReport | undefined;
   readonly startupError: unknown;
   /**
+   * The app is still starting: show a startup screen (`AppStartup`), never a
+   * sign-in screen, a Context chooser or a loading card. True from `start()`
+   * until the first usable screen, then false for the controller's lifetime;
+   * a later restoration, Pod switch or Context demand keeps its own states.
+   * While true, at least one holds:
+   * - startup has not settled (`startup` and `startupError` unset);
+   * - the active connection is `restoring` or `leaving`, or the startup
+   *   choice waits for another Pod (see `activeId`);
+   * - the active connection reads with its required scopes and needs a
+   *   Context whose first catalogue has not settled: always under
+   *   `contextSelection: 'required'`; under `'on-demand'` while a flow
+   *   demands a selected Context (`TargetScreen`), not for discovery alone.
+   * It ends as soon as a gate, the active connection's prompt, a Context
+   * chooser, a catalogue failure or content has to show instead.
+   */
+  readonly starting: boolean;
+  /**
    * Whether the startup's failed or cancelled callback still needs presenting.
    * Cleared once the person selects another connection, disconnects or
    * forgets one, starts a sign-in or dismisses the callback's prompt;
@@ -287,6 +304,10 @@ export function createAppController(
   let chosenBy: 'start' | 'fallback' | 'person' = 'start';
   /** The startup choice may still give way to another connection (#305). */
   let choosing = true;
+  /** The app has not reached its first usable screen (`AppSnapshot.starting`). */
+  let starting = true;
+  /** A flow demands a selected Context (`TargetScreen`), told by the provider. */
+  let selectionDemand = false;
   let graceExpired = false;
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
   /** The active connection at the last publish (snapshots are immutable), to notice a sign-out. */
@@ -319,6 +340,7 @@ export function createAppController(
     ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
     startup,
     startupError,
+    starting,
     callbackNotice,
     access: tracker.derive({
       signIn: runtime.signIn,
@@ -395,6 +417,26 @@ export function createAppController(
     // Nothing can take over: its gate or prompt shows, as before.
     choosing = false;
     return { connection, waiting: false };
+  }
+  /** Whether the app still starts (`AppSnapshot.starting`), before the latch. */
+  function stillStarting(
+    connection: Connection | undefined,
+    settled: boolean,
+    waiting: boolean,
+  ) {
+    if (!settled || waiting) return true;
+    if (!connection) return false;
+    const kind = connection.session.kind;
+    if (kind === 'restoring' || kind === 'leaving') return true;
+    // A Context is needed and its first catalogue is still being read.
+    const catalogue = connection.catalogue;
+    return (
+      connection.reading !== null &&
+      connection.missingRequiredScopes.length === 0 &&
+      (contextSelection === 'required' || selectionDemand) &&
+      (catalogue.kind === 'unknown' ||
+        (catalogue.kind === 'loading' && !catalogue.contexts))
+    );
   }
   function publish() {
     const connections = runtime.getSnapshot();
@@ -500,6 +542,7 @@ export function createAppController(
           view = null;
       }
     }
+    if (starting) starting = stillStarting(connection, settled, chosen.waiting);
     snapshot = Object.freeze({
       contextSelection,
       signIn: runtime.signIn,
@@ -507,6 +550,7 @@ export function createAppController(
       ...(runtime.allowedPods ? { allowedPods: runtime.allowedPods } : {}),
       startup,
       startupError,
+      starting,
       callbackNotice,
       access,
       connections,
@@ -972,8 +1016,22 @@ export function createAppController(
   retainedNavigation.set(controller, (action, retained) =>
     guard(action, 'navigate', retained),
   );
+  selectionDemands.set(controller, (demanded) => {
+    if (demanded === selectionDemand) return;
+    selectionDemand = demanded;
+    if (starting && unsubscribe) publish();
+  });
   accessActions.set(controller, runAccess);
   return controller;
+}
+const selectionDemands = new WeakMap<object, (demanded: boolean) => void>();
+/**
+ * Internal, for `SempodsProvider`: whether a flow demands a selected Context
+ * (`TargetScreen`), so `starting` covers its first catalogue under
+ * `contextSelection: 'on-demand'`. No public API.
+ */
+export function demandSelection(app: AppController, demanded: boolean) {
+  selectionDemands.get(app)?.(demanded);
 }
 const callbackReasons = new Set<AccessPrompt['reason']>([
   'sign-in-failed',

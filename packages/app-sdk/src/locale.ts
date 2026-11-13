@@ -181,6 +181,12 @@ export interface UiMessages {
    */
   readonly leaving?: string;
   /**
+   * Status of the startup screen (`AppStartup`) once a start takes a while.
+   * Optional in the type (added after 0.8.0); `createLocale` fills it from
+   * the language defaults, else `loading` shows.
+   */
+  readonly starting?: string;
+  /**
    * A saved session whose Pod could not be reached at startup (offline): it is
    * kept and restored again once back online; `retry` tries at once. Optional
    * in the type (added in 0.6.0); `createLocale` fills it.
@@ -352,6 +358,7 @@ export const englishMessages: SdkMessages = {
     forgetFailed:
       'This Pod was not forgotten on this device. Try forgetting it again.',
     leaving: 'Opening your Pod’s sign-in…',
+    starting: 'Starting…',
     unreachable:
       'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
 
@@ -513,6 +520,7 @@ export const germanMessages: SdkMessages = {
     forgetFailed:
       'Der Pod wurde auf diesem Gerät nicht vergessen. Versuche erneut, ihn zu vergessen.',
     leaving: 'Die Anmeldung deines Pods wird geöffnet…',
+    starting: 'Wird gestartet…',
     unreachable:
       'Der Pod ist gerade nicht erreichbar. Du bleibst angemeldet; die App verbindet sich wieder, sobald das Netz zurück ist.',
 

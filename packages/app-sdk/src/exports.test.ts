@@ -33,6 +33,7 @@ it.each([
       'AccessPrompt',
       'AccessPrompts',
       'AppAccess',
+      'AppStartup',
       'CallbackNotice',
       'ContextAccess',
       'LoadNotice',

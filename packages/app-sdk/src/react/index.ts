@@ -1,5 +1,6 @@
 export { SdkLocaleProvider, useMessages, useSdkLocale } from './locale.js';
 export { AccessGate, AppAccess, ContextAccess } from './access.js';
+export { AppStartup, type AppStartupProps } from './startup.js';
 export type {
   AccessGateProps,
   AppAccessProps,
