@@ -37,13 +37,16 @@ export function SignInConnections({
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
   const connections = state.connections;
+  const canAdd =
+    mode === 'multiple' ||
+    !connections.some((entry) => entry.session.kind !== 'signed-out');
   const options = [
     ...connections.map((connection) => ({
       key: connection.id,
       url: connection.podUrl,
       connection,
     })),
-    ...(state.allowedPods ?? (defaultUrl ? [defaultUrl] : []))
+    ...(canAdd ? (state.allowedPods ?? (defaultUrl ? [defaultUrl] : [])) : [])
       .filter((target) => !connections.some((c) => c.podUrl === target))
       .map((target) => ({
         key: `url:${target}`,
@@ -57,16 +60,16 @@ export function SignInConnections({
     options.find((o) => o.url === defaultUrl) ??
     options[0];
   const c = selected?.connection;
-  const free =
-    !state.allowedPods &&
-    (mode === 'multiple' ||
-      !connections.some((entry) => entry.session.kind !== 'signed-out'));
+  const free = !state.allowedPods && canAdd;
   const field = !selected || (free && url !== null);
   const inputValue = field ? (url ?? podAddressPrefix) : selected.url;
   const incomplete =
     field &&
     (!inputValue.trim() ||
-      Boolean(podAddressPrefix && inputValue.trim() === podAddressPrefix));
+      Boolean(
+        podAddressPrefix.trim() &&
+        enteredPod(inputValue) === enteredPod(podAddressPrefix),
+      ));
   const entered = field
     ? (connections.find(
         (entry) =>

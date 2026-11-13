@@ -904,12 +904,14 @@ export function createAppController(
      * Adds a Pod (or reuses its matching connection) and makes it
      * active. Under `signIn: 'required'` it then starts signing in; under
      * `'optional'` and `'none'` the connection reads without a token, and
-     * `authorize(id)` signs in. Guarded like `selectConnection`.
+     * `authorize(id)` signs in. Guarded like `selectConnection`. A failed
+     * retirement (`ended.saved === false`) rejects with `RuntimeError('storage')`;
+     * retry `disconnect`/`forget` before connecting again.
      */
     connect(url = defaultPodUrl) {
       return guard(connecting(url));
     },
-    /** Guarded like `selectConnection`. */
+    /** Guarded like `selectConnection`; failed retirement rejects with `RuntimeError('storage')` until retried. */
     authorize(id: string) {
       return guard(authorizing(id));
     },
@@ -949,6 +951,7 @@ export function createAppController(
           .find(
             (c) => c.id === activeId && c.podUrl === (url ?? defaultPodUrl),
           ) ?? (await runtime.connect(url));
+      checkRetirement(connection);
       if (connection.session.kind === 'restoring')
         throw new RuntimeError('configuration');
       if (runtime.signIn === 'required')
@@ -958,9 +961,19 @@ export function createAppController(
       publish();
     };
   }
+  function checkRetirement(connection: Connection | undefined) {
+    if (
+      connection?.session.kind === 'ended' &&
+      connection.session.saved === false
+    )
+      throw new RuntimeError('storage');
+  }
   function authorizing(id: string) {
-    return () => {
+    return async () => {
       callbackNotice = false;
+      checkRetirement(
+        runtime.getSnapshot().find((connection) => connection.id === id),
+      );
       return runtime.beginAuthorization(id);
     };
   }

@@ -1532,7 +1532,8 @@ does not move them off centre.
 `components={{ Connections: MyPicker }}` replaces the connection view in the
 sign-in gate, Context surface and management while keeping startup and callback
 presentation. Standalone `AccessGate` accepts the same replacement. It receives
-`ConnectionsProps` (`mode`, `podNames`, `podAddress` and `surface`, which is
+`ConnectionsProps` (`mode`, `podNames`, `podAddress`, `podAddressPrefix` and
+`surface`, which is
 `sign-in`, `context` or `management`) and uses `useConnections`, `useAppState` and guarded `useApp()`
 actions, never raw runtime selection. The **Pods & sharing** button opens it;
 access loss and toggling keep mounted content and drafts.

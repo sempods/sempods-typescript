@@ -30,6 +30,12 @@ actions, as before. See [custom connection views](react-authoring.md#replacing-t
 No app should copy the default login or session logic. Upgrade to the containing
 SDK release to receive it; this source change is not in published 0.8.0.
 
+Controller `connect` and `authorize` now reject with `RuntimeError('storage')`
+when the target's previous sign-out or forget could not be saved. Retry that
+retirement first; this also applies when an existing Pod URL is typed again.
+The low-level `runtime.beginAuthorization` still supports explicitly replacing
+that record with a new durable authorization attempt.
+
 ## Pending release: remembered Pod deduplication
 
 `runtime.connect(url)` now reuses a matching connection for any Pod, not only

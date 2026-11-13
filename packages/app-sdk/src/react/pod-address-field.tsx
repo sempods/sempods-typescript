@@ -126,7 +126,10 @@ export function PodAddressField({
               event.stopPropagation();
               close();
             }
-            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            if (
+              choices.length > 0 &&
+              (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+            ) {
               event.preventDefault();
               if (!expanded) {
                 setFilter(false);

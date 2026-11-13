@@ -1038,6 +1038,55 @@ it.each([
   },
 );
 
+it.each([false, true])(
+  'single-mode sign-in only offers existing Pods until sign-out (restricted: %s)',
+  async (restricted) => {
+    const other = 'https://pod.example/bob';
+    const f = fixture({
+      scopes: { required: ['tasks'] },
+      ...(restricted ? { allowedPods: [pod, other] } : {}),
+    });
+    const logged = await f.login();
+    cleanups.push(() => logged.runtime.dispose());
+    const ui = (mode: 'single' | 'multiple') => (
+      <SempodsProvider runtime={logged.runtime}>
+        <AppAccess appName="Shopping" mode={mode} />
+      </SempodsProvider>
+    );
+    const view = render(ui('single'));
+    await screen.findByRole('button', { name: 'Change sharing' });
+    const input = screen.getByRole<HTMLInputElement>('combobox', {
+      name: 'Pod address',
+    });
+    expect(input.readOnly).toBe(true);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(
+      screen.getAllByRole('option').map((option) => option.textContent),
+    ).toEqual(['pod.example/alice']);
+    expect(logged.runtime.getSnapshot()).toHaveLength(1);
+    view.rerender(ui('multiple'));
+    if (restricted)
+      expect(
+        screen.getAllByRole('option').map((option) => option.textContent),
+      ).toContain('pod.example/bob');
+    else expect(input.readOnly).toBe(false);
+    view.rerender(ui('single'));
+    await act(async () => {
+      await logged.runtime.disconnect(logged.id);
+    });
+    await screen.findByRole('button', { name: 'Sign in' });
+    const signedOutInput = screen.getByRole<HTMLInputElement>('combobox', {
+      name: 'Pod address',
+    });
+    if (restricted) {
+      fireEvent.keyDown(signedOutInput, { key: 'ArrowDown' });
+      expect(
+        screen.getAllByRole('option').map((option) => option.textContent),
+      ).toContain('pod.example/bob');
+    } else expect(signedOutInput.readOnly).toBe(false);
+  },
+);
+
 function Started() {
   const { startup } = useAppState();
   return <output data-testid="startup">{startup ? 'started' : ''}</output>;
@@ -1708,6 +1757,8 @@ it.each(['en', 'de'] as const)(
     expect(order(change, another)).toBeTruthy();
     const details = another.closest('details')!;
     expect(details.open).toBe(false);
+    fireEvent.click(another);
+    expect(details.querySelector('.sp-access-hint')).toBeNull();
     expect(
       within(details).getByLabelText(de ? 'Pod-Adresse' : 'Pod address'),
     ).toBeTruthy();
@@ -2146,6 +2197,24 @@ it.each([undefined, '', 'https://pods.example/'])(
     );
     const input = await screen.findByRole<HTMLInputElement>('combobox');
     expect(input.value).toBe(prefix ?? 'https://sempods.org/');
+    for (const key of ['ArrowDown', 'ArrowUp'])
+      fireEvent.keyDown(input, { key });
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    for (const variant of new Set([
+      input.value,
+      input.value.replace(/\/$/, ''),
+      input.value.replace(/^https:\/\//, ''),
+      `  ${input.value}  `,
+    ])) {
+      fireEvent.change(input, { target: { value: variant } });
+      await act(async () => fireEvent.submit(input.closest('form')!));
+      expect(f.fetch).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'Sign in' })
+          .disabled,
+      ).toBe(true);
+    }
     await act(async () => fireEvent.submit(input.closest('form')!));
     expect(f.fetch).not.toHaveBeenCalled();
     expect(

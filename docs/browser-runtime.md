@@ -919,7 +919,12 @@ main action. **Manage saved Pods**, in its dropdown, separates removal from sign
 and `controls.sessionEnded` notes an ended session. Connected management also
 lists other Pods under **Connect another Pod**. Failed retirement offers its
 failure and retry, never sign-in to that connection, even when it is not the
-active Pod. The [React guide](react-authoring.md#sign-in-and-pod-addresses)
+active Pod. Controller `connect` and `authorize` reject with
+`RuntimeError('storage')` while that connection has `ended.saved === false`;
+retry `disconnect` or `forget` first. The low-level runtime's
+`beginAuthorization(id)` remains an explicit escape hatch: a durably saved new
+attempt replaces the old record and cancels the failed forget intent. Ordinary
+apps should use the controller's retry flow. The [React guide](react-authoring.md#sign-in-and-pod-addresses)
 describes the default presentation and its customization.
 
 A custom `SessionStore` (`openStore`) implements `remove(id, expectedRevision)`

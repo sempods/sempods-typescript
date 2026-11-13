@@ -1182,17 +1182,11 @@ function AccessConnections({
             spellCheck={false}
             required
             value={url}
-            aria-describedby={m.controls.podHint ? id : undefined}
             placeholder="sempods.org/alice"
             disabled={unavailable}
             onChange={(event) => setUrl(event.target.value)}
           />
         </label>
-        {m.controls.podHint && (
-          <p id={id} className="sp-access-hint">
-            {m.controls.podHint}
-          </p>
-        )}
         <button
           className={found ? undefined : 'sp-access-primary sp-access-wide'}
           disabled={unavailable}
@@ -1232,9 +1226,6 @@ function AccessConnections({
     <>
       {!another && rememberedList}
       {!another && addPod}
-      {!found && m.controls.loginHint && (
-        <p className="sp-access-hint">{m.controls.loginHint}</p>
-      )}
       {activePod}
       {/* Without the Pod selector, the active Pod is named here. */}
       {manage && active && selectable.length < 2 && podLine(c!.podUrl)}
