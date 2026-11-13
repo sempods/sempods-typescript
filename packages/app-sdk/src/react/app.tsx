@@ -240,8 +240,10 @@ export function SempodsProvider({
     <SdkLocaleProvider {...locale}>
       <Context.Provider value={value}>
         <Demand.Provider value={demand}>
-          <GuardedContent>{children}</GuardedContent>
+          {/* Before the content, so its container exists when the content's
+              AppStartup first renders into it. */}
           <StartupHost />
+          <GuardedContent>{children}</GuardedContent>
           <LeaveConfirmation />
         </Demand.Provider>
       </Context.Provider>

@@ -4,7 +4,7 @@
  * change recorded, in the shapes of Explorer (on demand, no TargetScreen),
  * Focus (on demand with a TargetScreen) and Konsum (required, several Pods).
  */
-import { StrictMode } from 'react';
+import { createContext, StrictMode, useContext } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -355,4 +355,34 @@ it('speaks the language of a nested locale provider around AppAccess', async () 
       'Wird gestartet…',
     ),
   );
+});
+
+const Brand = createContext<string | null>(null);
+function BrandIcon() {
+  // An icon whose hook requires the app's provider, as in the access gate.
+  const brand = useContext(Brand);
+  if (!brand) throw new Error('BrandIcon needs its provider.');
+  return <span data-testid="brand-icon">{brand}</span>;
+}
+
+it('keeps the React context around AppAccess for its icon', async () => {
+  const s = await staged();
+  render(
+    <SempodsProvider runtime={s.runtime}>
+      <Brand.Provider value="blue">
+        <AppAccess appName="Shopping" icon={<BrandIcon />} />
+      </Brand.Provider>
+      <Content />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const layer = document.querySelector('[data-sempods-startup]')!;
+  expect(layer.querySelector('[data-testid="brand-icon"]')?.textContent).toBe(
+    'blue',
+  );
+  // The layer is outside the inert content; the content is inert.
+  expect(layer.closest('[inert]')).toBeNull();
+  expect(
+    document.querySelector('[data-app-content]')?.closest('[inert]'),
+  ).not.toBeNull();
 });

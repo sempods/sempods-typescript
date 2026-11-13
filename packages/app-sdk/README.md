@@ -174,7 +174,7 @@ examples installed with the SDK. The same entry is
 
 Use Node 24.15 or newer for tooling. The runtime needs browser IndexedDB and Web
 Locks; plain consumers need neither React nor its types. React consumers install
-React 19 themselves. Automated browser checks run in Chromium. Installed PWAs
+React 19 and React DOM 19 themselves. Automated browser checks run in Chromium. Installed PWAs
 are experimental; iOS/iPadOS home-screen login is unverified. See
 [supported environments](https://github.com/sempods/sempods-typescript/blob/v0.8.0/README.md#supported-environments)
 and [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.8.0/docs/development.md).

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useState,
@@ -6,6 +7,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import type { AppSnapshot } from '../authoring/app.js';
 import { useAppFacts, useController } from './app.js';
 import { useSdkLocale } from './locale.js';
@@ -28,109 +30,101 @@ export interface AppStartupProps {
 const PROGRESS_DELAY = 350;
 const selectStarting = (s: AppSnapshot) => s.starting;
 
-/** The mounted `AppStartup` instances of one provider, oldest first. */
 /**
- * What one `AppStartup` registers: its props and the locale where it is
- * mounted, as the host renders outside a nested `SdkLocaleProvider`.
+ * One provider's startup screen: the `AppStartup` instances, oldest first
+ * (the first shows), and the container beside the content that it renders
+ * into.
  */
-interface Shown {
-  readonly props: AppStartupProps;
-  readonly locale: ReturnType<typeof useSdkLocale>;
-}
 interface Hosts {
-  readonly mounted: { shown: Shown | null }[];
+  readonly mounted: symbol[];
   readonly listeners: Set<() => void>;
-  shown: Shown | null;
+  container: HTMLElement | null;
 }
 const registry = new WeakMap<object, Hosts>();
 function hostsOf(app: object) {
   let hosts = registry.get(app);
   if (!hosts) {
-    hosts = { mounted: [], listeners: new Set(), shown: null };
+    hosts = { mounted: [], listeners: new Set(), container: null };
     registry.set(app, hosts);
   }
   return hosts;
 }
-function changed(hosts: Hosts) {
-  const shown = hosts.mounted[0]?.shown ?? null;
-  if (shown === hosts.shown) return;
-  hosts.shown = shown;
+function notify(hosts: Hosts) {
   hosts.listeners.forEach((listener) => listener());
 }
-function useShown() {
+function useHosts<T>(read: (hosts: Hosts) => T): T {
   const hosts = hostsOf(useController());
+  const get = () => read(hosts);
   return useSyncExternalStore(
     (listener) => {
       hosts.listeners.add(listener);
       return () => hosts.listeners.delete(listener);
     },
-    () => hosts.shown,
-    () => hosts.shown,
+    get,
+    get,
   );
 }
 
 /**
  * The startup screen while the app starts (`useAppState().starting`): a
  * full-viewport layer with the app's `icon` and `appName`, centred like the
- * sign-in screen's header. The provider renders it beside the app's content,
- * which stays mounted and is inert and hidden from assistive technology
- * meanwhile (as behind the gate), so `TargetScreen` demands and reads
- * already start. After 350 ms it adds a progress indicator and a status
- * (`controls.starting`), announced politely. It has no controls and never
- * takes focus. One shows per provider, from the first mounted instance;
- * `AppAccess` places one unless `startup="none"`. Match a static HTML splash
- * to it (see the startup sequence in the React guide), so the hand-over is
- * invisible.
+ * sign-in screen's header. It renders through a portal into a container the
+ * provider keeps beside the app's content, so it keeps the React context
+ * where it is placed (a nested `SdkLocaleProvider`, the providers an `icon`
+ * uses), while the content stays mounted and is inert and hidden from
+ * assistive technology meanwhile (as behind the gate), and `TargetScreen`
+ * demands and reads already start. After 350 ms it adds a progress
+ * indicator and a status (`controls.starting`), announced politely. It has
+ * no controls and never takes focus. One shows per provider, the first
+ * mounted; `AppAccess` places one unless `startup="none"`. Match a static
+ * HTML splash to it (see the startup sequence in the React guide), so the
+ * hand-over is invisible.
  */
 export function AppStartup(props: AppStartupProps) {
   const hosts = hostsOf(useController());
-  // The texts and direction where it is mounted, also under a nested
-  // `SdkLocaleProvider`: the host renders beside the content, outside it.
-  const locale = useSdkLocale();
-  const [entry] = useState<{ shown: Shown | null }>(() => ({ shown: null }));
-  // Before paint, so the first frame already shows the screen. Registered
-  // once; the props follow below.
+  const [token] = useState(() => Symbol('startup'));
+  // Before paint, so the first frame already covers the content.
   useLayoutEffect(() => {
-    hosts.mounted.push(entry);
-    // Also when mounted again (StrictMode) with props already set.
-    changed(hosts);
+    hosts.mounted.push(token);
+    notify(hosts);
     return () => {
-      hosts.mounted.splice(hosts.mounted.indexOf(entry), 1);
-      changed(hosts);
+      hosts.mounted.splice(hosts.mounted.indexOf(token), 1);
+      notify(hosts);
     };
-  }, [hosts, entry]);
-  useLayoutEffect(() => {
-    if (entry.shown?.props === props && entry.shown.locale === locale) return;
-    entry.shown = { props, locale };
-    changed(hosts);
-  });
-  return null;
+  }, [hosts, token]);
+  const starting = useAppFacts(selectStarting);
+  const first = useHosts((h) => h.mounted[0] === token);
+  const container = useHosts((h) => h.container);
+  return starting && first && container
+    ? createPortal(<StartupLayer {...props} />, container)
+    : null;
 }
 
 /** Internal: whether a startup screen covers the content now. */
 export function useStartupCover() {
   const starting = useAppFacts(selectStarting);
-  const shown = useShown();
-  return starting && shown !== null;
+  const placed = useHosts((h) => h.mounted.length > 0);
+  return starting && placed;
 }
 
-/** Internal: the provider's place for the startup screen, beside the content. */
+/**
+ * Internal: the provider's container for the startup screen, beside (not
+ * inside) the content that turns inert behind it.
+ */
 export function StartupHost() {
-  const starting = useAppFacts(selectStarting);
-  const shown = useShown();
-  return starting && shown ? (
-    <StartupLayer {...shown.props} locale={shown.locale} />
-  ) : null;
+  const hosts = hostsOf(useController());
+  const attach = useCallback(
+    (node: HTMLDivElement | null) => {
+      hosts.container = node;
+      notify(hosts);
+    },
+    [hosts],
+  );
+  return <div ref={attach} style={{ display: 'contents' }} />;
 }
 
-function StartupLayer({
-  appName,
-  icon,
-  className,
-  style,
-  locale,
-}: AppStartupProps & { readonly locale: Shown['locale'] }) {
-  const { messages: m, direction } = locale;
+function StartupLayer({ appName, icon, className, style }: AppStartupProps) {
+  const { messages: m, direction } = useSdkLocale();
   const [progress, setProgress] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setProgress(true), PROGRESS_DELAY);

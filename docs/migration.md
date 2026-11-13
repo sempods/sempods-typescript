@@ -71,7 +71,8 @@ app has one. Match a static HTML splash to it (see
 `startup="none"` keeps the 0.8.0 behaviour for the restoration and leaves
 the screen to the app; the Context surface still waits for `starting` to end.
 A complete custom `messages.controls` may add `starting`; otherwise `loading`
-shows.
+shows. The `react` entry now imports `react-dom` (an optional peer, like
+`react`) for the startup screen's portal; a React web app already has it.
 
 ## Pending release: the last active Pod at startup
 
