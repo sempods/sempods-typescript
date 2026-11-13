@@ -3,6 +3,7 @@ import { useApp, useAppState } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { endedMessage } from './components.js';
 import { distinctName, podName } from './names.js';
+import { PodAddressField } from './pod-address-field.js';
 import type { ConnectionsProps } from './access.js';
 
 /** Presentation convenience only; canonical/security validation stays in the runtime. */
@@ -17,6 +18,7 @@ export function SignInConnections({
   podNames,
   podAddress = 'visible',
   surface = 'sign-in',
+  podAddressPrefix = 'https://sempods.org/',
 }: ConnectionsProps) {
   const app = useApp();
   const state = useAppState();
@@ -24,13 +26,13 @@ export function SignInConnections({
   const id = useId();
   const form = useRef<HTMLFormElement>(null);
   const removing = useRef<string | null>(null);
-  const changingField = useRef(false);
+
   const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
   const [chosen, setChosen] = useState('');
-  const [entering, setEntering] = useState(false);
-  const [url, setUrl] = useState('');
+  const [help, setHelp] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
   const defaultUrl =
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
@@ -59,12 +61,18 @@ export function SignInConnections({
     !state.allowedPods &&
     (mode === 'multiple' ||
       !connections.some((entry) => entry.session.kind !== 'signed-out'));
-  const field = options.length === 0 || (free && entering);
+  const field = !selected || (free && url !== null);
+  const inputValue = field ? (url ?? podAddressPrefix) : selected.url;
+  const incomplete =
+    field &&
+    (!inputValue.trim() ||
+      Boolean(podAddressPrefix && inputValue.trim() === podAddressPrefix));
   const entered = field
     ? (connections.find(
         (entry) =>
-          entry.id === state.activeId && entry.podUrl === enteredPod(url),
-      ) ?? connections.find((entry) => entry.podUrl === enteredPod(url)))
+          entry.id === state.activeId &&
+          entry.podUrl === enteredPod(inputValue),
+      ) ?? connections.find((entry) => entry.podUrl === enteredPod(inputValue)))
     : undefined;
   const targetConnection = field ? entered : c;
   const failedRetirement =
@@ -87,18 +95,19 @@ export function SignInConnections({
   const restoring = targetConnection?.session.kind === 'restoring';
   const leaving = connections.some((entry) => entry.session.kind === 'leaving');
   const readable =
-    !field &&
-    c?.reading !== null &&
-    c !== undefined &&
-    c.missingRequiredScopes.length === 0;
-  const retry = !field && c?.session.kind === 'ended' && c.session.restorable;
+    targetConnection !== undefined &&
+    targetConnection.reading !== null &&
+    targetConnection.missingRequiredScopes.length === 0;
+  const retry =
+    targetConnection?.session.kind === 'ended' &&
+    targetConnection.session.restorable;
   const label =
     retry || failedRetirement
       ? m.controls.retry
       : readable || state.signIn !== 'required'
         ? (m.controls.open ?? m.controls.signIn)
-        : !field &&
-            (c?.session.kind === 'active' || c?.session.kind === 'renewing')
+        : targetConnection?.session.kind === 'active' ||
+            targetConnection?.session.kind === 'renewing'
           ? m.controls.updateAccess
           : m.controls.signIn;
   const saved = connections.filter(
@@ -121,10 +130,6 @@ export function SignInConnections({
     c.session.problem === state.startup?.problem;
 
   useLayoutEffect(() => {
-    if (changingField.current) {
-      changingField.current = false;
-      form.current?.querySelector<HTMLElement>('input, button')?.focus();
-    }
     if (
       !busy &&
       removing.current &&
@@ -150,6 +155,7 @@ export function SignInConnections({
     }
   }
   async function proceed() {
+    if (incomplete) return;
     // A failed retirement remains a retry even when its Pod is not the active
     // connection (and therefore has no blocking gate), or its address is typed.
     if (failedRetirement && targetConnection) {
@@ -157,20 +163,73 @@ export function SignInConnections({
       else await app.disconnect(targetConnection.id);
       return;
     }
-    if (field) {
-      const target = enteredPod(url);
-      const existing = entered;
-      if (existing?.session.kind === 'restoring') return;
-      if (existing) {
-        if (state.signIn === 'required') await app.authorize(existing.id);
-        else await app.selectConnection(existing.id);
-      } else await app.connect(target);
-    } else if (c) {
-      if (retry) await app.retryRestore(c.id);
-      else if (readable) await app.selectConnection(c.id);
-      else await app.authorize(c.id);
-    } else if (selected) await app.connect(selected.url);
+    if (targetConnection) {
+      if (restoring) return;
+      if (retry) await app.retryRestore(targetConnection.id);
+      else if (readable || state.signIn !== 'required')
+        await app.selectConnection(targetConnection.id);
+      else await app.authorize(targetConnection.id);
+    } else if (field) await app.connect(enteredPod(inputValue));
+    else if (selected) await app.connect(selected.url);
   }
+
+  const management = saved.length > 0 && (
+    <details className="sp-sign-in-management">
+      <summary>{m.controls.manageSavedPods}</summary>
+      <p className="sp-access-hint">{m.controls.forgetHint}</p>
+      <ul
+        className="sp-access-remembered"
+        aria-label={m.controls.rememberedPods}
+      >
+        {saved.map((entry) => (
+          <li key={entry.id}>
+            <p id={`${id}-${entry.id}`}>{entry.podUrl}</p>
+            {entry.id !== targetConnection?.id &&
+              entry.session.kind === 'ended' &&
+              entry.session.saved === false && (
+                <p role="alert">
+                  {entry.session.forget
+                    ? m.controls.forgetFailed
+                    : m.controls.disconnectFailed}
+                </p>
+              )}
+            {(entry.session.kind === 'signed-out' ||
+              entry.session.kind === 'ended') && (
+              <button
+                type="button"
+                disabled={unavailable}
+                aria-describedby={`${id}-${entry.id}`}
+                onClick={() => {
+                  removing.current = entry.id;
+                  void act(() => app.forget(entry.id));
+                }}
+              >
+                {entry.session.kind === 'ended' &&
+                entry.session.saved === false &&
+                entry.session.forget
+                  ? m.controls.retry
+                  : (m.controls.removeSavedPod ?? m.controls.forget)}
+              </button>
+            )}
+            {entry.session.kind !== 'signed-out' &&
+              !(entry.session.kind === 'ended' && entry.session.forget) && (
+                <button
+                  type="button"
+                  disabled={unavailable}
+                  aria-describedby={`${id}-${entry.id}`}
+                  onClick={() => void act(() => app.disconnect(entry.id))}
+                >
+                  {entry.session.kind === 'ended' &&
+                  entry.session.saved === false
+                    ? m.controls.retry
+                    : m.controls.disconnect}
+                </button>
+              )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 
   if (leaving)
     return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
@@ -183,71 +242,58 @@ export function SignInConnections({
           void act(proceed);
         }}
       >
-        {field ? (
+        <PodAddressField
+          value={inputValue}
+          descriptionId={help ? `${id}-hint` : undefined}
+          selectedKey={field ? undefined : selected?.key}
+          editable={free}
+          disabled={unavailable}
+          hiddenAddress={hiddenAddress}
+          choices={options.map((option, index) => ({
+            key: option.key,
+            url: option.url,
+            label: hiddenAddress
+              ? (podNames?.[option.url]?.trim() ||
+                  (options.length > 1 ? `${index + 1}` : '')) +
+                (podNames?.[option.url]?.trim() && options.length > 1
+                  ? ` · ${index + 1}`
+                  : '')
+              : name(option.url) +
+                (options.filter((o) => o.url === option.url).length > 1
+                  ? ` · ${index + 1}`
+                  : ''),
+          }))}
+          onChange={(value) => {
+            setUrl(value);
+            setFailure(null);
+          }}
+          onChoose={(key) => {
+            setChosen(key);
+            setUrl(null);
+            setFailure(null);
+          }}
+        >
+          {management}
+        </PodAddressField>
+        {!hiddenAddress && (m.controls.podHint || m.controls.loginHint) && (
           <>
-            <label htmlFor={`${id}-address`}>{m.controls.yourPod}</label>
-            <input
-              id={`${id}-address`}
-              type="text"
-              inputMode="url"
-              autoCapitalize="none"
-              spellCheck={false}
-              required
-              value={url}
-              placeholder={m.controls.podPlaceholder}
-              aria-describedby={m.controls.podHint ? `${id}-hint` : undefined}
-              disabled={unavailable}
-              onChange={(event) => setUrl(event.target.value)}
-            />
-            {m.controls.podHint && (
+            <button
+              type="button"
+              className="sp-pod-help"
+              aria-label={m.controls.podHelp}
+              aria-expanded={help}
+              aria-controls={`${id}-hint`}
+              onClick={() => setHelp(!help)}
+            >
+              <span aria-hidden="true">?</span>
+            </button>
+            {help && (
               <p id={`${id}-hint`} className="sp-access-hint">
-                {m.controls.podHint}
+                {m.controls.podHint}{' '}
+                {state.signIn === 'required' && m.controls.loginHint}
               </p>
             )}
           </>
-        ) : hiddenAddress &&
-          options.length === 1 &&
-          !podNames?.[selected?.url ?? '']?.trim() ? null : (
-          <fieldset className="sp-sign-in-choices" disabled={unavailable}>
-            <legend>
-              {options.length > 1
-                ? m.controls.choosePod
-                : c
-                  ? m.controls.savedPod
-                  : m.controls.yourPod}
-            </legend>
-            {options.map((option, index) => (
-              <label className="sp-sign-in-choice" key={option.key}>
-                {options.length > 1 && (
-                  <input
-                    type="radio"
-                    name={`${id}-pod`}
-                    value={option.key}
-                    checked={selected?.key === option.key}
-                    onChange={() => {
-                      setChosen(option.key);
-                      setFailure(null);
-                    }}
-                  />
-                )}
-                <span>
-                  {hiddenAddress
-                    ? podNames?.[option.url]?.trim() ||
-                      (options.length > 1 ? `${index + 1}` : m.controls.yourPod)
-                    : name(option.url)}
-                  {!hiddenAddress &&
-                    podNames?.[option.url]?.trim() &&
-                    name(option.url) === podNames[option.url]?.trim() && (
-                      <span className="sp-access-address">{option.url}</span>
-                    )}
-                  {(!hiddenAddress ||
-                    Boolean(podNames?.[option.url]?.trim())) &&
-                    options.filter((o) => o.url === option.url).length > 1 &&
-                    ` · ${index + 1}`}
-                </span>
-              </label>
-            ))}
-          </fieldset>
         )}
         {!field &&
           c?.session.kind === 'signed-out' &&
@@ -271,83 +317,13 @@ export function SignInConnections({
         {restoring && <p role="status">{m.controls.loading}</p>}
         <button
           className="sp-access-primary sp-access-wide"
-          disabled={unavailable || restoring || (!field && !selected)}
+          disabled={
+            unavailable || restoring || incomplete || (!field && !selected)
+          }
         >
           {label}
         </button>
       </form>
-      {state.signIn === 'required' && m.controls.loginHint && (
-        <p className="sp-access-hint">{m.controls.loginHint}</p>
-      )}
-      {free && options.length > 0 && (
-        <button
-          type="button"
-          className="sp-sign-in-secondary"
-          disabled={unavailable}
-          onClick={() => {
-            changingField.current = true;
-            setEntering(!field);
-            setFailure(null);
-          }}
-        >
-          {field ? m.controls.useSavedPod : m.controls.useAnotherPod}
-        </button>
-      )}
-      {saved.length > 0 && (
-        <details className="sp-sign-in-management">
-          <summary>{m.controls.manageSavedPods}</summary>
-          <p className="sp-access-hint">{m.controls.forgetHint}</p>
-          <ul
-            className="sp-access-remembered"
-            aria-label={m.controls.rememberedPods}
-          >
-            {saved.map((entry) => (
-              <li key={entry.id}>
-                <p id={`${id}-${entry.id}`}>{entry.podUrl}</p>
-                {entry.id !== targetConnection?.id &&
-                  entry.session.kind === 'ended' &&
-                  entry.session.saved === false && (
-                    <p role="alert">
-                      {entry.session.forget
-                        ? m.controls.forgetFailed
-                        : m.controls.disconnectFailed}
-                    </p>
-                  )}
-                {(entry.session.kind === 'signed-out' ||
-                  entry.session.kind === 'ended') && (
-                  <button
-                    disabled={unavailable}
-                    aria-describedby={`${id}-${entry.id}`}
-                    onClick={() => {
-                      removing.current = entry.id;
-                      void act(() => app.forget(entry.id));
-                    }}
-                  >
-                    {entry.session.kind === 'ended' &&
-                    entry.session.saved === false &&
-                    entry.session.forget
-                      ? m.controls.retry
-                      : (m.controls.removeSavedPod ?? m.controls.forget)}
-                  </button>
-                )}
-                {entry.session.kind !== 'signed-out' &&
-                  !(entry.session.kind === 'ended' && entry.session.forget) && (
-                    <button
-                      disabled={unavailable}
-                      aria-describedby={`${id}-${entry.id}`}
-                      onClick={() => void act(() => app.disconnect(entry.id))}
-                    >
-                      {entry.session.kind === 'ended' &&
-                      entry.session.saved === false
-                        ? m.controls.retry
-                        : m.controls.disconnect}
-                    </button>
-                  )}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
       {hiddenAddress && c && saved.length === 0 && selected && (
         <details>
           <summary>{m.controls.addresses}</summary>

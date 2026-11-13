@@ -1018,6 +1018,7 @@ not a failure. A `ready` source with no hits is a successful empty answer.
 | `description`            | `ReactNode`                       | One line under the name on sign-in only; never sent to the Pod, not a consent purpose or scope                                      |
 | `podNames`               | `Record<string, string>`          | Exact canonical Pod URL → display name; the address stays visible, duplicates are disambiguated                                     |
 | `podAddress`             | `'visible'` \| `'hidden'`         | `'hidden'` omits the address at sign-in while exactly one Pod is permitted; see [sign-in](#sign-in-and-pod-addresses)               |
+| `podAddressPrefix`       | `string`                          | Initial editable address, default `https://sempods.org/`; empty disables it. Never changes permitted Pods or a configured target.   |
 | `open`                   | `boolean`                         | Host-owned **Pods & sharing** management; never starts a login, demands discovery in on-demand mode                                 |
 | `onClose`                | `() => void`                      | Management as a modal dialog; Escape, **Close** and a click beside it call this to reset `open`. Without it, management is in place |
 | `only`                   | `'management'`                    | Renders management alone (while `open`), for an app that places the gate, Context surface and prompts itself                        |
@@ -1041,7 +1042,7 @@ It follows `useAppState().access` ([access prompts](#access-prompts-and-your-own
   mounted and inert behind it, and Escape does not close it. Without a
   connection, after a sign-out or an ended session and with missing required
   scopes it is the sign-in view: one Pod choice and one main action,
-  with another address and saved-address management as secondary steps
+  in one editable chooser, with saved-address management in its dropdown
   (see [sign-in](#sign-in-and-pod-addresses)); a failed or cancelled callback
   names its cause there. A startup failure or a second tab offer **Reload**,
   unavailable session storage only explains; a sign-out or forget that could
@@ -1243,24 +1244,35 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 ### Sign-in and Pod addresses
 
-- On a first visit, unrestricted apps show a **Pod address** field. One
-  `allowedPods` entry or a preset needs no URL input; several get a finite
-  choice. Remembered Pods are offered before asking for another address.
-- Choose a Pod, then use the single main action. Choosing a radio option alone
-  never switches the active connection, navigates or discards a draft. A working
-  session offers **Open**, missing scopes offer **Change sharing**, and an
-  unreachable retained session offers **Try again**.
-- **Use another Pod** opens the address field where configuration allows it;
-  **Use a saved Pod** returns to the choice. **Manage saved Pods** separates
-  removal from sign-in. **Remove from this device** deletes the address and its
-  local session record, never Pod data. Errors and guarded leave decisions stay
-  with the SDK.
+- The centred sign-in shows the app icon, name, optional one-line description,
+  one **Pod address** field and one outlined main action. With saved Pods, the
+  field also opens their list; a display name is accompanied by its address.
+  Type to filter the list or enter another address. Arrow keys move through
+  choices, Enter chooses, and Escape closes the list. Choosing never switches
+  the active connection, navigates or discards a draft until the main action.
+- On a first unrestricted visit the field starts at `https://sempods.org/`.
+  Complete the Pod name, edit the whole address or clear it with the adjacent
+  button. The prefix alone cannot be submitted. Set `podAddressPrefix` to
+  another prefix or `""` for an empty field. A configured target takes precedence;
+  this is a typing convenience, not an `allowedPods` restriction or a connection.
+- A preset pre-fills the field. With `allowedPods`, the chooser is read-only
+  and contains only permitted Pods. `mode="single"` keeps its existing limit.
+  A working session offers **Open**, missing scopes **Change sharing**, and an
+  unreachable retained session **Try again**.
+- **Manage saved Pods**, inside the dropdown, separates removal from sign-in.
+  **Remove from this device** deletes the address and local session record,
+  never Pod data. Errors and guarded leave decisions stay with the SDK.
 - Input may omit `https://`; surrounding whitespace and one trailing slash are
   removed, other noncanonical input is rejected. Configured URLs must be
   canonical. Enter `http://127.0.0.1:…` explicitly for local HTTP.
-- `controls.podHint` explains what a Pod is; `controls.loginHint` explains that
-  sign-in happens at the Pod. Override either through provider messages; an
-  empty string omits it. Choice and management labels are localized too.
+- The small help button reveals `controls.podHint` and `controls.loginHint`;
+  neither is shown by default. Override either through provider messages; an
+  empty string omits it. All control labels follow the provider's language,
+  including `controls.podHelp` and `controls.clearPodAddress`. The provider uses
+  browser preferences unless the app supplies `language` or `locale`; EN/DE are
+  built in, unsupported UI languages fall back to English. Localize `appName`
+  and `description` in the app with the same provider. Language changes keep
+  the field and connection state in place.
 - No silent auth or automatic redirect; login and consent use the Pod's UI.
 - `podAddress="hidden"` works only while exactly one Pod is permitted, also
   when signing in again. A `podNames` name remains; without one no Pod line
@@ -1372,7 +1384,7 @@ appearance in the app's CSS and keep page colours compatible (`light-dark()`):
 ```
 
 Theme with `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
-`--sempods-accent` (controls; the default is neutral grey) and
+`--sempods-accent` (controls; the default is muted sage) and
 `--sempods-on-accent`, on an ancestor or a component's `style`/`className`.
 `--sempods-font` sets the font family (default `system-ui, sans-serif`) and
 `--sempods-radius` the corner radius of controls (default `8px`); cards and
@@ -1384,16 +1396,16 @@ until you set one. The SDK has two action roles, the one main action of a
 surface (Save, Confirm, Sign in) and its other actions (Cancel, Discard, text
 buttons), and each role has the same three parts:
 
-| Token                        | Styles                                              | Default                |
-| ---------------------------- | --------------------------------------------------- | ---------------------- |
-| `--sempods-field-line`       | Borders of fields; keep it at 3:1 to the background | `--sempods-line`       |
-| `--sempods-primary-bg`       | Surface of the main action                          | `--sempods-accent`     |
-| `--sempods-primary-text`     | Text of the main action                             | `--sempods-on-accent`  |
-| `--sempods-primary-border`   | Border of the main action (2px)                     | `--sempods-primary-bg` |
-| `--sempods-secondary-bg`     | Surface of the other actions                        | `transparent`          |
-| `--sempods-secondary-text`   | Text of the other actions                           | `--sempods-accent`     |
-| `--sempods-secondary-border` | Border of the other actions (1px)                   | `transparent`          |
-| `--sempods-focus`            | Focus outline of SDK controls                       | `--sempods-accent`     |
+| Token                        | Styles                                              | Default                             |
+| ---------------------------- | --------------------------------------------------- | ----------------------------------- |
+| `--sempods-field-line`       | Borders of fields; keep it at 3:1 to the background | Sage grey, separate from separators |
+| `--sempods-primary-bg`       | Surface of the main action                          | `--sempods-bg`                      |
+| `--sempods-primary-text`     | Text of the main action                             | `--sempods-accent`                  |
+| `--sempods-primary-border`   | Border of the main action                           | `--sempods-accent`                  |
+| `--sempods-secondary-bg`     | Surface of the other actions                        | `transparent`                       |
+| `--sempods-secondary-text`   | Text of the other actions                           | `--sempods-accent`                  |
+| `--sempods-secondary-border` | Border of the other actions (1px)                   | `transparent`                       |
+| `--sempods-focus`            | Focus outline of SDK controls                       | `--sempods-accent`                  |
 
 When a role changes, check its three parts together and keep its text at 4.5:1
 to its surface, or to the page where the surface is transparent. States follow from
@@ -1401,9 +1413,8 @@ the parts: hover mixes 12% of the text into the main action's surface and 8%
 into the other actions' surface (in `oklch`), disabled actions are dimmed, and
 focus draws `--sempods-focus`. The borders stay inside the 44px target.
 
-Until you set `--sempods-field-line`, fields share the separator colour
-`--sempods-line`; set it when a quiet separator would leave field borders
-below 3:1 against the background.
+The default field border is stronger than the separator. When changing the
+background, set `--sempods-field-line` with at least 3:1 contrast.
 
 On Tailwind CSS 4, [@sempods/app-ui](../packages/app-ui/README.md) sets all of
 these tokens from one palette and adds shadcn/ui components that work inside

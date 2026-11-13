@@ -99,21 +99,16 @@ function show(runtime: BrowserRuntime, language: 'en' | 'de' = 'en') {
 }
 
 it.each(['en', 'de'] as const)(
-  'offers a remembered Pod with one sign-in and keeps another address secondary (%s)',
+  'offers a remembered Pod in the editable address field with one sign-in (%s)',
   async (language) => {
     const t = texts[language];
     const { f, runtime, id } = await remembered('sign-out');
     show(runtime, language);
     const signIn = await screen.findByRole('button', { name: t.signIn });
-    expect(screen.getByText('pod.example/alice')).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>('combobox').value).toBe(pod);
     expect(screen.queryByText(t.ended)).toBeNull();
     expect(screen.getAllByRole('button', { name: t.signIn })).toHaveLength(1);
     expect(screen.queryByRole('textbox', { name: t.address })).toBeNull();
-    expect(
-      screen.getByRole('button', {
-        name: language === 'en' ? 'Use another Pod' : 'Anderen Pod verwenden',
-      }),
-    ).toBeTruthy();
     expect(
       screen.queryByRole('button', { name: /Sign out|Abmelden/ }),
     ).toBeNull();
@@ -138,13 +133,18 @@ it.each(['en', 'de'] as const)(
     const t = texts[language];
     const { runtime } = await remembered('sign-out');
     show(runtime, language);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: language === 'en' ? 'Choose a pod' : 'Pod auswählen',
+      }),
+    );
     const list = await screen.findByRole('list', { name: t.list });
     await act(async () =>
       within(list).getByRole('button', { name: t.forget }).click(),
     );
     await waitFor(() => expect(runtime.getSnapshot()).toEqual([]));
     await waitFor(() =>
-      expect(screen.getByRole('textbox', { name: t.address })).toBeTruthy(),
+      expect(screen.getByRole('combobox', { name: t.address })).toBeTruthy(),
     );
     expect(screen.queryByRole('list', { name: t.list })).toBeNull();
   },
@@ -160,7 +160,7 @@ it.each(['en', 'de'] as const)(
       problem: expect.any(String),
     });
     show(runtime, language);
-    await screen.findByRole('list', { name: t.list });
+    await screen.findByRole('button', { name: t.signIn });
     expect(screen.getByText(t.ended)).toBeTruthy();
   },
 );
@@ -191,7 +191,7 @@ it('shows only the address field when the runtime does not remember Pods', async
   );
   await waitFor(() => expect(runtime.getSnapshot()).toEqual([]));
   expect(screen.queryByRole('list', { name: texts.en.list })).toBeNull();
-  expect(screen.getByRole('textbox', { name: 'Pod address' })).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: 'Pod address' })).toBeTruthy();
   expect(id).toBeTruthy();
 });
 
@@ -274,6 +274,11 @@ it.each(['en', 'de'] as const)(
       })),
     });
     show(runtime, language);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: language === 'en' ? 'Choose a pod' : 'Pod auswählen',
+      }),
+    );
     const list = await screen.findByRole('list', { name: t.list });
     failing = true;
     await act(async () =>
@@ -307,7 +312,7 @@ it.each(['en', 'de'] as const)(
     );
     expect(screen.queryByRole('alert')).toBeNull();
     // Forgetting the only Pod leaves the first sign-in.
-    expect(screen.getByRole('textbox', { name: t.address })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: t.address })).toBeTruthy();
   },
 );
 
@@ -349,12 +354,15 @@ it.each(['choice', 'address'] as const)(
       cleanups.push(() => r.dispose()),
     );
     show(next);
-    const choices = await screen.findAllByRole('radio');
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Choose a pod' }),
+    );
+    const choices = await screen.findAllByRole('option');
     expect(choices).toHaveLength(2);
     const before = f.navigate.mock.calls.length;
     const ids = next.getSnapshot().map((c) => c.id);
     await act(async () =>
-      screen.getByRole('radio', { name: 'pod.example/bob' }).click(),
+      screen.getByRole('option', { name: 'pod.example/bob' }).click(),
     );
     expect(f.navigate).toHaveBeenCalledTimes(before);
     expect(
@@ -363,8 +371,7 @@ it.each(['choice', 'address'] as const)(
     expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(1);
     expect(screen.queryByRole('textbox')).toBeNull();
     if (entry === 'address') {
-      fireEvent.click(screen.getByRole('button', { name: 'Use another Pod' }));
-      fireEvent.change(screen.getByRole('textbox'), {
+      fireEvent.change(screen.getByRole('combobox'), {
         target: { value: 'pod.example/bob' },
       });
     }
@@ -388,10 +395,8 @@ it.each(['choice', 'address'] as const)(
 it('opens another address on request and reuses a saved Pod entered there', async () => {
   const { f, runtime, id } = await remembered('sign-out');
   show(runtime);
-  await act(async () =>
-    (await screen.findByRole('button', { name: 'Use another Pod' })).click(),
-  );
-  const field = screen.getByRole('textbox', { name: 'Pod address' });
+  await screen.findByRole('combobox');
+  const field = screen.getByRole('combobox', { name: 'Pod address' });
   fireEvent.change(field, { target: { value: '  pod.example/alice/  ' } });
   await act(async () => fireEvent.submit(field.closest('form')!));
   await waitFor(() =>
@@ -447,9 +452,14 @@ it.each([
       expect(element).toBeTruthy();
       return element!;
     });
+    fireEvent.click(within(view).getByRole('button', { name: 'Choose a pod' }));
     if (selected)
       fireEvent.click(
-        within(view).getByRole('radio', { name: 'pod.example/bob' }),
+        within(view).getByRole('option', { name: 'pod.example/bob' }),
+      );
+    if (selected)
+      fireEvent.click(
+        within(view).getByRole('button', { name: 'Choose a pod' }),
       );
     const record = within(view)
       .getByText('https://pod.example/bob', { selector: 'p' })
@@ -486,22 +496,20 @@ it.each([
     }
     expect(within(view).queryByRole('button', { name: 'Sign in' })).toBeNull();
     expect(
-      within(view.querySelector('form')!).getByRole('button', {
-        name: 'Try again',
-      }),
+      within(view)
+        .getAllByRole('button', { name: 'Try again' })
+        .find((b) => b.classList.contains('sp-access-primary'))!,
     ).toBeTruthy();
     // Entering the same URL cannot bypass the retained removal intent either.
-    fireEvent.click(
-      within(view).getByRole('button', { name: 'Use another Pod' }),
-    );
-    fireEvent.change(within(view).getByRole('textbox'), {
+    fireEvent.change(within(view).getByRole('combobox'), {
       target: { value: 'pod.example/bob' },
     });
     expect(within(view).queryByRole('button', { name: 'Sign in' })).toBeNull();
     failing = false;
     await act(async () =>
-      within(view.querySelector('form')!)
-        .getByRole('button', { name: 'Try again' })
+      within(view)
+        .getAllByRole('button', { name: 'Try again' })
+        .find((b) => b.classList.contains('sp-access-primary'))!
         .click(),
     );
     await waitFor(() =>

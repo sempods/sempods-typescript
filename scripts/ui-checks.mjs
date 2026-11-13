@@ -68,7 +68,7 @@ const chooser = (page) => page.getByLabel(/Data context|Datenkontext/);
 async function signIn(page, origin, address = '/', { choose = true } = {}) {
   await fetch(origin + '/__reset');
   await page.goto(origin + address);
-  await page.getByLabel(/Pod address|Pod-Adresse/).fill(origin + '/alice');
+  await page.getByLabel(/^(Pod address|Pod-Adresse)$/).fill(origin + '/alice');
   await page.getByRole('button', { name: /^(Sign in|Anmelden)$/ }).click();
   if (!choose) return;
   await chooser(page).selectOption({ label: 'work' });
@@ -4248,6 +4248,7 @@ async function accessSettings({ browser, origin, engine }) {
           await dialog.getByRole('radio', { name: 'Deutsch' }).check();
           await dialog.getByRole('button', { name: 'Schließen' }).click();
           await gone(dialog);
+          await gate.getByRole('button', { name: 'Pod auswählen' }).click();
           await gate
             .getByText('Gespeicherte Pods verwalten', { exact: true })
             .click();

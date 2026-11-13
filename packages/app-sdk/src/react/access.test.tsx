@@ -239,9 +239,13 @@ it.each(['en', 'de'] as const)(
       screen.getByRole('heading', { name: 'Shopping', level: 1 }),
     ).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(screen.queryByRole('combobox')).toBeNull();
-    expect(screen.getByText('Personal')).toBeTruthy();
-    expect(screen.getByText(pod)).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>('combobox').value).toBe(pod);
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: language === 'en' ? 'Choose a pod' : 'Pod auswählen',
+      }),
+    );
+    expect(screen.getByRole('option', { name: /Personal/ })).toBeTruthy();
     expect(f.navigate).not.toHaveBeenCalled();
     expect(f.fetch).not.toHaveBeenCalled();
     f.fetch.mockRejectedValueOnce(new Error('offline'));
@@ -293,9 +297,7 @@ it.each([
     </SempodsProvider>,
   );
   await screen.findByRole('button', { name: 'Sign in' });
-  if ('allowedPods' in options)
-    fireEvent.click(screen.getByRole('radio', { name: /Personal/ }));
-  expect(screen.getByText(pod)).toBeTruthy();
+  expect(screen.getByRole<HTMLInputElement>('combobox').value).toBe(pod);
 });
 
 it('keeps the Pod address in management with one permitted Pod', async () => {
@@ -320,8 +322,9 @@ it('keeps the Pod address in management with one permitted Pod', async () => {
     return found!;
   });
   await within(dialog).findByRole('button', { name: 'Sign in' });
-  expect(within(dialog).getByText('Personal')).toBeTruthy();
-  expect(within(dialog).getByText(pod)).toBeTruthy();
+  expect(within(dialog).getByRole<HTMLInputElement>('combobox').value).toBe(
+    pod,
+  );
   // The gate behind it may omit the address.
   const gate = await waitFor(() => {
     const found = document.querySelector<HTMLElement>(
@@ -346,11 +349,12 @@ it('offers only the permitted finite choices, disambiguates names and does not s
       />
     </SempodsProvider>,
   );
-  const picker = await screen.findByRole('radio', {
+  fireEvent.click(await screen.findByRole('button', { name: 'Choose a pod' }));
+  const picker = await screen.findByRole('option', {
     name: `My Pod · ${other}`,
   });
   expect(screen.queryByRole('textbox')).toBeNull();
-  expect(screen.getAllByRole('radio')).toHaveLength(2);
+  expect(screen.getAllByRole('option')).toHaveLength(2);
   fireEvent.click(picker);
   expect(f.fetch).not.toHaveBeenCalled();
   expect(f.navigate).not.toHaveBeenCalled();
@@ -397,10 +401,7 @@ it('keeps an unrestricted preset a default and offers another Pod in the managem
   const dialog = document.querySelector<HTMLElement>(
     '[data-sempods-ui="management"]',
   )!;
-  fireEvent.click(
-    within(dialog).getByRole('button', { name: 'Use another Pod' }),
-  );
-  const input = within(dialog).getByRole('textbox', { name: 'Pod address' });
+  const input = within(dialog).getByRole('combobox', { name: 'Pod address' });
   fireEvent.change(input, { target: { value: 'https://pod.example/bob' } });
   await act(async () => fireEvent.submit(input.closest('form')!));
   await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(1));
@@ -462,17 +463,19 @@ it.each([
         <AppAccess appName="Shopping" />
       </SempodsProvider>,
     );
-    const input = await screen.findByRole('textbox', { name: label });
-    expect(
-      document.getElementById(input.getAttribute('aria-describedby')!)
-        ?.textContent,
-    ).toBe(
-      language === 'en'
-        ? 'A Pod is where your data lives.'
-        : 'Ein Pod ist der Ort, an dem deine Daten liegen.',
-    );
+    const input = await screen.findByRole('combobox', { name: label });
     const region = input.closest('[data-sempods-access]')!;
-    expect(region.querySelectorAll('.sp-access-hint')).toHaveLength(2);
+    expect(region.querySelectorAll('.sp-access-hint')).toHaveLength(0);
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: language === 'en' ? 'What is a Pod?' : 'Was ist ein Pod?',
+      }),
+    );
+    expect(region.querySelector('.sp-access-hint')?.textContent).toBe(
+      language === 'en'
+        ? 'A Pod is where your data lives. You sign in at your Pod.'
+        : 'Ein Pod ist der Ort, an dem deine Daten liegen. Die Anmeldung erfolgt bei deinem Pod.',
+    );
     // No empty paragraph keeps spacing between the field and the button.
     for (const paragraph of region.querySelectorAll('p'))
       expect(paragraph.textContent).not.toBe('');
@@ -493,10 +496,10 @@ it('still shows app-supplied sign-in hints and describes the input with one', as
       <AppAccess appName="Shopping" />
     </SempodsProvider>,
   );
-  const input = await screen.findByRole('textbox', { name: 'Pod address' });
-  const hint = document.getElementById(input.getAttribute('aria-describedby')!);
-  expect(hint?.textContent).toBe('Paste a link.');
-  expect(screen.getByText('Then sign in.')).toBeTruthy();
+  const input = await screen.findByRole('combobox', { name: 'Pod address' });
+  expect(input).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'What is a Pod?' }));
+  expect(screen.getByText('Paste a link. Then sign in.')).toBeTruthy();
 });
 
 it.each([
@@ -802,13 +805,16 @@ it.each(['select', 'disconnect'] as const)(
     expect(
       runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
     ).toMatchObject({ kind: 'ended', problem: 'login-required' });
-    const picker = screen.getByRole<HTMLInputElement>('radio', {
+    fireEvent.click(screen.getByRole('button', { name: 'Choose a pod' }));
+    const picker = screen.getByRole('option', {
       name: 'pod.example/bob',
     });
-    expect(picker.checked).toBe(true);
+    expect(picker.getAttribute('aria-selected')).toBe('true');
     expect(f.count('/token')).toBe(1);
     if (action === 'select') {
-      fireEvent.click(screen.getByRole('radio', { name: 'pod.example/alice' }));
+      fireEvent.click(
+        screen.getByRole('option', { name: 'pod.example/alice' }),
+      );
       await act(async () =>
         screen.getByRole('button', { name: 'Open' }).click(),
       );
@@ -928,10 +934,13 @@ it.each([false, true])(
         />
       </SempodsProvider>,
     );
-    const choices = await screen.findAllByRole('radio');
-    expect(
-      choices.map((choice) => choice.closest('label')?.textContent),
-    ).toEqual(named ? ['Home · 1', 'Home · 2'] : ['1', '2']);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Choose a pod' }),
+    );
+    const choices = await screen.findAllByRole('option');
+    expect(choices.map((choice) => choice.textContent)).toEqual(
+      named ? ['Home · 1', 'Home · 2'] : ['1', '2'],
+    );
     expect(screen.queryByText(pod.replace(/^https?:\/\//, ''))).toBeNull();
   },
 );
@@ -2105,3 +2114,75 @@ it('passes presentation context to replacements, including a standalone AccessGa
   // Management without a dialog is hidden behind a blocking gate.
   expect(screen.queryByText('management:visible:Home')).toBeNull();
 });
+
+it.each([undefined, '', 'https://pods.example/'])(
+  'offers a clearable address prefix without submitting it (%s)',
+  async (prefix) => {
+    const f = fixture();
+    cleanups.push(() => f.runtime.dispose());
+    render(
+      <SempodsProvider runtime={f.runtime}>
+        <AppAccess
+          appName="Tasks"
+          {...(prefix === undefined ? {} : { podAddressPrefix: prefix })}
+        />
+      </SempodsProvider>,
+    );
+    const input = await screen.findByRole<HTMLInputElement>('combobox');
+    expect(input.value).toBe(prefix ?? 'https://sempods.org/');
+    await act(async () => fireEvent.submit(input.closest('form')!));
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole<HTMLButtonElement>('button', { name: 'Sign in' })
+        .disabled,
+    ).toBe(true);
+    if (input.value)
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Clear Pod address' }),
+      );
+    expect(input.value).toBe('');
+    fireEvent.change(input, { target: { value: pod } });
+    await act(async () => fireEvent.submit(input.closest('form')!));
+    await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(1));
+  },
+);
+
+it.each([true, false])(
+  'keeps the chosen or typed address when language changes (restricted: %s)',
+  async (restricted) => {
+    const f = fixture(
+      restricted ? { allowedPods: [pod, 'https://pod.example/bob'] } : {},
+    );
+    cleanups.push(() => f.runtime.dispose());
+    function Host() {
+      const [language, setLanguage] = useState<'en' | 'de'>('en');
+      return (
+        <SempodsProvider runtime={f.runtime} language={language}>
+          <button onClick={() => setLanguage('de')}>German</button>
+          <AppAccess appName="Tasks" />
+        </SempodsProvider>
+      );
+    }
+    render(<Host />);
+    const input = await screen.findByRole<HTMLInputElement>('combobox', {
+      name: 'Pod address',
+    });
+    expect(input.readOnly).toBe(restricted);
+    if (restricted) {
+      fireEvent.keyDown(input, { key: 'ArrowDown' });
+      fireEvent.keyDown(input, { key: 'ArrowDown' });
+      fireEvent.keyDown(input, { key: 'Enter' });
+    } else
+      fireEvent.change(input, { target: { value: 'https://pod.example/bob' } });
+    expect(input.value).toBe('https://pod.example/bob');
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+    expect(f.fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'German' }));
+    expect(screen.getByRole('combobox', { name: 'Pod-Adresse' })).toBe(input);
+    expect(input.value).toBe('https://pod.example/bob');
+    expect(screen.getByRole('button', { name: 'Anmelden' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Was ist ein Pod?' }),
+    ).toBeTruthy();
+  },
+);

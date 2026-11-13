@@ -210,6 +210,7 @@ function CustomAccessTypes() {
     <AccessGate
       appName="Tasks"
       podAddress="hidden"
+      podAddressPrefix=""
       components={{ Connections: AccessReplacement }}
     />
   );

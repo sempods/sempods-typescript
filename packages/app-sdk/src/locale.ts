@@ -172,9 +172,8 @@ export interface UiMessages {
    */
   readonly rememberedPods?: string;
   /** Sign-in choice and device-local address management; filled from locale defaults. */
-  readonly savedPod?: string;
-  readonly useAnotherPod?: string;
-  readonly useSavedPod?: string;
+  readonly podHelp?: string;
+  readonly clearPodAddress?: string;
   readonly manageSavedPods?: string;
   readonly removeSavedPod?: string;
   readonly forgetHint?: string;
@@ -355,9 +354,8 @@ export const englishMessages: SdkMessages = {
     disconnectFailed:
       'Sign-out was not saved on this device. Try signing out again.',
     rememberedPods: 'Pods on this device',
-    savedPod: 'Saved Pod',
-    useAnotherPod: 'Use another Pod',
-    useSavedPod: 'Use a saved Pod',
+    podHelp: 'What is a Pod?',
+    clearPodAddress: 'Clear Pod address',
     manageSavedPods: 'Manage saved Pods',
     removeSavedPod: 'Remove from this device',
     forgetHint: 'Only the saved address is removed. Your Pod data stays.',
@@ -522,9 +520,8 @@ export const germanMessages: SdkMessages = {
     disconnectFailed:
       'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.',
     rememberedPods: 'Pods auf diesem Gerät',
-    savedPod: 'Gespeicherter Pod',
-    useAnotherPod: 'Anderen Pod verwenden',
-    useSavedPod: 'Gespeicherten Pod verwenden',
+    podHelp: 'Was ist ein Pod?',
+    clearPodAddress: 'Pod-Adresse leeren',
     manageSavedPods: 'Gespeicherte Pods verwalten',
     removeSavedPod: 'Von diesem Gerät entfernen',
     forgetHint:

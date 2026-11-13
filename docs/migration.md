@@ -6,14 +6,22 @@ automatic conversion of legacy app data or stored credentials.
 
 ## Pending release: simpler AppAccess sign-in
 
-The default sign-in shows one Pod choice and one main action. Another address
-opens with **Use another Pod**; removal lives under **Manage saved Pods** and
-says **Remove from this device**. Pod and sign-in hints now have EN/DE defaults;
-set them to an empty string through provider messages to omit them. Existing
-message overrides, app identity and theme tokens still apply. Primary colour
-no longer forces a row action to full width.
+The default sign-in centres the app icon, name and optional description above
+one editable Pod chooser and one outlined main action. Saved Pods appear in
+that field's dropdown; **Manage saved Pods** is inside it. **Remove from this
+device** still removes only local records. Help appears on request instead of
+always showing explanatory paragraphs.
 
-`ConnectionsProps` adds optional `surface` and `podAddress` presentation props.
+`podAddressPrefix` starts unrestricted new sign-in at `https://sempods.org/`;
+set it to another prefix or `""` for an empty field. It is clearable and cannot
+be submitted by itself. Configured/permitted targets still take precedence.
+The fallback palette is sage with outlined primary actions; app theme tokens
+and the UI kit bridge still override it. The app's language and provider
+message overrides also apply to the new optional `controls.podHelp` and
+`controls.clearPodAddress` labels.
+
+`ConnectionsProps` adds optional `surface`, `podAddress` and `podAddressPrefix`
+presentation props.
 Standalone `AccessGate` now also accepts `components.Connections`. Existing
 replacements keep compiling; replacements can distinguish sign-in, Context and
 management rather than inferring it from session state. Use guarded `useApp()`

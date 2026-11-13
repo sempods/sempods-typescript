@@ -914,8 +914,8 @@ The app controller does not make a remembered Pod active while another
 connection has a session (signed in, restoring or ended), and when the active
 connection signs out it gives way to such a connection, as a removed one did.
 A remembered Pod the person selects stays active, ready to sign in.
-`AppAccess` offers remembered Pods as a choice with one main action; another
-address opens on request. **Manage saved Pods** separates removal from sign-in,
+`AppAccess` offers remembered Pods in an editable address chooser with one
+main action. **Manage saved Pods**, in its dropdown, separates removal from sign-in,
 and `controls.sessionEnded` notes an ended session. Connected management also
 lists other Pods under **Connect another Pod**. Failed retirement offers its
 failure and retry, never sign-in to that connection, even when it is not the

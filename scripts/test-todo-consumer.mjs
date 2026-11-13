@@ -898,7 +898,7 @@ try {
     });
     await page.goto(origin + '/baseline');
     assert.equal(await page.locator('link[rel=stylesheet]').count(), 0);
-    await page.getByLabel('Pod address').waitFor();
+    await page.getByLabel('Pod address', { exact: true }).waitFor();
     const initialSignIn = page.getByRole('button', {
       name: 'Sign in',
       exact: true,
@@ -932,7 +932,10 @@ try {
     }
     // AppAccess under the Tailwind host: the reset in `base` stays below the
     // SDK, and the field, action and focus tokens reach the sign-in screen.
-    const address = page.getByLabel('Pod address');
+    const address = page.getByRole('combobox', {
+      name: 'Pod address',
+      exact: true,
+    });
     const signInHost = await page.addStyleTag({ content: tailwindHost });
     const signInLook = () =>
       Promise.all([
@@ -1015,7 +1018,7 @@ try {
       ])
         document.documentElement.style.removeProperty(name);
     });
-    await page.getByLabel('Pod address').fill(pod);
+    await page.getByLabel('Pod address', { exact: true }).fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     // Both lists are labelled "Tasks": the switch adds their short names.
     await listShown(page, 'Tasks · work');
@@ -1453,7 +1456,7 @@ try {
         : route.abort(),
     );
     await page.goto(origin + '/');
-    await page.getByLabel('Pod address').fill(pod);
+    await page.getByLabel('Pod address', { exact: true }).fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await listShown(page, 'work');
     await page.getByText('No tasks yet.', { exact: true }).waitFor();
@@ -2157,7 +2160,7 @@ try {
       '/,standalone,./,./,2',
     );
     seen.length = 0;
-    await page.getByLabel('Pod address').fill(pod);
+    await page.getByLabel('Pod address', { exact: true }).fill(pod);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await listShown(page, 'work');
     await page.getByText('No tasks yet.', { exact: true }).waitFor();

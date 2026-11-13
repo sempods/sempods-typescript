@@ -252,7 +252,9 @@ it('keeps a dirty editor behind the gate after session loss while settings chang
   expect(gate()).toBe(shown);
   expect(screen.getByLabelText('Draft')).toBe(draft);
   expect(draft.value).toBe('Unsaved');
-  expect(within(shown).getByText('pod.example/alice')).toBeTruthy();
+  expect(within(shown).getByRole<HTMLInputElement>('combobox').value).toBe(
+    'https://pod.example/alice',
+  );
   // The provider initializes its runtime once; settings never again.
   expect(initialize).toHaveBeenCalledTimes(1);
   expect(writes(f)).toHaveLength(before);
@@ -273,7 +275,7 @@ it('offers settings beside a remembered Pod after a reload and forgets it withou
   );
   render(<Host runtime={next} />);
   const shown = await findGate('signed-out');
-  const list = within(shown).getByRole('list', { name: 'Pods on this device' });
+  const input = within(shown).getByRole('combobox');
   await act(async () =>
     within(shown).getByRole('button', { name: 'Settings' }).click(),
   );
@@ -281,9 +283,9 @@ it('offers settings beside a remembered Pod after a reload and forgets it withou
     within(settingsDialog()!).getByRole('button', { name: 'Close' }),
   );
   expect(gate()).toBe(shown);
-  expect(within(shown).getByRole('list', { name: 'Pods on this device' })).toBe(
-    list,
-  );
+  expect(within(shown).getByRole('combobox')).toBe(input);
+  fireEvent.click(within(shown).getByRole('button', { name: 'Choose a pod' }));
+  const list = within(shown).getByRole('list', { name: 'Pods on this device' });
   // Forget still works from the same gate, and sends nothing to the Pod.
   const before = writes(f).length;
   await act(async () =>
