@@ -307,11 +307,11 @@ export interface BrowserRuntime {
   /** Listener exceptions are reported asynchronously and never interrupt session transitions. */
   subscribe(listener: () => void): () => void;
   /**
-   * Omit the URL to use the preset or sole allowed Pod. Matching default
-   * connections are reused after
+   * Omit the URL to use the preset or sole allowed Pod. Connections at the
+   * same exact Pod URL are reused (prefer a session over an address) after
    * any pending disconnect settles. Waiting rejects with RuntimeError (storage)
    * if retirement fails, or (disconnected) if this runtime was disposed.
-   * Concurrent default connects share discovery; connecting never starts login.
+   * Concurrent same-URL connects share discovery; connecting never starts login.
    * Outside-list URLs reject with RuntimeError (configuration) before discovery.
    * A discovery that has not answered after 15 seconds rejects with
    * RuntimeError (network). Never waits for another connection's restoration.

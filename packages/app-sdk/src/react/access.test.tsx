@@ -33,6 +33,8 @@ import {
   settleLease,
 } from '../runtime/fixture.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
+import { openSessionStore } from '../sessions/store.js';
+import type { SessionRecord } from '../sessions/records.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import type { BoundPod } from '../runtime/view.js';
 const cleanups: (() => void)[] = [];
@@ -882,8 +884,22 @@ it('keeps the address of the one permitted Pod hidden when signing in again', as
 it('numbers saved duplicates of the one permitted Pod instead of showing its hidden address', async () => {
   const f = fixture();
   await f.runtime.initialize();
-  for (let i = 0; i < 2; i++)
-    await f.runtime.beginAuthorization((await f.runtime.connect(pod)).id);
+  await f.runtime.beginAuthorization((await f.runtime.connect(pod)).id);
+  // An older SDK could save another independent attempt for the same Pod.
+  const store = await openSessionStore(
+    JSON.stringify(['dynamic', 'https://app.example/oauth/callback']),
+    f.factory,
+  );
+  const value = (await store.list()).records[0]!.value as SessionRecord;
+  if (value.kind !== 'authorizing') throw new Error('expected attempt');
+  await store.commit('legacy-attempt', null, {
+    ...value,
+    attempt: {
+      ...value.attempt,
+      connectionId: 'legacy-attempt',
+    },
+  });
+  store.close();
   f.runtime.dispose();
   await settleLease();
   const runtime = createBrowserRuntime({ ...f.options, allowedPods: [pod] });

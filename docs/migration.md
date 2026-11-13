@@ -4,6 +4,15 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## Pending release: remembered Pod deduplication
+
+`runtime.connect(url)` now reuses a matching connection for any Pod, not only
+the configured default. Concurrent calls share discovery. Use the returned
+connection's ID rather than expecting a new one for each call. Startup cleans
+up redundant address-only records from older SDKs; existing live sessions and
+pending authorization are preserved. A failed cleanup remains visible and can
+be retried. See [connection reuse](browser-runtime.md#one-known-pod).
+
 ## Pending release: standard grouped Context chooser
 
 The source adds `ContextSwitch` to `@sempods/app-ui` and additive display
