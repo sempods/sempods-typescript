@@ -1485,8 +1485,12 @@ from the guarded `useApp()` actions.
   sign-in; adding its own Pod address counts as that sign-in. Its sign-out and
   **Forget** stay available and win over the restoration. While the active
   connection restores, `access.pending` is true: show content or a skeleton. A
-  saved session whose Pod does not answer within 15 seconds ends `restorable`
-  with the prompt `unreachable`: offer `retryRestore(id)`. A resumed
+  saved session whose Pod does not answer its discovery within 15 seconds ends
+  `restorable` with the prompt `unreachable`: offer `retryRestore(id)`. A due
+  credential is renewed while it restores, which can take up to 20 seconds
+  more. With several Pods, a working one takes over from an active one that
+  cannot work, or that still restores after 5 seconds
+  ([several Pods at startup](browser-runtime.md#several-pods-at-startup)). A resumed
   re-authorization that times out ends without `restorable` and asks for a new
   sign-in.
 - Read `useAppState().access` for what needs attention, or compose the

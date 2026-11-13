@@ -53,6 +53,23 @@ The gate also shows again, with the focus kept, when a browser closes it on a
 repeated Escape: browsers let a close request through uncancelled when no
 other input came between two of them.
 
+## Pending release: the last active Pod at startup
+
+With several saved Pods, the app controller now makes the Pod active that the
+app last worked with, remembered in `preferences` (localStorage by default),
+instead of the first in the session store's order. At startup, an active Pod
+whose session ended, that is unreachable, that lacks a required scope, or
+that still restores after 5 seconds gives way to another Pod that works. The
+other Pod then shows as an action prompt instead of the gate. A saved credential that is due
+is renewed while it restores, so an expired grant ends as `restoring` →
+`ended` rather than after `active`; restoration of such a credential can take
+up to 20 seconds longer than its discovery. This is not part of published
+0.8.0. After upgrading to the containing release, remove app code that stored
+or reselected the last active Pod itself, or that offered a switch to another
+Pod beside the gate at startup. `preferences: null` also disables the
+remembered Pod. See
+[several Pods at startup](browser-runtime.md#several-pods-at-startup).
+
 ## Pending release: rdf:langString in the preferred-language recipe
 
 `selectTextVariant` and `patchTextVariant` in `@sempods/client-sdk/edit` now
