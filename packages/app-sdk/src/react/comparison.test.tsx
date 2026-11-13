@@ -348,28 +348,35 @@ it('a review lists a field the current version lacks as no value', async () => {
   ]);
 });
 
-it('the hour repeated when the clocks go back keeps two instants apart', () => {
-  const f = fixture();
-  runtimes.push(f.runtime);
-  render(
-    <SempodsProvider runtime={f.runtime} timeZone="Europe/Berlin">
-      <UpdateNotice
-        outcome={{ kind: 'unconfirmed' }}
-        current={{
-          summer: new Date('2026-10-25T00:30:00Z'),
-          winter: new Date('2026-10-25T01:30:00Z'),
-        }}
-      />
-    </SempodsProvider>,
-  );
-  expect(
-    rows(
-      screen
-        .getByRole('region')
-        .querySelector('dl[data-sempods-ui="comparison"]')!,
-    ),
-  ).toEqual([
-    'summer: Oct 25, 2026, 2:30:00 AM GMT+2',
-    'winter: Oct 25, 2026, 2:30:00 AM GMT+1',
-  ]);
-});
+it.each([
+  ['en-US', 'Oct 25, 2026, 2:30:00 AM GMT+2', 'Oct 25, 2026, 2:30:00 AM GMT+1'],
+  ['de-DE', '25.10.2026, 02:30:00 MESZ', '25.10.2026, 02:30:00 MEZ'],
+] as const)(
+  'the hour repeated when the clocks go back keeps two instants apart (%s)',
+  (locale, summer, winter) => {
+    const f = fixture();
+    runtimes.push(f.runtime);
+    render(
+      <SempodsProvider
+        runtime={f.runtime}
+        locale={locale}
+        timeZone="Europe/Berlin"
+      >
+        <UpdateNotice
+          outcome={{ kind: 'unconfirmed' }}
+          current={{
+            summer: new Date('2026-10-25T00:30:00Z'),
+            winter: new Date('2026-10-25T01:30:00Z'),
+          }}
+        />
+      </SempodsProvider>,
+    );
+    expect(
+      rows(
+        screen
+          .getByRole('region')
+          .querySelector('dl[data-sempods-ui="comparison"]')!,
+      ),
+    ).toEqual([`summer: ${summer}`, `winter: ${winter}`]);
+  },
+);
