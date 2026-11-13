@@ -4290,6 +4290,117 @@ async function accessSettings({ browser, origin, engine }) {
   return results;
 }
 
+/**
+ * The startup screen while a saved session restores (#304): at 375px and on
+ * a desktop, light and dark, with the Pod's discovery held. It covers the
+ * viewport without controls or overflow, keeps the content inert, measures
+ * its contrast, adds its status after the delay and gives way to the app.
+ * With SEMPODS_UI_SCREENSHOTS set to a directory, each state is saved there.
+ */
+async function startup({ browser, origin, engine }) {
+  const results = [];
+  const { context, page, errors } = await newPage(browser);
+  const shots = process.env.SEMPODS_UI_SCREENSHOTS;
+  let release = () => {};
+  let held = Promise.resolve();
+  await page.route('**/.well-known/oauth-protected-resource', async (route) => {
+    await held;
+    await route.continue();
+  });
+  try {
+    await signIn(page, origin);
+    const layer = page.locator('[data-sempods-startup]');
+    for (const [width, height] of [
+      [375, 812],
+      [1280, 800],
+    ])
+      for (const scheme of ['light', 'dark']) {
+        const id = `${width}-${scheme}`;
+        held = new Promise((resolve) => (release = resolve));
+        await page.setViewportSize({ width, height });
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.goto(origin + '/');
+        await layer.waitFor();
+        results.push(
+          await attemptOn(errors, `screen-${id}`, async () => {
+            const status = layer.getByRole('status');
+            await status.filter({ hasText: 'Starting…' }).waitFor();
+            await settle(page);
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/startup-${engine}-${id}.png`,
+              });
+            const measured = await page.evaluate(() => {
+              const el = document.querySelector('[data-sempods-startup]');
+              const box = el.getBoundingClientRect();
+              const heading = el.querySelector('h1').getBoundingClientRect();
+              return {
+                covers:
+                  box.left <= 0 &&
+                  box.top <= 0 &&
+                  box.right >= innerWidth &&
+                  box.bottom >= innerHeight,
+                centred:
+                  Math.abs(heading.left + heading.width / 2 - innerWidth / 2) <=
+                  2,
+                overflow:
+                  document.scrollingElement.scrollWidth > innerWidth ||
+                  el.scrollWidth > el.clientWidth,
+                controls: el.querySelectorAll(
+                  'button, a, input, select, textarea, [tabindex]',
+                ).length,
+                inert: Boolean(
+                  document.querySelector('main')?.closest('[inert]'),
+                ),
+                gate: Boolean(
+                  document.querySelector('[data-sempods-ui="gate"]'),
+                ),
+                focusInside: el.contains(document.activeElement),
+              };
+            });
+            await page.addScriptTag({ content: contrastScript });
+            const failing = await layer.evaluate((el) =>
+              window.uiContrast(el).filter((r) => !r.pass),
+            );
+            return {
+              pass:
+                measured.covers &&
+                measured.centred &&
+                !measured.overflow &&
+                measured.controls === 0 &&
+                measured.inert &&
+                !measured.gate &&
+                !measured.focusInside &&
+                failing.length === 0,
+              measured,
+              failing,
+            };
+          }),
+        );
+        results.push(
+          await attemptOn(errors, `ends-${id}`, async () => {
+            release();
+            await loaded(page);
+            await layer.waitFor({ state: 'detached' });
+            const inert = await page.evaluate(() =>
+              Boolean(document.querySelector('main')?.closest('[inert]')),
+            );
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/started-${engine}-${id}.png`,
+              });
+            return { pass: !inert, inert };
+          }),
+        );
+      }
+  } finally {
+    release();
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -4305,6 +4416,7 @@ export const suites = {
   workspace,
   search,
   accessSettings,
+  startup,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */

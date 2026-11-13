@@ -224,8 +224,12 @@ function Evidence() {
 // Every state the access surface passes through on this page load, recorded
 // from before the first render so a brief flash cannot slip between polls.
 const accessTrace: string[] = [];
-Object.assign(window, { accessTrace });
+// Whether the startup screen (#304) showed on this page load.
+const startupTrace = { seen: false };
+Object.assign(window, { accessTrace, startupTrace });
 new MutationObserver(() => {
+  if (document.querySelector('[data-sempods-startup]'))
+    startupTrace.seen = true;
   const section = document.querySelector('[data-sempods-access]');
   if (!section) return;
   const state = section.hasAttribute('hidden')

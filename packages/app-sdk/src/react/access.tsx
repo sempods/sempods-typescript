@@ -43,6 +43,7 @@ import {
 import { useFirst } from './first.js';
 import { enteredPod, SignInConnections } from './access-sign-in.js';
 import { useFocusHold } from './focus.js';
+import { AppStartup } from './startup.js';
 
 /** What a replacement for the connection view (`components.Connections`) receives. */
 export interface ConnectionsProps {
@@ -124,6 +125,12 @@ export interface AppAccessProps {
   readonly components?: {
     readonly Connections?: ComponentType<ConnectionsProps>;
   };
+  /**
+   * `screen` (default) shows `AppStartup` with `appName` and `icon` while the
+   * app starts (`useAppState().starting`). `none` leaves it to the app, for
+   * example its own skeleton; the Context surface and prompts still wait.
+   */
+  readonly startup?: 'screen' | 'none';
   readonly className?: string;
   readonly style?: CSSProperties;
 }
@@ -169,8 +176,9 @@ const unavailablePod = Object.freeze({
 const noSubscription = () => () => {};
 
 /**
- * The default access UI: `AccessGate` (the sign-in screen while the app
- * cannot work), `ContextAccess` (Context selection and catalogue recovery),
+ * The default access UI: `AppStartup` (the startup screen while the app
+ * starts, unless `startup="none"`), `AccessGate` (the sign-in screen while
+ * the app cannot work), `ContextAccess` (Context selection and catalogue recovery),
  * `AccessPrompts` (dialogs and toasts at the bottom of the viewport) and,
  * while `open`, management of Pods and sharing. With `only="management"` it
  * renders management alone, for an app that places the other parts itself.
@@ -185,6 +193,7 @@ export function AppAccess({
   open = false,
   onClose,
   settings,
+  startup = 'screen',
   ...props
 }: AppAccessProps) {
   const asDialog = open && Boolean(onClose);
@@ -198,6 +207,14 @@ export function AppAccess({
   if (only === 'management') return management;
   return (
     <>
+      {startup === 'screen' && (
+        <AppStartup
+          appName={props.appName}
+          {...(props.icon ? { icon: props.icon } : {})}
+          {...(props.className ? { className: props.className } : {})}
+          {...(props.style ? { style: props.style } : {})}
+        />
+      )}
       <Gate {...props} {...(settings ? { settings } : {})} />
       {/* Management in place already shows the connection view. */}
       {!(open && !asDialog) && <AccessSection {...props} manage={false} />}
@@ -209,7 +226,8 @@ export function AppAccess({
 
 /**
  * Context selection and catalogue recovery, outside access prompts. It shows
- * while the active connection is usable and a flow demands a Context: a
+ * after startup (`useAppState().starting`), while the active connection is
+ * usable and a flow demands a Context: a
  * selection (`TargetScreen`, the `required` mode) with the chooser, the first
  * load, an empty or unreadable catalogue, a failed one with retry and an
  * unavailable preset Context; or only discovery (an explicit target such as
@@ -324,7 +342,9 @@ function AccessSection({
     ...(headingLevel === undefined ? {} : { headingLevel }),
   });
   const { body, notice, heading: Heading, namesApp } = presentation;
-  const hidden = !presentation.visible;
+  // While the app starts, the startup screen shows instead (management, which
+  // the host opens, still shows).
+  const hidden = !presentation.visible || (state.starting && !manage);
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
     // focus only after that transition and once access feedback has hidden.

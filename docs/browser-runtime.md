@@ -961,7 +961,10 @@ the gate then blocks as before. A Pod outside the preset is never used, and
 
 The 5-second grace period is a starting value: a healthy discovery answers
 well within a second. With a single Pod, startup lasts as long as its
-restoration (see the bounds above).
+restoration (see the bounds above). While the choice is open,
+`AppSnapshot.starting` stays true, so `AppAccess` shows its
+[startup screen](react-authoring.md#startup-screen-and-static-splash), not a
+gate.
 
 ## Protocol and session ownership
 
