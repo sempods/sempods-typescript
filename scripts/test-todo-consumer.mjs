@@ -907,8 +907,8 @@ try {
       await initialSignIn.evaluate(
         (button) => getComputedStyle(button).backgroundColor,
       ),
-      // The neutral default accent, not a brand colour.
-      'rgb(31, 41, 51)',
+      // The outlined action shares the sage page background.
+      'rgb(247, 249, 247)',
     );
     // A dark OS preference alone must not create dark SDK islands on a light page.
     for (const surface of await page.locator('[data-sempods-ui]').all()) {
@@ -926,7 +926,7 @@ try {
         ['access', 'gate'].includes(
           await surface.getAttribute('data-sempods-ui'),
         )
-          ? 'rgb(255, 255, 255)'
+          ? 'rgb(247, 249, 247)'
           : 'rgba(0, 0, 0, 0)',
       );
     }
@@ -950,24 +950,24 @@ try {
           ];
         }),
         address.evaluate((input) => {
-          const style = getComputedStyle(input);
+          const border = getComputedStyle(input.parentElement);
           return [
-            style.borderBottomWidth,
-            style.borderBottomColor,
-            style.paddingTop,
+            border.borderBottomWidth,
+            border.borderBottomColor,
+            getComputedStyle(input).paddingTop,
           ];
         }),
       ]);
-    // The main action's 2px border takes its fill and stays inside 44px.
+    // The outline uses the accent; the combined field owns its border.
     assert.deepEqual(await signInLook(), [
       [
-        'rgb(31, 41, 51)',
-        'rgb(255, 255, 255)',
-        '8px',
-        '12px',
-        '2px rgb(31, 41, 51)',
+        'rgb(247, 249, 247)',
+        'rgb(62, 107, 86)',
+        '9px',
+        '13px',
+        '1px rgb(62, 107, 86)',
       ],
-      ['1px', 'rgb(229, 231, 235)', '12px'],
+      ['1px', 'rgb(132, 149, 139)', '14px'],
     ]);
     await page.evaluate(() => {
       const root = document.documentElement.style;
@@ -981,14 +981,17 @@ try {
       [
         'rgb(10, 20, 30)',
         'rgb(40, 50, 60)',
-        '8px',
-        '12px',
-        '2px rgb(13, 14, 15)',
+        '9px',
+        '13px',
+        '1px rgb(13, 14, 15)',
       ],
-      ['1px', 'rgb(11, 12, 13)', '12px'],
+      ['1px', 'rgb(11, 12, 13)', '14px'],
     ]);
+    await address.fill(pod);
     await address.focus();
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab'); // Clear address.
+    await page.keyboard.press('Tab'); // Help.
+    await page.keyboard.press('Tab'); // Sign in.
     assert.deepEqual(
       await initialSignIn.evaluate((button) => [
         button === document.activeElement,
@@ -1067,7 +1070,7 @@ try {
     }
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
-      'rgb(31, 41, 51)',
+      'rgb(38, 56, 47)',
     );
     // This is the entire host opt-in; no SDK stylesheet import is needed.
     await page.addStyleTag({ content: ':root { color-scheme: light dark; }' });
@@ -1104,7 +1107,7 @@ try {
       appearance === 'light' ? 'rgb(255, 255, 255)' : 'rgb(18, 18, 18)',
     );
     const expectedText =
-      appearance === 'light' ? 'rgb(31, 41, 51)' : 'rgb(229, 231, 235)';
+      appearance === 'light' ? 'rgb(38, 56, 47)' : 'rgb(229, 237, 232)';
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
       expectedText,
@@ -1115,7 +1118,7 @@ try {
     });
     assert.equal(
       await editor.evaluate((element) => getComputedStyle(element).color),
-      'rgb(31, 41, 51)',
+      'rgb(38, 56, 47)',
     );
     await page.evaluate(() => {
       document.documentElement.style.removeProperty('color-scheme');
@@ -1125,9 +1128,9 @@ try {
     await page.evaluate(() =>
       document.documentElement.style.setProperty('--sempods-accent', '#654321'),
     );
-    // Save is the editor's main action: filled with the accent.
+    // Save is the editor's outlined main action: text follows the accent.
     assert.equal(
-      await save.evaluate((button) => getComputedStyle(button).backgroundColor),
+      await save.evaluate((button) => getComputedStyle(button).color),
       'rgb(101, 67, 33)',
     );
     assert.equal(
@@ -1201,7 +1204,7 @@ try {
       }),
       [
         '1px',
-        appearance === 'light' ? 'rgb(229, 231, 235)' : 'rgb(45, 49, 56)',
+        appearance === 'light' ? 'rgb(132, 149, 139)' : 'rgb(115, 139, 124)',
         '12px',
       ],
     );
@@ -1212,7 +1215,7 @@ try {
     );
     await save.evaluate((button) => button.classList.remove('host-fill'));
     // Both action roles have a surface, text and border. By default the main
-    // action's border takes its fill and the other actions have none to see.
+    // action's border takes its text and the other actions have none to see.
     const look = (button) =>
       button.evaluate((element) => {
         const style = getComputedStyle(element);
@@ -1230,8 +1233,8 @@ try {
     });
     // Away from the actions: a hovered one mixes its text into its surface.
     await page.mouse.move(0, 0);
-    const [saveFill, , saveBorderWidth, saveBorder] = await look(save);
-    assert.deepEqual([saveBorderWidth, saveBorder], ['2px', saveFill]);
+    const [, saveText, saveBorderWidth, saveBorder] = await look(save);
+    assert.deepEqual([saveBorderWidth, saveBorder], ['2px', saveText]);
     for (const other of [cancel, compare]) {
       const [fill, , width, border] = await look(other);
       assert.deepEqual(
@@ -1239,7 +1242,7 @@ try {
         ['rgba(0, 0, 0, 0)', '1px', 'rgba(0, 0, 0, 0)'],
       );
     }
-    // Field boundaries follow --sempods-line until they get their own token.
+    // Field boundaries retain their contrast independently of separators.
     const tokens = {
       '--sempods-line': 'rgb(7, 8, 9)',
       '--sempods-primary-bg': 'rgb(10, 20, 30)',
@@ -1256,7 +1259,7 @@ try {
     }, tokens);
     assert.equal(
       await field.evaluate((input) => getComputedStyle(input).borderTopColor),
-      'rgb(7, 8, 9)',
+      appearance === 'light' ? 'rgb(132, 149, 139)' : 'rgb(115, 139, 124)',
     );
     await page.evaluate(() =>
       document.documentElement.style.setProperty(
