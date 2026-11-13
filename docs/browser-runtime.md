@@ -142,6 +142,20 @@ connection yet, so dispose stops it. A timeout reports no `failure` detail.
 Token requests and client registration are not covered by this deadline, and no
 refresh or code exchange is replayed.
 
+A saved credential that is due when it is restored (past its expiry, or within
+the minute before it, with a refresh token) is renewed as part of restoration:
+the connection stays `restoring` until the token endpoint answers, so an
+expired grant ends there (`ended`, retired like at a first request) instead of
+after the app saw it `active`. That token request has its own 20-second
+deadline. A lost answer gets the one rediscovery and resend of a
+[lost renewal answer](#lost-renewal-answers), still `restoring`; offline it is
+`ended` with `restorable: true` at once. Storage that cannot record the refresh
+claim leaves it restorable too, with nothing spent. An expired credential
+without a refresh token ends as `expired`. A valid credential becomes `active`
+without a token request. Restoration therefore settles within 15 seconds when
+a Pod does not answer its discovery, within 35 seconds for a due credential,
+and within about 70 seconds when that answer is lost once while online.
+
 A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` or no
 answer within the deadline during discovery) is not a sign-out: the connection ends with that problem and
 `restorable: true`, and the saved session is kept. The runtime restores it again
@@ -683,7 +697,9 @@ explicitly chosen context of each connection is remembered as a preference
 (`preferences`, localStorage by default; `null` disables it) and reselected when
 the fresh catalogue lists it as readable. It is never replaced by another
 context, it is kept for a [remembered Pod](#remembered-pods) and forgotten
-with it, and storage failures only disable it.
+with it, and storage failures only disable it. The same preference storage keeps the
+connection the app last worked with, for the
+[startup choice with several Pods](#several-pods-at-startup).
 Connecting a second Pod preserves the first session.
 
 Discovery retains `authorization_response_iss_parameter_supported`. When true,
@@ -898,6 +914,44 @@ lists them under **Connect another Pod**. A Pod whose forgetting failed shows
 
 A custom `SessionStore` (`openStore`) implements `remove(id, expectedRevision)`
 for this: an atomic delete at the expected revision, `conflict` otherwise.
+
+## Several Pods at startup
+
+With several saved Pods, the app controller (`createAppController`, and so
+`SempodsProvider` and `AppAccess`) makes the connection active that the app
+last worked with. It remembers that connection per app identity in
+`preferences` once it works: signed in (`reading: 'session'`) with every
+required scope. Without it, or once it is merely remembered (`signed-out`) or
+forgotten, the first connection with a session in the session store's order
+is active, as before. With a preset, only the preset Pod's connections count.
+
+Until the startup choice closes, an active connection that cannot work gives
+way to one that works:
+
+| The remembered (active) connection at startup                           | Other permitted connections | Result                                                                                                       |
+| ----------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Restores and works                                                      | Any                         | Stays active                                                                                                 |
+| Ends (not a chosen sign-out), is unreachable, or lacks a required scope | One works                   | That one becomes active; the other shows as an action prompt (`signed-out`, `unreachable`, `missing-scopes`) |
+| Cannot work, as in the row above                                        | Others still restore        | `access.pending` until one works (it becomes active) or none can                                             |
+| Ends or lacks a required scope                                          | None works                  | Its gate (`signed-out`, `missing-scopes`), as without other Pods                                             |
+| Is unreachable                                                          | None works                  | Its `unreachable` prompt, as without other Pods                                                              |
+| Still restores after 5 seconds                                          | One works                   | That one becomes active; the remembered one keeps restoring and prompts only if it then cannot work          |
+| Still restores after 5 seconds                                          | None works yet              | Keeps waiting; the first that works becomes active, possibly the remembered one                              |
+
+A connection that took over is not remembered, so a Pod that was only slow is
+preferred again on the next start, and the controller never switches back to
+the remembered one by itself. The startup choice closes once the active
+connection works, the person starts a guarded action (navigation, a Context
+selection or a connection action), or the active connection's gate or prompt
+shows. A returning sign-in's connection (also a failed one, whose cause shows
+there) and a connection the person selects never give way. No switch happens
+while a registered guard holds work (a draft, a pending or unconfirmed write);
+the gate then blocks as before. A Pod outside the preset is never used, and
+`allowedPods` keeps foreign records out of the snapshot.
+
+The 5-second grace period is a starting value: a healthy discovery answers
+well within a second. With a single Pod, startup lasts as long as its
+restoration (see the bounds above).
 
 ## Protocol and session ownership
 
