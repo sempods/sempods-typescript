@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -71,7 +72,8 @@ function useHosts<T>(read: (hosts: Hosts) => T): T {
  * sign-in screen's header. It renders through a portal into a container the
  * provider keeps beside the app's content, so it keeps the React context
  * where it is placed (a nested `SdkLocaleProvider`, the providers an `icon`
- * uses), while the content stays mounted and is inert and hidden from
+ * uses) and the theme its DOM ancestors set (`--sempods-*` tokens,
+ * `color-scheme`), while the content stays mounted and is inert and hidden from
  * assistive technology meanwhile (as behind the gate), and `TargetScreen`
  * demands and reads already start. After 350 ms it adds a progress
  * indicator and a status (`controls.starting`), announced politely. It has
@@ -95,9 +97,72 @@ export function AppStartup(props: AppStartupProps) {
   const starting = useAppFacts(selectStarting);
   const first = useHosts((h) => h.mounted[0] === token);
   const container = useHosts((h) => h.container);
-  return starting && first && container
-    ? createPortal(<StartupLayer {...props} />, container)
-    : null;
+  const shows = starting && first && container !== null;
+  // The portal leaves the DOM ancestors of this placement: carry over the
+  // theme they set (`--sempods-*` tokens, `color-scheme`), as the gate,
+  // rendered in place, inherits it.
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [theme, setTheme] = useState<Theme>(noTheme);
+  // Read once it shows, before paint; a start is too short to follow a
+  // theme that changes meanwhile.
+  useLayoutEffect(() => {
+    if (!shows || !anchor.current) return;
+    const next = inheritedTheme(anchor.current);
+    setTheme((current) => (sameTheme(current, next) ? current : next));
+  }, [shows]);
+  return (
+    <>
+      <span ref={anchor} hidden data-sempods-startup-anchor="" />
+      {shows &&
+        createPortal(
+          <StartupLayer
+            {...props}
+            style={{ ...theme, ...props.style } as CSSProperties}
+          />,
+          container,
+        )}
+    </>
+  );
+}
+
+type Theme = Readonly<Record<string, string>>;
+const noTheme: Theme = Object.freeze({});
+/** The access surfaces' tokens (see `styles.tsx`), as a host may set them. */
+const tokens = [
+  'bg',
+  'text',
+  'muted',
+  'line',
+  'accent',
+  'on-accent',
+  'field-line',
+  'primary-bg',
+  'primary-text',
+  'primary-border',
+  'secondary-bg',
+  'secondary-text',
+  'secondary-border',
+  'focus',
+  'font',
+  'radius',
+].map((name) => `--sempods-${name}`);
+/** The theme an element inherits: set tokens and a non-default `color-scheme`. */
+function inheritedTheme(element: Element): Theme {
+  const computed = getComputedStyle(element);
+  const theme: Record<string, string> = {};
+  for (const token of tokens) {
+    const value = computed.getPropertyValue(token).trim();
+    if (value) theme[token] = value;
+  }
+  const scheme = computed.getPropertyValue('color-scheme').trim();
+  if (scheme && scheme !== 'normal') theme.colorScheme = scheme;
+  return theme;
+}
+function sameTheme(a: Theme, b: Theme) {
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
+  );
 }
 
 /** Internal: whether a startup screen covers the content now. */

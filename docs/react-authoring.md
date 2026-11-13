@@ -1144,7 +1144,9 @@ Pod switch or Context demand keeps its own states.
 screen's header. After 350 ms it adds a progress indicator and
 `controls.starting` in a polite status, so a fast start shows no progress
 and announces nothing. It has no controls and never takes focus; the content
-behind it stays mounted and inert. One shows per provider. For an app that
+behind it stays mounted and inert. It keeps the React context and the
+`--sempods-*` tokens and `color-scheme` of the place where `AppAccess` (or
+`AppStartup`) is rendered. One shows per provider. For an app that
 composes the access parts itself, place `<AppStartup appName="…" icon={…} />`
 beside them.
 

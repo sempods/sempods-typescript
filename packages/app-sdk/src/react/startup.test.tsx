@@ -4,7 +4,12 @@
  * change recorded, in the shapes of Explorer (on demand, no TargetScreen),
  * Focus (on demand with a TargetScreen) and Konsum (required, several Pods).
  */
-import { createContext, StrictMode, useContext } from 'react';
+import {
+  createContext,
+  StrictMode,
+  useContext,
+  type CSSProperties,
+} from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -385,4 +390,33 @@ it('keeps the React context around AppAccess for its icon', async () => {
   expect(
     document.querySelector('[data-app-content]')?.closest('[inert]'),
   ).not.toBeNull();
+});
+
+it('carries the theme set on an ancestor of AppAccess into the startup screen', async () => {
+  const s = await staged();
+  render(
+    <SempodsProvider runtime={s.runtime}>
+      <div
+        style={
+          {
+            '--sempods-bg': 'rgb(1, 2, 3)',
+            '--sempods-text': 'rgb(250, 250, 250)',
+            colorScheme: 'dark',
+          } as CSSProperties
+        }
+      >
+        <AppAccess
+          appName="Shopping"
+          style={{ '--sempods-text': 'rgb(9, 9, 9)' } as CSSProperties}
+        />
+      </div>
+      <Content />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const layer = document.querySelector<HTMLElement>('[data-sempods-startup]')!;
+  expect(layer.style.getPropertyValue('--sempods-bg')).toBe('rgb(1, 2, 3)');
+  expect(layer.style.colorScheme).toBe('dark');
+  // The component's own style wins over the inherited theme.
+  expect(layer.style.getPropertyValue('--sempods-text')).toBe('rgb(9, 9, 9)');
 });
