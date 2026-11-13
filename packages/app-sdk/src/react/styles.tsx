@@ -63,7 +63,15 @@ ${surfaces} :where(input:not([type=checkbox]):not([type=radio]),select,textarea)
 ${surfaces} :where(p) { margin-block:12px; }
 ${surfaces} :where(dl) { display:grid; gap:12px; margin:12px 0; }
 ${surfaces} :where(dt) { color:var(--sp-muted); font-size:.875rem; }
-${surfaces} :where(dd) { margin:0; white-space:pre-wrap; }
+${surfaces} :where(dd) { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+/* Comparison values: no value and empty text read apart from text; a language tag and a conflict stay visible.
+   In the text colour: muted text falls below 4.5:1 on the tinted in-place card. */
+${surfaces} :where(dd) :where(dl) { margin:4px 0 0; padding-inline-start:12px; border-inline-start:1px solid var(--sp-line); gap:8px; }
+${surfaces} :where(dd) :where(ul) { margin:4px 0 0; padding-inline-start:20px; white-space:normal; }
+${surfaces} :where(dd) :where(li) { white-space:pre-wrap; }
+${surfaces} :where(.sp-sdk-none) { font-style:italic; }
+${surfaces} :where(.sp-sdk-tag) { font-size:.875rem; }
+${surfaces} :where(.sp-sdk-conflict) { display:block; font-weight:600; }
 ${surfaces} :where(details) { color:var(--sp-muted); font-size:.875rem; margin-block:12px; }
 ${surfaces} :where(summary) { min-height:44px; padding-block:10px; cursor:pointer; }
 /* Explicit, so a reset such as Tailwind's preflight (margin:0) keeps modals centred. */

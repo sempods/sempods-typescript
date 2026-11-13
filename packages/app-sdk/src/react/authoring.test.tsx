@@ -1040,11 +1040,11 @@ it.each([
 );
 
 it.each([
-  ['en', 'Yes', 'No'],
-  ['de', 'Ja', 'Nein'],
+  ['en', 'Yes', 'No', 'No value', 'Empty text'],
+  ['de', 'Ja', 'Nein', 'Kein Wert', 'Leerer Text'],
 ] as const)(
   'comparisons show field labels and localized values (%s)',
-  (language, yes, no) => {
+  (language, yes, no, noValue, emptyText) => {
     const f = fixture();
     cleanups.push(() => f.runtime.dispose());
     render(
@@ -1063,11 +1063,11 @@ it.each([
     const [labelled, plain] = screen.getAllByRole('region');
     expect(
       [...labelled!.querySelectorAll('dt, dd')].map((e) => e.textContent),
-    ).toEqual(['Task', 'Buy milk', 'Done', yes, 'note', '—']);
-    // Without labels the field key remains; empty text shows a dash.
+    ).toEqual(['Task', 'Buy milk', 'Done', yes, 'note', noValue]);
+    // Without labels the field key remains; empty text reads apart from none.
     expect(
       [...plain!.querySelectorAll('dt, dd')].map((e) => e.textContent),
-    ).toEqual(['title', '—', 'done', no]);
+    ).toEqual(['title', emptyText, 'done', no]);
   },
 );
 
