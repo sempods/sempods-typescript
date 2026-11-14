@@ -20,7 +20,7 @@ import { podName } from './names.js';
 import { layered, SdkStyles } from './styles.js';
 import { useFirst } from './first.js';
 import { useCommitted } from './hooks.js';
-import { useFocusHold } from './focus.js';
+import { returnFocusAfterCommit, useFocusHold } from './focus.js';
 
 const selectAccess = (s: AppSnapshot) => s.access;
 
@@ -184,7 +184,7 @@ export function AccessPrompt({ prompt, focusTarget }: AccessPromptProps) {
       focus.held.current ? (target.current?.current ?? previous.current) : null;
     return () => {
       const next = returnTo();
-      if (next?.isConnected) next.focus();
+      if (next?.isConnected) returnFocusAfterCommit(next);
     };
   }, [focus.held, target]);
   const { connections, activeId } = useAppFacts(

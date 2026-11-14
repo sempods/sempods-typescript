@@ -2065,12 +2065,19 @@ it('returns focus to the focus target when the management dialog closes', async 
   const f = fixture();
   const logged = await f.login();
   cleanups.push(() => logged.runtime.dispose());
+  // React sees the focus arrive: a React Aria trigger tracks its focus, and
+  // so its keyboard ring, through onFocus (#232).
+  let seen = 0;
   function Shell() {
     const [open, setOpen] = useState(false);
     const target = useRef<HTMLButtonElement>(null);
     return (
       <>
-        <button ref={target} onClick={() => setOpen(true)}>
+        <button
+          ref={target}
+          onClick={() => setOpen(true)}
+          onFocus={() => seen++}
+        >
           Menu
         </button>
         <AppAccess
@@ -2094,9 +2101,12 @@ it('returns focus to the focus target when the management dialog closes', async 
   await waitFor(() =>
     expect(screen.queryByRole('dialog', { name: 'Pods & sharing' })).toBeNull(),
   );
-  expect(document.activeElement).toBe(
-    screen.getByRole('button', { name: 'Menu' }),
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Menu' }),
+    ),
   );
+  expect(seen).toBe(1);
 });
 
 it('keeps the known Context while the management dialog checks access again', async () => {
