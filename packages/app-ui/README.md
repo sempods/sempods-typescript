@@ -787,7 +787,9 @@ export function TaskFilter(props: {
 
 A header menu that opens Pods & sharing gives `AppAccess` its button as
 `focusTarget`. The chosen item has left with the menu by the time management
-closes, so Escape or Close would otherwise leave the focus on the page:
+closes, so Escape or Close would otherwise leave the focus on the page. Back
+on the button, the focus shows its ring after Escape, as after any keyboard
+use, and none after a press on Close:
 
 ```tsx
 // app-menu.tsx

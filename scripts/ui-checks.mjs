@@ -958,9 +958,23 @@ async function interaction({ browser, origin, engine }) {
     // Pods & sharing from the menu (#230): once the menu's popup has gone,
     // closing management with Escape or with a press on Close returns the
     // focus to the menu button, which the frame passes as `focusTarget`.
+    // The button keeps the keyboard's ring after Escape, also after a Tab
+    // inside management, and has none after a pointer's Close (#232).
     async 'menu-access-focus'() {
       const menu = page.getByRole('button', { name: 'Menu', exact: true });
       const sheet = page.getByRole('dialog', { name: /Pods & sharing/ });
+      const ring = async () => {
+        await settle(page);
+        return menu.evaluate((el) => ({
+          focusVisible: el.hasAttribute('data-focus-visible'),
+          outline:
+            getComputedStyle(el).outlineStyle === 'none'
+              ? 'none'
+              : `${getComputedStyle(el).outlineWidth} ${getComputedStyle(el).outlineStyle}`,
+        }));
+      };
+      const shown = (r) =>
+        r.focusVisible && r.outline !== 'none' && !r.outline.startsWith('0px');
       const open = async (how) => {
         if (how === 'keyboard') {
           await menu.focus();
@@ -980,22 +994,41 @@ async function interaction({ browser, origin, engine }) {
       await page.keyboard.press('Escape');
       const keyboardClosed = await hidden(sheet);
       const afterEscape = await focusUntil(page, /Menu/, focused);
+      const escapeRing = await ring();
+      const tabMenuGone = await open('keyboard');
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Escape');
+      const tabClosed = await hidden(sheet);
+      const afterTabEscape = await focusUntil(page, /Menu/, focused);
+      const tabEscapeRing = await ring();
       const pointerMenuGone = await open('pointer');
       await sheet.getByRole('button', { name: 'Close', exact: true }).click();
       const pointerClosed = await hidden(sheet);
       const afterClose = await focusUntil(page, /Menu/, focused);
+      const closeRing = await ring();
       return {
         pass:
           keyboardMenuGone &&
           keyboardClosed &&
           /Menu/.test(afterEscape) &&
+          shown(escapeRing) &&
+          tabMenuGone &&
+          tabClosed &&
+          /Menu/.test(afterTabEscape) &&
+          shown(tabEscapeRing) &&
           pointerMenuGone &&
           pointerClosed &&
-          /Menu/.test(afterClose),
+          /Menu/.test(afterClose) &&
+          !closeRing.focusVisible &&
+          closeRing.outline === 'none',
         keyboardMenuGone,
         afterEscape,
+        escapeRing,
+        afterTabEscape,
+        tabEscapeRing,
         pointerMenuGone,
         afterClose,
+        closeRing,
       };
     },
     // A row's quiet menu (sempods-apps-template#145, #116, #141): a ghost
