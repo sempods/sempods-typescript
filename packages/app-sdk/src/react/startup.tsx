@@ -98,19 +98,34 @@ export function AppStartup(props: AppStartupProps) {
   const first = useHosts((h) => h.mounted[0] === token);
   const container = useHosts((h) => h.container);
   const shows = starting && first && container !== null;
-  // The portal leaves the DOM ancestors of this placement: carry over the
-  // theme they set (`--sempods-*` tokens, `color-scheme`), as the gate,
-  // rendered in place, inherits it. A wrapper holds it, so the layer only
-  // inherits it, like the gate, and its own `className` and `style` win.
+  // The portal leaves the DOM ancestors of this placement. Where they set a
+  // different theme (`--sempods-*` tokens, `color-scheme`) than the portal's
+  // own ancestors, a wrapper carries the difference, so the layer inherits
+  // what the gate, rendered in place, would; its own `className` and `style`
+  // still win. Values the portal shares (for example on `:root`) are not
+  // copied and follow changes by themselves; the copied ones are read again
+  // on any DOM change while the screen shows, so an app that loads its theme
+  // during startup is followed.
   const anchor = useRef<HTMLSpanElement>(null);
   const [theme, setTheme] = useState<Theme>(noTheme);
-  // Read once it shows, before paint; a start is too short to follow a
-  // theme that changes meanwhile.
   useLayoutEffect(() => {
-    if (!shows || !anchor.current) return;
-    const next = inheritedTheme(anchor.current);
-    setTheme((current) => (sameTheme(current, next) ? current : next));
-  }, [shows]);
+    const placed = anchor.current;
+    if (!shows || !placed || !container) return;
+    const read = () => {
+      const next = placementTheme(placed, container);
+      setTheme((current) => (sameTheme(current, next) ? current : next));
+    };
+    read();
+    if (typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(read);
+    observer.observe(placed.ownerDocument.documentElement, {
+      attributes: true,
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    return () => observer.disconnect();
+  }, [shows, container]);
   return (
     <>
       <span ref={anchor} hidden data-sempods-startup-anchor="" />
@@ -149,16 +164,23 @@ const tokens = [
   'font',
   'radius',
 ].map((name) => `--sempods-${name}`);
-/** The theme an element inherits: set tokens and a non-default `color-scheme`. */
-function inheritedTheme(element: Element): Theme {
-  const computed = getComputedStyle(element);
+/**
+ * What the placement inherits differently from the portal's container: each
+ * token whose value differs (`initial` where only the container has one, so
+ * the default applies as at the placement) and a differing `color-scheme`.
+ */
+function placementTheme(placed: Element, container: Element): Theme {
+  const here = getComputedStyle(placed);
+  const there = getComputedStyle(container);
   const theme: Record<string, string> = {};
   for (const token of tokens) {
-    const value = computed.getPropertyValue(token).trim();
-    if (value) theme[token] = value;
+    const value = here.getPropertyValue(token).trim();
+    if (value !== there.getPropertyValue(token).trim())
+      theme[token] = value || 'initial';
   }
-  const scheme = computed.getPropertyValue('color-scheme').trim();
-  if (scheme && scheme !== 'normal') theme.colorScheme = scheme;
+  const scheme = here.getPropertyValue('color-scheme').trim() || 'normal';
+  if (scheme !== (there.getPropertyValue('color-scheme').trim() || 'normal'))
+    theme.colorScheme = scheme;
   return theme;
 }
 function sameTheme(a: Theme, b: Theme) {

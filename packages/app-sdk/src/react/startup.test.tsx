@@ -457,3 +457,62 @@ it("keeps the component's className above the inherited theme in the startup scr
     sheet.remove();
   }
 });
+
+it('follows a global theme that changes while the startup screen shows', async () => {
+  const root = document.documentElement;
+  root.style.setProperty('--sempods-bg', 'rgb(1, 2, 3)');
+  try {
+    const s = await staged();
+    render(
+      <SempodsProvider runtime={s.runtime}>
+        <AppAccess appName="Shopping" />
+        <Content />
+      </SempodsProvider>,
+    );
+    await screen.findByText('started');
+    const layer = document.querySelector<HTMLElement>(
+      '[data-sempods-startup]',
+    )!;
+    const bg = () =>
+      getComputedStyle(layer).getPropertyValue('--sempods-bg').trim();
+    expect(bg()).toBe('rgb(1, 2, 3)');
+    // A value the portal inherits by itself is not copied.
+    const wrapper = document.querySelector<HTMLElement>(
+      '[data-sempods-startup-theme]',
+    )!;
+    expect(wrapper.style.getPropertyValue('--sempods-bg')).toBe('');
+    // The app loads its saved theme while startup is still pending.
+    root.style.setProperty('--sempods-bg', 'rgb(4, 5, 6)');
+    expect(document.querySelector('[data-sempods-startup]')).toBe(layer);
+    expect(bg()).toBe('rgb(4, 5, 6)');
+  } finally {
+    root.style.removeProperty('--sempods-bg');
+  }
+});
+
+it('follows a nested theme that changes while the startup screen shows', async () => {
+  const s = await staged();
+  render(
+    <SempodsProvider runtime={s.runtime}>
+      <div data-testid="themed" style={{ colorScheme: 'light' }}>
+        <AppAccess appName="Shopping" />
+      </div>
+      <Content />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const layer = document.querySelector<HTMLElement>('[data-sempods-startup]')!;
+  expect(getComputedStyle(layer).colorScheme).toBe('light');
+  const themed = screen.getByTestId('themed');
+  await act(async () => {
+    themed.style.colorScheme = 'dark';
+    themed.style.setProperty('--sempods-accent', 'rgb(7, 8, 9)');
+    await Promise.resolve();
+  });
+  expect(document.querySelector('[data-sempods-startup]')).toBe(layer);
+  const computed = getComputedStyle(layer);
+  expect(computed.colorScheme).toBe('dark');
+  expect(computed.getPropertyValue('--sempods-accent').trim()).toBe(
+    'rgb(7, 8, 9)',
+  );
+});
