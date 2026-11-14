@@ -3288,6 +3288,76 @@ async function insets({ browser, origin, engine }) {
       };
     });
   };
+  /**
+   * Opens the task at width × tall, types into its nth text field, shrinks
+   * the viewport to width × short as a keyboard does and measures.
+   */
+  const keyboard = async (width, tall, short, nth) => {
+    await setInsets();
+    await page.setViewportSize({ width, height: tall });
+    await page.goto(origin + '/');
+    await openTask(page);
+    const before = await dialog.evaluate((el) => {
+      const r = el.parentElement.getBoundingClientRect();
+      return { top: r.top, left: r.left, width: r.width };
+    });
+    const field = dialog.getByRole('textbox').nth(nth);
+    await field.click();
+    await field.press('End');
+    await page.keyboard.type(' draft');
+    const draft = await field.inputValue();
+    await page.setViewportSize({ width, height: short });
+    await settle(page);
+    // Chromium's own scroll is smooth: wait until it ends.
+    await page.waitForTimeout(500);
+    const m = await dialog.evaluate((el) => {
+      const box = (node) => {
+        const r = node.getBoundingClientRect();
+        return { top: r.top, right: r.right, bottom: r.bottom, left: r.left };
+      };
+      /** Whether the element's centre is on screen and shows the element. */
+      const shows = (node) => {
+        const r = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          r.left + r.width / 2,
+          r.top + r.height / 2,
+        );
+        return !!hit && (hit === node || node.contains(hit));
+      };
+      const focused = document.activeElement;
+      const result = {
+        modal: box(el.parentElement),
+        focusInDialog: el.contains(focused),
+        field: box(focused),
+        fieldShown: shows(focused),
+        viewport: { width: innerWidth, height: innerHeight },
+      };
+      const last = [...el.querySelectorAll('button')].at(-1);
+      for (let node = last.parentElement; node; node = node.parentElement)
+        if (node.scrollHeight > node.clientHeight) {
+          node.scrollTop = node.scrollHeight;
+          break;
+        }
+      result.last = box(last);
+      result.lastShown = shows(last);
+      return result;
+    });
+    return {
+      pass:
+        before.top === 0 &&
+        before.left === 0 &&
+        before.width === width &&
+        m.modal.top === 0 &&
+        m.modal.bottom === m.viewport.height &&
+        m.focusInDialog &&
+        m.fieldShown &&
+        m.lastShown &&
+        (await field.inputValue()) === draft &&
+        draft.endsWith(' draft'),
+      before,
+      ...m,
+    };
+  };
   const emulated = (run) => async () =>
     cdp ? run() : { pass: false, skip: 'no safe-area emulation' };
   const checks = {
@@ -3338,6 +3408,19 @@ async function insets({ browser, origin, engine }) {
         ...m,
       };
     }),
+    // A keyboard opens while a field holds a draft (#314). With
+    // interactive-widget=resizes-content the viewport shrinks, and Chromium
+    // scrolls the focused field into view on its own, aligned with the top
+    // of the viewport. Afterwards the dialog fills the viewport, the field
+    // keeps its draft and the focus and is visible (not under the heading),
+    // and the last action can be scrolled to.
+    async 'screen-dialog-landscape-keyboard'() {
+      // Pixel 8 in landscape: 915px wide, about 150px left by the keyboard.
+      return keyboard(915, 340, 150, 0);
+    },
+    async 'screen-dialog-portrait-keyboard'() {
+      return keyboard(375, 700, 260, 1);
+    },
     // The centred dialog does not move with insets.
     'screen-dialog-centred-ignores-insets': emulated(async () => {
       const plain = await measure(1280, 800);

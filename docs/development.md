@@ -142,7 +142,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     below a 47px top inset, the last action after scrolling above a 34px
     bottom inset, heading, Close and fields beside 44px landscape side
     insets; the ordinary phone padding without insets in every engine, and
-    the centred dialog unmoved by insets;
+    the centred dialog unmoved by insets; and, in every engine, a keyboard
+    opening over a typed draft, as a shrinking viewport: 915px wide from 340
+    to 150px high and 375px wide from 700 to 260px, the dialog full screen
+    before and after, the field still focused, holding its draft and not
+    under the heading, the last action reachable (#314);
   - the calendar-date roundtrip with the SDK's `date` field in
     Europe/Berlin, UTC+14 and UTC−11: stored `xsd:date` after Apply and Save,
     nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`
