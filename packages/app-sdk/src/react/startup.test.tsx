@@ -4,7 +4,12 @@
  * change recorded, in the shapes of Explorer (on demand, no TargetScreen),
  * Focus (on demand with a TargetScreen) and Konsum (required, several Pods).
  */
-import { createContext, StrictMode, useContext } from 'react';
+import {
+  createContext,
+  StrictMode,
+  useContext,
+  type CSSProperties,
+} from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -385,4 +390,129 @@ it('keeps the React context around AppAccess for its icon', async () => {
   expect(
     document.querySelector('[data-app-content]')?.closest('[inert]'),
   ).not.toBeNull();
+});
+
+it('carries the theme set on an ancestor of AppAccess into the startup screen', async () => {
+  const s = await staged();
+  render(
+    <SempodsProvider runtime={s.runtime}>
+      <div
+        style={
+          {
+            '--sempods-bg': 'rgb(1, 2, 3)',
+            '--sempods-text': 'rgb(250, 250, 250)',
+            colorScheme: 'dark',
+          } as CSSProperties
+        }
+      >
+        <AppAccess
+          appName="Shopping"
+          style={{ '--sempods-text': 'rgb(9, 9, 9)' } as CSSProperties}
+        />
+      </div>
+      <Content />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const layer = document.querySelector<HTMLElement>('[data-sempods-startup]')!;
+  const computed = getComputedStyle(layer);
+  expect(computed.getPropertyValue('--sempods-bg').trim()).toBe('rgb(1, 2, 3)');
+  expect(computed.colorScheme).toBe('dark');
+  // The component's own style wins over the inherited theme.
+  expect(computed.getPropertyValue('--sempods-text').trim()).toBe(
+    'rgb(9, 9, 9)',
+  );
+  // The inherited theme is not declared on the layer itself.
+  expect(layer.style.getPropertyValue('--sempods-bg')).toBe('');
+});
+
+it("keeps the component's className above the inherited theme in the startup screen", async () => {
+  const sheet = document.createElement('style');
+  sheet.textContent = `
+    .themed-root { --sempods-bg: rgb(255, 255, 255); color-scheme: light; }
+    .custom-access { --sempods-bg: rgb(0, 0, 0); color-scheme: dark; }
+  `;
+  document.head.append(sheet);
+  try {
+    const s = await staged();
+    render(
+      <SempodsProvider runtime={s.runtime}>
+        <div className="themed-root">
+          <AppAccess appName="Shopping" className="custom-access" />
+        </div>
+        <Content />
+      </SempodsProvider>,
+    );
+    await screen.findByText('started');
+    const layer = document.querySelector<HTMLElement>(
+      '[data-sempods-startup]',
+    )!;
+    expect(layer.classList.contains('custom-access')).toBe(true);
+    const computed = getComputedStyle(layer);
+    expect(computed.getPropertyValue('--sempods-bg').trim()).toBe(
+      'rgb(0, 0, 0)',
+    );
+    expect(computed.colorScheme).toBe('dark');
+  } finally {
+    sheet.remove();
+  }
+});
+
+it('follows a global theme that changes while the startup screen shows', async () => {
+  const root = document.documentElement;
+  root.style.setProperty('--sempods-bg', 'rgb(1, 2, 3)');
+  try {
+    const s = await staged();
+    render(
+      <SempodsProvider runtime={s.runtime}>
+        <AppAccess appName="Shopping" />
+        <Content />
+      </SempodsProvider>,
+    );
+    await screen.findByText('started');
+    const layer = document.querySelector<HTMLElement>(
+      '[data-sempods-startup]',
+    )!;
+    const bg = () =>
+      getComputedStyle(layer).getPropertyValue('--sempods-bg').trim();
+    expect(bg()).toBe('rgb(1, 2, 3)');
+    // A value the portal inherits by itself is not copied.
+    const wrapper = document.querySelector<HTMLElement>(
+      '[data-sempods-startup-theme]',
+    )!;
+    expect(wrapper.style.getPropertyValue('--sempods-bg')).toBe('');
+    // The app loads its saved theme while startup is still pending.
+    root.style.setProperty('--sempods-bg', 'rgb(4, 5, 6)');
+    expect(document.querySelector('[data-sempods-startup]')).toBe(layer);
+    expect(bg()).toBe('rgb(4, 5, 6)');
+  } finally {
+    root.style.removeProperty('--sempods-bg');
+  }
+});
+
+it('follows a nested theme that changes while the startup screen shows', async () => {
+  const s = await staged();
+  render(
+    <SempodsProvider runtime={s.runtime}>
+      <div data-testid="themed" style={{ colorScheme: 'light' }}>
+        <AppAccess appName="Shopping" />
+      </div>
+      <Content />
+    </SempodsProvider>,
+  );
+  await screen.findByText('started');
+  const layer = document.querySelector<HTMLElement>('[data-sempods-startup]')!;
+  expect(getComputedStyle(layer).colorScheme).toBe('light');
+  const themed = screen.getByTestId('themed');
+  await act(async () => {
+    themed.style.colorScheme = 'dark';
+    themed.style.setProperty('--sempods-accent', 'rgb(7, 8, 9)');
+    await Promise.resolve();
+  });
+  expect(document.querySelector('[data-sempods-startup]')).toBe(layer);
+  const computed = getComputedStyle(layer);
+  expect(computed.colorScheme).toBe('dark');
+  expect(computed.getPropertyValue('--sempods-accent').trim()).toBe(
+    'rgb(7, 8, 9)',
+  );
 });

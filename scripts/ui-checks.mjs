@@ -4393,6 +4393,43 @@ async function startup({ browser, origin, engine }) {
           }),
         );
       }
+    // An app that loads its theme while startup is pending (#315 review): a
+    // `:root` token that changes is followed by the startup screen.
+    held = new Promise((resolve) => (release = resolve));
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(origin + '/');
+    await layer.waitFor();
+    results.push(
+      await attemptOn(errors, 'follows-root-theme', async () => {
+        const background = () =>
+          layer.evaluate((el) => getComputedStyle(el).backgroundColor);
+        await page.evaluate(() =>
+          document.documentElement.style.setProperty(
+            '--sempods-bg',
+            'rgb(1, 2, 3)',
+          ),
+        );
+        const before = await background();
+        await page.evaluate(() =>
+          document.documentElement.style.setProperty(
+            '--sempods-bg',
+            'rgb(4, 5, 6)',
+          ),
+        );
+        const after = await background();
+        const still = await layer.count();
+        return {
+          pass:
+            before === 'rgb(1, 2, 3)' &&
+            after === 'rgb(4, 5, 6)' &&
+            still === 1,
+          before,
+          after,
+        };
+      }),
+    );
+    release();
+    await loaded(page);
   } finally {
     release();
   }
