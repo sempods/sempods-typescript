@@ -17,10 +17,32 @@
   --ring: light-dark(#0a6680, #5ec6e4);
 }
 
-/* Control for the built stylesheet: only the dark preference has unreadable
-   primary text on the page. Its former destructive colour passes on the page
-   and fails on the popover when hovered. */
+/* Deliberately fixed neutral control, independent of the package default.
+   Only the dark preference has unreadable primary text on the page. Its
+   destructive colour passes on the page and fails on the popover when hovered. */
 :root[data-theme='contrast-control'] {
+  color-scheme: light dark;
+  --background: light-dark(#ffffff, #111315);
+  --foreground: light-dark(#1f2933, #e5e7eb);
+  --card: light-dark(#ffffff, #181b1f);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(#ffffff, #1b1e23);
+  --popover-foreground: var(--foreground);
   --primary: light-dark(#1f2933, #111315);
+  --primary-foreground: light-dark(#ffffff, #111315);
+  --secondary: light-dark(#eef0f3, #23272e);
+  --secondary-foreground: var(--foreground);
+  /* muted is a quiet surface and muted-foreground its text; the SDK's
+     --sempods-muted is that text colour. */
+  --muted: light-dark(#f3f4f6, #1d2026);
+  --muted-foreground: light-dark(#5f6672, #a1a7b0);
+  /* accent is the highlight surface of hovered and focused menu items. */
+  --accent: light-dark(#eef0f3, #262a31);
+  --accent-foreground: var(--foreground);
   --destructive: light-dark(#b42318, #ff9188);
+  /* Decorative separators. Control boundaries use input, at 3:1. */
+  --border: light-dark(#e5e7eb, #2d3138);
+  --input: light-dark(#7a818c, #6b7280);
+  --ring: light-dark(#1f2933, #e5e7eb);
+  --radius: 0.625rem;
 }

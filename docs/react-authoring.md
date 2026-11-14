@@ -1165,8 +1165,8 @@ Match the static splash in `index.html` to it, so the hand-over is invisible:
     place-content: center;
     justify-items: center;
     gap: 20px;
-    background: var(--sempods-bg, light-dark(#fff, #111315));
-    color: var(--sempods-text, light-dark(#1f2933, #e5e7eb));
+    background: var(--sempods-bg, light-dark(#f7f9f7, #131b18));
+    color: var(--sempods-text, light-dark(#26382f, #e5ede8));
     font: 500 1.75rem/1.25 var(--sempods-font, system-ui, sans-serif);
     color-scheme: light dark;
   }
