@@ -577,7 +577,8 @@ it.each([
     const ask = screen.getByRole('alertdialog', { name: text.ask });
     const cancel = within(ask).getByRole('button', { name: text.cancel });
     expect(document.activeElement).toBe(cancel);
-    fireEvent.click(cancel);
+    // The focus returns once React's commit has ended.
+    await act(async () => fireEvent.click(cancel));
     expect(screen.queryByRole('alertdialog', { name: text.ask })).toBeNull();
     expect(document.activeElement).toBe(
       screen.getByRole('button', { name: text.remove }),

@@ -5,6 +5,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { returnFocusAfterCommit } from './focus.js';
 import { SdkStyles } from './styles.js';
 
 /**
@@ -34,7 +35,8 @@ export function useModalDialog(
       else element.removeAttribute('open');
       // Not into a dialog that closed first, as the gate around its
       // settings does: the gate's own focus return stands.
-      if (!back?.closest('dialog:not([open])')) back?.focus();
+      if (back && !back.closest('dialog:not([open])'))
+        returnFocusAfterCommit(back);
     };
   }, [ref, open, returnFocus, initialFocus]);
 }

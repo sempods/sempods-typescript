@@ -179,7 +179,9 @@ it('opens settings above a no-connection gate and keeps the gate', async () => {
   expect(gate()).toBe(shown);
   expect(within(dialog).getByRole('radio', { name: 'English' })).toBeTruthy();
   // Close returns focus to the gate's button; the gate never left.
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+  await act(async () =>
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' })),
+  );
   expect(settingsDialog()).toBeNull();
   expect(gate()).toBe(shown);
   expect(document.activeElement).toBe(button);
@@ -221,7 +223,9 @@ it('switches language and appearance from the gate with one runtime initializati
     within(dialog).getByRole('heading', { name: 'Einstellungen' }),
   ).toBeTruthy();
   expect(view.container.querySelector('[data-appearance="dark"]')).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Schließen' }));
+  await act(async () =>
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schließen' })),
+  );
   expect(document.activeElement).toBe(
     within(shown).getByRole('button', { name: 'Einstellungen' }),
   );
