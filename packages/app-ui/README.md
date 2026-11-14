@@ -569,8 +569,12 @@ export function TaskDialog({
 An app's own main action uses `ActionButton`, for example a 72px round button
 with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete}>`.
 
-- **`ScreenDialog`**: a routed screen as a modal, full screen below 640px and up
-  to 42rem wide above, with a heading, optional `actions` and Close. It is
+- **`ScreenDialog`**: a routed screen as a modal, full screen below 640px wide
+  or 480px high and up to 42rem wide otherwise, with a heading, optional
+  `actions` and Close. Its content scrolls below the standing heading; below
+  320px high, such as a phone in landscape with its keyboard open, the heading
+  scrolls with the content, because Chromium scrolls the focused field to the
+  top of the viewport. It is
   controlled: Escape, Close and a press beside it call `onRequestClose`, and
   it closes only when `open` turns false, so it follows the route. A press in
   an SDK confirmation (a native `<dialog>`) does not count as a press beside
@@ -1534,8 +1538,10 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
 - `ScreenDialog`'s safe-area padding is checked with insets that Chromium
   emulates, not on an iPhone, an Android phone or an installed PWA. It reads
   only `env(safe-area-inset-*)`, which is 0 unless the app's viewport sets
-  `viewport-fit=cover`. The centred dialog above 640px keeps its margins of
-  at least 1rem and adds no insets.
+  `viewport-fit=cover`. The centred dialog keeps its margins of at least 1rem
+  and adds no insets. Its behaviour with an open keyboard is checked by
+  shrinking the viewport, as `interactive-widget=resizes-content` does; a real
+  Android keyboard in landscape is not checked (#314).
 - The UI layer adds about 97 KB of gzipped JavaScript to an app (measured in
   the spike with the same components).
 

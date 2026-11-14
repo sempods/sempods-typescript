@@ -213,7 +213,7 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
   ).join('\n');
   // Classes that only the package's built JavaScript uses reached the CSS.
   for (const candidate of [
-    'max-sm\\:h-dvh',
+    '30rem\\)\\]\\:h-dvh',
     '--cell-size',
     'bg-action',
     'data-exiting\\:animate-out',
