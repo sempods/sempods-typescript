@@ -816,8 +816,11 @@ device's clock from the first send; a clock set back extends it on the client
 only, and the Pod still refuses a late resend. Should a page close before an ended
 session's claim is retired, the next start within the grace period may send
 that claim's token once more; its result passes the same continuity checks.
-These are fixture tests; evidence against a deployed Pod with the grace period
-is still open ([#239](https://github.com/sempods/sempods-typescript/issues/239)).
+Besides fixture tests, these outcomes have
+[live evidence](https://github.com/sempods/sempods-typescript/issues/239#issuecomment-6827365012)
+for 0.8.0 against a deployed Pod with the 60-second grace period. The lost
+answers were simulated in the page, so a real network loss and the `online`
+resend are covered by fixture tests only.
 A code exchange is never resent.
 
 `beginAuthorization()` prepares first (discovery, client resolution, the stored
@@ -1027,10 +1030,13 @@ so the callback must land in the storage that holds the attempt; the runtime nev
 transfers attempts or tokens between storage containers. See
 [supported environments](../README.md#supported-environments).
 
-Sign-in against a deployed Pod in a real browser is not yet recorded as evidence.
+Sign-in against a deployed Kotlin Pod in Chrome is recorded as live evidence for
+a dynamic client on a loopback origin; a deployed `did:web` origin is not.
 React `AppAccess` and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
 checks. Multi-tab concurrent operation and revocation are not implemented
-here. [Apps without sign-in](#apps-without-sign-in) are covered by fixture
-tests only; reading a deployed Pod's public data from another origin is not yet
-recorded as live evidence.
+here. [Apps without sign-in](#apps-without-sign-in) have
+[live evidence](https://github.com/sempods/sempods-typescript/issues/240#issuecomment-6824544194)
+for 0.8.0: a deployed Pod's public data read from another origin, signing in
+and out under `optional`, and two tabs under `none`. A session that ends through
+a refused renewal is covered by fixture tests only.
