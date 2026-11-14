@@ -281,22 +281,31 @@ it.each(
     const shown = await findGate('no-connection');
     let target = pod;
     if (name === 'unrestricted') {
-      const input = within(shown).getByRole('textbox', { name: 'Pod address' });
+      const input = within(shown).getByRole('combobox', {
+        name: 'Pod address',
+      });
       fireEvent.change(input, { target: { value: 'pod.example/alice' } });
       // Enter submits the form.
       await act(async () => fireEvent.submit(input.closest('form')!));
     } else if (name === 'several allowed Pods') {
       expect(within(shown).queryByRole('textbox')).toBeNull();
-      const picker = within(shown).getByRole('combobox', {
-        name: 'Pod address',
+      fireEvent.click(
+        within(shown).getByRole('button', { name: 'Choose a pod' }),
+      );
+      const picker = within(shown).getByRole('option', {
+        name: 'pod.example/bob',
       });
-      fireEvent.change(picker, { target: { value: bob } });
+      fireEvent.click(picker);
       target = bob;
-      await act(async () => fireEvent.submit(picker.closest('form')!));
+      await act(async () =>
+        within(shown).getByRole('button', { name: 'Sign in' }).click(),
+      );
     } else {
       // The address is fixed: one sign-in, no field.
       expect(within(shown).queryByRole('textbox')).toBeNull();
-      expect(within(shown).queryByRole('combobox')).toBeNull();
+      expect(within(shown).getByRole<HTMLInputElement>('combobox').value).toBe(
+        pod,
+      );
       await act(async () =>
         within(shown).getByRole('button', { name: 'Sign in' }).click(),
       );

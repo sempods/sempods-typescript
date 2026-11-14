@@ -191,7 +191,9 @@ it('lets the person forget a Pod they signed out of, while reading on', async ()
   )!;
   expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
   await act(async () =>
-    within(management).getByRole('button', { name: 'Forget' }).click(),
+    within(management)
+      .getByRole('button', { name: 'Remove from this device' })
+      .click(),
   );
   // Forgotten: the default Pod is listed again, never signed in to.
   await waitFor(() =>

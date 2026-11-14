@@ -4,6 +4,47 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## Pending release: simpler AppAccess sign-in
+
+The default sign-in centres the app icon, name and optional description above
+one editable Pod chooser and one outlined main action. Saved Pods appear in
+that field's dropdown; **Manage saved Pods** is inside it. **Remove from this
+device** still removes only local records. Help appears on request instead of
+always showing explanatory paragraphs.
+
+`podAddressPrefix` starts unrestricted new sign-in at `https://sempods.org/`;
+set it to another prefix or `""` for an empty field. It is clearable and cannot
+be submitted by itself. Configured/permitted targets still take precedence.
+The fallback palette is sage with outlined primary actions; app theme tokens
+and the UI kit bridge still override it. The app's language and provider
+message overrides also apply to the new optional `controls.podHelp` and
+`controls.clearPodAddress` labels.
+
+`ConnectionsProps` adds optional `surface`, `podAddress` and `podAddressPrefix`
+presentation props.
+Standalone `AccessGate` now also accepts `components.Connections`. Existing
+replacements keep compiling; replacements can distinguish sign-in, Context and
+management rather than inferring it from session state. Use guarded `useApp()`
+actions, as before. See [custom connection views](react-authoring.md#replacing-the-connection-view).
+
+No app should copy the default login or session logic. Upgrade to the containing
+SDK release to receive it; this source change is not in published 0.8.0.
+
+Controller `connect` and `authorize` now reject with `RuntimeError('storage')`
+when the target's previous sign-out or forget could not be saved. Retry that
+retirement first; this also applies when an existing Pod URL is typed again.
+The low-level `runtime.beginAuthorization` still supports explicitly replacing
+that record with a new durable authorization attempt.
+
+## Pending release: remembered Pod deduplication
+
+`runtime.connect(url)` now reuses a matching connection for any Pod, not only
+the configured default. Concurrent calls share discovery. Use the returned
+connection's ID rather than expecting a new one for each call. Startup cleans
+up redundant address-only records from older SDKs; existing live sessions and
+pending authorization are preserved. A failed cleanup remains visible and can
+be retried. See [connection reuse](browser-runtime.md#one-known-pod).
+
 ## Pending release: standard grouped Context chooser
 
 The source adds `ContextSwitch` to `@sempods/app-ui` and additive display

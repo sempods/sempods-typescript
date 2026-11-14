@@ -1,6 +1,5 @@
 /** Internal shared baseline. Public tokens inherit from the host; no style registry.
- * Without them, the fallbacks are a calm neutral grey palette. Actions read as
- * text, as in AppAccess; the one main action of a surface is filled. A UI kit
+ * Without them, the fallbacks are a sage palette with outlined primary actions. A UI kit
  * restyles both action roles through their surface, text and border tokens. */
 export function SdkStyles() {
   return (
@@ -24,16 +23,16 @@ const surfaces =
   ':where([data-sempods-ui="access"], [data-sempods-ui="editor"], [data-sempods-ui="notice"], [data-sempods-ui="prompt"], .sp-sdk-dialog)';
 const styles = `
 :where([data-sempods-ui]) {
-  --sp-bg:var(--sempods-bg,light-dark(#fff,#111315));
-  --sp-text:var(--sempods-text,light-dark(#1f2933,#e5e7eb));
-  --sp-muted:var(--sempods-muted,light-dark(#6b7280,#9ca3af));
+  --sp-bg:var(--sempods-bg,light-dark(#f7f9f7,#131b18));
+  --sp-text:var(--sempods-text,light-dark(#26382f,#e5ede8));
+  --sp-muted:var(--sempods-muted,light-dark(#5f7167,#b0c0b6));
   --sp-line:var(--sempods-line,light-dark(#e5e7eb,#2d3138));
-  --sp-accent:var(--sempods-accent,light-dark(#1f2933,#e5e7eb));
-  --sp-on-accent:var(--sempods-on-accent,light-dark(#fff,#111315));
-  --sp-field-line:var(--sempods-field-line,var(--sp-line));
-  --sp-primary-bg:var(--sempods-primary-bg,var(--sp-accent));
-  --sp-primary-text:var(--sempods-primary-text,var(--sp-on-accent));
-  --sp-primary-border:var(--sempods-primary-border,var(--sp-primary-bg));
+  --sp-accent:var(--sempods-accent,light-dark(#3e6b56,#a2cbb4));
+  --sp-on-accent:var(--sempods-on-accent,light-dark(#f7f9f7,#131b18));
+  --sp-field-line:var(--sempods-field-line,light-dark(#7e8d83,#738b7c));
+  --sp-primary-bg:var(--sempods-primary-bg,var(--sp-bg));
+  --sp-primary-text:var(--sempods-primary-text,var(--sp-accent));
+  --sp-primary-border:var(--sempods-primary-border,var(--sp-accent));
   --sp-secondary-bg:var(--sempods-secondary-bg,transparent);
   --sp-secondary-text:var(--sempods-secondary-text,var(--sp-accent));
   --sp-secondary-border:var(--sempods-secondary-border,transparent);

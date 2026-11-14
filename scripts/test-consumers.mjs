@@ -654,7 +654,7 @@ try {
   // The quickstart app starts and offers its first step.
   await page.goto(`${origin}/quickstart`);
   await page.getByText('My tasks', { exact: true }).waitFor();
-  await page.getByLabel('Pod address').waitFor();
+  await page.getByLabel('Pod address', { exact: true }).waitFor();
   assert.equal(
     await page.getByRole('button', { name: 'Sign in', exact: true }).count(),
     1,

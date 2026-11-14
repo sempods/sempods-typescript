@@ -234,7 +234,8 @@ new MutationObserver(() => {
   if (!section) return;
   const state = section.hasAttribute('hidden')
     ? 'hidden'
-    : section.textContent?.includes('Full addresses')
+    : section.querySelector('.sp-sign-in') ||
+        section.textContent?.includes('Full addresses')
       ? 'connection'
       : section.querySelector('[role="status"]')?.textContent === 'Loading…'
         ? 'loading'

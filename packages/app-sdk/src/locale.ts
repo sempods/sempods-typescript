@@ -166,11 +166,18 @@ export interface UiMessages {
   readonly disconnectFailed?: string;
   /*
    * Remembered Pods (added in 0.8.0; optional in the type, `createLocale`
-   * fills them): the list of signed-out Pods on the sign-in view, the action
+   * fills them): the saved-Pod management list, the action
    * that removes one from this device, and the note under a Pod whose session
    * ended rather than being signed out.
    */
   readonly rememberedPods?: string;
+  /** Sign-in choice and device-local address management; filled from locale defaults. */
+  readonly podHelp?: string;
+  readonly clearPodAddress?: string;
+  readonly manageSavedPods?: string;
+  readonly removeSavedPod?: string;
+  readonly forgetHint?: string;
+  readonly podPlaceholder?: string;
   readonly forget?: string;
   readonly sessionEnded?: string;
   /** Forgetting a Pod could not be saved; retry Forget, never reload advice. */
@@ -353,6 +360,12 @@ export const englishMessages: SdkMessages = {
     disconnectFailed:
       'Sign-out was not saved on this device. Try signing out again.',
     rememberedPods: 'Pods on this device',
+    podHelp: 'What is a Pod?',
+    clearPodAddress: 'Clear Pod address',
+    manageSavedPods: 'Manage saved Pods',
+    removeSavedPod: 'Remove from this device',
+    forgetHint: 'Only the saved address is removed. Your Pod data stays.',
+    podPlaceholder: 'sempods.org/your-name',
     forget: 'Forget',
     sessionEnded: 'The session ended. Sign in again to continue.',
     forgetFailed:
@@ -415,8 +428,8 @@ export const englishMessages: SdkMessages = {
     alongside: 'Saved alongside changes to other fields.',
     dataAccess: 'Pods & sharing',
     yourPod: 'Pod address',
-    podHint: '',
-    loginHint: '',
+    podHint: 'A Pod is where your data lives.',
+    loginHint: 'You sign in at your Pod.',
     checkAccess: 'Check access',
     addresses: 'Full addresses',
     signInCancelled:
@@ -514,6 +527,13 @@ export const germanMessages: SdkMessages = {
     disconnectFailed:
       'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.',
     rememberedPods: 'Pods auf diesem Gerät',
+    podHelp: 'Was ist ein Pod?',
+    clearPodAddress: 'Pod-Adresse leeren',
+    manageSavedPods: 'Gespeicherte Pods verwalten',
+    removeSavedPod: 'Von diesem Gerät entfernen',
+    forgetHint:
+      'Nur die gespeicherte Adresse wird entfernt. Deine Daten im Pod bleiben erhalten.',
+    podPlaceholder: 'sempods.org/dein-name',
     forget: 'Vergessen',
     sessionEnded:
       'Die Sitzung wurde beendet. Melde dich erneut an, um fortzufahren.',
@@ -578,8 +598,8 @@ export const germanMessages: SdkMessages = {
     alongside: 'Zusammen mit Änderungen an anderen Feldern gespeichert.',
     dataAccess: 'Pods & Freigaben',
     yourPod: 'Pod-Adresse',
-    podHint: '',
-    loginHint: '',
+    podHint: 'Ein Pod ist der Ort, an dem deine Daten liegen.',
+    loginHint: 'Die Anmeldung erfolgt bei deinem Pod.',
     checkAccess: 'Zugriff prüfen',
     addresses: 'Vollständige Adressen',
     signInCancelled:

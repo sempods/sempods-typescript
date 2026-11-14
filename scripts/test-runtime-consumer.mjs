@@ -1386,9 +1386,65 @@ try {
           language === 'en' ? 'Pods on this device' : 'Pods auf diesem Gerät',
         exact: true,
       });
-      await remembered
-        .getByRole('button', { name: signIn, exact: true })
-        .waitFor();
+      const mainSignIn = page.getByRole('button', {
+        name: signIn,
+        exact: true,
+      });
+      await mainSignIn.waitFor();
+      assert.equal(await mainSignIn.count(), 1);
+      assert.equal(await page.getByRole('textbox').count(), 0);
+      const beforeChoice = exchanges;
+      const addressInput = page.getByRole('combobox', {
+        name: language === 'en' ? 'Pod address' : 'Pod-Adresse',
+      });
+      await page
+        .getByRole('button', {
+          name: language === 'en' ? 'Clear Pod address' : 'Pod-Adresse leeren',
+        })
+        .click();
+      assert.equal(await addressInput.inputValue(), '');
+      assert.ok(
+        await addressInput.evaluate(
+          (input) => input === document.activeElement,
+        ),
+      );
+      await addressInput.press('ArrowDown');
+      await addressInput.press('Enter');
+      assert.equal(await addressInput.inputValue(), origin + '/alice');
+      assert.equal(exchanges, beforeChoice);
+      const viewport = page.viewportSize();
+      for (const width of [320, 1280])
+        for (const colorScheme of ['light', 'dark']) {
+          await page.setViewportSize({ width, height: 812 });
+          await page.emulateMedia({ colorScheme });
+          assert.ok(
+            await page
+              .locator('[data-sempods-ui="gate"]')
+              .evaluate((gate) => gate.scrollWidth <= gate.clientWidth),
+          );
+          if (process.env.SEMPODS_UI_PREVIEW_DIR)
+            await page.screenshot({
+              path: join(
+                process.env.SEMPODS_UI_PREVIEW_DIR,
+                `login-remembered-${language}-${width}-${colorScheme}.png`,
+              ),
+            });
+        }
+      if (viewport) await page.setViewportSize(viewport);
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page
+        .getByRole('button', {
+          name: language === 'en' ? 'Choose a pod' : 'Pod auswählen',
+        })
+        .click();
+      await page
+        .getByText(
+          language === 'en'
+            ? 'Manage saved Pods'
+            : 'Gespeicherte Pods verwalten',
+          { exact: true },
+        )
+        .click();
       assert.equal(
         await page.getByLabel('Connections', { exact: true }).textContent(),
         '1',
@@ -1400,7 +1456,10 @@ try {
       assert.equal(await page.getByRole('alert').count(), 0);
       await remembered
         .getByRole('button', {
-          name: language === 'en' ? 'Forget' : 'Vergessen',
+          name:
+            language === 'en'
+              ? 'Remove from this device'
+              : 'Von diesem Gerät entfernen',
           exact: true,
         })
         .click();
@@ -1538,7 +1597,6 @@ try {
         ),
       });
     // podAddress="hidden" applies only to the one permitted Pod.
-    const address = page.getByText(origin + '/alice', { exact: true });
     if (mode === 'one') {
       assert.equal(await page.getByRole('textbox').count(), 0);
       assert.equal(await page.getByRole('combobox').count(), 0);
@@ -1549,11 +1607,16 @@ try {
         ).includes(origin.replace(/^https?:\/\//, '') + '/alice'),
       );
     } else if (mode === 'set') {
-      await page.getByLabel('Pod address').selectOption(origin + '/alice');
-      assert.equal(await page.getByRole('textbox').count(), 0);
-      await address.waitFor();
+      await page.getByRole('button', { name: 'Choose a pod' }).click();
+      await page.getByRole('option', { name: /Personal/ }).click();
+      assert.equal(
+        await page.getByRole('combobox').inputValue(),
+        origin + '/alice',
+      );
     } else
-      await page.getByLabel('Pod address').fill('  ' + origin + '/alice/  ');
+      await page
+        .getByLabel('Pod address', { exact: true })
+        .fill('  ' + origin + '/alice/  ');
     await page.getByRole('button', { name: 'Sign in', exact: true }).focus();
     await Promise.all([
       page.waitForURL('**/callback?**'),
@@ -1697,7 +1760,7 @@ try {
   // A Pod whose provider answers login_required: the specific cause (EN/DE),
   // shown once and without a kept-draft claim, until the person acts.
   await page.goto(origin + '/app?identity=access-refusing');
-  await page.getByLabel('Pod address').fill(origin + '/alice');
+  await page.getByLabel('Pod address', { exact: true }).fill(origin + '/alice');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Sign in', exact: true }).click(),
@@ -1712,7 +1775,9 @@ try {
     .click();
   // In management, signing in to another Pod is a collapsed section.
   await page.getByText('Connect another Pod', { exact: true }).click();
-  await page.getByLabel('Pod address').fill(origin + '/refusing');
+  await page
+    .getByLabel('Pod address', { exact: true })
+    .fill(origin + '/refusing');
   const beforeLoginRequired = exchanges;
   await Promise.all([
     page.waitForURL('**/callback?**'),
@@ -1731,13 +1796,13 @@ try {
   assert.ok(!accessText.includes('draft'), accessText);
   assert.ok(!accessText.includes('not signed in to the app'), accessText);
   assert.equal(exchanges, beforeLoginRequired);
-  const activePod = access.getByLabel('Active pod', { exact: true });
-  assert.ok(
-    (await activePod.locator('option:checked').textContent()).endsWith(
-      '/refusing',
-    ),
+  assert.equal(
+    await access.getByRole('combobox').inputValue(),
+    origin + '/refusing',
   );
-  await activePod.selectOption({ label: 'Personal' });
+  await access.getByRole('button', { name: 'Choose a pod' }).click();
+  await access.getByRole('option', { name: /Personal/ }).click();
+  await access.getByRole('button', { name: 'Open', exact: true }).click();
   await access.waitFor({ state: 'hidden' });
   // The refusing Pod is now another Pod whose session ended: one prompt.
   const ended = page.locator(
@@ -1747,7 +1812,9 @@ try {
   assert.equal(await ended.count(), 1);
   assert.equal(await page.getByText(refusal).count(), 1);
   await page.goto(origin + '/app?identity=access-refusing-de');
-  await page.getByLabel('Pod-Adresse').fill(origin + '/refusing');
+  await page
+    .getByLabel('Pod-Adresse', { exact: true })
+    .fill(origin + '/refusing');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Anmelden', exact: true }).click(),
@@ -1762,14 +1829,15 @@ try {
     'Der Pod verlangt, dass du dich zuerst bei seinem Anbieter anmeldest. Melde dich dort an und versuche es dann erneut.',
   );
   assert.ok(!(await zugriff.textContent()).includes('Entwurf'));
+  await zugriff.getByRole('button', { name: 'Pod auswählen' }).click();
+  await zugriff
+    .getByText('Gespeicherte Pods verwalten', { exact: true })
+    .click();
   await zugriff.getByRole('button', { name: 'Abmelden', exact: true }).click();
-  await page.getByLabel('Pod-Adresse').waitFor();
+  await page.getByRole('button', { name: 'Anmelden', exact: true }).waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
-  // The signed-out Pod stays remembered above the address field (#237).
-  await page
-    .getByRole('list', { name: 'Pods auf diesem Gerät', exact: true })
-    .getByRole('button', { name: 'Anmelden', exact: true })
-    .waitFor();
+  // The signed-out Pod offers one sign-in; another address is secondary.
+  await page.getByRole('combobox', { name: 'Pod-Adresse' }).waitFor();
   assert.equal(
     await page.getByLabel('Connections', { exact: true }).textContent(),
     '1',
@@ -2061,7 +2129,9 @@ try {
   // Switching Pods retires an editor that belongs to the previous connection.
   // In management, signing in to another Pod is a collapsed section.
   await page.getByText('Connect another Pod', { exact: true }).click();
-  await page.getByLabel('Pod address').fill(origin + '/second-pod');
+  await page
+    .getByLabel('Pod address', { exact: true })
+    .fill(origin + '/second-pod');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Sign in', exact: true }).click(),
@@ -2078,8 +2148,11 @@ try {
     await pods.selectOption(value);
   };
   // The failed sign-in to the second Pod blocks: the gate offers the other Pod.
-  await page.locator('[data-sempods-ui="gate"]').waitFor();
-  await choosePod('overview-pod');
+  const overviewGate = page.locator('[data-sempods-ui="gate"]');
+  await overviewGate.waitFor();
+  await overviewGate.getByRole('button', { name: 'Choose a pod' }).click();
+  await overviewGate.getByRole('option', { name: /overview-pod/ }).click();
+  await overviewGate.getByRole('button', { name: 'Open', exact: true }).click();
   await page.locator('[data-sempods-ui="gate"]').waitFor({ state: 'detached' });
   // The second Pod's failed sign-in is now a prompt beside it: dismiss it.
   await page

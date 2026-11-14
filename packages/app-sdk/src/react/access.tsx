@@ -41,11 +41,18 @@ import {
   usePromptText,
 } from './access-prompts.js';
 import { useFirst } from './first.js';
+import { enteredPod, SignInConnections } from './access-sign-in.js';
 import { useFocusHold } from './focus.js';
 import { AppStartup } from './startup.js';
 
 /** What a replacement for the connection view (`components.Connections`) receives. */
 export interface ConnectionsProps {
+  /** Where the replacement is shown; it still uses guarded useApp actions. */
+  readonly surface?: 'sign-in' | 'context' | 'management';
+  /** Presentation preference; hide only with exactly one permitted Pod. */
+  readonly podAddress?: 'visible' | 'hidden';
+  /** Editable suggestion for unrestricted first sign-in; default https://sempods.org/. Empty disables it. Never a Pod policy or automatic request. */
+  readonly podAddressPrefix?: string;
   readonly mode?: 'single' | 'multiple';
   /** Optional app-supplied display names keyed by exact Pod URL. Never identities. */
   readonly podNames?: Readonly<Record<string, string>>;
@@ -71,9 +78,11 @@ export interface AppAccessProps {
    * permits exactly one Pod; a `podNames` name remains, otherwise saved
    * duplicate connections are numbered. Several or unrestricted
    * Pods, management (`open`) and Full addresses always show the address.
-   * A custom `components.Connections` does not receive this option.
+   * Replacements receive this preference and enforce the same policy check.
    */
   readonly podAddress?: 'visible' | 'hidden';
+  /** Editable suggestion for unrestricted first sign-in; default https://sempods.org/. Empty disables it. Never a Pod policy or automatic request. */
+  readonly podAddressPrefix?: string;
   /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
   /**
@@ -134,8 +143,10 @@ export type AccessGateProps = Pick<
   | 'description'
   | 'podNames'
   | 'podAddress'
+  | 'podAddressPrefix'
   | 'focusTarget'
   | 'settings'
+  | 'components'
   | 'className'
   | 'style'
 >;
@@ -150,6 +161,7 @@ export type ContextAccessProps = Partial<
     | 'description'
     | 'podNames'
     | 'podAddress'
+    | 'podAddressPrefix'
     | 'focusTarget'
     | 'components'
     | 'className'
@@ -266,6 +278,7 @@ function AccessSection({
   description,
   podNames,
   podAddress = 'visible',
+  podAddressPrefix,
   manage,
   asDialog = false,
   focusTarget,
@@ -385,7 +398,15 @@ function AccessSection({
             ) : body === 'loading' ? (
               <p role="status">{m.controls.loading}</p>
             ) : (
-              <Connections mode={mode} {...(podNames ? { podNames } : {})} />
+              <Connections
+                mode={mode}
+                surface={manage ? 'management' : 'context'}
+                podAddress={podAddress}
+                {...(podAddressPrefix !== undefined
+                  ? { podAddressPrefix }
+                  : {})}
+                {...(podNames ? { podNames } : {})}
+              />
             )
           ) : (
             <AccessConnections
@@ -397,6 +418,7 @@ function AccessSection({
               mode={mode}
               body={body}
               podAddress={podAddress}
+              {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
               {...(podNames ? { podNames } : {})}
             />
           )}
@@ -428,8 +450,8 @@ const signInReasons = new Set<AccessPromptFact['reason']>([
  * full-viewport modal layer above the app, whose content stays mounted and
  * inert, so drafts stay in memory. It does not close on Escape and offers no
  * way back to the content until the cause ends. For `no-connection`,
- * `signed-out` and `missing-scopes` it shows the sign-in view: remembered
- * Pods, the other connections and, without a connection, the address input
+ * `signed-out` and `missing-scopes` it shows one Pod choice and one main
+ * action in an editable chooser; saved-address management lives in its dropdown
  * (keeping `allowedPods`). Every other reason shows its own actions only.
  * `className` and `style` apply to its access surface as in `AppAccess`;
  * custom properties such as `--sempods-*` tokens also cover the whole layer.
@@ -458,6 +480,7 @@ function GateDialog({
   description,
   podNames,
   podAddress = 'visible',
+  podAddressPrefix,
   focusTarget,
   settings,
   components,
@@ -593,16 +616,22 @@ function GateDialog({
                 <p role="status">{text}</p>
               )}
               {Connections ? (
-                <Connections mode={mode} {...(podNames ? { podNames } : {})} />
-              ) : (
-                <AccessConnections
-                  contextRequired={false}
-                  switching={false}
-                  discovery={false}
-                  manage={false}
+                <Connections
                   mode={mode}
-                  body="connections"
+                  surface="sign-in"
                   podAddress={podAddress}
+                  {...(podAddressPrefix !== undefined
+                    ? { podAddressPrefix }
+                    : {})}
+                  {...(podNames ? { podNames } : {})}
+                />
+              ) : (
+                <SignInConnections
+                  mode={mode}
+                  podAddress={podAddress}
+                  {...(podAddressPrefix !== undefined
+                    ? { podAddressPrefix }
+                    : {})}
                   {...(podNames ? { podNames } : {})}
                 />
               )}
@@ -714,14 +743,6 @@ function AccessDialog({
   );
 }
 
-/** Presentation-only convenience. Canonical URL/security validation stays in the runtime. */
-function enteredPod(value: string) {
-  // Only clean up the common pasted-address form. Do not parse/re-serialize the
-  // URL: that could silently normalize ambiguous paths, credentials or escapes.
-  const text = value.trim().replace(/\/$/, '');
-  return /^[a-z][a-z\d+.-]*:/i.test(text) ? text : `https://${text}`;
-}
-
 function AccessConnections({
   manage,
   mode,
@@ -731,11 +752,13 @@ function AccessConnections({
   discovery,
   body,
   podAddress,
+  podAddressPrefix,
 }: {
   readonly manage: boolean;
   readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
+  readonly podAddressPrefix?: string | undefined;
   readonly contextRequired: boolean;
   /** The app selects through its own switch (`useContexts`): no chooser here. */
   readonly switching: boolean;
@@ -753,8 +776,8 @@ function AccessConnections({
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
   // Remembered Pods: signed out at a known address (see `rememberPods`). The
-  // sign-in view lists them above the address field, each with its own
-  // sign-in and a way to forget it on this device. A Pod being forgotten
+  // connected management view lists them under the other-Pod action;
+  // the gate uses SignInConnections. A Pod being forgotten
   // stays in that list; if forgetting could not be saved, with the failure
   // and Forget again, so its address is not kept against the choice.
   const forgetting = (entry: Connection) =>
@@ -912,7 +935,7 @@ function AccessConnections({
         <p className="sp-access-address">{defaultUrl}</p>
       )}
       <button
-        className={found ? undefined : 'sp-access-primary'}
+        className={found ? undefined : 'sp-access-primary sp-access-wide'}
         disabled={
           unavailable ||
           state.connections.some(
@@ -1021,7 +1044,7 @@ function AccessConnections({
                 disabled={unavailable}
                 onClick={() => void act(() => app.forget(entry.id))}
               >
-                {m.controls.forget}
+                {m.controls.removeSavedPod ?? m.controls.forget}
               </button>
             </div>
           </li>
@@ -1083,7 +1106,7 @@ function AccessConnections({
               disabled={unavailable}
               onClick={() => void act(() => app.forget(c.id))}
             >
-              {m.controls.forget}
+              {m.controls.removeSavedPod ?? m.controls.forget}
             </button>
           )}
         </div>
@@ -1128,7 +1151,7 @@ function AccessConnections({
         </label>
         {choice && <p className="sp-access-address">{choice}</p>}
         <button
-          className={found ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary sp-access-wide'}
           disabled={
             unavailable ||
             !choice ||
@@ -1159,25 +1182,30 @@ function AccessConnections({
             spellCheck={false}
             required
             value={url}
-            aria-describedby={m.controls.podHint ? id : undefined}
             placeholder="sempods.org/alice"
             disabled={unavailable}
             onChange={(event) => setUrl(event.target.value)}
           />
         </label>
-        {m.controls.podHint && (
-          <p id={id} className="sp-access-hint">
-            {m.controls.podHint}
-          </p>
-        )}
         <button
-          className={found ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary sp-access-wide'}
           disabled={unavailable}
         >
           {addLabel}
         </button>
       </form>
     ) : null;
+
+  if (manage && !c && body === 'connections')
+    return (
+      <SignInConnections
+        mode={mode}
+        surface="management"
+        podAddress={podAddress}
+        {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
+        {...(podNames ? { podNames } : {})}
+      />
+    );
 
   // The page is navigating to the Pod's sign-in: no action applies any more.
   if (body === 'leaving')
@@ -1198,9 +1226,6 @@ function AccessConnections({
     <>
       {!another && rememberedList}
       {!another && addPod}
-      {!found && m.controls.loginHint && (
-        <p className="sp-access-hint">{m.controls.loginHint}</p>
-      )}
       {activePod}
       {/* Without the Pod selector, the active Pod is named here. */}
       {manage && active && selectable.length < 2 && podLine(c!.podUrl)}
@@ -1223,7 +1248,7 @@ function AccessConnections({
             c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button
-              className="sp-access-primary"
+              className="sp-access-primary sp-access-wide"
               disabled={unavailable}
               onClick={() => void act(() => app.retryRestore(c.id))}
             >
@@ -1357,8 +1382,8 @@ const styles = `
 [data-sempods-access][hidden] { display:none; }
 [data-sempods-access] * { box-sizing:border-box; }
 [data-sempods-access] .sp-access-content { width:100%; max-width:22rem; margin-inline:auto; }
-[data-sempods-access] header { margin:0 0 28px; }
-[data-sempods-access] h1, [data-sempods-access] h2 { font-size:1.75rem; font-weight:500; line-height:1.25; margin:0; }
+[data-sempods-access] header { margin:0 0 36px; }
+[data-sempods-access] h1, [data-sempods-access] h2 { font-size:1.875rem; font-weight:600; letter-spacing:-.035em; line-height:1.25; margin:0; }
 [data-sempods-access] .sp-access-icon { margin:0 auto 20px; width:56px; height:56px; }
 [data-sempods-access] .sp-access-icon > * { width:100%; height:100%; object-fit:contain; }
 [data-sempods-access] p { overflow-wrap:anywhere; margin:12px 0; }
@@ -1369,8 +1394,28 @@ const styles = `
 [data-sempods-access] input::placeholder { color:var(--sp-muted); opacity:1; }
 [data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:1px solid var(--sp-secondary-border); border-radius:calc(var(--sp-radius) * .625); color:var(--sp-secondary-text); background:var(--sp-secondary-bg); padding:9px 13px; cursor:pointer; }
 [data-sempods-access] button:hover:not(:disabled) { background:color-mix(in oklch,var(--sp-secondary-bg),var(--sp-secondary-text) 8%); }
-[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-primary-text); background:var(--sp-primary-bg); border:2px solid var(--sp-primary-border); padding:8px 12px; }
+[data-sempods-access] .sp-access-primary { margin-top:12px; color:var(--sp-primary-text); background:var(--sp-primary-bg); border:1px solid var(--sp-primary-border); padding:9px 13px; }
 [data-sempods-access] .sp-access-primary:hover:not(:disabled) { background:color-mix(in oklch,var(--sp-primary-bg),var(--sp-primary-text) 12%); }
+[data-sempods-access] .sp-access-wide { width:100%; }
+[data-sempods-access] .sp-access-description { font-size:.875rem; color:var(--sp-muted); margin-top:10px; }
+[data-sempods-access] .sp-sign-in { text-align:start; }
+[data-sempods-access] .sp-sign-in form { position:relative; }
+[data-sempods-access] .sp-sign-in .sp-access-primary { margin-top:16px; min-height:50px; border-radius:calc(var(--sp-radius) * 1.25); }
+[data-sempods-access] .sp-pod-field { position:relative; }
+[data-sempods-access] .sp-pod-field > label { margin:0 44px 8px 0; min-height:30px; display:flex; align-items:center; font-size:.875rem; }
+[data-sempods-access] .sp-pod-input { display:flex; align-items:center; border:1px solid var(--sp-field-line); border-radius:calc(var(--sp-radius) * 1.25); }
+[data-sempods-access] .sp-pod-input input { border:0; border-radius:inherit; padding:14px; margin:0; min-width:0; flex:1; background:transparent; }
+[data-sempods-access] .sp-pod-input:has(input:focus-visible) { outline:2px solid var(--sp-focus); outline-offset:3px; }
+[data-sempods-access] .sp-pod-input input:focus-visible { outline:none; }
+[data-sempods-access] .sp-pod-icon { display:grid; place-items:center; width:44px; padding:0; flex:none; background:transparent; border:0; color:var(--sp-muted); }
+[data-sempods-access] .sp-pod-icon svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.5; }
+[data-sempods-access] .sp-pod-help { position:absolute; inset-block-start:-7px; inset-inline-end:0; width:44px; height:44px; padding:0; border:0; background:transparent; color:var(--sp-muted); }
+[data-sempods-access] .sp-pod-popover { position:absolute; inset-inline:0; top:100%; z-index:2; max-height:min(24rem,50dvh); overflow:auto; margin-top:6px; padding:6px; box-shadow:0 8px 24px color-mix(in srgb,var(--sp-text) 8%,transparent); background:var(--sp-bg); border:1px solid var(--sp-field-line); border-radius:calc(var(--sp-radius) * 1.5); }
+[data-sempods-access] .sp-pod-popover [role=option] { display:block; width:100%; text-align:start; border:0; background:transparent; color:var(--sp-text); padding:10px; }
+[data-sempods-access] .sp-pod-popover [role=option][aria-selected=true], [data-sempods-access] .sp-pod-popover [role=option][data-active] { background:color-mix(in srgb,var(--sp-accent) 10%,var(--sp-bg)); }
+[data-sempods-access] .sp-pod-popover .sp-access-address { display:block; font-weight:400; margin-top:3px; overflow-wrap:anywhere; }
+[data-sempods-access] .sp-sign-in-management { margin-top:6px; }
+[data-sempods-access] .sp-sign-in-management summary { text-align:start; }
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
 [data-sempods-access] :focus-visible { outline:2px solid var(--sp-focus); outline-offset:3px; }
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }

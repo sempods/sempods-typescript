@@ -230,7 +230,7 @@ export function createBrowserRuntime(
       combined.dispose();
     }
   }
-  let connectingDefault: Promise<Connection> | undefined;
+  const connecting = new Map<string, Promise<Connection>>();
   const contexts = createContextMemory(
     namespace,
     options.preferences === undefined
@@ -1370,6 +1370,14 @@ export function createBrowserRuntime(
       const lost: { e: Entry; resend: RefreshResend }[] = [];
       /** Addresses an earlier start remembered, deleted under `rememberPods: false`. */
       const forgotten: SessionSnapshot[] = [];
+      // Old SDKs could save several connections for one address. Retire only
+      // redundant address-only records, under the namespace lease and revision
+      // check. Never merge sessions, attempts, or different exact Pod URLs.
+      const represented = new Set(
+        listing.records
+          .filter((saved) => saved.value.kind !== 'disconnected')
+          .map((saved) => sessionBinding(saved.value).pod.podUrl),
+      );
       for (const saved of listing.records) {
         const b = sessionBinding(saved.value);
         // Find the callback even when its Pod is excluded. Reject it below without
@@ -1388,6 +1396,18 @@ export function createBrowserRuntime(
           forgotten.push(saved);
           continue;
         }
+        if (saved.value.kind === 'disconnected') {
+          if (represented.has(b.pod.podUrl)) {
+            try {
+              await erase(saved.id, saved.revision);
+              continue;
+            } catch {
+              // Keep it visible and forgettable if cleanup could not be saved.
+            }
+          }
+          represented.add(b.pod.podUrl);
+        }
+        if (disposed) throw new RuntimeError('disconnected');
         const e = createEntry(
           b.pod.podUrl,
           b.pod,
@@ -1681,25 +1701,28 @@ export function createBrowserRuntime(
         (signIn === 'none' && url !== defaultPodUrl)
       )
         throw new RuntimeError('configuration');
-      const matchesDefault = url === defaultPodUrl;
-      if (matchesDefault) {
-        for (;;) {
-          const existing = [...entries.values()].find(
-            (e) => e.view.podUrl === url,
-          );
-          const pending = existing && disconnects.get(existing.view.id);
-          if (!pending) {
-            if (existing) return existing.view;
-            break;
-          }
-          const result = await pending.operation;
-          if (disposed) throw new RuntimeError('disconnected');
-          if (result.kind === 'blocked-locally')
-            throw new RuntimeError('storage');
-          // Re-read after retirement: another connect may already have replaced it.
+      for (;;) {
+        const matches = [...entries.values()].filter(
+          (e) => e.view.podUrl === url,
+        );
+        // Legacy live sessions remain independent. Prefer one to an old
+        // address-only entry; the controller can preserve its active match.
+        const existing =
+          matches.find((e) => e.view.session.kind !== 'signed-out') ??
+          matches[0];
+        const pending = existing && disconnects.get(existing.view.id);
+        if (!pending) {
+          if (existing) return existing.view;
+          break;
         }
-        if (connectingDefault) return connectingDefault;
+        const result = await pending.operation;
+        if (disposed) throw new RuntimeError('disconnected');
+        if (result.kind === 'blocked-locally')
+          throw new RuntimeError('storage');
+        // Retirement may have removed it or another connect replaced it.
       }
+      const pending = connecting.get(url);
+      if (pending) return pending;
       const operation = (async () => {
         if (readsAnonymously) {
           // Reading needs neither discovery nor a client: a sign-in
@@ -1717,11 +1740,11 @@ export function createBrowserRuntime(
         publish();
         return e.view;
       })();
-      if (matchesDefault) connectingDefault = operation;
+      connecting.set(url, operation);
       try {
         return await operation;
       } finally {
-        if (connectingDefault === operation) connectingDefault = undefined;
+        if (connecting.get(url) === operation) connecting.delete(url);
       }
     },
     async beginAuthorization(id) {
