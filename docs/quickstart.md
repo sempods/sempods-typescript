@@ -242,12 +242,13 @@ add a checkbox list, text buttons and the input row):
 ```css
 :root {
   color-scheme: light dark;
-  --sempods-bg: light-dark(#fff, #111315);
-  --sempods-text: light-dark(#1f2933, #e5e7eb);
-  --sempods-muted: light-dark(#6b7280, #9ca3af);
-  --sempods-line: light-dark(#e5e7eb, #2d3138);
-  --sempods-accent: light-dark(#1f2933, #e5e7eb);
-  --sempods-on-accent: light-dark(#fff, #111315);
+  --sempods-bg: light-dark(#f7f9f7, #131b18);
+  --sempods-text: light-dark(#26382f, #e5ede8);
+  --sempods-muted: light-dark(#52665a, #b0c0b6);
+  --sempods-line: light-dark(#dce5df, #364a3d);
+  --sempods-field-line: light-dark(#7e8d83, #738b7c);
+  --sempods-accent: light-dark(#3e6b56, #a2cbb4);
+  --sempods-on-accent: light-dark(#ffffff, #131b18);
   font:
     400 1rem/1.5 system-ui,
     sans-serif;

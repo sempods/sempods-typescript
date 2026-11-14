@@ -6,6 +6,7 @@ import {
   registerAppWorker,
 } from './examples/todo/pwa/register.js';
 import './examples/todo/src/style.css';
+import './examples/todo/src/browser-theme.js';
 
 // Copied outside the workspace by the packed-consumer harness: the TODO app
 // served as an installable PWA with the recipe's service worker.

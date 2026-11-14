@@ -25,10 +25,10 @@ const styles = `
 :where([data-sempods-ui]) {
   --sp-bg:var(--sempods-bg,light-dark(#f7f9f7,#131b18));
   --sp-text:var(--sempods-text,light-dark(#26382f,#e5ede8));
-  --sp-muted:var(--sempods-muted,light-dark(#5f7167,#b0c0b6));
-  --sp-line:var(--sempods-line,light-dark(#e5e7eb,#2d3138));
+  --sp-muted:var(--sempods-muted,light-dark(#52665a,#b0c0b6));
+  --sp-line:var(--sempods-line,light-dark(#dce5df,#364a3d));
   --sp-accent:var(--sempods-accent,light-dark(#3e6b56,#a2cbb4));
-  --sp-on-accent:var(--sempods-on-accent,light-dark(#f7f9f7,#131b18));
+  --sp-on-accent:var(--sempods-on-accent,light-dark(#ffffff,#131b18));
   --sp-field-line:var(--sempods-field-line,light-dark(#7e8d83,#738b7c));
   --sp-primary-bg:var(--sempods-primary-bg,var(--sp-bg));
   --sp-primary-text:var(--sempods-primary-text,var(--sp-accent));

@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import { TodoApp } from './app.js';
 import './style.css';
+import './browser-theme.js';
 
 function mount() {
   const runtime = createBrowserRuntime({
