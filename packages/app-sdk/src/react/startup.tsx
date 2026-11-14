@@ -100,7 +100,8 @@ export function AppStartup(props: AppStartupProps) {
   const shows = starting && first && container !== null;
   // The portal leaves the DOM ancestors of this placement: carry over the
   // theme they set (`--sempods-*` tokens, `color-scheme`), as the gate,
-  // rendered in place, inherits it.
+  // rendered in place, inherits it. A wrapper holds it, so the layer only
+  // inherits it, like the gate, and its own `className` and `style` win.
   const anchor = useRef<HTMLSpanElement>(null);
   const [theme, setTheme] = useState<Theme>(noTheme);
   // Read once it shows, before paint; a start is too short to follow a
@@ -115,10 +116,12 @@ export function AppStartup(props: AppStartupProps) {
       <span ref={anchor} hidden data-sempods-startup-anchor="" />
       {shows &&
         createPortal(
-          <StartupLayer
-            {...props}
-            style={{ ...theme, ...props.style } as CSSProperties}
-          />,
+          <div
+            data-sempods-startup-theme=""
+            style={{ display: 'contents', ...theme } as CSSProperties}
+          >
+            <StartupLayer {...props} />
+          </div>,
           container,
         )}
     </>

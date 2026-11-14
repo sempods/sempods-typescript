@@ -415,8 +415,45 @@ it('carries the theme set on an ancestor of AppAccess into the startup screen', 
   );
   await screen.findByText('started');
   const layer = document.querySelector<HTMLElement>('[data-sempods-startup]')!;
-  expect(layer.style.getPropertyValue('--sempods-bg')).toBe('rgb(1, 2, 3)');
-  expect(layer.style.colorScheme).toBe('dark');
+  const computed = getComputedStyle(layer);
+  expect(computed.getPropertyValue('--sempods-bg').trim()).toBe('rgb(1, 2, 3)');
+  expect(computed.colorScheme).toBe('dark');
   // The component's own style wins over the inherited theme.
-  expect(layer.style.getPropertyValue('--sempods-text')).toBe('rgb(9, 9, 9)');
+  expect(computed.getPropertyValue('--sempods-text').trim()).toBe(
+    'rgb(9, 9, 9)',
+  );
+  // The inherited theme is not declared on the layer itself.
+  expect(layer.style.getPropertyValue('--sempods-bg')).toBe('');
+});
+
+it("keeps the component's className above the inherited theme in the startup screen", async () => {
+  const sheet = document.createElement('style');
+  sheet.textContent = `
+    .themed-root { --sempods-bg: rgb(255, 255, 255); color-scheme: light; }
+    .custom-access { --sempods-bg: rgb(0, 0, 0); color-scheme: dark; }
+  `;
+  document.head.append(sheet);
+  try {
+    const s = await staged();
+    render(
+      <SempodsProvider runtime={s.runtime}>
+        <div className="themed-root">
+          <AppAccess appName="Shopping" className="custom-access" />
+        </div>
+        <Content />
+      </SempodsProvider>,
+    );
+    await screen.findByText('started');
+    const layer = document.querySelector<HTMLElement>(
+      '[data-sempods-startup]',
+    )!;
+    expect(layer.classList.contains('custom-access')).toBe(true);
+    const computed = getComputedStyle(layer);
+    expect(computed.getPropertyValue('--sempods-bg').trim()).toBe(
+      'rgb(0, 0, 0)',
+    );
+    expect(computed.colorScheme).toBe('dark');
+  } finally {
+    sheet.remove();
+  }
 });
