@@ -63,7 +63,7 @@ explains the order and which app rules still override SDK rules.
 
 - the palette roles as Tailwind colours (`bg-primary`, `text-muted-foreground`,
   `border-input`, `bg-action`, …) and the radius scale;
-- default role values (a calm neutral palette) in the `theme` layer without
+- default role values (the shared sage palette) in the `theme` layer without
   specificity, so any `:root` rule of the app wins;
 - the component variants and the bridge to the SDK tokens (below);
 - shadcn's state variants (`data-open:`, `data-disabled:`, …) and the

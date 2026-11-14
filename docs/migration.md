@@ -4,6 +4,20 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
+## Pending release: shared palette defaults
+
+The UI kit's fallback palette and the TODO example now use sage in both
+modes, matching AppAccess and new template apps. Existing app theme files
+still override package defaults. Apps that relied on the kit's neutral
+fallback should retain an explicit neutral palette if they want that look.
+No theme provider or configuration format is added. The TODO keeps its own
+small CSS token list and exposes the same ordinary host overrides.
+
+The TODO PWA uses the light primary (`#3e6b56`) as its static manifest theme
+colour and the light background (`#f7f9f7`) as the launch fallback. Marked
+page meta colours follow the resolved background. Android system bars and
+installed metadata refresh remain browser/OS controlled; see [PWA colours](pwa.md#colours-and-system-ui).
+
 ## Pending release: simpler AppAccess sign-in
 
 The default sign-in centres the app icon, name and optional description above

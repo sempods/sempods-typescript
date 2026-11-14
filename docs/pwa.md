@@ -270,3 +270,33 @@ drafts, such as a creation draft or an unconfirmed creation, which a reload woul
 lose. Background
 sync, push notifications and offline write queues are out of scope; the last
 would conflict with “never resend an uncertain write”.
+
+## Colours and system UI
+
+Keep the page's palette in CSS. The standard TODO uses sage; the template
+also offers fresh (petrol) and warm (terracotta), each with light/dark role
+pairs. The UI kit bridges palette roles to SDK tokens, so login and dialogs
+follow the app without separate branding configuration. An independent app
+store owns its own palette and displays each app's original icon.
+
+The broadly implemented `theme_color` is static. Use an intentional brand colour
+such as sage's light primary `#3e6b56`, with `background_color: '#f7f9f7'` as
+the static launch fallback. The running page can set `theme-color` meta
+values to its resolved background instead. The TODO's
+[browser-theme entry](../examples/todo/src/browser-theme.ts) updates only
+marked meta elements after system changes; after changing an explicit app
+appearance, call `syncBrowserTheme()` too. Keep CSS `light-dark()` native in
+a production Vite build (`build.cssTarget: 'esnext'`).
+
+These are different surfaces. Installed Chromium can use the manifest colour
+for Android's three-button navigation even while the status bar follows the
+page. A web app cannot force native scrims, icon contrast or exact colour
+matching on every Android/iOS version. The current manifest draft adds
+`color_scheme_dark`, but the inspected Chromium 157 parser does not read it;
+do not rely on it for installed dark-mode bars or change app identity to
+force a refresh. Test both an existing and
+a new installation, recording browser/OS versions and navigation mode;
+desktop emulation verifies metadata and CSS, not native system bars.
+
+See [the manifest colour contract](https://www.w3.org/TR/appmanifest/#theme_color-member)
+and [Chromium's navigation-colour implementation](https://chromium.googlesource.com/chromium/src/+/0a6ab4f0e2ce17e572b05400ae6eacd7fc5389f0%5E!/).

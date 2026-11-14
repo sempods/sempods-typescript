@@ -28,6 +28,12 @@ written into a shared and a personal Context) and `recipes/clear-done.tsx`
 (deleting all done tasks after one confirmation, stopping safely at the first
 conflict, uncertain answer or changed target) are further copyable screens.
 
+The default palette is sage in light and dark mode, shared by the app and
+SDK surfaces. Change the role values at the top of `src/style.css` to adapt
+it; no theme provider is needed. The entry also imports `src/browser-theme.ts`
+to synchronize marked page meta colours. See [PWA colours](../../docs/pwa.md#colours-and-system-ui)
+for the HTML/manifest setup and the limits of native system bars.
+
 Open `http://127.0.0.1:5173/`. The app uses only the SDK's standard UI:
 `AppAccess` for sign-in and recovery beside the app's own header and task
 screen, `ResourceEditor` and `UpdateNotice` for editing and outcomes. The ⋮ menu

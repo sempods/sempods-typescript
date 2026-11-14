@@ -310,7 +310,7 @@ try {
       ) {
         res.writeHead(200, { 'content-type': 'text/html' });
         res.end(
-          '<html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+          '<html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" data-sempods-theme media="(prefers-color-scheme: light)" content="#f7f9f7"><meta name="theme-color" data-sempods-theme media="(prefers-color-scheme: dark)" content="#131b18">' +
             (pwaMode
               ? '<link rel="manifest" href="/manifest.webmanifest">'
               : '') +
@@ -816,6 +816,44 @@ try {
     });
     const page = await context.newPage();
     await page.goto(origin + '/');
+    const background =
+      language === 'de' ? 'rgb(19, 27, 24)' : 'rgb(247, 249, 247)';
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="theme-color"][data-sempods-theme]')
+          ?.content === expected,
+      background,
+    );
+    assert.equal(
+      await page
+        .locator('html')
+        .evaluate((el) => getComputedStyle(el).backgroundColor),
+      background,
+    );
+    assert.equal(
+      await page
+        .locator('[data-sempods-ui="access"]:visible')
+        .evaluate((el) => getComputedStyle(el).backgroundColor),
+      background,
+    );
+    await page.emulateMedia({
+      colorScheme: language === 'de' ? 'light' : 'dark',
+    });
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="theme-color"][data-sempods-theme]')
+          ?.content === expected,
+      language === 'de' ? 'rgb(247, 249, 247)' : 'rgb(19, 27, 24)',
+    );
+    await page.emulateMedia({
+      colorScheme: language === 'de' ? 'dark' : 'light',
+    });
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="theme-color"][data-sempods-theme]')
+          ?.content === expected,
+      background,
+    );
     await page
       .getByLabel(language === 'de' ? 'Pod-Adresse' : 'Pod address', {
         exact: true,
@@ -838,6 +876,14 @@ try {
     await page
       .getByRole('region', { name: 'Pods & sharing', exact: true })
       .waitFor({ state: 'hidden' });
+    if (process.env.SEMPODS_UI_PREVIEW_DIR)
+      await page.screenshot({
+        path: join(
+          process.env.SEMPODS_UI_PREVIEW_DIR,
+          'todo-sage-' + (language === 'de' ? 'dark' : 'light') + '.png',
+        ),
+        fullPage: true,
+      });
     await input.fill('Keep this draft');
     await menu(page, 'Pods & sharing');
     await page

@@ -23,7 +23,7 @@ const server = createServer(async (req, res) => {
     } else {
       res.setHeader('content-type', 'text/html');
       res.end(
-        '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>sempods TODO</title><link rel="stylesheet" href="/app.css"><div id="root"></div><script type="module" src="/app.js"></script></html>',
+        '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" data-sempods-theme media="(prefers-color-scheme: light)" content="#f7f9f7"><meta name="theme-color" data-sempods-theme media="(prefers-color-scheme: dark)" content="#131b18"><title>sempods TODO</title><link rel="stylesheet" href="/app.css"><div id="root"></div><script type="module" src="/app.js"></script></html>',
       );
     }
   } catch {
