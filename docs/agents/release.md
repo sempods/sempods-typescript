@@ -9,6 +9,10 @@ version and commit. Use the [contributor rules](../contributing.md).
 - Read the selected issues, current [support matrix](../../README.md#supported-environments),
   [migration guide](../migration.md) and package manifests. Do not infer release
   scope or a target version from open issues or passing tests.
+- A prerelease under the npm dist-tag `next` is for changes that downstream apps
+  must try before the release, such as new or changed public APIs and flows. A fix
+  with a regression check goes into the next regular release; one that fails
+  downstream gets a patch release.
 - Keep the three package versions coordinated and verify the packed app-sdk
   dependency resolves to the selected client-sdk version and app-ui's packed
   `@sempods/app-sdk` peer names the same minor. Preserve private workspace/examples,

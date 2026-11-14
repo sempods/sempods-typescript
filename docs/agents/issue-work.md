@@ -14,9 +14,16 @@ Do not publish vulnerability details in a planning issue.
 
 Use [contributor rules](../contributing.md), applicable scoped AGENTS.md files and
 [development checks](../development.md). Update acceptance with evidence from each
-increment; use `Refs` for partial delivery. Close only after the required work and
-acceptance are verified. A parent also needs its own acceptance and required
-children settled. Assign a release milestone only when the maintainer chooses it.
+increment; use `Refs` for partial delivery. Close an issue once its required work and
+acceptance are verified in this repository: unit tests, the UI gate and the packed
+consumers count, and a regression check that fails on the old code proves a fix.
+Confirming a fix on a device, in an installed PWA or against a real Pod belongs to
+the downstream app's adoption issue; if it fails there, reopen the issue or open one
+that refers to it, for a patch release. Live evidence keeps an issue open only when
+the maintainer agreed that it is the issue's own acceptance
+([live validation](live-validation.md)). Write new acceptance the same way. A parent
+also needs its own acceptance and required children settled. Assign a release
+milestone only when the maintainer chooses it.
 
 Before handoff, run [doc review](doc-review.md) and [test review](test-review.md),
 and report the exact commit, meaningful
