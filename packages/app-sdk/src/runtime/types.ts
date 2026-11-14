@@ -26,6 +26,13 @@ export type SessionFact =
    * `beginAuthorization(id)` signs in again at the remembered address.
    */
   | { readonly kind: 'signed-out'; readonly problem?: RuntimeProblem }
+  /**
+   * A saved session is restored: its Pod's discovery (at most 15 seconds),
+   * and, for a credential that is due, its renewal (a token request of at
+   * most 20 seconds, resent once after a lost answer). Nothing is dispatched
+   * meanwhile. It ends `active`, or `ended` (with `restorable` when only the
+   * Pod or storage was unavailable).
+   */
   | { readonly kind: 'restoring' }
   | { readonly kind: 'active' | 'renewing'; readonly subject: string }
   /**
@@ -224,8 +231,9 @@ export interface BrowserRuntimeOptions {
   readonly locks?: SessionLocks | null;
   /**
    * Remembers each connection's last chosen context for the next start; it is
-   * reselected only while still readable. Defaults to localStorage; `null`
-   * disables remembering.
+   * reselected only while still readable. The app controller also keeps the
+   * connection the app last worked with here, preferred at the next start.
+   * Defaults to localStorage; `null` disables remembering.
    */
   readonly preferences?: PreferenceStorage | null;
   /**
@@ -264,7 +272,9 @@ export interface BrowserRuntimeOptions {
    * waits; waiting Pods take turns, and a read with `priority: 'current'` goes
    * first. After three priority reads in a row on a Pod, its waiting normal
    * read is next on that Pod; after three across all Pods, a waiting normal
-   * read of any Pod that is below its limit is next.
+   * read of any Pod that is below its limit is next. A loader's priority
+   * (`usePodLoad`'s `priority`, `setPriority`) changes its waiting reads in
+   * place: they keep their arrival order and are sent once.
    *
    * A slot is held until the request settles, also after the caller stopped
    * waiting (cancelled, or invalidated by a changed grant or a sign-out): a
@@ -305,11 +315,11 @@ export interface BrowserRuntime {
   /** Listener exceptions are reported asynchronously and never interrupt session transitions. */
   subscribe(listener: () => void): () => void;
   /**
-   * Omit the URL to use the preset or sole allowed Pod. Matching default
-   * connections are reused after
+   * Omit the URL to use the preset or sole allowed Pod. Connections at the
+   * same exact Pod URL are reused (prefer a session over an address) after
    * any pending disconnect settles. Waiting rejects with RuntimeError (storage)
    * if retirement fails, or (disconnected) if this runtime was disposed.
-   * Concurrent default connects share discovery; connecting never starts login.
+   * Concurrent same-URL connects share discovery; connecting never starts login.
    * Outside-list URLs reject with RuntimeError (configuration) before discovery.
    * A discovery that has not answered after 15 seconds rejects with
    * RuntimeError (network). Never waits for another connection's restoration.

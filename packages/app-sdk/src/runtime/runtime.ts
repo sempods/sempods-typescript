@@ -66,7 +66,11 @@ import {
   loadSelectedLabel,
   resetLabels,
 } from './catalogue.js';
-import { browserPreferences, createContextMemory } from './context-memory.js';
+import {
+  activeMemories,
+  browserPreferences,
+  createContextMemory,
+} from './context-memory.js';
 
 import { assertCredentialRecipient, sends, type Entry } from './connection.js';
 
@@ -226,7 +230,7 @@ export function createBrowserRuntime(
       combined.dispose();
     }
   }
-  let connectingDefault: Promise<Connection> | undefined;
+  const connecting = new Map<string, Promise<Connection>>();
   const contexts = createContextMemory(
     namespace,
     options.preferences === undefined
@@ -856,6 +860,15 @@ export function createBrowserRuntime(
     }
   }
   /**
+   * Whether a credential is due for renewal: within a minute of `expiresAt`,
+   * half the lifetime for short tokens, or past it.
+   */
+  function due(credentials: ExchangeResult) {
+    const lifetime = credentials.expiresAt - credentials.receivedAt;
+    const margin = Math.min(RENEWAL_MARGIN, Math.max(lifetime, 0) / 2);
+    return Date.now() >= credentials.expiresAt - margin;
+  }
+  /**
    * Renews ahead of the credential's own expiry, so dispatch does not depend on
    * the Pod's 401 challenge. Due within a minute of `expiresAt` (half the
    * lifetime for short tokens). Until it expires, the current credential is
@@ -865,11 +878,8 @@ export function createBrowserRuntime(
   function renewBeforeExpiry(e: Entry) {
     const credentials = e.credentials;
     if (e.refresh || !e.credential || !credentials) return;
-    const now = Date.now();
-    const lifetime = credentials.expiresAt - credentials.receivedAt;
-    const margin = Math.min(RENEWAL_MARGIN, Math.max(lifetime, 0) / 2);
-    if (now < credentials.expiresAt - margin) return;
-    if (!credentials.refreshToken && now < credentials.expiresAt) return;
+    if (!due(credentials)) return;
+    if (!credentials.refreshToken && Date.now() < credentials.expiresAt) return;
     void renew(e, e.credential, undefined, true);
   }
   /** `pod` and `client` are absent for a connection added without sign-in. */
@@ -1005,7 +1015,20 @@ export function createBrowserRuntime(
       current(e, generation);
       assertSessionBinding(saved.binding, binding(e, pod));
       e.pod = pod;
-      install(e, saved.credentials);
+      const credentials = saved.credentials;
+      if (due(credentials) && credentials.refreshToken) {
+        // Renewed as part of restoration (#305): the connection stays
+        // `restoring` until the answer, so an expired grant ends here
+        // rather than after the app saw the session `active`.
+        await renewRestored(e, generation, pod, saved);
+        return;
+      }
+      if (!credentials.refreshToken && Date.now() >= credentials.expiresAt) {
+        // Retired as at its first request, keeping the address.
+        end(e, new RuntimeError('expired'));
+        return;
+      }
+      install(e, credentials);
     } catch (error) {
       if (eligible(e, generation)) {
         // An unreachable or failing Pod is not a logout: the saved session
@@ -1027,6 +1050,74 @@ export function createBrowserRuntime(
         // retry found the session still restoring, so try once more now.
         if (restorable && onlineEvents !== events) void retryRestore(e);
       }
+    }
+  }
+  /**
+   * Renews a restored credential that is due, while the connection still
+   * restores; publishes its own outcome. Like `renew`, except that nothing is
+   * dispatched meanwhile and a cause that spent nothing (storage, the claim)
+   * leaves the session restorable, as an unreachable Pod does. A lost answer
+   * gets the one resend of `resumeLost`; a refusal ends the session.
+   */
+  async function renewRestored(
+    e: Entry,
+    generation: string,
+    pod: PodDiscovery,
+    saved: Extract<SessionRecord, { kind: 'ready' }>,
+  ) {
+    const before = saved.credentials;
+    let consumed = false;
+    try {
+      const claim = await serial(e, async () => {
+        current(e, generation);
+        if (!sessions || !e.revision) throw new RuntimeError('storage');
+        const claimed = await sessions.claimRefresh(
+          e.view.id,
+          e.revision,
+          binding(e, pod),
+        );
+        if (claimed.kind === 'conflict') throw new RuntimeError('disconnected');
+        consumed = true;
+        e.revision = claimed.revision;
+        return claimed;
+      });
+      current(e, generation);
+      const sent = await sendRefresh(
+        e,
+        pod,
+        before.refreshToken!,
+        before.subject,
+        before.scopes,
+      );
+      if (sent.kind === 'lost') {
+        current(e, generation);
+        await resumeLost(e, claim.sentAt);
+        return;
+      }
+      await serial(e, async () => {
+        current(e, generation);
+        accepted(e, await claim.complete(sent.result));
+      });
+      current(e, generation);
+      install(e, sent.result);
+    } catch (error) {
+      if (!eligible(e, generation)) return;
+      if (error instanceof OAuthError && error.problem === 'invalid-client')
+        registry.clear(e.view.podUrl);
+      if (!consumed && transientBeforeClaim(error)) {
+        e.restorable = saved;
+        e.view = {
+          ...e.view,
+          session: Object.freeze({
+            kind: 'ended',
+            problem: runtimeProblem(error),
+            ...runtimeFailure(error),
+            restorable: true as const,
+          }),
+        };
+        settle(e);
+        publish();
+      } else end(e, error, consumed);
     }
   }
   /** Restores a session whose restoration found its Pod unreachable; no-op otherwise. */
@@ -1279,6 +1370,14 @@ export function createBrowserRuntime(
       const lost: { e: Entry; resend: RefreshResend }[] = [];
       /** Addresses an earlier start remembered, deleted under `rememberPods: false`. */
       const forgotten: SessionSnapshot[] = [];
+      // Old SDKs could save several connections for one address. Retire only
+      // redundant address-only records, under the namespace lease and revision
+      // check. Never merge sessions, attempts, or different exact Pod URLs.
+      const represented = new Set(
+        listing.records
+          .filter((saved) => saved.value.kind !== 'disconnected')
+          .map((saved) => sessionBinding(saved.value).pod.podUrl),
+      );
       for (const saved of listing.records) {
         const b = sessionBinding(saved.value);
         // Find the callback even when its Pod is excluded. Reject it below without
@@ -1297,6 +1396,18 @@ export function createBrowserRuntime(
           forgotten.push(saved);
           continue;
         }
+        if (saved.value.kind === 'disconnected') {
+          if (represented.has(b.pod.podUrl)) {
+            try {
+              await erase(saved.id, saved.revision);
+              continue;
+            } catch {
+              // Keep it visible and forgettable if cleanup could not be saved.
+            }
+          }
+          represented.add(b.pod.podUrl);
+        }
+        if (disposed) throw new RuntimeError('disconnected');
         const e = createEntry(
           b.pod.podUrl,
           b.pod,
@@ -1558,7 +1669,7 @@ export function createBrowserRuntime(
     publish();
     return operation;
   }
-  return {
+  const runtime: BrowserRuntime = {
     ...(preset ? { preset } : {}),
     ...(allowedPods ? { allowedPods } : {}),
     signIn,
@@ -1590,25 +1701,28 @@ export function createBrowserRuntime(
         (signIn === 'none' && url !== defaultPodUrl)
       )
         throw new RuntimeError('configuration');
-      const matchesDefault = url === defaultPodUrl;
-      if (matchesDefault) {
-        for (;;) {
-          const existing = [...entries.values()].find(
-            (e) => e.view.podUrl === url,
-          );
-          const pending = existing && disconnects.get(existing.view.id);
-          if (!pending) {
-            if (existing) return existing.view;
-            break;
-          }
-          const result = await pending.operation;
-          if (disposed) throw new RuntimeError('disconnected');
-          if (result.kind === 'blocked-locally')
-            throw new RuntimeError('storage');
-          // Re-read after retirement: another connect may already have replaced it.
+      for (;;) {
+        const matches = [...entries.values()].filter(
+          (e) => e.view.podUrl === url,
+        );
+        // Legacy live sessions remain independent. Prefer one to an old
+        // address-only entry; the controller can preserve its active match.
+        const existing =
+          matches.find((e) => e.view.session.kind !== 'signed-out') ??
+          matches[0];
+        const pending = existing && disconnects.get(existing.view.id);
+        if (!pending) {
+          if (existing) return existing.view;
+          break;
         }
-        if (connectingDefault) return connectingDefault;
+        const result = await pending.operation;
+        if (disposed) throw new RuntimeError('disconnected');
+        if (result.kind === 'blocked-locally')
+          throw new RuntimeError('storage');
+        // Retirement may have removed it or another connect replaced it.
       }
+      const pending = connecting.get(url);
+      if (pending) return pending;
       const operation = (async () => {
         if (readsAnonymously) {
           // Reading needs neither discovery nor a client: a sign-in
@@ -1626,11 +1740,11 @@ export function createBrowserRuntime(
         publish();
         return e.view;
       })();
-      if (matchesDefault) connectingDefault = operation;
+      connecting.set(url, operation);
       try {
         return await operation;
       } finally {
-        if (connectingDefault === operation) connectingDefault = undefined;
+        if (connecting.get(url) === operation) connecting.delete(url);
       }
     },
     async beginAuthorization(id) {
@@ -1846,4 +1960,6 @@ export function createBrowserRuntime(
       snapshot = Object.freeze([]);
     },
   };
+  activeMemories.set(runtime, contexts.active);
+  return runtime;
 }

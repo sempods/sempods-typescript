@@ -166,11 +166,18 @@ export interface UiMessages {
   readonly disconnectFailed?: string;
   /*
    * Remembered Pods (added in 0.8.0; optional in the type, `createLocale`
-   * fills them): the list of signed-out Pods on the sign-in view, the action
+   * fills them): the saved-Pod management list, the action
    * that removes one from this device, and the note under a Pod whose session
    * ended rather than being signed out.
    */
   readonly rememberedPods?: string;
+  /** Sign-in choice and device-local address management; filled from locale defaults. */
+  readonly podHelp?: string;
+  readonly clearPodAddress?: string;
+  readonly manageSavedPods?: string;
+  readonly removeSavedPod?: string;
+  readonly forgetHint?: string;
+  readonly podPlaceholder?: string;
   readonly forget?: string;
   readonly sessionEnded?: string;
   /** Forgetting a Pod could not be saved; retry Forget, never reload advice. */
@@ -180,6 +187,12 @@ export interface UiMessages {
    * (added in 0.6.0); `createLocale` fills it from the language defaults.
    */
   readonly leaving?: string;
+  /**
+   * Status of the startup screen (`AppStartup`) once a start takes a while.
+   * Optional in the type (added after 0.8.0); `createLocale` fills it from
+   * the language defaults, else `loading` shows.
+   */
+  readonly starting?: string;
   /**
    * A saved session whose Pod could not be reached at startup (offline): it is
    * kept and restored again once back online; `retry` tries at once. Optional
@@ -246,6 +259,16 @@ export interface UiMessages {
   readonly yes: string;
   readonly no: string;
   readonly mine: string;
+  /*
+   * Comparison values (added after 0.8.0; optional in the type,
+   * `createLocale` fills them), shown by `ResourceEditor` and `UpdateNotice`:
+   * a field without a value (missing, `null`, no list items, a text variant
+   * without values), a field holding empty text, and the note above a text
+   * variant with several values in one language.
+   */
+  readonly noValue?: string;
+  readonly emptyText?: string;
+  readonly severalValues?: string;
   readonly alongside: string;
   readonly dataAccess: string;
   /** Label of the Pod address field; also a Pod that shares a context with the person. */
@@ -337,11 +360,18 @@ export const englishMessages: SdkMessages = {
     disconnectFailed:
       'Sign-out was not saved on this device. Try signing out again.',
     rememberedPods: 'Pods on this device',
+    podHelp: 'What is a Pod?',
+    clearPodAddress: 'Clear Pod address',
+    manageSavedPods: 'Manage saved Pods',
+    removeSavedPod: 'Remove from this device',
+    forgetHint: 'Only the saved address is removed. Your Pod data stays.',
+    podPlaceholder: 'sempods.org/your-name',
     forget: 'Forget',
     sessionEnded: 'The session ended. Sign in again to continue.',
     forgetFailed:
       'This Pod was not forgotten on this device. Try forgetting it again.',
     leaving: 'Opening your Pod’s sign-in…',
+    starting: 'Starting…',
     unreachable:
       'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
 
@@ -392,11 +422,14 @@ export const englishMessages: SdkMessages = {
     yes: 'Yes',
     no: 'No',
     mine: 'Your draft',
+    noValue: 'No value',
+    emptyText: 'Empty text',
+    severalValues: 'Several values in this language',
     alongside: 'Saved alongside changes to other fields.',
     dataAccess: 'Pods & sharing',
     yourPod: 'Pod address',
-    podHint: '',
-    loginHint: '',
+    podHint: 'A Pod is where your data lives.',
+    loginHint: 'You sign in at your Pod.',
     checkAccess: 'Check access',
     addresses: 'Full addresses',
     signInCancelled:
@@ -494,12 +527,20 @@ export const germanMessages: SdkMessages = {
     disconnectFailed:
       'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.',
     rememberedPods: 'Pods auf diesem Gerät',
+    podHelp: 'Was ist ein Pod?',
+    clearPodAddress: 'Pod-Adresse leeren',
+    manageSavedPods: 'Gespeicherte Pods verwalten',
+    removeSavedPod: 'Von diesem Gerät entfernen',
+    forgetHint:
+      'Nur die gespeicherte Adresse wird entfernt. Deine Daten im Pod bleiben erhalten.',
+    podPlaceholder: 'sempods.org/dein-name',
     forget: 'Vergessen',
     sessionEnded:
       'Die Sitzung wurde beendet. Melde dich erneut an, um fortzufahren.',
     forgetFailed:
       'Der Pod wurde auf diesem Gerät nicht vergessen. Versuche erneut, ihn zu vergessen.',
     leaving: 'Die Anmeldung deines Pods wird geöffnet…',
+    starting: 'Wird gestartet…',
     unreachable:
       'Der Pod ist gerade nicht erreichbar. Du bleibst angemeldet; die App verbindet sich wieder, sobald das Netz zurück ist.',
 
@@ -551,11 +592,14 @@ export const germanMessages: SdkMessages = {
     yes: 'Ja',
     no: 'Nein',
     mine: 'Dein Entwurf',
+    noValue: 'Kein Wert',
+    emptyText: 'Leerer Text',
+    severalValues: 'Mehrere Werte in dieser Sprache',
     alongside: 'Zusammen mit Änderungen an anderen Feldern gespeichert.',
     dataAccess: 'Pods & Freigaben',
     yourPod: 'Pod-Adresse',
-    podHint: '',
-    loginHint: '',
+    podHint: 'Ein Pod ist der Ort, an dem deine Daten liegen.',
+    loginHint: 'Die Anmeldung erfolgt bei deinem Pod.',
     checkAccess: 'Zugriff prüfen',
     addresses: 'Vollständige Adressen',
     signInCancelled:

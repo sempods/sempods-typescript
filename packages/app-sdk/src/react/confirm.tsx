@@ -32,7 +32,9 @@ export function useModalDialog(
     return () => {
       if (typeof element.close === 'function') element.close();
       else element.removeAttribute('open');
-      back?.focus();
+      // Not into a dialog that closed first, as the gate around its
+      // settings does: the gate's own focus return stands.
+      if (!back?.closest('dialog:not([open])')) back?.focus();
     };
   }, [ref, open, returnFocus, initialFocus]);
 }

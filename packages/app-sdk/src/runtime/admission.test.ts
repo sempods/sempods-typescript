@@ -5,6 +5,8 @@ import { RuntimeError } from './errors.js';
 
 const never = new AbortController().signal;
 const noop = () => {};
+const normal = () => false;
+const current = () => true;
 
 it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
   'rejects %s as a limit',
@@ -29,9 +31,15 @@ function queue(limit: { total?: number; perPod?: number }) {
   const running = new Map<string, number>();
   let total = 0;
   const maxima = { total: 0, perPod: 0 };
-  function add(name: string, pod: string, priority = false, signal = never) {
+  function add(
+    name: string,
+    pod: string,
+    priority: boolean | (() => boolean) = false,
+    signal = never,
+  ) {
     const queued = { value: false };
-    const slot = admission.acquire(pod, priority, signal, () => {
+    const live = typeof priority === 'function' ? priority : () => priority;
+    const slot = admission.acquire(pod, live, signal, () => {
       queued.value = true;
     });
     void slot.then((release) => {
@@ -128,10 +136,12 @@ it('a Pod admits its waiting normal read after three priority reads, while norma
   const order: string[] = [];
   const held = new Map<string, Release>();
   const add = (name: string, pod: string, priority = false) =>
-    void admission.acquire(pod, priority, never, noop).then((release) => {
-      order.push(name);
-      held.set(pod, release!);
-    });
+    void admission
+      .acquire(pod, priority ? current : normal, never, noop)
+      .then((release) => {
+        order.push(name);
+        held.set(pod, release!);
+      });
   add('a', 'A');
   add('c0', 'C');
   add('c1', 'C');
@@ -191,16 +201,77 @@ it('drops a read whose signal aborts while it waits, and admits the next one', a
 
 it('frees a slot once, however often it is released', async () => {
   const admission = createAdmission({ perPod: 1 })!;
-  const first = (await admission.acquire('A', false, never, noop))!;
+  const first = (await admission.acquire('A', normal, never, noop))!;
   const order: string[] = [];
   void admission
-    .acquire('A', false, never, noop)
+    .acquire('A', normal, never, noop)
     .then(() => order.push('second'));
   void admission
-    .acquire('A', false, never, noop)
+    .acquire('A', normal, never, noop)
     .then(() => order.push('third'));
   first();
   first();
   await flush();
   expect(order).toEqual(['second']);
+});
+
+// #287: a waiting read's priority is asked at each choice, not only on arrival.
+it('changes the class of a waiting read in place, keeping its arrival order', async () => {
+  const q = queue({ total: 1 });
+  const focus = { on: '' };
+  const live = (name: string) => () => focus.on === name;
+  q.add('a0', 'A');
+  for (const name of ['a1', 'a2', 'a3']) q.add(name, 'A', live(name));
+  await flush();
+  focus.on = 'a3'; // promoted while it waits
+  await q.finish();
+  expect(q.order).toEqual(['a0', 'a3']);
+  // Demoted again: back at its place among the normal reads, not at the end.
+  const r = queue({ total: 1 });
+  r.add('b0', 'B');
+  for (const name of ['b1', 'b2', 'b3']) r.add(name, 'B', live(name));
+  focus.on = 'b1';
+  await flush();
+  focus.on = 'b3';
+  focus.on = '';
+  while (r.held.length) await r.finish();
+  expect(r.order).toEqual(['b0', 'b1', 'b2', 'b3']);
+});
+
+it('a promotion admits nothing by itself, and the read is admitted once', async () => {
+  const q = queue({ total: 1 });
+  const focus = { on: false };
+  q.add('a0', 'A');
+  q.add('a1', 'A');
+  q.add('a2', 'A', () => focus.on);
+  await flush();
+  focus.on = true;
+  await flush();
+  expect(q.order).toEqual(['a0']);
+  while (q.held.length) await q.finish();
+  expect(q.order).toEqual(['a0', 'a2', 'a1']);
+});
+
+it('rapid priority changes never give priority reads more than three admissions in a row', async () => {
+  const q = queue({ total: 1 });
+  const focus = { on: -1 };
+  q.add('blocker', 'A');
+  for (let i = 0; i < 4; i++) q.add(`n${i}`, 'B');
+  for (let i = 0; i < 12; i++) q.add(`f${i}`, 'A', () => focus.on === i);
+  await flush();
+  // Each admission, focus moves to another waiting read, as when a person
+  // clicks through resources faster than reads finish.
+  // `p` marks an admission of the read in focus, `n` any other.
+  let kinds = '';
+  for (let i = 0; q.held.length; i++) {
+    focus.on = i;
+    await q.finish();
+    kinds += q.order.at(-1) === `f${i}` ? 'p' : 'n';
+  }
+  expect(kinds).toContain('ppp');
+  expect(kinds).not.toContain('pppp');
+  // Background reads keep moving: B's reads alternate with A's unfocused ones
+  // for the normal turns, each after at most three focused admissions.
+  for (let i = 0; i < 4; i++)
+    expect(q.order.indexOf(`n${i}`)).toBeLessThanOrEqual(8 * (i + 1));
 });

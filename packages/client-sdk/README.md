@@ -602,10 +602,15 @@ export function renamed(draft: Labelled, name: string): Labelled {
 Several values in it, also under case-equivalent tags, set `ambiguous` and list
 all `values` to show; only an explicit `editTextVariant` replaces them all. A
 written value carries the lower-case tag; every other language, typed literal
-and IRI stays as it is. Like every custom definition it saves against the
-whole version that was read and never rebases. After a confirmed save an
-untouched draft follows the saved version, so removing the selected value
-shows the next variant in the order; typing made while saving stays.
+and IRI stays as it is. A language literal that also states its implied
+datatype `rdf:langString` (as a SPARQL SELECT projection may report it) counts
+like the plain form: it is selected, and an edit replaces it with one plain
+value, while an unedited one keeps its `@type`. `rdf:langString` without a
+language, or any other datatype, is never selected. Like every custom
+definition it saves against the whole version that was read and never rebases.
+After a confirmed save an untouched draft follows the saved version, so
+removing the selected value shows the next variant in the order; typing made
+while saving stays.
 
 ## Scope and support
 

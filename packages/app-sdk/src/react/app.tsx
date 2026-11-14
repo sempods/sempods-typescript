@@ -3,6 +3,7 @@ import {
   Fragment,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useSyncExternalStore,
   useState,
@@ -19,14 +20,21 @@ import {
   type LocaleOptions,
   type TargetSelection,
 } from '../index.js';
-import { targetProblem } from '../authoring/app.js';
+import { demandSelection, targetProblem } from '../authoring/app.js';
 import type { CatalogueContext } from '@sempods/client-sdk';
 import type { CatalogueFact } from '../runtime/types.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog } from './confirm.js';
 import { useCommands } from './commands.js';
 import { knownContexts, reads } from './access-presentation.js';
-import { contextName, distinctName, podName, podLabel } from './names.js';
+import { StartupHost, useStartupCover } from './startup.js';
+import {
+  contextLabels,
+  contextName,
+  distinctName,
+  podLabels,
+  podName,
+} from './names.js';
 import { editorsOf } from '../authoring/editors.js';
 const Context = createContext<{
   readonly controller: AppController;
@@ -220,6 +228,10 @@ export function SempodsProvider({
     [selection, discovery, switching],
   );
   const app = owner.controller;
+  // Before start, so the first startup snapshot already knows the demand.
+  useLayoutEffect(() => {
+    demandSelection(app, selection);
+  }, [app, selection]);
   useEffect(() => {
     app.start();
     return () => app.stop();
@@ -228,6 +240,9 @@ export function SempodsProvider({
     <SdkLocaleProvider {...locale}>
       <Context.Provider value={value}>
         <Demand.Provider value={demand}>
+          {/* Before the content, so its container exists when the content's
+              AppStartup first renders into it. */}
+          <StartupHost />
           <GuardedContent>{children}</GuardedContent>
           <LeaveConfirmation />
         </Demand.Provider>
@@ -236,6 +251,9 @@ export function SempodsProvider({
   );
 }
 function GuardedContent({ children }: { readonly children: ReactNode }) {
+  // Behind the startup screen the content stays mounted, inert and hidden
+  // from assistive technology, as behind the gate.
+  const covered = useStartupCover();
   const { changing, confirmingLeave, leaving } = useAppFacts(
     (s) => ({
       changing: s.changing,
@@ -250,7 +268,7 @@ function GuardedContent({ children }: { readonly children: ReactNode }) {
   );
   return (
     <div
-      inert={changing || confirmingLeave || leaving}
+      inert={changing || confirmingLeave || leaving || covered}
       style={{ display: 'contents' }}
     >
       {children}
@@ -317,8 +335,21 @@ export interface ContextChoice {
   readonly iri: string;
   /** Its label, else a readable last path segment; duplicates add the IRI. */
   readonly name: string;
-  /** Name within its Pod, including same-Pod disambiguation; never adds a Pod. */
+  /**
+   * Unique within its Pod: `contextLabel`, plus ` · qualifier` when that
+   * repeats there. Never adds the Pod. Display only.
+   */
   readonly label: string;
+  /**
+   * Its label, else its readable last path segment, without any
+   * disambiguation; it may repeat within a Pod. Display only.
+   */
+  readonly contextLabel: string;
+  /**
+   * Only when the composed label would repeat within its Pod: the readable
+   * last segment, else the path below the Pod, else the exact IRI.
+   */
+  readonly qualifier?: string;
   /** Whether this app may change data there, not only read it. */
   readonly writable: boolean;
 }
@@ -351,8 +382,14 @@ export function useContexts() {
   const fixed =
     preset?.podUrl === connection?.podUrl ? preset?.contextIri : undefined;
   const contexts = useMemo(
-    () => contextChoices(knownContexts(catalogue), catalogue, fixed),
-    [catalogue, fixed],
+    () =>
+      contextChoices(
+        knownContexts(catalogue),
+        catalogue,
+        fixed,
+        connection?.podUrl,
+      ),
+    [catalogue, fixed, connection?.podUrl],
   );
   const id = reading?.id ?? null;
   const selectedIri = reading?.selectedContext ?? null;
@@ -442,6 +479,7 @@ function contextChoices(
   known: readonly CatalogueContext[] | undefined,
   catalogue: CatalogueFact | undefined,
   fixed: string | undefined,
+  podUrl: string | undefined,
 ): ContextChoice[] {
   const readable = (known ?? []).filter(
     (entry) => entry.readable && (!fixed || entry.iri === fixed),
@@ -465,10 +503,14 @@ function contextChoices(
       ];
     }),
   );
-  return readable.map((entry) => {
-    const label = distinctName(entry.iri, iris, (iri) => candidate.get(iri)!);
-    return { iri: entry.iri, name: label, label, writable: entry.writable };
-  });
+  const parts = contextLabels(iris, label, podUrl);
+  return readable.map((entry) => ({
+    iri: entry.iri,
+    // The 0.8.0 name, kept as it was.
+    name: distinctName(entry.iri, iris, (iri) => candidate.get(iri)!),
+    ...parts.get(entry.iri)!,
+    writable: entry.writable,
+  }));
 }
 
 /**
@@ -476,7 +518,7 @@ function contextChoices(
  * `ContextTarget` it can be passed to `select` itself.
  */
 export interface PodContextChoice extends ContextChoice, ContextTarget {
-  /** Presentation-only Pod label for a standalone choice or two-line trigger. */
+  /** Its group's `label`, for a standalone choice or two-line trigger. Display only. */
   readonly podLabel: string;
   /** Exact Pod address for details; never derive a target from display labels. */
   readonly podUrl: string;
@@ -498,7 +540,11 @@ export interface PodContextGroup {
   readonly podUrl: string;
   /** `podNames[podUrl]`, else the address without its scheme. */
   readonly name: string;
-  /** Configured Pod name, else host/path without a terminal slash. Display only. */
+  /**
+   * The configured Pod name as given, else host and decoded path without the
+   * scheme and a terminal slash; the exact `podUrl` where that fallback would
+   * equal another Pod's label. Display only.
+   */
   readonly label: string;
   /**
    * The session when the connection does not read (`signed-out`,
@@ -580,23 +626,27 @@ export function usePodContexts(
           ? connection.catalogue.kind
           : (connection.session.kind as PodContextGroup['status']),
         name: podName(connection.podUrl, podNames),
-        choices: contextChoices(known, catalogue, fixed),
+        choices: contextChoices(known, catalogue, fixed, connection.podUrl),
       };
     });
     // Names still equal across Pods add the Pod's name.
     const all = groups.flatMap((g) => g.choices.map((c) => c.name));
-    return groups.map(({ connection, status, name, choices }) => ({
+    const labels = podLabels(
+      groups.map((g) => g.connection.podUrl),
+      podNames,
+    );
+    return groups.map(({ connection, status, name, choices }, i) => ({
       connectionId: connection.id,
       podUrl: connection.podUrl,
       name,
-      label: podLabel(connection.podUrl, podNames),
+      label: labels[i]!,
       status,
       ...('restorable' in connection.session && connection.session.restorable
         ? { restorable: true as const }
         : {}),
       choices: choices.map((choice): PodContextChoice => ({
         ...choice,
-        podLabel: podLabel(connection.podUrl, podNames),
+        podLabel: labels[i]!,
         podUrl: connection.podUrl,
         name:
           all.filter((n) => n === choice.name).length > 1

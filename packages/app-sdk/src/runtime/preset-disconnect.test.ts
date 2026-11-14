@@ -7,7 +7,7 @@ import { deferred, fixture, pod, storeWith } from './fixture.test.js';
 const runtimes: BrowserRuntime[] = [];
 afterEach(() => runtimes.splice(0).forEach((runtime) => runtime.dispose()));
 
-async function heldDisconnect(rememberPods = true) {
+async function heldDisconnect(rememberPods = true, preset = true) {
   const factory = new IDBFactory();
   const entered = deferred<void>();
   const release = deferred<void>();
@@ -20,7 +20,7 @@ async function heldDisconnect(rememberPods = true) {
     }
   }
   const f = fixture({
-    preset: { podUrl: pod },
+    ...(preset ? { preset: { podUrl: pod } } : {}),
     rememberPods,
     openStore: storeWith(factory, (store) => ({
       async commit(...args) {
@@ -41,14 +41,18 @@ async function heldDisconnect(rememberPods = true) {
 }
 
 it.each([
-  ['direct', true],
-  ['subscriber', true],
-  ['direct', false],
-  ['subscriber', false],
+  ['direct', true, true],
+  ['subscriber', true, true],
+  ['direct', false, true],
+  ['subscriber', false, true],
+  ['direct', true, false],
+  ['subscriber', true, false],
+  ['direct', false, false],
+  ['subscriber', false, false],
 ] as const)(
-  'waits for durable preset disconnect before concurrent reconnects (%s, rememberPods: %s)',
-  async (mode, rememberPods) => {
-    const f = await heldDisconnect(rememberPods);
+  'waits for durable disconnect before concurrent reconnects (%s, rememberPods: %s, preset: %s)',
+  async (mode, rememberPods, preset) => {
+    const f = await heldDisconnect(rememberPods, preset);
     let reconnecting: Promise<Connection> | undefined;
     let duplicateDisconnect:
       ReturnType<BrowserRuntime['disconnect']> | undefined;
@@ -56,13 +60,13 @@ it.each([
     const off = f.runtime.subscribe(() => {
       if (mode === 'subscriber' && !observed) {
         observed = true;
-        reconnecting = f.runtime.connect();
+        reconnecting = f.runtime.connect(pod);
         duplicateDisconnect = f.runtime.disconnect(f.id);
       }
     });
     const requestsBeforeDisconnect = f.fetch.mock.calls.length;
     const disconnecting = f.runtime.disconnect(f.id);
-    reconnecting ??= f.runtime.connect();
+    reconnecting ??= f.runtime.connect(pod);
     const explicit = f.runtime.connect(pod);
     let settled = false;
     void reconnecting.then(() => {
@@ -110,7 +114,9 @@ it.each([true, false])(
   async (rememberPods) => {
     const f = await heldDisconnect(rememberPods);
     const disconnecting = f.runtime.disconnect(f.id);
-    const reconnecting = f.runtime.connect().catch((error: unknown) => error);
+    const reconnecting = f.runtime
+      .connect(pod)
+      .catch((error: unknown) => error);
     const explicit = f.runtime.connect(pod).catch((error: unknown) => error);
     await f.entered.promise;
     const requests = f.fetch.mock.calls.length;
@@ -129,7 +135,7 @@ it.each([true, false])(
       kind: 'invalidated',
     });
     expect(await f.runtime.disconnect(f.id)).toEqual({ kind: 'disconnected' });
-    const next = await f.runtime.connect();
+    const next = await f.runtime.connect(pod);
     if (rememberPods) expect(next.id).toBe(f.id);
     else expect(next.id).not.toBe(f.id);
   },
@@ -148,7 +154,7 @@ it('does not publish a late sign-out failure after disposal', async () => {
 it('does not discover or recreate a preset connection after disposal while waiting', async () => {
   const f = await heldDisconnect();
   const disconnecting = f.runtime.disconnect(f.id);
-  const reconnecting = f.runtime.connect().catch((error: unknown) => error);
+  const reconnecting = f.runtime.connect(pod).catch((error: unknown) => error);
   await f.entered.promise;
   const requests = f.fetch.mock.calls.length;
   f.runtime.dispose();

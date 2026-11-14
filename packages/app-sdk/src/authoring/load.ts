@@ -65,6 +65,20 @@ interface ViewLoader<T> {
   cancel(): void;
   dispose(): void;
 }
+/** A loader of a `BoundPod`, whose reads can wait for a `podReadLimit` slot. */
+interface PodLoader<T> extends ViewLoader<T> {
+  /**
+   * `'current'` for what the person looks at now: this loader's waiting
+   * reads go first, in place, and its later reads start with it, as if they
+   * passed `priority: 'current'`; `undefined` makes them normal reads again.
+   * It never restarts, aborts or sends a read: a waiting read keeps its place
+   * and is not sent twice, and an admitted read keeps its request and
+   * signal. It reaches only reads that carry this loader's `signal`
+   * unchanged; a read's own `priority: 'current'` stays. After `dispose()` it
+   * does nothing. Without `podReadLimit` nothing waits, so it changes nothing.
+   */
+  setPriority(priority: 'current' | undefined): void;
+}
 
 /**
  * One cancellable read, plus at most one same-target recovery retry per cycle.
@@ -77,6 +91,8 @@ interface ViewLoader<T> {
  * handle and callback; a Context read never falls back to a Pod read.
  * Changed grants refresh ready Pod data; failed operations wait for explicit
  * reload or a new handle rather than automatically repeating a refusal.
+ * A Pod loader's `setPriority` changes the priority of its waiting reads in
+ * place, without restarting them.
  */
 export function createViewLoader<T>(
   view: BoundView,
@@ -87,7 +103,7 @@ export function createViewLoader<T>(
   pod: BoundPod,
   read: PodRead<T>,
   options?: LoaderOptions,
-): ViewLoader<T>;
+): PodLoader<T>;
 export function createViewLoader<T, H extends BoundView | BoundPod = BoundView>(
   view: H,
   read: (handle: H, signal: AbortSignal) => Promise<BoundRead<QueryResult<T>>>,
@@ -98,6 +114,17 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
   read: (handle: H, signal: AbortSignal) => Promise<BoundRead<QueryResult<T>>>,
   options: LoaderOptions = {},
 ) {
+  return createLoader(view, read, options);
+}
+/**
+ * `createViewLoader` for either handle type, with `setPriority` (which does
+ * nothing for a Context loader: its reads are not admitted). Internal.
+ */
+export function createLoader<T, H extends BoundView | BoundPod>(
+  view: H,
+  read: (handle: H, signal: AbortSignal) => Promise<BoundRead<QueryResult<T>>>,
+  options: LoaderOptions = {},
+): PodLoader<T> {
   let state: LoadState<T> = { kind: 'loading' };
   /** The last ready data and the access revision it was read under. */
   let kept: { readonly data: T; readonly revision: number } | undefined;
@@ -127,6 +154,8 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
    * such a run is not a recovery and spends no retry.
    */
   let admission: 'unknown' | 'queued' | 'admitted' = 'unknown';
+  /** `setPriority`: asked by admission while this loader's reads wait. */
+  let current = false;
   const spends = () => admission !== 'queued';
   let previous = view.getSnapshot();
   const emit = (next: LoadState<T>) => {
@@ -164,11 +193,17 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
     const signal = abort.signal;
     const ticket = ++serial;
     admission = 'unknown';
-    watchAdmission(signal, (event) => {
-      if (ticket !== serial) return;
-      if (event === 'admitted') admission = 'admitted';
-      else if (admission === 'unknown') admission = 'queued';
-    });
+    watchAdmission(
+      signal,
+      (event) => {
+        if (ticket !== serial) return;
+        if (event === 'admitted') admission = 'admitted';
+        else if (admission === 'unknown') admission = 'queued';
+      },
+      // Only the current run's reads follow it; `dispose`, `cancel` and a
+      // reload supersede a run.
+      () => current && ticket === serial,
+    );
     waiting = false;
     running = true;
     emit({ kind: 'loading', ...retained(access.revision) });
@@ -253,6 +288,9 @@ export function createViewLoader<T, H extends BoundView | BoundPod>(
       abort.abort();
       kept = undefined;
       emit({ kind: 'cancelled' });
+    },
+    setPriority(priority: 'current' | undefined) {
+      if (!disposed) current = priority === 'current';
     },
     dispose() {
       disposed = true;

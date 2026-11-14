@@ -81,6 +81,54 @@ it('keeps guarded disconnect Boolean semantics and retains its failure across co
     connections: [],
   });
 });
+it.each([
+  { operation: 'disconnect', active: true },
+  { operation: 'disconnect', active: false },
+  { operation: 'forget', active: true },
+  { operation: 'forget', active: false },
+] as const)(
+  'keeps failed $operation retry ahead of headless sign-in (active: $active)',
+  async ({ operation, active }) => {
+    const f = await connected();
+    const app = createAppController(f.runtime);
+    app.start();
+    cleanups.push(() => app.stop());
+    await vi.waitFor(() => expect(app.getSnapshot().startup).toBeDefined());
+    const write = vi
+      .spyOn(
+        IDBObjectStore.prototype,
+        operation === 'forget' ? 'delete' : 'put',
+      )
+      .mockImplementation(() => {
+        throw new Error('fixture storage failure');
+      });
+    await app[operation](f.id);
+    write.mockRestore();
+    if (!active) {
+      const other = await f.runtime.connect('https://pod.example/bob');
+      await app.selectConnection(other.id);
+    }
+    const before = app.getSnapshot().activeId;
+    const requests = f.fetch.mock.calls.length;
+    f.navigate.mockClear();
+    await expect(app.connect(pod)).rejects.toMatchObject({
+      problem: 'storage',
+    });
+    await expect(app.authorize(f.id)).rejects.toMatchObject({
+      problem: 'storage',
+    });
+    expect(f.fetch.mock.calls).toHaveLength(requests);
+    expect(f.navigate).not.toHaveBeenCalled();
+    expect(app.getSnapshot().activeId).toBe(before);
+    expect(
+      f.runtime.getSnapshot().find((c) => c.id === f.id)?.session,
+    ).toMatchObject({ kind: 'ended', saved: false });
+    await app[operation](f.id);
+    expect(await app.connect(pod)).toBe(true);
+    expect(f.navigate).toHaveBeenCalledTimes(1);
+  },
+);
+
 it.each(['save', 'remove'] as const)(
   'a write-start observer can dispose a bound editor before its first %s (#120)',
   async (operation) => {

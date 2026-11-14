@@ -10,7 +10,6 @@ import {
 } from 'react';
 import {
   RuntimeError,
-  createViewLoader,
   type BoundView,
   type BoundPod,
   type ViewRead,
@@ -33,6 +32,7 @@ import {
   type CreateOutcome,
 } from '@sempods/client-sdk/edit';
 import { startupSettled, type AppSnapshot } from '../authoring/app.js';
+import { createLoader } from '../authoring/load.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
   shallowEqual,
@@ -217,6 +217,18 @@ export interface LoadOptions {
    */
   readonly key?: unknown;
 }
+/**
+ * `priority: 'current'` for what the person looks at now, such as the selected
+ * resource: with `podReadLimit`, this loader's waiting reads go first, in
+ * place, and its later reads start with it. A changed value never restarts
+ * or aborts the read, unlike `key`: an admitted request keeps running with
+ * its signal, and a waiting one keeps its place and is sent once. It reaches
+ * the reads that receive the callback's `signal` unchanged; see
+ * `setPriority` of `createViewLoader`.
+ */
+interface PodLoadOptions extends LoadOptions {
+  readonly priority?: 'current' | undefined;
+}
 /** What `useLoad` and `usePodLoad` return. */
 type Loaded<T> = ReturnType<typeof useLoad<T>>;
 const selectPod = (s: AppSnapshot) => s.pod;
@@ -230,7 +242,7 @@ const noPod = () => null;
  */
 export function usePodLoad<T>(
   read: PodRead<T>,
-  options?: LoadOptions,
+  options?: PodLoadOptions,
 ): Loaded<T>;
 /**
  * Loads an explicit BoundPod from `runtime.bindPod(id)`, for example one read
@@ -245,12 +257,12 @@ export function usePodLoad<T>(
 export function usePodLoad<T>(
   pod: BoundPod | null,
   read: PodRead<T>,
-  options?: LoadOptions,
+  options?: PodLoadOptions,
 ): Loaded<T>;
 export function usePodLoad<T>(
   first: PodRead<T> | BoundPod | null,
-  second?: PodRead<T> | LoadOptions,
-  third?: LoadOptions,
+  second?: PodRead<T> | PodLoadOptions,
+  third?: PodLoadOptions,
 ): Loaded<T> {
   // The active-Pod form passes the read first; the explicit form a handle.
   const explicit = typeof first !== 'function';
@@ -259,7 +271,7 @@ export function usePodLoad<T>(
   const settled = useAppFacts(startupSettled);
   const pod = explicit ? first : active;
   const read = (explicit ? second : first) as PodRead<T>;
-  const options = (explicit ? third : second) as LoadOptions | undefined;
+  const options = (explicit ? third : second) as PodLoadOptions | undefined;
   const { state, reload, cancel } = useBoundLoad(
     pod,
     read,
@@ -274,7 +286,7 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   view: H | null,
   read: (handle: H, signal: AbortSignal) => ReturnType<ViewRead<T>>,
   empty: LoadState<T> = loading,
-  { retain = false, key }: LoadOptions = {},
+  { retain = false, key, priority }: PodLoadOptions = {},
 ) {
   const latest = useCommitted(read);
   // The loader reads it at each (re)load.
@@ -284,23 +296,31 @@ function useBoundLoad<T, H extends BoundView | BoundPod>(
   }, [retain]);
   const [active, setActive] = useState<{
     view: H;
-    loader: ReturnType<typeof createViewLoader<T, H>>;
+    loader: ReturnType<typeof createLoader<T, H>>;
   } | null>(null);
+  // Set before a new loader's first read; a change only reprioritizes.
+  const committedPriority = useRef(priority);
+  const activeLoader = active?.view === view ? active.loader : null;
+  useInsertionEffect(() => {
+    committedPriority.current = priority;
+    activeLoader?.setPriority(priority);
+  }, [priority, activeLoader]);
   useEffect(() => {
     if (!view) {
       setActive(null);
       return;
     }
-    const loader = createViewLoader<T, H>(
+    const loader = createLoader<T, H>(
       view,
       (target, signal) => latest.current(target, signal),
       loaderOptions.current,
     );
+    loader.setPriority(committedPriority.current);
     setActive({ view, loader });
     void loader.reload();
     return () => loader.dispose();
   }, [view, latest]);
-  const loader = active?.view === view ? active.loader : null;
+  const loader = activeLoader;
   const loaded: LoadState<T> = useSyncExternalStore(
     loader?.subscribe ?? noopSubscribe,
     loader?.getSnapshot ?? (() => empty),

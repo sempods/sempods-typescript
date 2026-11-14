@@ -126,6 +126,18 @@ export function ContextSwitch({
       </span>
     </DropdownMenuItem>
   );
+  // The qualifier tells equal names within one Pod apart, more quietly.
+  const contextText = (choice: PodContextChoice) =>
+    choice.qualifier ? (
+      <>
+        {choice.contextLabel}
+        <span className="font-normal text-muted-foreground">
+          {` · ${choice.qualifier}`}
+        </span>
+      </>
+    ) : (
+      choice.contextLabel
+    );
   const permission = (writable: boolean) =>
     writable ? messages.controls.canChange : messages.controls.canRead;
   const permissionIcon = (writable: boolean) =>
@@ -163,7 +175,7 @@ export function ContextSwitch({
           )}
           <span className="grid min-w-0 flex-1 gap-0.5">
             <span className="truncate text-lg font-semibold">
-              {selected?.label ?? title}
+              {selected ? contextText(selected) : title}
             </span>
             <span className="truncate text-xs font-normal text-muted-foreground">
               {selected?.podLabel ?? t.chooseContext}
@@ -205,7 +217,7 @@ export function ContextSwitch({
                       >
                         {permissionIcon(choice.writable)}
                         <Text slot="label" className="min-w-0 wrap-anywhere">
-                          {choice.label}
+                          {contextText(choice)}
                         </Text>
                         <Text
                           slot="description"

@@ -3,6 +3,7 @@ import type {
   ResourceEditor as Editor,
   SaveOutcome,
   RemoveOutcome,
+  TextVariant,
 } from '@sempods/client-sdk/edit';
 import {
   useStartCount,
@@ -65,7 +66,10 @@ export function UpdateNotice({
    * notices. When omitted, a successful local onCheck enables acknowledgement.
    */
   readonly checked?: boolean;
-  /** Field display names for the comparison. */
+  /**
+   * Field display names for the comparison. Values are shown as described
+   * for `ResourceEditor`'s review comparison.
+   */
   readonly labels?: FieldLabels;
   readonly onCheck?: () => Promise<boolean>;
   readonly onAcknowledge?: () => void;
@@ -436,37 +440,171 @@ function exactNumber(value: number, locale: string): string {
 }
 /** Display names for draft fields; a missing name shows the field key. */
 export type FieldLabels = { readonly [field: string]: string | undefined };
-function Comparison({
+/**
+ * A `TextVariant` from `@sempods/client-sdk/edit`, recognised by its exact
+ * shape, so apps keep it in their drafts as read.
+ */
+function isTextVariant(value: object): value is TextVariant {
+  const v = value as Record<string, unknown>;
+  return (
+    Object.keys(v).length === 4 &&
+    (v.language === null || typeof v.language === 'string') &&
+    (v.value === null || typeof v.value === 'string') &&
+    Array.isArray(v.values) &&
+    v.values.every((item) => typeof item === 'string') &&
+    typeof v.ambiguous === 'boolean'
+  );
+}
+/**
+ * One compared value. Missing (`undefined`, `null`, no items, a variant
+ * without values) and empty text read differently; a text variant keeps its
+ * language and shows every value of a conflict; other structures show their
+ * parts instead of `[object Object]`.
+ */
+function Shown({
   value,
-  labels,
+  seen = [],
 }: {
   readonly value: unknown;
-  readonly labels?: FieldLabels | undefined;
+  readonly seen?: readonly object[];
 }) {
-  const { messages, locale } = useSdkLocale();
+  const { messages, locale, timeZone } = useSdkLocale();
   const m = messages.controls;
-  if (value === undefined) return <span>—</span>;
-  if (value === null) return <p>{m.notPresent}</p>;
-  const shown = (v: unknown) =>
-    typeof v === 'boolean'
-      ? v
-        ? m.yes
-        : m.no
-      : typeof v === 'number'
-        ? exactNumber(v, locale)
-        : v === null || v === undefined || v === ''
-          ? '—'
-          : String(v);
-  return (
+  const none = <span className="sp-sdk-none">{m.noValue ?? '—'}</span>;
+  const text = (v: string, language?: string | null) =>
+    v === '' ? (
+      <span className="sp-sdk-none">{m.emptyText ?? '""'}</span>
+    ) : (
+      <span lang={language ?? undefined}>{v}</span>
+    );
+  if (value === undefined || value === null) return none;
+  if (typeof value === 'string') return text(value);
+  if (typeof value === 'boolean') return <>{value ? m.yes : m.no}</>;
+  if (typeof value === 'number') return <>{exactNumber(value, locale)}</>;
+  if (typeof value !== 'object') return <>{String(value)}</>;
+  if (value instanceof Date) {
+    // The locale's form only where it loses nothing: whole seconds, a
+    // four-digit year, and the zone's offset, so the hour repeated when the
+    // clocks go back cannot make two instants look alike. Otherwise ISO.
+    const time = value.valueOf();
+    const year = Number.isFinite(time) ? value.getUTCFullYear() : 0;
+    return (
+      <>
+        {!Number.isFinite(time)
+          ? String(value)
+          : time % 1000 === 0 && year > 1000 && year < 9999
+            ? new Intl.DateTimeFormat(locale, {
+                dateStyle: 'medium',
+                timeStyle: 'long',
+                timeZone,
+              }).format(value)
+            : value.toISOString()}
+      </>
+    );
+  }
+  // A cycle cannot be shown; stop where it repeats.
+  if (seen.includes(value)) return <>…</>;
+  const inner = [...seen, value];
+  if (isTextVariant(value)) {
+    const tag = value.language !== null && (
+      <span className="sp-sdk-tag"> · {value.language}</span>
+    );
+    if (value.values.length <= 1)
+      return (
+        <>
+          {value.values.length === 0
+            ? none
+            : text(value.values[0]!, value.language)}
+          {tag}
+        </>
+      );
+    return (
+      <>
+        <span className="sp-sdk-conflict">
+          {m.severalValues ?? '!'}
+          {tag}
+        </span>
+        <ul>
+          {value.values.map((v, i) => (
+            <li key={i}>{text(v, value.language)}</li>
+          ))}
+        </ul>
+      </>
+    );
+  }
+  if (Array.isArray(value))
+    return value.length === 0 ? (
+      none
+    ) : (
+      <ul>
+        {value.map((item, i) => (
+          <li key={i}>
+            <Shown value={item} seen={inner} />
+          </li>
+        ))}
+      </ul>
+    );
+  const entries = Object.entries(value);
+  return entries.length === 0 ? (
+    none
+  ) : (
     <dl>
-      {Object.entries(value as Record<string, unknown>).map(([key, v]) => (
+      {entries.map(([key, v]) => (
         <div key={key}>
-          <dt>{labels?.[key] ?? key}</dt>
-          <dd>{shown(v)}</dd>
+          <dt>{key}</dt>
+          <dd>
+            <Shown value={v} seen={inner} />
+          </dd>
         </div>
       ))}
     </dl>
   );
+}
+function Comparison({
+  value,
+  labels,
+  fields,
+}: {
+  readonly value: unknown;
+  readonly labels?: FieldLabels | undefined;
+  /** Every field to list, also those this side lacks (shown as no value). */
+  readonly fields?: readonly string[] | undefined;
+}) {
+  const m = useSdkLocale().messages.controls;
+  if (value === undefined) return <span>—</span>;
+  if (value === null) return <p>{m.notPresent}</p>;
+  if (
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    value instanceof Date
+  )
+    return (
+      <div>
+        <Shown value={value} />
+      </div>
+    );
+  const record = value as Record<string, unknown>;
+  const keys = fields ?? Object.keys(record);
+  return (
+    <dl data-sempods-ui="comparison">
+      {keys.map((key) => (
+        <div key={key}>
+          <dt>{labels?.[key] ?? key}</dt>
+          <dd>
+            <Shown value={record[key]} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+/** The fields of both sides of a review, in draft order. */
+function comparedFields(mine: unknown, current: unknown) {
+  const keys = (v: unknown) =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)
+      ? Object.keys(v)
+      : [];
+  return [...new Set([...keys(mine), ...keys(current)])];
 }
 /**
  * The element a key went to inside `own`, or null when the key belongs to
@@ -532,7 +670,14 @@ export function ResourceEditor<D, U = D>({
   readonly editor: Editor<D, U> | null;
   readonly children: (draft: D, change: (draft: U) => void) => ReactNode;
   readonly onChanged?: () => void;
-  /** Field display names for the review comparison. */
+  /**
+   * Field display names for the review comparison, which lists every field of
+   * the draft and of the current version. Values are localized; a
+   * `TextVariant` from `@sempods/client-sdk/edit` shows its language tag and,
+   * for several values in one language, each of them; no value (missing,
+   * `null`, empty list) reads apart from empty text; lists and nested objects
+   * show their parts. Keep such structured values in the draft as read.
+   */
   readonly labels?: { readonly [K in keyof D]?: string };
 }) {
   const m = useSdkLocale().messages.controls;
@@ -558,6 +703,9 @@ export function ResourceEditor<D, U = D>({
   if (!editor || editor.state.phase === 'loading')
     return <Notice>{m.loading}</Notice>;
   const state = editor.state;
+  const fields = state.review
+    ? comparedFields(state.draft, state.review.current)
+    : undefined;
   const act = async (action: () => Promise<SaveOutcome | RemoveOutcome>) => {
     // A bound editor counts its own start synchronously in `action()`.
     const pending = action();
@@ -645,9 +793,13 @@ export function ResourceEditor<D, U = D>({
             {state.review.kind === 'unconfirmed' ? m.unconfirmed : m.changed}
           </p>
           <h3>{m.mine}</h3>
-          <Comparison value={state.draft} labels={labels} />
+          <Comparison value={state.draft} labels={labels} fields={fields} />
           <h3>{m.current}</h3>
-          <Comparison value={state.review.current} labels={labels} />
+          <Comparison
+            value={state.review.current}
+            labels={labels}
+            fields={fields}
+          />
           <button
             disabled={state.phase === 'saving'}
             onClick={() => void editor.refresh()}

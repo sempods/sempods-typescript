@@ -142,6 +142,20 @@ connection yet, so dispose stops it. A timeout reports no `failure` detail.
 Token requests and client registration are not covered by this deadline, and no
 refresh or code exchange is replayed.
 
+A saved credential that is due when it is restored (past its expiry, or within
+the minute before it, with a refresh token) is renewed as part of restoration:
+the connection stays `restoring` until the token endpoint answers, so an
+expired grant ends there (`ended`, retired like at a first request) instead of
+after the app saw it `active`. That token request has its own 20-second
+deadline. A lost answer gets the one rediscovery and resend of a
+[lost renewal answer](#lost-renewal-answers), still `restoring`; offline it is
+`ended` with `restorable: true` at once. Storage that cannot record the refresh
+claim leaves it restorable too, with nothing spent. An expired credential
+without a refresh token ends as `expired`. A valid credential becomes `active`
+without a token request. Restoration therefore settles within 15 seconds when
+a Pod does not answer its discovery, within 35 seconds for a due credential,
+and within about 70 seconds when that answer is lost once while online.
+
 A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` or no
 answer within the deadline during discovery) is not a sign-out: the connection ends with that problem and
 `restorable: true`, and the saved session is kept. The runtime restores it again
@@ -205,21 +219,29 @@ props does not change an existing runtime. A host that replaces a runtime must
 first settle its drafts and unresolved operations, dispose it, and initialize its
 replacement.
 
-`runtime.connect()` uses the preset URL and reuses its first matching connection;
-concurrent preset connects share discovery. If that connection is being
+`runtime.connect()` uses the preset URL. Both it and `connect(url)` reuse an
+existing connection at that exact URL, preferring a session over an address-only
+record. Concurrent connects to the same URL share discovery. If that connection is being
 disconnected, connect waits for retirement and checks the current entries again.
 A failed durable retirement keeps the connection locally blocked: disconnect
 returns `blocked-locally` and waiting connects reject with `RuntimeError('storage')`.
 Offer an explicit disconnect retry; do not claim the saved session was removed.
 Disposing the runtime while a connect waits makes it reject with
 `RuntimeError('disconnected')`, without starting new discovery.
-`connect(preset.podUrl)` reuses the same way. Connecting alone does not sign in:
+Connecting alone does not sign in:
 once startup storage is durable and the connection has finished restoring, call
 `beginAuthorization(connection.id)` to sign in or change sharing. React and
 headless authoring use the guarded `app.connect()`, which does both and prefers
 an already active matching connection. Without a preset or a sole allowed Pod,
 `connect()` needs a URL; omitting it is a configuration error. A failed
 preparation leaves the connection reusable, so a retry creates no duplicate.
+
+Startup removes redundant disconnected records left by older SDKs, within the
+app identity's namespace and only after their revision-checked deletion succeeds.
+One remembered address remains unless a session or authorization attempt already
+represents it. Live sessions and attempts are never merged. Failed cleanup keeps
+the address visible and forgettable; the next startup can try again. Pod URLs are
+compared exactly, never by their display label or by normalizing identities.
 
 An exact configured context takes precedence over a remembered choice for that
 Pod. A fresh successful catalogue must list it as readable before a view can be
@@ -590,7 +612,14 @@ const runtime = createBrowserRuntime({
   podReadLimit: { perPod: 4, total: 8 },
 });
 
-// For what the person looks at now:
+// For what the person looks at now, such as the selected graph node. A
+// changed value reprioritizes the loader's waiting reads; it restarts nothing.
+usePodLoad(reader, read, {
+  key: iri,
+  priority: selected ? 'current' : undefined,
+});
+
+// A single read that is always current:
 await reader.sparql.select(query, { signal, priority: 'current' });
 ```
 
@@ -606,9 +635,19 @@ explicit Pod read (`BoundPod.sparql.select`/`construct` or `find`, also through
   `priority: 'current'` read goes before them. After three priority reads in
   a row on a Pod, its waiting normal read is next on that Pod; after three in
   a row across all Pods, a waiting normal read of any Pod is next. Priority
-  never exceeds a limit or stops a running read. It counts when the
-  read starts: when the current resource changes, restart that read (for
-  example with a new `key`). A waiting read that is restarted loses its place.
+  never exceeds a limit or stops a running read.
+- When the current resource changes, change the priority, not the read:
+  `usePodLoad`'s `priority` option, or `setPriority` of a
+  `createViewLoader(pod, …)` loader. A waiting read of that loader then goes
+  first or back to normal in place: it keeps its arrival order, is not
+  restarted and is sent once. A read already admitted keeps its request and
+  signal; the loader's later reads (a second query in the same callback, a
+  `reload()`, a recovery) start with the priority set then. A disposed loader
+  ignores it, and it never reaches another loader's reads. Only reads that
+  receive the loader's `signal` unchanged follow it; a read's own
+  `priority: 'current'` stays. Do not restart a read to change its priority:
+  `loading` covers both waiting and running reads, and a restart aborts a
+  running request, whose slot an abort-ignoring transport keeps.
 - A waiting read that is cancelled (`signal`, `cancel()`, unmount, a `reload()`
   that supersedes it) or invalidated (changed grants, sign-out, disconnect)
   leaves the queue at once and is never sent.
@@ -666,7 +705,9 @@ explicitly chosen context of each connection is remembered as a preference
 (`preferences`, localStorage by default; `null` disables it) and reselected when
 the fresh catalogue lists it as readable. It is never replaced by another
 context, it is kept for a [remembered Pod](#remembered-pods) and forgotten
-with it, and storage failures only disable it.
+with it, and storage failures only disable it. The same preference storage keeps the
+connection the app last worked with, for the
+[startup choice with several Pods](#several-pods-at-startup).
 Connecting a second Pod preserves the first session.
 
 Discovery retains `authorization_response_iss_parameter_supported`. When true,
@@ -854,8 +895,8 @@ from the next start on.
   `useApp().authorize(id)`) uses the remembered address and reselects the
   remembered Context once the fresh catalogue confirms it. With a valid sign-in
   cookie at the Pod and a remembered consent, the Pod answers without
-  interaction. `connect()` for the preset or sole allowed Pod reuses its
-  remembered connection.
+  interaction. `connect(url)` reuses a matching connection; without a URL it
+  uses the preset or sole allowed Pod.
 - **Forgetting is separate.** `forget(id)` signs out if needed, deletes the
   record and the remembered Context choice, and removes the connection from the
   snapshot. It works for any connection. While it runs, and after a failed
@@ -876,14 +917,62 @@ The app controller does not make a remembered Pod active while another
 connection has a session (signed in, restoring or ended), and when the active
 connection signs out it gives way to such a connection, as a removed one did.
 A remembered Pod the person selects stays active, ready to sign in.
-`AppAccess` lists remembered Pods on its gate's sign-in view, above the address
-field, each with **Sign in** and **Forget** (`controls.rememberedPods`,
-`controls.forget`; `controls.sessionEnded` notes an ended session); management
-lists them under **Connect another Pod**. A Pod whose forgetting failed shows
-`controls.forgetFailed` with **Try again** only, which forgets it.
+`AppAccess` offers remembered Pods in an editable address chooser with one
+main action. **Manage saved Pods**, in its dropdown, separates removal from sign-in,
+and `controls.sessionEnded` notes an ended session. Connected management also
+lists other Pods under **Connect another Pod**. Failed retirement offers its
+failure and retry, never sign-in to that connection, even when it is not the
+active Pod. Controller `connect` and `authorize` reject with
+`RuntimeError('storage')` while that connection has `ended.saved === false`;
+retry `disconnect` or `forget` first. The low-level runtime's
+`beginAuthorization(id)` remains an explicit escape hatch: a durably saved new
+attempt replaces the old record and cancels the failed forget intent. Ordinary
+apps should use the controller's retry flow. The [React guide](react-authoring.md#sign-in-and-pod-addresses)
+describes the default presentation and its customization.
 
 A custom `SessionStore` (`openStore`) implements `remove(id, expectedRevision)`
 for this: an atomic delete at the expected revision, `conflict` otherwise.
+
+## Several Pods at startup
+
+With several saved Pods, the app controller (`createAppController`, and so
+`SempodsProvider` and `AppAccess`) makes the connection active that the app
+last worked with. It remembers that connection per app identity in
+`preferences` once it works: signed in (`reading: 'session'`) with every
+required scope. Without it, or once it is merely remembered (`signed-out`) or
+forgotten, the first connection with a session in the session store's order
+is active, as before. With a preset, only the preset Pod's connections count.
+
+Until the startup choice closes, an active connection that cannot work gives
+way to one that works:
+
+| The remembered (active) connection at startup                           | Other permitted connections | Result                                                                                                       |
+| ----------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Restores and works                                                      | Any                         | Stays active                                                                                                 |
+| Ends (not a chosen sign-out), is unreachable, or lacks a required scope | One works                   | That one becomes active; the other shows as an action prompt (`signed-out`, `unreachable`, `missing-scopes`) |
+| Cannot work, as in the row above                                        | Others still restore        | `access.pending` until one works (it becomes active) or none can                                             |
+| Ends or lacks a required scope                                          | None works                  | Its gate (`signed-out`, `missing-scopes`), as without other Pods                                             |
+| Is unreachable                                                          | None works                  | Its `unreachable` prompt, as without other Pods                                                              |
+| Still restores after 5 seconds                                          | One works                   | That one becomes active; the remembered one keeps restoring and prompts only if it then cannot work          |
+| Still restores after 5 seconds                                          | None works yet              | Keeps waiting; the first that works becomes active, possibly the remembered one                              |
+
+A connection that took over is not remembered, so a Pod that was only slow is
+preferred again on the next start, and the controller never switches back to
+the remembered one by itself. The startup choice closes once the active
+connection works, the person starts a guarded action (navigation, a Context
+selection or a connection action), or the active connection's gate or prompt
+shows. A returning sign-in's connection (also a failed one, whose cause shows
+there) and a connection the person selects never give way. No switch happens
+while a registered guard holds work (a draft, a pending or unconfirmed write);
+the gate then blocks as before. A Pod outside the preset is never used, and
+`allowedPods` keeps foreign records out of the snapshot.
+
+The 5-second grace period is a starting value: a healthy discovery answers
+well within a second. With a single Pod, startup lasts as long as its
+restoration (see the bounds above). While the choice is open,
+`AppSnapshot.starting` stays true, so `AppAccess` shows its
+[startup screen](react-authoring.md#startup-screen-and-static-splash), not a
+gate.
 
 ## Protocol and session ownership
 

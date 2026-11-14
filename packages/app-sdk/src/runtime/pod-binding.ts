@@ -10,7 +10,7 @@ import { waitFor } from './wait.js';
 import { combineSignals } from './signals.js';
 import { observePod } from './binding.js';
 import type { Admission } from './admission.js';
-import { noticeAdmission } from './admission-notice.js';
+import { admissionPriority, noticeAdmission } from './admission-notice.js';
 
 type PodReadOptions = ReadOptions & { readonly priority?: 'current' };
 
@@ -61,14 +61,17 @@ export function bindPod(
     const stopped = () =>
       caller?.aborted ? ({ kind: 'cancelled' } as const) : invalidated;
     try {
+      // The read's own `priority` holds for its whole wait; a loader's (by
+      // its signal) is asked again whenever the next read is chosen.
+      const priority =
+        options?.priority === 'current'
+          ? () => true
+          : (admissionPriority(caller) ?? (() => false));
       // Waiting for a slot is not a request: a read that stops while it
       // waits leaves the queue and is never sent.
       const release = admission
-        ? await admission.acquire(
-            e.view.podUrl,
-            options?.priority === 'current',
-            signal,
-            () => noticeAdmission(caller, 'queued'),
+        ? await admission.acquire(e.view.podUrl, priority, signal, () =>
+            noticeAdmission(caller, 'queued'),
           )
         : undefined;
       if (admission && !release) return stopped();

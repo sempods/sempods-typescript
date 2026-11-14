@@ -10,16 +10,46 @@ import type { PreferenceStorage } from './types.js';
 export interface ContextMemory {
   recall(id: string): string | undefined;
   remember(id: string, iri: string): void;
+  /** Forgets the connection's Context, and the connection as the last active one. */
   forget(id: string): void;
+  /**
+   * The connection the app last worked with (#305), so the next start prefers
+   * it. A convenience like the Context, never a grant.
+   */
+  readonly active: ActiveMemory;
+}
+/** The last active connection of one app identity. */
+export interface ActiveMemory {
+  recall(): string | undefined;
+  remember(id: string): void;
 }
 
 const prefix = '@sempods/app-sdk:context:';
+const activePrefix = '@sempods/app-sdk:active:';
 
 export function createContextMemory(
   namespace: string,
   storage: PreferenceStorage | null | undefined,
 ): ContextMemory {
   const key = prefix + namespace;
+  const activeKey = activePrefix + namespace;
+  const active: ActiveMemory = {
+    recall() {
+      try {
+        return storage?.getItem(activeKey) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    remember(id) {
+      try {
+        if (storage && storage.getItem(activeKey) !== id)
+          storage.setItem(activeKey, id);
+      } catch {
+        // The connection simply is not remembered.
+      }
+    },
+  };
   const read = (): Record<string, string> => {
     try {
       const value: unknown = JSON.parse(storage?.getItem(key) ?? '{}');
@@ -48,8 +78,15 @@ export function createContextMemory(
       if (!storage || read()[id] === iri) return;
       write({ ...read(), [id]: iri });
     },
+    active,
     forget(id) {
       if (!storage) return;
+      if (active.recall() === id)
+        try {
+          storage.removeItem(activeKey);
+        } catch {
+          // Left behind, it names a connection that no longer exists.
+        }
       const choices = read();
       if (!(id in choices)) return;
       delete choices[id];
@@ -66,3 +103,10 @@ export function browserPreferences(): PreferenceStorage | undefined {
     return undefined;
   }
 }
+
+/**
+ * Internal: the runtime's memory of its last active connection, for the
+ * controller's startup choice (#305). Absent for a runtime not created by
+ * `createBrowserRuntime`, which keeps the store order.
+ */
+export const activeMemories = new WeakMap<object, ActiveMemory>();

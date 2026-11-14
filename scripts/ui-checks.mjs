@@ -68,7 +68,7 @@ const chooser = (page) => page.getByLabel(/Data context|Datenkontext/);
 async function signIn(page, origin, address = '/', { choose = true } = {}) {
   await fetch(origin + '/__reset');
   await page.goto(origin + address);
-  await page.getByLabel(/Pod address|Pod-Adresse/).fill(origin + '/alice');
+  await page.getByLabel(/^(Pod address|Pod-Adresse)$/).fill(origin + '/alice');
   await page.getByRole('button', { name: /^(Sign in|Anmelden)$/ }).click();
   if (!choose) return;
   await chooser(page).selectOption({ label: 'work' });
@@ -2941,8 +2941,9 @@ async function theme({ browser, origin }) {
  * The README's quick edit (#229): a compact `Dialog` around an SDK editor.
  * Cancelling an SDK question above it keeps the dialog and the draft, its
  * corner Close asks through the editor, and it speaks the SDK's language.
+ * Its corner Close is a 44px target with the package's stylesheet alone (#288).
  */
-async function compact({ browser, origin }) {
+async function compact({ browser, origin, engine }) {
   const { context, page, errors } = await newPage(browser);
   await signIn(page, origin);
   const dialog = page.getByRole('dialog', { name: /^(Rename|Umbenennen)$/ });
@@ -3063,6 +3064,134 @@ async function compact({ browser, origin }) {
         .locator('[data-slot=dialog-close]')
         .evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim()));
       return { pass: names.join() === 'Schließen', names };
+    },
+    // The corner Close is a 44px target around a compact glyph (#288), with
+    // the stylesheet the README documents and no app CSS: inside the dialog
+    // and clear of its title and fields, at 375px and on the desktop, light
+    // and dark. A press anywhere in the target closes the dialog, and the
+    // keyboard reaches and presses it.
+    async 'compact-close-target'() {
+      const tab = tabKey(engine);
+      const corner = dialog.locator(':scope > [data-slot=dialog-close]');
+      const cases = [];
+      try {
+        for (const width of [375, 1280])
+          for (const scheme of ['light', 'dark']) {
+            const height = width === 375 ? 812 : 800;
+            await page.setViewportSize({ width, height });
+            await page.emulateMedia({ colorScheme: scheme });
+            await open();
+            const m = await dialog.evaluate((el) => {
+              const close = el.querySelector(
+                ':scope > [data-slot=dialog-close]',
+              );
+              const box = close.getBoundingClientRect();
+              const glyph = close.querySelector('svg').getBoundingClientRect();
+              const content = el.closest('[data-slot=dialog-content]');
+              const frame = content.getBoundingClientRect();
+              // Only what a child shows counts: a header's padding may lie
+              // under the target.
+              const shown = (node) => {
+                const r = node.getBoundingClientRect();
+                const pad = getComputedStyle(node);
+                return {
+                  top: r.top,
+                  bottom: r.bottom,
+                  left: r.left + parseFloat(pad.paddingLeft),
+                  right: r.right - parseFloat(pad.paddingRight),
+                };
+              };
+              const clear = [...el.children]
+                .filter((child) => child !== close)
+                .every((child) => {
+                  const r = shown(child);
+                  return (
+                    r.right <= box.left ||
+                    r.left >= box.right ||
+                    r.bottom <= box.top ||
+                    r.top >= box.bottom
+                  );
+                });
+              // Rounded corners take no press: the middle of each edge does.
+              const x = (box.left + box.right) / 2;
+              const y = (box.top + box.bottom) / 2;
+              const hits = [
+                [box.left + 2, y],
+                [box.right - 2, y],
+                [x, box.top + 2],
+                [x, box.bottom - 2],
+              ].every(([px, py]) =>
+                close.contains(document.elementFromPoint(px, py)),
+              );
+              return {
+                target: [box.width, box.height],
+                glyph: Math.max(glyph.width, glyph.height),
+                inside:
+                  box.top >= frame.top &&
+                  box.right <= frame.right &&
+                  frame.left >= 16 &&
+                  frame.right <= innerWidth - 16 &&
+                  frame.top >= 0 &&
+                  frame.bottom <= innerHeight,
+                clear,
+                hits,
+                colour: getComputedStyle(close).color,
+                surface: getComputedStyle(content).backgroundColor,
+                // A point in the target outside the registry's 28px box.
+                rim: { x: box.left + 2, y },
+              };
+            });
+            const { rim, ...measured } = m;
+            await page.mouse.click(rim.x, rim.y);
+            const pointer = await gone(dialog);
+            await open();
+            await title.focus();
+            let reached = false;
+            for (let i = 0; i < 8 && !reached; i++) {
+              await page.keyboard.press(tab);
+              reached = await corner.evaluate(
+                (b) => document.activeElement === b,
+              );
+            }
+            const ring = reached
+              ? await corner.getAttribute('data-focus-visible')
+              : null;
+            if (reached) await page.keyboard.press('Enter');
+            const keyboard = reached && (await gone(dialog));
+            cases.push({
+              width,
+              scheme,
+              ...measured,
+              pointer,
+              keyboard,
+              ring: ring !== null,
+            });
+          }
+      } finally {
+        await page.emulateMedia({ colorScheme: null });
+      }
+      const surfaces = (width) =>
+        new Set(cases.filter((c) => c.width === width).map((c) => c.surface))
+          .size === 2;
+      return {
+        pass:
+          cases.length === 4 &&
+          cases.every(
+            (c) =>
+              Math.min(...c.target) >= 44 &&
+              c.glyph <= 16 &&
+              c.inside &&
+              c.clear &&
+              c.hits &&
+              c.colour !== c.surface &&
+              c.pointer &&
+              c.keyboard &&
+              c.ring,
+          ) &&
+          surfaces(375) &&
+          surfaces(1280),
+        cases,
+      };
     },
   };
   const results = [];
@@ -3790,8 +3919,491 @@ async function search({ browser, origin }) {
   return results;
 }
 
+/**
+ * Equal Context labels within one Pod (#290): each row names its quieter
+ * qualifier, the trigger keeps the Pod beneath, at 320px in both schemes.
+ */
+async function contextQualifiers({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser, {
+    viewport: { width: 320, height: 700 },
+  });
+  await page.route('**/_system/contexts', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body['https://schema.sempods.org/writableContext'] = body[
+      'https://schema.sempods.org/writableContext'
+    ].filter((c) => c['@id'].endsWith('/work'));
+    await route.fulfill({ json: body });
+  });
+  await page.route('**/_system/contexts/*', (route) => {
+    const iri = route.request().url();
+    return route.fulfill({
+      json: {
+        '@id': iri,
+        '@type': ['http://www.w3.org/ns/sparql-service-description#NamedGraph'],
+        'http://www.w3.org/ns/sparql-service-description#name': [
+          { '@id': iri },
+        ],
+        'https://schema.sempods.org/public': [{ '@value': false }],
+        'http://www.w3.org/2000/01/rdf-schema#label': [
+          { '@value': 'Einkaufsliste' },
+        ],
+      },
+    });
+  });
+  const results = [];
+  try {
+    await signIn(page, origin, '/?screen=contexts&lang=de', { choose: false });
+    const trigger = page.getByRole('button', {
+      name: 'List: Einkaufsliste · work · Privat',
+      exact: true,
+    });
+    await trigger.waitFor();
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await trigger.click();
+      const rows = ['work', 'personal'].map((q) =>
+        page.getByRole('menuitemradio', {
+          name: `Einkaufsliste · ${q}`,
+          exact: true,
+        }),
+      );
+      await rows[1].waitFor();
+      await settle(page);
+      const popup = page.locator('[role="dialog"]:has([role="menu"])');
+      const measured = await popup.evaluate((el) => {
+        const quiet = [...el.querySelectorAll('[role=menuitemradio] span')]
+          .filter((s) => s.textContent?.startsWith(' · '))
+          .map((s) => getComputedStyle(s).color);
+        const label = el.querySelector('[role=menuitemradio] [slot=label]');
+        return {
+          quiet,
+          label: label && getComputedStyle(label).color,
+          right: Math.max(
+            ...[...el.querySelectorAll('[role=menuitemradio]')].map(
+              (r) => r.getBoundingClientRect().right,
+            ),
+          ),
+          // The fixture's own target output may be wider; the chooser not.
+          popup: el.getBoundingClientRect().right,
+          trigger: document
+            .querySelector('[data-slot=context-switch] button')
+            ?.getBoundingClientRect().right,
+        };
+      });
+      results.push({
+        id: `qualifier-${scheme}`,
+        pass:
+          (await rows[0].count()) === 1 &&
+          (await rows[1].count()) === 1 &&
+          (await page
+            .getByRole('group', { name: 'Privat', exact: true })
+            .count()) === 1 &&
+          measured.quiet.length === 2 &&
+          measured.quiet.every((c) => c !== measured.label) &&
+          Math.max(measured.right, measured.popup, measured.trigger) <= 320,
+        measured,
+      });
+      await page.addScriptTag({ content: contrastScript });
+      const failing = await popup.evaluate((el) =>
+        window.uiContrast(el).filter((r) => !r.pass),
+      );
+      results.push({
+        id: `qualifier-contrast-${scheme}`,
+        pass: failing.length === 0,
+        failing,
+      });
+      await page.keyboard.press('Escape');
+    }
+  } catch (error) {
+    results.push({
+      id: 'qualifier-journey',
+      pass: false,
+      error: String(error),
+    });
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
+/**
+ * The app's settings in the access gate (#282): a corner button opens them
+ * above the gate, which stays open; language and appearance change in place;
+ * Escape closes only the settings, also on repeated presses; on a phone they
+ * are a bottom sheet. Then the gate of a remembered Pod: the same settings,
+ * and Forget without a write to the Pod.
+ */
+async function accessSettings({ browser, origin, engine }) {
+  const results = [];
+  const { context, page, errors } = await newPage(browser);
+  const gateOpen = () =>
+    page.evaluate(() => {
+      const gate = document.querySelector('dialog[data-sempods-ui="gate"]');
+      return Boolean(gate?.open && gate.matches(':modal'));
+    });
+  const settings = page.locator('dialog[data-sempods-ui="settings"]');
+  const button = page.locator(
+    'dialog[data-sempods-ui="gate"] > .sp-access-settings',
+  );
+  try {
+    await fetch(origin + '/__reset');
+    await page.goto(origin + '/');
+    await page.locator('dialog[data-sempods-ui="gate"]').waitFor();
+    results.push(
+      await attempt('settings-button-in-corner', async () => {
+        const box = await button.boundingBox();
+        const name = await button.getAttribute('aria-label');
+        // The gate opens on its own sign-in view, not on the settings button.
+        const focus = await page.evaluate(() => ({
+          inView: Boolean(
+            document.activeElement?.closest(
+              'dialog[data-sempods-ui="gate"] [data-sempods-access]',
+            ),
+          ),
+          tag: document.activeElement?.tagName,
+        }));
+        return {
+          pass:
+            name === 'Settings' &&
+            box !== null &&
+            box.width >= 44 &&
+            box.height >= 44 &&
+            box.x + box.width >= 1280 - 60 &&
+            box.y <= 60 &&
+            focus.inView,
+          name,
+          box,
+          focus,
+        };
+      }),
+    );
+    results.push(
+      await attempt('settings-above-the-open-gate', async () => {
+        await button.click();
+        await settings.waitFor();
+        const top = await settings.evaluate((dialog) => {
+          const box = dialog.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          );
+          return {
+            hit: dialog.contains(hit),
+            focusInside: dialog.contains(document.activeElement),
+            modal: dialog.matches(':modal'),
+          };
+        });
+        return {
+          pass: top.hit && top.focusInside && top.modal && (await gateOpen()),
+          ...top,
+        };
+      }),
+    );
+    results.push(
+      await attempt('language-and-appearance-in-place', async () => {
+        await page.evaluate(() => {
+          window.sameDocument = true;
+        });
+        await settings.getByRole('radio', { name: 'Deutsch' }).check();
+        await page.getByRole('dialog', { name: 'Einstellungen' }).waitFor();
+        await settings.getByRole('radio', { name: 'Dunkel' }).check();
+        const after = await page.evaluate(() => {
+          const gate = document.querySelector('dialog[data-sempods-ui="gate"]');
+          const rgb = getComputedStyle(gate)
+            .backgroundColor.match(/[\d.]+/g)
+            .slice(0, 3)
+            .map(Number);
+          return {
+            sameDocument: window.sameDocument === true,
+            signIn: [...gate.querySelectorAll('button')].some(
+              (b) => b.textContent === 'Anmelden',
+            ),
+            dark: rgb.reduce((a, b) => a + b, 0) < 150,
+            rgb,
+          };
+        });
+        return {
+          pass:
+            after.sameDocument &&
+            after.signIn &&
+            after.dark &&
+            (await gateOpen()),
+          ...after,
+        };
+      }),
+    );
+    results.push(
+      await attempt('escape-closes-only-the-settings', async () => {
+        await page.keyboard.press('Escape');
+        const closed = await gone(settings);
+        const focus = await focusUntil(page, /Einstellungen/, (p) =>
+          p.evaluate(
+            () => document.activeElement?.getAttribute('aria-label') ?? '',
+          ),
+        );
+        // No activation in between: a close watcher lets a repeated close
+        // request through uncancelled; the gate shows again, focus kept.
+        await page.keyboard.press('Escape');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(100);
+        const kept = await page.evaluate(
+          () => document.activeElement?.getAttribute('aria-label') ?? '',
+        );
+        return {
+          pass:
+            closed &&
+            focus === 'Einstellungen' &&
+            kept === 'Einstellungen' &&
+            (await gateOpen()),
+          closed,
+          focus,
+          kept,
+        };
+      }),
+    );
+    results.push(
+      await attempt('phone-bottom-sheet-and-backdrop', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        const corner = await button.boundingBox();
+        await button.click();
+        await settings.waitFor();
+        const sheet = await settings.boundingBox();
+        // A press beside the sheet, on its backdrop, closes it.
+        await page.mouse.click(187, 20);
+        const closed = await gone(settings);
+        return {
+          pass:
+            corner !== null &&
+            corner.x + corner.width <= 375 &&
+            sheet !== null &&
+            Math.abs(sheet.width - 375) <= 1 &&
+            Math.abs(sheet.y + sheet.height - 812) <= 2 &&
+            closed &&
+            (await gateOpen()),
+          corner,
+          sheet,
+          closed,
+        };
+      }),
+    );
+  } finally {
+    await context.close();
+  }
+  // The gate's cause ends while its settings are open: both dialogs go and
+  // the focus target outside them gets the focus, which a still modal
+  // settings dialog would otherwise keep inert.
+  const ending = await newPage(browser);
+  try {
+    const q = ending.page;
+    results.push(
+      await attempt('cause-ends-with-settings-open', async () => {
+        await fetch(origin + '/__reset');
+        await q.goto(origin + '/?screen=gate-settings');
+        const gate = q.locator('dialog[data-sempods-ui="gate"]');
+        await gate.getByRole('button', { name: 'Settings' }).click();
+        const dialog = q.locator('dialog[data-sempods-ui="settings"]');
+        await dialog.getByRole('radio', { name: 'English' }).focus();
+        // Opening a Pod to read without a token ends the gate in place.
+        await q.evaluate(
+          (pod) => window.gateRuntime.connect(pod),
+          origin + '/alice',
+        );
+        const closed = (await gone(gate)) && (await gone(dialog));
+        const focus = await focusUntil(q, /gate-focus-target/, (p) =>
+          p.evaluate(() => document.activeElement?.id || 'BODY'),
+        );
+        return {
+          pass: closed && focus === 'gate-focus-target',
+          closed,
+          focus,
+        };
+      }),
+    );
+  } finally {
+    await ending.context.close();
+  }
+  // A remembered Pod: signed in, then signed out through management.
+  const remembered = await newPage(browser);
+  try {
+    const p = remembered.page;
+    results.push(
+      await attempt(
+        'remembered-pod-gate-and-forget-without-writes',
+        async () => {
+          await signIn(p, origin);
+          await p.getByRole('button', { name: 'Menu', exact: true }).click();
+          await p.getByRole('menuitem', { name: 'Pods & sharing' }).click();
+          // Management stays open above the gate after the sign-out.
+          const sheet = p.getByRole('dialog', { name: /Pods & sharing/ });
+          await sheet.getByRole('button', { name: 'Sign out' }).click();
+          const gate = p.locator('dialog[data-sempods-ui="gate"]');
+          await gate
+            .getByRole('button', { name: 'Sign in', exact: true })
+            .waitFor();
+          await sheet.getByRole('button', { name: 'Close' }).click();
+          await gone(sheet);
+          await gate.getByRole('button', { name: 'Settings' }).click();
+          const dialog = p.locator('dialog[data-sempods-ui="settings"]');
+          await dialog.getByRole('radio', { name: 'Deutsch' }).check();
+          await dialog.getByRole('button', { name: 'Schließen' }).click();
+          await gone(dialog);
+          await gate.getByRole('button', { name: 'Pod auswählen' }).click();
+          await gate
+            .getByText('Gespeicherte Pods verwalten', { exact: true })
+            .click();
+          const list = gate.getByRole('list', {
+            name: 'Pods auf diesem Gerät',
+          });
+          const kept = await shown(list);
+          const writes = [];
+          p.on('request', (request) => {
+            if (request.method() !== 'GET' && request.url().startsWith(origin))
+              writes.push(request.method() + ' ' + request.url());
+          });
+          await list
+            .getByRole('button', { name: 'Von diesem Gerät entfernen' })
+            .click();
+          const forgotten = await gone(list);
+          await p.waitForTimeout(200);
+          return {
+            pass: kept && forgotten && writes.length === 0,
+            kept,
+            forgotten,
+            writes,
+          };
+        },
+      ),
+    );
+  } finally {
+    await remembered.context.close();
+  }
+  results.push({
+    id: 'no-page-errors',
+    pass:
+      errors.length === 0 &&
+      ending.errors.length === 0 &&
+      remembered.errors.length === 0,
+    errors: [...errors, ...ending.errors, ...remembered.errors],
+    engine,
+  });
+  return results;
+}
+
+/**
+ * The startup screen while a saved session restores (#304): at 375px and on
+ * a desktop, light and dark, with the Pod's discovery held. It covers the
+ * viewport without controls or overflow, keeps the content inert, measures
+ * its contrast, adds its status after the delay and gives way to the app.
+ * With SEMPODS_UI_SCREENSHOTS set to a directory, each state is saved there.
+ */
+async function startup({ browser, origin, engine }) {
+  const results = [];
+  const { context, page, errors } = await newPage(browser);
+  const shots = process.env.SEMPODS_UI_SCREENSHOTS;
+  let release = () => {};
+  let held = Promise.resolve();
+  await page.route('**/.well-known/oauth-protected-resource', async (route) => {
+    await held;
+    await route.continue();
+  });
+  try {
+    await signIn(page, origin);
+    const layer = page.locator('[data-sempods-startup]');
+    for (const [width, height] of [
+      [375, 812],
+      [1280, 800],
+    ])
+      for (const scheme of ['light', 'dark']) {
+        const id = `${width}-${scheme}`;
+        held = new Promise((resolve) => (release = resolve));
+        await page.setViewportSize({ width, height });
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.goto(origin + '/');
+        await layer.waitFor();
+        results.push(
+          await attemptOn(errors, `screen-${id}`, async () => {
+            const status = layer.getByRole('status');
+            await status.filter({ hasText: 'Starting…' }).waitFor();
+            await settle(page);
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/startup-${engine}-${id}.png`,
+              });
+            const measured = await page.evaluate(() => {
+              const el = document.querySelector('[data-sempods-startup]');
+              const box = el.getBoundingClientRect();
+              const heading = el.querySelector('h1').getBoundingClientRect();
+              return {
+                covers:
+                  box.left <= 0 &&
+                  box.top <= 0 &&
+                  box.right >= innerWidth &&
+                  box.bottom >= innerHeight,
+                centred:
+                  Math.abs(heading.left + heading.width / 2 - innerWidth / 2) <=
+                  2,
+                overflow:
+                  document.scrollingElement.scrollWidth > innerWidth ||
+                  el.scrollWidth > el.clientWidth,
+                controls: el.querySelectorAll(
+                  'button, a, input, select, textarea, [tabindex]',
+                ).length,
+                inert: Boolean(
+                  document.querySelector('main')?.closest('[inert]'),
+                ),
+                gate: Boolean(
+                  document.querySelector('[data-sempods-ui="gate"]'),
+                ),
+                focusInside: el.contains(document.activeElement),
+              };
+            });
+            await page.addScriptTag({ content: contrastScript });
+            const failing = await layer.evaluate((el) =>
+              window.uiContrast(el).filter((r) => !r.pass),
+            );
+            return {
+              pass:
+                measured.covers &&
+                measured.centred &&
+                !measured.overflow &&
+                measured.controls === 0 &&
+                measured.inert &&
+                !measured.gate &&
+                !measured.focusInside &&
+                failing.length === 0,
+              measured,
+              failing,
+            };
+          }),
+        );
+        results.push(
+          await attemptOn(errors, `ends-${id}`, async () => {
+            release();
+            await loaded(page);
+            await layer.waitFor({ state: 'detached' });
+            const inert = await page.evaluate(() =>
+              Boolean(document.querySelector('main')?.closest('[inert]')),
+            );
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/started-${engine}-${id}.png`,
+              });
+            return { pass: !inert, inert };
+          }),
+        );
+      }
+  } finally {
+    release();
+  }
+  results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+  await context.close();
+  return results;
+}
+
 export const suites = {
   contexts,
+  contextQualifiers,
   gate,
   roundtrip,
   interaction,
@@ -3803,6 +4415,8 @@ export const suites = {
   insets,
   workspace,
   search,
+  accessSettings,
+  startup,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */

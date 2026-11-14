@@ -4,6 +4,8 @@ import { createAppController, createFormatters } from '@sempods/app-sdk';
 import { fields, text } from '@sempods/client-sdk/edit';
 import {
   SdkLocaleProvider,
+  AccessGate,
+  type ConnectionsProps,
   SempodsProvider,
   useSdkLocale,
   useApp,
@@ -185,3 +187,32 @@ function PodLoadTypes(runtime: BrowserRuntime) {
   return [active.state.kind, state, rows, none.data];
 }
 void PodLoadTypes;
+
+// A replacement remains an installed public API, also for a standalone gate.
+function AccessReplacement({
+  surface,
+  podAddress,
+  podNames,
+}: ConnectionsProps) {
+  const app = useApp();
+  return (
+    <button
+      data-surface={surface}
+      data-address={podAddress}
+      onClick={() => void app.connect('https://pod.example/alice')}
+    >
+      {podNames?.['https://pod.example/alice'] ?? 'Sign in'}
+    </button>
+  );
+}
+function CustomAccessTypes() {
+  return (
+    <AccessGate
+      appName="Tasks"
+      podAddress="hidden"
+      podAddressPrefix=""
+      components={{ Connections: AccessReplacement }}
+    />
+  );
+}
+void CustomAccessTypes;

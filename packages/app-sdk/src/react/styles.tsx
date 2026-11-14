@@ -1,6 +1,5 @@
 /** Internal shared baseline. Public tokens inherit from the host; no style registry.
- * Without them, the fallbacks are a calm neutral grey palette. Actions read as
- * text, as in AppAccess; the one main action of a surface is filled. A UI kit
+ * Without them, the fallbacks are a sage palette with outlined primary actions. A UI kit
  * restyles both action roles through their surface, text and border tokens. */
 export function SdkStyles() {
   return (
@@ -24,16 +23,16 @@ const surfaces =
   ':where([data-sempods-ui="access"], [data-sempods-ui="editor"], [data-sempods-ui="notice"], [data-sempods-ui="prompt"], .sp-sdk-dialog)';
 const styles = `
 :where([data-sempods-ui]) {
-  --sp-bg:var(--sempods-bg,light-dark(#fff,#111315));
-  --sp-text:var(--sempods-text,light-dark(#1f2933,#e5e7eb));
-  --sp-muted:var(--sempods-muted,light-dark(#6b7280,#9ca3af));
+  --sp-bg:var(--sempods-bg,light-dark(#f7f9f7,#131b18));
+  --sp-text:var(--sempods-text,light-dark(#26382f,#e5ede8));
+  --sp-muted:var(--sempods-muted,light-dark(#5f7167,#b0c0b6));
   --sp-line:var(--sempods-line,light-dark(#e5e7eb,#2d3138));
-  --sp-accent:var(--sempods-accent,light-dark(#1f2933,#e5e7eb));
-  --sp-on-accent:var(--sempods-on-accent,light-dark(#fff,#111315));
-  --sp-field-line:var(--sempods-field-line,var(--sp-line));
-  --sp-primary-bg:var(--sempods-primary-bg,var(--sp-accent));
-  --sp-primary-text:var(--sempods-primary-text,var(--sp-on-accent));
-  --sp-primary-border:var(--sempods-primary-border,var(--sp-primary-bg));
+  --sp-accent:var(--sempods-accent,light-dark(#3e6b56,#a2cbb4));
+  --sp-on-accent:var(--sempods-on-accent,light-dark(#f7f9f7,#131b18));
+  --sp-field-line:var(--sempods-field-line,light-dark(#7e8d83,#738b7c));
+  --sp-primary-bg:var(--sempods-primary-bg,var(--sp-bg));
+  --sp-primary-text:var(--sempods-primary-text,var(--sp-accent));
+  --sp-primary-border:var(--sempods-primary-border,var(--sp-accent));
   --sp-secondary-bg:var(--sempods-secondary-bg,transparent);
   --sp-secondary-text:var(--sempods-secondary-text,var(--sp-accent));
   --sp-secondary-border:var(--sempods-secondary-border,transparent);
@@ -63,7 +62,15 @@ ${surfaces} :where(input:not([type=checkbox]):not([type=radio]),select,textarea)
 ${surfaces} :where(p) { margin-block:12px; }
 ${surfaces} :where(dl) { display:grid; gap:12px; margin:12px 0; }
 ${surfaces} :where(dt) { color:var(--sp-muted); font-size:.875rem; }
-${surfaces} :where(dd) { margin:0; white-space:pre-wrap; }
+${surfaces} :where(dd) { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+/* Comparison values: no value and empty text read apart from text; a language tag and a conflict stay visible.
+   In the text colour: muted text falls below 4.5:1 on the tinted in-place card. */
+${surfaces} :where(dd) :where(dl) { margin:4px 0 0; padding-inline-start:12px; border-inline-start:1px solid var(--sp-line); gap:8px; }
+${surfaces} :where(dd) :where(ul) { margin:4px 0 0; padding-inline-start:20px; white-space:normal; }
+${surfaces} :where(dd) :where(li) { white-space:pre-wrap; }
+${surfaces} :where(.sp-sdk-none) { font-style:italic; }
+${surfaces} :where(.sp-sdk-tag) { font-size:.875rem; }
+${surfaces} :where(.sp-sdk-conflict) { display:block; font-weight:600; }
 ${surfaces} :where(details) { color:var(--sp-muted); font-size:.875rem; margin-block:12px; }
 ${surfaces} :where(summary) { min-height:44px; padding-block:10px; cursor:pointer; }
 /* Explicit, so a reset such as Tailwind's preflight (margin:0) keeps modals centred. */

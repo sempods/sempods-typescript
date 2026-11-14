@@ -67,7 +67,10 @@ screen and access-management controls, follow the complete
 `AppAccess` provides login, context choice and recovery without a mandatory app
 frame: a sign-in gate above the content while the app cannot work, the Context
 choice, and dismissible prompts for the rest. It hides when access is usable,
-including read-only access; apps can also place these parts themselves. The app owns
+including read-only access; apps can also place these parts themselves. Sign-in
+centres the app identity above one editable Pod chooser and one outlined main
+action, with device-local saved-address management inside the dropdown. Theme tokens, provider messages and
+`components.Connections` customize it without replacing session behavior. The app owns
 its layout and a **Pods & sharing** button that opens management (`open`). The
 [API table](https://github.com/sempods/sempods-typescript/blob/v0.8.0/docs/react-authoring.md#api-at-a-glance)
 maps each screen task (lists, creation, row updates, editors, notices) to its
@@ -129,6 +132,8 @@ still need fresh readable evidence. `useWorkflowAccess` remains Context-only.
 for example one read per connection, each with its own state and retry.
 With many readers at once, the runtime option `podReadLimit: { perPod, total }`
 bounds the requests in flight; further reads wait without spending their retry.
+`usePodLoad`'s `priority: 'current'` moves the selected resource's waiting
+read ahead in place, without restarting a running one.
 
 An app that switches Contexts in its own UI, such as a list switch, uses
 `useContexts()`: readable Contexts with names and access, a guarded `select`,
@@ -172,7 +177,7 @@ examples installed with the SDK. The same entry is
 
 Use Node 24.15 or newer for tooling. The runtime needs browser IndexedDB and Web
 Locks; plain consumers need neither React nor its types. React consumers install
-React 19 themselves. Automated browser checks run in Chromium. Installed PWAs
+React 19 and React DOM 19 themselves. Automated browser checks run in Chromium. Installed PWAs
 are experimental; iOS/iPadOS home-screen login is unverified. See
 [supported environments](https://github.com/sempods/sempods-typescript/blob/v0.8.0/README.md#supported-environments)
 and [development evidence](https://github.com/sempods/sempods-typescript/blob/v0.8.0/docs/development.md).

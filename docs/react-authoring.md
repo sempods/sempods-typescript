@@ -164,6 +164,8 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Bind the UI](#runtime-and-provider)                                    | `SempodsProvider`, `TargetScreen` (React)                                  | The runtime; your screen inside `TargetScreen`                               |
 | [Sign-in, Context choice, recovery](#appaccess-props)                   | `AppAccess` (React)                                                        | `appName`; a host button sets `open`                                         |
 | [Place access prompts yourself](#access-prompts-and-your-own-placement) | `AccessGate`, `ContextAccess`, `AccessPrompts`, `useAccessPrompts` (React) | `AppAccess only="management"` for management                                 |
+| [Startup screen and splash](#startup-screen-and-static-splash)          | `AppStartup`, `useAppState().starting` (React)                             | `appName`, `icon`; match the static HTML splash to it                        |
+| [App settings before sign-in](#app-settings-before-sign-in)             | `AppAccess`, `AccessGate` (React)                                          | `settings={{ label, content }}` with the app's own controls                  |
 | [Describe your data](#field-definitions)                                | `fields`, `text`, `flag`, `iri`, `dateTime`, `date` (edit)                 | Type and predicate IRIs, explicit text language, `trim: true` for text       |
 | [Show a list](#lists-uselist-and-loadnotice)                            | `useList`, `LoadNotice` (React)                                            | The definition; render `list.data?.items` and `<LoadNotice {...list} />`     |
 | [Add an item](#creating-usecreation)                                    | `useCreation` (React)                                                      | `{ initial, collection }`; inputs to `canEdit`, submit to `canCreate`        |
@@ -202,7 +204,8 @@ of trimming before `create()`.
 - `text()` edits one fixed language. To show and edit whichever variant the app
   prefers, define the custom mapping once at module level with the
   [preferred-language recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant)
-  and use it with `useResourceEditor`.
+  and use it with `useResourceEditor`. `ResourceEditor` compares the variants
+  with their language and conflicts after a conflicting or unconfirmed write.
 
 ### Lists: useList and LoadNotice
 
@@ -507,6 +510,12 @@ change is optimistic; an unconfirmed write stays visible and is never replayed.
   absence; acknowledgement is explicit and enabled only by a successful check.
   A present resource the definition cannot read sets `unreadable`. Pass
   `labels={{ title: 'Task' }}` to name fields; values are localized.
+- The comparison shows structured draft values as they are, in `UpdateNotice`
+  and in `ResourceEditor`'s review alike: a `TextVariant` with its language
+  tag, and a conflict (several values in one language) as the list of all of
+  them. No value (a missing field, `null`, an empty list) reads differently
+  from empty text, and lists and nested objects show their parts. Keep such
+  values in the draft as read; do not flatten them for the comparison.
 - `checked` decides the acknowledgement button; pass it through to a custom
   recovery UI (without it, a caller keeps the state set by its `onCheck`).
 - Lost read access clears comparison values, `checked`, `outcome.current` and
@@ -566,7 +575,7 @@ example `remove`). SDK texts and formats: [messages and language](#messages-and-
 
 ```tsx
 const lists = useContexts();
-// lists.contexts: [{ iri, name, label, writable }] of the readable Contexts
+// lists.contexts: [{ iri, name, label, contextLabel, qualifier?, writable }]
 // lists.selected: the selected one or null
 // lists.select(iri): guarded; resolves false when refused or not selectable
 // lists.loading / lists.failed / lists.retry(): catalogue state
@@ -577,7 +586,10 @@ const lists = useContexts();
 - Mount it outside `TargetScreen`, so it can select before a view exists. It
   loads the catalogue in both modes, reads up to 20 labels once and keeps known
   Contexts during a reload. Equal names add the short name ("Tasks · work"),
-  then the IRI.
+  then the IRI. For display, `contextLabel` is the label (or readable last
+  segment) alone and `qualifier` is set only where that would repeat within
+  the Pod: the short name, then the path below the Pod, then the IRI.
+  `label` joins both (`Tasks · work`) and is unique within the Pod.
 - Without a remembered or preset Context it selects the first writable, else
   the first readable; an exact preset keeps only its Context.
 - `select` and `share()` (the Pod's consent page) run under the leave policy.
@@ -606,9 +618,14 @@ import { ContextSwitch } from '@sempods/app-ui';
 ```
 
 For a custom presentation, `usePodContexts({ podNames })` supplies the facts.
-`pod.label` is the configured name or a host/path fallback without a terminal
-slash. `choice.label` is disambiguated **within** its Pod, without adding that
-Pod. A standalone trigger combines `choice.label` with `choice.podLabel`.
+`pod.label` is the configured name as given, else the host and decoded path
+without scheme and terminal slash; where that fallback would equal another
+Pod's label, it is the exact address. In a Pod section, show
+`choice.contextLabel` and, when present, `choice.qualifier` more quietly;
+equal names on different Pods get no qualifier, since their sections differ.
+`choice.label` joins both and is unique within its Pod, without adding that
+Pod. A standalone trigger shows the Context above `choice.podLabel`, and its
+accessible name keeps both (`List: Tasks · work · Privat`).
 `pod.podUrl`, `choice.podUrl` and `choice.contextIri` retain exact identities
 for details; no app should strip suffixes from `name` or construct targets
 from labels. A supplied name ending in `/` is not an address to normalize.
@@ -949,8 +966,11 @@ function Source(props: {
 - Many sources at once, such as hundreds of graph nodes across Pods: set
   `podReadLimit` on the runtime instead of queueing reads in the app. Reads
   beyond the limit wait in `loading`, and a grant change while they wait
-  spends no retry. Pass `{ signal, priority: 'current' }` for what the person
-  looks at now ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
+  spends no retry. For what the person looks at now, such as the selected
+  node, pass `priority: selected ? 'current' : undefined` to `usePodLoad`: a
+  change moves a waiting read ahead in place and never restarts a running
+  one, unlike a new `key`
+  ([bounded Pod reads](browser-runtime.md#bounded-pod-reads)).
   [Resource cards](resource-cards.md) is a complete recipe for this: cards
   with pictures from every reading connection.
 
@@ -992,40 +1012,48 @@ not a failure. A `ready` source with no hits is a successful empty answer.
 
 ### AppAccess props
 
-| Prop                     | Type                              | Effect                                                                                                                              |
-| ------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `appName`                | `string` (required)               | The app's name on sign-in and recovery                                                                                              |
-| `icon`                   | `ReactNode`                       | Decorative app icon, usually `<img src="/icon.png" alt="" />`                                                                       |
-| `description`            | `ReactNode`                       | One line under the name on sign-in only; never sent to the Pod, not a consent purpose or scope                                      |
-| `podNames`               | `Record<string, string>`          | Exact canonical Pod URL → display name; the address stays visible, duplicates are disambiguated                                     |
-| `podAddress`             | `'visible'` \| `'hidden'`         | `'hidden'` omits the address at sign-in while exactly one Pod is permitted; see [sign-in](#sign-in-and-pod-addresses)               |
-| `open`                   | `boolean`                         | Host-owned **Pods & sharing** management; never starts a login, demands discovery in on-demand mode                                 |
-| `onClose`                | `() => void`                      | Management as a modal dialog; Escape, **Close** and a click beside it call this to reset `open`. Without it, management is in place |
-| `only`                   | `'management'`                    | Renders management alone (while `open`), for an app that places the gate, Context surface and prompts itself                        |
-| `focusTarget`            | `RefObject<HTMLElement \| null>`  | Focus returns here when the focused surface hides after its guarded transition (not for visible retry or error feedback)            |
-| `mode`                   | `'single'` \| `'multiple'`        | `'single'` hides adding another Pod once one is selected; presentation only, enforce with runtime `allowedPods`                     |
-| `headingLevel`           | `1` \| `2`                        | Default: `h1` for first sign-in, `h2` for recovery and management. Use `2` under a host title                                       |
-| `components.Connections` | `ComponentType<ConnectionsProps>` | Replaces the connection view; see [replacing it](#replacing-the-connection-view)                                                    |
-| `className`, `style`     | `string`, `CSSProperties`         | Styling of the gate and the Context surface, for example `--sempods-*` tokens, which also cover the gate's whole layer              |
+| Prop                     | Type                              | Effect                                                                                                                                 |
+| ------------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `appName`                | `string` (required)               | The app's name on sign-in and recovery                                                                                                 |
+| `icon`                   | `ReactNode`                       | Decorative app icon, usually `<img src="/icon.png" alt="" />`                                                                          |
+| `description`            | `ReactNode`                       | One line under the name on sign-in only; never sent to the Pod, not a consent purpose or scope                                         |
+| `podNames`               | `Record<string, string>`          | Exact canonical Pod URL → display name; the address stays visible, duplicates are disambiguated                                        |
+| `podAddress`             | `'visible'` \| `'hidden'`         | `'hidden'` omits the address at sign-in while exactly one Pod is permitted; see [sign-in](#sign-in-and-pod-addresses)                  |
+| `podAddressPrefix`       | `string`                          | Initial editable address, default `https://sempods.org/`; empty disables it. Never changes permitted Pods or a configured target.      |
+| `open`                   | `boolean`                         | Host-owned **Pods & sharing** management; never starts a login, demands discovery in on-demand mode                                    |
+| `onClose`                | `() => void`                      | Management as a modal dialog; Escape, **Close** and a click beside it call this to reset `open`. Without it, management is in place    |
+| `only`                   | `'management'`                    | Renders management alone (while `open`), for an app that places the gate, Context surface and prompts itself                           |
+| `focusTarget`            | `RefObject<HTMLElement \| null>`  | Focus returns here when the focused surface hides after its guarded transition (not for visible retry or error feedback)               |
+| `settings`               | `{ label, content, icon? }`       | The app's own settings while the gate blocks, in a dialog above it; see [settings before sign-in](#app-settings-before-sign-in)        |
+| `startup`                | `'screen'` \| `'none'`            | `'screen'` (default) shows the [startup screen](#startup-screen-and-static-splash) while the app starts; `'none'` leaves it to the app |
+| `mode`                   | `'single'` \| `'multiple'`        | `'single'` hides adding another Pod once one is selected; presentation only, enforce with runtime `allowedPods`                        |
+| `headingLevel`           | `1` \| `2`                        | Default: `h1` for first sign-in, `h2` for recovery and management. Use `2` under a host title                                          |
+| `components.Connections` | `ComponentType<ConnectionsProps>` | Replaces the connection view; see [replacing it](#replacing-the-connection-view)                                                       |
+| `className`, `style`     | `string`, `CSSProperties`         | Styling of the gate and the Context surface, for example `--sempods-*` tokens, which also cover the gate's whole layer                 |
 
 ### What AppAccess shows
 
-`AppAccess` is `AccessGate` + `ContextAccess` + `AccessPrompts` + management.
-It follows `useAppState().access` ([access prompts](#access-prompts-and-your-own-placement)):
+`AppAccess` combines `AppStartup`, `AccessGate`, `ContextAccess`,
+`AccessPrompts` and management. It follows `useAppState().starting` and
+`useAppState().access` ([access prompts](#access-prompts-and-your-own-placement)):
 
-- **While startup settles or the active connection restores:** nothing. The app shows
-  its content or a skeleton; no sign-in screen flashes and no loading panel
-  shifts the layout.
+- **While the app starts** (`starting`: records, restoration and the first
+  catalogue a Context needs): the [startup screen](#startup-screen-and-static-splash)
+  with the app's name and `icon`, above the content, which stays mounted and
+  inert. No sign-in screen, Pod chooser or loading card appears, and prompts
+  wait until it ends. With `startup="none"` nothing shows instead; the app
+  draws its own skeleton.
 - **The gate**, while the app cannot work (`access.blocking`): a full-viewport
   modal layer with the app's name, `icon` and `description`. The content stays
   mounted and inert behind it, and Escape does not close it. Without a
   connection, after a sign-out or an ended session and with missing required
-  scopes it is the sign-in view: remembered Pods with **Sign in** and
-  **Forget**, the Pod selector, and without a connection the address input
+  scopes it is the sign-in view: one Pod choice and one main action,
+  in one editable chooser, with saved-address management in its dropdown
   (see [sign-in](#sign-in-and-pod-addresses)); a failed or cancelled callback
   names its cause there. A startup failure or a second tab offer **Reload**,
   unavailable session storage only explains; a sign-out or forget that could
-  not be saved offers **Try again** and never a sign-in.
+  not be saved offers **Try again** and never a sign-in. With `settings`, a
+  corner button opens the app's own settings above it, for every reason.
 - **The Context surface**, while the active connection is usable and a flow
   needs a Context: the first catalogue load, the **Data context** chooser, an
   empty or unreadable catalogue, a failed one with **Check access**, an
@@ -1091,6 +1119,114 @@ function AppContent() {
   shared or public; changing them is the Pod's consent behind **Change
   sharing**. It sends one catalogue request and no extra label reads.
 
+### Startup screen and static splash
+
+An app with a saved session starts in stages; `useAppState().starting`
+(headless: `createAppController(…).getSnapshot().starting`) is true until the
+first usable screen, then stays false:
+
+| Stage                  | What happens                                                                                                                                                           | `starting` |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Before JavaScript runs | The browser shows the static HTML splash                                                                                                                               | –          |
+| Records                | Saved sessions are read; `startup` is unset                                                                                                                            | true       |
+| Restoring              | Each saved Pod restores on its own (discovery, a due credential's renewal); the active one is chosen as for [several Pods](browser-runtime.md#several-pods-at-startup) | true       |
+| Active                 | The active Pod reads; on demand without a selection demand, this is the first screen                                                                                   | true       |
+| First catalogue        | Under `required`, or for a `TargetScreen` on demand: the catalogue confirms the remembered Context                                                                     | true       |
+| First screen           | Content, a Context chooser, a catalogue failure, the gate or a prompt                                                                                                  | false      |
+
+Startup never waits for other Pods' discovery, no Context screen starts
+before startup settles, and an unreachable Pod still ends `restorable` after
+15 seconds and shows its prompt, which ends `starting`. A later restoration,
+Pod switch or Context demand keeps its own states.
+
+`AppStartup` (placed by `AppAccess`) shows the app's `icon` (56px) and
+`appName` (1.75rem, weight 500) centred on `--sempods-bg`, like the sign-in
+screen's header. After 350 ms it adds a progress indicator and
+`controls.starting` in a polite status, so a fast start shows no progress
+and announces nothing. It has no controls and never takes focus; the content
+behind it stays mounted and inert. One shows per provider. For an app that
+composes the access parts itself, place `<AppStartup appName="…" icon={…} />`
+beside them.
+
+Match the static splash in `index.html` to it, so the hand-over is invisible:
+
+```html
+<div id="splash" aria-hidden="true">
+  <img src="/icon.png" alt="" width="56" height="56" />
+  <p>My tasks</p>
+</div>
+<style>
+  #splash {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 20px;
+    background: var(--sempods-bg, light-dark(#fff, #111315));
+    color: var(--sempods-text, light-dark(#1f2933, #e5e7eb));
+    font: 500 1.75rem/1.25 var(--sempods-font, system-ui, sans-serif);
+    color-scheme: light dark;
+  }
+  #splash p {
+    margin: 0 0 calc(28px + 1.3125rem);
+  }
+</style>
+```
+
+Put the splash inside the element React renders into, so the first render
+replaces it with the startup screen in the same frame. The bottom margin
+keeps the name where `AppStartup` places it, above its status line.
+
+### App settings before sign-in
+
+People may need to change the app's language or appearance before they can
+read the sign-in screen. The gate is a native modal layer: a header button
+behind it is inert, and an app dialog that renders into `document.body` (as
+the UI kit's `Dialog` does) stays below it. Give the gate the app's settings
+instead:
+
+```tsx
+// SettingChoices, LanguageSetting and texts are the app's own.
+function Access({ language, setLanguage }: LanguageSetting) {
+  const t = useMessages(texts);
+  return (
+    <AppAccess
+      appName="My tasks"
+      settings={{
+        label: t.settings,
+        // The same controls as the app's own Settings dialog after sign-in.
+        content: (
+          <SettingChoices language={language} setLanguage={setLanguage} />
+        ),
+      }}
+    />
+  );
+}
+```
+
+- `AccessGate` takes the same prop; `ContextAccess` and management do not
+  show it. The app keeps its own settings entry for the signed-in screen.
+- The gate shows a 44px button in its top inline-end corner, named and titled
+  by `label` (a gear unless `icon` is given). The gate still opens on its
+  sign-in view; the button comes first in the Tab order.
+- The button opens `content` in a modal dialog with `label` as its title and
+  **Close**, above the gate: a bottom sheet up to 30rem wide, centred above.
+  **Close**, Escape and a click beside it close only this dialog and return
+  focus to the button. The gate stays open throughout, so the content behind
+  it stays covered and mounted, drafts included.
+- Apply each choice at once; closing saves nothing. When the gate's cause
+  ends while the dialog is open, both go and focus follows `focusTarget`.
+- Change the language through the provider's `language`/`locale`: the gate
+  and the dialog re-render in place, and the runtime is not created or
+  initialized again. Do not key the provider or the runtime on the language.
+- Use controls that render in place, such as radio groups, toggles and
+  switches. A popover, menu, select or dialog that renders into
+  `document.body` is inert below the gate. Plain controls get the SDK's
+  defaults; the app's own classes take precedence.
+- Only device-local presentation choices belong here. The gate grants no
+  session or write access: no data or account actions.
+
 ### Access prompts and your own placement
 
 The controller derives **access prompts** from runtime facts
@@ -1124,6 +1260,7 @@ import {
   AccessGate,
   AccessPrompt,
   AppAccess,
+  AppStartup,
   ContextAccess,
   useAccessPrompts,
 } from '@sempods/app-sdk/react';
@@ -1132,6 +1269,7 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { prompts } = useAccessPrompts();
   return (
     <>
+      <AppStartup appName="My tasks" />
       <AccessGate appName="My tasks" />
       <ContextAccess appName="My tasks" />
       {/* Or <AccessPrompts /> for the default stack. */}
@@ -1173,20 +1311,43 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 ### Sign-in and Pod addresses
 
-- One `allowedPods` entry or a preset needs no URL input; several get a finite
-  picker (choosing does not sign in); unrestricted apps show a **Pod address**
-  field. With a connection, adding another Pod is secondary.
+- The centred sign-in shows the app icon, name, optional one-line description,
+  one **Pod address** field and one outlined main action. With saved Pods, the
+  field also opens their list; a display name is accompanied by its address.
+  Type to filter the list or enter another address. Arrow keys move through
+  choices, Enter chooses, and Escape closes the list. Choosing never switches
+  the active connection, navigates or discards a draft until the main action.
+- On a first unrestricted visit the field starts at `https://sempods.org/`.
+  Complete the Pod name, edit the whole address or clear it with the adjacent
+  button. The prefix alone cannot be submitted. Set `podAddressPrefix` to
+  another prefix or `""` for an empty field. A configured target takes precedence;
+  this is a typing convenience, not an `allowedPods` restriction or a connection.
+- A preset pre-fills the field. With `allowedPods`, the chooser is read-only
+  and contains only permitted Pods. `mode="single"` keeps its existing limit.
+  A working session offers **Open**, missing scopes **Change sharing**, and an
+  unreachable retained session **Try again**.
+- **Manage saved Pods**, inside the dropdown, separates removal from sign-in.
+  **Remove from this device** deletes the address and local session record,
+  never Pod data. Errors and guarded leave decisions stay with the SDK.
 - Input may omit `https://`; surrounding whitespace and one trailing slash are
   removed, other noncanonical input is rejected. Configured URLs must be
   canonical. Enter `http://127.0.0.1:…` explicitly for local HTTP.
-- `controls.podHint` and `controls.loginHint` are empty by default.
+- The small help button reveals `controls.podHint` and `controls.loginHint`;
+  neither is shown by default. Override either through provider messages; an
+  empty string omits it. All control labels follow the provider's language,
+  including `controls.podHelp` and `controls.clearPodAddress`. The provider uses
+  browser preferences unless the app supplies `language` or `locale`; EN/DE are
+  built in, unsupported UI languages fall back to English. Localize `appName`
+  and `description` in the app with the same provider. Language changes keep
+  the field and connection state in place.
 - No silent auth or automatic redirect; login and consent use the Pod's UI.
 - `podAddress="hidden"` works only while exactly one Pod is permitted, also
   when signing in again. A `podNames` name remains; without one no Pod line
   shows and duplicate saved connections are numbered. With several or
   unrestricted Pods (including a preset without `allowedPods`) the address
   stays, as does management's and **Full addresses**. A custom
-  `components.Connections` does not receive it; CSS on SDK markup is no stable
+  `components.Connections` receives this presentation preference; a replacement
+  must enforce the same single-permitted-Pod rule. CSS on SDK markup is no stable
   way to hide it.
 
 ### One known Pod
@@ -1290,7 +1451,7 @@ appearance in the app's CSS and keep page colours compatible (`light-dark()`):
 ```
 
 Theme with `--sempods-bg`, `--sempods-text`, `--sempods-muted`, `--sempods-line`,
-`--sempods-accent` (controls; the default is neutral grey) and
+`--sempods-accent` (controls; the default is muted sage) and
 `--sempods-on-accent`, on an ancestor or a component's `style`/`className`.
 `--sempods-font` sets the font family (default `system-ui, sans-serif`) and
 `--sempods-radius` the corner radius of controls (default `8px`); cards and
@@ -1302,16 +1463,16 @@ until you set one. The SDK has two action roles, the one main action of a
 surface (Save, Confirm, Sign in) and its other actions (Cancel, Discard, text
 buttons), and each role has the same three parts:
 
-| Token                        | Styles                                              | Default                |
-| ---------------------------- | --------------------------------------------------- | ---------------------- |
-| `--sempods-field-line`       | Borders of fields; keep it at 3:1 to the background | `--sempods-line`       |
-| `--sempods-primary-bg`       | Surface of the main action                          | `--sempods-accent`     |
-| `--sempods-primary-text`     | Text of the main action                             | `--sempods-on-accent`  |
-| `--sempods-primary-border`   | Border of the main action (2px)                     | `--sempods-primary-bg` |
-| `--sempods-secondary-bg`     | Surface of the other actions                        | `transparent`          |
-| `--sempods-secondary-text`   | Text of the other actions                           | `--sempods-accent`     |
-| `--sempods-secondary-border` | Border of the other actions (1px)                   | `transparent`          |
-| `--sempods-focus`            | Focus outline of SDK controls                       | `--sempods-accent`     |
+| Token                        | Styles                                              | Default                             |
+| ---------------------------- | --------------------------------------------------- | ----------------------------------- |
+| `--sempods-field-line`       | Borders of fields; keep it at 3:1 to the background | Sage grey, separate from separators |
+| `--sempods-primary-bg`       | Surface of the main action                          | `--sempods-bg`                      |
+| `--sempods-primary-text`     | Text of the main action                             | `--sempods-accent`                  |
+| `--sempods-primary-border`   | Border of the main action                           | `--sempods-accent`                  |
+| `--sempods-secondary-bg`     | Surface of the other actions                        | `transparent`                       |
+| `--sempods-secondary-text`   | Text of the other actions                           | `--sempods-accent`                  |
+| `--sempods-secondary-border` | Border of the other actions (1px)                   | `transparent`                       |
+| `--sempods-focus`            | Focus outline of SDK controls                       | `--sempods-accent`                  |
 
 When a role changes, check its three parts together and keep its text at 4.5:1
 to its surface, or to the page where the surface is transparent. States follow from
@@ -1319,9 +1480,8 @@ the parts: hover mixes 12% of the text into the main action's surface and 8%
 into the other actions' surface (in `oklch`), disabled actions are dimmed, and
 focus draws `--sempods-focus`. The borders stay inside the 44px target.
 
-Until you set `--sempods-field-line`, fields share the separator colour
-`--sempods-line`; set it when a quiet separator would leave field borders
-below 3:1 against the background.
+The default field border is stronger than the separator. When changing the
+background, set `--sempods-field-line` with at least 3:1 contrast.
 
 On Tailwind CSS 4, [@sempods/app-ui](../packages/app-ui/README.md) sets all of
 these tokens from one palette and adds shadcn/ui components that work inside
@@ -1369,9 +1529,12 @@ does not move them off centre.
 
 ### Replacing the connection view
 
-`components={{ Connections: MyPicker }}` replaces the connection view and keeps
-startup and callback presentation. It receives `ConnectionsProps` (`mode`,
-`podNames`) and uses `useConnections`, `useAppState` and guarded `useApp()`
+`components={{ Connections: MyPicker }}` replaces the connection view in the
+sign-in gate, Context surface and management while keeping startup and callback
+presentation. Standalone `AccessGate` accepts the same replacement. It receives
+`ConnectionsProps` (`mode`, `podNames`, `podAddress`, `podAddressPrefix` and
+`surface`, which is
+`sign-in`, `context` or `management`) and uses `useConnections`, `useAppState` and guarded `useApp()`
 actions, never raw runtime selection. The **Pods & sharing** button opens it;
 access loss and toggling keep mounted content and drafts.
 
@@ -1420,10 +1583,16 @@ from the guarded `useApp()` actions.
   global actions (adding a Pod, choosing another one) and other connections'
   actions enabled. On the restoring connection, show its status and offer no
   sign-in; adding its own Pod address counts as that sign-in. Its sign-out and
-  **Forget** stay available and win over the restoration. While the active
-  connection restores, `access.pending` is true: show content or a skeleton. A
-  saved session whose Pod does not answer within 15 seconds ends `restorable`
-  with the prompt `unreachable`: offer `retryRestore(id)`. A resumed
+  **Forget** stay available and win over the restoration. While the app
+  starts, `starting` is true: show a startup screen or a skeleton (see the
+  [startup sequence](#startup-screen-and-static-splash)); while the active
+  connection restores later, `access.pending` is true. A
+  saved session whose Pod does not answer its discovery within 15 seconds ends
+  `restorable` with the prompt `unreachable`: offer `retryRestore(id)`. A due
+  credential is renewed while it restores, which can take up to 20 seconds
+  more. With several Pods, a working one takes over from an active one that
+  cannot work, or that still restores after 5 seconds
+  ([several Pods at startup](browser-runtime.md#several-pods-at-startup)). A resumed
   re-authorization that times out ends without `restorable` and asks for a new
   sign-in.
 - Read `useAppState().access` for what needs attention, or compose the

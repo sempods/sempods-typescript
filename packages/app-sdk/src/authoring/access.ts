@@ -56,9 +56,10 @@ export interface AccessPrompt {
 /** What `AppSnapshot.access` reports. */
 export interface AccessState {
   /**
-   * Startup has not settled, or the active connection is restoring or leaving
-   * for a sign-in. No prompt is derived; show content or a skeleton, never a
-   * sign-in screen.
+   * Startup has not settled, the active connection is restoring or leaving
+   * for a sign-in, or, with several Pods, the startup choice still waits for
+   * another one to take over from an active connection that cannot work. No
+   * prompt is derived; show content or a skeleton, never a sign-in screen.
    */
   readonly pending: boolean;
   /**
@@ -79,6 +80,11 @@ interface Facts {
   readonly callbackNotice: boolean;
   readonly connections: readonly Connection[];
   readonly activeId: string | null;
+  /**
+   * The startup choice waits for another Pod (#305): the active one cannot
+   * work and another may still take over. Nothing is derived meanwhile.
+   */
+  readonly choosing?: boolean;
 }
 interface Cause {
   readonly key: string;
@@ -210,6 +216,7 @@ export function createAccessTracker() {
     const active = f.connections.find((c) => c.id === f.activeId);
     if (
       !settled ||
+      f.choosing ||
       active?.session.kind === 'restoring' ||
       active?.session.kind === 'leaving'
     )

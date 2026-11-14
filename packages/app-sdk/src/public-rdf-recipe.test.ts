@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-/** The public RDF lookup recipe (#234), with its real parsers. */
+/** The public RDF lookup recipe (#234, #284), with its real parsers. */
 import { describe, expect, it, vi } from 'vitest';
 import { createLocale } from '@sempods/app-sdk';
 import type { SparqlTerm } from '@sempods/client-sdk';
 import {
   lookupPublicRdf,
+  lookupPublicRdfDataset,
   PUBLIC_RDF_ACCEPT,
   publicAddress,
+  type PublicQuad,
   type PublicRdfOptions,
   type PublicStatement,
 } from '../../../examples/todo/recipes/public-rdf.js';
@@ -471,7 +473,7 @@ describe('public RDF lookup: parsed statements', () => {
     expect(statements[5]!.object).toEqual(statements[6]!.subject);
   });
 
-  it('resolves relative Turtle IRIs against the source and parses TriG', async () => {
+  it('resolves relative Turtle IRIs against the source', async () => {
     const turtle = await loaded(
       `@prefix s: <${SCHEMA}> .\n<> s:name "Berlin"@de ; s:containedIn <../Germany> .`,
       'TEXT/Turtle',
@@ -486,20 +488,6 @@ describe('public RDF lookup: parsed statements', () => {
         subject: iri(IRI),
         predicate: iri(`${SCHEMA}containedIn`),
         object: iri('https://data.example.org/Germany'),
-      },
-    ]);
-
-    const trig = await loaded(
-      `<https://ex.org/g> { <${IRI}> <${SCHEMA}name> "Berlin" . }\n` +
-        `<https://ex.org/h> { <${IRI}> <${SCHEMA}name> "Berlin" . }`,
-      'application/trig',
-    );
-    // Graph names are dropped; the same triple in two graphs is kept once.
-    expect(trig).toEqual([
-      {
-        subject: iri(IRI),
-        predicate: iri(`${SCHEMA}name`),
-        object: { type: 'literal', value: 'Berlin' },
       },
     ]);
   });
@@ -736,24 +724,6 @@ describe('public RDF lookup: parsed statements', () => {
     expect(statements).toHaveLength(2);
   });
 
-  it('merges the statements of JSON-LD named graphs', async () => {
-    const statements = await loaded(
-      JSON.stringify({
-        '@id': 'https://data.example.org/graph',
-        '@graph': [{ '@id': IRI, [RDFS_LABEL]: 'Berlin' }],
-      }),
-      'application/ld+json',
-    );
-
-    expect(statements).toEqual([
-      {
-        subject: iri(IRI),
-        predicate: iri(RDFS_LABEL),
-        object: { type: 'literal', value: 'Berlin' },
-      },
-    ]);
-  });
-
   it('never fetches a remote JSON-LD context; bundled contexts resolve by exact URL', async () => {
     const document = JSON.stringify({
       '@context': 'https://schema.org',
@@ -950,6 +920,240 @@ describe('public RDF lookup: parsed statements', () => {
     expect(population).toMatchObject({
       text: '3850809',
       exact: `"3850809"^^<${XSD}integer>`,
+    });
+  });
+});
+
+const DCT_SOURCE = 'http://purl.org/dc/terms/source';
+const ARCHIVE = 'https://archive.example.org/2024';
+const NAMED = 'https://data.example.org/graph';
+const LABEL_DE = `"Berlin"@de`;
+const POPULATION = `"3850809"^^<${XSD}integer>`;
+
+/**
+ * One dataset in three syntaxes: the same label in the default graph, in the
+ * named graph and in a blank graph that the default graph describes. TriG and
+ * N-Quads also repeat one quad.
+ */
+const DATASETS: readonly (readonly [string, string])[] = [
+  [
+    'application/trig',
+    [
+      `<${IRI}> <${RDFS_LABEL}> ${LABEL_DE} .`,
+      `_:g <${DCT_SOURCE}> <${ARCHIVE}> .`,
+      `<${NAMED}> { <${IRI}> <${RDFS_LABEL}> ${LABEL_DE} . }`,
+      `_:g { <${IRI}> <${RDFS_LABEL}> ${LABEL_DE} ; <${SCHEMA}population> ${POPULATION} . }`,
+      `<${NAMED}> { <${IRI}> <${RDFS_LABEL}> ${LABEL_DE} . }`,
+    ].join('\n'),
+  ],
+  [
+    'application/n-quads',
+    [
+      `<${IRI}> <${RDFS_LABEL}> ${LABEL_DE} .`,
+      `_:g <${DCT_SOURCE}> <${ARCHIVE}> .`,
+      `<${IRI}> <${RDFS_LABEL}> ${LABEL_DE} <${NAMED}> .`,
+      `<${IRI}> <${RDFS_LABEL}> ${LABEL_DE} _:g .`,
+      `<${IRI}> <${SCHEMA}population> ${POPULATION} _:g .`,
+      `<${IRI}> <${RDFS_LABEL}> ${LABEL_DE} <${NAMED}> .`,
+    ].join('\n'),
+  ],
+  [
+    'application/ld+json',
+    JSON.stringify({
+      '@graph': [
+        { '@id': IRI, [RDFS_LABEL]: { '@value': 'Berlin', '@language': 'de' } },
+        {
+          '@id': '_:g',
+          [DCT_SOURCE]: { '@id': ARCHIVE },
+          '@graph': [
+            {
+              '@id': IRI,
+              [RDFS_LABEL]: { '@value': 'Berlin', '@language': 'de' },
+              [`${SCHEMA}population`]: {
+                '@value': '3850809',
+                '@type': `${XSD}integer`,
+              },
+            },
+          ],
+        },
+        {
+          '@id': NAMED,
+          '@graph': [
+            {
+              '@id': IRI,
+              [RDFS_LABEL]: { '@value': 'Berlin', '@language': 'de' },
+            },
+          ],
+        },
+      ],
+    }),
+  ],
+];
+
+async function dataset(
+  body: string,
+  contentType: string,
+): Promise<readonly PublicQuad[]> {
+  const result = await lookupPublicRdfDataset(IRI, {
+    fetch: serve(answer(body, contentType)),
+  });
+  if (result.kind !== 'loaded') throw new Error(JSON.stringify(result));
+  return result.quads;
+}
+
+/** The one blank node that names a graph of `quads`. */
+function blankGraph(quads: readonly PublicQuad[]): SparqlTerm {
+  const names = new Set(
+    quads.flatMap(({ graph }) => (graph.type === 'blank' ? [graph.value] : [])),
+  );
+  expect(names.size).toBe(1);
+  return { type: 'blank', value: [...names][0]! };
+}
+
+describe('public RDF dataset lookup', () => {
+  it.each(DATASETS)(
+    'keeps each graph of %s, with exact terms and one blank graph node',
+    async (contentType, body) => {
+      const quads = await dataset(body, contentType);
+
+      // The blank graph name and the subject that describes it are one node.
+      const blank = blankGraph(quads);
+      const label: PublicStatement = {
+        subject: iri(IRI),
+        predicate: iri(RDFS_LABEL),
+        object: { type: 'literal', value: 'Berlin', language: 'de' },
+      };
+      const expected: PublicQuad[] = [
+        { ...label, graph: { type: 'default' } },
+        {
+          subject: blank,
+          predicate: iri(DCT_SOURCE),
+          object: iri(ARCHIVE),
+          graph: { type: 'default' },
+        },
+        { ...label, graph: iri(NAMED) },
+        { ...label, graph: blank },
+        {
+          subject: iri(IRI),
+          predicate: iri(`${SCHEMA}population`),
+          object: {
+            type: 'literal',
+            value: '3850809',
+            datatype: `${XSD}integer`,
+          },
+          graph: blank,
+        },
+      ];
+      // The parsers order graphs differently; the repeated quad is kept once.
+      expect(quads).toHaveLength(expected.length);
+      expect(quads).toEqual(expect.arrayContaining(expected));
+
+      // The triple lookup reads the same body as three statements. Its blank
+      // labels belong to its own response, so only their kind is compared.
+      const statements = await loaded(body, contentType);
+      expect(statements).toHaveLength(3);
+      expect(statements).toEqual(
+        expect.arrayContaining(
+          expected.map(({ subject, predicate, object }) => ({
+            subject:
+              subject.type === 'blank'
+                ? { type: 'blank', value: expect.any(String) }
+                : subject,
+            predicate,
+            object,
+          })),
+        ),
+      );
+    },
+  );
+
+  it('expands each JSON-LD script of an HTML page on its own, as one dataset', async () => {
+    const label = { [RDFS_LABEL]: 'Berlin' };
+    const page = `<!doctype html><html><head>
+      <script type="application/ld+json">
+        ${JSON.stringify({ '@graph': [{ '@id': IRI, ...label }] })}
+      </script>
+      <script type="application/ld+json">
+        ${JSON.stringify({ '@id': '_:x', '@graph': [{ '@id': IRI, ...label }] })}
+      </script>
+      <script type="application/ld+json">
+        ${JSON.stringify({ '@id': '_:x', [DCT_SOURCE]: { '@id': ARCHIVE } })}
+      </script>
+    </head></html>`;
+
+    const quads = await dataset(page, 'text/html');
+
+    // A top-level @graph is the default graph in every script, and `_:x`
+    // names one node across the scripts.
+    const blank = blankGraph(quads);
+    const statement: PublicStatement = {
+      subject: iri(IRI),
+      predicate: iri(RDFS_LABEL),
+      object: { type: 'literal', value: 'Berlin' },
+    };
+    expect(quads).toHaveLength(3);
+    expect(quads).toEqual(
+      expect.arrayContaining([
+        { ...statement, graph: { type: 'default' } },
+        { ...statement, graph: blank },
+        {
+          subject: blank,
+          predicate: iri(DCT_SOURCE),
+          object: iri(ARCHIVE),
+          graph: { type: 'default' },
+        },
+      ]),
+    );
+  });
+
+  it('shares the request policy, limits and failures of the triple lookup', async () => {
+    const fetch = serve(() =>
+      answer(`<${IRI}> <${RDFS_LABEL}> "Berlin" .`, 'text/turtle'),
+    );
+
+    expect(await lookupPublicRdfDataset(IRI, { fetch })).toEqual({
+      kind: 'loaded',
+      source: IRI,
+      contentType: 'text/turtle',
+      quads: [
+        {
+          subject: iri(IRI),
+          predicate: iri(RDFS_LABEL),
+          object: { type: 'literal', value: 'Berlin' },
+          graph: { type: 'default' },
+        },
+      ],
+    });
+    expect(fetch.mock.calls[0]![1]).toMatchObject({
+      credentials: 'omit',
+      redirect: 'manual',
+      referrerPolicy: 'no-referrer',
+      headers: { accept: PUBLIC_RDF_ACCEPT },
+    });
+    expect(await lookupPublicRdfDataset(IRI, { fetch, maxBytes: 8 })).toEqual({
+      kind: 'failed',
+      reason: 'too-large',
+    });
+
+    const cancelled = new AbortController();
+    cancelled.abort();
+    expect(
+      await lookupPublicRdfDataset(IRI, { fetch, signal: cancelled.signal }),
+    ).toEqual({ kind: 'cancelled' });
+    expect(
+      await lookupPublicRdfDataset('https://localhost/x', { fetch }),
+    ).toEqual({ kind: 'failed', reason: 'blocked-host' });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    const remote = serve(
+      answer(
+        JSON.stringify({ '@context': 'https://schema.org', name: 'Berlin' }),
+        'application/ld+json',
+      ),
+    );
+    expect(await lookupPublicRdfDataset(IRI, { fetch: remote })).toEqual({
+      kind: 'failed',
+      reason: 'remote-context',
     });
   });
 });

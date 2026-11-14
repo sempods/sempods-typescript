@@ -41,10 +41,18 @@ import {
   usePromptText,
 } from './access-prompts.js';
 import { useFirst } from './first.js';
+import { enteredPod, SignInConnections } from './access-sign-in.js';
 import { useFocusHold } from './focus.js';
+import { AppStartup } from './startup.js';
 
 /** What a replacement for the connection view (`components.Connections`) receives. */
 export interface ConnectionsProps {
+  /** Where the replacement is shown; it still uses guarded useApp actions. */
+  readonly surface?: 'sign-in' | 'context' | 'management';
+  /** Presentation preference; hide only with exactly one permitted Pod. */
+  readonly podAddress?: 'visible' | 'hidden';
+  /** Editable suggestion for unrestricted first sign-in; default https://sempods.org/. Empty disables it. Never a Pod policy or automatic request. */
+  readonly podAddressPrefix?: string;
   readonly mode?: 'single' | 'multiple';
   /** Optional app-supplied display names keyed by exact Pod URL. Never identities. */
   readonly podNames?: Readonly<Record<string, string>>;
@@ -70,9 +78,11 @@ export interface AppAccessProps {
    * permits exactly one Pod; a `podNames` name remains, otherwise saved
    * duplicate connections are numbered. Several or unrestricted
    * Pods, management (`open`) and Full addresses always show the address.
-   * A custom `components.Connections` does not receive this option.
+   * Replacements receive this preference and enforce the same policy check.
    */
   readonly podAddress?: 'visible' | 'hidden';
+  /** Editable suggestion for unrestricted first sign-in; default https://sempods.org/. Empty disables it. Never a Pod policy or automatic request. */
+  readonly podAddressPrefix?: string;
   /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
   /**
@@ -92,9 +102,35 @@ export interface AppAccessProps {
    * transition ends. Visible retry or error feedback does not trigger this.
    */
   readonly focusTarget?: RefObject<HTMLElement | null>;
+  /**
+   * The app's own settings while the gate blocks, such as language and
+   * appearance: a button in the gate's top inline-end corner opens `content`
+   * in a modal dialog above the gate. The gate stays open and the content
+   * behind it stays covered; nothing about sessions or data changes. Only the
+   * gate offers it: the app keeps its own settings entry otherwise.
+   *
+   * Put device-local presentation choices here, not data or account actions.
+   * `content` renders inside the dialog, so use controls without a portal
+   * (radio groups, toggles, switches): a popover, menu or dialog that renders
+   * into `document.body` is inert below the gate.
+   */
+  readonly settings?: {
+    /** The button's accessible name and tooltip, and the dialog's title. */
+    readonly label: string;
+    /** The controls; applied immediately, since closing saves nothing. */
+    readonly content: ReactNode;
+    /** Decorative icon of the button; a gear by default. */
+    readonly icon?: ReactNode;
+  };
   readonly components?: {
     readonly Connections?: ComponentType<ConnectionsProps>;
   };
+  /**
+   * `screen` (default) shows `AppStartup` with `appName` and `icon` while the
+   * app starts (`useAppState().starting`). `none` leaves it to the app, for
+   * example its own skeleton; the Context surface and prompts still wait.
+   */
+  readonly startup?: 'screen' | 'none';
   readonly className?: string;
   readonly style?: CSSProperties;
 }
@@ -107,7 +143,10 @@ export type AccessGateProps = Pick<
   | 'description'
   | 'podNames'
   | 'podAddress'
+  | 'podAddressPrefix'
   | 'focusTarget'
+  | 'settings'
+  | 'components'
   | 'className'
   | 'style'
 >;
@@ -122,6 +161,7 @@ export type ContextAccessProps = Partial<
     | 'description'
     | 'podNames'
     | 'podAddress'
+    | 'podAddressPrefix'
     | 'focusTarget'
     | 'components'
     | 'className'
@@ -136,8 +176,9 @@ const unavailablePod = Object.freeze({
 const noSubscription = () => () => {};
 
 /**
- * The default access UI: `AccessGate` (the sign-in screen while the app
- * cannot work), `ContextAccess` (Context selection and catalogue recovery),
+ * The default access UI: `AppStartup` (the startup screen while the app
+ * starts, unless `startup="none"`), `AccessGate` (the sign-in screen while
+ * the app cannot work), `ContextAccess` (Context selection and catalogue recovery),
  * `AccessPrompts` (dialogs and toasts at the bottom of the viewport) and,
  * while `open`, management of Pods and sharing. With `only="management"` it
  * renders management alone, for an app that places the other parts itself.
@@ -151,6 +192,8 @@ export function AppAccess({
   only,
   open = false,
   onClose,
+  settings,
+  startup = 'screen',
   ...props
 }: AppAccessProps) {
   const asDialog = open && Boolean(onClose);
@@ -164,7 +207,15 @@ export function AppAccess({
   if (only === 'management') return management;
   return (
     <>
-      <Gate {...props} />
+      {startup === 'screen' && (
+        <AppStartup
+          appName={props.appName}
+          {...(props.icon ? { icon: props.icon } : {})}
+          {...(props.className ? { className: props.className } : {})}
+          {...(props.style ? { style: props.style } : {})}
+        />
+      )}
+      <Gate {...props} {...(settings ? { settings } : {})} />
       {/* Management in place already shows the connection view. */}
       {!(open && !asDialog) && <AccessSection {...props} manage={false} />}
       <AccessPrompts focusTarget={props.focusTarget} />
@@ -175,7 +226,8 @@ export function AppAccess({
 
 /**
  * Context selection and catalogue recovery, outside access prompts. It shows
- * while the active connection is usable and a flow demands a Context: a
+ * after startup (`useAppState().starting`), while the active connection is
+ * usable and a flow demands a Context: a
  * selection (`TargetScreen`, the `required` mode) with the chooser, the first
  * load, an empty or unreadable catalogue, a failed one with retry and an
  * unavailable preset Context; or only discovery (an explicit target such as
@@ -190,7 +242,7 @@ function Management({
   onClose,
   focusTarget,
   ...props
-}: Omit<AppAccessProps, 'open' | 'only' | 'onClose'> & {
+}: Omit<AppAccessProps, 'open' | 'only' | 'onClose' | 'settings'> & {
   readonly onClose: () => void;
 }) {
   const { messages: m } = useSdkLocale();
@@ -203,13 +255,14 @@ function Management({
     if (activeId) void refreshContexts(activeId).catch(() => {});
   }, [activeId, refreshContexts]);
   return (
-    <ManagementDialog
+    <AccessDialog
+      ui="management"
       title={m.controls.dataAccess}
       onClose={onClose}
       {...(focusTarget ? { returnFocus: focusTarget } : {})}
     >
       <AccessSection {...props} manage asDialog />
-    </ManagementDialog>
+    </AccessDialog>
   );
 }
 
@@ -225,6 +278,7 @@ function AccessSection({
   description,
   podNames,
   podAddress = 'visible',
+  podAddressPrefix,
   manage,
   asDialog = false,
   focusTarget,
@@ -288,7 +342,9 @@ function AccessSection({
     ...(headingLevel === undefined ? {} : { headingLevel }),
   });
   const { body, notice, heading: Heading, namesApp } = presentation;
-  const hidden = !presentation.visible;
+  // While the app starts, the startup screen shows instead (management, which
+  // the host opens, still shows).
+  const hidden = !presentation.visible || (state.starting && !manage);
   useLayoutEffect(() => {
     // Guarded target changes temporarily make the whole provider inert. Restore
     // focus only after that transition and once access feedback has hidden.
@@ -342,7 +398,15 @@ function AccessSection({
             ) : body === 'loading' ? (
               <p role="status">{m.controls.loading}</p>
             ) : (
-              <Connections mode={mode} {...(podNames ? { podNames } : {})} />
+              <Connections
+                mode={mode}
+                surface={manage ? 'management' : 'context'}
+                podAddress={podAddress}
+                {...(podAddressPrefix !== undefined
+                  ? { podAddressPrefix }
+                  : {})}
+                {...(podNames ? { podNames } : {})}
+              />
             )
           ) : (
             <AccessConnections
@@ -354,6 +418,7 @@ function AccessSection({
               mode={mode}
               body={body}
               podAddress={podAddress}
+              {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
               {...(podNames ? { podNames } : {})}
             />
           )}
@@ -385,11 +450,12 @@ const signInReasons = new Set<AccessPromptFact['reason']>([
  * full-viewport modal layer above the app, whose content stays mounted and
  * inert, so drafts stay in memory. It does not close on Escape and offers no
  * way back to the content until the cause ends. For `no-connection`,
- * `signed-out` and `missing-scopes` it shows the sign-in view: remembered
- * Pods, the other connections and, without a connection, the address input
+ * `signed-out` and `missing-scopes` it shows one Pod choice and one main
+ * action in an editable chooser; saved-address management lives in its dropdown
  * (keeping `allowedPods`). Every other reason shows its own actions only.
  * `className` and `style` apply to its access surface as in `AppAccess`;
  * custom properties such as `--sempods-*` tokens also cover the whole layer.
+ * With `settings`, a corner button opens the app's settings above it.
  */
 export function AccessGate(props: AccessGateProps) {
   return <Gate {...props} />;
@@ -414,7 +480,9 @@ function GateDialog({
   description,
   podNames,
   podAddress = 'visible',
+  podAddressPrefix,
   focusTarget,
+  settings,
   components,
   className,
   style,
@@ -424,25 +492,28 @@ function GateDialog({
   readonly blocking: AccessPromptFact;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const surface = useRef<HTMLElement>(null);
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  // Where the focus was at the last close request, to keep it on reopening.
+  const lastFocus = useRef<HTMLElement | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const label = useId();
   const { messages: m, direction } = useSdkLocale();
+  // Declared before the gate's own dialog effect, so its cleanup runs first:
+  // when the gate goes with its settings open, close them, or the focus
+  // target behind them is still inert when the gate returns the focus.
+  useLayoutEffect(
+    () => () => {
+      dialog.current
+        ?.querySelector<HTMLDialogElement>('dialog[data-sempods-ui="settings"]')
+        ?.close?.();
+    },
+    [],
+  );
   useModalDialog(dialog, true, focusTarget);
   useLayoutEffect(() => {
-    // A gate that opens after management or a leave confirmation must not
-    // cover them: the top layer stacks by opening order, so raise them again.
-    const above =
-      dialog.current?.ownerDocument.querySelectorAll<HTMLDialogElement>(
-        'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]',
-      );
-    for (const element of above ?? []) {
-      if (typeof element.showModal !== 'function') continue;
-      const focused = element.contains(element.ownerDocument.activeElement)
-        ? (element.ownerDocument.activeElement as HTMLElement)
-        : null;
-      element.close();
-      element.showModal();
-      focused?.focus();
-    }
+    focusView(dialog.current, settingsButton.current, surface.current);
+    raiseAbove(dialog.current);
   }, []);
   const text = usePromptText(blocking);
   const signIn = signInReasons.has(blocking.reason);
@@ -462,13 +533,64 @@ function GateDialog({
       // Custom properties (--sempods-* tokens) also cover the whole layer.
       style={tokensOf(style)}
       // The gate ends only with its cause.
-      onCancel={(event) => event.preventDefault()}
+      onCancel={(event) => {
+        event.preventDefault();
+        const focused = event.currentTarget.ownerDocument.activeElement;
+        lastFocus.current = event.currentTarget.contains(focused)
+          ? (focused as HTMLElement)
+          : null;
+      }}
+      onClose={(event) => {
+        // A repeated close request without user activation cannot be
+        // cancelled (close watchers): show the gate again while it lasts.
+        const element = event.currentTarget;
+        if (
+          !element.isConnected ||
+          element.open ||
+          typeof element.showModal !== 'function'
+        )
+          return;
+        element.showModal();
+        const back = lastFocus.current;
+        if (back && element.contains(back)) back.focus();
+        else focusView(element, settingsButton.current, surface.current);
+        raiseAbove(element);
+      }}
     >
       <SdkStyles />
       <style href="sempods-access" precedence="sempods">
         {layered(styles)}
       </style>
+      {settings && (
+        <button
+          ref={settingsButton}
+          type="button"
+          className="sp-access-settings"
+          aria-haspopup="dialog"
+          aria-label={settings.label}
+          title={settings.label}
+          onClick={() => setSettingsOpen(true)}
+        >
+          {settings.icon ?? (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          )}
+        </button>
+      )}
+      {settings && settingsOpen && (
+        <AccessDialog
+          ui="settings"
+          title={settings.label}
+          onClose={() => setSettingsOpen(false)}
+          returnFocus={settingsButton}
+        >
+          <div className="sp-access-settings-content">{settings.content}</div>
+        </AccessDialog>
+      )}
       <section
+        ref={surface}
         data-sempods-access=""
         data-sempods-ui="access"
         aria-label={m.controls.dataAccess}
@@ -494,16 +616,22 @@ function GateDialog({
                 <p role="status">{text}</p>
               )}
               {Connections ? (
-                <Connections mode={mode} {...(podNames ? { podNames } : {})} />
-              ) : (
-                <AccessConnections
-                  contextRequired={false}
-                  switching={false}
-                  discovery={false}
-                  manage={false}
+                <Connections
                   mode={mode}
-                  body="connections"
+                  surface="sign-in"
                   podAddress={podAddress}
+                  {...(podAddressPrefix !== undefined
+                    ? { podAddressPrefix }
+                    : {})}
+                  {...(podNames ? { podNames } : {})}
+                />
+              ) : (
+                <SignInConnections
+                  mode={mode}
+                  podAddress={podAddress}
+                  {...(podAddressPrefix !== undefined
+                    ? { podAddressPrefix }
+                    : {})}
                   {...(podNames ? { podNames } : {})}
                 />
               )}
@@ -521,15 +649,55 @@ function GateDialog({
 }
 
 /**
- * Management as a native modal dialog in the top layer: the app behind it is
- * inert, and a leave confirmation still opens above it.
+ * The settings button comes first, at the top; opening the gate still
+ * focuses the first control of its own view, as without settings.
  */
-function ManagementDialog({
+function focusView(
+  gate: HTMLDialogElement | null,
+  button: HTMLButtonElement | null,
+  view: HTMLElement | null,
+) {
+  if (!gate || !button || gate.ownerDocument.activeElement !== button) return;
+  view?.querySelector<HTMLElement>(focusable)?.focus();
+}
+
+/**
+ * A gate that opens after management or a leave confirmation must not cover
+ * them: the top layer stacks by opening order, so raise them again.
+ */
+function raiseAbove(gate: HTMLDialogElement | null) {
+  const above = gate?.ownerDocument.querySelectorAll<HTMLDialogElement>(
+    'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]',
+  );
+  for (const element of above ?? []) {
+    if (typeof element.showModal !== 'function') continue;
+    const focused = element.contains(element.ownerDocument.activeElement)
+      ? (element.ownerDocument.activeElement as HTMLElement)
+      : null;
+    element.close();
+    element.showModal();
+    focused?.focus();
+  }
+}
+
+/** What the browser focuses first in a dialog: enabled, tabbable controls. */
+const focusable =
+  'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Management, or the app's settings above the gate, as a native modal dialog
+ * in the top layer: the app behind it is inert, and a leave confirmation
+ * still opens above it.
+ */
+function AccessDialog({
+  ui,
   title,
   onClose,
   returnFocus,
   children,
 }: {
+  /** `data-sempods-ui`: the gate raises open management above itself. */
+  readonly ui: 'management' | 'settings';
   readonly title: string;
   readonly onClose: () => void;
   /** Focus after closing (`focusTarget`); otherwise the element focused before. */
@@ -544,7 +712,7 @@ function ManagementDialog({
     <dialog
       ref={dialog}
       aria-labelledby={label}
-      data-sempods-ui="management"
+      data-sempods-ui={ui}
       className="sp-sdk-dialog sp-access-dialog"
       dir={direction}
       onCancel={(event) => {
@@ -575,14 +743,6 @@ function ManagementDialog({
   );
 }
 
-/** Presentation-only convenience. Canonical URL/security validation stays in the runtime. */
-function enteredPod(value: string) {
-  // Only clean up the common pasted-address form. Do not parse/re-serialize the
-  // URL: that could silently normalize ambiguous paths, credentials or escapes.
-  const text = value.trim().replace(/\/$/, '');
-  return /^[a-z][a-z\d+.-]*:/i.test(text) ? text : `https://${text}`;
-}
-
 function AccessConnections({
   manage,
   mode,
@@ -592,11 +752,13 @@ function AccessConnections({
   discovery,
   body,
   podAddress,
+  podAddressPrefix,
 }: {
   readonly manage: boolean;
   readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
+  readonly podAddressPrefix?: string | undefined;
   readonly contextRequired: boolean;
   /** The app selects through its own switch (`useContexts`): no chooser here. */
   readonly switching: boolean;
@@ -614,8 +776,8 @@ function AccessConnections({
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
   // Remembered Pods: signed out at a known address (see `rememberPods`). The
-  // sign-in view lists them above the address field, each with its own
-  // sign-in and a way to forget it on this device. A Pod being forgotten
+  // connected management view lists them under the other-Pod action;
+  // the gate uses SignInConnections. A Pod being forgotten
   // stays in that list; if forgetting could not be saved, with the failure
   // and Forget again, so its address is not kept against the choice.
   const forgetting = (entry: Connection) =>
@@ -773,7 +935,7 @@ function AccessConnections({
         <p className="sp-access-address">{defaultUrl}</p>
       )}
       <button
-        className={found ? undefined : 'sp-access-primary'}
+        className={found ? undefined : 'sp-access-primary sp-access-wide'}
         disabled={
           unavailable ||
           state.connections.some(
@@ -882,7 +1044,7 @@ function AccessConnections({
                 disabled={unavailable}
                 onClick={() => void act(() => app.forget(entry.id))}
               >
-                {m.controls.forget}
+                {m.controls.removeSavedPod ?? m.controls.forget}
               </button>
             </div>
           </li>
@@ -944,7 +1106,7 @@ function AccessConnections({
               disabled={unavailable}
               onClick={() => void act(() => app.forget(c.id))}
             >
-              {m.controls.forget}
+              {m.controls.removeSavedPod ?? m.controls.forget}
             </button>
           )}
         </div>
@@ -989,7 +1151,7 @@ function AccessConnections({
         </label>
         {choice && <p className="sp-access-address">{choice}</p>}
         <button
-          className={found ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary sp-access-wide'}
           disabled={
             unavailable ||
             !choice ||
@@ -1020,25 +1182,30 @@ function AccessConnections({
             spellCheck={false}
             required
             value={url}
-            aria-describedby={m.controls.podHint ? id : undefined}
             placeholder="sempods.org/alice"
             disabled={unavailable}
             onChange={(event) => setUrl(event.target.value)}
           />
         </label>
-        {m.controls.podHint && (
-          <p id={id} className="sp-access-hint">
-            {m.controls.podHint}
-          </p>
-        )}
         <button
-          className={found ? undefined : 'sp-access-primary'}
+          className={found ? undefined : 'sp-access-primary sp-access-wide'}
           disabled={unavailable}
         >
           {addLabel}
         </button>
       </form>
     ) : null;
+
+  if (manage && !c && body === 'connections')
+    return (
+      <SignInConnections
+        mode={mode}
+        surface="management"
+        podAddress={podAddress}
+        {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
+        {...(podNames ? { podNames } : {})}
+      />
+    );
 
   // The page is navigating to the Pod's sign-in: no action applies any more.
   if (body === 'leaving')
@@ -1059,9 +1226,6 @@ function AccessConnections({
     <>
       {!another && rememberedList}
       {!another && addPod}
-      {!found && m.controls.loginHint && (
-        <p className="sp-access-hint">{m.controls.loginHint}</p>
-      )}
       {activePod}
       {/* Without the Pod selector, the active Pod is named here. */}
       {manage && active && selectable.length < 2 && podLine(c!.podUrl)}
@@ -1084,7 +1248,7 @@ function AccessConnections({
             c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button
-              className="sp-access-primary"
+              className="sp-access-primary sp-access-wide"
               disabled={unavailable}
               onClick={() => void act(() => app.retryRestore(c.id))}
             >
@@ -1218,8 +1382,8 @@ const styles = `
 [data-sempods-access][hidden] { display:none; }
 [data-sempods-access] * { box-sizing:border-box; }
 [data-sempods-access] .sp-access-content { width:100%; max-width:22rem; margin-inline:auto; }
-[data-sempods-access] header { margin:0 0 28px; }
-[data-sempods-access] h1, [data-sempods-access] h2 { font-size:1.75rem; font-weight:500; line-height:1.25; margin:0; }
+[data-sempods-access] header { margin:0 0 36px; }
+[data-sempods-access] h1, [data-sempods-access] h2 { font-size:1.875rem; font-weight:600; letter-spacing:-.035em; line-height:1.25; margin:0; }
 [data-sempods-access] .sp-access-icon { margin:0 auto 20px; width:56px; height:56px; }
 [data-sempods-access] .sp-access-icon > * { width:100%; height:100%; object-fit:contain; }
 [data-sempods-access] p { overflow-wrap:anywhere; margin:12px 0; }
@@ -1230,8 +1394,28 @@ const styles = `
 [data-sempods-access] input::placeholder { color:var(--sp-muted); opacity:1; }
 [data-sempods-access] button { min-height:44px; font:inherit; font-weight:500; border:1px solid var(--sp-secondary-border); border-radius:calc(var(--sp-radius) * .625); color:var(--sp-secondary-text); background:var(--sp-secondary-bg); padding:9px 13px; cursor:pointer; }
 [data-sempods-access] button:hover:not(:disabled) { background:color-mix(in oklch,var(--sp-secondary-bg),var(--sp-secondary-text) 8%); }
-[data-sempods-access] .sp-access-primary { width:100%; margin-top:12px; color:var(--sp-primary-text); background:var(--sp-primary-bg); border:2px solid var(--sp-primary-border); padding:8px 12px; }
+[data-sempods-access] .sp-access-primary { margin-top:12px; color:var(--sp-primary-text); background:var(--sp-primary-bg); border:1px solid var(--sp-primary-border); padding:9px 13px; }
 [data-sempods-access] .sp-access-primary:hover:not(:disabled) { background:color-mix(in oklch,var(--sp-primary-bg),var(--sp-primary-text) 12%); }
+[data-sempods-access] .sp-access-wide { width:100%; }
+[data-sempods-access] .sp-access-description { font-size:.875rem; color:var(--sp-muted); margin-top:10px; }
+[data-sempods-access] .sp-sign-in { text-align:start; }
+[data-sempods-access] .sp-sign-in form { position:relative; }
+[data-sempods-access] .sp-sign-in .sp-access-primary { margin-top:16px; min-height:50px; border-radius:calc(var(--sp-radius) * 1.25); }
+[data-sempods-access] .sp-pod-field { position:relative; }
+[data-sempods-access] .sp-pod-field > label { margin:0 44px 8px 0; min-height:30px; display:flex; align-items:center; font-size:.875rem; }
+[data-sempods-access] .sp-pod-input { display:flex; align-items:center; border:1px solid var(--sp-field-line); border-radius:calc(var(--sp-radius) * 1.25); }
+[data-sempods-access] .sp-pod-input input { border:0; border-radius:inherit; padding:14px; margin:0; min-width:0; flex:1; background:transparent; }
+[data-sempods-access] .sp-pod-input:has(input:focus-visible) { outline:2px solid var(--sp-focus); outline-offset:3px; }
+[data-sempods-access] .sp-pod-input input:focus-visible { outline:none; }
+[data-sempods-access] .sp-pod-icon { display:grid; place-items:center; width:44px; padding:0; flex:none; background:transparent; border:0; color:var(--sp-muted); }
+[data-sempods-access] .sp-pod-icon svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.5; }
+[data-sempods-access] .sp-pod-help { position:absolute; inset-block-start:-7px; inset-inline-end:0; width:44px; height:44px; padding:0; border:0; background:transparent; color:var(--sp-muted); }
+[data-sempods-access] .sp-pod-popover { position:absolute; inset-inline:0; top:100%; z-index:2; max-height:min(24rem,50dvh); overflow:auto; margin-top:6px; padding:6px; box-shadow:0 8px 24px color-mix(in srgb,var(--sp-text) 8%,transparent); background:var(--sp-bg); border:1px solid var(--sp-field-line); border-radius:calc(var(--sp-radius) * 1.5); }
+[data-sempods-access] .sp-pod-popover [role=option] { display:block; width:100%; text-align:start; border:0; background:transparent; color:var(--sp-text); padding:10px; }
+[data-sempods-access] .sp-pod-popover [role=option][aria-selected=true], [data-sempods-access] .sp-pod-popover [role=option][data-active] { background:color-mix(in srgb,var(--sp-accent) 10%,var(--sp-bg)); }
+[data-sempods-access] .sp-pod-popover .sp-access-address { display:block; font-weight:400; margin-top:3px; overflow-wrap:anywhere; }
+[data-sempods-access] .sp-sign-in-management { margin-top:6px; }
+[data-sempods-access] .sp-sign-in-management summary { text-align:start; }
 [data-sempods-access] :disabled { opacity:.55; cursor:default; }
 [data-sempods-access] :focus-visible { outline:2px solid var(--sp-focus); outline-offset:3px; }
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
@@ -1255,6 +1439,12 @@ const styles = `
 .sp-access-gate { position:fixed; inset:0; width:100%; height:100%; max-width:none; max-height:none; margin:0; padding:0; border:0; background:var(--sp-bg); color:var(--sp-text); overflow:auto; }
 .sp-access-gate[open] { display:grid; align-items:center; }
 .sp-access-gate::backdrop { background:var(--sp-bg); }
+.sp-access-settings { position:absolute; inset-block-start:calc(8px + env(safe-area-inset-top,0px)); inset-inline-end:8px; z-index:1; width:44px; height:44px; display:grid; place-items:center; padding:0; font:inherit; color:var(--sp-text); background:transparent; border:1px solid transparent; border-radius:calc(var(--sp-radius) * .625); cursor:pointer; }
+.sp-access-settings:hover { background:color-mix(in oklch,transparent,var(--sp-text) 8%); }
+.sp-access-settings:focus-visible { outline:2px solid var(--sp-focus); outline-offset:3px; }
+.sp-access-settings > * { width:22px; height:22px; }
+.sp-access-settings svg { fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
+.sp-access-settings-content { padding:8px 24px 24px; }
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
 .sp-access-dialog-header h2 { flex:1; margin:0; }

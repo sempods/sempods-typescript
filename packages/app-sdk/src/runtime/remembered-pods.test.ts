@@ -9,6 +9,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
+import { sessionBinding, type SessionRecord } from '../sessions/records.js';
 import {
   deferred,
   fixture,
@@ -415,3 +416,108 @@ it('drops a failed forget once the person signs in again', async () => {
     problem: 'disconnected',
   });
 });
+
+// Seed records written by older SDKs; ordinary connect no longer creates them.
+async function duplicateRecord(
+  f: Awaited<ReturnType<typeof logged>>,
+  id: string,
+  disconnected = false,
+) {
+  const original = (await records(f)).find((r) => r.id === f.id)!;
+  const value = original.value as SessionRecord;
+  const binding = { ...sessionBinding(value), connectionId: id };
+  const store = await openSessionStore(fixtureNamespace, f.factory);
+  try {
+    expect(
+      await store.commit(
+        id,
+        null,
+        disconnected
+          ? {
+              version: 1,
+              kind: 'disconnected',
+              binding,
+              reason: 'disconnected',
+            }
+          : { ...value, binding },
+      ),
+    ).toMatchObject({ kind: 'committed' });
+  } finally {
+    store.close();
+  }
+}
+
+it('coalesces unrestricted connects and reuses the same address after sign-out and reload', async () => {
+  const f = fixture();
+  keep(f.runtime);
+  await f.runtime.initialize();
+  const [a, b] = await Promise.all([
+    f.runtime.connect(pod),
+    f.runtime.connect(pod),
+  ]);
+  expect(a.id).toBe(b.id);
+  expect(f.runtime.getSnapshot()).toHaveLength(1);
+  expect(f.count('/.well-known/oauth-protected-resource')).toBe(1);
+  expect(f.navigate).not.toHaveBeenCalled();
+  const signedIn = await signInAgain(f, f.runtime, a.id, keep);
+  await signedIn.disconnect(a.id);
+  const next = await reload(f, signedIn);
+  expect((await next.connect(pod)).id).toBe(a.id);
+  const again = await signInAgain(f, next, a.id, keep);
+  await again.disconnect(a.id);
+  expect(await records(f)).toHaveLength(1);
+  await again.forget(a.id);
+  expect((await reload(f, again)).getSnapshot()).toEqual([]);
+  expect(await records(f)).toEqual([]);
+});
+
+it('removes old duplicate address-only records durably, then forgets the surviving address', async () => {
+  const f = await logged();
+  await f.runtime.disconnect(f.id);
+  await duplicateRecord(f, 'zz-duplicate-a');
+  await duplicateRecord(f, 'zz-duplicate-b');
+  const next = await reload(f, f.runtime);
+  expect(next.getSnapshot()).toMatchObject([{ id: f.id, podUrl: pod }]);
+  expect(await records(f)).toHaveLength(1);
+  await next.forget(f.id);
+  expect((await reload(f, next)).getSnapshot()).toEqual([]);
+});
+
+it('keeps legacy live sessions independent while removing their redundant remembered addresses', async () => {
+  const f = await logged();
+  await duplicateRecord(f, 'zz-live');
+  await duplicateRecord(f, 'zz-remembered', true);
+  const next = await reload(f, f.runtime);
+  expect(
+    next
+      .getSnapshot()
+      .map((c) => c.id)
+      .sort(),
+  ).toEqual([f.id, 'zz-live'].sort());
+  expect(next.getSnapshot().every((c) => c.session.kind === 'active')).toBe(
+    true,
+  );
+  expect(await records(f)).toHaveLength(2);
+});
+
+it.each(['failure', 'conflict'] as const)(
+  'retains an old address when cleanup cannot be saved (%s)',
+  async (result) => {
+    const f = await logged();
+    await f.runtime.disconnect(f.id);
+    await duplicateRecord(f, 'zz-duplicate');
+    const next = await reload(f, f.runtime, {
+      openStore: storeWith(f.factory, () => ({
+        remove: async () => {
+          if (result === 'failure') throw new Error('storage');
+          return { kind: 'conflict' };
+        },
+      })),
+    });
+    expect(next.getSnapshot()).toHaveLength(2);
+    expect(await records(f)).toHaveLength(2);
+    const retried = await reload(f, next);
+    expect(retried.getSnapshot()).toHaveLength(1);
+    expect(await records(f)).toHaveLength(1);
+  },
+);
