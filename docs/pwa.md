@@ -284,9 +284,34 @@ such as sage's light primary `#3e6b56`, with `background_color: '#f7f9f7'` as
 the static launch fallback. The running page can set `theme-color` meta
 values to its resolved background instead. The TODO's
 [browser-theme entry](../examples/todo/src/browser-theme.ts) updates only
-marked meta elements after system changes; after changing an explicit app
-appearance, call `syncBrowserTheme()` too. Keep CSS `light-dark()` native in
-a production Vite build (`build.cssTarget: 'esnext'`).
+marked meta elements after system changes. In your app's `index.html`, put
+these initial light/dark fallbacks inside `<head>`:
+
+```html
+<meta
+  name="theme-color"
+  data-sempods-theme
+  media="(prefers-color-scheme: light)"
+  content="#f7f9f7"
+/>
+<meta
+  name="theme-color"
+  data-sempods-theme
+  media="(prefers-color-scheme: dark)"
+  content="#131b18"
+/>
+```
+
+Import the helper in the app entry **after** the stylesheet that defines
+`--sempods-bg` on `:root`, as the TODO's `style.css` does. That token must be
+a CSS colour: without it, the probe inherits text colour instead of the
+background. The helper updates both marked meta elements to the resolved
+background so an explicit app appearance also works when it differs from
+the OS preference. After changing that appearance, call `syncBrowserTheme()`.
+Unmarked meta elements remain app-owned. The TODO development and consumer
+scripts generate this HTML; a copied app supplies its own `index.html`.
+Keep CSS `light-dark()` native in a production Vite build
+(`build.cssTarget: 'esnext'`).
 
 These are different surfaces. Installed Chromium can use the manifest colour
 for Android's three-button navigation even while the status bar follows the

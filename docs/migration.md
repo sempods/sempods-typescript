@@ -7,11 +7,48 @@ automatic conversion of legacy app data or stored credentials.
 ## Pending release: shared palette defaults
 
 The UI kit's fallback palette and the TODO example now use sage in both
-modes, matching AppAccess and new template apps. Existing app theme files
-still override package defaults. Apps that relied on the kit's neutral
-fallback should retain an explicit neutral palette if they want that look.
-No theme provider or configuration format is added. The TODO keeps its own
-small CSS token list and exposes the same ordinary host overrides.
+modes, matching AppAccess and new template apps. The bare app-sdk also aligns
+its muted text, separator and on-accent fallbacks with that palette. Existing
+app theme files still override package defaults. No theme provider or
+configuration format is added. The TODO keeps its own small CSS token list.
+
+To retain the UI kit's previous neutral appearance, put these roles in the
+app-owned stylesheet imported after `@sempods/app-ui/styles.css`. The kit's
+foreground aliases and action-role mapping continue to apply:
+
+```css
+:root {
+  --background: light-dark(#ffffff, #111315);
+  --foreground: light-dark(#1f2933, #e5e7eb);
+  --card: light-dark(#ffffff, #181b1f);
+  --popover: light-dark(#ffffff, #1b1e23);
+  --primary: light-dark(#1f2933, #e5e7eb);
+  --primary-foreground: light-dark(#ffffff, #111315);
+  --secondary: light-dark(#eef0f3, #23272e);
+  --muted: light-dark(#f3f4f6, #1d2026);
+  --muted-foreground: light-dark(#5f6672, #a1a7b0);
+  --accent: light-dark(#eef0f3, #262a31);
+  --destructive: light-dark(#b42318, #ffbcb5);
+  --border: light-dark(#e5e7eb, #2d3138);
+  --input: light-dark(#7a818c, #6b7280);
+  --ring: light-dark(#1f2933, #e5e7eb);
+}
+```
+
+For an app using app-sdk **without** the UI kit, only these three fallback
+pairs change in this palette update. To retain their previous values, set
+the public tokens on an ancestor of the SDK surfaces:
+
+```css
+:root {
+  --sempods-muted: light-dark(#5f7167, #b0c0b6);
+  --sempods-line: light-dark(#e5e7eb, #2d3138);
+  --sempods-on-accent: light-dark(#f7f9f7, #131b18);
+}
+```
+
+The earlier AppAccess redesign's fallback changes are described separately
+below; these three overrides do not restore its former layout or palette.
 
 The TODO PWA uses the light primary (`#3e6b56`) as its static manifest theme
 colour and the light background (`#f7f9f7`) as the launch fallback. Marked

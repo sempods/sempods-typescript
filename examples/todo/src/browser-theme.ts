@@ -1,4 +1,7 @@
-/** Page chrome follows the app's resolved background. Installed native bars
+/** Import after the page stylesheet, which must define --sempods-bg on :root.
+ * Requires marked theme-color meta elements (see docs/pwa.md). Without that
+ * token a CSS colour probe would inherit text colour, not the background.
+ * Page chrome follows the app's resolved background. Installed native bars
  * may instead use the manifest's static theme_color; this does not control them. */
 export function syncBrowserTheme() {
   const probe = document.createElement('span');

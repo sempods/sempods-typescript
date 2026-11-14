@@ -135,11 +135,15 @@
     --primary-foreground: light-dark(#ffffff, #131b18);
     --secondary: light-dark(#e8efe9, #2a3d31);
     --secondary-foreground: var(--foreground);
+    /* muted is a quiet surface and muted-foreground its text; the SDK's
+       --sempods-muted is that text colour. */
     --muted: light-dark(#eef3ef, #223329);
     --muted-foreground: light-dark(#52665a, #b0c0b6);
+    /* accent is the highlight surface of hovered and focused menu items. */
     --accent: light-dark(#e8efe9, #2a3d31);
     --accent-foreground: var(--foreground);
     --destructive: light-dark(#a31e15, #ffbcb5);
+    /* Decorative separators. Control boundaries use input, at 3:1. */
     --border: light-dark(#dce5df, #364a3d);
     --input: light-dark(#7e8d83, #738b7c);
     --ring: light-dark(#3e6b56, #a2cbb4);
