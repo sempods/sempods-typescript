@@ -8,7 +8,12 @@ import {
   type Ref,
   type TouchEvent,
 } from 'react';
-import { ComboBoxStateContext, Label, Text } from 'react-aria-components';
+import {
+  ComboBoxStateContext,
+  Label,
+  Text,
+  useLocale,
+} from 'react-aria-components';
 import { cn } from 'cn';
 import {
   Combobox,
@@ -17,7 +22,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from '../components/combobox.js';
-import { quietAriaCount } from './aria-count.js';
+import { expectAriaCount } from './aria-count.js';
 import { useAdapterTexts, type AdapterTexts } from './texts.js';
 
 /** One suggestion: what it is called, its exact value and where it is from. */
@@ -260,26 +265,31 @@ function FollowSuggest({ suggest }: { readonly suggest: boolean }) {
 
 /**
  * Keeps React Aria's count of the options ("0 options available." while the
- * first results load, "2 options available.") out of its announcer while
- * the field has the focus; the field's status says how many there are. The
- * active option's text, which React Aria announces for VoiceOver, still
- * reaches it.
+ * first results load, "2 options available.") out of its announcer: in each
+ * commit in which the list opens or the number of options changes while it
+ * is open, it tells aria-count.ts the count React Aria announces in that
+ * commit's effects, which run after this one's. The field's status says how
+ * many there are; the active option's text, which React Aria announces for
+ * VoiceOver, and other components' announcements still reach the announcer.
  */
 function QuietCount() {
   const state = useContext(ComboBoxStateContext);
-  const latest = useRef(state);
-  useLayoutEffect(() => {
-    latest.current = state;
-  });
-  const focused = state?.isFocused ?? false;
+  const { locale } = useLocale();
+  const open = state?.isOpen ?? false;
+  const options = [...(state?.collection ?? [])].filter(
+    (node) => node.type === 'item',
+  );
+  const before = useRef({ open, count: options.length });
   useEffect(() => {
-    if (!focused) return;
-    return quietAriaCount(() =>
-      [...(latest.current?.collection ?? [])].map((node) =>
-        node.textValue.trim(),
-      ),
-    );
-  }, [focused]);
+    const last = before.current;
+    before.current = { open, count: options.length };
+    if (open && (!last.open || last.count !== options.length))
+      expectAriaCount(
+        options.length,
+        locale,
+        options.map((node) => node.textValue.trim()),
+      );
+  });
   return null;
 }
 

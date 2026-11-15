@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { createRef, useState, type ReactNode, type Ref } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { I18nProvider } from 'react-aria-components';
+import {
+  Calendar,
+  CalendarCell,
+  CalendarGrid,
+  I18nProvider,
+} from 'react-aria-components';
+import { CalendarDate } from '@internationalized/date';
 import { SdkLocaleProvider } from '@sempods/app-sdk/react';
 import {
   act,
@@ -200,6 +206,37 @@ it('leaves the active suggestion to React Aria for VoiceOver (#326)', async () =
   // Its count on opening ("2 options available.") stays out.
   expect(heard()).toEqual(['2 suggestions.', 'Alice', 'Flat 3']);
 });
+
+it.each([
+  ['the field', true],
+  ['another control', false],
+])(
+  "keeps another component's announcement with a number while %s has the focus (#326)",
+  async (_, inField) => {
+    // React Aria's calendar announces a new date through the same announcer.
+    const Page = ({ day }: { readonly day: number }) => (
+      <>
+        <Field suggest={false} />
+        <Calendar aria-label="Date" value={new CalendarDate(2026, 11, day)}>
+          <CalendarGrid>{(date) => <CalendarCell date={date} />}</CalendarGrid>
+        </Calendar>
+        <button type="button">Elsewhere</button>
+      </>
+    );
+    const { rerender } = render(<Page day={15} />);
+    await act(async () => {
+      (inField
+        ? input()
+        : screen.getByRole('button', { name: 'Elsewhere' })
+      ).focus();
+    });
+    const heard = listen();
+    await act(async () => {
+      rerender(<Page day={16} />);
+    });
+    expect(heard()).toContain('Selected Date: Monday, November 16, 2026');
+  },
+);
 
 it('shows the exact value and the source with the label', async () => {
   render(<Field items={[alice]} />);

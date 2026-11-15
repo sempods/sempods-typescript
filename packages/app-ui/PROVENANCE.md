@@ -82,12 +82,13 @@ language, and palette defaults sit in the `theme` layer without specificity.
 in `styles.css` are this package's own, written on the registry's combo box
 for sempods/sempods-apps-template#144; its address mode (`suggest`) and input
 `ref` are for sempods/sempods-typescript#324. `src/adapters/aria-count.ts`
-keeps React Aria's combo box count out of React Aria's announcer while the
-field has the focus (sempods/sempods-typescript#326); it relies on that
-announcer's region (`data-live-announcer` with two `role="log"` children)
-and on its count being the only message with a number that is not an
-option's text, which the unit tests and the UI gate's `search-live-regions`
-check after a React Aria update.
+keeps React Aria's combo box count for the field out of React Aria's
+announcer (sempods/sempods-typescript#326). It relies on that announcer's
+region (`data-live-announcer` with two `role="log"` children), on the combo
+box announcing its count in the effects of the commit in which its list
+opens or the count changes, after the field's own, and on the count's
+number being formatted for React Aria's locale; the unit tests and the UI
+gate's `search-live-regions` check that after a React Aria update.
 
 `ContextSwitch` (`src/adapters/context-switch.tsx`) is an SDK-aware composition
 for sempods/sempods-typescript#290 and sempods/sempods-apps-template#155.
