@@ -712,7 +712,15 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   in part or completely, in the SDK provider's language. It is 44px high,
   as are the suggestions, and draws one focus cue, the outline around the
   whole field. `labelHidden` names it for assistive technology only, for a
-  bar whose placeholder and place say what it is.
+  bar whose placeholder and place say what it is. `suggest={false}` is for
+  text the app does not search, such as an exact address, an invalid one or
+  a single character: the suggestions stay closed, arrow keys do not open
+  them, `items`, `loading` and `failed` are ignored and nothing is
+  announced, while the same input keeps its focus, caret and composition
+  and Enter submits. When `suggest` turns true again while the field has
+  the focus, the suggestions open as typing would open them. Telling an
+  address from a search stays with the app. `ref` reaches the input, for
+  example to focus and select it on Ctrl/Cmd-K.
 
 A main action usually stands alone above a group of the others, as in the
 reference screen's Zen view:
@@ -1084,7 +1092,8 @@ A search bar that opens a resource from several sources, or an address
 typed into it. The app's `search` runs per text and stops when its signal
 aborts; it is app code, for example one `pod.find` per connected Pod with
 the sources' names. The bar keeps the earlier suggestions while the next
-search runs, so the one the keyboard is on stays:
+search runs, so the one the keyboard is on stays. A typed address runs no
+search: the bar suggests nothing for it, and Enter opens it:
 
 ```tsx
 // resource-search.tsx
@@ -1118,8 +1127,9 @@ export function ResourceSearch({
   const [text, setText] = useState('');
   const [found, setFound] = useState<Found>({ text: '', items: [] });
   const query = text.trim();
+  const address = URL.canParse(query);
   useEffect(() => {
-    if (!query) return;
+    if (!query || address) return;
     const controller = new AbortController();
     // Waits for a pause in typing; a newer text aborts this search.
     const timer = setTimeout(() => {
@@ -1137,7 +1147,7 @@ export function ResourceSearch({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, search]);
+  }, [query, address, search]);
   const current = found.text === query;
   return (
     <SuggestField
@@ -1149,6 +1159,7 @@ export function ResourceSearch({
       items={query ? found.items : []}
       loading={query !== '' && !current}
       failed={current ? found.failed : undefined}
+      suggest={!address}
       onSelect={(item) => onOpen(item.id)}
       onSubmit={(value) => {
         if (URL.canParse(value)) onOpen(value);

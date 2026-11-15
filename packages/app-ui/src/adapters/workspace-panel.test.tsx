@@ -197,3 +197,41 @@ it('lets the first Escape close the suggestions of a SuggestField in it', async 
   });
   expect(closed).toHaveBeenCalledTimes(1);
 });
+
+it('lets the first Escape close the panel while its SuggestField does not suggest', async () => {
+  const closed = vi.fn();
+  function Address() {
+    const [open, setOpen] = useState(true);
+    const [value, setValue] = useState('');
+    return (
+      <WorkspacePanel
+        title="Search"
+        open={open}
+        onRequestClose={() => {
+          closed();
+          setOpen(false);
+        }}
+      >
+        <SuggestField
+          label="Search"
+          value={value}
+          onChange={setValue}
+          items={[]}
+          suggest={!URL.canParse(value)}
+          onSelect={() => {}}
+        />
+      </WorkspacePanel>
+    );
+  }
+  render(<Address />);
+  const field = screen.getByRole('combobox', { name: 'Search' });
+  await act(async () => {
+    field.focus();
+    fireEvent.change(field, { target: { value: 'https://pod.example/' } });
+  });
+  expect(field.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => {
+    fireEvent.keyDown(field, { key: 'Escape' });
+  });
+  expect(closed).toHaveBeenCalledTimes(1);
+});

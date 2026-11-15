@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useState } from 'react';
+import { createRef, useState, type Ref } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   act,
@@ -30,8 +30,13 @@ function Field(props: {
   readonly failed?: 'some' | 'all';
   readonly onSelect?: (item: Suggestion) => void;
   readonly onSubmit?: (value: string) => void;
+  /** Whether the field suggests, or which text it suggests for. */
+  readonly suggest?: boolean | ((value: string) => boolean);
+  readonly inputRef?: Ref<HTMLInputElement>;
 }) {
   const [value, setValue] = useState('');
+  const suggest =
+    typeof props.suggest === 'function' ? props.suggest(value) : props.suggest;
   return (
     <SuggestField
       label="Address or search"
@@ -42,6 +47,8 @@ function Field(props: {
       failed={props.failed}
       onSelect={props.onSelect ?? (() => {})}
       onSubmit={props.onSubmit}
+      suggest={suggest}
+      ref={props.inputRef}
     />
   );
 }
@@ -155,4 +162,89 @@ it('calls the latest onSelect for suggestions it keeps across a rerender', async
   await key('Enter');
   expect(latest).toHaveBeenCalledWith(alice);
   expect(first).not.toHaveBeenCalled();
+});
+
+/** As an address bar decides: no search for an address or one character. */
+const searchable = (value: string) =>
+  !URL.canParse(value.trim()) && value.trim().length >= 2;
+
+it('neither suggests nor announces for text the app does not search', async () => {
+  const onSubmit = vi.fn();
+  render(<Field suggest={searchable} onSubmit={onSubmit} />);
+  const status = () => screen.getByRole('status').textContent;
+  const field = input();
+  await type('https://pod.example/carol');
+  await key('ArrowDown');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(field.getAttribute('aria-expanded')).toBe('false');
+  expect(status()).toBe('');
+  await key('Enter', { isComposing: true });
+  expect(onSubmit).not.toHaveBeenCalled();
+  await key('Enter');
+  expect(onSubmit).toHaveBeenCalledWith('https://pod.example/carol');
+  await type('c');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(status()).toBe('');
+  // A searchable text suggests again, in the same input.
+  await type('ca');
+  expect(screen.getByRole('listbox')).toBeTruthy();
+  expect(status()).toBe('No suggestions.');
+  expect(input()).toBe(field);
+  expect(document.activeElement).toBe(field);
+});
+
+it('ignores loading and failed searches while it does not suggest', async () => {
+  const { rerender } = render(
+    <Field suggest={false} items={[alice]} loading failed="some" />,
+  );
+  await type('al');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(screen.getByRole('status').textContent).toBe('');
+  await act(async () => {
+    rerender(<Field suggest={false} failed="all" />);
+  });
+  expect(screen.getByRole('status').textContent).toBe('');
+});
+
+it('opens and closes the suggestions as the field starts and stops suggesting', async () => {
+  const onSelect = vi.fn();
+  const { rerender } = render(
+    <Field suggest={false} items={[alice]} onSelect={onSelect} />,
+  );
+  const field = input();
+  await type('al');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  // The app's search starts for the typed text without another key.
+  await act(async () => {
+    rerender(<Field items={[alice]} onSelect={onSelect} />);
+  });
+  expect(screen.getAllByRole('option')).toHaveLength(1);
+  expect(screen.getByRole('status').textContent).toBe('1 suggestion.');
+  await act(async () => {
+    rerender(<Field suggest={false} items={[alice]} onSelect={onSelect} />);
+  });
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(screen.getByRole('status').textContent).toBe('');
+  await act(async () => {
+    rerender(<Field items={[alice]} onSelect={onSelect} />);
+  });
+  await key('ArrowDown');
+  await key('Enter');
+  expect(onSelect).toHaveBeenCalledWith(alice);
+  expect(input()).toBe(field);
+});
+
+it('gives the app its input through ref, to focus and select it', async () => {
+  const ref = createRef<HTMLInputElement>();
+  render(<Field inputRef={ref} />);
+  await type('https://pod.example/carol');
+  expect(ref.current).toBe(input());
+  act(() => {
+    ref.current?.blur();
+    ref.current?.focus();
+    ref.current?.select();
+  });
+  expect(document.activeElement).toBe(input());
+  expect(ref.current?.selectionStart).toBe(0);
+  expect(ref.current?.selectionEnd).toBe('https://pod.example/carol'.length);
 });
