@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -247,4 +248,67 @@ it('gives the app its input through ref, to focus and select it', async () => {
   expect(document.activeElement).toBe(input());
   expect(ref.current?.selectionStart).toBe(0);
   expect(ref.current?.selectionEnd).toBe('https://pod.example/carol'.length);
+});
+
+/**
+ * What any live region says from now on: the field's own and React Aria's
+ * announcer, which lives outside the field.
+ */
+function listen() {
+  const said: string[] = [];
+  const live = '[aria-live], [role="status"], [role="log"], [role="alert"]';
+  const read = (records: readonly MutationRecord[]) => {
+    for (const record of records) {
+      const target =
+        record.target instanceof Element
+          ? record.target
+          : record.target.parentElement;
+      if (!target?.closest(live)) continue;
+      const texts =
+        record.type === 'characterData'
+          ? [record.target.textContent]
+          : [...record.addedNodes].map((node) => node.textContent);
+      for (const text of texts) if (text?.trim()) said.push(text.trim());
+    }
+  };
+  const observer = new MutationObserver(read);
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+  });
+  return () => {
+    read(observer.takeRecords());
+    return said;
+  };
+}
+
+it('announces nothing when it stops suggesting while its suggestions show', async () => {
+  render(<Field suggest={searchable} items={[alice]} />);
+  await type('al');
+  expect(screen.getAllByRole('option')).toHaveLength(1);
+  const heard = listen();
+  // The person pastes an address over the searched text.
+  await type('https://pod.example/carol');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(input().getAttribute('aria-expanded')).toBe('false');
+  expect(heard()).toEqual([]);
+});
+
+it('does not open on a touch on the input centre while it does not suggest', async () => {
+  render(<Field suggest={false} />);
+  await type('https://pod.example/carol');
+  const heard = listen();
+  // React Aria takes a touch on the exact centre for an iPad's virtual
+  // click; jsdom measures the input as an empty box at 0, 0.
+  const touch = createEvent.touchEnd(input(), {
+    changedTouches: [{ clientX: 0, clientY: 0 }],
+  });
+  Object.defineProperty(touch, 'timeStamp', { value: 10_000 });
+  await act(async () => {
+    fireEvent(input(), touch);
+  });
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(input().getAttribute('aria-expanded')).toBe('false');
+  expect(heard()).toEqual([]);
 });

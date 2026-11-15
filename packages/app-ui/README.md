@@ -714,9 +714,10 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   whole field. `labelHidden` names it for assistive technology only, for a
   bar whose placeholder and place say what it is. `suggest={false}` is for
   text the app does not search, such as an exact address, an invalid one or
-  a single character: the suggestions stay closed, arrow keys do not open
-  them, `items`, `loading` and `failed` are ignored and nothing is
-  announced, while the same input keeps its focus, caret and composition
+  a single character: the suggestions stay closed, also when they were
+  open, neither the arrow keys nor a touch open them, `items`, `loading`
+  and `failed` are ignored and nothing is announced, not even React Aria's
+  option count, while the same input keeps its focus, caret and composition
   and Enter submits. When `suggest` turns true again while the field has
   the focus, the suggestions open as typing would open them. Telling an
   address from a search stays with the app. `ref` reaches the input, for

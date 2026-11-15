@@ -231,8 +231,8 @@ new optional `controls` messages `noValue`, `emptyText` and `severalValues`;
 0.9.0 adds two optional props to `@sempods/app-ui`'s `SuggestField`.
 `suggest={false}` keeps the suggestions closed and silent for text the app
 does not search, such as an exact address, an invalid one or text too short to
-search: no "No suggestions" or searching announcement, no popup on the arrow
-keys, and Enter submits through `onSubmit`, in the same input. `ref` reaches
+search: no "No suggestions", searching or option-count announcement, no popup
+on the arrow keys or a touch, and Enter submits through `onSubmit`, in the same input. `ref` reaches
 the input element. Existing fields keep their behaviour. After upgrading,
 replace a composition that swapped `SuggestField` for a plain input in address
 mode, or passed `items={[]}` and kept the false "No suggestions", by

@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type Ref,
+  type TouchEvent,
 } from 'react';
 import { ComboBoxStateContext, Label, Text } from 'react-aria-components';
 import { cn } from 'cn';
@@ -62,8 +63,9 @@ export interface SuggestFieldProps<T extends Suggestion> {
    * Whether `value` is a search the app runs (default true). False for text
    * the app treats otherwise, such as an exact address, an invalid one or
    * text too short to search: the suggestions stay closed (and close if
-   * they are open), arrow keys do not open them, `items`, `loading` and
-   * `failed` are ignored, and nothing is announced. The same input stays
+   * they are open), neither the arrow keys nor a touch open them, `items`,
+   * `loading` and `failed` are ignored, and nothing is announced, also not
+   * by React Aria. The same input stays
    * mounted with its focus, caret and input method composition, and Enter
    * submits the text (`onSubmit`).
    */
@@ -150,7 +152,7 @@ export function SuggestField<T extends Suggestion>(
       menuTrigger="input"
     >
       {labelHidden ? null : <Label>{label}</Label>}
-      <OpenWhenSuggesting suggest={suggest} />
+      <FollowSuggest suggest={suggest} />
       <FieldKeys onSubmit={onSubmit} suggest={suggest}>
         <ComboboxInput
           ref={ref}
@@ -228,18 +230,26 @@ export function SuggestField<T extends Suggestion>(
 }
 
 /**
- * Opens the suggestions when the field starts to suggest for text that is
- * already typed, for example once the text becomes searchable, as typing
- * it would have; the combo box itself opens only when the text changes.
+ * Closes the suggestions when the field stops suggesting, and opens them
+ * when it starts to suggest for text that is already typed, for example
+ * once the text becomes searchable, as typing it would have; the combo box
+ * itself opens only when the text changes.
+ *
+ * The close comes in the same commit that empties `items`, before React
+ * Aria's collection follows them one render later: otherwise the list
+ * closes only once it is empty, and React Aria announces "0 options
+ * available" while it is still open.
  */
-function OpenWhenSuggesting({ suggest }: { readonly suggest: boolean }) {
+function FollowSuggest({ suggest }: { readonly suggest: boolean }) {
   const state = useContext(ComboBoxStateContext);
   const before = useRef(suggest);
   useEffect(() => {
     const started = suggest && !before.current;
     before.current = suggest;
-    if (!started || !state || state.isOpen || !state.isFocused) return;
-    if (state.inputValue.trim() !== '') state.open(null, 'input');
+    if (!state) return;
+    if (!suggest && state.isOpen) state.close();
+    else if (started && !state.isOpen && state.isFocused)
+      if (state.inputValue.trim() !== '') state.open(null, 'input');
   });
   return null;
 }
@@ -247,8 +257,8 @@ function OpenWhenSuggesting({ suggest }: { readonly suggest: boolean }) {
 /**
  * Submits the typed text on Enter when no suggestion is active, before the
  * combo box handles the key; never while an input method composes text.
- * While the field does not suggest, the arrow keys do not open the
- * suggestions.
+ * While the field does not suggest, neither the arrow keys nor a touch on
+ * the input's centre (an iPad's virtual click) open the suggestions.
  */
 function FieldKeys({
   onSubmit,
@@ -272,8 +282,17 @@ function FieldKeys({
     const text = state.inputValue.trim();
     if (active == null && text !== '') onSubmit(text);
   };
+  const onTouchEndCapture = (event: TouchEvent<HTMLDivElement>) => {
+    // React Aria would toggle the empty list and announce it; the touch
+    // still focuses the input as on any text field.
+    if (!suggest) event.stopPropagation();
+  };
   return (
-    <div className="contents" onKeyDownCapture={onKeyDownCapture}>
+    <div
+      className="contents"
+      onKeyDownCapture={onKeyDownCapture}
+      onTouchEndCapture={onTouchEndCapture}
+    >
       {children}
     </div>
   );
