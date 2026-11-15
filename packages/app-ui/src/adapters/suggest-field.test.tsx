@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { createRef, useState, type Ref } from 'react';
+import { createRef, useState, type ReactNode, type Ref } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { I18nProvider } from 'react-aria-components';
+import { SdkLocaleProvider } from '@sempods/app-sdk/react';
 import {
   act,
   cleanup,
@@ -11,7 +13,10 @@ import {
 } from '@testing-library/react';
 import { SuggestField, type Suggestion } from './suggest-field.js';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const alice: Suggestion = {
   id: 'https://pod.example/alice#me',
@@ -142,6 +147,60 @@ it('announces a running, an empty, a partial and a failed search', async () => {
   expect(status()).toBe('The search failed.');
 });
 
+it('speaks in no live region but its status while results load, arrive and change (#326)', async () => {
+  const { rerender } = render(<Field loading />);
+  const heard = listen();
+  await type('x');
+  // Not React Aria's "0 options available." next to it.
+  expect(heard()).toEqual(['Searching …']);
+  for (const props of [
+    { items: [alice], loading: true },
+    { items: [alice, bob] },
+    { items: [bob] },
+    {},
+  ])
+    await act(async () => {
+      rerender(<Field {...props} />);
+    });
+  expect(heard()).toEqual([
+    'Searching …',
+    '1 suggestion. Searching for more …',
+    '2 suggestions.',
+    '1 suggestion.',
+    'No suggestions.',
+  ]);
+});
+
+it('speaks only in the provider language under a German browser locale (#326)', async () => {
+  const german = ({ children }: { readonly children: ReactNode }) => (
+    <I18nProvider locale="de-DE">
+      <SdkLocaleProvider locale="de-DE">{children}</SdkLocaleProvider>
+    </I18nProvider>
+  );
+  const { rerender } = render(<Field loading />, { wrapper: german });
+  const heard = listen();
+  await type('x');
+  await act(async () => {
+    rerender(<Field items={[alice, bob]} />);
+  });
+  // Not "0 Optionen verfügbar." or "2 Optionen verfügbar."
+  expect(heard()).toEqual(['Suche läuft …', '2 Vorschläge.']);
+});
+
+it('leaves the active suggestion to React Aria for VoiceOver (#326)', async () => {
+  // React Aria announces the active option itself on Apple devices.
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const flat: Suggestion = { id: 'https://pod.example/flat3', label: 'Flat 3' };
+  render(<Field items={[alice, flat]} />);
+  const heard = listen();
+  await type('a');
+  await key('ArrowDown');
+  await key('ArrowDown');
+  expect(active()).toBe('Flat 3');
+  // Its count on opening ("2 options available.") stays out.
+  expect(heard()).toEqual(['2 suggestions.', 'Alice', 'Flat 3']);
+});
+
 it('shows the exact value and the source with the label', async () => {
   render(<Field items={[alice]} />);
   await type('a');
@@ -252,7 +311,10 @@ it('gives the app its input through ref, to focus and select it', async () => {
 
 /**
  * What any live region says from now on: the field's own and React Aria's
- * announcer, which lives outside the field.
+ * announcer, which lives outside the field. A region says what it still
+ * holds once the task's microtasks have run, as assistive technology reads
+ * it: the field takes React Aria's count out again when React Aria creates
+ * its announcer with it.
  */
 function listen() {
   const said: string[] = [];
@@ -267,11 +329,15 @@ function listen() {
       const texts =
         record.type === 'characterData'
           ? [record.target.textContent]
-          : [...record.addedNodes].map((node) => node.textContent);
+          : [...record.addedNodes]
+              .filter((node) => node.isConnected)
+              .map((node) => node.textContent);
       for (const text of texts) if (text?.trim()) said.push(text.trim());
     }
   };
-  const observer = new MutationObserver(read);
+  const observer = new MutationObserver((records) =>
+    queueMicrotask(() => read(records)),
+  );
   observer.observe(document.body, {
     subtree: true,
     childList: true,
