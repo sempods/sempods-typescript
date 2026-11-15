@@ -4,7 +4,13 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
-## Pending release: shared palette defaults
+## From 0.8.0 to 0.9.0
+
+0.9.0 is not released yet; this section collects its upgrade steps. The
+prerelease `0.9.0-dev.1` carries them, and the [0.9.0 release
+notes](releases/0.9.0.md) list the changes.
+
+### Shared palette defaults
 
 The UI kit's fallback palette and the TODO example now use sage in both
 modes, matching AppAccess and new template apps. The bare app-sdk also aligns
@@ -35,27 +41,33 @@ foreground aliases and action-role mapping continue to apply:
 }
 ```
 
-For an app using app-sdk **without** the UI kit, only these three fallback
-pairs change in this palette update. To retain their previous values, set
-the public tokens on an ancestor of the SDK surfaces:
+For an app using app-sdk **without** the UI kit, every `--sempods-*` fallback
+is sage now, and the primary action is outlined instead of filled. To retain
+the 0.8.0 colours, set the public tokens on an ancestor of the SDK surfaces.
+This does not restore the 0.8.0 sign-in layout:
 
 ```css
 :root {
-  --sempods-muted: light-dark(#5f7167, #b0c0b6);
+  --sempods-bg: light-dark(#ffffff, #111315);
+  --sempods-text: light-dark(#1f2933, #e5e7eb);
+  --sempods-muted: light-dark(#6b7280, #9ca3af);
   --sempods-line: light-dark(#e5e7eb, #2d3138);
-  --sempods-on-accent: light-dark(#f7f9f7, #131b18);
+  --sempods-accent: light-dark(#1f2933, #e5e7eb);
+  --sempods-on-accent: light-dark(#ffffff, #111315);
+  --sempods-field-line: light-dark(#e5e7eb, #2d3138);
+  --sempods-primary-bg: light-dark(#1f2933, #e5e7eb);
+  --sempods-primary-text: light-dark(#ffffff, #111315);
+  --sempods-primary-border: light-dark(#1f2933, #e5e7eb);
 }
 ```
 
-The earlier AppAccess redesign's fallback changes are described separately
-below; these three overrides do not restore its former layout or palette.
-
 The TODO PWA uses the light primary (`#3e6b56`) as its static manifest theme
-colour and the light background (`#f7f9f7`) as the launch fallback. Marked
-page meta colours follow the resolved background. Android system bars and
-installed metadata refresh remain browser/OS controlled; see [PWA colours](pwa.md#colours-and-system-ui).
+colour and the light background (`#f7f9f7`) as the launch fallback. Marked page
+meta colours follow the resolved background. Android system bars and installed
+metadata refresh remain browser/OS controlled; see [PWA
+colours](pwa.md#colours-and-system-ui).
 
-## Pending release: simpler AppAccess sign-in
+### Simpler AppAccess sign-in
 
 The default sign-in centres the app icon, name and optional description above
 one editable Pod chooser and one outlined main action. Saved Pods appear in
@@ -67,19 +79,32 @@ always showing explanatory paragraphs.
 set it to another prefix or `""` for an empty field. It is clearable and cannot
 be submitted by itself. Configured/permitted targets still take precedence.
 The fallback palette is sage with outlined primary actions; app theme tokens
-and the UI kit bridge still override it. The app's language and provider
-message overrides also apply to the new optional `controls.podHelp` and
-`controls.clearPodAddress` labels.
+and the UI kit bridge still override it.
+
+End-to-end tests that drive the sign-in need new steps. The Pod address is a
+combobox (`role="combobox"`), no longer a text input or a `<select>` with
+`allowedPods`. Without configured targets it is prefilled with
+`https://sempods.org/`, so typing a full address into it appends; clear it
+first or set `podAddressPrefix=""`. The placeholder is `sempods.org/your-name`.
+**Forget** is now **Remove from this device**, inside **Manage saved Pods**.
+
+`controls` has new optional messages: `podHelp`, `clearPodAddress`,
+`manageSavedPods`, `removeSavedPod`, `forgetHint` and `podPlaceholder`, and,
+from the sections below, `starting`, `noValue`, `emptyText` and
+`severalValues`. `createLocale` fills English and German defaults for every
+one of them, and `podHint` and `loginHint` now default to a short text instead
+of `''`. An app that translates the controls into another language should add
+the new messages; one that set `forget` should also set `removeSavedPod`,
+which the remove action now shows.
 
 `ConnectionsProps` adds optional `surface`, `podAddress` and `podAddressPrefix`
-presentation props.
-Standalone `AccessGate` now also accepts `components.Connections`. Existing
-replacements keep compiling; replacements can distinguish sign-in, Context and
-management rather than inferring it from session state. Use guarded `useApp()`
-actions, as before. See [custom connection views](react-authoring.md#replacing-the-connection-view).
+presentation props. Standalone `AccessGate` now also accepts
+`components.Connections`. Existing replacements keep compiling; replacements can
+distinguish sign-in, Context and management rather than inferring it from
+session state. Use guarded `useApp()` actions, as before. See [custom connection
+views](react-authoring.md#replacing-the-connection-view).
 
-No app should copy the default login or session logic. Upgrade to the containing
-SDK release to receive it; this source change is not in published 0.8.0.
+No app should copy the default login or session logic.
 
 Controller `connect` and `authorize` now reject with `RuntimeError('storage')`
 when the target's previous sign-out or forget could not be saved. Retry that
@@ -87,7 +112,7 @@ retirement first; this also applies when an existing Pod URL is typed again.
 The low-level `runtime.beginAuthorization` still supports explicitly replacing
 that record with a new durable authorization attempt.
 
-## Pending release: remembered Pod deduplication
+### Remembered Pod deduplication
 
 `runtime.connect(url)` now reuses a matching connection for any Pod, not only
 the configured default. Concurrent calls share discovery. Use the returned
@@ -96,114 +121,108 @@ up redundant address-only records from older SDKs; existing live sessions and
 pending authorization are preserved. A failed cleanup remains visible and can
 be retried. See [connection reuse](browser-runtime.md#one-known-pod).
 
-## Pending release: standard grouped Context chooser
+### Standard grouped Context chooser
 
-The source adds `ContextSwitch` to `@sempods/app-ui` and additive display
-labels to `useContexts`/`usePodContexts`. This is not part of published 0.8.0;
-upgrade all three SDK packages together after the containing release exists.
-Replace a copied list chooser with the standard component, retaining domain
-words and scope configuration. Remove app-owned generic selection feedback,
-permission rows and label parsing: a custom chooser reads `contextLabel`,
-`qualifier` and `podLabel` instead of splitting `name` or `label`. Keep domain data operations and `AppAccess`.
-See [the chooser guide](react-authoring.md#one-chooser-across-pods).
+0.9.0 adds `ContextSwitch` to `@sempods/app-ui` and additive display labels to
+`useContexts`/`usePodContexts`. Upgrade all three SDK packages together. Replace
+a copied list chooser with the standard component, retaining domain words and
+scope configuration. Remove app-owned generic selection feedback, permission
+rows and label parsing: a custom chooser reads `contextLabel`, `qualifier` and
+`podLabel` instead of splitting `name` or `label`. Keep domain data operations
+and `AppAccess`. See [the chooser
+guide](react-authoring.md#one-chooser-across-pods).
 
-## Pending release: change a waiting Pod read's priority in place
+### Change a waiting Pod read's priority in place
 
-The source adds `priority` to the `usePodLoad` options and `setPriority` to
-the loader that `createViewLoader(pod, …)` returns. This is not part of
-published 0.8.0. A changed value moves that loader's waiting reads ahead (or
-back) under `podReadLimit` without restarting them; a running request keeps
-its signal. After upgrading to the containing release, remove reloads or
+0.9.0 adds `priority` to the `usePodLoad` options and `setPriority` to the
+loader that `createViewLoader(pod, …)` returns. A changed value moves that
+loader's waiting reads ahead (or back) under `podReadLimit` without restarting
+them; a running request keeps its signal. After upgrading, remove reloads or
 `key` changes that only restarted a read to change its priority, and pass
-`priority: selected ? 'current' : undefined` to `usePodLoad` instead of
-choosing `priority` inside the read callback. A read's own
-`priority: 'current'` keeps working for a read that is always current. See
-[bounded Pod reads](browser-runtime.md#bounded-pod-reads).
+`priority: selected ? 'current' : undefined` to `usePodLoad` instead of choosing
+`priority` inside the read callback. A read's own `priority: 'current'` keeps
+working for a read that is always current. See [bounded Pod
+reads](browser-runtime.md#bounded-pod-reads).
 
-## Pending release: 44px corner Close in the compact Dialog
+### 44px corner Close in the compact Dialog
 
-The source makes the corner Close of `@sempods/app-ui`'s compact `Dialog` a
-44px target around the same 16px glyph, and a `DialogHeader` or `DialogTitle`
-placed directly in that `Dialog` keeps 40px clear on its right for it. This is
-not part of published 0.8.0. After upgrading to the containing release, remove
-app CSS that only enlarged `[data-slot=dialog-close]` (a minimum width or
-height, padding) and check a header with its own right padding. Other
-`icon-sm` buttons keep their 28px size.
+0.9.0 makes the corner Close of `@sempods/app-ui`'s compact `Dialog` a 44px
+target around the same 16px glyph, and a `DialogHeader` or `DialogTitle` placed
+directly in that `Dialog` keeps 40px clear on its right for it. After upgrading,
+remove app CSS that only enlarged `[data-slot=dialog-close]` (a minimum width or
+height, padding) and check a header with its own right padding. Other `icon-sm`
+buttons keep their 28px size.
 
-## Pending release: app settings in the access gate
+### App settings in the access gate
 
-The source adds `settings` to `AppAccess` and `AccessGate` in
+0.9.0 adds `settings` to `AppAccess` and `AccessGate` in
 `@sempods/app-sdk/react`: a corner button in the gate opens the app's own
-settings, such as language and appearance, above the gate. This is not part
-of published 0.8.0. After upgrading to the containing release, replace a
-composition that hides the gate while an app settings modal is open (a
+settings, such as language and appearance, above the gate. After upgrading,
+replace a composition that hides the gate while an app settings modal is open (a
 settings button in `description` together with `only="management"`) by
 `settings={{ label, content }}`, reusing the controls of the app's settings
-dialog. Keep the header settings entry for the signed-in app. See
-[settings before sign-in](react-authoring.md#app-settings-before-sign-in).
-The gate also shows again, with the focus kept, when a browser closes it on a
-repeated Escape: browsers let a close request through uncancelled when no
-other input came between two of them.
+dialog. Keep the header settings entry for the signed-in app. See [settings
+before sign-in](react-authoring.md#app-settings-before-sign-in). The gate also
+shows again, with the focus kept, when a browser closes it on a repeated Escape:
+browsers let a close request through uncancelled when no other input came
+between two of them.
 
-## Pending release: a startup screen instead of a blank page or the access card
+### A startup screen instead of a blank page or the access card
 
-The source adds `AppSnapshot.starting` (`useAppState().starting`) and the
-startup screen `AppStartup` to `@sempods/app-sdk/react`. `AppAccess` places
-it by default while the app starts: from the saved records through
-restoration to the first catalogue a Context needs. This is not part of
-published 0.8.0. In 0.8.0 `AppAccess` showed nothing while a saved session
-restored and its access card with "Loading…" (or the Pod chooser) during the
-first catalogue. Now one calm screen with the app's icon and name covers both.
-The content stays mounted and inert behind it, and prompts wait until it
-ends. After upgrading to the containing release, remove app code that
-combined `startup`, `access.pending`, the session kind and readability to
-tell "starting" from "nothing to show", and pass `icon` to `AppAccess` if the
-app has one. Match a static HTML splash to it (see
-[the startup sequence](react-authoring.md#startup-screen-and-static-splash)).
-`startup="none"` keeps the 0.8.0 behaviour for the restoration and leaves
-the screen to the app; the Context surface still waits for `starting` to end.
-A complete custom `messages.controls` may add `starting`; otherwise `loading`
+0.9.0 adds `AppSnapshot.starting` (`useAppState().starting`) and the startup
+screen `AppStartup` to `@sempods/app-sdk/react`. `AppAccess` places it by
+default while the app starts: from the saved records through restoration to the
+first catalogue a Context needs. In 0.8.0 `AppAccess` showed nothing while a
+saved session restored and its access card with "Loading…" (or the Pod chooser)
+during the first catalogue. Now one calm screen with the app's icon and name
+covers both. The content stays mounted and inert behind it, and prompts wait
+until it ends. After upgrading, remove app code that combined `startup`,
+`access.pending`, the session kind and readability to tell "starting" from
+"nothing to show", and pass `icon` to `AppAccess` if the app has one. Match a
+static HTML splash to it (see [the startup
+sequence](react-authoring.md#startup-screen-and-static-splash)).
+`startup="none"` keeps the 0.8.0 behaviour for the restoration and leaves the
+screen to the app; the Context surface still waits for `starting` to end. A
+complete custom `messages.controls` may add `starting`; otherwise `loading`
 shows. The `react` entry now imports `react-dom` (an optional peer, like
 `react`) for the startup screen's portal; a React web app already has it.
 
-## Pending release: the last active Pod at startup
+### The last active Pod at startup
 
 With several saved Pods, the app controller now makes the Pod active that the
 app last worked with, remembered in `preferences` (localStorage by default),
 instead of the first in the session store's order. At startup, an active Pod
-whose session ended, that is unreachable, that lacks a required scope, or
-that still restores after 5 seconds gives way to another Pod that works. The
-other Pod then shows as an action prompt instead of the gate. A saved credential that is due
-is renewed while it restores, so an expired grant ends as `restoring` →
-`ended` rather than after `active`; restoration of such a credential can take
-up to 20 seconds longer than its discovery. This is not part of published
-0.8.0. After upgrading to the containing release, remove app code that stored
-or reselected the last active Pod itself, or that offered a switch to another
-Pod beside the gate at startup. `preferences: null` also disables the
-remembered Pod. See
-[several Pods at startup](browser-runtime.md#several-pods-at-startup).
+whose session ended, that is unreachable, that lacks a required scope, or that
+still restores after 5 seconds gives way to another Pod that works. The other
+Pod then shows as an action prompt instead of the gate. A saved credential that
+is due is renewed while it restores, so an expired grant ends as `restoring` →
+`ended` rather than after `active`; restoration of such a credential can take up
+to 20 seconds longer than its discovery. After upgrading, remove app code that
+stored or reselected the last active Pod itself, or that offered a switch to
+another Pod beside the gate at startup. `preferences: null` also disables the
+remembered Pod. See [several Pods at
+startup](browser-runtime.md#several-pods-at-startup).
 
-## Pending release: rdf:langString in the preferred-language recipe
+### rdf:langString in the preferred-language recipe
 
 `selectTextVariant` and `patchTextVariant` in `@sempods/client-sdk/edit` now
 also read a language literal that states its implied `@type` `rdf:langString`.
-This is not part of published 0.8.0. After upgrading to the containing release,
-remove an app-owned projection that only dropped that `@type` before the
-helpers and restored retained terms in the patch: unedited terms keep their
-representation, and an edit writes one plain value in the selected language.
-See [the recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant).
+After upgrading, remove an app-owned projection that only dropped that `@type`
+before the helpers and restored retained terms in the patch: unedited terms keep
+their representation, and an edit writes one plain value in the selected
+language. See [the
+recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant).
 
-## Pending release: structured values in recovery comparisons
+### Structured values in recovery comparisons
 
 `ResourceEditor`'s review and `UpdateNotice` now show structured draft values
-instead of `[object Object]`. This is not part of published 0.8.0. A
-`TextVariant` shows its language tag, and several values in one language list
-each of them; no value (missing, `null`, an empty list) reads "No value" and
-empty text "Empty text" instead of a shared dash; lists and nested objects show
-their parts. After upgrading to the containing release, remove an app-owned
-comparison or a draft flattened only to make this readable, and keep the
-`TextVariant` in the draft. A complete custom message catalog may set the new
-optional `controls` messages `noValue`, `emptyText` and `severalValues`;
+instead of `[object Object]`. A `TextVariant` shows its language tag, and
+several values in one language list each of them; no value (missing, `null`, an
+empty list) reads "No value" and empty text "Empty text" instead of a shared
+dash; lists and nested objects show their parts. After upgrading, remove an
+app-owned comparison or a draft flattened only to make this readable, and keep
+the `TextVariant` in the draft. A complete custom message catalog may set the
+new optional `controls` messages `noValue`, `emptyText` and `severalValues`;
 `createLocale` fills English and German defaults. See
 [notices](react-authoring.md#notices-updatenotice).
 
