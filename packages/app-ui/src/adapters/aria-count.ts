@@ -11,13 +11,18 @@
  * available." while the first results load. The announcer is internal to
  * React Aria and has no option for the count, so the field says in that
  * commit which count to expect (`expectAriaCount`), and the region's logs
- * leave out one message with that number in it, as React Aria formats it,
- * that is not one of the field's option texts. Other messages, such as
- * VoiceOver's active option or another component's announcement, are kept.
+ * leave out one message whose only number is that count, as React Aria
+ * formats it, and that is not one of the field's option texts. Such a
+ * message is expected only in that commit's task, or, when React Aria
+ * creates its region with it, as its delayed first message. Other messages,
+ * such as VoiceOver's active option or another component's announcement,
+ * are kept.
  */
 
 /** A count React Aria is about to announce for a field. */
 interface Expected {
+  /** React Aria announced it. */
+  done?: boolean;
   /** The number as React Aria formats it in its locale. */
   readonly count: string;
   /** The field's option texts, which React Aria announces for VoiceOver. */
@@ -26,7 +31,10 @@ interface Expected {
 
 /** Counts React Aria announces in the effects of the current commit. */
 const now = new Set<Expected>();
-/** Counts with which React Aria creates its region, adding them 100ms later. */
+/**
+ * Counts with which React Aria creates its region, while it may add them:
+ * at once under React's act(), else 100ms later.
+ */
 const first = new Set<Expected>();
 /** The announcer logs guarded so far. */
 const guarded = new WeakSet<Element>();
@@ -37,14 +45,20 @@ let waiting = 0;
 const digit = (char: string | undefined) =>
   char !== undefined && /\p{Nd}/u.test(char);
 
-/** Whether `text` has `number` in it, not as part of a longer number. */
-function hasNumber(text: string, number: string): boolean {
+/**
+ * Whether the only number in `text` is `number`, as in React Aria's count
+ * ("2 options available."), unlike a date or a time.
+ */
+function onlyNumber(text: string, number: string): boolean {
   for (
     let at = text.indexOf(number);
     at >= 0;
     at = text.indexOf(number, at + 1)
-  )
-    if (!digit(text[at - 1]) && !digit(text[at + number.length])) return true;
+  ) {
+    const rest = text.slice(0, at) + ' ' + text.slice(at + number.length);
+    if (!digit(text[at - 1]) && !digit(text[at + number.length]))
+      return !/\p{Nd}/u.test(rest);
+  }
   return false;
 }
 
@@ -57,9 +71,10 @@ function take(node: Node): boolean {
   const text = node.textContent?.trim() ?? '';
   for (const counts of [now, first])
     for (const count of counts) {
-      if (count.options.includes(text) || !hasNumber(text, count.count))
+      if (count.options.includes(text) || !onlyNumber(text, count.count))
         continue;
       counts.delete(count);
+      count.done = true;
       return true;
     }
   return false;
@@ -109,14 +124,19 @@ export function expectAriaCount(
     queueMicrotask(() => now.delete(entry));
     return;
   }
-  first.add(entry);
-  // React Aria creates its region with its first message and adds that
-  // message 100ms later.
+  // React Aria creates its region with its first message: it adds that
+  // message at once under React's act(), else from a 100ms timer it sets
+  // in this commit's effects, after the one set here.
   waiting++;
   watcher ??= new MutationObserver(guardAll);
   watcher.observe(document.body, { childList: true });
+  first.add(entry);
+  setTimeout(() => first.delete(entry), 0);
   setTimeout(() => {
-    first.delete(entry);
-    if (--waiting === 0) watcher?.disconnect();
-  }, 1000);
+    if (!entry.done) first.add(entry);
+    setTimeout(() => {
+      first.delete(entry);
+      if (--waiting === 0) watcher?.disconnect();
+    }, 50);
+  }, 100);
 }
