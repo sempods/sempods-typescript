@@ -1,4 +1,4 @@
-/* global document, getComputedStyle, history, innerHeight, innerWidth, location, MutationObserver, requestAnimationFrame, window */
+/* global document, Element, Event, getComputedStyle, history, innerHeight, innerWidth, location, MutationObserver, performance, requestAnimationFrame, window */
 // The checks of the UI gate (scripts/test-ui-consumer.mjs), ported from the
 // template's spike #120 (gate.mjs, roundtrip.mjs, interaction.mjs,
 // evidence.mjs, contrast-selftest.mjs and routing-gate.mjs on
@@ -3812,10 +3812,13 @@ async function search({ browser, origin }) {
       .catch(() => {});
     return status.textContent();
   };
-  const open = async ({ width = 1280, lang = 'en' } = {}) => {
+  const open = async ({ width = 1280, lang = 'en', mode } = {}) => {
     await page.setViewportSize({ width, height: 800 });
     await page.goto(
-      origin + `/?screen=search${lang === 'de' ? '&lang=de' : ''}`,
+      origin +
+        `/?screen=search${lang === 'de' ? '&lang=de' : ''}${
+          mode ? `&mode=${mode}` : ''
+        }`,
     );
     await field.waitFor();
   };
@@ -3830,6 +3833,49 @@ async function search({ browser, origin }) {
     page.evaluate(() => document.activeElement?.getAttribute('role') ?? null);
   const log = async () =>
     (await opened.getByRole('listitem').allTextContents()).map((t) => t.trim());
+  /**
+   * Records, until `heard`, how often a suggestion list is in the page and
+   * what any live region says: the field's own and React Aria's announcer.
+   */
+  const listen = () =>
+    page.evaluate(() => {
+      const seen = { lists: 0, said: [] };
+      const live = '[aria-live], [role="status"], [role="log"], [role="alert"]';
+      const read = (records) => {
+        if (document.querySelector('[role="listbox"]')) seen.lists++;
+        for (const record of records) {
+          const target =
+            record.target instanceof Element
+              ? record.target
+              : record.target.parentElement;
+          if (!target?.closest(live)) continue;
+          const texts =
+            record.type === 'characterData'
+              ? [record.target.textContent]
+              : [...record.addedNodes].map((node) => node.textContent);
+          for (const text of texts)
+            if (text?.trim()) seen.said.push(text.trim());
+        }
+      };
+      const observer = new MutationObserver(read);
+      observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+      });
+      window.liveHeard = () => {
+        read(observer.takeRecords());
+        observer.disconnect();
+        return seen;
+      };
+    });
+  // React Aria's announcer speaks up to 100ms late the first time.
+  const heard = async () => {
+    await settle(page);
+    await page.waitForTimeout(300);
+    return page.evaluate(() => window.liveHeard());
+  };
   const checks = {
     // Typing opens the suggestions; arrows move, Enter chooses one and the
     // focus stays in the field.
@@ -4013,6 +4059,142 @@ async function search({ browser, origin }) {
           m.inputOutline === 'none' &&
           m.groupOutline === 'solid',
         ...m,
+      };
+    },
+    // An address bar (#324): for an address and a single character the
+    // field neither opens its suggestions nor announces a search, also on
+    // the arrow keys; Enter submits and the first Escape reaches the panel.
+    // A searchable text suggests in the same input, whose suggestions take
+    // the first Escape again; Ctrl/Cmd-K focuses and selects it (`ref`).
+    async 'search-address-mode'() {
+      await open({ mode: 'address' });
+      await listen();
+      await field.click();
+      await field.evaluate((input) => (window.addressInput = input));
+      // The complete address arrives at once, as when it is pasted; its
+      // prefixes, typed one by one, are searchable text.
+      await page.keyboard.insertText('https://pod.example/dan');
+      // Even a search result the app still holds stays unused.
+      await found({ items: [] });
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowUp');
+      await settle(page);
+      const expanded = await field.getAttribute('aria-expanded');
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Enter');
+      await field.fill('');
+      await page.keyboard.type('d');
+      await page.keyboard.press('ArrowDown');
+      const quiet = await heard();
+      const addressLog = await log();
+      // Searchable text: the same input suggests again.
+      await page.keyboard.type('a');
+      await found({ items: [alice, carol] });
+      await listbox.waitFor();
+      const said = await announced('2 suggestions.');
+      const same = await field.evaluate(
+        (input) => input === window.addressInput,
+      );
+      await page.keyboard.press('Escape');
+      await hidden(listbox);
+      const afterFirst = await log();
+      await page.keyboard.type('n');
+      await listbox.waitFor();
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowDown');
+      const chosen = await active();
+      await page.keyboard.press('Enter');
+      await hidden(listbox);
+      await page.getByRole('heading', { name: 'Explorer' }).click();
+      await page.keyboard.press('ControlOrMeta+k');
+      const selected = await field.evaluate((input) => ({
+        focused: document.activeElement === input,
+        all:
+          input.selectionStart === 0 &&
+          input.selectionEnd === input.value.length,
+        value: input.value,
+      }));
+      const entries = await log();
+      return {
+        pass:
+          expanded === 'false' &&
+          quiet.lists === 0 &&
+          quiet.said.length === 0 &&
+          addressLog.join() === 'close,submit https://pod.example/dan' &&
+          said === '2 suggestions.' &&
+          same &&
+          afterFirst.length === 2 &&
+          chosen === 'Carol' &&
+          entries.at(-1) === 'select ' + carol.id &&
+          selected.focused &&
+          selected.all &&
+          selected.value === 'dan',
+        expanded,
+        quiet,
+        addressLog,
+        said,
+        same,
+        afterFirst,
+        chosen,
+        selected,
+        entries,
+      };
+    },
+    // An address pasted over searched text closes the suggestions without
+    // an announcement, also React Aria's count ("0 options available"); a
+    // touch on the input's exact centre, which React Aria takes for an
+    // iPad's virtual click, does not open them either (#324).
+    async 'search-address-after-search'() {
+      await open({ mode: 'address' });
+      await field.click();
+      await page.keyboard.type('da');
+      await found({ items: [alice, carol] });
+      await listbox.waitFor();
+      await announced('2 suggestions.');
+      // What React Aria says about the search itself has been said.
+      await page.waitForTimeout(300);
+      await listen();
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.insertText('https://pod.example/dan');
+      await hidden(listbox);
+      const pasted = await heard();
+      // React Aria ignores a touch within 500ms of the page's start.
+      await page.waitForFunction(() => performance.now() > 600);
+      await listen();
+      await field.evaluate((input) => {
+        const box = input.getBoundingClientRect();
+        const event = new Event('touchend', {
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperty(event, 'changedTouches', {
+          value: [
+            {
+              identifier: 0,
+              target: input,
+              clientX: Math.ceil(box.left + box.width / 2),
+              clientY: Math.ceil(box.top + box.height / 2),
+            },
+          ],
+        });
+        input.dispatchEvent(event);
+      });
+      const touched = await heard();
+      const expanded = await field.getAttribute('aria-expanded');
+      const focused = await field.evaluate(
+        (input) => document.activeElement === input,
+      );
+      return {
+        pass:
+          pasted.said.length === 0 &&
+          touched.lists === 0 &&
+          touched.said.length === 0 &&
+          expanded === 'false' &&
+          focused,
+        pasted,
+        touched,
+        expanded,
+        focused,
       };
     },
     // A press chooses a suggestion too.

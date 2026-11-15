@@ -9,7 +9,10 @@
 // workspace with its nonmodal filter panel instead of the tasks. With
 // `?screen=search`, the page is a search bar with suggestions (SuggestField)
 // whose results the checks set through `window.searchGate`, as an app's
-// search would. The access gate offers the app's language and appearance
+// search would; with `&mode=address` as well, the bar sits in a nonmodal
+// panel and searches only text that is no address and at least two
+// characters long, as an address bar does, and Ctrl/Cmd-K focuses and
+// selects it. The access gate offers the app's language and appearance
 // settings (`AppAccess` `settings`), applied in place. With
 // `?screen=gate-settings`, sign-in is optional and the page is only the
 // gate with a fixed focus target; the checks end the gate's cause through
@@ -42,6 +45,7 @@ import {
   HeaderMenu,
   ScreenDialog,
   SuggestField,
+  WorkspacePanel,
   replaceUrl,
   useNav,
   type Nav,
@@ -198,6 +202,7 @@ const language =
 const compact = settings.get('dialog') === 'compact';
 const workspace = settings.has('workspace');
 const search = settings.get('screen') === 'search';
+const addressBar = search && settings.get('mode') === 'address';
 const gateSettings = settings.get('screen') === 'gate-settings';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
@@ -601,30 +606,57 @@ function GateSettingsScreen({
 function SearchGate() {
   const [text, setText] = useState('');
   const [found, setFound] = useState<SearchState>({ items: [] });
-  // What a choice or Enter opened, for the checks to read.
+  // What a choice, Enter or a close request did, for the checks to read.
   const [opened, setOpened] = useState<readonly string[]>([]);
+  const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     Object.assign(window, { searchGate: setFound });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== 'k') return;
+      event.preventDefault();
+      input.current?.focus();
+      input.current?.select();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+  const query = text.trim();
+  // An address bar searches neither an address nor a single character.
+  const suggest = !addressBar || (!URL.canParse(query) && query.length >= 2);
+  const field = (
+    <SuggestField
+      ref={input}
+      label={language === 'de' ? 'Adresse oder Suche' : 'Address or search'}
+      labelHidden
+      placeholder={
+        language === 'de'
+          ? 'Suchen oder Adresse eingeben'
+          : 'Search or enter an address'
+      }
+      value={text}
+      onChange={setText}
+      items={query ? found.items : []}
+      loading={found.loading}
+      failed={found.failed}
+      suggest={suggest}
+      onSelect={(item) => setOpened((o) => [...o, 'select ' + item.id])}
+      onSubmit={(value) => setOpened((o) => [...o, 'submit ' + value])}
+    />
+  );
   return (
     <main className="gate-main">
       <h1 className="mb-4 text-lg font-semibold">Explorer</h1>
-      <SuggestField
-        label={language === 'de' ? 'Adresse oder Suche' : 'Address or search'}
-        labelHidden
-        placeholder={
-          language === 'de'
-            ? 'Suchen oder Adresse eingeben'
-            : 'Search or enter an address'
-        }
-        value={text}
-        onChange={setText}
-        items={text.trim() ? found.items : []}
-        loading={found.loading}
-        failed={found.failed}
-        onSelect={(item) => setOpened((o) => [...o, 'select ' + item.id])}
-        onSubmit={(value) => setOpened((o) => [...o, 'submit ' + value])}
-      />
+      {addressBar ? (
+        <WorkspacePanel
+          title="Find"
+          open
+          onRequestClose={() => setOpened((o) => [...o, 'close'])}
+        >
+          {field}
+        </WorkspacePanel>
+      ) : (
+        field
+      )}
       <ol aria-label="Opened" className="mt-4">
         {opened.map((entry, i) => (
           <li key={i}>{entry}</li>

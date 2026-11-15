@@ -80,7 +80,8 @@ focus tokens (sempods/sempods-typescript#200), the date chooser takes the SDK
 language, and palette defaults sit in the `theme` layer without specificity.
 `SuggestField` (`src/adapters/suggest-field.tsx`) and its single focus cue
 in `styles.css` are this package's own, written on the registry's combo box
-for sempods/sempods-apps-template#144.
+for sempods/sempods-apps-template#144; its address mode (`suggest`) and input
+`ref` are for sempods/sempods-typescript#324.
 
 `ContextSwitch` (`src/adapters/context-switch.tsx`) is an SDK-aware composition
 for sempods/sempods-typescript#290 and sempods/sempods-apps-template#155.

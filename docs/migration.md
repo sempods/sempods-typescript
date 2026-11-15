@@ -226,6 +226,20 @@ new optional `controls` messages `noValue`, `emptyText` and `severalValues`;
 `createLocale` fills English and German defaults. See
 [notices](react-authoring.md#notices-updatenotice).
 
+### Address mode and an input ref for SuggestField
+
+0.9.0 adds two optional props to `@sempods/app-ui`'s `SuggestField`.
+`suggest={false}` keeps the suggestions closed and silent for text the app
+does not search, such as an exact address, an invalid one or text too short to
+search: no "No suggestions", searching or option-count announcement, no popup
+on the arrow keys or a touch, and Enter submits through `onSubmit`, in the same input. `ref` reaches
+the input element. Existing fields keep their behaviour. After upgrading,
+replace a composition that swapped `SuggestField` for a plain input in address
+mode, or passed `items={[]}` and kept the false "No suggestions", by
+`suggest={false}` for that text, and focus and select the field through `ref`
+instead of querying the DOM. Recognizing and opening an address stays app
+code. See [the UI kit's adapters](../packages/app-ui/README.md#adapters).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to
