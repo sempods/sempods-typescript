@@ -709,7 +709,12 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   only visually, and `source` names where it was found in a few words;
   assistive technology reads both in full as the suggestion's description. The field announces the number
   of suggestions, a search still running, one that found nothing or failed
-  in part or completely, in the SDK provider's language. It is 44px high,
+  in part or completely, in the SDK provider's language, and each change
+  once. It is the only voice for them: React Aria's own option count for
+  the field ("0 options available." while the first results load) stays
+  out of React Aria's announcer, while the active suggestion, which React
+  Aria says for VoiceOver, and other components' announcements still
+  reach it. It is 44px high,
   as are the suggestions, and draws one focus cue, the outline around the
   whole field. `labelHidden` names it for assistive technology only, for a
   bar whose placeholder and place say what it is. `suggest={false}` is for

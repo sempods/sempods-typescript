@@ -3837,8 +3837,8 @@ async function search({ browser, origin }) {
    * Records, until `heard`, how often a suggestion list is in the page and
    * what any live region says: the field's own and React Aria's announcer.
    */
-  const listen = () =>
-    page.evaluate(() => {
+  const listen = (on = page) =>
+    on.evaluate(() => {
       const seen = { lists: 0, said: [] };
       const live = '[aria-live], [role="status"], [role="log"], [role="alert"]';
       const read = (records) => {
@@ -3852,12 +3852,19 @@ async function search({ browser, origin }) {
           const texts =
             record.type === 'characterData'
               ? [record.target.textContent]
-              : [...record.addedNodes].map((node) => node.textContent);
+              : [...record.addedNodes]
+                  .filter((node) => node.isConnected)
+                  .map((node) => node.textContent);
           for (const text of texts)
             if (text?.trim()) seen.said.push(text.trim());
         }
       };
-      const observer = new MutationObserver(read);
+      // What a region still holds once the task's microtasks have run, as
+      // assistive technology reads it: SuggestField takes React Aria's
+      // count out again when React Aria creates its announcer with it.
+      const observer = new MutationObserver((records) =>
+        window.queueMicrotask(() => read(records)),
+      );
       observer.observe(document.body, {
         subtree: true,
         childList: true,
@@ -3871,10 +3878,47 @@ async function search({ browser, origin }) {
       };
     });
   // React Aria's announcer speaks up to 100ms late the first time.
-  const heard = async () => {
-    await settle(page);
-    await page.waitForTimeout(300);
-    return page.evaluate(() => window.liveHeard());
+  const heard = async (on = page) => {
+    await settle(on);
+    await on.waitForTimeout(300);
+    return on.evaluate(() => window.liveHeard());
+  };
+  /**
+   * What every live region says while a search for "x" loads and `steps`
+   * set its results, each once the field's status says its text, and then
+   * as the keyboard moves to the first suggestion; on `on`, a page in the
+   * browser locale of its own.
+   */
+  const searchHeard = async (on, lang, steps) => {
+    await on.goto(origin + `/?screen=search${lang === 'de' ? '&lang=de' : ''}`);
+    await on.evaluate(() => window.searchGate({ items: [], loading: true }));
+    const input = on.getByRole('combobox');
+    await input.click();
+    await listen(on);
+    await on.keyboard.type('x');
+    for (const [state, text] of steps) {
+      if (state) await on.evaluate((s) => window.searchGate(s), state);
+      await on.waitForFunction(
+        (text) =>
+          document.querySelector('[role="status"][data-live-announcer]')
+            ?.textContent === text,
+        text,
+        { timeout: 3000 },
+      );
+    }
+    await on.keyboard.press('ArrowDown');
+    const active = await input.evaluate((el) => {
+      const id = el.getAttribute('aria-activedescendant');
+      return id
+        ? document.getElementById(id)?.querySelector('[slot="label"]')
+            ?.textContent
+        : null;
+    });
+    // React Aria says the active option itself on Apple devices.
+    const apple = await on.evaluate(() =>
+      /^(Mac|iPhone|iPad)/.test(window.navigator.platform),
+    );
+    return { active, apple, ...(await heard(on)) };
   };
   const checks = {
     // Typing opens the suggestions; arrows move, Enter chooses one and the
@@ -4003,6 +4047,50 @@ async function search({ browser, origin }) {
           seen.failed === 'The search failed.' &&
           seen.german === 'Suche läuft …',
         ...seen,
+      };
+    },
+    // Only the field's status speaks about its suggestions, in every live
+    // region, React Aria's announcer included, and in the provider's
+    // language: a search still loading says that it searches, not "0
+    // options available.", and each result once, without React Aria's
+    // count beside it, also in a German browser. On Apple devices React
+    // Aria still says the active suggestion, for VoiceOver (#326).
+    async 'search-live-regions'() {
+      const english = [
+        [null, 'Searching …'],
+        [
+          { items: [alice], loading: true },
+          '1 suggestion. Searching for more …',
+        ],
+        [{ items: [alice, bob] }, '2 suggestions.'],
+        [{ items: [bob] }, '1 suggestion.'],
+        [{ items: [] }, 'No suggestions.'],
+        [{ items: [alice, carol] }, '2 suggestions.'],
+      ];
+      const en = await searchHeard(page, 'en', english);
+      const de = await newPage(browser, { locale: 'de-DE' });
+      const german = await searchHeard(de.page, 'de', [
+        [null, 'Suche läuft …'],
+        [{ items: [alice, bob] }, '2 Vorschläge.'],
+      ]);
+      await de.context.close();
+      const expected = (texts, heard) =>
+        [...texts, ...(heard.apple ? ['Alice'] : [])].join('|');
+      return {
+        pass:
+          en.active === 'Alice' &&
+          en.said.join('|') ===
+            expected(
+              english.map(([, text]) => text),
+              en,
+            ) &&
+          german.active === 'Alice' &&
+          german.said.join('|') ===
+            expected(['Suche läuft …', '2 Vorschläge.'], german) &&
+          de.errors.length === 0,
+        en,
+        german,
+        errors: de.errors,
       };
     },
     // At 375px: 44px targets, labels on at most two lines, the exact address

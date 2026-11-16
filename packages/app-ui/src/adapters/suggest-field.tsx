@@ -8,7 +8,12 @@ import {
   type Ref,
   type TouchEvent,
 } from 'react';
-import { ComboBoxStateContext, Label, Text } from 'react-aria-components';
+import {
+  ComboBoxStateContext,
+  Label,
+  Text,
+  useLocale,
+} from 'react-aria-components';
 import { cn } from 'cn';
 import {
   Combobox,
@@ -17,6 +22,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from '../components/combobox.js';
+import { expectAriaCount } from './aria-count.js';
 import { useAdapterTexts, type AdapterTexts } from './texts.js';
 
 /** One suggestion: what it is called, its exact value and where it is from. */
@@ -102,7 +108,8 @@ function statusText<T extends Suggestion>(
  * chooses one, Escape closes them. The app searches: it passes the
  * suggestions for `value` with `loading` and `failed`, and cancels a search
  * whose text has changed. The field announces their number, a search that
- * is still running, that failed or found nothing. With `suggest` false,
+ * is still running, that failed or found nothing, and React Aria's own
+ * count of the options stays silent. With `suggest` false,
  * for an address or text too short to search, it is a plain text field
  * that submits with Enter, without suggestions or announcements.
  */
@@ -153,6 +160,7 @@ export function SuggestField<T extends Suggestion>(
     >
       {labelHidden ? null : <Label>{label}</Label>}
       <FollowSuggest suggest={suggest} />
+      <QuietCount />
       <FieldKeys onSubmit={onSubmit} suggest={suggest}>
         <ComboboxInput
           ref={ref}
@@ -218,10 +226,11 @@ export function SuggestField<T extends Suggestion>(
           </p>
         ) : null}
       </ComboboxContent>
-      {/* One polite announcement for every state, open or closed. While the
-          suggestions show, React Aria hides everything outside the field
-          from assistive technology except live regions it marks with
-          data-live-announcer, as its own announcer does. */}
+      {/* One polite announcement for every state, open or closed, and the
+          only count (QuietCount). While the suggestions show, React Aria
+          hides everything outside the field from assistive technology
+          except live regions it marks with data-live-announcer, as its own
+          announcer does. */}
       <span role="status" data-live-announcer="true" className="sr-only">
         {status}
       </span>
@@ -250,6 +259,32 @@ function FollowSuggest({ suggest }: { readonly suggest: boolean }) {
     if (!suggest && state.isOpen) state.close();
     else if (started && !state.isOpen && state.isFocused)
       if (state.inputValue.trim() !== '') state.open(null, 'input');
+  });
+  return null;
+}
+
+/**
+ * Keeps React Aria's count of the options ("0 options available." while the
+ * first results load, "2 options available.") out of its announcer: in each
+ * commit in which the list opens or the number of options changes while it
+ * is open, it tells aria-count.ts the count React Aria announces in that
+ * commit's effects, which run after this one's. The field's status says how
+ * many there are; the active option's text, which React Aria announces for
+ * VoiceOver, and other components' announcements still reach the announcer.
+ */
+function QuietCount() {
+  const state = useContext(ComboBoxStateContext);
+  const { locale } = useLocale();
+  const open = state?.isOpen ?? false;
+  const options = [...(state?.collection ?? [])].filter(
+    (node) => node.type === 'item',
+  );
+  const before = useRef({ open, count: options.length });
+  useEffect(() => {
+    const last = before.current;
+    before.current = { open, count: options.length };
+    if (open && (!last.open || last.count !== options.length))
+      expectAriaCount(options.length, locale);
   });
   return null;
 }
