@@ -36,7 +36,7 @@
     "eslint": "10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "fake-indexeddb": "6.2.8",
-    "jsdom": "31.0.0",
+    "jsdom": "31.0.1",
     "oxigraph": "0.5.13",
     "playwright": "1.65.1",
     "prettier": "3.10.1",
