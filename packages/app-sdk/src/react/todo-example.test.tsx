@@ -586,3 +586,26 @@ it('the TODO appearance applies at once and is kept on this device', async () =>
   expect(document.documentElement.dataset.appearance).toBeUndefined();
   expect(localStorage.getItem('todo-appearance')).toBeNull();
 });
+
+it('the TODO list moves a confirmed tick to Done even when the next read fails', async () => {
+  const f = await signedIn('en', async () => Response.json([milk]));
+  f.setResource(async (url, init) => {
+    if ((init?.method ?? 'GET') === 'GET')
+      return Response.json(milk, { headers: { etag: '"v1"' } });
+    return new Response(null, { status: 204 });
+  });
+  const box = (await screen.findByRole('checkbox', {
+    name: 'Done: Buy milk',
+  })) as HTMLInputElement;
+  await waitFor(() => expect(box.disabled).toBe(false));
+  // The refresh after the confirmed write fails; the list keeps its old rows.
+  f.setQuery(async () => new Response(null, { status: 500 }));
+  fireEvent.click(box);
+  const section = await screen.findByRole('region', { name: 'Done' });
+  expect(
+    within(section).getByRole('button', { name: 'Buy milk' }),
+  ).toBeTruthy();
+  expect(
+    (await screen.findByRole('alert', {}, { timeout: 5000 })).textContent,
+  ).toContain(text.en.failed);
+});

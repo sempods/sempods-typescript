@@ -108,12 +108,15 @@ function TaskScreen() {
   );
 
   const field = useRef<HTMLInputElement>(null);
-  const open = tasks?.filter((item) => !item.data.done) ?? [];
-  const done = tasks?.filter((item) => item.data.done) ?? [];
-  const row = (item: NonNullable<typeof tasks>[number]) => (
+  // Sections follow what each row shows: a confirmed tick moves its task at
+  // once, also when the list's next read is late or fails.
+  const rows = (tasks ?? []).map((item) => ({ item, row: mutate.for(item) }));
+  const open = rows.filter(({ row }) => !row.data.done);
+  const done = rows.filter(({ row }) => row.data.done);
+  const row = ({ item, row }: (typeof rows)[number]) => (
     <TaskRow
       key={item.iri}
-      row={mutate.for(item)}
+      row={row}
       editing={selected === item.iri ? editing : null}
       onOpen={() => void select(item.iri)}
     />
