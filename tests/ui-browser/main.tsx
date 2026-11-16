@@ -16,7 +16,10 @@
 // settings (`AppAccess` `settings`), applied in place. With
 // `?screen=gate-settings`, sign-in is optional and the page is only the
 // gate with a fixed focus target; the checks end the gate's cause through
-// `window.gateRuntime`, as the app's own code could.
+// `window.gateRuntime`, as the app's own code could. With `?screen=add-pod`,
+// the page is a multi-Pod app's sources panel (a nonmodal WorkspacePanel)
+// listing the connected Pods, with the SDK's PodChooser to add another one
+// while signed in (#329).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, and the
@@ -30,6 +33,7 @@ import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
   LoadNotice,
+  PodChooser,
   SempodsProvider,
   TargetScreen,
   useAppState,
@@ -204,6 +208,13 @@ const workspace = settings.has('workspace');
 const search = settings.get('screen') === 'search';
 const addressBar = search && settings.get('mode') === 'address';
 const gateSettings = settings.get('screen') === 'gate-settings';
+// The sign-in callback returns to the sources panel it started from.
+if (settings.get('screen') === 'add-pod')
+  sessionStorage.setItem('add-pod-gate', '1');
+const addPod =
+  settings.get('screen') === 'add-pod' ||
+  (location.pathname === '/callback' &&
+    sessionStorage.getItem('add-pod-gate') === '1');
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -323,6 +334,8 @@ function App() {
         <SearchGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
+      ) : addPod ? (
+        <AddPodScreen />
       ) : (
         <Frame settings={appSettings} />
       )}
@@ -584,6 +597,39 @@ interface SearchState {
   readonly items: readonly Suggestion[];
   readonly loading?: boolean;
   readonly failed?: 'some' | 'all';
+}
+
+/**
+ * A multi-Pod app's sources panel, as Explorer's: the connected Pods with
+ * their session, and the SDK's chooser to add another one while signed in.
+ */
+function AddPodScreen() {
+  const { connections } = useAppState();
+  const [closed, setClosed] = useState(0);
+  return (
+    <main className="gate-main">
+      <AppAccess appName="Explorer" />
+      {connections.some((c) => c.session.kind === 'active') && (
+        <WorkspacePanel
+          title="Sources"
+          open
+          onRequestClose={() => setClosed((n) => n + 1)}
+        >
+          <ul aria-label="Connected Pods" className="mb-4">
+            {connections.map((c) => (
+              <li key={c.id} data-session={c.session.kind}>
+                {c.podUrl}
+              </li>
+            ))}
+          </ul>
+          <PodChooser />
+          <p data-testid="panel-closed" className="sr-only">
+            {closed}
+          </p>
+        </WorkspacePanel>
+      )}
+    </main>
+  );
 }
 
 /** Only the gate with the app's settings, and a target outside it. */

@@ -37,6 +37,7 @@ it.each([
       'CallbackNotice',
       'ContextAccess',
       'LoadNotice',
+      'PodChooser',
       'RemoveButton',
       'ResourceEditor',
       'SdkLocaleProvider',
