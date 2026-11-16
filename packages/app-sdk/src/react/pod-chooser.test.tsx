@@ -271,6 +271,35 @@ it('starts a finite choice on a permitted Pod not connected yet', async () => {
   expect(signed.runtime.getSnapshot().map((c) => c.podUrl)).toEqual([pod, bob]);
 });
 
+it('stays on the submitted permitted Pod when its sign-in cannot be prepared', async () => {
+  const charlie = 'https://pod.example/charlie';
+  const f = fixture({ allowedPods: [pod, bob, charlie] });
+  const signed = await f.login();
+  cleanups.push(() => signed.runtime.dispose());
+  const group = show(signed.runtime);
+  const input = await waitFor(() => {
+    const found = field(group);
+    expect(found.disabled).toBe(false);
+    return found;
+  });
+  expect(input.value).toBe(bob);
+  // Bob's connection exists before its preparation fails.
+  const prepare = vi
+    .spyOn(signed.runtime, 'beginAuthorization')
+    .mockRejectedValueOnce(new Error('Could not prepare'));
+  await act(async () => fireEvent.submit(input.closest('form')!));
+  await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+  await waitFor(() => expect(action(group)?.disabled).toBe(false));
+  expect(signed.runtime.getSnapshot().map((c) => c.podUrl)).toEqual([pod, bob]);
+  // The error and the retry belong to Bob, not to the next free Pod.
+  expect(input.value).toBe(bob);
+  expect(within(group).getAllByRole('alert').length).toBeGreaterThan(0);
+  prepare.mockRestore();
+  await act(async () => fireEvent.submit(input.closest('form')!));
+  await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
+  expect(signed.runtime.getSnapshot().map((c) => c.podUrl)).toEqual([pod, bob]);
+});
+
 it('signs in to a Pod it already reads without a token, rather than only selecting it', async () => {
   const f = fixture({ preferences: null, signIn: 'optional' });
   cleanups.push(() => f.runtime.dispose());

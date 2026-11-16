@@ -40,6 +40,9 @@ export function SignInConnections({
   const [chosen, setChosen] = useState('');
   const [help, setHelp] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
+  // The Pod an adding chooser submitted: kept by address, since connecting
+  // it changes its option's key and the start falls to the next free Pod.
+  const [pinned, setPinned] = useState<string | null>(null);
   const defaultUrl =
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
@@ -69,6 +72,7 @@ export function SignInConnections({
     connection.missingRequiredScopes.length === 0;
   const selected =
     options.find((o) => o.key === chosen) ??
+    (pinned !== null ? options.find((o) => o.url === pinned) : undefined) ??
     (adding
       ? // A free address starts as the field; a finite choice starts on a
         // permitted Pod not connected yet, else on one that is not readable.
@@ -199,15 +203,22 @@ export function SignInConnections({
       else if (readable || state.signIn !== 'required')
         await app.selectConnection(targetConnection.id);
       else await app.authorize(targetConnection.id);
-    } else if (
-      (field && (await app.connect(enteredPod(inputValue)))) ||
-      (!field && selected && (await app.connect(selected.url)))
-    ) {
-      // A Pod opened in place (no sign-in page) leaves the chooser ready for
-      // the next one.
-      if (adding) {
-        setUrl(null);
-        setChosen('');
+      if (adding) setPinned(null);
+    } else {
+      // A failed preparation stays on the submitted Pod, so the error and a
+      // retry belong to it.
+      if (adding && !field && selected) setPinned(selected.url);
+      if (
+        (field && (await app.connect(enteredPod(inputValue)))) ||
+        (!field && selected && (await app.connect(selected.url)))
+      ) {
+        // A Pod opened in place (no sign-in page) leaves the chooser ready
+        // for the next one.
+        if (adding) {
+          setUrl(null);
+          setChosen('');
+          setPinned(null);
+        }
       }
     }
   }
@@ -308,6 +319,7 @@ export function SignInConnections({
           }}
           onChoose={(key) => {
             setChosen(key);
+            setPinned(null);
             setUrl(null);
             setFailure(null);
           }}
