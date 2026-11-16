@@ -72,8 +72,9 @@ explains the order and which app rules still override SDK rules.
   takes `background` and `foreground`, and app links, buttons and fields get a
   solid focus outline;
 - in its own layer `app-ui-focus`, after Tailwind's utilities: a solid 2px
-  focus outline in the `ring` colour on the package's components and calendar
-  days. Menu triggers and menu rows show it only for keyboard focus, as
+  focus outline in the `ring` colour on the package's components, on an app's
+  elements drawn with `buttonVariants` (such as [view links](#views-as-links))
+  and on calendar days. Menu triggers and menu rows show it only for keyboard focus, as
   React Aria's `data-focus-visible` reports it, and a row draws it inside its
   edge; with forced colors, the focused row draws it for pointer focus too.
   A `Checkbox` draws it on its visible box while its hidden input has
@@ -190,6 +191,7 @@ the page, a card or a popover.
 | all      | muted-foreground            | muted                  | background                | rest  | 4.5           |
 | all      | muted-foreground            | card                   | background                | rest  | 4.5           |
 | all      | muted-foreground            | popover                | background                | rest  | 4.5           |
+| all      | foreground                  | muted                  | background                | rest  | 4.5           |
 | all      | primary-foreground          | primary                | background                | rest  | 4.5           |
 | all      | destructive                 | destructive-tint       | background, card, popover | rest  | 4.5           |
 | all      | destructive                 | destructive-hover      | background, card, popover | hover | 4.5           |
@@ -709,7 +711,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   in a heading), `round` (56px) or `round-lg` (72px); `label` names an
   icon-only button. **`ActionLink`** looks the same and is a real link, for
   an action with an address (`{...nav.link(place)}`), so it can be opened in
-  a new tab or copied.
+  a new tab or copied. A `ghost` link to the shown place
+  (`aria-current="page"`) is drawn chosen, as in
+  [views as links](#views-as-links).
 - **`ActionGroup`**: a labelled row of actions, the full width on phones and at
   most 26rem wide and centred above. `pill` actions share the free width,
   round ones keep their size, and each action stays its own Tab stop.
@@ -1252,7 +1256,10 @@ screen, the draft and the history.
     direct entry to `fallback` in place;
   - `link(place)`: `href` and `onClick` for an `<a>`; a plain click switches
     in place, Ctrl/Cmd-, Shift- and middle clicks open the address in the
-    browser as usual.
+    browser as usual. A link to the shown place also gets
+    `aria-current="page"`: the router compares `format(place)` with the
+    canonical address of the shown place, path and query (a fragment is not
+    part of it), so a screen over a view marks its own links, not the view's.
 - **`replaceUrl`**: pass it to `createBrowserRuntime`, so the address the
   runtime returns to after sign-in is the one the app shows.
 
@@ -1560,6 +1567,38 @@ Host rules for the app's addresses (a rewrite to `index.html` for each
 resource pattern), the offline navigation allowlist and the bounded sign-in
 return come from the app template's tooling, not from this package.
 
+### Views as links
+
+Views with addresses of their own, such as two lists shown as tabs, can be
+plain links instead of a menu: each opens in a new tab or can be copied, and
+`nav.link` marks the one to the shown view with `aria-current="page"`.
+Drawn with `buttonVariants({ variant: 'ghost' })`, that link is chosen: the
+`muted` surface with `foreground` text, and underlined, so the choice does
+not rest on the surface alone and stays apart from a hovered link. The look
+is the same under every `data-actions` and `data-secondary` value; `min-h-11`
+keeps a 44px target. The UI gate renders this file as written:
+
+```tsx
+// view-tabs.tsx
+import { buttonVariants, type Nav } from '@sempods/app-ui';
+import type { Place } from './places';
+
+const tab = buttonVariants({ variant: 'ghost', className: 'min-h-11 px-4' });
+
+export function ViewTabs({ nav }: { readonly nav: Nav<Place> }) {
+  return (
+    <nav aria-label="Views" className="flex gap-1">
+      <a {...nav.link({ kind: 'zen' })} className={tab}>
+        Zen
+      </a>
+      <a {...nav.link({ kind: 'list' })} className={tab}>
+        List
+      </a>
+    </nav>
+  );
+}
+```
+
 ## What is checked
 
 The packed browser gate builds a reference screen with Vite and Tailwind 4
@@ -1581,7 +1620,8 @@ combinations in light and dark; rendered screen contrast in four combinations; a
 links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
 Context, plus fragment entries, a source address without a Context choice and
-a path with two leading slashes. It uses a loopback fixture Pod: it is not
+a path with two leading slashes; and views as links, their current link
+marked by the router and drawn chosen in every action combination. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
