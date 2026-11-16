@@ -1575,7 +1575,10 @@ The leave confirmation is a native modal `<dialog>` (role `alertdialog`) with
 focus, Escape and focus restoration, in the top layer above an app's own
 `showModal()` dialog, which becomes inert. Editors and an inline `AppAccess`
 may live in an app modal under the same provider; keep it mounted while a
-confirmation is pending.
+confirmation is pending. Above an open React Aria overlay (the UI kit's
+`Dialog`, `ScreenDialog` or a popover), the SDK's modal dialogs carry
+`data-react-aria-top-layer`, so the overlay does not mark them or their
+ancestors `inert` and test tools such as Playwright click them directly.
 
 ### Custom layouts without AppAccess
 
