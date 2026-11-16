@@ -284,7 +284,8 @@ such as sage's light primary `#3e6b56`, with `background_color: '#f7f9f7'` as
 the static launch fallback. The running page can set `theme-color` meta
 values to its resolved background instead. The TODO's
 [browser-theme entry](../examples/todo/src/browser-theme.ts) updates only
-marked meta elements after system changes. In your app's `index.html`, put
+marked meta elements after system changes and after the app's own appearance
+setting marks `<html>` (`data-appearance`). In your app's `index.html`, put
 these initial light/dark fallbacks inside `<head>`:
 
 ```html
@@ -303,7 +304,8 @@ these initial light/dark fallbacks inside `<head>`:
 ```
 
 Import the helper in the app entry **after** the stylesheet that defines
-`--sempods-bg` on `:root`, as the TODO's `style.css` does. That token must be
+`--sempods-bg` on `:root`, as the TODO's `style.css` does through the UI kit's
+bridge. That token must be
 a CSS colour: without it, the probe inherits text colour instead of the
 background. The helper updates both marked meta elements to the resolved
 background so an explicit app appearance also works when it differs from

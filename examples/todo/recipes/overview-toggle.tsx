@@ -11,6 +11,7 @@ import {
   usePodList,
   useSdkLocale,
 } from '@sempods/app-sdk/react';
+import { Button } from '@sempods/app-ui';
 
 const schema = 'https://schema.org/';
 const task = fields(
@@ -96,9 +97,14 @@ function OverviewToggleContent({
   const { messages: m } = useSdkLocale();
   return (
     <main>
-      <button aria-expanded={manage} onClick={() => onManage(!manage)}>
+      <Button
+        variant="ghost"
+        className="min-h-11 px-3"
+        aria-expanded={manage}
+        onPress={() => onManage(!manage)}
+      >
         {m.controls.dataAccess}
-      </button>
+      </Button>
       <AppAccess appName="Tasks overview" open={manage} />
       <TasksOverview />
     </main>

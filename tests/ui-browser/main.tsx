@@ -248,7 +248,7 @@ function SettingsChoices({
   const de = lang === 'de';
   return (
     <>
-      <fieldset className="gate-settings">
+      <fieldset>
         <legend>{de ? 'Sprache' : 'Language'}</legend>
         {(
           [
@@ -267,7 +267,7 @@ function SettingsChoices({
           </label>
         ))}
       </fieldset>
-      <fieldset className="gate-settings">
+      <fieldset>
         <legend>{de ? 'Erscheinungsbild' : 'Appearance'}</legend>
         {(
           [
