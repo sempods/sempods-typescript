@@ -603,7 +603,8 @@ with a "read only" hint and **Share more lists**.
 #### One chooser across Pods
 
 For the default UI, use `ContextSwitch` from `@sempods/app-ui`. It supplies
-Pod groups, a two-line trigger, permission icons and their visible legend,
+Pod groups, a trigger with the Context and, once a second Pod is connected,
+its Pod, permission icons and their visible legend,
 full-address details, per-Pod recovery and guarded selection feedback:
 
 ```tsx

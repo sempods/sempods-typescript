@@ -177,9 +177,13 @@ export function ContextSwitch({
             <span className="truncate text-lg font-semibold">
               {selected ? contextText(selected) : title}
             </span>
-            <span className="truncate text-xs font-normal text-muted-foreground">
-              {selected?.podLabel ?? t.chooseContext}
-            </span>
+            {/* With one Pod its name says nothing to choose between; the
+                accessible name keeps it. */}
+            {(!selected || lists.pods.length > 1) && (
+              <span className="truncate text-xs font-normal text-muted-foreground">
+                {selected?.podLabel ?? t.chooseContext}
+              </span>
+            )}
           </span>
           <ChevronDownIcon
             aria-hidden="true"

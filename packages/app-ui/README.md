@@ -594,8 +594,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   the active Pod's first writable, else readable Context when none was
   remembered or configured, just like `useContexts`.
 
-  The two-line trigger shows the Context and Pod, with 16px inline padding,
-  a 12px gap and a 64px height. The menu groups concise Context names under
+  The trigger shows the Context and, below it, its Pod, with 16px inline
+  padding, a 12px gap and a 64px height; with a single connected Pod it shows
+  only the Context, and its accessible name still names the Pod. The menu groups concise Context names under
   their Pod, with 52px minimum rows. Equal names within one Pod show their
   `qualifier` more quietly; equal names on different Pods need none. A fixed pencil/eye column identifies
   write/read-only access; the check marks selection separately. A visible
