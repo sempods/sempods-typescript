@@ -11,7 +11,7 @@ import {
   usePodList,
   useSdkLocale,
 } from '@sempods/app-sdk/react';
-import { Button } from '@sempods/app-ui';
+import { Button, Checkbox } from '@sempods/app-ui';
 
 const schema = 'https://schema.org/';
 const task = fields(
@@ -48,17 +48,16 @@ export function TasksOverview() {
           const row = overview.for(item);
           return (
             <li key={`${item.context} ${item.snapshot.iri}`}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={row.data.done}
-                  disabled={!row.canMutate}
-                  onChange={(event) =>
-                    void row.update({ done: event.target.checked })
-                  }
+              <div className="flex min-h-11 items-center gap-3">
+                {/* Named by the title beside it; the box keeps a 44px target. */}
+                <Checkbox
+                  aria-label={row.data.title}
+                  isSelected={row.data.done}
+                  isDisabled={!row.canMutate}
+                  onChange={(done) => void row.update({ done })}
                 />
-                {row.data.title}
-              </label>
+                <span className="wrap-anywhere">{row.data.title}</span>
+              </div>
               {row.problem && (
                 <p role="status">{m.contextProblems![row.problem]}</p>
               )}

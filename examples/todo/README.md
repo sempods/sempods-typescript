@@ -32,8 +32,7 @@ their own Contexts with one click, through `usePodList` and `useContextUpdate`),
 written into a shared and a personal Context) and `recipes/clear-done.tsx`
 (deleting all done tasks after one confirmation, stopping safely at the first
 conflict, uncertain answer or changed target) are further copyable screens,
-built from the same kit; their row tick is still a native checkbox, as the
-kit has none yet.
+built from the same kit, with its `Checkbox` as the row tick.
 
 The default palette is the kit's sage in light and dark mode, shared by the app
 and SDK surfaces. Set palette roles in `src/style.css` to adapt it, as the
