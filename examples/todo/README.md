@@ -10,39 +10,55 @@ pnpm dev:todo
 `@sempods/app-sdk` also ships these sources, under
 `node_modules/@sempods/app-sdk/examples/todo/`, for reading and copying. There
 they are not a runnable project: the development server and build setup are
-part of the SDK repository. To use the screens in your own app, start it with
-the [quickstart](../../docs/quickstart.md), copy `src/domain.ts`, `src/app.tsx`
-and `src/style.css` into its `src/`, and render `<TodoApp runtime={runtime} />`
-from your entry with the runtime configuration shown in `src/main.tsx`. The
-shipped `package.json` names the exact SDK version the sources belong to.
+part of the SDK repository. The screen is built from
+[`@sempods/app-ui`](../../packages/app-ui/README.md) on Tailwind CSS 4, as apps
+from the [apps template](https://github.com/sempods/sempods-apps-template)
+are; `src/style.css` is the kit's documented stylesheet setup. To use the
+screens in your own app, set up the kit as its README describes, copy
+`src/domain.ts` and `src/app.tsx` into its `src/`, and render
+`<TodoApp runtime={runtime} />` from your entry with the runtime configuration
+shown in `src/main.tsx`. The shipped `package.json` names the exact SDK and kit
+versions the sources belong to. Like the kit, the screen compiles without
+`exactOptionalPropertyTypes`, which React Aria's declarations do not support
+(`tsconfig.json` here, for the screen and the recipes on the kit); the other
+examples keep it.
 An app that already has a host (the template's starter, or any screen with its
 own `SempodsProvider`) does not render `TodoApp`: it brings a second provider
 and its own language state. Reuse `TaskScreen` and `TaskRow` inside the
-existing provider instead, and rename or scope the stylesheet's generic classes
-(`.menu`, `.composer`, `.title`, `.empty`) so they do not collide with the
-app's own.
+existing provider instead.
 `recipes/pod-overview.tsx` (a Pod overview with on-demand Contexts, plus
 creating and editing in an explicit Context), `recipes/overview-toggle.tsx` (ticking tasks on overview rows in
 their own Contexts with one click, through `usePodList` and `useContextUpdate`), `recipes/task-with-note.tsx` (one input
 written into a shared and a personal Context) and `recipes/clear-done.tsx`
 (deleting all done tasks after one confirmation, stopping safely at the first
-conflict, uncertain answer or changed target) are further copyable screens.
+conflict, uncertain answer or changed target) are further copyable screens,
+built from the same kit; their row tick is still a native checkbox, as the
+kit has none yet.
 
-The default palette is sage in light and dark mode, shared by the app and
-SDK surfaces. Change the role values at the top of `src/style.css` to adapt
-it; no theme provider is needed. The entry also imports `src/browser-theme.ts`
+The default palette is the kit's sage in light and dark mode, shared by the app
+and SDK surfaces. Set palette roles in `src/style.css` to adapt it, as the
+kit's [theme contract](../../packages/app-ui/README.md#the-theme-contract)
+describes; no theme provider is needed. The entry also imports `src/browser-theme.ts`
 to synchronize marked page meta colours. See [PWA colours](../../docs/pwa.md#colours-and-system-ui)
 for the HTML/manifest setup and the limits of native system bars.
 
-Open `http://127.0.0.1:5173/`. The app uses only the SDK's standard UI:
-`AppAccess` for sign-in and recovery beside the app's own header and task
-screen, `ResourceEditor` and `UpdateNotice` for editing and outcomes. The ⋮ menu
-in the header (a native popover) opens **Pods & sharing** after connecting and
-picks the language. Enter the Pod address and sign in on the Pod; the app
-then shows a list (a readable Context) and names it in the header. With several
-lists the title switches between them (`useContexts()`). The UI follows the
-browser's language until EN/DE is picked. No protocol or session logic lives in
-the app. The callback route is served by the development server. Configure
+Open `http://127.0.0.1:5173/`; `pnpm dev:todo` builds the stylesheet with
+Tailwind CSS 4. The app uses only the SDK's standard UI and the kit:
+`AppAccess` for the startup screen, sign-in, the list catalogue's loading and
+failure states, prompts and **Pods & sharing**, `ContextSwitch` as the
+header's list switch, which also picks the first list, `HeaderMenu`
+for the header menu, `Input` and `ActionButton` for the new task, and
+`ResourceEditor` and `UpdateNotice` for editing and outcomes. The sign-in
+screen's settings (`AppAccess` `settings`) and the header menu pick the
+language, each named in itself (Deutsch, English), and the appearance
+(System, Light, Dark). `src/appearance.ts` keeps the appearance in this
+browser and marks `<html>`; `src/style.css` maps it to `color-scheme` and the
+kit's `dark:` utilities, and `src/browser-theme.ts` follows it. Enter the Pod address and
+sign in on the Pod; the app then shows a list (a readable Context) and names
+it in the header, where the switch lists every list of the connected Pod and
+shares more. The UI follows the browser's language until one is picked; the
+kit's controls (`I18nProvider`) and the page's `lang` follow it too. No
+protocol or session logic lives in the app. The callback route is served by the development server. Configure
 a production identity/HTTPS origin before deploying; see
 [browser runtime](../../docs/browser-runtime.md).
 
@@ -53,9 +69,12 @@ unsaved work.
 
 Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
 or reopens a task (`useFieldUpdate`'s `for(item)`: a tick locks
-only its row), its title opens the editor below the list, a done task
-offers a delete button that asks first (`RemoveButton` with
-`row.remove` from `mutate.for(item)`), and the input at the bottom adds one. The list reads again when the page becomes visible
+only its row), its title opens the editor in its place, done tasks move to
+their own section below the open ones and offer a delete button that asks
+first (`RemoveButton` with `row.remove` from `mutate.for(item)`), and the
+input above the list adds one. Add stays enabled: with nothing to add it moves
+the focus into the input; it is locked only while a creation is sent or
+unresolved. The list reads again when the page becomes visible
 (no reload button) and keeps its rows while it reloads and after a failed
 refresh; `LoadNotice` says what the read does, with a retry. A new or changed row is its own
 confirmation (`UpdateNotice quiet`); refusals, conflicts and unconfirmed

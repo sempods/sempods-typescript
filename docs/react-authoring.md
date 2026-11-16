@@ -5,7 +5,7 @@ without React. Start with the [complete minimal screen](quickstart.md) when
 integrating the SDK; new apps start in
 [sempods-apps-template](https://github.com/sempods/sempods-apps-template).
 This guide is a task reference. The [TODO screen](../examples/todo/src/app.tsx)
-adds a list switch and app-owned presentation; its
+adds a list switch and a header menu from `@sempods/app-ui`; its
 [domain functions](../examples/todo/src/domain.ts) hold the field definition.
 
 1. [Model and setup](#part-1-model-and-setup)
@@ -597,8 +597,8 @@ const lists = useContexts();
   the hook selects) and management names only the selected Context. Sign-in,
   recovery, **Change sharing** and **Sign out** stay in `AppAccess`.
 
-The [TODO example](../examples/todo/src/app.tsx) puts the switch in its header,
-with a "read only" hint and **Share more lists**.
+The [TODO example](../examples/todo/src/app.tsx) puts `ContextSwitch` (below)
+in its header, with **Share more lists**.
 
 #### One chooser across Pods
 
@@ -1225,7 +1225,9 @@ function Access({ language, setLanguage }: LanguageSetting) {
 - Use controls that render in place, such as radio groups, toggles and
   switches. A popover, menu, select or dialog that renders into
   `document.body` is inert below the gate. Plain controls get the SDK's
-  defaults; the app's own classes take precedence.
+  defaults: a `fieldset` with a `legend` and `label`s around radio buttons or
+  checkboxes shows one choice per 44px row, the groups apart. The app's own
+  classes take precedence.
 - Only device-local presentation choices belong here. The gate grants no
   session or write access: no data or account actions.
 
@@ -1558,6 +1560,11 @@ access loss and toggling keep mounted content and drafts.
   `messages={{ errors: { catalogue: () => '…' } }}` override single texts and
   retranslate in place; other codes keep defaults, so new SDK codes need no
   change.
+- The provider does not touch the page: set `document.documentElement.lang`
+  to `useSdkLocale().language` so screen readers pronounce the app in its
+  language, and with `@sempods/app-ui` wrap the content in its `I18nProvider`
+  with `useSdkLocale().locale`, as the [TODO example](../examples/todo/src/app.tsx)
+  does.
 - RDF text language comes from the field definitions; the UI language never
   changes the RDF slot being edited.
 - Headless: `createLocale(options).error(cause)` and
@@ -1570,7 +1577,10 @@ The leave confirmation is a native modal `<dialog>` (role `alertdialog`) with
 focus, Escape and focus restoration, in the top layer above an app's own
 `showModal()` dialog, which becomes inert. Editors and an inline `AppAccess`
 may live in an app modal under the same provider; keep it mounted while a
-confirmation is pending.
+confirmation is pending. Above an open React Aria overlay (the UI kit's
+`Dialog`, `ScreenDialog` or a popover), the SDK's modal dialogs carry
+`data-react-aria-top-layer`, so the overlay does not mark them or their
+ancestors `inert` and test tools such as Playwright click them directly.
 
 ### Custom layouts without AppAccess
 

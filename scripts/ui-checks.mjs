@@ -2595,7 +2595,8 @@ async function routing({ browser, origin }) {
   const { at, personal } = plumberTask(origin);
   const sourced = (source) => `${at}?context=${encodeURIComponent(source)}`;
   // A title the task dialog shows, an alert in it, or the Not found text.
-  // An address that names its source opens without a Context choice.
+  // An address that names its source opens without a Context choice. Not
+  // found covers the page: its Context choice waits, inert, behind it.
   const signedOut = [
     ['direct-entry-signed-out', at, { title: PLUMBER }],
     [
@@ -2608,7 +2609,11 @@ async function routing({ browser, origin }) {
       sourced(origin + '/alice/_system/contexts/nope'),
       { alert: /not available/, choose: false },
     ],
-    ['invalid-legacy-signed-out', '/?task=!!!', { notFound: /not valid/ }],
+    [
+      'invalid-legacy-signed-out',
+      '/?task=!!!',
+      { notFound: /not valid/, choose: false, behind: true },
+    ],
   ];
   for (const [id, address, expected] of signedOut) {
     const { context, page, errors } = await newPage(browser);
@@ -2633,12 +2638,25 @@ async function routing({ browser, origin }) {
           await field.waitFor();
           shows = (await field.inputValue()) === expected.title;
         }
-        const asked = !choose && (await chooser(page).isVisible());
+        let asked = false;
+        let behind = true;
+        if (expected.behind) {
+          await chooser(page).waitFor();
+          behind = await chooser(page).evaluate(
+            (el) => el.closest('[inert]') !== null,
+          );
+        } else asked = !choose && (await chooser(page).isVisible());
         const path = addressOf(page);
         return {
-          pass: path === address && shows && !asked && errors.length === 0,
+          pass:
+            path === address &&
+            shows &&
+            !asked &&
+            behind &&
+            errors.length === 0,
           path,
           chooserShown: asked,
+          chooserBehind: behind,
           errors,
         };
       }),
@@ -3090,13 +3108,17 @@ async function compact({ browser, origin, engine }) {
         editors,
       };
     },
-    // German: the corner Close takes the SDK's text.
+    // German: the corner Close takes the SDK's text. Counted, not read:
+    // Firefox 159 with Playwright 1.65 crashes the page on evaluateAll() or
+    // allTextContents() of a locator chained to getByRole() (#264).
     async 'compact-close-label-german'() {
       await open('de');
-      const names = await dialog
-        .locator('[data-slot=dialog-close]')
-        .evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim()));
-      return { pass: names.join() === 'Schließen', names };
+      const closes = dialog.locator('[data-slot=dialog-close]');
+      const count = await closes.count();
+      const german = await closes
+        .and(dialog.getByRole('button', { name: 'Schließen', exact: true }))
+        .count();
+      return { pass: count === 1 && german === 1, count, german };
     },
     // The corner Close is a 44px target around a compact glyph (#288), with
     // the stylesheet the README documents and no app CSS: inside the dialog
@@ -4487,6 +4509,33 @@ async function accessSettings({ browser, origin, engine }) {
       }),
     );
     results.push(
+      // Plain fieldsets and radio labels, without app CSS (#339): one choice
+      // per 44px row, the groups apart.
+      await attempt('plain-choices-one-per-row', async () => {
+        const rows = await settings.evaluate((dialog) =>
+          [...dialog.querySelectorAll('fieldset')].map((fieldset) => ({
+            top: fieldset.getBoundingClientRect().top,
+            bottom: fieldset.getBoundingClientRect().bottom,
+            labels: [...fieldset.querySelectorAll('label')].map((label) => {
+              const box = label.getBoundingClientRect();
+              return { top: box.top, height: box.height };
+            }),
+          })),
+        );
+        const stacked = rows.every((group) =>
+          group.labels.every(
+            (label, i) =>
+              label.height >= 44 &&
+              (i === 0 || label.top >= group.labels[i - 1].top + 44 - 0.5),
+          ),
+        );
+        const apart = rows.every(
+          (group, i) => i === 0 || group.top >= rows[i - 1].bottom + 8,
+        );
+        return { pass: rows.length === 2 && stacked && apart, rows };
+      }),
+    );
+    results.push(
       await attempt('language-and-appearance-in-place', async () => {
         await page.evaluate(() => {
           window.sameDocument = true;
@@ -4883,6 +4932,8 @@ async function contexts({ browser, origin }) {
   });
   const trigger = () => page.getByRole('button', { name: /^List:/ });
   const results = [];
+  // The step that runs, so that a timeout names the wait it ended in.
+  let step = 'sign-in';
   try {
     await signIn(page, origin, '/?screen=contexts&lang=de', { choose: false });
     await page
@@ -4893,6 +4944,7 @@ async function contexts({ browser, origin }) {
       .getByRole('button', { name: 'List: Einkaufsliste · Familie/' })
       .waitFor();
     for (const scheme of ['light', 'dark']) {
+      step = `grouped-${scheme}`;
       await page.emulateMedia({ colorScheme: scheme });
       await trigger().focus();
       await page.keyboard.press('Enter');
@@ -4921,6 +4973,7 @@ async function contexts({ browser, origin }) {
             .count()) === 1,
         geometry,
       });
+      step = `escape-${scheme}`;
       await page.keyboard.press('Escape');
       await page.waitForFunction(() =>
         document.activeElement?.getAttribute('aria-label')?.startsWith('List:'),
@@ -4930,6 +4983,7 @@ async function contexts({ browser, origin }) {
         pass: await trigger().evaluate((el) => el === document.activeElement),
       });
     }
+    step = 'address-keyboard-scroll: focus on the address region';
     await page.setViewportSize({ width: 375, height: 400 });
     await trigger().click();
     await page
@@ -4943,20 +4997,28 @@ async function contexts({ browser, origin }) {
     await page.waitForFunction(
       () => document.activeElement?.getAttribute('role') === 'region',
     );
+    // Chromium scrolls on the compositor, with the scroll range of the last
+    // frame it received: an End in the frame that shows the addresses stops
+    // where the menu ended without them (#332).
+    await settle(page);
+    step = 'address-keyboard-scroll: final address in view after End';
     await page.keyboard.press('End');
-    // Native scroll is animated on some engines: wait for the final address,
-    // not merely for a rendered element below the viewport.
+    // Native scroll is animated on some engines: wait for the end of the
+    // popup and the final address, not merely for a rendered element below
+    // the viewport. Focusing the region already scrolls most of it in view.
     await page.waitForFunction(() => {
       const region = document.querySelector('[role=region][tabindex="0"]');
       const last = region?.querySelector('dl:last-child dd:last-child');
-      if (!region || !last) return false;
+      const scroller = region?.closest('[role="dialog"]');
+      if (!region || !last || !scroller) return false;
       const r = region.getBoundingClientRect(),
         d = last.getBoundingClientRect(),
-        popup = region.closest('[role="dialog"]')?.getBoundingClientRect();
+        popup = scroller.getBoundingClientRect();
       return (
-        d.bottom <=
-          Math.min(r.bottom, popup?.bottom ?? innerHeight, innerHeight) + 1 &&
-        d.top >= Math.max(r.top, popup?.top ?? 0, 0)
+        scroller.scrollTop >=
+          scroller.scrollHeight - scroller.clientHeight - 1 &&
+        d.bottom <= Math.min(r.bottom, popup.bottom, innerHeight) + 1 &&
+        d.top >= Math.max(r.top, popup.top, 0)
       );
     });
     results.push({
@@ -4974,6 +5036,7 @@ async function contexts({ browser, origin }) {
           .filter({ hasText: origin + '/bob/_system/contexts/work' })
           .isVisible()),
     });
+    step = 'declined-cross-pod-draft';
     await page.keyboard.press('Escape');
     await page.waitForFunction(() =>
       document.activeElement?.getAttribute('aria-label')?.startsWith('List:'),
@@ -4994,6 +5057,7 @@ async function contexts({ browser, origin }) {
         (await page.getByLabel('target').textContent()).includes('/bob/') &&
         (await page.getByLabel('draft').textContent()) === 'dirty',
     });
+    step = 'accepted-cross-pod-draft';
     await trigger().click();
     await page
       .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
@@ -5008,6 +5072,7 @@ async function contexts({ browser, origin }) {
         (await page.getByLabel('target').textContent()).includes('/alice/') &&
         (await page.getByLabel('draft').textContent()) === 'clean',
     });
+    step = 'partial-failure';
     failed = true;
     await page.getByRole('button', { name: 'Reload second Pod' }).click();
     await trigger().click();
@@ -5020,6 +5085,7 @@ async function contexts({ browser, origin }) {
         (await page.getByRole('menuitemradio', { disabled: false }).count()) ===
           2,
     });
+    step = 'per-pod-retry';
     failed = false;
     await page.getByRole('menuitem', { name: /Familie/ }).click();
     await page
@@ -5034,6 +5100,7 @@ async function contexts({ browser, origin }) {
         (await page.getByRole('menuitemradio', { disabled: true }).count()) ===
         0,
     });
+    step = 'read-only-target';
     await page
       .getByRole('menuitemradio')
       .filter({ hasText: 'Familie/ · Nur lesen' })
@@ -5049,6 +5116,7 @@ async function contexts({ browser, origin }) {
         '/personal',
       ),
     });
+    step = 'one-group-per-ready-or-empty-pod';
     await trigger().click();
     await page
       .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
@@ -5077,6 +5145,7 @@ async function contexts({ browser, origin }) {
       name: 'Weitere Kontexte freigeben …: Familie/',
       exact: true,
     });
+    step = 'empty-pod-sharing-keeps-declined-draft';
     // A dirty draft must still guard sharing on the inactive empty Pod.
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Keep a draft' }).click();
@@ -5091,6 +5160,7 @@ async function contexts({ browser, origin }) {
         (await page.getByLabel('target').textContent()).includes('/alice/') &&
         (await page.getByLabel('draft').textContent()) === 'dirty',
     });
+    step = 'share-empty-inactive-pod';
     await trigger().click();
     await share.click();
     emptyBob = false;
@@ -5114,11 +5184,20 @@ async function contexts({ browser, origin }) {
     results.push({
       id: 'chooser-journey',
       pass: false,
+      step,
       error: String(error),
       details: await page.evaluate(() => {
         const region = document.querySelector('[role=region][tabindex="0"]');
         const last = region?.querySelector('dl:last-child dd:last-child');
+        const popup = region?.closest('[role="dialog"]');
         return {
+          viewport: { width: innerWidth, height: innerHeight },
+          popup: popup && {
+            ...popup.getBoundingClientRect().toJSON(),
+            scroll: popup.scrollTop,
+            scrollHeight: popup.scrollHeight,
+            clientHeight: popup.clientHeight,
+          },
           focus: document.activeElement?.outerHTML.slice(0, 250),
           items: Array.from(document.querySelectorAll('[role="menuitem"]')).map(
             (el) => ({

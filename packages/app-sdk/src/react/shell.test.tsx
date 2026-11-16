@@ -13,6 +13,28 @@ import {
 import { fixture } from '../runtime/fixture.test.js';
 
 /**
+ * What an app overlay library does when its overlay opens (React Aria's
+ * `ariaHideOutside` with `inert`, as the UI kit's Dialog uses it): it marks
+ * the highest elements outside the overlay inert and spares top-layer
+ * elements that exist by then, with their ancestors.
+ */
+export function markOutside(overlay: Element) {
+  const spared = [
+    overlay,
+    ...document.querySelectorAll('[data-react-aria-top-layer]'),
+  ];
+  const visit = (element: Element) => {
+    if (spared.includes(element)) return;
+    if (!spared.some((node) => element.contains(node))) {
+      element.setAttribute('inert', '');
+      return;
+    }
+    for (const child of element.children) visit(child);
+  };
+  for (const child of document.body.children) visit(child);
+}
+
+/**
  * The standard composition the tests share: an app header with the
  * management button, `AppAccess` beside the content, content once storage is
  * durable, and the read-only notice.

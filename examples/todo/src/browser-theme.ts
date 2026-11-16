@@ -20,3 +20,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener(
   'change',
   syncBrowserTheme,
 );
+// The app's own appearance setting (appearance.ts) marks <html>.
+new MutationObserver(syncBrowserTheme).observe(document.documentElement, {
+  attributeFilter: ['data-appearance'],
+});

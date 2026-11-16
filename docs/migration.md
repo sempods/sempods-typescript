@@ -240,6 +240,22 @@ mode, or passed `items={[]}` and kept the false "No suggestions", by
 instead of querying the DOM. Recognizing and opening an address stays app
 code. See [the UI kit's adapters](../packages/app-ui/README.md#adapters).
 
+### SDK questions in Playwright 1.65 and later
+
+0.9.0 keeps the SDK's modal dialogs (the leave and delete questions, the access
+gate and the management and settings dialogs) out of the `inert` marks that
+React Aria sets around an open overlay, such as the UI kit's `Dialog`,
+`ScreenDialog` or a popover. The dialogs carry `data-react-aria-top-layer`, and
+`SempodsProvider`, `AppAccess` and `AccessGate` render a `display: contents`
+element that holds them. The background stays inert, blocked by the modal
+dialog. After upgrading, lift a hold that kept Playwright below 1.65 and drop
+`force: true` from clicks in SDK questions: Playwright 1.65 refuses an element
+with an `[inert]` ancestor, also in a modal `<dialog>`. A step that selected or
+clicked a control behind an open modal, which Playwright 1.64 allowed for
+`selectOption`, now times out; close the modal first. Check CSS child
+selectors from the provider's parent element: the provider's content now sits
+in two `display: contents` elements instead of one.
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

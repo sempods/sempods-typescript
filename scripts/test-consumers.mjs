@@ -93,6 +93,16 @@ try {
     }
   }
   const example = await examplePackages(root);
+  // The shipped TODO screen is built from the UI kit, a package of its own;
+  // the React consumer installs it beside the SDKs to type-check it.
+  const kit = join(temp, 'kit');
+  await mkdir(kit);
+  run(
+    'pnpm',
+    ['pack', '--pack-destination', kit],
+    join(root, 'packages/app-ui'),
+  );
+  const [kitArchive] = await readdir(kit);
   async function consumer(name, react) {
     const path = join(temp, name);
     await mkdir(path);
@@ -114,7 +124,13 @@ try {
       name: `packed-${name}-consumer`,
       private: true,
       type: 'module',
-      dependencies: react ? { ...example.dependencies, ...tarballs } : tarballs,
+      dependencies: react
+        ? {
+            ...example.dependencies,
+            ...tarballs,
+            '@sempods/app-ui': `file:${join(kit, kitArchive)}`,
+          }
+        : tarballs,
       devDependencies,
     });
     // Outside the workspace; npm's file dependencies install both tarballs together.
@@ -146,17 +162,23 @@ try {
     checkReference(join(withReact, 'node_modules/@sempods/app-sdk')),
     [],
   );
-  // The shipped examples type-check with their own shipped config against the
-  // installed packages; nothing outside the package is needed.
-  run(
-    process.execPath,
-    [
-      join(withReact, 'node_modules/typescript/bin/tsc'),
-      '-p',
-      'node_modules/@sempods/app-sdk/examples/tsconfig.json',
-    ],
-    withReact,
-  );
+  // The shipped examples type-check with their own shipped configs against
+  // the installed packages; nothing outside the package is needed. The TODO
+  // screen and recipes on the UI kit have their own, without
+  // exactOptionalPropertyTypes.
+  for (const config of [
+    'examples/tsconfig.json',
+    'examples/todo/tsconfig.json',
+  ])
+    run(
+      process.execPath,
+      [
+        join(withReact, 'node_modules/typescript/bin/tsc'),
+        '-p',
+        `node_modules/@sempods/app-sdk/${config}`,
+      ],
+      withReact,
+    );
   const strict = {
     target: 'ES2022',
     strict: true,
