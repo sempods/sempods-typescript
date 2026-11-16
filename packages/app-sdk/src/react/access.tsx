@@ -238,6 +238,63 @@ export function ContextAccess(props: ContextAccessProps) {
   return <AccessSection {...props} manage={false} />;
 }
 
+/** What `PodChooser` receives. */
+export interface PodChooserProps {
+  /** Exact Pod URL → friendly name, as in `AppAccess`. A name never changes the destination. */
+  readonly podNames?: Readonly<Record<string, string>>;
+  /** Editable suggestion for a new address, as in `AppAccess`; default https://sempods.org/. Empty disables it. */
+  readonly podAddressPrefix?: string;
+  readonly className?: string;
+  readonly style?: CSSProperties;
+}
+
+/**
+ * The sign-in's Pod chooser, to add another Pod while signed in: for an app
+ * that reads several Pods at once and places it in its own panel. It is the
+ * gate's field (the address prefix, the saved Pods in its list, **Manage
+ * saved Pods** and help on request) with the same keyboard use and labels,
+ * and the same guarded `useApp` actions. It starts on a new address; a typed
+ * address is cleaned up as in the gate and matched to a saved connection,
+ * which is signed in to again (**Change sharing** for a signed-in one) rather
+ * than added twice. While that Pod restores the action is disabled, and a
+ * failed sign-out or removal is retried here first. Like `connect`, it makes
+ * the Pod it opens the active one. Without sign-in (`signIn: 'none'`) there is
+ * no other Pod to add, and it renders nothing. Render it inside
+ * `SempodsProvider`; it has no heading of its own.
+ */
+export function PodChooser({
+  podNames,
+  podAddressPrefix,
+  className,
+  style,
+}: PodChooserProps) {
+  const { messages: m, direction } = useSdkLocale();
+  const signIn = useAppState().signIn;
+  if (signIn === 'none') return null;
+  return (
+    <div
+      role="group"
+      aria-label={m.controls.connectAnother}
+      data-sempods-access=""
+      data-sempods-ui="access"
+      data-sempods-chooser=""
+      dir={direction}
+      className={className}
+      style={style}
+    >
+      <SdkStyles />
+      <style href="sempods-access" precedence="sempods">
+        {layered(styles)}
+      </style>
+      <SignInConnections
+        adding
+        {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
+        {...(podNames ? { podNames } : {})}
+      />
+    </div>
+  );
+}
+
 function Management({
   onClose,
   focusTarget,
@@ -1399,6 +1456,8 @@ const styles = `
 [data-sempods-access] .sp-access-wide { width:100%; }
 [data-sempods-access] .sp-access-description { font-size:.875rem; color:var(--sp-muted); margin-top:10px; }
 [data-sempods-access] .sp-sign-in { text-align:start; }
+/* PodChooser sits in the app's own panel: no padding or surface of its own. */
+[data-sempods-access][data-sempods-chooser] { padding:0; text-align:start; background:none; }
 [data-sempods-access] .sp-sign-in form { position:relative; }
 [data-sempods-access] .sp-sign-in .sp-access-primary { margin-top:16px; min-height:50px; border-radius:calc(var(--sp-radius) * 1.25); }
 [data-sempods-access] .sp-pod-field { position:relative; }

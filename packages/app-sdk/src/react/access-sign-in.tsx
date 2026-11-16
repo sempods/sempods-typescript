@@ -5,6 +5,7 @@ import { endedMessage } from './components.js';
 import { distinctName, podName } from './names.js';
 import { PodAddressField } from './pod-address-field.js';
 import type { ConnectionsProps } from './access.js';
+import type { Connection } from '../runtime/types.js';
 
 /** Presentation convenience only; canonical/security validation stays in the runtime. */
 export function enteredPod(value: string) {
@@ -12,14 +13,20 @@ export function enteredPod(value: string) {
   return /^[a-z][a-z\d+.-]*:/i.test(text) ? text : `https://${text}`;
 }
 
-/** One choice and one action. This component owns no session or target state. */
+/**
+ * One choice and one action. This component owns no session or target state.
+ * `adding` is `PodChooser`: another Pod beside the connected ones, so it
+ * ignores `mode`, starts on a new address rather than on the active Pod, and
+ * signs in again to a Pod that is already readable instead of only selecting it.
+ */
 export function SignInConnections({
   mode = 'multiple',
   podNames,
   podAddress = 'visible',
   surface = 'sign-in',
   podAddressPrefix = 'https://sempods.org/',
-}: ConnectionsProps) {
+  adding = false,
+}: ConnectionsProps & { readonly adding?: boolean }) {
   const app = useApp();
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
@@ -38,6 +45,7 @@ export function SignInConnections({
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
   const connections = state.connections;
   const canAdd =
+    adding ||
     mode === 'multiple' ||
     !connections.some((entry) => entry.session.kind !== 'signed-out');
   const options = [
@@ -54,13 +62,25 @@ export function SignInConnections({
         connection: undefined,
       })),
   ];
+  const free = !state.allowedPods && canAdd;
+  const readsAlready = (connection: Connection | undefined) =>
+    connection !== undefined &&
+    connection.reading !== null &&
+    connection.missingRequiredScopes.length === 0;
   const selected =
     options.find((o) => o.key === chosen) ??
-    options.find((o) => o.key === state.activeId) ??
-    options.find((o) => o.url === defaultUrl) ??
-    options[0];
+    (adding
+      ? // A free address starts as the field; a finite choice starts on a
+        // permitted Pod not connected yet, else on one that is not readable.
+        free
+        ? undefined
+        : (options.find((o) => !o.connection) ??
+          options.find((o) => !readsAlready(o.connection)) ??
+          options[0])
+      : (options.find((o) => o.key === state.activeId) ??
+        options.find((o) => o.url === defaultUrl) ??
+        options[0]));
   const c = selected?.connection;
-  const free = !state.allowedPods && canAdd;
   const field = !selected || (free && url !== null);
   const inputValue = field ? (url ?? podAddressPrefix) : selected.url;
   const incomplete =
@@ -87,6 +107,7 @@ export function SignInConnections({
   const hiddenAddress =
     podAddress === 'hidden' &&
     surface === 'sign-in' &&
+    !adding &&
     state.allowedPods?.length === 1;
   const unavailable =
     busy ||
@@ -97,22 +118,27 @@ export function SignInConnections({
     Boolean(state.startupError);
   const restoring = targetConnection?.session.kind === 'restoring';
   const leaving = connections.some((entry) => entry.session.kind === 'leaving');
-  const readable =
-    targetConnection !== undefined &&
-    targetConnection.reading !== null &&
-    targetConnection.missingRequiredScopes.length === 0;
+  const readable = readsAlready(targetConnection);
+  // Adding a Pod that is already readable signs in to it again (sharing),
+  // rather than only selecting it; the callback then makes it active.
+  const again = adding && readable && state.signIn !== 'none';
   const retry =
     targetConnection?.session.kind === 'ended' &&
     targetConnection.session.restorable;
   const label =
     retry || failedRetirement
       ? m.controls.retry
-      : readable || state.signIn !== 'required'
-        ? (m.controls.open ?? m.controls.signIn)
-        : targetConnection?.session.kind === 'active' ||
-            targetConnection?.session.kind === 'renewing'
+      : again
+        ? targetConnection?.session.kind === 'active' ||
+          targetConnection?.session.kind === 'renewing'
           ? m.controls.updateAccess
-          : m.controls.signIn;
+          : m.controls.signIn
+        : readable || state.signIn !== 'required'
+          ? (m.controls.open ?? m.controls.signIn)
+          : targetConnection?.session.kind === 'active' ||
+              targetConnection?.session.kind === 'renewing'
+            ? m.controls.updateAccess
+            : m.controls.signIn;
   const saved = connections.filter(
     (entry) =>
       entry.session.kind === 'signed-out' ||
@@ -169,11 +195,21 @@ export function SignInConnections({
     if (targetConnection) {
       if (restoring) return;
       if (retry) await app.retryRestore(targetConnection.id);
+      else if (again) await app.authorize(targetConnection.id);
       else if (readable || state.signIn !== 'required')
         await app.selectConnection(targetConnection.id);
       else await app.authorize(targetConnection.id);
-    } else if (field) await app.connect(enteredPod(inputValue));
-    else if (selected) await app.connect(selected.url);
+    } else if (
+      (field && (await app.connect(enteredPod(inputValue)))) ||
+      (!field && selected && (await app.connect(selected.url)))
+    ) {
+      // A Pod opened in place (no sign-in page) leaves the chooser ready for
+      // the next one.
+      if (adding) {
+        setUrl(null);
+        setChosen('');
+      }
+    }
   }
 
   const management = saved.length > 0 && (
