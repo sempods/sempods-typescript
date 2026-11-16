@@ -284,11 +284,7 @@ function QuietCount() {
     const last = before.current;
     before.current = { open, count: options.length };
     if (open && (!last.open || last.count !== options.length))
-      expectAriaCount(
-        options.length,
-        locale,
-        options.map((node) => node.textValue.trim()),
-      );
+      expectAriaCount(options.length, locale);
   });
   return null;
 }

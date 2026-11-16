@@ -35,10 +35,11 @@ afterEach(async () => {
 
 it('leaves out the one expected count of this commit, nothing else', async () => {
   const [assertive, polite] = announcer();
-  expectAriaCount(2, 'en-US', ['Flat 2']);
+  expectAriaCount(2, 'en-US');
   say(assertive, 'Flat 2');
   say(polite, '2 of 16 selected.');
   say(assertive, '12 options available.');
+  say(assertive, 'sorted by column Score 2 in descending order');
   say(assertive, '2 options available.');
   say(assertive, '2 options available.');
   await tick();
@@ -46,6 +47,7 @@ it('leaves out the one expected count of this commit, nothing else', async () =>
   expect(said(assertive)).toEqual([
     'Flat 2',
     '12 options available.',
+    'sorted by column Score 2 in descending order',
     '2 options available.',
     '2 options available.',
   ]);
@@ -54,7 +56,7 @@ it('leaves out the one expected count of this commit, nothing else', async () =>
 
 it('reads the count as React Aria formats it in its locale', () => {
   const [assertive] = announcer();
-  expectAriaCount(1000, 'de-DE', []);
+  expectAriaCount(1000, 'de-DE');
   say(assertive, '1000 Optionen verfügbar.');
   say(assertive, '1.000 Optionen verfügbar.');
   expect(said(assertive)).toEqual(['1000 Optionen verfügbar.']);
@@ -70,7 +72,7 @@ const later = (log: Element, text: string) =>
   );
 
 it('leaves out a count with which React Aria creates its region', async () => {
-  expectAriaCount(0, 'en-US', []);
+  expectAriaCount(0, 'en-US');
   let [assertive] = announcer();
   // Under act() React Aria adds its first message with the region.
   say(assertive, '0 options available.');
@@ -79,24 +81,28 @@ it('leaves out a count with which React Aria creates its region', async () => {
   document.body.innerHTML = '';
   // In a browser it adds it 100ms later; a later commit's count, announced
   // at once, does not use up its place.
-  expectAriaCount(1, 'en-US', []);
+  expectAriaCount(1, 'en-US');
   [assertive] = announcer();
   const first = later(assertive, '1 option available.');
-  expectAriaCount(1, 'en-US', []);
+  expectAriaCount(1, 'en-US');
   say(assertive, '1 option available.');
   await first;
   expect(said(assertive)).toEqual([]);
 });
 
 it("keeps another message with the number while React Aria's first count waits", async () => {
-  expectAriaCount(16, 'en-US', []);
+  expectAriaCount(16, 'en-US');
   const [assertive, polite] = announcer();
   const first = later(assertive, '16 options available.');
+  // Another component's announcement in the task that creates the region.
+  say(assertive, 'sorted by column Score 16 in descending order');
   await new Promise((done) => setTimeout(done, 50));
   say(polite, 'Moved to row 16.');
   say(polite, 'Selected Date: Monday, November 16, 2026');
   await first;
-  expect(said(assertive)).toEqual([]);
+  expect(said(assertive)).toEqual([
+    'sorted by column Score 16 in descending order',
+  ]);
   expect(said(polite)).toEqual([
     'Moved to row 16.',
     'Selected Date: Monday, November 16, 2026',

@@ -11,22 +11,22 @@
  * available." while the first results load. The announcer is internal to
  * React Aria and has no option for the count, so the field says in that
  * commit which count to expect (`expectAriaCount`), and the region's logs
- * leave out one message whose only number is that count, as React Aria
- * formats it, and that is not one of the field's option texts. Such a
- * message is expected only in that commit's task, or, when React Aria
- * creates its region with it, as its delayed first message. Other messages,
- * such as VoiceOver's active option or another component's announcement,
- * are kept.
+ * leave out one message that is exactly that count as React Aria says it in
+ * its locale (aria-count-text.ts). Such a message is expected only in that
+ * commit's task, or, when React Aria creates its region with it, as its
+ * delayed first message. Other messages, such as VoiceOver's active option
+ * or another component's announcement, also one with the same number, are
+ * kept.
  */
+
+import { ariaCountText } from './aria-count-text.js';
 
 /** A count React Aria is about to announce for a field. */
 interface Expected {
   /** React Aria announced it. */
   done?: boolean;
-  /** The number as React Aria formats it in its locale. */
-  readonly count: string;
-  /** The field's option texts, which React Aria announces for VoiceOver. */
-  readonly options: readonly string[];
+  /** The count as React Aria says it in its locale. */
+  readonly text: string;
 }
 
 /** Counts React Aria announces in the effects of the current commit. */
@@ -42,37 +42,16 @@ let watcher: MutationObserver | undefined;
 /** Counts waiting for React Aria to create its region. */
 let waiting = 0;
 
-const digit = (char: string | undefined) =>
-  char !== undefined && /\p{Nd}/u.test(char);
-
-/**
- * Whether the only number in `text` is `number`, as in React Aria's count
- * ("2 options available."), unlike a date or a time.
- */
-function onlyNumber(text: string, number: string): boolean {
-  for (
-    let at = text.indexOf(number);
-    at >= 0;
-    at = text.indexOf(number, at + 1)
-  ) {
-    const rest = text.slice(0, at) + ' ' + text.slice(at + number.length);
-    if (!digit(text[at - 1]) && !digit(text[at + number.length]))
-      return !/\p{Nd}/u.test(rest);
-  }
-  return false;
-}
-
 /**
  * Whether `node` is an expected count, which it then uses up: one of the
  * current commit first, so that a later commit's count does not use up the
  * one React Aria still adds as its first message.
  */
 function take(node: Node): boolean {
-  const text = node.textContent?.trim() ?? '';
+  const text = node.textContent;
   for (const counts of [now, first])
     for (const count of counts) {
-      if (count.options.includes(text) || !onlyNumber(text, count.count))
-        continue;
+      if (text !== count.text) continue;
       counts.delete(count);
       count.done = true;
       return true;
@@ -104,20 +83,12 @@ function guardAll(): boolean {
 
 /**
  * Leaves out of React Aria's announcer the count of `count` options it is
- * about to announce in this commit, in `locale`, for a field whose options
- * have the texts `options`. Called in the commit before React Aria's own
- * effect: what it announces in that commit's effects, or, the first time,
- * as it creates its region, is left out.
+ * about to announce in this commit, in `locale`. Called in the commit
+ * before React Aria's own effect: what it announces in that commit's
+ * effects, or, the first time, as it creates its region, is left out.
  */
-export function expectAriaCount(
-  count: number,
-  locale: string,
-  options: readonly string[],
-) {
-  const entry: Expected = {
-    count: new Intl.NumberFormat(locale).format(count),
-    options,
-  };
+export function expectAriaCount(count: number, locale: string) {
+  const entry: Expected = { text: ariaCountText(count, locale) };
   if (guardAll()) {
     now.add(entry);
     // React Aria announces in the effects of this commit, before this.
