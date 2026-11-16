@@ -4,6 +4,7 @@
  * while signed in, to add or sign in to another Pod.
  */
 import { webcrypto } from 'node:crypto';
+import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { IDBObjectStore } from 'fake-indexeddb';
 import {
@@ -26,7 +27,7 @@ import {
 } from '../runtime/fixture.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import type { BrowserRuntime } from '../runtime/types.js';
-import { PodChooser, SempodsProvider } from './index.js';
+import { PodChooser, SempodsProvider, useDraftGuard } from './index.js';
 
 const bob = 'https://pod.example/bob';
 const cleanups: (() => void)[] = [];
@@ -298,6 +299,55 @@ it('stays on the submitted permitted Pod when its sign-in cannot be prepared', a
   await act(async () => fireEvent.submit(input.closest('form')!));
   await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
   expect(signed.runtime.getSnapshot().map((c) => c.podUrl)).toEqual([pod, bob]);
+});
+
+it('stays on the submitted permitted Pod when its guarded retry is cancelled', async () => {
+  const charlie = 'https://pod.example/charlie';
+  const f = fixture({ allowedPods: [pod, bob, charlie] });
+  const signed = await f.login();
+  cleanups.push(() => signed.runtime.dispose());
+  function Draft() {
+    const [value, setValue] = useState('');
+    useDraftGuard(Boolean(value), () => setValue(''));
+    return (
+      <input
+        aria-label="Draft"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+    );
+  }
+  render(
+    <SempodsProvider runtime={signed.runtime}>
+      <Draft />
+      <PodChooser />
+    </SempodsProvider>,
+  );
+  const group = screen.getByRole('group', { name: 'Connect another Pod' });
+  const input = await waitFor(() => {
+    const found = field(group);
+    expect(found.disabled).toBe(false);
+    return found;
+  });
+  const prepare = vi
+    .spyOn(signed.runtime, 'beginAuthorization')
+    .mockRejectedValueOnce(new Error('Could not prepare'));
+  await act(async () => fireEvent.submit(input.closest('form')!));
+  await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+  await waitFor(() => expect(action(group)?.disabled).toBe(false));
+  expect(input.value).toBe(bob);
+  // The retry asks before leaving the draft; declining it runs nothing.
+  fireEvent.change(screen.getByLabelText('Draft'), {
+    target: { value: 'Unfinished' },
+  });
+  await act(async () => fireEvent.submit(input.closest('form')!));
+  fireEvent.click(await screen.findByText('Keep editing'));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  await waitFor(() => expect(action(group)?.disabled).toBe(false));
+  expect(prepare).toHaveBeenCalledOnce();
+  expect(screen.getByDisplayValue('Unfinished')).toBeTruthy();
+  expect(input.value).toBe(bob);
+  prepare.mockRestore();
 });
 
 it('signs in to a Pod it already reads without a token, rather than only selecting it', async () => {

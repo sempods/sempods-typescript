@@ -198,12 +198,14 @@ export function SignInConnections({
     }
     if (targetConnection) {
       if (restoring) return;
+      let ran = true;
       if (retry) await app.retryRestore(targetConnection.id);
-      else if (again) await app.authorize(targetConnection.id);
+      else if (again) ran = await app.authorize(targetConnection.id);
       else if (readable || state.signIn !== 'required')
-        await app.selectConnection(targetConnection.id);
-      else await app.authorize(targetConnection.id);
-      if (adding) setPinned(null);
+        ran = await app.selectConnection(targetConnection.id);
+      else ran = await app.authorize(targetConnection.id);
+      // A declined leave confirmation ran nothing: stay on the same Pod.
+      if (adding && ran) setPinned(null);
     } else {
       // A failed preparation stays on the submitted Pod, so the error and a
       // retry belong to it.
