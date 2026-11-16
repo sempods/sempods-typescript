@@ -232,7 +232,10 @@ Connecting alone does not sign in:
 once startup storage is durable and the connection has finished restoring, call
 `beginAuthorization(connection.id)` to sign in or change sharing. React and
 headless authoring use the guarded `app.connect()`, which does both and prefers
-an already active matching connection. Without a preset or a sole allowed Pod,
+an already active matching connection. `PodChooser` relies on this reuse to
+add another Pod while signed in
+([adding another Pod](react-authoring.md#adding-another-pod-while-signed-in)).
+Without a preset or a sole allowed Pod,
 `connect()` needs a URL; omitting it is a configuration error. A failed
 preparation leaves the connection reusable, so a retry creates no duplicate.
 

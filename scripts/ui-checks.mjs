@@ -1860,6 +1860,26 @@ const contrastFixtures = [
     'field-boundary',
     '<input aria-label="fx" style="border:1px solid #767676;color:#000" value="x">',
   ],
+  // A borderless field framed by its wrapper (an input group, the SDK's Pod
+  // address) is bounded by the wrapper's border; a divider is no frame.
+  [
+    'boundary-wrapper-low',
+    false,
+    'field-boundary',
+    '<div style="border:1px solid #eee"><input aria-label="fx" style="border:0;color:#000" value="x"></div>',
+  ],
+  [
+    'boundary-wrapper-readable',
+    true,
+    'field-boundary',
+    '<div style="border:1px solid #767676"><input aria-label="fx" style="border:0;color:#000" value="x"></div>',
+  ],
+  [
+    'boundary-wrapper-top-only',
+    false,
+    'field-boundary',
+    '<div style="border-top:1px solid #767676"><input aria-label="fx" style="border:0;color:#000" value="x"></div>',
+  ],
 ];
 const focusFixtures = [
   [
@@ -4873,6 +4893,153 @@ async function startup({ browser, origin, engine }) {
   return results;
 }
 
+/**
+ * A multi-Pod app's sources panel on `?screen=add-pod` (#329): the SDK's
+ * PodChooser adds another Pod while signed in, with the sign-in's field,
+ * keyboard and labels, in the app's own nonmodal panel.
+ */
+async function addPod({ browser, origin, engine }) {
+  const results = [];
+  const { context, page, errors } = await newPage(browser);
+  const shots = process.env.SEMPODS_UI_SCREENSHOTS;
+  const panel = page.getByRole('region', { name: 'Sources' });
+  const group = page.getByRole('group', { name: 'Connect another Pod' });
+  const field = group.getByRole('combobox', { name: 'Pod address' });
+  const primary = group.locator('.sp-access-primary');
+  const pods = page.getByRole('list', { name: 'Connected Pods' });
+  const closed = () => page.getByTestId('panel-closed').textContent();
+  try {
+    await signIn(page, origin, '/?screen=add-pod', { choose: false });
+    await field.waitFor();
+    for (const [width, height] of [
+      [375, 812],
+      [1280, 800],
+    ])
+      for (const scheme of ['light', 'dark']) {
+        const id = `${width}-${scheme}`;
+        await page.setViewportSize({ width, height });
+        await page.emulateMedia({ colorScheme: scheme });
+        await settle(page);
+        results.push(
+          await attemptOn(errors, `in-panel-${id}`, async () => {
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/add-pod-${engine}-${id}.png`,
+              });
+            const measured = await group.evaluate((el) => {
+              const style = getComputedStyle(el);
+              const box = el.getBoundingClientRect();
+              const parent = getComputedStyle(el.parentElement);
+              const host =
+                el.parentElement.clientWidth -
+                parseFloat(parent.paddingLeft) -
+                parseFloat(parent.paddingRight);
+              return {
+                padding: style.padding,
+                align: style.textAlign,
+                background: style.backgroundColor,
+                fills: Math.abs(box.width - host) <= 1,
+                host,
+                width: box.width,
+                overflow:
+                  document.scrollingElement.scrollWidth > innerWidth ||
+                  el.scrollWidth > el.clientWidth,
+              };
+            });
+            await page.addScriptTag({ content: contrastScript });
+            const failing = await group.evaluate((el) =>
+              window.uiContrast(el).filter((r) => !r.pass),
+            );
+            return {
+              pass:
+                (await field.inputValue()) === 'https://sempods.org/' &&
+                (await primary.textContent()) === 'Sign in' &&
+                (await primary.isDisabled()) &&
+                measured.padding === '0px' &&
+                measured.align === 'start' &&
+                measured.background === 'rgba(0, 0, 0, 0)' &&
+                measured.fills &&
+                !measured.overflow &&
+                failing.length === 0,
+              measured,
+              failing,
+            };
+          }),
+        );
+      }
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.emulateMedia({ colorScheme: 'light' });
+    results.push(
+      await attemptOn(errors, 'escape-closes-only-the-list', async () => {
+        await field.focus();
+        await page.keyboard.press('ArrowDown');
+        await group.getByRole('option').first().waitFor();
+        const expanded = await field.getAttribute('aria-expanded');
+        const options = await group.getByRole('option').count();
+        await page.keyboard.press('Escape');
+        await settle(page);
+        const after = await field.getAttribute('aria-expanded');
+        return {
+          pass:
+            expanded === 'true' &&
+            options === 1 &&
+            after === 'false' &&
+            (await closed()) === '0' &&
+            (await panel.isVisible()) &&
+            (await field.evaluate((el) => el === document.activeElement)),
+          expanded,
+          options,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'matches-a-connected-pod', async () => {
+        await field.fill(origin + '/alice/');
+        const label = await primary.textContent();
+        const count = await pods.getByRole('listitem').count();
+        return {
+          pass: label === 'Change sharing' && count === 1,
+          label,
+          count,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(
+        errors,
+        'signs-in-to-another-pod-by-keyboard',
+        async () => {
+          await field.focus();
+          await field.press('ControlOrMeta+a');
+          await page.keyboard.type(origin + '/bob');
+          await page.keyboard.press('Enter');
+          await pods
+            .locator('li[data-session="active"]')
+            .nth(1)
+            .waitFor({ timeout: 15000 });
+          const listed = (
+            await pods.getByRole('listitem').allTextContents()
+          ).sort();
+          await field.waitFor();
+          return {
+            pass:
+              listed.length === 2 &&
+              listed[0] === origin + '/alice' &&
+              listed[1] === origin + '/bob' &&
+              (await field.inputValue()) === 'https://sempods.org/',
+            listed,
+          };
+        },
+      ),
+    );
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -4889,6 +5056,7 @@ export const suites = {
   search,
   accessSettings,
   startup,
+  addPod,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */
