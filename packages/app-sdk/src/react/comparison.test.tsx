@@ -2,8 +2,9 @@
 /**
  * Recovery comparisons show structured draft values (#306): a `TextVariant`
  * keeps its language and every value of a conflict, missing and empty read
- * apart, and other structures never collapse to `[object Object]`. The
- * editor's evidence, acknowledgement and conditional writes are unchanged.
+ * apart, and other structures never collapse to `[object Object]`; enumerated
+ * values take the app's names (#330). The editor's evidence, acknowledgement
+ * and conditional writes are unchanged.
  */
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -380,3 +381,130 @@ it.each([
     ).toEqual([`summer: ${summer}`, `winter: ${winter}`]);
   },
 );
+
+it("UpdateNotice names a field's values as the app does and leaves others as they are", () => {
+  const f = fixture();
+  runtimes.push(f.runtime);
+  render(
+    <SempodsProvider runtime={f.runtime} language="de">
+      <UpdateNotice
+        outcome={{ kind: 'unconfirmed' }}
+        current={{
+          status: 'open',
+          other: 'open',
+          tags: ['urgent', 'later', null],
+          odd: 'unsupported',
+          inherited: 'constructor',
+          empty: '',
+        }}
+        labels={{ status: 'Status' }}
+        valueLabels={{
+          status: { open: 'Offen', done: 'Erledigt' },
+          tags: { urgent: 'Dringend' },
+          odd: { open: 'Offen' },
+          inherited: {},
+          empty: { open: 'Offen' },
+        }}
+      />
+    </SempodsProvider>,
+  );
+  expect(
+    rows(
+      screen
+        .getByRole('region')
+        .querySelector('dl[data-sempods-ui="comparison"]')!,
+    ),
+  ).toEqual([
+    'Status: Offen',
+    // Names belong to their field.
+    'other: open',
+    'tags: DringendlaterKein Wert',
+    // An unlisted value, also a name only on the prototype, shows as it is.
+    'odd: unsupported',
+    'inherited: constructor',
+    'empty: Leerer Text',
+  ]);
+});
+
+it("a review shows both sides' enumerated values with the app's names, keeping the draft's codes", async () => {
+  const f = fixture();
+  const session = await f.login();
+  runtimes.push(session.runtime);
+  type Status = 'open' | 'done' | 'unsupported';
+  interface Item {
+    readonly title: string;
+    readonly status: Status;
+    readonly kinds: readonly Status[];
+  }
+  const draft: Item = { title: 'open', status: 'open', kinds: ['done'] };
+  const state = {
+    phase: 'review' as const,
+    draft,
+    dirty: true,
+    valid: true,
+    canSave: false,
+    canRemove: false,
+    canDiscard: true,
+    problem: null,
+    review: {
+      kind: 'changed-on-pod' as const,
+      intent: 'save' as const,
+      mine: draft,
+      current: {
+        title: 'open',
+        status: 'unsupported',
+        kinds: [],
+      } satisfies Item as Item,
+    },
+  };
+  const editor = {
+    iri: 'urn:one',
+    state,
+    loaded: Promise.resolve(state),
+    subscribe: () => () => {},
+    change: vi.fn(),
+    save: vi.fn(),
+    remove: vi.fn(),
+    discard: vi.fn(),
+    refresh: vi.fn(),
+    continueFromCurrent: vi.fn(),
+    setAccess: vi.fn(),
+    dispose: vi.fn(),
+  };
+  render(
+    <SempodsProvider runtime={session.runtime} language="de">
+      <ResourceEditor
+        editor={editor}
+        labels={{ title: 'Titel', status: 'Status', kinds: 'Arten' }}
+        valueLabels={{
+          status: { open: 'Offen', done: 'Erledigt' },
+          kinds: { done: 'Erledigt' },
+        }}
+      >
+        {() => null}
+      </ResourceEditor>
+    </SempodsProvider>,
+  );
+  await act(async () => {});
+  expect(
+    [...document.querySelectorAll('dl[data-sempods-ui="comparison"]')].map(
+      rows,
+    ),
+  ).toEqual([
+    ['Titel: open', 'Status: Offen', 'Arten: Erledigt'],
+    ['Titel: open', 'Status: unsupported', 'Arten: Kein Wert'],
+  ]);
+  expect(editor.state.draft).toEqual({
+    title: 'open',
+    status: 'open',
+    kinds: ['done'],
+  });
+  // Names are typed by the draft's codes.
+  <ResourceEditor
+    editor={editor}
+    // @ts-expect-error -- 'closed' is no status of this draft.
+    valueLabels={{ status: { closed: 'Geschlossen' } }}
+  >
+    {() => null}
+  </ResourceEditor>;
+});

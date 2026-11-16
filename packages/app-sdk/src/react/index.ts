@@ -82,4 +82,4 @@ export {
   UnresolvedNotices,
   UpdateNotice,
 } from './components.js';
-export type { FieldLabels } from './components.js';
+export type { FieldLabels, FieldValueLabels } from './components.js';
