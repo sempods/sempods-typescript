@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -36,7 +37,7 @@ import {
   CallbackNotice,
   TargetScreen,
 } from './index.js';
-import { TestShell } from './shell.test.js';
+import { markOutside, TestShell } from './shell.test.js';
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto);
@@ -844,6 +845,37 @@ it.each(['en', 'de'] as const)(
     );
   },
 );
+
+it('opens the leave question outside what an open app overlay marks inert (#264)', async () => {
+  const f = await connected();
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <p>Behind the overlay</p>
+      {createPortal(
+        <div role="dialog" aria-label="Task">
+          <Picker />
+          <Form />
+        </div>,
+        document.body,
+      )}
+    </SempodsProvider>,
+  );
+  fireEvent.change(await screen.findByDisplayValue('Original'), {
+    target: { value: 'Unfinished' },
+  });
+  markOutside(screen.getByRole('dialog', { name: 'Task' }));
+  const behind = screen.getByText('Behind the overlay');
+  expect(behind.closest('[inert]')).not.toBeNull();
+  fireEvent.click(screen.getByText('Custom picker'));
+  const question = await screen.findByRole('alertdialog');
+  // No inert ancestor, which test tools such as Playwright 1.65 refuse.
+  expect(question.closest('[inert]')).toBeNull();
+  fireEvent.keyDown(question, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  // The guarded content's own inert ended; the overlay's mark stays.
+  expect(behind.closest('[inert]')).not.toBeNull();
+  expect(screen.getByDisplayValue('Unfinished')).toBeTruthy();
+});
 
 it.each(['connect', 'authorize'] as const)(
   'makes provider content inert throughout %s preparation and restores it after failure',
