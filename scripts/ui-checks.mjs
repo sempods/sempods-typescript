@@ -5040,6 +5040,140 @@ async function addPod({ browser, origin, engine }) {
   return results;
 }
 
+/**
+ * The kit's Checkbox (#337) on `?screen=checkbox`: a 44px target around its
+ * 20px box, Space and a press tick it, a solid focus outline for the
+ * keyboard (also with forced colors),
+ * a disabled box stays as it is, and its check mark does not rest on colour.
+ */
+async function checkbox({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser);
+  const box = (name) => page.getByRole('checkbox', { name, exact: true });
+  const checked = (name) => box(name).isChecked();
+  const results = [];
+  try {
+    await page.goto(origin + '/?screen=checkbox');
+    await box('Done: Buy milk').waitFor({ state: 'attached' });
+    results.push(
+      await attempt('target-44-around-the-box', async () => {
+        const hits = await page.evaluate(() => {
+          const el = document.querySelector('[data-slot="checkbox"]');
+          const r = el.getBoundingClientRect();
+          const cx = r.x + r.width / 2;
+          const cy = r.y + r.height / 2;
+          const at = (x, y) => el.contains(document.elementFromPoint(x, y));
+          return {
+            box: [r.width, r.height],
+            edges: [
+              at(cx - 21, cy),
+              at(cx + 21, cy),
+              at(cx, cy - 21),
+              at(cx, cy + 21),
+            ],
+          };
+        });
+        return {
+          pass:
+            hits.box[0] === 20 &&
+            hits.box[1] === 20 &&
+            hits.edges.every(Boolean),
+          ...hits,
+        };
+      }),
+    );
+    results.push(
+      await attempt('press-at-the-edge-ticks', async () => {
+        const r = await page
+          .locator('[data-slot="checkbox"]')
+          .first()
+          .boundingBox();
+        await page.mouse.click(r.x + r.width / 2 + 20, r.y + r.height / 2);
+        const after = await checked('Done: Buy milk');
+        return { pass: after === true, after };
+      }),
+    );
+    results.push(
+      await attempt('space-ticks-with-a-focus-outline', async () => {
+        // Keyboard from the top of the page: the first two boxes.
+        await page.locator('body').click({ position: { x: 1, y: 700 } });
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Tab');
+        const focused = await page.evaluate(() =>
+          document.activeElement?.getAttribute('aria-label'),
+        );
+        // The visible box draws a solid outline, in ordinary and in forced
+        // colors, where the ring's box shadow is dropped (#348 review).
+        const outline = {};
+        for (const forcedColors of ['none', 'active']) {
+          await page.emulateMedia({ forcedColors });
+          outline[forcedColors] = await page.evaluate(() => {
+            const el = document.activeElement?.closest(
+              '[data-slot="checkbox"]',
+            );
+            const style = el ? getComputedStyle(el) : null;
+            return style
+              ? `${style.outlineStyle} ${style.outlineWidth}`
+              : 'no box';
+          });
+        }
+        await page.emulateMedia({ forcedColors: null });
+        const before = await checked('Done: Buy bread');
+        await page.keyboard.press('Space');
+        const after = await checked('Done: Buy bread');
+        return {
+          pass:
+            focused === 'Done: Buy bread' &&
+            outline.none === 'solid 2px' &&
+            outline.active === 'solid 2px' &&
+            before === true &&
+            after === false,
+          focused,
+          outline,
+          before,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attempt('disabled-stays', async () => {
+        await page
+          .locator('[data-slot="checkbox"]')
+          .nth(2)
+          .click({ force: true });
+        const after = await checked('Done: Locked');
+        return { pass: after === true, after };
+      }),
+    );
+    results.push(
+      await attempt('check-mark-and-visible-label', async () => {
+        await page.locator('[data-slot="checkbox"]').last().click();
+        const state = await page.evaluate(() => {
+          const boxes = [
+            ...document.querySelectorAll('[data-slot="checkbox"]'),
+          ];
+          return boxes.map((el) => ({
+            selected: el.hasAttribute('data-selected'),
+            mark: Boolean(el.querySelector('svg')),
+          }));
+        });
+        const remember = await checked('Remember this device');
+        return {
+          pass:
+            remember &&
+            state.every((s) => s.selected === s.mark) &&
+            state.some((s) => s.mark),
+          remember,
+          state,
+        };
+      }),
+    );
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -5057,6 +5191,7 @@ export const suites = {
   accessSettings,
   startup,
   addPod,
+  checkbox,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */

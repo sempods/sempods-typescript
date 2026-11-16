@@ -12,7 +12,8 @@
 // search would; with `&mode=address` as well, the bar sits in a nonmodal
 // panel and searches only text that is no address and at least two
 // characters long, as an address bar does, and Ctrl/Cmd-K focuses and
-// selects it. The access gate offers the app's language and appearance
+// selects it. With `?screen=checkbox`, the page is ticked rows with the
+// kit's Checkbox. The access gate offers the app's language and appearance
 // settings (`AppAccess` `settings`), applied in place. With
 // `?screen=gate-settings`, sign-in is optional and the page is only the
 // gate with a fixed focus target; the checks end the gate's cause through
@@ -44,6 +45,7 @@ import {
 import {
   ActionButton,
   ActionGroup,
+  Checkbox,
   Chip,
   ChipGroup,
   HeaderMenu,
@@ -215,6 +217,7 @@ const addPod =
   settings.get('screen') === 'add-pod' ||
   (location.pathname === '/callback' &&
     sessionStorage.getItem('add-pod-gate') === '1');
+const checkboxes = settings.get('screen') === 'checkbox';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -332,6 +335,8 @@ function App() {
         <ContextSwitchGate />
       ) : search ? (
         <SearchGate />
+      ) : checkboxes ? (
+        <CheckboxGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (
@@ -645,6 +650,48 @@ function GateSettingsScreen({
         Back to the app
       </button>
       <AppAccess appName="Focus" settings={settings} focusTarget={target} />
+    </main>
+  );
+}
+
+/**
+ * Ticked rows as a list app has them (`?screen=checkbox`): the box named by
+ * the row's title, a disabled row, and a box with a visible label.
+ */
+function CheckboxGate() {
+  const [done, setDone] = useState({ milk: false, bread: true });
+  const [remember, setRemember] = useState(false);
+  return (
+    <main className="gate-main">
+      <ul aria-label="Tasks">
+        {(
+          [
+            ['milk', 'Buy milk'],
+            ['bread', 'Buy bread'],
+          ] as const
+        ).map(([key, title]) => (
+          <li key={key} className="flex min-h-12 items-center gap-3 px-3">
+            <Checkbox
+              aria-label={`Done: ${title}`}
+              isSelected={done[key]}
+              onChange={(next) => setDone({ ...done, [key]: next })}
+            />
+            <span>{title}</span>
+          </li>
+        ))}
+        <li className="flex min-h-12 items-center gap-3 px-3">
+          <Checkbox aria-label="Done: Locked" isSelected isDisabled />
+          <span>Locked</span>
+        </li>
+      </ul>
+      <div className="flex min-h-12 items-center gap-3 px-3">
+        <Checkbox
+          aria-labelledby="remember-device"
+          isSelected={remember}
+          onChange={setRemember}
+        />
+        <span id="remember-device">Remember this device</span>
+      </div>
     </main>
   );
 }
