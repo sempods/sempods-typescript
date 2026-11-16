@@ -36,7 +36,7 @@ afterEach(() => {
 });
 const text = {
   en: {
-    language: /^(English|Englisch)$/,
+    language: 'English',
     retry: 'Try again',
     failed: 'The pod reported an error. Try again later.',
     unavailable: 'This cannot be read right now.',
@@ -45,7 +45,7 @@ const text = {
     description: 'Tasks, stored in a Pod.',
   },
   de: {
-    language: /^(German|Deutsch)$/,
+    language: 'Deutsch',
     retry: 'Erneut versuchen',
     failed: 'Der Pod hat einen Fehler gemeldet. Versuche es später erneut.',
     unavailable: 'Das kann gerade nicht gelesen werden.',
@@ -62,13 +62,33 @@ const promisesDraft = (language: 'en' | 'de') =>
     }).textContent ?? '',
   );
 
-/**
- * Picks a language from the header menu. jsdom does not open popovers, so the
- * closed menu's item is found although hidden.
- */
-function pick(language: 'en' | 'de') {
+/** Presses a React Aria control with the keyboard, as a person would. */
+async function press(element: HTMLElement) {
+  await act(async () => {
+    fireEvent.keyDown(element, { key: 'Enter' });
+    fireEvent.keyUp(element, { key: 'Enter' });
+  });
+}
+
+/** Picks a language from the header menu, where each is named in itself. */
+async function pick(language: 'en' | 'de') {
+  await press(await screen.findByRole('button', { name: /^(Menu|Menü)$/ }));
+  await press(
+    screen.getByRole('menuitemradio', { name: text[language].language }),
+  );
+}
+
+/** Picks a language before sign-in, in the gate's settings. */
+async function pickInGate(language: 'en' | 'de') {
   fireEvent.click(
-    screen.getByRole('button', { name: text[language].language, hidden: true }),
+    await screen.findByRole('button', { name: /^(Settings|Einstellungen)$/ }),
+  );
+  fireEvent.click(
+    within(
+      await screen.findByRole('dialog', { name: /^(Settings|Einstellungen)$/ }),
+    ).getByRole('radio', {
+      name: text[language].language,
+    }),
   );
 }
 
@@ -78,7 +98,7 @@ async function signedIn(language: 'en' | 'de', query: PodFetch) {
   cleanups.push(() => session.runtime.dispose());
   f.setQuery(query);
   render(<TodoApp runtime={session.runtime} />);
-  pick(language);
+  await pick(language);
   return { ...f, ...session };
 }
 
@@ -250,8 +270,10 @@ it.each(['en', 'de'] as const)(
     const f = fixture();
     cleanups.push(() => f.runtime.dispose());
     render(<TodoApp runtime={f.runtime} />);
-    pick(language);
+    await pickInGate(language);
     expect(await screen.findByText(text[language].description)).toBeTruthy();
+    // The page and the kit's controls speak the picked language.
+    expect(document.documentElement.lang).toBe(language);
   },
 );
 
@@ -267,40 +289,43 @@ it.each([
     cleanups.push(() => f.runtime.dispose());
     render(<TodoApp runtime={f.runtime} />);
     expect(await screen.findByText(text[initial].description)).toBeTruthy();
-    pick(picked);
+    await pickInGate(picked);
     expect(await screen.findByText(text[picked].description)).toBeTruthy();
     expect(screen.queryByText(text[initial].description)).toBeNull();
   },
 );
 
+/** Opens the header's list switch (the UI kit's ContextSwitch). */
+async function openLists(name: RegExp) {
+  await press(await screen.findByRole('button', { name }));
+  // The menu is named by its trigger.
+  return screen.getByRole('menu', { name });
+}
+
 it('the TODO header switches lists and marks a read-only one', async () => {
   await signedIn('en', async () => Response.json([]));
   expect(await screen.findByText(text.en.empty)).toBeTruthy();
-  const heading = screen.getByRole('heading', { level: 1 });
-  expect(heading.textContent).toBe('work');
-  const menu = document.getElementById('list-menu')!;
-  const personalList = within(menu).getByRole('button', {
-    name: /^personal/,
-    hidden: true,
+  const menu = await openLists(/^List: work · /);
+  const personalList = within(menu).getByRole('menuitemradio', {
+    name: 'personal',
   });
-  expect(personalList.textContent).toContain('read only');
+  // The kit names the access beside the list: personal is read only.
+  expect(personalList.textContent).toContain('Read only');
   expect(
     within(menu)
-      .getByRole('button', { name: /^work/, hidden: true })
-      .getAttribute('aria-pressed'),
+      .getByRole('menuitemradio', { name: 'work' })
+      .getAttribute('aria-checked'),
   ).toBe('true');
-  fireEvent.click(personalList);
-  await waitFor(() =>
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
-      'personal',
-    ),
-  );
+  await press(personalList);
+  expect(
+    await screen.findByRole('button', { name: /^List: personal · / }),
+  ).toBeTruthy();
   expect(
     await screen.findByText('You can read this context, but cannot change it.'),
   ).toBeTruthy();
 });
 
-it('the TODO header names a single list without a switch', async () => {
+it('the TODO header names a single list and offers no other', async () => {
   const f = fixture();
   f.setCatalogue(async () => catalogue([work], [work]));
   const session = await f.login();
@@ -308,21 +333,25 @@ it('the TODO header names a single list without a switch', async () => {
   f.setQuery(async () => Response.json([]));
   render(<TodoApp runtime={session.runtime} />);
   expect(await screen.findByText(text.en.empty)).toBeTruthy();
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('work');
-  expect(document.getElementById('list-menu')).toBeNull();
+  const menu = await openLists(/^List: work · /);
+  expect(
+    within(menu)
+      .getAllByRole('menuitemradio')
+      .map((item) => item.getAttribute('data-key') ?? item.textContent),
+  ).toHaveLength(1);
 });
 
 it('the TODO header says when sharing more lists cannot reach the Pod', async () => {
   const f = await signedIn('en', async () => Response.json([]));
   expect(await screen.findByText(text.en.empty)).toBeTruthy();
-  const share = within(document.getElementById('list-menu')!).getByRole(
-    'button',
-    { name: 'Share more lists', hidden: true },
-  );
+  const menu = await openLists(/^List: work · /);
+  const share = within(menu).getByRole('menuitem', {
+    name: /^Share more lists: /,
+  });
   // Preparing the consent fails before the page leaves: the session stays.
   const navigations = f.navigate.mock.calls.length;
   f.fetch.mockRejectedValueOnce(new TypeError('offline'));
-  fireEvent.click(share);
+  await press(share);
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
   expect(screen.getByText(text.en.empty)).toBeTruthy();

@@ -303,7 +303,8 @@ these initial light/dark fallbacks inside `<head>`:
 ```
 
 Import the helper in the app entry **after** the stylesheet that defines
-`--sempods-bg` on `:root`, as the TODO's `style.css` does. That token must be
+`--sempods-bg` on `:root`, as the TODO's `style.css` does through the UI kit's
+bridge. That token must be
 a CSS colour: without it, the probe inherits text colour instead of the
 background. The helper updates both marked meta elements to the resolved
 background so an explicit app appearance also works when it differs from

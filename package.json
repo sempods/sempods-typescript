@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc -b && node scripts/package-docs.mjs",
-    "typecheck": "pnpm build && tsc -p packages/client-sdk/tsconfig.node.json && tsc -p packages/client-sdk/tsconfig.browser.json && tsc -p tsconfig.tests.json && tsc -p packages/app-ui/tsconfig.tests.json && tsc -p examples/tsconfig.json",
+    "typecheck": "pnpm build && tsc -p packages/client-sdk/tsconfig.node.json && tsc -p packages/client-sdk/tsconfig.browser.json && tsc -p tsconfig.tests.json && tsc -p tsconfig.todo-tests.json && tsc -p packages/app-ui/tsconfig.tests.json && tsc -p examples/tsconfig.json",
     "test": "vitest run",
     "test:consumers": "pnpm build && node scripts/test-consumers.mjs",
     "lint": "eslint packages scripts tests examples eslint.config.mjs vitest.config.ts",

@@ -222,8 +222,8 @@ check the Pod's current version before acknowledging; nothing is resent. A succe
 the target starts, so the notices show the last action; unresolved outcomes stay until
 acknowledged. `useList` refreshes after this target's own confirmed
 writes; `TargetScreen` resets app-local state on a target change. The
-[TODO example](../examples/todo/src/app.tsx) adds an icon and a header menu
-with the language switch.
+[TODO example](../examples/todo/src/app.tsx) adds an icon, a list switch and a
+header menu with the language switch, from `@sempods/app-ui`.
 
 `LoadNotice` explains a failed read and offers **Try again**. A failure is never
 shown as an empty list. The retry only reads data, so it cannot repeat a write.
@@ -236,8 +236,9 @@ reachable when the selected row disappears.
 
 Replace Vite's demo styles in `src/index.css`. AppAccess, the editor and the
 notices style themselves from the `--sempods-*` tokens; set them once so your
-own elements match (the [TODO example's styles](../examples/todo/src/style.css)
-add a checkbox list, text buttons and the input row):
+own elements match. On Tailwind CSS 4, `@sempods/app-ui` sets them from its
+palette roles instead, as the [TODO example's styles](../examples/todo/src/style.css)
+do:
 
 ```css
 :root {

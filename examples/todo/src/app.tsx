@@ -1,10 +1,7 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  AccessGate,
   AccessNotice,
-  AccessPrompts,
   AppAccess,
-  ContextAccess,
   LoadNotice,
   RemoveButton,
   ResourceEditor,
@@ -12,7 +9,6 @@ import {
   UpdateNotice,
   SempodsProvider,
   useAppState,
-  useContexts,
   useFieldUpdate,
   useCreation,
   useList,
@@ -21,13 +17,20 @@ import {
   useResourceEditor,
   useMessages,
   useSdkLocale,
-  type ContextList,
   type FieldUpdateRow,
 } from '@sempods/app-sdk/react';
 import type { BrowserRuntime } from '@sempods/app-sdk';
+import {
+  ActionButton,
+  ContextSwitch,
+  HeaderMenu,
+  I18nProvider,
+  Input,
+} from '@sempods/app-ui';
+import { PlusIcon, UsersIcon } from 'lucide-react';
 import { emptyTask, taskFields, type Task } from './domain.js';
 
-/** The app's own texts; the SDK's controls bring theirs. */
+/** The app's own texts; the SDK's controls and the UI kit bring theirs. */
 const text = {
   en: {
     tasks: 'Tasks',
@@ -37,9 +40,10 @@ const text = {
     done: 'Done',
     empty: 'No tasks yet.',
     menu: 'Menu',
+    settings: 'Settings',
     language: 'Language',
     description: 'Tasks, stored in a Pod.',
-    readOnly: 'read only',
+    list: 'List',
     shareMore: 'Share more lists',
   },
   de: {
@@ -50,9 +54,10 @@ const text = {
     done: 'Erledigt',
     empty: 'Noch keine Aufgaben.',
     menu: 'Menü',
+    settings: 'Einstellungen',
     language: 'Sprache',
     description: 'Aufgaben, gespeichert in einem Pod.',
-    readOnly: 'nur lesen',
+    list: 'Liste',
     shareMore: 'Weitere Listen freigeben',
   },
 };
@@ -76,9 +81,10 @@ function TaskScreen() {
   const editing = (
     <ResourceEditor editor={editor} onClose={() => select(null)}>
       {(draft, change) => (
-        <input
+        <Input
           aria-label={m.task}
           autoFocus
+          className="h-11"
           value={draft.title}
           onChange={(e) => change({ title: e.target.value })}
         />
@@ -92,8 +98,10 @@ function TaskScreen() {
       {/* Empty only when confirmed: not on a failure, nor with skipped entries. */}
       {(list.state.kind === 'ready' || list.state.kind === 'loading') &&
         tasks?.length === 0 &&
-        list.data?.skipped === 0 && <p className="empty">{m.empty}</p>}
-      <ul className="tasks">
+        list.data?.skipped === 0 && (
+          <p className="py-6 text-center text-muted-foreground">{m.empty}</p>
+        )}
+      <ul className="my-4">
         {tasks?.map((item) => (
           <TaskRow
             key={item.iri}
@@ -109,29 +117,28 @@ function TaskScreen() {
       {selected && !tasks?.some((item) => item.iri === selected) && editing}
       <UpdateNotice {...creation.notice} quiet />
       <form
-        className="composer"
+        className="mt-4 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           void creation.create();
         }}
       >
-        <input
+        <Input
           aria-label={m.newTask}
           placeholder={m.newTask}
+          className="h-11 flex-1"
           disabled={!creation.canEdit}
           value={creation.draft.title}
           onChange={(e) => creation.change({ title: e.target.value })}
         />
-        <button
-          className="add"
-          aria-label={m.add}
-          title={m.add}
-          disabled={!creation.canCreate}
+        <ActionButton
+          type="submit"
+          shape="round-sm"
+          label={m.add}
+          isDisabled={!creation.canCreate}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
+          <PlusIcon />
+        </ActionButton>
       </form>
     </section>
   );
@@ -157,11 +164,18 @@ function TaskRow({
   const { remove } = useSdkLocale().messages.controls;
   const task = row.data;
   return (
-    <li className={task.done ? 'done' : undefined}>
-      {/* The wrapping label is the checkbox's 44px touch target. */}
-      <label className="check">
+    <li className="flex flex-wrap items-start gap-1 border-b *:data-[sempods-ui=editor]:min-w-0 *:data-[sempods-ui=editor]:flex-1 *:data-[sempods-ui=notice]:mb-2 *:data-[sempods-ui=notice]:ms-11 *:data-[sempods-ui=notice]:basis-full">
+      {/* The wrapping label is the checkbox's 44px touch target; inside the
+          editor's card it stays level with the field. */}
+      <label
+        className={
+          'grid size-11 flex-none cursor-pointer place-items-center' +
+          (editing ? ' mt-3' : '')
+        }
+      >
         <input
           type="checkbox"
+          className="size-5.5 cursor-pointer accent-primary disabled:cursor-default disabled:opacity-55"
           aria-label={`${m.done}: ${task.title}`}
           checked={task.done}
           disabled={!row.canMutate}
@@ -169,7 +183,13 @@ function TaskRow({
         />
       </label>
       {editing ?? (
-        <button className="title" onClick={onOpen}>
+        <button
+          className={
+            'min-h-11 flex-1 cursor-pointer rounded-lg px-1 py-2.5 text-start wrap-anywhere hover:bg-muted' +
+            (task.done ? ' text-muted-foreground line-through' : '')
+          }
+          onClick={onOpen}
+        >
           {task.title}
         </button>
       )}
@@ -186,12 +206,28 @@ function TaskRow({
   );
 }
 
-/** The menu's languages; the provider follows the browser's until one is picked. */
-const languages = ['de', 'en'] as const;
+/**
+ * The languages, each named in itself, so it is found whichever language
+ * the app currently shows.
+ */
+const languages = [
+  { code: 'de', name: 'Deutsch' },
+  { code: 'en', name: 'English' },
+] as const;
+type Language = (typeof languages)[number]['code'];
 
-/** The app's icon: in the header and on the sign-in screen. */
+/** The app's icon: in the header, on the startup and sign-in screens. */
 const icon = (
-  <svg className="app-icon" viewBox="0 0 32 32" aria-hidden="true">
+  <svg
+    viewBox="0 0 32 32"
+    aria-hidden="true"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="size-8 text-primary"
+  >
     <rect x="3" y="3" width="26" height="26" rx="7" />
     <path d="m10 16.5 4 4 8-9" />
   </svg>
@@ -199,8 +235,9 @@ const icon = (
 
 /**
  * The TODO app with the SDK's standard UI: `AppAccess` beside the app's own
- * header and screen. Until a language is picked in the menu, the provider
- * follows the browser's language.
+ * header and screen, built from `@sempods/app-ui`. Until a language is
+ * picked, in the menu or before sign-in in the settings, the provider follows
+ * the browser's language.
  */
 export function TodoApp({
   runtime,
@@ -211,166 +248,134 @@ export function TodoApp({
   readonly children?: ReactNode;
 }) {
   // A picked locale sets messages and formatting together.
-  const [locale, setLocale] = useState<'en' | 'de'>();
+  const [locale, setLocale] = useState<Language>();
 
   return (
     <SempodsProvider runtime={runtime} locale={locale}>
-      {children}
-      <StandardScreen onLocale={setLocale} />
+      <KitLocale>
+        {children}
+        <StandardScreen onLocale={setLocale} />
+      </KitLocale>
     </SempodsProvider>
+  );
+}
+
+/**
+ * The UI kit's controls and the page follow the provider's locale: React
+ * Aria's announcements and formats, and the document language that screen
+ * readers pronounce the page in.
+ */
+function KitLocale({ children }: { readonly children: ReactNode }) {
+  const { locale, language } = useSdkLocale();
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+  return <I18nProvider locale={locale}>{children}</I18nProvider>;
+}
+
+/**
+ * The language choice in the gate's settings: plain radio buttons, since a
+ * menu or popover would render below the gate.
+ */
+function LanguageChoices({
+  onLocale,
+}: {
+  readonly onLocale: (locale: Language) => void;
+}) {
+  const m = useMessages(text);
+  const { language } = useSdkLocale();
+  return (
+    <fieldset className="grid">
+      <legend className="mb-1">{m.language}</legend>
+      {languages.map(({ code, name }) => (
+        <label
+          key={code}
+          lang={code}
+          className="flex min-h-11 cursor-pointer items-center gap-3"
+        >
+          <input
+            type="radio"
+            className="size-5 accent-primary"
+            name="todo-language"
+            checked={language === code}
+            onChange={() => onLocale(code)}
+          />
+          {name}
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
 function StandardScreen({
   onLocale,
 }: {
-  readonly onLocale: (locale: 'en' | 'de') => void;
+  readonly onLocale: (locale: Language) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const focusTarget = useRef<HTMLButtonElement>(null);
+  // Closing Pods & sharing returns here: the menu item is gone by then.
+  const menu = useRef<HTMLButtonElement>(null);
   const { messages, language } = useSdkLocale();
-  const { view, connections } = useAppState();
-  // Mounted before a list is chosen: it selects one, so no chooser appears.
-  const lists = useContexts();
+  const { connections } = useAppState();
   const m = useMessages(text);
-  // Language names in the current language: Deutsch/Englisch, German/English.
-  const names = useMemo(
-    () => new Intl.DisplayNames([language], { type: 'language' }),
-    [language],
-  );
+  // The gate covers the page until a Pod is connected; it has its own settings.
+  const header = connections.length > 0;
 
   return (
-    <main className="standard">
-      <header className="app-heading">
-        {view && (
-          <>
-            {icon}
-            <ListSwitch lists={lists} />
-          </>
-        )}
-        {/* A native popover: the browser closes it on Escape or outside. */}
-        <button
-          ref={focusTarget}
-          className="menu-button"
-          popoverTarget="app-menu"
-          aria-label={m.menu}
-          title={m.menu}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="5" r="1.8" />
-            <circle cx="12" cy="12" r="1.8" />
-            <circle cx="12" cy="19" r="1.8" />
-          </svg>
-        </button>
-        <div id="app-menu" className="menu" popover="auto">
-          {connections.length > 0 && (
-            <button
-              popoverTarget="app-menu"
-              popoverTargetAction="hide"
-              aria-haspopup="dialog"
-              onClick={() => setOpen(true)}
-            >
-              {messages.controls.dataAccess}
-            </button>
-          )}
-          <p id="menu-language" className="menu-label">
-            {m.language}
-          </p>
-          <div role="group" aria-labelledby="menu-language">
-            {languages.map((code) => (
-              <button
-                key={code}
-                popoverTarget="app-menu"
-                popoverTargetAction="hide"
-                aria-pressed={language === code}
-                onClick={() => onLocale(code)}
-              >
-                <span className="check" aria-hidden="true">
-                  {language === code ? '✓' : ''}
-                </span>
-                {names.of(code)}
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
-      {/* Preparing the Pod's consent can fail (unreachable Pod); say so here. */}
-      {lists.shareProblem && <p role="alert">{lists.shareProblem}</p>}
-      {/* The access UI in parts: the sign-in screen while nothing works, the
-          list choice, prompts at the bottom and the menu's management. */}
-      <AccessGate
+    <main className="mx-auto max-w-160 px-4 pt-2 pb-8">
+      {header && (
+        <header className="flex items-center justify-between gap-2">
+          {/* The list switch across the connected Pods, with sharing more. */}
+          <ContextSwitch
+            title="TODO"
+            label={m.list}
+            icon={icon}
+            texts={{ shareMore: m.shareMore }}
+          />
+          <HeaderMenu
+            ref={menu}
+            label={m.menu}
+            items={[
+              {
+                label: messages.controls.dataAccess,
+                onSelect: () => setOpen(true),
+                icon: <UsersIcon />,
+              },
+              null,
+              {
+                label: m.language,
+                display: 'section',
+                choices: languages.map(({ code, name }) => ({
+                  id: code,
+                  label: name,
+                  checked: language === code,
+                  onSelect: () => onLocale(code),
+                })),
+              },
+            ]}
+          />
+        </header>
+      )}
+      {/* Startup, sign-in (with the language before it), the list choice,
+          prompts and, from the menu, Pods & sharing. */}
+      <AppAccess
         appName="TODO"
         icon={icon}
         description={m.description}
-        mode="single"
-        focusTarget={focusTarget}
-      />
-      <ContextAccess appName="TODO" mode="single" focusTarget={focusTarget} />
-      <AccessPrompts />
-      <AppAccess
-        appName="TODO"
-        only="management"
+        headingLevel={header ? 2 : 1}
         mode="single"
         open={open}
         onClose={() => setOpen(false)}
-        focusTarget={focusTarget}
+        focusTarget={menu}
+        settings={{
+          label: m.settings,
+          content: <LanguageChoices onLocale={onLocale} />,
+        }}
       />
       <AccessNotice only="write" />
       <TargetScreen>
         <TaskScreen />
       </TargetScreen>
     </main>
-  );
-}
-
-/**
- * The header's list switch: the chosen list's name, and with several lists a
- * menu to switch (under the leave policy) or to share more lists on the Pod.
- */
-function ListSwitch({ lists }: { readonly lists: ContextList }) {
-  const m = useMessages(text);
-  const current = lists.selected;
-  if (!current) return null;
-  if (lists.contexts.length < 2) return <h1>{current.name}</h1>;
-  return (
-    <>
-      <h1>
-        <button className="list-button" popoverTarget="list-menu">
-          {current.name}
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
-      </h1>
-      <div id="list-menu" className="menu list-menu" popover="auto">
-        {lists.contexts.map((list) => (
-          <button
-            key={list.iri}
-            popoverTarget="list-menu"
-            popoverTargetAction="hide"
-            aria-pressed={list.iri === current.iri}
-            onClick={() => void lists.select(list.iri)}
-          >
-            <span className="check" aria-hidden="true">
-              {list.iri === current.iri ? '✓' : ''}
-            </span>
-            {list.name}
-            {!list.writable && <small>{m.readOnly}</small>}
-          </button>
-        ))}
-        {lists.canShare && (
-          <>
-            <hr />
-            <button
-              popoverTarget="list-menu"
-              popoverTargetAction="hide"
-              onClick={() => void lists.share()}
-            >
-              {m.shareMore}
-            </button>
-          </>
-        )}
-      </div>
-    </>
   );
 }

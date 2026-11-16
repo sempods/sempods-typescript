@@ -93,6 +93,16 @@ try {
     }
   }
   const example = await examplePackages(root);
+  // The shipped TODO screen is built from the UI kit, a package of its own;
+  // the React consumer installs it beside the SDKs to type-check it.
+  const kit = join(temp, 'kit');
+  await mkdir(kit);
+  run(
+    'pnpm',
+    ['pack', '--pack-destination', kit],
+    join(root, 'packages/app-ui'),
+  );
+  const [kitArchive] = await readdir(kit);
   async function consumer(name, react) {
     const path = join(temp, name);
     await mkdir(path);
@@ -114,7 +124,13 @@ try {
       name: `packed-${name}-consumer`,
       private: true,
       type: 'module',
-      dependencies: react ? { ...example.dependencies, ...tarballs } : tarballs,
+      dependencies: react
+        ? {
+            ...example.dependencies,
+            ...tarballs,
+            '@sempods/app-ui': `file:${join(kit, kitArchive)}`,
+          }
+        : tarballs,
       devDependencies,
     });
     // Outside the workspace; npm's file dependencies install both tarballs together.
