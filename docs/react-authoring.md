@@ -1225,7 +1225,9 @@ function Access({ language, setLanguage }: LanguageSetting) {
 - Use controls that render in place, such as radio groups, toggles and
   switches. A popover, menu, select or dialog that renders into
   `document.body` is inert below the gate. Plain controls get the SDK's
-  defaults; the app's own classes take precedence.
+  defaults: a `fieldset` with a `legend` and `label`s around radio buttons or
+  checkboxes shows one choice per 44px row, the groups apart. The app's own
+  classes take precedence.
 - Only device-local presentation choices belong here. The gate grants no
   session or write access: no data or account actions.
 

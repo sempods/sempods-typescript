@@ -4487,6 +4487,33 @@ async function accessSettings({ browser, origin, engine }) {
       }),
     );
     results.push(
+      // Plain fieldsets and radio labels, without app CSS (#339): one choice
+      // per 44px row, the groups apart.
+      await attempt('plain-choices-one-per-row', async () => {
+        const rows = await settings.evaluate((dialog) =>
+          [...dialog.querySelectorAll('fieldset')].map((fieldset) => ({
+            top: fieldset.getBoundingClientRect().top,
+            bottom: fieldset.getBoundingClientRect().bottom,
+            labels: [...fieldset.querySelectorAll('label')].map((label) => {
+              const box = label.getBoundingClientRect();
+              return { top: box.top, height: box.height };
+            }),
+          })),
+        );
+        const stacked = rows.every((group) =>
+          group.labels.every(
+            (label, i) =>
+              label.height >= 44 &&
+              (i === 0 || label.top >= group.labels[i - 1].top + 44 - 0.5),
+          ),
+        );
+        const apart = rows.every(
+          (group, i) => i === 0 || group.top >= rows[i - 1].bottom + 8,
+        );
+        return { pass: rows.length === 2 && stacked && apart, rows };
+      }),
+    );
+    results.push(
       await attempt('language-and-appearance-in-place', async () => {
         await page.evaluate(() => {
           window.sameDocument = true;

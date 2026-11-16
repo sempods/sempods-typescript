@@ -1445,6 +1445,13 @@ const styles = `
 .sp-access-settings > * { width:22px; height:22px; }
 .sp-access-settings svg { fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
 .sp-access-settings-content { padding:8px 24px 24px; }
+/* Plain choices in the app's settings: one per 44px row, groups apart. Without
+   specificity of their own, so the app's classes win. */
+.sp-access-settings-content :where(fieldset) { display:grid; min-inline-size:0; margin:0 0 16px; padding:0; border:0; }
+.sp-access-settings-content :where(fieldset:last-child) { margin-block-end:0; }
+.sp-access-settings-content :where(legend) { padding:0; margin-block-end:4px; font-weight:500; }
+.sp-access-settings-content :where(label:has(> input[type=radio], > input[type=checkbox])) { display:flex; align-items:center; gap:12px; min-height:44px; cursor:pointer; }
+.sp-access-settings-content :where(input[type=radio], input[type=checkbox]) { flex:none; width:20px; height:20px; margin:0; accent-color:var(--sp-accent); }
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
 .sp-access-dialog-header h2 { flex:1; margin:0; }
