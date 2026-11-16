@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { expectAriaCount } from './aria-count.js';
 
 /** A region shaped like React Aria's announcer, with its two logs. */
@@ -103,6 +103,31 @@ it('leaves out the first count when the page is busy before React Aria creates i
   const [assertive] = announcer();
   const first = later(assertive, '3 options available.');
   await first;
+  expect(said(assertive)).toEqual([]);
+});
+
+it('leaves out the first count when its timers due together run in another order', async () => {
+  // On a busy page Node ran the field's 0ms timer after its 100ms timer
+  // (CI on PR 356): the 0ms one is set here only after the 100ms one.
+  const set = globalThis.setTimeout;
+  let zero: (() => void) | undefined;
+  vi.stubGlobal('setTimeout', ((run: () => void, ms?: number) => {
+    if (ms === 0 && !zero) {
+      zero = run;
+      return 0;
+    }
+    const timer = set(run, ms);
+    if (ms === 100 && zero) set(zero, 100);
+    return timer;
+  }) as typeof setTimeout);
+  try {
+    expectAriaCount(4, 'en-US');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  expect(zero).toBeDefined();
+  const [assertive] = announcer();
+  await later(assertive, '4 options available.');
   expect(said(assertive)).toEqual([]);
 });
 

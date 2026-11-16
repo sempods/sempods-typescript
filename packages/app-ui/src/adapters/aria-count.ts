@@ -23,7 +23,8 @@
  * page can be busy for a while in between (sempods-typescript#353). A
  * browser runs timers of the same delay in the order they were set, so the
  * field waits for that message from a 100ms timer it sets before React
- * Aria's until one it sets once the region exists.
+ * Aria's until one it sets once the region exists. Timers of different
+ * delays that are due together can run in either order, under Node too.
  */
 
 import { ariaCountText } from './aria-count-text.js';
@@ -32,6 +33,8 @@ import { ariaCountText } from './aria-count-text.js';
 interface Expected {
   /** React Aria announced it. */
   done?: boolean;
+  /** Expected from React Aria's 100ms timer, until its first message. */
+  delayed?: boolean;
   /** The count as React Aria says it in its locale. */
   readonly text: string;
 }
@@ -110,12 +113,19 @@ export function expectAriaCount(count: number, locale: string) {
   watcher ??= new MutationObserver(created);
   watcher.observe(document.body, { childList: true });
   first.add(entry);
-  setTimeout(() => first.delete(entry), 0);
+  // On a busy page both timers can be due together and run in either
+  // order: this one ends only the wait in this task.
+  setTimeout(() => {
+    if (!entry.delayed) first.delete(entry);
+  }, 0);
   setTimeout(() => {
     // React Aria did not create its region in that commit: it does not
     // announce the count.
     if (waiting.delete(entry)) stopWatching();
-    else if (!entry.done) first.add(entry);
+    else if (!entry.done) {
+      entry.delayed = true;
+      first.add(entry);
+    }
   }, 100);
 }
 
