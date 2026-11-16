@@ -3108,13 +3108,17 @@ async function compact({ browser, origin, engine }) {
         editors,
       };
     },
-    // German: the corner Close takes the SDK's text.
+    // German: the corner Close takes the SDK's text. Counted, not read:
+    // Firefox 159 with Playwright 1.65 crashes the page on evaluateAll() or
+    // allTextContents() of a locator chained to getByRole() (#264).
     async 'compact-close-label-german'() {
       await open('de');
-      const names = await dialog
-        .locator('[data-slot=dialog-close]')
-        .evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim()));
-      return { pass: names.join() === 'Schließen', names };
+      const closes = dialog.locator('[data-slot=dialog-close]');
+      const count = await closes.count();
+      const german = await closes
+        .and(dialog.getByRole('button', { name: 'Schließen', exact: true }))
+        .count();
+      return { pass: count === 1 && german === 1, count, german };
     },
     // The corner Close is a 44px target around a compact glyph (#288), with
     // the stylesheet the README documents and no app CSS: inside the dialog
