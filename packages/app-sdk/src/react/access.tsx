@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -837,8 +838,26 @@ function AccessConnections({
     // Without sign-in nothing is stored, on purpose.
     (state.startup.storage !== 'durable' && state.signIn !== 'none') ||
     Boolean(state.startupError);
+  // The control that started the running action. Its own action disables it,
+  // and a disabled control loses the focus in WebKit (the focus fixup rule),
+  // which stays on the body once the control is enabled again (#332).
+  const actionFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const target = actionFocus.current;
+    if (unavailable || !target) return;
+    actionFocus.current = null;
+    // Only a lost focus returns: one the action moved elsewhere stays there.
+    const active = target.ownerDocument.activeElement;
+    if (target.isConnected && (!active || active === target.ownerDocument.body))
+      target.focus();
+  }, [unavailable]);
   async function act(task: () => Promise<unknown>) {
     if (inFlight.current || unavailable) return;
+    const focused = document.activeElement;
+    actionFocus.current =
+      focused instanceof HTMLElement && focused !== document.body
+        ? focused
+        : null;
     inFlight.current = true;
     setBusy(true);
     setFailure(null);
