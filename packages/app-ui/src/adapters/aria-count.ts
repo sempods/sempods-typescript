@@ -17,6 +17,14 @@
  * delayed first message. Other messages, such as VoiceOver's active option
  * or another component's announcement, also one with the same number, are
  * kept.
+ *
+ * The delayed first message comes from a 100ms timer React Aria sets as it
+ * creates its region, in an effect after the field's: on a slow device the
+ * page can be busy for a while in between (sempods-typescript#353). A
+ * browser runs timers of the same delay in the order they were set, so the
+ * field waits for that message from a 100ms timer it sets before React
+ * Aria's until one it sets once the region exists. Timers of different
+ * delays that are due together can run in either order, under Node too.
  */
 
 import { ariaCountText } from './aria-count-text.js';
@@ -25,6 +33,8 @@ import { ariaCountText } from './aria-count-text.js';
 interface Expected {
   /** React Aria announced it. */
   done?: boolean;
+  /** Expected from React Aria's 100ms timer, until its first message. */
+  delayed?: boolean;
   /** The count as React Aria says it in its locale. */
   readonly text: string;
 }
@@ -33,14 +43,14 @@ interface Expected {
 const now = new Set<Expected>();
 /**
  * Counts with which React Aria creates its region, while it may add them:
- * at once under React's act(), else 100ms later.
+ * at once under React's act(), else from its 100ms timer.
  */
 const first = new Set<Expected>();
 /** The announcer logs guarded so far. */
 const guarded = new WeakSet<Element>();
 let watcher: MutationObserver | undefined;
 /** Counts waiting for React Aria to create its region. */
-let waiting = 0;
+const waiting = new Set<Expected>();
 
 /**
  * Whether `node` is an expected count, which it then uses up: one of the
@@ -97,17 +107,44 @@ export function expectAriaCount(count: number, locale: string) {
   }
   // React Aria creates its region with its first message: it adds that
   // message at once under React's act(), else from a 100ms timer it sets
-  // in this commit's effects, after the one set here.
-  waiting++;
-  watcher ??= new MutationObserver(guardAll);
+  // in this commit's effects, after the one set here, and maybe much later
+  // than this on a slow device.
+  waiting.add(entry);
+  watcher ??= new MutationObserver(created);
   watcher.observe(document.body, { childList: true });
   first.add(entry);
-  setTimeout(() => first.delete(entry), 0);
+  // On a busy page both timers can be due together and run in either
+  // order: this one ends only the wait in this task.
   setTimeout(() => {
-    if (!entry.done) first.add(entry);
-    setTimeout(() => {
-      first.delete(entry);
-      if (--waiting === 0) watcher?.disconnect();
-    }, 50);
+    if (!entry.delayed) first.delete(entry);
+  }, 0);
+  setTimeout(() => {
+    // React Aria did not create its region in that commit: it does not
+    // announce the count.
+    if (waiting.delete(entry)) stopWatching();
+    else if (!entry.done) {
+      entry.delayed = true;
+      first.add(entry);
+    }
   }, 100);
+}
+
+/**
+ * Once React Aria has created its region, ends the wait for the first
+ * message of the counts waiting for it: React Aria set its 100ms timer as
+ * it created the region, before this, so the same delay set now ends after
+ * that message.
+ */
+function created() {
+  if (!guardAll()) return;
+  const counts = [...waiting];
+  waiting.clear();
+  stopWatching();
+  setTimeout(() => {
+    for (const count of counts) first.delete(count);
+  }, 100);
+}
+
+function stopWatching() {
+  if (waiting.size === 0) watcher?.disconnect();
 }
