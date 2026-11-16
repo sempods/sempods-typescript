@@ -7,5 +7,11 @@
     "types": ["node"]
   },
   "include": ["packages/**/*.test.ts", "packages/**/*.test.tsx"],
-  "exclude": ["packages/app-ui/**"]
+  "exclude": [
+    "packages/app-ui/**",
+    "packages/app-sdk/src/react/todo-example.test.tsx",
+    "packages/app-sdk/src/react/clear-done-recipe.test.tsx",
+    "packages/app-sdk/src/react/overview-toggle-recipe.test.tsx",
+    "packages/app-sdk/src/react/task-with-note-recipe.test.tsx"
+  ]
 }

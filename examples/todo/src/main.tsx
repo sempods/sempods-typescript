@@ -1,8 +1,13 @@
 import { createRoot } from 'react-dom/client';
 import { createBrowserRuntime } from '@sempods/app-sdk';
 import { TodoApp } from './app.js';
+import { applyAppearance, readAppearance } from './appearance.js';
 import './style.css';
 import './browser-theme.js';
+
+// The kept appearance applies before the first render; browser-theme.ts
+// follows it.
+applyAppearance(readAppearance());
 
 function mount() {
   const runtime = createBrowserRuntime({

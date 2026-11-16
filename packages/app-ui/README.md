@@ -664,7 +664,10 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   heading: for two or three choices, such as a View with Zen and List, a
   section shows the current one at once and needs no second layer on a phone.
   A choice's `description` adds a second line ("Can read") that describes it
-  without becoming part of its name. `disabled` on an action or a choice keeps
+  without becoming part of its name. `lang` on a choice or an action marks a
+  label in another language than the page's, such as a language named in
+  itself (`{ label: 'Deutsch', lang: 'de', … }` in an English menu), so
+  assistive technology reads it in that language; the name stays the label. `disabled` on an action or a choice keeps
   it visible but out of reach: a press does nothing and arrow keys skip it.
   `variant="ghost"` shows only the icon until it is hovered, pressed or open,
   for a menu repeated on every row, with the same 44px target. An action's own `icon` is a decorative

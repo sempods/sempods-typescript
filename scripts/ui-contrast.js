@@ -176,9 +176,26 @@ function uiContrast(root = document.body) {
       }
     }
     if (bounded) {
-      const bg = backdrop(el, false);
-      const border = rgba(s.borderTopColor);
-      if (parseFloat(s.borderTopWidth) > 0 && border[3] > 0)
+      // A borderless field inside a wrapper that frames it on all four
+      // sides (an input group, the SDK's Pod address) is bounded by that
+      // wrapper's border; a divider or an underline is not a frame.
+      const parent = el.parentElement && getComputedStyle(el.parentElement);
+      const sides = (style) =>
+        ['Top', 'Right', 'Bottom', 'Left'].map((side) =>
+          parseFloat(style[`border${side}Width`]),
+        );
+      const frame =
+        sides(s).every((width) => !(width > 0)) &&
+        parent &&
+        sides(parent).every((width) => width > 0)
+          ? el.parentElement
+          : el;
+      const bg = backdrop(frame, false);
+      const border = rgba((frame === el ? s : parent).borderTopColor);
+      if (
+        parseFloat((frame === el ? s : parent).borderTopWidth) > 0 &&
+        border[3] > 0
+      )
         record('field-boundary', el, over(border, bg), bg, 3);
       else
         results.push({
