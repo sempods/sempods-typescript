@@ -27,7 +27,8 @@ const temp = await mkdtemp(join(tmpdir(), 'sempods-runtime-'));
 let browser;
 let server;
 try {
-  for (const name of ['client-sdk', 'app-sdk'])
+  // The copied recipes are built from the UI kit.
+  for (const name of ['client-sdk', 'app-sdk', 'app-ui'])
     execFileSync('pnpm', ['pack', '--pack-destination', temp], {
       cwd: join(root, 'packages', name),
       stdio: 'pipe',

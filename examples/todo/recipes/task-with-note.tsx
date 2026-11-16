@@ -6,6 +6,7 @@ import {
   UpdateNotice,
   useCreation,
 } from '@sempods/app-sdk/react';
+import { ActionButton, Input, Textarea } from '@sempods/app-ui';
 
 const schema = 'https://schema.org/';
 const task = fields(
@@ -77,36 +78,39 @@ export function TaskWithNote({
   return (
     <section aria-label="New task with a private note">
       <form
+        className="grid gap-4"
         onSubmit={(event) => {
           event.preventDefault();
           void save();
         }}
       >
-        <label>
+        <label className="grid gap-1.5">
           Task
-          <input
+          <Input
+            className="h-11"
             disabled={linked || !taskCreation.canEdit}
             value={taskCreation.draft.title}
             onChange={(e) => taskCreation.change({ title: e.target.value })}
           />
         </label>
-        <label>
+        <label className="grid gap-1.5">
           Private note
-          <textarea
+          <Textarea
             disabled={!noteCreation.canEdit}
             value={noteCreation.draft.text}
             onChange={(e) => noteCreation.change({ text: e.target.value })}
           />
         </label>
-        <button
-          disabled={
+        <ActionButton
+          type="submit"
+          isDisabled={
             !hasNote ||
             taskUnresolved ||
             (taskToSend ? !taskCreation.canCreate : !noteCreation.canCreate)
           }
         >
           {linked ? 'Save the note again' : 'Save'}
-        </button>
+        </ActionButton>
       </form>
       {linked && !taskToSend && !taskUnresolved && (
         <p role="status">The task is saved; its private note is not yet.</p>
