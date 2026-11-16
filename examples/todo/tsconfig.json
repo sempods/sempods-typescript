@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/app.tsx",
+    "src/main.tsx",
+    "src/style.d.ts",
+    "recipes/clear-done.tsx",
+    "recipes/overview-toggle.tsx",
+    "recipes/pod-overview.tsx",
+    "recipes/task-with-note.tsx"
+  ],
+  "exclude": []
+}

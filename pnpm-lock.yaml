@@ -105,12 +105,18 @@ importers:
       '@sempods/app-sdk':
         specifier: workspace:*
         version: link:../../packages/app-sdk
+      '@sempods/app-ui':
+        specifier: workspace:*
+        version: link:../../packages/app-ui
       '@sempods/client-sdk':
         specifier: workspace:*
         version: link:../../packages/client-sdk
       jsonld:
         specifier: 9.0.0
         version: 9.0.0
+      lucide-react:
+        specifier: 1.72.0
+        version: 1.72.0(@types/react@19.3.0)(react@19.3.1)
       n3:
         specifier: 2.13.12
         version: 2.13.12

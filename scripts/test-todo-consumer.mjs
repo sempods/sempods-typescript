@@ -18,30 +18,46 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import { examplePackages } from './example-packages.mjs';
+import { todoCss } from './todo-css.mjs';
 import { chromium } from 'playwright';
 
-/** Menu language names follow the current language (Deutsch/Englisch, German/English). */
-const german = /^(German|Deutsch)$/;
-const english = /^(English|Englisch)$/;
-/** Clicks an item of the TODO header menu, opening the menu first. */
+/** The menu names each language in itself. */
+const german = 'Deutsch';
+const english = 'English';
+/** Chooses an item of the TODO header menu (the UI kit's HeaderMenu). */
 async function menu(page, name) {
-  await page.locator('.menu-button').click();
+  await page.getByRole('button', { name: /^(Menu|Menü)$/ }).click();
   await page
-    .locator('#app-menu')
-    .getByRole('button', { name, exact: true })
+    .getByRole('menu')
+    .getByRole(
+      /^(English|Deutsch|System|Light|Dark)$/.test(name)
+        ? 'menuitemradio'
+        : 'menuitem',
+      {
+        name,
+        exact: true,
+      },
+    )
     .click();
 }
-/** Switches lists in the header (the app's own Context switch). */
+/** The header's list switch (the UI kit's ContextSwitch), by the list's name. */
+const listSwitch = (page, name = '') =>
+  page.getByRole('button', {
+    name: new RegExp(
+      '^(List|Liste): ' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    ),
+  });
+/** Switches lists in the header. */
 async function switchList(page, name) {
-  await page.locator('.list-button').click();
+  await listSwitch(page).click();
   await page
-    .locator('#list-menu')
-    .getByRole('button', { name: new RegExp('^' + name) })
+    .getByRole('menu')
+    .getByRole('menuitemradio', { name, exact: true })
     .click();
 }
 /** The app selects a list itself after sign-in: no chooser appears. */
 async function listShown(page, name) {
-  await page.getByRole('heading', { level: 1, name, exact: true }).waitFor();
+  await listSwitch(page, name + ' · ').waitFor();
 }
 /** Closes the management dialog in either language. */
 async function closeManagement(page) {
@@ -70,7 +86,7 @@ async function confirmDelete(page) {
 let server;
 let browser;
 try {
-  for (const name of ['client-sdk', 'app-sdk'])
+  for (const name of ['client-sdk', 'app-sdk', 'app-ui'])
     execFileSync('pnpm', ['pack', '--pack-destination', temp], {
       cwd: join(root, 'packages', name),
       stdio: 'pipe',
@@ -102,6 +118,8 @@ try {
       devDependencies: {
         ...example.devDependencies,
         typescript: tools.typescript,
+        // The TODO stylesheet is Tailwind CSS 4 with the UI kit's styles.css.
+        tailwindcss: tools.tailwindcss,
         '@types/react': tools['@types/react'],
         '@types/react-dom': tools['@types/react-dom'],
         '@types/node': tools['@types/node'],
@@ -118,7 +136,9 @@ try {
     filter: (source) =>
       !source.includes('/node_modules') && !source.includes('/dist'),
   });
+  // The consumer type-checks with its own config below.
   await rm(join(temp, 'examples/tsconfig.json'));
+  await rm(join(temp, 'examples/todo/tsconfig.json'));
   await cp(
     join(root, 'tests/todo-browser/customized.tsx'),
     join(temp, 'customized.tsx'),
@@ -156,6 +176,8 @@ try {
     ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.json'],
     { cwd: temp, stdio: 'inherit' },
   );
+  // The stylesheet goes through Tailwind against the installed UI kit; the
+  // bundles leave its import out.
   const bundle = await build({
     absWorkingDir: temp,
     entryPoints: ['examples/todo/src/main.tsx'],
@@ -163,6 +185,7 @@ try {
     platform: 'browser',
     format: 'esm',
     jsx: 'automatic',
+    loader: { '.css': 'empty' },
     write: false,
     outdir: 'out',
     metafile: true,
@@ -179,7 +202,10 @@ try {
     outfile: join(temp, 'node.mjs'),
   });
   const js = bundle.outputFiles.find((f) => f.path.endsWith('.js')).text;
-  const css = bundle.outputFiles.find((f) => f.path.endsWith('.css')).text;
+  const css = await todoCss(temp);
+  // Built from the installed packages: the kit's sources, no @source line.
+  assert.match(css, /--sempods-bg:\s*var\(--background\)/);
+  assert.ok(!css.includes(root));
   // Exercise the actual shipped quickstart, not a separately maintained screen.
   const quickstartDir = join(temp, 'quickstart');
   await mkdir(quickstartDir);
@@ -232,6 +258,7 @@ try {
     platform: 'browser',
     format: 'esm',
     jsx: 'automatic',
+    loader: { '.css': 'empty' },
     write: false,
     outdir: 'out',
     metafile: true,
@@ -350,11 +377,8 @@ try {
       }
       if (url.pathname === '/app.css') {
         res.writeHead(200, { 'content-type': 'text/css' });
-        res.end(
-          pwaMode
-            ? pwa.outputFiles.find((f) => f.path.endsWith('.css')).text
-            : css,
-        );
+        // The PWA entry imports the same stylesheet.
+        res.end(css);
         return;
       }
       if (pwaMode && url.pathname === '/sw.js') {
@@ -600,7 +624,9 @@ try {
       .waitFor();
     assert.equal(writes, before + 1);
     // An unsaved draft asks before the document goes (#201); the SDK's one
-    // `beforeunload` listener exists only while it is unsaved.
+    // `beforeunload` listener exists only while it is unsaved. React Aria
+    // (the UI kit) adds a `once` listener of its own that never asks; it is
+    // not counted.
     const cdp = await context.newCDPSession(page);
     async function unloadListeners() {
       const { result } = await cdp.send('Runtime.evaluate', {
@@ -609,7 +635,8 @@ try {
       const { listeners } = await cdp.send('DOMDebugger.getEventListeners', {
         objectId: result.objectId,
       });
-      return listeners.filter((l) => l.type === 'beforeunload').length;
+      return listeners.filter((l) => l.type === 'beforeunload' && !l.once)
+        .length;
     }
     assert.equal(await unloadListeners(), 0);
     await page
@@ -824,9 +851,10 @@ try {
           ?.content === expected,
       background,
     );
+    // The kit paints the body, which the canvas takes over.
     assert.equal(
       await page
-        .locator('html')
+        .locator('body')
         .evaluate((el) => getComputedStyle(el).backgroundColor),
       background,
     );
@@ -854,11 +882,18 @@ try {
           ?.content === expected,
       background,
     );
-    await page
-      .getByLabel(language === 'de' ? 'Pod-Adresse' : 'Pod address', {
-        exact: true,
-      })
-      .fill(pod);
+    const address = page.getByLabel(
+      language === 'de' ? 'Pod-Adresse' : 'Pod address',
+      { exact: true },
+    );
+    // One focus ring: the SDK draws it around the combined field, and the
+    // app's stylesheet adds none to the input inside it.
+    await address.focus();
+    assert.equal(
+      await address.evaluate((input) => getComputedStyle(input).outlineStyle),
+      'none',
+    );
+    await address.fill(pod);
     await page
       .getByRole('button', {
         name: language === 'de' ? 'Anmelden' : 'Sign in',
@@ -867,6 +902,31 @@ try {
       .click();
     await listShown(page, 'work');
     if (language === 'de') await menu(page, english);
+    // The appearance setting overrides the system's mode, page and SDK alike,
+    // and the marked theme-color follows; System returns to it.
+    const other = language === 'de' ? 'Light' : 'Dark';
+    const otherBackground =
+      language === 'de' ? 'rgb(247, 249, 247)' : 'rgb(19, 27, 24)';
+    await menu(page, other);
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="theme-color"][data-sempods-theme]')
+          ?.content === expected,
+      otherBackground,
+    );
+    assert.equal(
+      await page
+        .locator('body')
+        .evaluate((el) => getComputedStyle(el).backgroundColor),
+      otherBackground,
+    );
+    await menu(page, 'System');
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="theme-color"][data-sempods-theme]')
+          ?.content === expected,
+      background,
+    );
     const input = page.getByLabel('New task', { exact: true });
     await input.fill('Shell-free task');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -914,8 +974,6 @@ try {
 }
 @layer utilities {
   .host-fill { background-color: rgb(1, 2, 3); }
-  /* The app sizes its own icon button, which has no stylesheet here. */
-  .menu-button { width: 44px; height: 44px; }
 }`;
   for (const appearance of ['light', 'dark']) {
     tasks.clear();
@@ -1225,8 +1283,10 @@ try {
             .map((rule) => rule.nameList.join()),
         ),
       ),
-      // The shared sheet, the access sheet and the prompt stack's sheet.
+      // The shared sheet, the access sheet, the prompt stack's sheet and
+      // the startup screen's sheet.
       [
+        'base,sempods',
         'base,sempods',
         'base,sempods',
         'base,sempods',
@@ -1545,11 +1605,15 @@ try {
       await page.getByRole('button', { name: 'Add', exact: true }).click();
       await page.getByRole('button', { name: title, exact: true }).waitFor();
     };
+    // A blank title is nothing to add: Add stays enabled, sends nothing and
+    // puts the focus back into the field.
     await newDraft.fill('   ');
-    assert.equal(
-      await page.getByRole('button', { name: 'Add', exact: true }).isDisabled(),
-      true,
+    const beforeBlank = writes;
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute('aria-label') === 'New task',
     );
+    assert.equal(writes, beforeBlank);
     await newDraft.fill('  First  ');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('button', { name: 'First', exact: true }).waitFor();
@@ -1655,7 +1719,11 @@ try {
     await page.unroute('**/_system/resources/**', loseAnswer);
     // Cancel discards after the comparison read and closes; reopen the row.
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.locator('.tasks .title').click();
+    // The row's title (its only button besides a delete) opens its editor.
+    await page
+      .getByRole('region', { name: 'Tasks', exact: true })
+      .locator('li > button:not([data-sempods-ui])')
+      .click();
     // The first Delete only asks; Escape keeps the task, confirming sends one DELETE.
     const beforeAsk = writes;
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -1691,7 +1759,9 @@ try {
     await page.waitForFunction(
       () =>
         !document
-          .querySelector('.tasks [data-sempods-ui="remove-button"]')
+          .querySelector(
+            'section[aria-label="Tasks"] [data-sempods-ui="remove-button"]',
+          )
           ?.hasAttribute('disabled'),
     );
     const beforeTrash = writes;
@@ -2007,15 +2077,21 @@ try {
     const busy = await context.newPage();
     await busy.goto(origin + '/');
     // A second tab gets the gate with a reload; the header menu stays behind
-    // it (#238). The German text is covered by the unit tests.
+    // it (#238), and the gate offers the app's settings for every reason.
+    // The German text is covered by the unit tests.
     const busyGate = busy.locator('[data-sempods-ui="gate"]');
     await busyGate
       .getByRole('alert')
       .filter({ hasText: 'another tab' })
       .waitFor();
-    assert.deepEqual(await busyGate.getByRole('button').allTextContents(), [
-      'Reload',
-    ]);
+    assert.deepEqual(
+      await busyGate
+        .getByRole('button')
+        .evaluateAll((buttons) =>
+          buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent),
+        ),
+      ['Settings', 'Reload'],
+    );
     await busy.close();
     // A reload keeps the session and reselects the last chosen context from
     // localStorage while it is still readable; no new login, no new choice.
@@ -2148,14 +2224,17 @@ try {
         .count(),
       0,
     );
-    // The gate only explains; the header menu stays behind it (#238). The
-    // German text is covered by the unit tests.
-    assert.equal(
+    // The gate only explains; the header menu stays behind it (#238), and
+    // only the app's settings remain. The German text is covered by the
+    // unit tests.
+    assert.deepEqual(
       await failed
         .locator('[data-sempods-ui="gate"]')
         .getByRole('button')
-        .count(),
-      0,
+        .evaluateAll((buttons) =>
+          buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent),
+        ),
+      ['Settings'],
     );
     await unavailable.close();
   }

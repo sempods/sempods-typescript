@@ -5,7 +5,7 @@ without React. Start with the [complete minimal screen](quickstart.md) when
 integrating the SDK; new apps start in
 [sempods-apps-template](https://github.com/sempods/sempods-apps-template).
 This guide is a task reference. The [TODO screen](../examples/todo/src/app.tsx)
-adds a list switch and app-owned presentation; its
+adds a list switch and a header menu from `@sempods/app-ui`; its
 [domain functions](../examples/todo/src/domain.ts) hold the field definition.
 
 1. [Model and setup](#part-1-model-and-setup)
@@ -597,8 +597,8 @@ const lists = useContexts();
   the hook selects) and management names only the selected Context. Sign-in,
   recovery, **Change sharing** and **Sign out** stay in `AppAccess`.
 
-The [TODO example](../examples/todo/src/app.tsx) puts the switch in its header,
-with a "read only" hint and **Share more lists**.
+The [TODO example](../examples/todo/src/app.tsx) puts `ContextSwitch` (below)
+in its header, with **Share more lists**.
 
 #### One chooser across Pods
 
@@ -1558,6 +1558,11 @@ access loss and toggling keep mounted content and drafts.
   `messages={{ errors: { catalogue: () => '…' } }}` override single texts and
   retranslate in place; other codes keep defaults, so new SDK codes need no
   change.
+- The provider does not touch the page: set `document.documentElement.lang`
+  to `useSdkLocale().language` so screen readers pronounce the app in its
+  language, and with `@sempods/app-ui` wrap the content in its `I18nProvider`
+  with `useSdkLocale().locale`, as the [TODO example](../examples/todo/src/app.tsx)
+  does.
 - RDF text language comes from the field definitions; the UI language never
   changes the RDF slot being edited.
 - Headless: `createLocale(options).error(cause)` and

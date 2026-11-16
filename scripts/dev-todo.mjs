@@ -1,6 +1,8 @@
 import { createServer } from 'node:http';
 import { build } from 'esbuild';
+import { todoCss } from './todo-css.mjs';
 const port = Number(process.env.PORT ?? 5173);
+// The stylesheet goes through Tailwind (todo-css.mjs), not into the bundle.
 const bundle = () =>
   build({
     entryPoints: ['examples/todo/src/main.tsx'],
@@ -8,18 +10,18 @@ const bundle = () =>
     write: false,
     outdir: 'out',
     format: 'esm',
+    jsx: 'automatic',
+    loader: { '.css': 'empty' },
     sourcemap: 'inline',
   });
 const server = createServer(async (req, res) => {
   try {
-    const files = (await bundle()).outputFiles;
-    if (req.url === '/app.js' || req.url === '/app.css') {
-      const ext = req.url.endsWith('.css') ? '.css' : '.js';
-      res.setHeader(
-        'content-type',
-        ext === '.css' ? 'text/css' : 'text/javascript',
-      );
-      res.end(files.find((f) => f.path.endsWith(ext))?.text);
+    if (req.url === '/app.js') {
+      res.setHeader('content-type', 'text/javascript');
+      res.end((await bundle()).outputFiles[0].text);
+    } else if (req.url === '/app.css') {
+      res.setHeader('content-type', 'text/css');
+      res.end(await todoCss(process.cwd()));
     } else {
       res.setHeader('content-type', 'text/html');
       res.end(
