@@ -3848,6 +3848,10 @@ async function search({ browser, origin }) {
   const carol = suggestion('carol#me', 'Carol', 'Home');
   const found = (state) =>
     page.evaluate((state) => window.searchGate(state), state);
+  // The gate page sets `window.searchGate` in an effect, which WebKit can run
+  // after the page has loaded and the field is shown.
+  const gateReady = (on) =>
+    on.waitForFunction(() => typeof window.searchGate === 'function');
   /** The announcement once it says `text`, or what it says after 3s. */
   const announced = async (text) => {
     await page
@@ -3870,6 +3874,7 @@ async function search({ browser, origin }) {
         }`,
     );
     await field.waitFor();
+    await gateReady(page);
   };
   /** The label of the suggestion the keyboard is on, if any. */
   const active = () =>
@@ -3940,6 +3945,7 @@ async function search({ browser, origin }) {
    */
   const searchHeard = async (on, lang, steps) => {
     await on.goto(origin + `/?screen=search${lang === 'de' ? '&lang=de' : ''}`);
+    await gateReady(on);
     await on.evaluate(() => window.searchGate({ items: [], loading: true }));
     const input = on.getByRole('combobox');
     await input.click();
