@@ -16,6 +16,7 @@ export * from './router/nav.js';
 export * from './components/badge.js';
 export * from './components/button.js';
 export * from './components/calendar.js';
+export * from './components/checkbox.js';
 export * from './components/combobox.js';
 export * from './components/dialog.js';
 export * from './components/dropdown-menu.js';

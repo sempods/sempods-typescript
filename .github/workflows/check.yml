@@ -3,11 +3,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue tests each entry on top of main and the entries ahead of
+  # it, and merges it only when these checks pass there.
+  merge_group:
 permissions:
   contents: read
 # A new push to a pull request supersedes its running checks. Every push to
-# main is its own group, so no run on main is cancelled or replaced while it
-# waits.
+# main and every merge group is its own group, so none of those runs is
+# cancelled or replaced while it waits.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
@@ -23,7 +26,7 @@ jobs:
     # when the Ubuntu mirror was slow. --ipc=host keeps Chromium from running
     # out of shared memory; --init reaps the browsers' child processes.
     container: &playwright
-      image: &image mcr.microsoft.com/playwright:v1.64.1-resolute
+      image: &image mcr.microsoft.com/playwright:v1.65.1-resolute
       options: --user 1001 --ipc=host --init
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +65,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - *image-matches
       # Ends before the job's timeout, so a stalled gate still leaves its log.
-      - run: pnpm test:ui --browsers="$BROWSER"
+      # Three lanes, each with its own Pod and browser, share the runner: the
+      # suites mostly wait for the page, so they barely slow each other down.
+      - run: pnpm test:ui --browsers="$BROWSER" --lanes=3
         timeout-minutes: 12
         env:
           BROWSER: ${{ matrix.browser }}

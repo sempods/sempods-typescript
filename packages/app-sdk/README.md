@@ -71,7 +71,9 @@ including read-only access; apps can also place these parts themselves. Sign-in
 centres the app identity above one editable Pod chooser and one outlined main
 action, with device-local saved-address management inside the dropdown. Theme tokens, provider messages and
 `components.Connections` customize it without replacing session behavior. The app owns
-its layout and a **Pods & sharing** button that opens management (`open`). The
+its layout and a **Pods & sharing** button that opens management (`open`). An
+app that reads several Pods places the same chooser in its own panel with
+`PodChooser`, to add another Pod while signed in. The
 [API table](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.1/docs/react-authoring.md#api-at-a-glance)
 maps each screen task (lists, creation, row updates, editors, notices) to its
 hook or component; the runnable

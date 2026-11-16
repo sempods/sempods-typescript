@@ -28,6 +28,12 @@ export interface HeaderMenuChoice {
    */
   readonly description?: string;
   /**
+   * The language of `label` when it differs from the page's, such as a
+   * language named in itself ("Deutsch" in an English menu), so assistive
+   * technology reads it in that language. A BCP 47 tag, as for `lang`.
+   */
+  readonly lang?: string;
+  /**
    * Shown but not available: neither a press nor the keyboard reaches it,
    * and arrow keys skip it. A checked choice stays checked.
    */
@@ -46,6 +52,8 @@ export interface HeaderMenuAction {
    * either reading direction.
    */
   readonly icon?: ReactNode;
+  /** The language of `label` when it differs from the page's, as for a choice. */
+  readonly lang?: string;
   /** Shown but not available, as a disabled choice. */
   readonly disabled?: boolean;
 }
@@ -125,10 +133,10 @@ export function HeaderMenu({
     >
       {inMenu && lead()}
       {choice.description === undefined ? (
-        choice.label
+        named(choice.label, choice.lang)
       ) : (
         <span className="grid min-w-0">
-          <Text slot="label" className="wrap-anywhere">
+          <Text slot="label" className="wrap-anywhere" lang={choice.lang}>
             {choice.label}
           </Text>
           <Text
@@ -141,6 +149,9 @@ export function HeaderMenu({
       )}
     </DropdownMenuItem>
   );
+  // A label in another language than the page's carries its `lang`.
+  const named = (label: string, lang?: string) =>
+    lang ? <span lang={lang}>{label}</span> : label;
   const lead = (icon?: ReactNode) =>
     icons ? (
       <span
@@ -199,7 +210,7 @@ export function HeaderMenu({
               isDisabled={item.disabled}
             >
               {lead(item.icon)}
-              {item.label}
+              {named(item.label, item.lang)}
             </DropdownMenuItem>
           ),
         )}

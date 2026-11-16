@@ -1,11 +1,12 @@
 export { SdkLocaleProvider, useMessages, useSdkLocale } from './locale.js';
-export { AccessGate, AppAccess, ContextAccess } from './access.js';
+export { AccessGate, AppAccess, ContextAccess, PodChooser } from './access.js';
 export { AppStartup, type AppStartupProps } from './startup.js';
 export type {
   AccessGateProps,
   AppAccessProps,
   ConnectionsProps,
   ContextAccessProps,
+  PodChooserProps,
 } from './access.js';
 export {
   AccessPrompt,

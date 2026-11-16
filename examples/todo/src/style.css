@@ -1,286 +1,43 @@
 /*
- * The app's own elements in the standard sage palette. The tokens below are the
- * SDK's defaults, set once on the page: the SDK surfaces (AppAccess, editor,
- * notices) and this app's header, list and input read the same values. Change
- * a token here to brand both together. The SDK styles its own surfaces, so the
- * rules below name the app's elements instead of every button or input.
+ * The app's stylesheet, as the UI kit's README sets it up: the layer order
+ * first, then Tailwind, the kit and the app's theme. The kit's styles.css
+ * brings the shared sage palette as defaults and passes the palette roles to
+ * the SDK's --sempods-* tokens, so AppAccess, the editor and notices match
+ * the app's header, list and input in light and dark mode. The screen styles
+ * its elements with utility classes; no app rule names an SDK element.
  */
-:root {
-  color-scheme: light dark;
-  --sempods-bg: light-dark(#f7f9f7, #131b18);
-  --sempods-text: light-dark(#26382f, #e5ede8);
-  --sempods-muted: light-dark(#52665a, #b0c0b6);
-  --sempods-line: light-dark(#dce5df, #364a3d);
-  --sempods-field-line: light-dark(#7e8d83, #738b7c);
-  --sempods-accent: light-dark(#3e6b56, #a2cbb4);
-  --sempods-on-accent: light-dark(#ffffff, #131b18);
-  font:
-    400 1rem/1.5 system-ui,
-    sans-serif;
-  color: var(--sempods-text);
-  background: var(--sempods-bg);
-}
-* {
-  box-sizing: border-box;
-}
-body {
-  margin: 0;
-}
-button,
-input {
-  font: inherit;
-}
-:focus-visible {
-  outline: 2px solid var(--sempods-accent);
-  outline-offset: 3px;
-}
+@layer theme, base, sempods, components, utilities;
+@import 'tailwindcss';
+@import '@sempods/app-ui/styles.css';
 
-/* App actions read as text; only adding a task is filled. */
-.menu-button,
-.menu button,
-.title {
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--sempods-text);
-  background: transparent;
-  text-align: start;
-  cursor: pointer;
-}
-.menu-button:hover,
-.menu button:hover {
-  background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
-}
-svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.add {
-  flex: none;
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  color: var(--sempods-on-accent);
-  background: var(--sempods-accent);
-  cursor: pointer;
-}
-.add svg,
-.menu-button svg {
-  width: 22px;
-  height: 22px;
-}
-.menu-button svg {
-  fill: currentColor;
-  stroke: none;
-}
-button:disabled,
-input:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
+/*
+ * To brand the app, set palette roles here; the kit's README lists them and
+ * the contrast each pair needs. Run its theme check after a change, e.g.:
+ *
+ * :root {
+ *   --primary: light-dark(#0a6680, #5ec6e4);
+ *   --ring: light-dark(#0a6680, #5ec6e4);
+ * }
+ */
 
-/* Page: a narrow column with the header on top. */
-.standard {
-  max-width: 640px;
-  margin-inline: auto;
-  padding: 8px 16px 32px;
+/*
+ * The app's appearance setting (appearance.ts): without data-appearance the
+ * page follows the system; with it, both the palette (color-scheme drives
+ * light-dark()) and the kit's dark: utilities follow the choice.
+ */
+:root[data-appearance='light'] {
+  color-scheme: light;
 }
-.app-heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 56px;
+:root[data-appearance='dark'] {
+  color-scheme: dark;
 }
-.app-heading h1 {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-.app-icon {
-  width: 32px;
-  height: 32px;
-  color: var(--sempods-accent);
-}
-.menu-button {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  margin-inline-start: auto;
-  padding: 0;
-  anchor-name: --app-menu;
-}
-
-/* The menu opens below its button (anchor positioning, else top right). */
-.menu {
-  inset: auto;
-  position-anchor: --app-menu;
-  top: anchor(bottom);
-  right: anchor(right);
-  margin: 4px 0 0;
-  min-width: 12rem;
-  padding: 6px;
-  border: 1px solid var(--sempods-line);
-  border-radius: 12px;
-  color: var(--sempods-text);
-  background: var(--sempods-bg);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
-}
-@supports not (anchor-name: --a) {
-  .menu {
-    top: 56px;
-    right: 16px;
+@custom-variant dark {
+  &:where([data-appearance='dark'], [data-appearance='dark'] *) {
+    @slot;
   }
-}
-.menu:popover-open {
-  display: grid;
-}
-.menu [role='group'] {
-  display: grid;
-}
-.menu-label {
-  margin: 0;
-  padding: 10px 12px 2px;
-  border-top: 1px solid var(--sempods-line);
-  color: var(--sempods-muted);
-  font-size: 0.875rem;
-}
-.menu-label:first-child {
-  border-top: 0;
-}
-.check {
-  display: inline-block;
-  width: 1.5em;
-}
-.menu small {
-  margin-inline-start: 8px;
-  color: var(--sempods-muted);
-  font-size: 0.8125rem;
-}
-.menu hr {
-  margin: 6px 0;
-  border: 0;
-  border-top: 1px solid var(--sempods-line);
-}
-
-/* The list switch: the list's name as the title, its menu below it. */
-.list-button {
-  display: inline-flex;
-  max-width: 100%;
-  text-align: start;
-  align-items: center;
-  gap: 4px;
-  min-height: 44px;
-  margin-inline-start: -8px;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--sempods-text);
-  background: transparent;
-  cursor: pointer;
-  anchor-name: --list-menu;
-}
-.list-button:hover {
-  background: color-mix(in srgb, var(--sempods-accent) 8%, transparent);
-}
-.list-button svg {
-  width: 20px;
-  height: 20px;
-}
-.list-menu {
-  position-anchor: --list-menu;
-  right: auto;
-  left: anchor(left);
-}
-@supports not (anchor-name: --a) {
-  .list-menu {
-    right: auto;
-    left: 16px;
+  @media (prefers-color-scheme: dark) {
+    &:where(:not([data-appearance='light'], [data-appearance='light'] *)) {
+      @slot;
+    }
   }
-}
-
-/* The list: a checkbox to finish a task, its title to edit it. */
-.tasks {
-  margin: 16px 0;
-  padding: 0;
-  list-style: none;
-}
-.tasks li {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  border-bottom: 1px solid var(--sempods-line);
-}
-/* A margin is not part of a hit area; the label around the checkbox is. */
-.tasks .check {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 44px;
-  height: 44px;
-  cursor: pointer;
-}
-.tasks .check > input {
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  accent-color: var(--sempods-accent);
-  cursor: pointer;
-}
-.title {
-  flex: 1;
-  padding-inline: 4px;
-  overflow-wrap: anywhere;
-}
-.done .title {
-  color: var(--sempods-muted);
-  text-decoration: line-through;
-}
-/* A row's own notice (a refused or unconfirmed write) below its title. */
-.tasks li {
-  flex-wrap: wrap;
-}
-.tasks li > [data-sempods-ui='notice'] {
-  flex-basis: 100%;
-  margin: 0 0 8px 44px;
-}
-.tasks [data-sempods-ui='editor'] {
-  flex: 1;
-  min-width: 0;
-}
-/* The checkbox stays level with the field inside the editor's card. */
-.tasks li:has(> [data-sempods-ui='editor']) > .check {
-  margin-top: 12px;
-}
-.empty {
-  color: var(--sempods-muted);
-  text-align: center;
-  padding-block: 24px;
-}
-
-/* The input for a new task, below the list. */
-.composer {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-}
-.composer input {
-  flex: 1;
-  min-width: 0;
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 1px solid var(--sempods-field-line);
-  border-radius: 8px;
-  color: var(--sempods-text);
-  background: var(--sempods-bg);
 }
