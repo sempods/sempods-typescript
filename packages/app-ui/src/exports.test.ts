@@ -13,6 +13,7 @@ it('exports the adapters, the router and the shadcn/ui components', async () => 
     'Badge',
     'Button',
     'Calendar',
+    'Checkbox',
     'Chip',
     'ChipGroup',
     'Combobox',

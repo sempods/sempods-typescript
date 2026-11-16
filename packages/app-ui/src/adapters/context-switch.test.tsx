@@ -424,3 +424,21 @@ it('keeps the default wording for messages an app leaves out', async () => {
   await open();
   expect(screen.getByText('Connect a Pod to choose a context.')).toBeTruthy();
 });
+
+it('shows the Pod under the list name only when there is a second Pod to choose', () => {
+  const trigger = () => screen.getByRole('button', { name: /^List:/ });
+  const { unmount } = show();
+  // Two Pods: the trigger's second line names the selected one (the icon's
+  // title is decorative, hidden from assistive technology).
+  expect(trigger().textContent).toBe('Icon must be silentShoppingalice');
+  unmount();
+  api.list = {
+    ...api.list,
+    pods: [api.list.pods[0]!],
+    choices: api.list.pods[0]!.choices,
+  };
+  show();
+  // One Pod: only the list's name is shown; the accessible name keeps the Pod.
+  expect(trigger().textContent).toBe('Icon must be silentShopping');
+  expect(trigger().getAttribute('aria-label')).toBe('List: Shopping · alice');
+});

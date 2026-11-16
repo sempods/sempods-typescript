@@ -123,7 +123,8 @@ The screen uses `useList` with `LoadNotice`, `useCreation` with its notice,
 one `useFieldUpdate` with `mutate.for(item)` per row, and
 `useSelection` with `useResourceEditor`. Render `UnresolvedNotices` below the
 list so a missing row does not hide recovery. The
-[TODO example](../examples/todo/src/app.tsx) adds app texts, a list switch,
+[TODO example](../examples/todo/src/app.tsx) adds app texts, the UI kit's
+list switch and header menu, the language in the sign-in screen's settings,
 row components and an app-owned layout. Choose these additions when the app
 needs them; preserve the minimal screen's recovery when adapting it.
 

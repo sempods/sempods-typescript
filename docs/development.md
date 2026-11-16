@@ -31,8 +31,14 @@ manual runs; it is not part of `pnpm check`, because `typecheck` already compile
 them.
 
 Linux CI runs the same checks in parallel jobs: `pnpm check:base` with Chromium,
-and `pnpm test:ui` once each in Chromium, WebKit and Firefox. The required
-status check `Packages and consumers` passes only when all of them do. These
+and `pnpm test:ui --lanes=3` once each in Chromium, WebKit and Firefox.
+`--lanes=<n>` (default 1) runs a browser's suites in n lanes side by side,
+longest first, each lane against its own loopback Pod and browser instance;
+locally, `pnpm test:ui --lanes=3` shortens the run too. The required
+status check `Packages and consumers` passes only when all of them do. They run
+for pull requests, for pushes to `main` and for merge-queue groups; the DCO check
+runs for pull requests and is skipped in a merge group, whose commits it has
+already checked on the pull request. These
 jobs run in the official Playwright image of the pinned Playwright version
 instead of installing browsers through apt. A Playwright bump must update that
 image in `.github/workflows/check.yml` too, and a CI step fails while the two
@@ -238,10 +244,11 @@ follow a replacement target, and recovery never replays the write.
 The packed customized consumer also unmounts a dirty editor screen, opens the
 same row after remount and checks the retained draft without a prompt or write.
 
-`test:todo` installs packed SDKs, plus the TODO example's own registry
-packages (such as the public RDF recipe's parsers), and compiles the actual
-examples; the React consumer of `test:consumers` installs the same packages
-for the shipped examples. The TODO's standard screen covers EN/DE sign-in,
+`test:todo` installs packed SDKs and the packed UI kit, plus the TODO
+example's own registry packages (such as the public RDF recipe's parsers),
+compiles the actual examples and builds the TODO stylesheet with Tailwind CSS 4
+against the installed kit; the React consumer of `test:consumers` installs the
+same packages for the shipped examples. The TODO's standard screen covers EN/DE sign-in,
 320px light/dark presentation, explicit context choice, creation and guarded
 management with a retained draft, and the full CRUD, conflict/unknown-outcome,
 guard, keyboard/mobile and second-tab checks, plus the shared Node domain/edit
@@ -340,7 +347,7 @@ These notes back the [React/headless authoring guide](react-authoring.md); they
 are fixture evidence, not live Kotlin compatibility or independent usability
 evidence.
 
-- `pnpm test:todo` installs packed SDKs outside the workspace, typechecks and
+- `pnpm test:todo` installs packed SDKs and the UI kit outside the workspace, typechecks and
   bundles both examples, and drives the standard screen through real loopback
   PKCE redirects, CRUD, conflict and unknown outcomes, guarded selection, EN/DE,
   keyboard, mobile width and a busy second tab. It also runs the Node CRUD loop.

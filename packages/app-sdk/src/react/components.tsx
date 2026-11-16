@@ -48,6 +48,7 @@ export function UpdateNotice({
   unreadable,
   checked: suppliedChecked,
   labels,
+  valueLabels,
   quiet = false,
 }: {
   /**
@@ -71,6 +72,8 @@ export function UpdateNotice({
    * for `ResourceEditor`'s review comparison.
    */
   readonly labels?: FieldLabels;
+  /** The app's names for field values, as for `ResourceEditor`. */
+  readonly valueLabels?: FieldValueLabels;
   readonly onCheck?: () => Promise<boolean>;
   readonly onAcknowledge?: () => void;
   readonly outcome:
@@ -131,7 +134,11 @@ export function UpdateNotice({
           ) : current === null ? (
             <p>{m.notPresent}</p>
           ) : (
-            <Comparison value={current} labels={labels} />
+            <Comparison
+              value={current}
+              labels={labels}
+              valueLabels={valueLabels}
+            />
           )}
         </section>
       )}
@@ -441,6 +448,20 @@ function exactNumber(value: number, locale: string): string {
 /** Display names for draft fields; a missing name shows the field key. */
 export type FieldLabels = { readonly [field: string]: string | undefined };
 /**
+ * Display names for a field's values, by field and exact string value, for
+ * example `{ status: { open: 'Open' } }`; an unlisted value shows as it is.
+ */
+export type FieldValueLabels = {
+  readonly [field: string]: ValueLabels | undefined;
+};
+type ValueLabels = { readonly [value: string]: string | undefined };
+/** Names for one field's string values, or those of its list items. */
+type DraftValueLabels<V> = [NonNullable<V>] extends [string]
+  ? { readonly [S in NonNullable<V>]?: string }
+  : NonNullable<V> extends readonly (infer I)[]
+    ? DraftValueLabels<I>
+    : never;
+/**
  * A `TextVariant` from `@sempods/client-sdk/edit`, recognised by its exact
  * shape, so apps keep it in their drafts as read.
  */
@@ -464,9 +485,12 @@ function isTextVariant(value: object): value is TextVariant {
 function Shown({
   value,
   seen = [],
+  names,
 }: {
   readonly value: unknown;
   readonly seen?: readonly object[];
+  /** The app's names for this string value, or for a list's string items. */
+  readonly names?: ValueLabels | undefined;
 }) {
   const { messages, locale, timeZone } = useSdkLocale();
   const m = messages.controls;
@@ -478,6 +502,11 @@ function Shown({
       <span lang={language ?? undefined}>{v}</span>
     );
   if (value === undefined || value === null) return none;
+  const named =
+    typeof value === 'string' && names && Object.hasOwn(names, value)
+      ? names[value]
+      : undefined;
+  if (named !== undefined) return <span>{named}</span>;
   if (typeof value === 'string') return text(value);
   if (typeof value === 'boolean') return <>{value ? m.yes : m.no}</>;
   if (typeof value === 'number') return <>{exactNumber(value, locale)}</>;
@@ -539,7 +568,7 @@ function Shown({
       <ul>
         {value.map((item, i) => (
           <li key={i}>
-            <Shown value={item} seen={inner} />
+            <Shown value={item} seen={inner} names={names} />
           </li>
         ))}
       </ul>
@@ -563,10 +592,12 @@ function Shown({
 function Comparison({
   value,
   labels,
+  valueLabels,
   fields,
 }: {
   readonly value: unknown;
   readonly labels?: FieldLabels | undefined;
+  readonly valueLabels?: FieldValueLabels | undefined;
   /** Every field to list, also those this side lacks (shown as no value). */
   readonly fields?: readonly string[] | undefined;
 }) {
@@ -591,7 +622,7 @@ function Comparison({
         <div key={key}>
           <dt>{labels?.[key] ?? key}</dt>
           <dd>
-            <Shown value={record[key]} />
+            <Shown value={record[key]} names={valueLabels?.[key]} />
           </dd>
         </div>
       ))}
@@ -639,6 +670,7 @@ export function ResourceEditor<D, U = D>({
   children,
   onChanged,
   labels,
+  valueLabels,
   quiet = false,
   onClose,
   presentation,
@@ -679,6 +711,13 @@ export function ResourceEditor<D, U = D>({
    * show their parts. Keep such structured values in the draft as read.
    */
   readonly labels?: { readonly [K in keyof D]?: string };
+  /**
+   * The app's names for enumerated values in the comparison, by field and
+   * exact string value, also for the string items of a list:
+   * `{ status: { open: 'Open', done: 'Done' } }`, as the form's own select
+   * shows them. The draft keeps its codes; an unlisted value shows as it is.
+   */
+  readonly valueLabels?: { readonly [K in keyof D]?: DraftValueLabels<D[K]> };
 }) {
   const m = useSdkLocale().messages.controls;
   const [feedback, setFeedback] = useState<{
@@ -793,11 +832,17 @@ export function ResourceEditor<D, U = D>({
             {state.review.kind === 'unconfirmed' ? m.unconfirmed : m.changed}
           </p>
           <h3>{m.mine}</h3>
-          <Comparison value={state.draft} labels={labels} fields={fields} />
+          <Comparison
+            value={state.draft}
+            labels={labels}
+            valueLabels={valueLabels as FieldValueLabels | undefined}
+            fields={fields}
+          />
           <h3>{m.current}</h3>
           <Comparison
             value={state.review.current}
             labels={labels}
+            valueLabels={valueLabels as FieldValueLabels | undefined}
             fields={fields}
           />
           <button

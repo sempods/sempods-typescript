@@ -24,7 +24,7 @@ import { demandSelection, targetProblem } from '../authoring/app.js';
 import type { CatalogueContext } from '@sempods/client-sdk';
 import type { CatalogueFact } from '../runtime/types.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
-import { ConfirmDialog } from './confirm.js';
+import { ConfirmDialog, TopLayerSlot } from './confirm.js';
 import { useCommands } from './commands.js';
 import { knownContexts, reads } from './access-presentation.js';
 import { StartupHost, useStartupCover } from './startup.js';
@@ -244,7 +244,10 @@ export function SempodsProvider({
               AppStartup first renders into it. */}
           <StartupHost />
           <GuardedContent>{children}</GuardedContent>
-          <LeaveConfirmation />
+          {/* Also above an app dialog that is already open (#264). */}
+          <TopLayerSlot>
+            <LeaveConfirmation />
+          </TopLayerSlot>
         </Demand.Provider>
       </Context.Provider>
     </SdkLocaleProvider>
@@ -266,12 +269,17 @@ function GuardedContent({ children }: { readonly children: ReactNode }) {
     }),
     shallowEqual,
   );
+  // An app overlay that opens marks this page `inert` outside the overlay and
+  // the SDK's top-layer slots. The outer element takes that mark, so it never
+  // meets the inner one that React sets and clears with the guarded state.
   return (
-    <div
-      inert={changing || confirmingLeave || leaving || covered}
-      style={{ display: 'contents' }}
-    >
-      {children}
+    <div style={{ display: 'contents' }}>
+      <div
+        inert={changing || confirmingLeave || leaving || covered}
+        style={{ display: 'contents' }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
