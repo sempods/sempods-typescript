@@ -52,6 +52,8 @@ export const themePairs: readonly ThemePair[] = [
   ...['background', 'muted', 'card', 'popover'].map((surface) =>
     pair('muted text on ' + surface, 'muted-foreground', surface),
   ),
+  // A ghost link to the shown place (`aria-current="page"`).
+  pair('current link text', 'foreground', 'muted'),
   pair('selected day', 'primary-foreground', 'primary'),
   pair('destructive action', 'destructive', 'destructive-tint', {
     backdrops: surfaces,

@@ -1932,7 +1932,13 @@ const states = {
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('alertdialog').waitFor();
   },
+  // The README's views as links, Zen the current one (#343).
+  async tabs(page) {
+    await page.getByRole('link', { name: 'Zen', exact: true }).waitFor();
+  },
 };
+/** The query that loads a state's own page, after the theme's. */
+const stateScreens = { tabs: '&screen=tabs' };
 // Both palettes (the package default and the app's "fresh") with every
 // action and secondary variant at least once.
 const variants = [
@@ -1947,9 +1953,9 @@ const contrastPages = 4;
 
 /**
  * Rendered contrast (scripts/ui-contrast.js): its controls first, then each
- * state × palette and variants × light and dark × 375 and 1280px. Zen actions
- * and the unchosen filter chip are also measured hovered and pressed; controls reached by Tab with their
- * focus indicator. A measurement of these states, not a full audit.
+ * state × palette and variants × light and dark × 375 and 1280px. Zen actions,
+ * the unchosen filter chip and both view links are also measured hovered and
+ * pressed; controls reached by Tab with their focus indicator. A measurement of these states, not a full audit.
  */
 async function contrast({ browser, origin, engine }) {
   const tab = tabKey(engine);
@@ -2023,7 +2029,9 @@ async function contrast({ browser, origin, engine }) {
                 width,
                 height: width < 600 ? 812 : 800,
               });
-              await page.goto(origin + '/' + query);
+              await page.goto(
+                origin + '/' + query + (stateScreens[state] ?? ''),
+              );
               await reach(page);
               await settle(page);
               const measured = await page.evaluate(() => window.uiContrast());
@@ -2032,12 +2040,11 @@ async function contrast({ browser, origin, engine }) {
               const pressed = {
                 zen: ['Complete', 'Not today', 'Previous task'],
                 list: ['All'],
+                tabs: ['Zen', 'List'],
               };
+              const role = { list: 'radio', tabs: 'link' }[state] ?? 'button';
               for (const name of pressed[state] ?? []) {
-                const target = page.getByRole(
-                  state === 'list' ? 'radio' : 'button',
-                  { name, exact: true },
-                );
+                const target = page.getByRole(role, { name, exact: true });
                 await target.hover();
                 await settle(page);
                 measured.push(
@@ -5174,6 +5181,139 @@ async function checkbox({ browser, origin }) {
   return results;
 }
 
+/**
+ * The README's views as links on `?screen=tabs` (#342, #343): `nav.link`
+ * marks the link to the shown view with `aria-current="page"` through clicks,
+ * Back and a task's screen over a view, which marks neither view. The current
+ * ghost link has the same text colour as the other one, a surface of its own
+ * and an underline, rest and hovered, apart from the other link hovered,
+ * under both palettes, all six action variants and both schemes.
+ */
+async function viewTabs({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser, {
+    reducedMotion: 'reduce',
+  });
+  const link = (name) => page.getByRole('link', { name, exact: true });
+  const marked = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('a[aria-current]')].map(
+        (el) => `${el.textContent} ${el.getAttribute('aria-current')}`,
+      ),
+    );
+  const at = (path) => page.waitForURL((url) => url.pathname === path);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const results = [];
+  try {
+    await page.goto(origin + '/?screen=tabs');
+    await link('Zen').waitFor();
+    results.push(
+      await attemptOn(errors, 'current-follows-the-shown-view', async () => {
+        const start = await marked();
+        await link('List').click();
+        await at('/list');
+        const list = await marked();
+        await page.goBack();
+        await at('/');
+        const back = await marked();
+        return {
+          pass:
+            same(start, ['Zen page']) &&
+            same(list, ['List page']) &&
+            same(back, ['Zen page']),
+          start,
+          list,
+          back,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(
+        errors,
+        'a-screen-over-a-view-marks-neither',
+        async () => {
+          await link('Open a task').click();
+          await page.locator('#tabs-place', { hasText: 'task' }).waitFor();
+          const over = await marked();
+          await page.goBack();
+          await at('/');
+          const back = await marked();
+          return {
+            pass: same(over, ['Open a task page']) && same(back, ['Zen page']),
+            over,
+            back,
+          };
+        },
+      ),
+    );
+    // The look of both links, rest and hovered, as the browser paints it.
+    const look = () =>
+      page.evaluate(() => {
+        const of = (name) => {
+          const el = [...document.querySelectorAll('nav a')].find(
+            (a) => a.textContent === name,
+          );
+          const s = getComputedStyle(el);
+          return {
+            color: s.color,
+            background: s.backgroundColor,
+            underline: s.textDecorationLine.includes('underline'),
+            text: window.uiContrast(el).filter((m) => m.kind === 'text'),
+          };
+        };
+        return { zen: of('Zen'), list: of('List') };
+      });
+    await context.addInitScript(contrastScript);
+    for (const theme of ['default', 'fresh'])
+      for (const actions of ['solid', 'inverted'])
+        for (const secondary of ['tonal', 'outline', 'text'])
+          for (const scheme of ['light', 'dark'])
+            results.push(
+              await attemptOn(
+                errors,
+                `current-link-chosen ${theme}/${actions}/${secondary} ${scheme}`,
+                async () => {
+                  await page.emulateMedia({ colorScheme: scheme });
+                  await page.goto(
+                    origin +
+                      `/?screen=tabs&theme=${theme}&actions=${actions}&secondary=${secondary}`,
+                  );
+                  await link('Zen').waitFor();
+                  await page.mouse.move(1, 1);
+                  await settle(page);
+                  const rest = await look();
+                  await link('List').hover();
+                  await settle(page);
+                  const otherHovered = (await look()).list;
+                  await link('Zen').hover();
+                  await settle(page);
+                  const currentHovered = (await look()).zen;
+                  const { zen, list } = rest;
+                  const texts = [zen, currentHovered].flatMap((l) => l.text);
+                  return {
+                    pass:
+                      zen.color === list.color &&
+                      zen.underline &&
+                      !list.underline &&
+                      !otherHovered.underline &&
+                      zen.background !== list.background &&
+                      currentHovered.underline &&
+                      currentHovered.background === zen.background &&
+                      texts.length === 2 &&
+                      texts.every((m) => m.pass),
+                    rest,
+                    otherHovered,
+                    currentHovered,
+                  };
+                },
+              ),
+            );
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -5192,6 +5332,7 @@ export const suites = {
   startup,
   addPod,
   checkbox,
+  viewTabs,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */

@@ -63,11 +63,31 @@ function Frame() {
     </a>
   );
 }
+/** Links to several places, as a frame's tabs and rows have them. */
+const pages = ['list', 'list?sort=due', 'list#top', 'task', 'li st'];
+/** Each render's address and the links it marked as current. */
+let marked: [string, string[]][] = [];
+function Links() {
+  nav = useNav(model);
+  const links = pages.map((page) => ({ page, ...nav.link({ page }) }));
+  marked.push([
+    location.pathname + location.search,
+    links.filter((l) => l['aria-current'] === 'page').map((l) => l.page),
+  ]);
+  return links.map(({ page, ...props }) => (
+    <a key={page} data-testid={page} {...props} />
+  ));
+}
+const current = () =>
+  pages.filter(
+    (page) => screen.getByTestId(page).getAttribute('aria-current') === 'page',
+  );
 let useNav: typeof import('./nav.js').useNav;
+let replaceUrl: typeof import('./nav.js').replaceUrl;
 beforeAll(async () => {
   // The module keeps the document's history from its first use on.
   history.replaceState(null, '', '/?old=list');
-  ({ useNav } = await import('./nav.js'));
+  ({ useNav, replaceUrl } = await import('./nav.js'));
 });
 afterEach(() => {
   cleanup();
@@ -75,6 +95,7 @@ afterEach(() => {
   skipping = false;
   ask = null;
   frameNavigate = navigate;
+  marked = [];
 });
 
 /** Runs `action` and waits for the history event it causes. */
@@ -272,4 +293,34 @@ it('keeps a path that starts with two slashes on this origin', () => {
     '//unknown',
     'missing',
   ]);
+});
+
+it('marks the links to the shown place by its address', () => {
+  render(<Links />);
+  act(() => nav.go({ page: 'list' }));
+  // A fragment is not part of the address.
+  expect(current()).toEqual(['list', 'list#top']);
+  // The query is.
+  act(() => nav.go({ page: 'list?sort=due' }));
+  expect(current()).toEqual(['list?sort=due']);
+  // A screen over a view marks only its own links, not the view's.
+  act(() => nav.go({ page: 'task' }));
+  expect(current()).toEqual(['task']);
+  // Addresses compare as the browser keeps them.
+  act(() => nav.go({ page: 'li st' }));
+  expect(current()).toEqual(['li st']);
+  act(() => nav.go({ page: 'nowhere' }));
+  expect(current()).toEqual([]);
+  expect(screen.getByTestId('list').getAttribute('href')).toBe('/list');
+});
+
+it("marks a legacy address's links before it becomes canonical", () => {
+  render(<Links />);
+  act(() => nav.go({ page: 'task' }));
+  marked = [];
+  act(() => replaceUrl('/?old=list'));
+  expect(marked.filter(([at]) => at === '/?old=list')).not.toEqual([]);
+  for (const [at, links] of marked)
+    expect([at, links]).toEqual([at, ['list', 'list#top']]);
+  expect(address()).toBe('/list');
 });

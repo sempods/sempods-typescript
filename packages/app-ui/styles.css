@@ -231,11 +231,14 @@
 /* 4. Focus. shadcn's ring is the ring colour at 50% opacity, which stays below
    3:1 for mid-tone accents. The layer is first named here, after Tailwind's
    utilities, so it wins over the components' outline-hidden; an app's
-   unlayered rule still wins over it. It reaches only components (data-slot)
-   and the calendar's days, not a dialog that holds the focus while it opens. */
+   unlayered rule still wins over it. It reaches only components (data-slot),
+   an app's element drawn with buttonVariants (group/button), such as a
+   link to a view, and the calendar's days, not a dialog that holds the focus
+   while it opens. */
 @layer app-ui-focus {
   :where(
     [data-slot]:not([role='dialog'], [role='alertdialog']),
+    .group\/button,
     [data-slot='calendar'] [role='gridcell'] > *
   ):focus-visible {
     outline: 2px solid var(--ring);

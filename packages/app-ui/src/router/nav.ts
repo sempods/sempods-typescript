@@ -34,6 +34,11 @@ export interface NavLinkProps {
   readonly href: string;
   /** A plain left click switches in place through `go`. */
   readonly onClick: (event: MouseEvent<HTMLAnchorElement>) => void;
+  /**
+   * `page` when the place's address is the one the app shows, compared in
+   * canonical form (path and query); absent otherwise.
+   */
+  readonly 'aria-current'?: 'page';
 }
 
 /** What `useNav` returns. */
@@ -50,7 +55,10 @@ export interface Nav<P> {
    * direct entry, to `fallback` in place, without a new history entry.
    */
   close(fallback: P): void;
-  /** Props for an `<a>` to a place: a real `href` and an in-place switch. */
+  /**
+   * Props for an `<a>` to a place: a real `href`, an in-place switch, and
+   * `aria-current="page"` on a link to the shown place.
+   */
   link(place: P): NavLinkProps;
 }
 
@@ -308,16 +316,23 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
     },
     [go],
   );
+  // The shown place's canonical address: a legacy form about to be
+  // replaced already marks the links to its place.
+  const shown = normal(canonical);
   const link = useCallback(
-    (next: P): NavLinkProps => ({
-      href: model.format(next),
-      onClick: (event) => {
-        if (!plainClick(event)) return;
-        event.preventDefault();
-        go(next);
-      },
-    }),
-    [go, model],
+    (next: P): NavLinkProps => {
+      const href = model.format(next);
+      return {
+        href,
+        onClick: (event) => {
+          if (!plainClick(event)) return;
+          event.preventDefault();
+          go(next);
+        },
+        ...(normal(href) === shown ? { 'aria-current': 'page' as const } : {}),
+      };
+    },
+    [go, model, shown],
   );
   return useMemo(() => ({ place, go, close, link }), [place, go, close, link]);
 }

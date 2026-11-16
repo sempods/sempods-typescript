@@ -256,6 +256,18 @@ clicked a control behind an open modal, which Playwright 1.64 allowed for
 selectors from the provider's parent element: the provider's content now sits
 in two `display: contents` elements instead of one.
 
+### Current view links from the router
+
+0.9.0's `nav.link(place)` in `@sempods/app-ui` also returns
+`aria-current: 'page'` for a link to the shown place, compared by the
+router's canonical address (path and query), and a `ghost` link drawn with
+`buttonVariants` or `ActionLink` that carries it looks chosen under every
+action variant. Existing links keep working: the field is optional and
+absent for other places. After upgrading, drop an app's own comparison of
+places next to its view links, an `aria-current` it set from it, and classes
+such as `aria-[current=page]:bg-muted` it added for the chosen look. See
+[views as links](../packages/app-ui/README.md#views-as-links).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

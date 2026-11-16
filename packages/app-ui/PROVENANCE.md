@@ -32,6 +32,11 @@ Changes against the registry output:
   `bg-action-secondary`, …) instead of `primary` and `secondary` directly;
   their hover mixes the role's own text into its surface, as the SDK's
   actions do.
+- `button.tsx`: a `ghost` link to the shown place (`aria-current="page"`,
+  as the router's `nav.link` sets it) is chosen in the kit's selection
+  language: the `muted` surface with `foreground` text, also in dark mode
+  and while hovered, and a 2px underline, so it does not rest on the surface
+  alone (sempods/sempods-typescript#343).
 - `button.tsx`: a menu trigger (`aria-haspopup="true"`) gets no focus ring
   or border change of its own; its one keyboard indicator is the focus
   outline, drawn from React Aria's `data-focus-visible`

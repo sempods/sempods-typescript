@@ -143,9 +143,9 @@ try {
   const app = join(temp, 'app');
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
   // The installed README's examples: its task dialog, its quick edit, its
-  // workspace and its address model are the reference screen's, so the
-  // checks run them as shipped; other TSX examples are only compiled. Its
-  // stylesheet setup is the one the screen uses.
+  // workspace, its view links and its address model are the reference
+  // screen's, so the checks run them as shipped; other TSX examples are only
+  // compiled. Its stylesheet setup is the one the screen uses.
   const readme = await readFile(
     join(temp, 'node_modules/@sempods/app-ui/README.md'),
     'utf8',
@@ -165,6 +165,7 @@ try {
     await ship('tsx', 'task-dialog.tsx'),
     await ship('tsx', 'quick-edit.tsx'),
     await ship('tsx', 'workspace.tsx'),
+    await ship('tsx', 'view-tabs.tsx'),
   ];
   for (const [i, example] of blocks('tsx').entries())
     if (!shipped.includes(example))

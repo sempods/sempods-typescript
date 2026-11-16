@@ -118,7 +118,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   included, `skipLibCheck` off). Its task dialog and its address model are the
   installed README's `task-dialog.tsx` and `places.ts` examples as shipped, so
   every check below runs the documented recipe; its compact quick edit is the
-  README's `quick-edit.tsx`; the screen routes with the
+  README's `quick-edit.tsx`, its view links on `?screen=tabs` the README's
+  `view-tabs.tsx`; the screen routes with the
   package's `useNav` and uses the README's stylesheet setup. The README's other
   TSX examples are compiled. It is
   built with Vite and Tailwind CSS 4. The
@@ -183,9 +184,10 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     action combinations in both schemes, including rest and hover parity
     with the reference buttons and controls with known failing roles;
   - rendered contrast (`scripts/ui-contrast.js`): 19 controls that must pass or
-    fail as stated, then six states × two palettes with every action and
+    fail as stated, then seven states × two palettes with every action and
     secondary variant × light and dark × 375 and 1280px, including hovered,
-    pressed and focused controls; the List state measures the filter chips. Each of these loads its own state, so four
+    pressed and focused controls; the List state measures the filter chips,
+    the Tabs state both view links. Each of these loads its own state, so four
     signed-in pages measure them side by side;
   - the routing matrix of the template's routing spike (#114), 29 checks with
     the package's router: a resource link, one with a named source Context and
@@ -205,7 +207,13 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     and an unreadable source shows its error there too; after a fragment
     link's entry, staying after two entries back returns to the task screen
     and Close still returns to the opener, also after a replaced fragment;
-    and a path with two leading slashes shows the not-found page.
+    and a path with two leading slashes shows the not-found page;
+  - views as links (#342, #343): `nav.link` marks the link to the shown view
+    with `aria-current="page"` after a click and Back, a task's screen over a
+    view marks neither view's link, and the current ghost link keeps the
+    other link's text colour on a surface of its own with an underline, rest
+    and hovered, apart from the other link hovered, on both palettes in all
+    six action combinations, light and dark.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

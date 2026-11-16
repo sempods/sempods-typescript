@@ -20,11 +20,14 @@
 // `window.gateRuntime`, as the app's own code could. With `?screen=add-pod`,
 // the page is a multi-Pod app's sources panel (a nonmodal WorkspacePanel)
 // listing the connected Pods, with the SDK's PodChooser to add another one
-// while signed in (#329).
+// while signed in (#329). With `?screen=tabs`, the page is the README's
+// views as links: the two views as ghost links, the shown one marked by
+// `nav.link`, and a link to a task, a screen over a view (#342, #343).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
-// the quick edit, quick-edit.tsx, the workspace, workspace.tsx, and the
-// address model, places.ts, are the package README's examples, which
+// the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
+// links, view-tabs.tsx, and the address model, places.ts, are the package
+// README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
 import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -62,6 +65,7 @@ import { checkTheme, readTheme } from '@sempods/app-ui/theme-check';
 import { TaskDialog, taskFields } from './task-dialog';
 import { QuickEdit } from './quick-edit';
 import { Workspace } from './workspace';
+import { ViewTabs } from './view-tabs';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 
@@ -218,6 +222,7 @@ const addPod =
   (location.pathname === '/callback' &&
     sessionStorage.getItem('add-pod-gate') === '1');
 const checkboxes = settings.get('screen') === 'checkbox';
+const tabs = settings.get('screen') === 'tabs';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -337,6 +342,8 @@ function App() {
         <SearchGate />
       ) : checkboxes ? (
         <CheckboxGate />
+      ) : tabs ? (
+        <TabsGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (
@@ -692,6 +699,32 @@ function CheckboxGate() {
         />
         <span id="remember-device">Remember this device</span>
       </div>
+    </main>
+  );
+}
+
+/**
+ * The README's views as links (`?screen=tabs`) beside a link to a task: the
+ * task's screen is over a view, so neither view's link is current there.
+ */
+function TabsGate() {
+  const nav = useNav(places);
+  return (
+    <main className="gate-main">
+      <ViewTabs nav={nav} />
+      <p className="mt-4">
+        <a
+          {...nav.link({
+            kind: 'task',
+            subject: location.origin + '/alice/tasks/1',
+          })}
+        >
+          Open a task
+        </a>
+      </p>
+      <p className="mt-4" id="tabs-place">
+        {nav.place.kind}
+      </p>
     </main>
   );
 }
