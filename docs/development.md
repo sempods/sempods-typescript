@@ -35,7 +35,10 @@ and `pnpm test:ui --lanes=3` once each in Chromium, WebKit and Firefox.
 `--lanes=<n>` (default 1) runs a browser's suites in n lanes side by side,
 longest first, each lane against its own loopback Pod and browser instance;
 locally, `pnpm test:ui --lanes=3` shortens the run too. The required
-status check `Packages and consumers` passes only when all of them do. These
+status check `Packages and consumers` passes only when all of them do. They run
+for pull requests, for pushes to `main` and for merge-queue groups; the DCO check
+runs for pull requests and is skipped in a merge group, whose commits it has
+already checked on the pull request. These
 jobs run in the official Playwright image of the pinned Playwright version
 instead of installing browsers through apt. A Playwright bump must update that
 image in `.github/workflows/check.yml` too, and a CI step fails while the two
