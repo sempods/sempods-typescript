@@ -27,7 +27,7 @@ import type { AccessPrompt as AccessPromptFact } from '../authoring/access.js';
 import { useSdkLocale } from './locale.js';
 import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { layered, SdkStyles } from './styles.js';
-import { useModalDialog } from './confirm.js';
+import { topLayer, TopLayerSlot, useModalDialog } from './confirm.js';
 import { contextName, podName, distinctName } from './names.js';
 import type { Connection } from '../runtime/types.js';
 import {
@@ -200,12 +200,16 @@ export function AppAccess({
   const asDialog = open && Boolean(onClose);
   // Management in place would sit behind the gate; the dialog opens above it.
   const blocked = useAppFacts(selectBlocking) !== null;
-  const management = !open ? null : asDialog ? (
-    <Management {...props} onClose={onClose!} />
-  ) : blocked ? null : (
-    <AccessSection {...props} manage />
-  );
-  if (only === 'management') return management;
+  const dialog = asDialog ? <Management {...props} onClose={onClose!} /> : null;
+  const inPlace =
+    open && !asDialog && !blocked ? <AccessSection {...props} manage /> : null;
+  if (only === 'management')
+    return (
+      <>
+        <TopLayerSlot>{dialog}</TopLayerSlot>
+        {inPlace}
+      </>
+    );
   return (
     <>
       {startup === 'screen' && (
@@ -216,11 +220,15 @@ export function AppAccess({
           {...(props.style ? { style: props.style } : {})}
         />
       )}
-      <Gate {...props} {...(settings ? { settings } : {})} />
+      {/* The modals, also above an app dialog that is already open (#264). */}
+      <TopLayerSlot>
+        <Gate {...props} {...(settings ? { settings } : {})} />
+        {dialog}
+      </TopLayerSlot>
       {/* Management in place already shows the connection view. */}
       {!(open && !asDialog) && <AccessSection {...props} manage={false} />}
       <AccessPrompts focusTarget={props.focusTarget} />
-      {management}
+      {inPlace}
     </>
   );
 }
@@ -459,7 +467,11 @@ const signInReasons = new Set<AccessPromptFact['reason']>([
  * With `settings`, a corner button opens the app's settings above it.
  */
 export function AccessGate(props: AccessGateProps) {
-  return <Gate {...props} />;
+  return (
+    <TopLayerSlot>
+      <Gate {...props} />
+    </TopLayerSlot>
+  );
 }
 
 function Gate(
@@ -529,6 +541,7 @@ function GateDialog({
       aria-labelledby={label}
       data-sempods-ui="gate"
       data-reason={blocking.reason}
+      {...topLayer}
       className="sp-access-gate"
       dir={direction}
       // Custom properties (--sempods-* tokens) also cover the whole layer.
@@ -714,6 +727,7 @@ function AccessDialog({
       ref={dialog}
       aria-labelledby={label}
       data-sempods-ui={ui}
+      {...topLayer}
       className="sp-sdk-dialog sp-access-dialog"
       dir={direction}
       onCancel={(event) => {
@@ -1464,6 +1478,13 @@ const styles = `
 .sp-access-settings > * { width:22px; height:22px; }
 .sp-access-settings svg { fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
 .sp-access-settings-content { padding:8px 24px 24px; }
+/* Plain choices in the app's settings: one per 44px row, groups apart. Without
+   specificity of their own, so the app's classes win. */
+.sp-access-settings-content :where(fieldset) { display:grid; min-inline-size:0; margin:0 0 16px; padding:0; border:0; }
+.sp-access-settings-content :where(fieldset:last-child) { margin-block-end:0; }
+.sp-access-settings-content :where(legend) { padding:0; margin-block-end:4px; font-weight:500; }
+.sp-access-settings-content :where(label:has(> input[type=radio], > input[type=checkbox])) { display:flex; align-items:center; gap:12px; min-height:44px; cursor:pointer; }
+.sp-access-settings-content :where(input[type=radio], input[type=checkbox]) { flex:none; width:20px; height:20px; margin:0; accent-color:var(--sp-accent); }
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
 .sp-access-dialog-header h2 { flex:1; margin:0; }

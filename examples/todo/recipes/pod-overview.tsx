@@ -14,6 +14,7 @@ import {
   useWorkflowAccess,
   type ContextTarget,
 } from '@sempods/app-sdk/react';
+import { ActionButton, Button, Input } from '@sempods/app-ui';
 
 // This query does not enumerate Contexts. GRAPH requests source provenance;
 // which graphs the caller may query remains the server's authorization contract.
@@ -52,12 +53,14 @@ function Overview({
                 {item && graph && (
                   <>
                     {' '}
-                    <button
+                    <Button
+                      variant="ghost"
+                      className="min-h-11 px-3"
                       aria-label={`Edit ${item}`}
-                      onClick={() => onEdit({ subject: item, context: graph })}
+                      onPress={() => onEdit({ subject: item, context: graph })}
                     >
                       Edit
-                    </button>
+                    </Button>
                   </>
                 )}
               </li>
@@ -75,9 +78,14 @@ function Overview({
                 : 'The overview cannot be read right now.'}
         </p>
       )}
-      <button onClick={() => void reload()} disabled={state.kind === 'loading'}>
+      <Button
+        variant="secondary"
+        className="min-h-11 px-4"
+        onPress={() => void reload()}
+        isDisabled={state.kind === 'loading'}
+      >
         Reload overview
-      </button>
+      </Button>
     </section>
   );
 }
@@ -100,17 +108,21 @@ function NewNote() {
           void creation.create();
         }}
       >
-        <label>
+        <label className="grid gap-1.5">
           New note
-          <input
+          <Input
+            className="h-11"
             value={creation.draft.title}
             disabled={!access.write || !creation.canEdit}
             onChange={(event) => creation.change({ title: event.target.value })}
           />
         </label>
-        <button disabled={!access.write || !creation.canCreate}>
+        <ActionButton
+          type="submit"
+          isDisabled={!access.write || !creation.canCreate}
+        >
           {m.controls.save}
-        </button>
+        </ActionButton>
       </form>
     </section>
   );
@@ -129,18 +141,24 @@ function Content() {
   const { messages: m } = useSdkLocale();
   return (
     <main>
-      <button
+      <Button
         ref={menu}
+        variant="ghost"
+        className="min-h-11 px-3"
         aria-expanded={manage}
-        onClick={() => setManage(!manage)}
+        onPress={() => setManage(!manage)}
       >
         {m.controls.dataAccess}
-      </button>
+      </Button>
       <AppAccess appName="Notes overview" open={manage} focusTarget={menu} />
       <Overview onEdit={(row) => void edit.open(row)} />
-      <button onClick={() => setScoped(true)} disabled={scoped}>
+      <ActionButton
+        variant="secondary"
+        onPress={() => setScoped(true)}
+        isDisabled={scoped}
+      >
         Create a note
-      </button>
+      </ActionButton>
       {/* Mount the demand boundary before a view exists. AppAccess then offers
           discovery/selection/retry; labels never gate this flow. Keep mounted
           through access loss and while this form owns drafts or write outcomes. */}
@@ -153,7 +171,13 @@ function Content() {
         <p role="status">
           Editing ended because another Pod was chosen.{' '}
           {/* A retired target closes at once, without asking. */}
-          <button onClick={() => void edit.close()}>Dismiss</button>
+          <Button
+            variant="ghost"
+            className="min-h-11 px-3"
+            onPress={() => void edit.close()}
+          >
+            Dismiss
+          </Button>
         </p>
       )}
       {edit.target && edit.phase !== 'retired' && (
@@ -163,9 +187,10 @@ function Content() {
           ) : (
             <ResourceEditor editor={edit.editor}>
               {(draft, change) => (
-                <label>
+                <label className="grid gap-1.5">
                   Note title
-                  <input
+                  <Input
+                    className="h-11"
                     value={draft.title}
                     onChange={(event) => change({ title: event.target.value })}
                   />
@@ -173,7 +198,13 @@ function Content() {
               )}
             </ResourceEditor>
           )}
-          <button onClick={() => void edit.close()}>Close editor</button>
+          <Button
+            variant="secondary"
+            className="min-h-11 px-4"
+            onPress={() => void edit.close()}
+          >
+            Close editor
+          </Button>
         </section>
       )}
     </main>

@@ -238,10 +238,11 @@ follow a replacement target, and recovery never replays the write.
 The packed customized consumer also unmounts a dirty editor screen, opens the
 same row after remount and checks the retained draft without a prompt or write.
 
-`test:todo` installs packed SDKs, plus the TODO example's own registry
-packages (such as the public RDF recipe's parsers), and compiles the actual
-examples; the React consumer of `test:consumers` installs the same packages
-for the shipped examples. The TODO's standard screen covers EN/DE sign-in,
+`test:todo` installs packed SDKs and the packed UI kit, plus the TODO
+example's own registry packages (such as the public RDF recipe's parsers),
+compiles the actual examples and builds the TODO stylesheet with Tailwind CSS 4
+against the installed kit; the React consumer of `test:consumers` installs the
+same packages for the shipped examples. The TODO's standard screen covers EN/DE sign-in,
 320px light/dark presentation, explicit context choice, creation and guarded
 management with a retained draft, and the full CRUD, conflict/unknown-outcome,
 guard, keyboard/mobile and second-tab checks, plus the shared Node domain/edit
@@ -340,7 +341,7 @@ These notes back the [React/headless authoring guide](react-authoring.md); they
 are fixture evidence, not live Kotlin compatibility or independent usability
 evidence.
 
-- `pnpm test:todo` installs packed SDKs outside the workspace, typechecks and
+- `pnpm test:todo` installs packed SDKs and the UI kit outside the workspace, typechecks and
   bundles both examples, and drives the standard screen through real loopback
   PKCE redirects, CRUD, conflict and unknown outcomes, guarded selection, EN/DE,
   keyboard, mobile width and a busy second tab. It also runs the Node CRUD loop.

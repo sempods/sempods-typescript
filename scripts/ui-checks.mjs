@@ -2595,7 +2595,8 @@ async function routing({ browser, origin }) {
   const { at, personal } = plumberTask(origin);
   const sourced = (source) => `${at}?context=${encodeURIComponent(source)}`;
   // A title the task dialog shows, an alert in it, or the Not found text.
-  // An address that names its source opens without a Context choice.
+  // An address that names its source opens without a Context choice. Not
+  // found covers the page: its Context choice waits, inert, behind it.
   const signedOut = [
     ['direct-entry-signed-out', at, { title: PLUMBER }],
     [
@@ -2608,7 +2609,11 @@ async function routing({ browser, origin }) {
       sourced(origin + '/alice/_system/contexts/nope'),
       { alert: /not available/, choose: false },
     ],
-    ['invalid-legacy-signed-out', '/?task=!!!', { notFound: /not valid/ }],
+    [
+      'invalid-legacy-signed-out',
+      '/?task=!!!',
+      { notFound: /not valid/, choose: false, behind: true },
+    ],
   ];
   for (const [id, address, expected] of signedOut) {
     const { context, page, errors } = await newPage(browser);
@@ -2633,12 +2638,25 @@ async function routing({ browser, origin }) {
           await field.waitFor();
           shows = (await field.inputValue()) === expected.title;
         }
-        const asked = !choose && (await chooser(page).isVisible());
+        let asked = false;
+        let behind = true;
+        if (expected.behind) {
+          await chooser(page).waitFor();
+          behind = await chooser(page).evaluate(
+            (el) => el.closest('[inert]') !== null,
+          );
+        } else asked = !choose && (await chooser(page).isVisible());
         const path = addressOf(page);
         return {
-          pass: path === address && shows && !asked && errors.length === 0,
+          pass:
+            path === address &&
+            shows &&
+            !asked &&
+            behind &&
+            errors.length === 0,
           path,
           chooserShown: asked,
+          chooserBehind: behind,
           errors,
         };
       }),
@@ -3090,13 +3108,17 @@ async function compact({ browser, origin, engine }) {
         editors,
       };
     },
-    // German: the corner Close takes the SDK's text.
+    // German: the corner Close takes the SDK's text. Counted, not read:
+    // Firefox 159 with Playwright 1.65 crashes the page on evaluateAll() or
+    // allTextContents() of a locator chained to getByRole() (#264).
     async 'compact-close-label-german'() {
       await open('de');
-      const names = await dialog
-        .locator('[data-slot=dialog-close]')
-        .evaluateAll((buttons) => buttons.map((b) => b.textContent?.trim()));
-      return { pass: names.join() === 'Schließen', names };
+      const closes = dialog.locator('[data-slot=dialog-close]');
+      const count = await closes.count();
+      const german = await closes
+        .and(dialog.getByRole('button', { name: 'Schließen', exact: true }))
+        .count();
+      return { pass: count === 1 && german === 1, count, german };
     },
     // The corner Close is a 44px target around a compact glyph (#288), with
     // the stylesheet the README documents and no app CSS: inside the dialog
@@ -4484,6 +4506,33 @@ async function accessSettings({ browser, origin, engine }) {
           pass: top.hit && top.focusInside && top.modal && (await gateOpen()),
           ...top,
         };
+      }),
+    );
+    results.push(
+      // Plain fieldsets and radio labels, without app CSS (#339): one choice
+      // per 44px row, the groups apart.
+      await attempt('plain-choices-one-per-row', async () => {
+        const rows = await settings.evaluate((dialog) =>
+          [...dialog.querySelectorAll('fieldset')].map((fieldset) => ({
+            top: fieldset.getBoundingClientRect().top,
+            bottom: fieldset.getBoundingClientRect().bottom,
+            labels: [...fieldset.querySelectorAll('label')].map((label) => {
+              const box = label.getBoundingClientRect();
+              return { top: box.top, height: box.height };
+            }),
+          })),
+        );
+        const stacked = rows.every((group) =>
+          group.labels.every(
+            (label, i) =>
+              label.height >= 44 &&
+              (i === 0 || label.top >= group.labels[i - 1].top + 44 - 0.5),
+          ),
+        );
+        const apart = rows.every(
+          (group, i) => i === 0 || group.top >= rows[i - 1].bottom + 8,
+        );
+        return { pass: rows.length === 2 && stacked && apart, rows };
       }),
     );
     results.push(
