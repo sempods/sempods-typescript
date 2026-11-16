@@ -28,6 +28,11 @@ import {
   Input,
 } from '@sempods/app-ui';
 import { PlusIcon, UsersIcon } from 'lucide-react';
+import {
+  applyAppearance,
+  readAppearance,
+  type Appearance,
+} from './appearance.js';
 import { emptyTask, taskFields, type Task } from './domain.js';
 
 /** The app's own texts; the SDK's controls and the UI kit bring theirs. */
@@ -39,9 +44,14 @@ const text = {
     add: 'Add',
     done: 'Done',
     empty: 'No tasks yet.',
+    finished: 'Done',
     menu: 'Menu',
     settings: 'Settings',
     language: 'Language',
+    appearance: 'Appearance',
+    system: 'System',
+    light: 'Light',
+    dark: 'Dark',
     description: 'Tasks, stored in a Pod.',
     list: 'List',
     shareMore: 'Share more lists',
@@ -53,9 +63,14 @@ const text = {
     add: 'Hinzufügen',
     done: 'Erledigt',
     empty: 'Noch keine Aufgaben.',
+    finished: 'Erledigt',
     menu: 'Menü',
     settings: 'Einstellungen',
     language: 'Sprache',
+    appearance: 'Erscheinungsbild',
+    system: 'System',
+    light: 'Hell',
+    dark: 'Dunkel',
     description: 'Aufgaben, gespeichert in einem Pod.',
     list: 'Liste',
     shareMore: 'Weitere Listen freigeben',
@@ -92,38 +107,32 @@ function TaskScreen() {
     </ResourceEditor>
   );
 
+  const field = useRef<HTMLInputElement>(null);
+  const open = tasks?.filter((item) => !item.data.done) ?? [];
+  const done = tasks?.filter((item) => item.data.done) ?? [];
+  const row = (item: NonNullable<typeof tasks>[number]) => (
+    <TaskRow
+      key={item.iri}
+      row={mutate.for(item)}
+      editing={selected === item.iri ? editing : null}
+      onOpen={() => void select(item.iri)}
+    />
+  );
+
   return (
     <section aria-label={m.tasks}>
-      <LoadNotice {...list} />
-      {/* Empty only when confirmed: not on a failure, nor with skipped entries. */}
-      {(list.state.kind === 'ready' || list.state.kind === 'loading') &&
-        tasks?.length === 0 &&
-        list.data?.skipped === 0 && (
-          <p className="py-6 text-center text-muted-foreground">{m.empty}</p>
-        )}
-      <ul className="my-4">
-        {tasks?.map((item) => (
-          <TaskRow
-            key={item.iri}
-            row={mutate.for(item)}
-            editing={selected === item.iri ? editing : null}
-            onOpen={() => void select(item.iri)}
-          />
-        ))}
-      </ul>
-      {/* An unresolved tick or delete whose task left the list keeps its recovery. */}
-      <UnresolvedNotices of={mutate} shown={tasks} />
-      {/* A row that left the list (deleted elsewhere) keeps its editor. */}
-      {selected && !tasks?.some((item) => item.iri === selected) && editing}
-      <UpdateNotice {...creation.notice} quiet />
+      {/* The new task comes first. Add stays available: with nothing to add
+          it moves the focus into the field instead of being greyed out. */}
       <form
-        className="mt-4 flex gap-2"
+        className="mt-2 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          void creation.create();
+          if (creation.canCreate) void creation.create();
+          else field.current?.focus();
         }}
       >
         <Input
+          ref={field}
           aria-label={m.newTask}
           placeholder={m.newTask}
           className="h-11 flex-1"
@@ -131,15 +140,42 @@ function TaskScreen() {
           value={creation.draft.title}
           onChange={(e) => creation.change({ title: e.target.value })}
         />
+        {/* Locked only while a creation is sent or unresolved. A creation
+            found absent keeps the field locked and Add for its retry. */}
         <ActionButton
           type="submit"
           shape="round-sm"
           label={m.add}
-          isDisabled={!creation.canCreate}
+          isDisabled={!creation.canEdit && !creation.canCreate}
         >
           <PlusIcon />
         </ActionButton>
       </form>
+      <UpdateNotice {...creation.notice} quiet />
+      <LoadNotice {...list} />
+      {/* Empty only when confirmed: not on a failure, nor with skipped entries. */}
+      {(list.state.kind === 'ready' || list.state.kind === 'loading') &&
+        tasks?.length === 0 &&
+        list.data?.skipped === 0 && (
+          <p className="py-6 text-center text-muted-foreground">{m.empty}</p>
+        )}
+      <ul className="my-4">{open.map(row)}</ul>
+      {/* Done tasks stay visible below the open ones, quieter. */}
+      {done.length > 0 && (
+        <section aria-labelledby="todo-finished">
+          <h2
+            id="todo-finished"
+            className="mt-6 px-1 text-sm font-medium text-muted-foreground"
+          >
+            {m.finished}
+          </h2>
+          <ul className="mb-4">{done.map(row)}</ul>
+        </section>
+      )}
+      {/* An unresolved tick or delete whose task left the list keeps its recovery. */}
+      <UnresolvedNotices of={mutate} shown={tasks} />
+      {/* A row that left the list (deleted elsewhere) keeps its editor. */}
+      {selected && !tasks?.some((item) => item.iri === selected) && editing}
     </section>
   );
 }
@@ -215,6 +251,14 @@ const languages = [
   { code: 'en', name: 'English' },
 ] as const;
 type Language = (typeof languages)[number]['code'];
+const appearances = ['system', 'light', 'dark'] as const;
+
+/** The app's device-local settings and how to change them. */
+interface Settings {
+  readonly onLocale: (locale: Language) => void;
+  readonly appearance: Appearance;
+  readonly onAppearance: (appearance: Appearance) => void;
+}
 
 /** The app's icon: in the header, on the startup and sign-in screens. */
 const icon = (
@@ -249,12 +293,23 @@ export function TodoApp({
 }) {
   // A picked locale sets messages and formatting together.
   const [locale, setLocale] = useState<Language>();
+  // The appearance is kept on this device; the entry applies it before the
+  // first render.
+  const [appearance, setAppearance] = useState(readAppearance);
+  const onAppearance = (next: Appearance) => {
+    applyAppearance(next);
+    setAppearance(next);
+  };
 
   return (
     <SempodsProvider runtime={runtime} locale={locale}>
       <KitLocale>
         {children}
-        <StandardScreen onLocale={setLocale} />
+        <StandardScreen
+          onLocale={setLocale}
+          appearance={appearance}
+          onAppearance={onAppearance}
+        />
       </KitLocale>
     </SempodsProvider>
   );
@@ -274,44 +329,51 @@ function KitLocale({ children }: { readonly children: ReactNode }) {
 }
 
 /**
- * The language choice in the gate's settings: plain radio buttons, since a
- * menu or popover would render below the gate.
+ * The settings in the access gate's dialog: plain radio buttons, since a menu
+ * or popover would render below the gate. The header menu offers the same.
  */
-function LanguageChoices({
-  onLocale,
-}: {
-  readonly onLocale: (locale: Language) => void;
-}) {
+function SettingChoices({ onLocale, appearance, onAppearance }: Settings) {
   const m = useMessages(text);
   const { language } = useSdkLocale();
+  const choice = 'flex min-h-11 cursor-pointer items-center gap-3';
   return (
-    <fieldset className="grid">
-      <legend className="mb-1">{m.language}</legend>
-      {languages.map(({ code, name }) => (
-        <label
-          key={code}
-          lang={code}
-          className="flex min-h-11 cursor-pointer items-center gap-3"
-        >
-          <input
-            type="radio"
-            className="size-5 accent-primary"
-            name="todo-language"
-            checked={language === code}
-            onChange={() => onLocale(code)}
-          />
-          {name}
-        </label>
-      ))}
-    </fieldset>
+    <div className="grid gap-4">
+      <fieldset className="grid">
+        <legend className="mb-1">{m.language}</legend>
+        {languages.map(({ code, name }) => (
+          <label key={code} lang={code} className={choice}>
+            <input
+              type="radio"
+              className="size-5 accent-primary"
+              name="todo-language"
+              checked={language === code}
+              onChange={() => onLocale(code)}
+            />
+            {name}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="grid">
+        <legend className="mb-1">{m.appearance}</legend>
+        {appearances.map((value) => (
+          <label key={value} className={choice}>
+            <input
+              type="radio"
+              className="size-5 accent-primary"
+              name="todo-appearance"
+              checked={appearance === value}
+              onChange={() => onAppearance(value)}
+            />
+            {m[value]}
+          </label>
+        ))}
+      </fieldset>
+    </div>
   );
 }
 
-function StandardScreen({
-  onLocale,
-}: {
-  readonly onLocale: (locale: Language) => void;
-}) {
+function StandardScreen(settings: Settings) {
+  const { onLocale, appearance, onAppearance } = settings;
   const [open, setOpen] = useState(false);
   // Closing Pods & sharing returns here: the menu item is gone by then.
   const menu = useRef<HTMLButtonElement>(null);
@@ -352,6 +414,16 @@ function StandardScreen({
                   onSelect: () => onLocale(code),
                 })),
               },
+              {
+                label: m.appearance,
+                display: 'section',
+                choices: appearances.map((value) => ({
+                  id: value,
+                  label: m[value],
+                  checked: appearance === value,
+                  onSelect: () => onAppearance(value),
+                })),
+              },
             ]}
           />
         </header>
@@ -369,7 +441,7 @@ function StandardScreen({
         focusTarget={menu}
         settings={{
           label: m.settings,
-          content: <LanguageChoices onLocale={onLocale} />,
+          content: <SettingChoices {...settings} />,
         }}
       />
       <AccessNotice only="write" />

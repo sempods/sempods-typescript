@@ -284,7 +284,8 @@ such as sage's light primary `#3e6b56`, with `background_color: '#f7f9f7'` as
 the static launch fallback. The running page can set `theme-color` meta
 values to its resolved background instead. The TODO's
 [browser-theme entry](../examples/todo/src/browser-theme.ts) updates only
-marked meta elements after system changes. In your app's `index.html`, put
+marked meta elements after system changes and after the app's own appearance
+setting marks `<html>` (`data-appearance`). In your app's `index.html`, put
 these initial light/dark fallbacks inside `<head>`:
 
 ```html

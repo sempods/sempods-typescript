@@ -12,6 +12,7 @@ import {
   useSdkLocale,
   type FieldUpdateRow,
 } from '@sempods/app-sdk/react';
+import { ActionButton, Button } from '@sempods/app-ui';
 import { taskFields, type Task } from '../src/domain.js';
 
 /** A captured row command: it keeps its snapshot and target. */
@@ -98,9 +99,10 @@ export function ClearDone() {
       </ul>
       {/* The stopped row keeps its recovery, also once it is not shown. */}
       <UnresolvedNotices of={mutate} shown={items} />
-      <button
-        disabled={done.length === 0 || running || batch?.phase === 'confirm'}
-        onClick={() => {
+      <ActionButton
+        variant="secondary"
+        isDisabled={done.length === 0 || running || batch?.phase === 'confirm'}
+        onPress={() => {
           // Captured now: later rows are not part of this decision.
           setBatch({
             phase: 'confirm',
@@ -110,7 +112,7 @@ export function ClearDone() {
         }}
       >
         Clear done tasks
-      </button>
+      </ActionButton>
       {batch?.phase === 'confirm' && (
         <div
           ref={confirm}
@@ -121,8 +123,20 @@ export function ClearDone() {
           <p id="clear-done-question">
             Delete {tasks(batch.removes.length)} from this list?
           </p>
-          <button onClick={() => setBatch(null)}>Cancel</button>
-          <button onClick={() => void run(batch.removes)}>Delete</button>
+          <Button
+            variant="secondary"
+            className="min-h-11 px-4"
+            onPress={() => setBatch(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            className="min-h-11 px-4"
+            onPress={() => void run(batch.removes)}
+          >
+            Delete
+          </Button>
         </div>
       )}
       {batch && batch.phase !== 'confirm' && (
@@ -171,9 +185,14 @@ function ClearDoneContent() {
   const { messages: m } = useSdkLocale();
   return (
     <main>
-      <button aria-expanded={manage} onClick={() => setManage(!manage)}>
+      <Button
+        variant="ghost"
+        className="min-h-11 px-3"
+        aria-expanded={manage}
+        onPress={() => setManage(!manage)}
+      >
         {m.controls.dataAccess}
-      </button>
+      </Button>
       <AppAccess appName="Clear done tasks" open={manage} />
       <TargetScreen>
         <ClearDone />

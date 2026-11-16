@@ -30,7 +30,9 @@ async function menu(page, name) {
   await page
     .getByRole('menu')
     .getByRole(
-      /^(English|Deutsch)$/.test(name) ? 'menuitemradio' : 'menuitem',
+      /^(English|Deutsch|System|Light|Dark)$/.test(name)
+        ? 'menuitemradio'
+        : 'menuitem',
       {
         name,
         exact: true,
@@ -134,7 +136,9 @@ try {
     filter: (source) =>
       !source.includes('/node_modules') && !source.includes('/dist'),
   });
+  // The consumer type-checks with its own config below.
   await rm(join(temp, 'examples/tsconfig.json'));
+  await rm(join(temp, 'examples/todo/tsconfig.json'));
   await cp(
     join(root, 'tests/todo-browser/customized.tsx'),
     join(temp, 'customized.tsx'),
@@ -898,6 +902,31 @@ try {
       .click();
     await listShown(page, 'work');
     if (language === 'de') await menu(page, english);
+    // The appearance setting overrides the system's mode, page and SDK alike,
+    // and the marked theme-color follows; System returns to it.
+    const other = language === 'de' ? 'Light' : 'Dark';
+    const otherBackground =
+      language === 'de' ? 'rgb(247, 249, 247)' : 'rgb(19, 27, 24)';
+    await menu(page, other);
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="theme-color"][data-sempods-theme]')
+          ?.content === expected,
+      otherBackground,
+    );
+    assert.equal(
+      await page
+        .locator('body')
+        .evaluate((el) => getComputedStyle(el).backgroundColor),
+      otherBackground,
+    );
+    await menu(page, 'System');
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="theme-color"][data-sempods-theme]')
+          ?.content === expected,
+      background,
+    );
     const input = page.getByLabel('New task', { exact: true });
     await input.fill('Shell-free task');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -1576,11 +1605,15 @@ try {
       await page.getByRole('button', { name: 'Add', exact: true }).click();
       await page.getByRole('button', { name: title, exact: true }).waitFor();
     };
+    // A blank title is nothing to add: Add stays enabled, sends nothing and
+    // puts the focus back into the field.
     await newDraft.fill('   ');
-    assert.equal(
-      await page.getByRole('button', { name: 'Add', exact: true }).isDisabled(),
-      true,
+    const beforeBlank = writes;
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute('aria-label') === 'New task',
     );
+    assert.equal(writes, beforeBlank);
     await newDraft.fill('  First  ');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('button', { name: 'First', exact: true }).waitFor();

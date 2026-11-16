@@ -7,5 +7,12 @@
     "types": ["node"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["todo/src/app.tsx", "todo/src/main.tsx"]
+  "exclude": [
+    "todo/src/app.tsx",
+    "todo/src/main.tsx",
+    "todo/recipes/clear-done.tsx",
+    "todo/recipes/overview-toggle.tsx",
+    "todo/recipes/pod-overview.tsx",
+    "todo/recipes/task-with-note.tsx"
+  ]
 }

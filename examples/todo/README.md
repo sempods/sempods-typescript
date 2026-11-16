@@ -20,7 +20,8 @@ screens in your own app, set up the kit as its README describes, copy
 shown in `src/main.tsx`. The shipped `package.json` names the exact SDK and kit
 versions the sources belong to. Like the kit, the screen compiles without
 `exactOptionalPropertyTypes`, which React Aria's declarations do not support
-(`src/tsconfig.json`); the other examples keep it.
+(`tsconfig.json` here, for the screen and the recipes on the kit); the other
+examples keep it.
 An app that already has a host (the template's starter, or any screen with its
 own `SempodsProvider`) does not render `TodoApp`: it brings a second provider
 and its own language state. Reuse `TaskScreen` and `TaskRow` inside the
@@ -30,7 +31,9 @@ creating and editing in an explicit Context), `recipes/overview-toggle.tsx` (tic
 their own Contexts with one click, through `usePodList` and `useContextUpdate`), `recipes/task-with-note.tsx` (one input
 written into a shared and a personal Context) and `recipes/clear-done.tsx`
 (deleting all done tasks after one confirmation, stopping safely at the first
-conflict, uncertain answer or changed target) are further copyable screens.
+conflict, uncertain answer or changed target) are further copyable screens,
+built from the same kit; their row tick is still a native checkbox, as the
+kit has none yet.
 
 The default palette is the kit's sage in light and dark mode, shared by the app
 and SDK surfaces. Set palette roles in `src/style.css` to adapt it, as the
@@ -47,7 +50,10 @@ header's list switch, which also picks the first list, `HeaderMenu`
 for the header menu, `Input` and `ActionButton` for the new task, and
 `ResourceEditor` and `UpdateNotice` for editing and outcomes. The sign-in
 screen's settings (`AppAccess` `settings`) and the header menu pick the
-language, each named in itself (Deutsch, English). Enter the Pod address and
+language, each named in itself (Deutsch, English), and the appearance
+(System, Light, Dark). `src/appearance.ts` keeps the appearance in this
+browser and marks `<html>`; `src/style.css` maps it to `color-scheme` and the
+kit's `dark:` utilities, and `src/browser-theme.ts` follows it. Enter the Pod address and
 sign in on the Pod; the app then shows a list (a readable Context) and names
 it in the header, where the switch lists every list of the connected Pod and
 shares more. The UI follows the browser's language until one is picked; the
@@ -63,9 +69,12 @@ unsaved work.
 
 Create, list, rename, complete, reopen and delete tasks: the checkbox finishes
 or reopens a task (`useFieldUpdate`'s `for(item)`: a tick locks
-only its row), its title opens the editor below the list, a done task
-offers a delete button that asks first (`RemoveButton` with
-`row.remove` from `mutate.for(item)`), and the input at the bottom adds one. The list reads again when the page becomes visible
+only its row), its title opens the editor in its place, done tasks move to
+their own section below the open ones and offer a delete button that asks
+first (`RemoveButton` with `row.remove` from `mutate.for(item)`), and the
+input above the list adds one. Add stays enabled: with nothing to add it moves
+the focus into the input; it is locked only while a creation is sent or
+unresolved. The list reads again when the page becomes visible
 (no reload button) and keeps its rows while it reloads and after a failed
 refresh; `LoadNotice` says what the read does, with a retry. A new or changed row is its own
 confirmation (`UpdateNotice quiet`); refusals, conflicts and unconfirmed

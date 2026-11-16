@@ -521,3 +521,68 @@ it('the TODO row waits for a fresh read after a confirmed tick, so a second tick
   await waitFor(() => expect(box().checked).toBe(false));
   expect(screen.queryByText(/The pod has changed/)).toBeNull();
 });
+
+it('the TODO list shows done tasks in their own section below the open ones', async () => {
+  const done = {
+    ...milk,
+    '@id': 'urn:task:bread',
+    [schema + 'name']: [{ '@value': 'Buy bread' }],
+    [schema + 'actionStatus']: [{ '@id': schema + 'CompletedActionStatus' }],
+  };
+  await signedIn('en', async () => Response.json([done, milk]));
+  const section = await screen.findByRole('region', { name: 'Done' });
+  expect(
+    within(section).getByRole('button', { name: 'Buy bread' }),
+  ).toBeTruthy();
+  expect(
+    within(section).queryByRole('button', { name: 'Buy milk' }),
+  ).toBeNull();
+  // The open task comes first, the input above both.
+  const input = screen.getByLabelText('New task');
+  const open = screen.getByRole('button', { name: 'Buy milk' });
+  expect(
+    input.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    open.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+it('the TODO Add button moves the focus into an empty field instead of being disabled', async () => {
+  const f = await signedIn('en', async () => Response.json([]));
+  expect(await screen.findByText(text.en.empty)).toBeTruthy();
+  const writes: string[] = [];
+  f.setResource(async (_url, init) => {
+    writes.push(init?.method ?? 'GET');
+    return new Response(null, { status: 404 });
+  });
+  const add = screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement;
+  expect(add.disabled).toBe(false);
+  fireEvent.click(add);
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByLabelText('New task')),
+  );
+  expect(writes).toEqual([]);
+});
+
+it('the TODO appearance applies at once and is kept on this device', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  cleanups.push(() => {
+    delete document.documentElement.dataset.appearance;
+    localStorage.removeItem('todo-appearance');
+  });
+  render(<TodoApp runtime={f.runtime} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+  fireEvent.click(within(dialog).getByRole('radio', { name: 'Dark' }));
+  expect(document.documentElement.dataset.appearance).toBe('dark');
+  expect(localStorage.getItem('todo-appearance')).toBe('dark');
+  expect(
+    (within(dialog).getByRole('radio', { name: 'Dark' }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
+  fireEvent.click(within(dialog).getByRole('radio', { name: 'System' }));
+  expect(document.documentElement.dataset.appearance).toBeUndefined();
+  expect(localStorage.getItem('todo-appearance')).toBeNull();
+});

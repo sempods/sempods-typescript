@@ -19,3 +19,25 @@
  *   --ring: light-dark(#0a6680, #5ec6e4);
  * }
  */
+
+/*
+ * The app's appearance setting (appearance.ts): without data-appearance the
+ * page follows the system; with it, both the palette (color-scheme drives
+ * light-dark()) and the kit's dark: utilities follow the choice.
+ */
+:root[data-appearance='light'] {
+  color-scheme: light;
+}
+:root[data-appearance='dark'] {
+  color-scheme: dark;
+}
+@custom-variant dark {
+  &:where([data-appearance='dark'], [data-appearance='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:not([data-appearance='light'], [data-appearance='light'] *)) {
+      @slot;
+    }
+  }
+}

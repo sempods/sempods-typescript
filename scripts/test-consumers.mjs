@@ -164,10 +164,11 @@ try {
   );
   // The shipped examples type-check with their own shipped configs against
   // the installed packages; nothing outside the package is needed. The TODO
-  // screen on the UI kit has its own, without exactOptionalPropertyTypes.
+  // screen and recipes on the UI kit have their own, without
+  // exactOptionalPropertyTypes.
   for (const config of [
     'examples/tsconfig.json',
-    'examples/todo/src/tsconfig.json',
+    'examples/todo/tsconfig.json',
   ])
     run(
       process.execPath,
