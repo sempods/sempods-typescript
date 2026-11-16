@@ -62,7 +62,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - *image-matches
       # Ends before the job's timeout, so a stalled gate still leaves its log.
-      - run: pnpm test:ui --browsers="$BROWSER"
+      # Three lanes, each with its own Pod and browser, share the runner: the
+      # suites mostly wait for the page, so they barely slow each other down.
+      - run: pnpm test:ui --browsers="$BROWSER" --lanes=3
         timeout-minutes: 12
         env:
           BROWSER: ${{ matrix.browser }}
