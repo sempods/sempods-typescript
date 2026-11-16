@@ -5042,7 +5042,8 @@ async function addPod({ browser, origin, engine }) {
 
 /**
  * The kit's Checkbox (#337) on `?screen=checkbox`: a 44px target around its
- * 20px box, Space and a press tick it, a visible focus ring for the keyboard,
+ * 20px box, Space and a press tick it, a solid focus outline for the
+ * keyboard (also with forced colors),
  * a disabled box stays as it is, and its check mark does not rest on colour.
  */
 async function checkbox({ browser, origin }) {
@@ -5092,7 +5093,7 @@ async function checkbox({ browser, origin }) {
       }),
     );
     results.push(
-      await attempt('space-ticks-with-a-focus-ring', async () => {
+      await attempt('space-ticks-with-a-focus-outline', async () => {
         // Keyboard from the top of the page: the first two boxes.
         await page.locator('body').click({ position: { x: 1, y: 700 } });
         await page.keyboard.press('Tab');
@@ -5100,25 +5101,34 @@ async function checkbox({ browser, origin }) {
         const focused = await page.evaluate(() =>
           document.activeElement?.getAttribute('aria-label'),
         );
-        const ring = await page.evaluate(() => {
-          const el = document.activeElement?.closest('[data-slot="checkbox"]');
-          const style = el ? getComputedStyle(el) : null;
-          return {
-            outline: style?.outlineStyle,
-            shadow: style?.boxShadow,
-          };
-        });
+        // The visible box draws a solid outline, in ordinary and in forced
+        // colors, where the ring's box shadow is dropped (#348 review).
+        const outline = {};
+        for (const forcedColors of ['none', 'active']) {
+          await page.emulateMedia({ forcedColors });
+          outline[forcedColors] = await page.evaluate(() => {
+            const el = document.activeElement?.closest(
+              '[data-slot="checkbox"]',
+            );
+            const style = el ? getComputedStyle(el) : null;
+            return style
+              ? `${style.outlineStyle} ${style.outlineWidth}`
+              : 'no box';
+          });
+        }
+        await page.emulateMedia({ forcedColors: null });
         const before = await checked('Done: Buy bread');
         await page.keyboard.press('Space');
         const after = await checked('Done: Buy bread');
         return {
           pass:
             focused === 'Done: Buy bread' &&
-            (ring.outline !== 'none' || ring.shadow !== 'none') &&
+            outline.none === 'solid 2px' &&
+            outline.active === 'solid 2px' &&
             before === true &&
             after === false,
           focused,
-          ring,
+          outline,
           before,
           after,
         };

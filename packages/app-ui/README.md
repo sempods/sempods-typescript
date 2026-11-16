@@ -76,6 +76,8 @@ explains the order and which app rules still override SDK rules.
   days. Menu triggers and menu rows show it only for keyboard focus, as
   React Aria's `data-focus-visible` reports it, and a row draws it inside its
   edge; with forced colors, the focused row draws it for pointer focus too.
+  A `Checkbox` draws it on its visible box while its hidden input has
+  keyboard focus, also with forced colors.
   Name the layer in the order statement only to move it; an unlayered
   app rule overrides it;
 - in the layer `app-ui-motion`: without entry and exit animations of popovers,
