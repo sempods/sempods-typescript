@@ -517,6 +517,13 @@ change is optimistic; an unconfirmed write stays visible and is never replayed.
   them. No value (a missing field, `null`, an empty list) reads differently
   from empty text, and lists and nested objects show their parts. Keep such
   values in the draft as read; do not flatten them for the comparison.
+- `valueLabels` (on both) names a field's enumerated values in the
+  comparison, by field and exact string value, as the form's own select shows
+  them: `valueLabels={{ status: { open: 'Offen', done: 'Erledigt' } }}`. It
+  applies to a string field and to the string items of a list field; an
+  unlisted value shows its code. On `ResourceEditor` the keys are typed by the
+  draft. The draft and the observed data keep their codes; do not translate
+  them for the review.
 - `checked` decides the acknowledgement button; pass it through to a custom
   recovery UI (without it, a caller keeps the state set by its `onCheck`).
 - Lost read access clears comparison values, `checked`, `outcome.current` and
