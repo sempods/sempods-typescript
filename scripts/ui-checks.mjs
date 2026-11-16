@@ -2595,7 +2595,8 @@ async function routing({ browser, origin }) {
   const { at, personal } = plumberTask(origin);
   const sourced = (source) => `${at}?context=${encodeURIComponent(source)}`;
   // A title the task dialog shows, an alert in it, or the Not found text.
-  // An address that names its source opens without a Context choice.
+  // An address that names its source opens without a Context choice. Not
+  // found covers the page: its Context choice waits, inert, behind it.
   const signedOut = [
     ['direct-entry-signed-out', at, { title: PLUMBER }],
     [
@@ -2608,7 +2609,11 @@ async function routing({ browser, origin }) {
       sourced(origin + '/alice/_system/contexts/nope'),
       { alert: /not available/, choose: false },
     ],
-    ['invalid-legacy-signed-out', '/?task=!!!', { notFound: /not valid/ }],
+    [
+      'invalid-legacy-signed-out',
+      '/?task=!!!',
+      { notFound: /not valid/, choose: false, behind: true },
+    ],
   ];
   for (const [id, address, expected] of signedOut) {
     const { context, page, errors } = await newPage(browser);
@@ -2633,12 +2638,25 @@ async function routing({ browser, origin }) {
           await field.waitFor();
           shows = (await field.inputValue()) === expected.title;
         }
-        const asked = !choose && (await chooser(page).isVisible());
+        let asked = false;
+        let behind = true;
+        if (expected.behind) {
+          await chooser(page).waitFor();
+          behind = await chooser(page).evaluate(
+            (el) => el.closest('[inert]') !== null,
+          );
+        } else asked = !choose && (await chooser(page).isVisible());
         const path = addressOf(page);
         return {
-          pass: path === address && shows && !asked && errors.length === 0,
+          pass:
+            path === address &&
+            shows &&
+            !asked &&
+            behind &&
+            errors.length === 0,
           path,
           chooserShown: asked,
+          chooserBehind: behind,
           errors,
         };
       }),

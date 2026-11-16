@@ -23,7 +23,7 @@ jobs:
     # when the Ubuntu mirror was slow. --ipc=host keeps Chromium from running
     # out of shared memory; --init reaps the browsers' child processes.
     container: &playwright
-      image: &image mcr.microsoft.com/playwright:v1.64.1-resolute
+      image: &image mcr.microsoft.com/playwright:v1.65.1-resolute
       options: --user 1001 --ipc=host --init
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -6,6 +6,7 @@
  * message once.
  */
 import { webcrypto } from 'node:crypto';
+import { createPortal } from 'react-dom';
 import { useRef, useState, type CSSProperties, type RefObject } from 'react';
 import {
   act,
@@ -43,6 +44,7 @@ import {
   useAppState,
   useDraftGuard,
 } from './index.js';
+import { markOutside } from './shell.test.js';
 
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
@@ -658,6 +660,30 @@ it('keeps open management above a gate that opens after it', async () => {
   });
   await findGate('signed-out');
   expect(layer.map((d) => d.dataset.sempodsUi)).toEqual(['gate', 'management']);
+});
+
+it('opens the gate outside what an app overlay that is already open marks inert (#264)', async () => {
+  const f = fixture();
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" />
+      <p>Behind the overlay</p>
+      {createPortal(<div role="dialog" aria-label="Task" />, document.body)}
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Task' });
+  markOutside(screen.getByRole('dialog', { name: 'Task' }));
+  // The only session ends while the app's dialog is open.
+  await act(async () => {
+    await renewal(f, runtime, id, 'refused');
+  });
+  const shown = await findGate('signed-out');
+  expect(shown.closest('[inert]')).toBeNull();
+  expect(
+    screen.getByText('Behind the overlay').closest('[inert]'),
+  ).not.toBeNull();
 });
 
 it('applies AppAccess className and style to the gate', async () => {
