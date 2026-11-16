@@ -589,7 +589,11 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 - **`ContextSwitch`**: the standard header chooser for an app working in one
   Context at a time, across all connected Pods. Supply the app's `title`, an
   optional decorative `icon`, its word for a Context (`label`, e.g. "List"),
-  optional `texts.shareMore`, and optional `podNames` keyed by exact Pod URL.
+  optional `texts` that name its Contexts in the adapter's messages
+  (`shareMore`, `chooseContext`, `contextsLoading`, `contextsFailed`,
+  `contextsEmpty`, `switchUnavailable`, `actionNotCompleted`, `noPods`,
+  `showAddresses`, `addresses`; each left out keeps its default), and optional
+  `podNames` keyed by exact Pod URL.
   Mount outside `TargetScreen`, alongside `AppAccess`. It initially selects
   the active Pod's first writable, else readable Context when none was
   remembered or configured, just like `useContexts`.

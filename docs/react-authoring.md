@@ -617,6 +617,28 @@ import { ContextSwitch } from '@sempods/app-ui';
 />;
 ```
 
+`label` names a Context in the trigger's and menu's accessible names. The
+adapter's own messages say "context" until the app names its Contexts in
+`texts`, as strings in its current language: `shareMore`, `chooseContext`
+(the trigger while nothing is selected), `contextsLoading`, `contextsFailed`,
+`contextsEmpty`, `switchUnavailable`, `actionNotCompleted`, `noPods`,
+`showAddresses` and `addresses`. Each one left out keeps the English or German
+default, so a German shopping app writes the gender and plural it needs:
+
+```tsx
+<ContextSwitch
+  title="Einkauf"
+  label="Liste"
+  texts={{
+    shareMore: 'Weitere Listen freigeben …',
+    chooseContext: 'Liste auswählen',
+    contextsLoading: 'Listen werden geladen …',
+    contextsEmpty: 'Keine lesbaren Listen freigegeben.',
+    switchUnavailable: 'Diese Liste ist gerade nicht verfügbar.',
+  }}
+/>
+```
+
 For a custom presentation, `usePodContexts({ podNames })` supplies the facts.
 `pod.label` is the configured name as given, else the host and decoded path
 without scheme and terminal slash; where that fallback would equal another
