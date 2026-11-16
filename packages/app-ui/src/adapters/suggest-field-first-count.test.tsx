@@ -22,9 +22,21 @@ it("keeps another component's announcement with the count's number as React Aria
   // the field sets its 100ms timer, before React Aria sets its own.
   const later = globalThis.setTimeout;
   let busy = false;
+  let delivered = false;
   vi.stubGlobal('setTimeout', ((run: () => void, ms?: number) => {
-    const timer = later(run, ms);
-    if (ms === 100 && !busy) {
+    const from = new Error().stack ?? '';
+    // React Aria's first message, which the field leaves out.
+    const first = ms === 100 && from.includes('LiveAnnouncer');
+    const timer = later(
+      first
+        ? () => {
+            run();
+            delivered = true;
+          }
+        : run,
+      ms,
+    );
+    if (ms === 100 && !busy && from.includes('aria-count')) {
       busy = true;
       const end = Date.now() + 60;
       while (Date.now() < end);
@@ -76,6 +88,7 @@ it("keeps another component's announcement with the count's number as React Aria
     expect(busy).toBe(true);
     // Set after React Aria's 100ms timer, so it runs after its first message.
     await new Promise((done) => setTimeout(done, 100));
+    expect(delivered).toBe(true);
     const said = [
       ...document.querySelectorAll(
         'body > [data-live-announcer] > [role="log"] > *',
