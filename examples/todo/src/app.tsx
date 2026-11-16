@@ -22,6 +22,7 @@ import {
 import type { BrowserRuntime } from '@sempods/app-sdk';
 import {
   ActionButton,
+  Checkbox,
   ContextSwitch,
   HeaderMenu,
   I18nProvider,
@@ -204,23 +205,20 @@ function TaskRow({
   const task = row.data;
   return (
     <li className="flex flex-wrap items-start gap-1 border-b *:data-[sempods-ui=editor]:min-w-0 *:data-[sempods-ui=editor]:flex-1 *:data-[sempods-ui=notice]:mb-2 *:data-[sempods-ui=notice]:ms-11 *:data-[sempods-ui=notice]:basis-full">
-      {/* The wrapping label is the checkbox's 44px touch target; inside the
-          editor's card it stays level with the field. */}
-      <label
+      {/* The kit's box keeps its 44px target; inside the editor's card it
+          stays level with the field. */}
+      <span
         className={
-          'grid size-11 flex-none cursor-pointer place-items-center' +
-          (editing ? ' mt-3' : '')
+          'grid size-11 flex-none place-items-center' + (editing ? ' mt-3' : '')
         }
       >
-        <input
-          type="checkbox"
-          className="size-5.5 cursor-pointer accent-primary disabled:cursor-default disabled:opacity-55"
+        <Checkbox
           aria-label={`${m.done}: ${task.title}`}
-          checked={task.done}
-          disabled={!row.canMutate}
-          onChange={() => void row.update({ done: !task.done })}
+          isSelected={task.done}
+          isDisabled={!row.canMutate}
+          onChange={(done) => void row.update({ done })}
         />
-      </label>
+      </span>
       {editing ?? (
         <button
           className={
@@ -333,21 +331,20 @@ function KitLocale({ children }: { readonly children: ReactNode }) {
 
 /**
  * The settings in the access gate's dialog: plain radio buttons, since a menu
- * or popover would render below the gate. The header menu offers the same.
+ * or popover would render below the gate; the dialog lays them out one per
+ * row. The header menu offers the same.
  */
 function SettingChoices({ onLocale, appearance, onAppearance }: Settings) {
   const m = useMessages(text);
   const { language } = useSdkLocale();
-  const choice = 'flex min-h-11 cursor-pointer items-center gap-3';
   return (
-    <div className="grid gap-4">
-      <fieldset className="grid">
-        <legend className="mb-1">{m.language}</legend>
+    <>
+      <fieldset>
+        <legend>{m.language}</legend>
         {languages.map(({ code, name }) => (
-          <label key={code} lang={code} className={choice}>
+          <label key={code} lang={code}>
             <input
               type="radio"
-              className="size-5 accent-primary"
               name="todo-language"
               checked={language === code}
               onChange={() => onLocale(code)}
@@ -356,13 +353,12 @@ function SettingChoices({ onLocale, appearance, onAppearance }: Settings) {
           </label>
         ))}
       </fieldset>
-      <fieldset className="grid">
-        <legend className="mb-1">{m.appearance}</legend>
+      <fieldset>
+        <legend>{m.appearance}</legend>
         {appearances.map((value) => (
-          <label key={value} className={choice}>
+          <label key={value}>
             <input
               type="radio"
-              className="size-5 accent-primary"
               name="todo-appearance"
               checked={appearance === value}
               onChange={() => onAppearance(value)}
@@ -371,7 +367,7 @@ function SettingChoices({ onLocale, appearance, onAppearance }: Settings) {
           </label>
         ))}
       </fieldset>
-    </div>
+    </>
   );
 }
 
@@ -413,6 +409,7 @@ function StandardScreen(settings: Settings) {
                 choices: languages.map(({ code, name }) => ({
                   id: code,
                   label: name,
+                  lang: code,
                   checked: language === code,
                   onSelect: () => onLocale(code),
                 })),

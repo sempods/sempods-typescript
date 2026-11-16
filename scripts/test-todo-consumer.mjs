@@ -24,6 +24,11 @@ import { chromium } from 'playwright';
 /** The menu names each language in itself. */
 const german = 'Deutsch';
 const english = 'English';
+/**
+ * The visible box of the UI kit's Checkbox around its hidden input: a press
+ * lands there, as a person's would.
+ */
+const theBox = 'xpath=ancestor::label[@data-slot="checkbox"][1]';
 /** Chooses an item of the TODO header menu (the UI kit's HeaderMenu). */
 async function menu(page, name) {
   await page.getByRole('button', { name: /^(Menu|Menü)$/ }).click();
@@ -1622,13 +1627,24 @@ try {
     const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
     const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
     assert.equal(await created.count(), 0);
-    // The label around a row's checkbox is its touch target, not a margin.
+    // The kit's box takes a press up to 22px from its centre (44px target).
     const target = await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
-      .evaluate((box) => box.closest('label').getBoundingClientRect());
-    assert.ok(target.width >= 44 && target.height >= 44);
+      .evaluate((input) => {
+        const box = input.closest('[data-slot="checkbox"]');
+        const r = box.getBoundingClientRect();
+        const [cx, cy] = [r.x + r.width / 2, r.y + r.height / 2];
+        return [
+          [cx - 21, cy],
+          [cx + 21, cy],
+          [cx, cy - 21],
+          [cx, cy + 21],
+        ].every(([x, y]) => box.contains(document.elementFromPoint(x, y)));
+      });
+    assert.ok(target, 'the row checkbox keeps its 44px target');
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .locator(theBox)
       .click();
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: true })
@@ -1636,6 +1652,7 @@ try {
     assert.equal(await saved.count(), 0);
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .locator(theBox)
       .click();
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
@@ -1750,7 +1767,10 @@ try {
       await page.getByRole('button', { name: 'Delete: Done row' }).count(),
       0,
     );
-    await page.getByRole('checkbox', { name: 'Done: Done row' }).click();
+    await page
+      .getByRole('checkbox', { name: 'Done: Done row' })
+      .locator(theBox)
+      .click();
     const trash = page.getByRole('button', {
       name: 'Delete: Done row',
       exact: true,
@@ -1892,6 +1912,7 @@ try {
     await page.route('**/_system/resources/**', loseAnswer);
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .locator(theBox)
       .click();
     await page.getByRole('alert').filter({ hasText: 'unconfirmed' }).waitFor();
     await page.unroute('**/_system/resources/**', loseAnswer);
@@ -1982,6 +2003,7 @@ try {
     requested = listRequest();
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
+      .locator(theBox)
       .click();
     await requested;
     assert.equal(await keptRow().count(), 1);
@@ -2017,6 +2039,7 @@ try {
     );
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: true })
+      .locator(theBox)
       .click();
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })

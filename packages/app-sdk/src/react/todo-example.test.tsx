@@ -73,9 +73,14 @@ async function press(element: HTMLElement) {
 /** Picks a language from the header menu, where each is named in itself. */
 async function pick(language: 'en' | 'de') {
   await press(await screen.findByRole('button', { name: /^(Menu|Menü)$/ }));
-  await press(
-    screen.getByRole('menuitemradio', { name: text[language].language }),
+  const item = screen.getByRole('menuitemradio', {
+    name: text[language].language,
+  });
+  // The name in itself is read in its own language.
+  expect(item.querySelector(`[lang="${language}"]`)?.textContent).toBe(
+    text[language].language,
   );
+  await press(item);
 }
 
 /** Picks a language before sign-in, in the gate's settings. */

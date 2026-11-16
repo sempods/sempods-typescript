@@ -364,7 +364,9 @@ Parts for different Contexts use one hook per Context, as the
 
 `useFieldUpdate(definition)` exposes the controller's write state per resource.
 Use one hook for the list and give each row `mutate.for(item)`, as the
-[TODO example's `TaskRow`](../examples/todo/src/app.tsx) does:
+[TODO example's `TaskRow`](../examples/todo/src/app.tsx) does with the UI
+kit's `Checkbox`; a native checkbox works the same with `checked` and
+`onChange`:
 
 ```tsx
 const mutate = useFieldUpdate(taskFields); // once, for the list
@@ -373,11 +375,11 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   const task = row.data; // what to show
   return (
     <li>
-      <input
-        type="checkbox"
-        checked={task.done}
-        disabled={!row.canMutate}
-        onChange={() => void row.update({ done: !task.done })}
+      <Checkbox
+        aria-label={`Done: ${task.title}`}
+        isSelected={task.done}
+        isDisabled={!row.canMutate}
+        onChange={(done) => void row.update({ done })}
       />
       {task.title}
       {task.done && (
@@ -773,11 +775,11 @@ list.data?.items.map((item) => {
   const row = overview.for(item); // { data, context, canMutate, notice, problem, update, remove }
   return (
     <li key={`${item.context} ${item.snapshot.iri}`}>
-      <input
-        type="checkbox"
-        checked={row.data.done}
-        disabled={!row.canMutate}
-        onChange={(e) => void row.update({ done: e.target.checked })}
+      <Checkbox
+        aria-label={row.data.title}
+        isSelected={row.data.done}
+        isDisabled={!row.canMutate}
+        onChange={(done) => void row.update({ done })}
       />
       {row.data.title}
       <UpdateNotice {...row.notice} />

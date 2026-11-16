@@ -2257,6 +2257,9 @@ try {
   const milk = page
     .locator('ul')
     .getByRole('checkbox', { name: 'Buy milk', exact: true });
+  // The page has no stylesheet, so the kit's box has no area to press: the
+  // keyboard ticks it, as Space does for a person.
+  const tickMilk = () => milk.press('Space');
   const milkState = () =>
     page.evaluate(() => {
       const box = document.querySelector('ul input[type="checkbox"]');
@@ -2286,7 +2289,7 @@ try {
   const toggleReload = page.waitForRequest((request) =>
     toggleList(new URL(request.url())),
   );
-  await milk.click();
+  await tickMilk();
   await toggleReload;
   // Saved once with the read version. The confirmed tick shows at once; the
   // snapshot it was made from stays locked until the list reads again.
@@ -2312,7 +2315,7 @@ try {
   // A conflict shows the row's notice with its comparison: nothing is resent
   // beyond the single rebase, and the box stays as the Pod last confirmed.
   toggleConflict = true;
-  await milk.click();
+  await tickMilk();
   const changed = page
     .locator('ul li')
     .filter({ hasText: 'The pod has changed. Compare before continuing.' });
@@ -2332,7 +2335,7 @@ try {
     () =>
       document.querySelector('ul input[type="checkbox"]')?.disabled === false,
   );
-  await milk.click();
+  await tickMilk();
   await page.waitForFunction(() => {
     const box = document.querySelector('ul input[type="checkbox"]');
     return box?.checked === false && box.disabled === false;
