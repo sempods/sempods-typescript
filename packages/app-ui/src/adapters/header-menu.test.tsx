@@ -353,3 +353,51 @@ it('has a quiet ghost button with the same 44px target', () => {
   for (const button of [quiet, filled])
     expect(button.className).toMatch(/\bsize-11\b/);
 });
+
+it('marks the language of a label in another language without changing its name', async () => {
+  render(
+    <HeaderMenu
+      label="Menu"
+      items={[
+        { label: 'Help', onSelect: () => {}, lang: 'en' },
+        {
+          label: 'Language',
+          display: 'section',
+          choices: [
+            {
+              label: 'Deutsch',
+              lang: 'de',
+              checked: false,
+              onSelect: () => {},
+            },
+            { label: 'English', lang: 'en', checked: true, onSelect: () => {} },
+            {
+              label: 'Français',
+              lang: 'fr',
+              description: 'Beta',
+              checked: false,
+              onSelect: () => {},
+            },
+          ],
+        },
+      ]}
+    />,
+  );
+  await act(async () => {
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Menu' }), {
+      key: 'Enter',
+    });
+  });
+  for (const [name, lang] of [
+    ['Deutsch', 'de'],
+    ['English', 'en'],
+    ['Français', 'fr'],
+  ] as const) {
+    const item = screen.getByRole('menuitemradio', { name });
+    expect(item.querySelector(`[lang="${lang}"]`)?.textContent).toBe(name);
+  }
+  expect(
+    screen.getByRole('menuitem', { name: 'Help' }).querySelector('[lang="en"]')
+      ?.textContent,
+  ).toBe('Help');
+});

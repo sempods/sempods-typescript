@@ -5,7 +5,7 @@ without React. Start with the [complete minimal screen](quickstart.md) when
 integrating the SDK; new apps start in
 [sempods-apps-template](https://github.com/sempods/sempods-apps-template).
 This guide is a task reference. The [TODO screen](../examples/todo/src/app.tsx)
-adds a list switch and app-owned presentation; its
+adds a list switch and a header menu from `@sempods/app-ui`; its
 [domain functions](../examples/todo/src/domain.ts) hold the field definition.
 
 1. [Model and setup](#part-1-model-and-setup)
@@ -176,6 +176,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Translate the app's texts](#app-texts-usemessages)                     | `useMessages` (React)                                                      | One `{ en, de }` catalogue outside components                                |
 | [Switch between Contexts](#apps-that-switch-contexts)                   | `useContexts` (React)                                                      | Mount outside `TargetScreen`                                                 |
 | [Switch across Pods](#one-chooser-across-pods)                          | `usePodContexts` (React)                                                   | Optional `podNames`; `select({ connectionId, contextIri })`                  |
+| [Add another Pod while signed in](#adding-another-pod-while-signed-in)  | `PodChooser` (React)                                                       | Optional `podNames`, `podAddressPrefix`; place it in the app's own panel     |
 | [Create in another Context](#creating-in-an-explicit-context)           | `useCreation` with `context` (React), `bindCreation` (app)                 | The Context IRI; one hook per Context                                        |
 | [Read across the Pod](#pod-overviews-with-contexts-on-demand)           | `usePodLoad` (React)                                                       | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
 | [Search across Pods](#search-across-pods)                               | `usePodLoad` with `runtime.bindPod(id)` (React)                            | `pod.find(text)`; one source per connection                                  |
@@ -597,8 +598,8 @@ const lists = useContexts();
   the hook selects) and management names only the selected Context. Sign-in,
   recovery, **Change sharing** and **Sign out** stay in `AppAccess`.
 
-The [TODO example](../examples/todo/src/app.tsx) puts the switch in its header,
-with a "read only" hint and **Share more lists**.
+The [TODO example](../examples/todo/src/app.tsx) puts `ContextSwitch` (below)
+in its header, with **Share more lists**.
 
 #### One chooser across Pods
 
@@ -1226,7 +1227,9 @@ function Access({ language, setLanguage }: LanguageSetting) {
 - Use controls that render in place, such as radio groups, toggles and
   switches. A popover, menu, select or dialog that renders into
   `document.body` is inert below the gate. Plain controls get the SDK's
-  defaults; the app's own classes take precedence.
+  defaults: a `fieldset` with a `legend` and `label`s around radio buttons or
+  checkboxes shows one choice per 44px row, the groups apart. The app's own
+  classes take precedence.
 - Only device-local presentation choices belong here. The gate grants no
   session or write access: no data or account actions.
 
@@ -1352,6 +1355,55 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
   `components.Connections` receives this presentation preference; a replacement
   must enforce the same single-permitted-Pod rule. CSS on SDK markup is no stable
   way to hide it.
+
+### Adding another Pod while signed in
+
+An app that reads several Pods at once, such as a sources panel beside its
+content, places `PodChooser` where people add the next Pod. It is the
+sign-in's chooser, not a field of the app's own: the **Pod address** field
+with `podAddressPrefix`, the saved Pods and **Manage saved Pods** in its list,
+help on request, the same keyboard use and labels, and the guarded `useApp`
+actions.
+
+```tsx
+import { useState } from 'react';
+import { PodChooser } from '@sempods/app-sdk/react';
+
+function Sources() {
+  const [adding, setAdding] = useState(false);
+  return (
+    <section aria-label="Sources">
+      {/* The app's list of connected Pods (usePodContexts) … */}
+      <button aria-expanded={adding} onClick={() => setAdding(!adding)}>
+        Add a Pod
+      </button>
+      {adding && (
+        <PodChooser podNames={{ 'https://pods.example/alice': 'Personal' }} />
+      )}
+    </section>
+  );
+}
+```
+
+- It starts on a new address, not on the active Pod. The address is cleaned
+  up as at sign-in and matched to a saved connection by the runtime's
+  [connection reuse](browser-runtime.md#one-known-pod): a remembered Pod is
+  signed in to, a signed-in one offers **Change sharing**, a new one
+  connects. It never adds a Pod twice, and the app compares no addresses.
+- While that Pod restores, the action is disabled and says **Loading…**.
+  After a sign-out or removal that could not be saved, **Try again** repeats it
+  first. Other addresses stay available meanwhile.
+- Like `connect`, it makes the Pod it opens the active one, and leaving with
+  a draft asks first. Under `signIn: 'optional'` a Pod opens without a
+  sign-in page, and the field is ready for the next address.
+- It renders inside `SempodsProvider` with the SDK's appearance and no
+  padding, heading or surface of its own: its group is named **Connect another
+  Pod** (`controls.connectAnother`). Under `signIn: 'none'` it renders nothing,
+  since no other Pod can be added.
+- It always offers another Pod, also where `AppAccess` has `mode="single"`;
+  with `allowedPods` it starts on a permitted Pod not connected yet.
+- Keep `AppAccess` for the first sign-in and the gate. An Escape that closes
+  the chooser's list stays with it, also in a `WorkspacePanel`.
 
 ### One known Pod
 
@@ -1559,6 +1611,11 @@ access loss and toggling keep mounted content and drafts.
   `messages={{ errors: { catalogue: () => '…' } }}` override single texts and
   retranslate in place; other codes keep defaults, so new SDK codes need no
   change.
+- The provider does not touch the page: set `document.documentElement.lang`
+  to `useSdkLocale().language` so screen readers pronounce the app in its
+  language, and with `@sempods/app-ui` wrap the content in its `I18nProvider`
+  with `useSdkLocale().locale`, as the [TODO example](../examples/todo/src/app.tsx)
+  does.
 - RDF text language comes from the field definitions; the UI language never
   changes the RDF slot being edited.
 - Headless: `createLocale(options).error(cause)` and
@@ -1571,7 +1628,10 @@ The leave confirmation is a native modal `<dialog>` (role `alertdialog`) with
 focus, Escape and focus restoration, in the top layer above an app's own
 `showModal()` dialog, which becomes inert. Editors and an inline `AppAccess`
 may live in an app modal under the same provider; keep it mounted while a
-confirmation is pending.
+confirmation is pending. Above an open React Aria overlay (the UI kit's
+`Dialog`, `ScreenDialog` or a popover), the SDK's modal dialogs carry
+`data-react-aria-top-layer`, so the overlay does not mark them or their
+ancestors `inert` and test tools such as Playwright click them directly.
 
 ### Custom layouts without AppAccess
 
@@ -1586,7 +1646,8 @@ from the guarded `useApp()` actions.
   global actions (adding a Pod, choosing another one) and other connections'
   actions enabled. On the restoring connection, show its status and offer no
   sign-in; adding its own Pod address counts as that sign-in. Its sign-out and
-  **Forget** stay available and win over the restoration. While the app
+  **Forget** stay available and win over the restoration. `PodChooser`
+  follows these rules for adding a Pod. While the app
   starts, `starting` is true: show a startup screen or a skeleton (see the
   [startup sequence](#startup-screen-and-static-splash)); while the active
   connection restores later, `access.pending` is true. A

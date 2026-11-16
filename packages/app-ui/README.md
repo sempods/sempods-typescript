@@ -76,6 +76,8 @@ explains the order and which app rules still override SDK rules.
   days. Menu triggers and menu rows show it only for keyboard focus, as
   React Aria's `data-focus-visible` reports it, and a row draws it inside its
   edge; with forced colors, the focused row draws it for pointer focus too.
+  A `Checkbox` draws it on its visible box while its hidden input has
+  keyboard focus, also with forced colors.
   Name the layer in the order statement only to move it; an unlayered
   app rule overrides it;
 - in the layer `app-ui-motion`: without entry and exit animations of popovers,
@@ -262,13 +264,52 @@ the browser gate.
 
 The shadcn/ui components keep shadcn's names and React Aria's props
 (`onPress`, `isDisabled`, `isOpen`, …): `Badge`, `Button`, `LinkButton`,
-`Calendar`, `RangeCalendar`, `Dialog` and its parts, `DropdownMenu` and its
-parts, `Input`, `InputGroup` and its parts, `Combobox` and its parts,
-`Popover` and its parts, `Select` and its parts, `Textarea`, `Toggle`, and
-`ToggleGroup` with `ToggleGroupItem`. `Badge` suits read-only tags. shadcn's
+`Calendar`, `RangeCalendar`, `Checkbox`, `Dialog` and its parts,
+`DropdownMenu` and its parts, `Input`, `InputGroup` and its parts,
+`Combobox` and its parts, `Popover` and its parts, `Select` and its parts,
+`Textarea`, `Toggle`, and `ToggleGroup` with `ToggleGroupItem`. `Badge` suits
+read-only tags. shadcn's
 [aria-nova documentation](https://ui.shadcn.com/docs/components) describes
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
+
+`Checkbox` ticks a list row: a 20px box inside a 44px target, filled with the
+`primary` role and a check mark when selected (a dash while
+`isIndeterminate`), the kit's focus ring for the keyboard, and Space or a press
+to change it. It takes React Aria's `isSelected`, `onChange` and
+`isDisabled`. Name it with `aria-label`, for example `Done: Buy milk` beside
+a title that opens the row, or with `aria-labelledby` pointing at visible
+text; it has no label slot of its own:
+
+```tsx
+// task-row.tsx
+import { Checkbox } from '@sempods/app-ui';
+
+export function TaskRow(props: {
+  readonly title: string;
+  readonly done: boolean;
+  readonly canChange: boolean;
+  readonly toggle: (done: boolean) => void;
+  readonly open: () => void;
+}) {
+  return (
+    <li className="flex min-h-12 items-center gap-3 border-b px-3">
+      <Checkbox
+        aria-label={`Done: ${props.title}`}
+        isSelected={props.done}
+        isDisabled={!props.canChange}
+        onChange={props.toggle}
+      />
+      <button
+        className="min-h-11 flex-1 text-start wrap-anywhere"
+        onClick={props.open}
+      >
+        {props.title}
+      </button>
+    </li>
+  );
+}
+```
 
 The compact `Dialog` names its close buttons (the corner one and
 `DialogFooter`'s `showCloseButton`) with the SDK's "Close" text in the
@@ -626,7 +667,10 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   heading: for two or three choices, such as a View with Zen and List, a
   section shows the current one at once and needs no second layer on a phone.
   A choice's `description` adds a second line ("Can read") that describes it
-  without becoming part of its name. `disabled` on an action or a choice keeps
+  without becoming part of its name. `lang` on a choice or an action marks a
+  label in another language than the page's, such as a language named in
+  itself (`{ label: 'Deutsch', lang: 'de', … }` in an English menu), so
+  assistive technology reads it in that language; the name stays the label. `disabled` on an action or a choice keeps
   it visible but out of reach: a press does nothing and arrow keys skip it.
   `variant="ghost"` shows only the icon until it is hovered, pressed or open,
   for a menu repeated on every row, with the same 44px target. An action's own `icon` is a decorative
