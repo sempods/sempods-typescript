@@ -5,11 +5,16 @@ name: DCO
 # Keep the job id `check`; the ruleset requires that status check.
 on:
   pull_request:
+  # The merge queue needs the check on its merge group too. Its commits are
+  # GitHub's merges of commits this check passed on the pull request, so the
+  # job is skipped there, and a job skipped by its condition reports success.
+  merge_group:
 permissions:
   contents: read
   pull-requests: read
 jobs:
   check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
