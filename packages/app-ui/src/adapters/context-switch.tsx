@@ -18,7 +18,36 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/dropdown-menu.js';
-import { useAdapterTexts } from './texts.js';
+import { useAdapterTexts, type AdapterTexts } from './texts.js';
+
+/**
+ * The app's own wording, already in its current language. Each one replaces
+ * a generic message that says "context", so an app can name its Contexts
+ * ("Liste", "Listen") with the gender and plural its language needs; an
+ * omitted one keeps the adapter's English or German default.
+ */
+export interface ContextSwitchTexts {
+  /** The sharing action, e.g. "Share more lists …". */
+  readonly shareMore?: string;
+  /** The trigger's second line while nothing is selected. */
+  readonly chooseContext?: string;
+  /** A Pod whose Contexts are still loading. */
+  readonly contextsLoading?: string;
+  /** A Pod whose Contexts could not be loaded. */
+  readonly contextsFailed?: string;
+  /** A ready Pod that shares no readable Context. */
+  readonly contextsEmpty?: string;
+  /** A retained Context that cannot be selected now. */
+  readonly switchUnavailable?: string;
+  /** A sharing or sign-in action that did not complete. */
+  readonly actionNotCompleted?: string;
+  /** The menu without any connected Pod. */
+  readonly noPods?: string;
+  /** The action that shows the exact addresses. */
+  readonly showAddresses?: string;
+  /** The name of the address region. */
+  readonly addresses?: string;
+}
 
 export interface ContextSwitchProps {
   /** App name; kept as an h1 for screen readers when a Context is selected. */
@@ -29,8 +58,11 @@ export interface ContextSwitchProps {
   readonly icon?: ReactNode;
   /** Optional configured Pod names, keyed by exact Pod URL; no extra requests. */
   readonly podNames?: Readonly<Record<string, string>>;
-  /** Domain wording only; generic feedback and recovery belong to the adapter. */
-  readonly texts?: { readonly shareMore?: string };
+  /**
+   * The app's word for its Contexts in the adapter's messages; recovery and
+   * Pod feedback stay the adapter's.
+   */
+  readonly texts?: ContextSwitchTexts;
 }
 
 /**
@@ -53,11 +85,11 @@ export function ContextSwitch({
   const actions = useApp();
   const { signIn, activeId } = useAppState();
   const { messages, error } = useSdkLocale();
-  const t = useAdapterTexts();
+  const t = withTexts(useAdapterTexts(), texts);
   const noun = label ?? t.context;
   const selected = lists.selected;
   const activePod = lists.pods.find((pod) => pod.connectionId === activeId);
-  const shareLabel = texts?.shareMore ?? t.shareContexts;
+  const shareLabel = t.shareContexts;
   const shareEmpty = (pod: PodContextGroup) =>
     signIn !== 'none' && pod.status === 'ready' && pod.choices.length === 0;
   const shareActive = active.canShare && activePod && !shareEmpty(activePod);
@@ -352,4 +384,15 @@ export function ContextSwitch({
       )}
     </div>
   );
+}
+
+// An app's supplied wording over the defaults; an omitted key keeps its default.
+function withTexts(
+  defaults: AdapterTexts,
+  { shareMore, ...texts }: ContextSwitchTexts = {},
+): AdapterTexts {
+  const own = Object.entries({ shareContexts: shareMore, ...texts }).filter(
+    ([, text]) => text !== undefined,
+  );
+  return { ...defaults, ...Object.fromEntries(own) };
 }
