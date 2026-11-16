@@ -4932,6 +4932,8 @@ async function contexts({ browser, origin }) {
   });
   const trigger = () => page.getByRole('button', { name: /^List:/ });
   const results = [];
+  // The step that runs, so that a timeout names the wait it ended in.
+  let step = 'sign-in';
   try {
     await signIn(page, origin, '/?screen=contexts&lang=de', { choose: false });
     await page
@@ -4942,6 +4944,7 @@ async function contexts({ browser, origin }) {
       .getByRole('button', { name: 'List: Einkaufsliste · Familie/' })
       .waitFor();
     for (const scheme of ['light', 'dark']) {
+      step = `grouped-${scheme}`;
       await page.emulateMedia({ colorScheme: scheme });
       await trigger().focus();
       await page.keyboard.press('Enter');
@@ -4970,6 +4973,7 @@ async function contexts({ browser, origin }) {
             .count()) === 1,
         geometry,
       });
+      step = `escape-${scheme}`;
       await page.keyboard.press('Escape');
       await page.waitForFunction(() =>
         document.activeElement?.getAttribute('aria-label')?.startsWith('List:'),
@@ -4979,6 +4983,7 @@ async function contexts({ browser, origin }) {
         pass: await trigger().evaluate((el) => el === document.activeElement),
       });
     }
+    step = 'address-keyboard-scroll: focus on the address region';
     await page.setViewportSize({ width: 375, height: 400 });
     await trigger().click();
     await page
@@ -4992,20 +4997,28 @@ async function contexts({ browser, origin }) {
     await page.waitForFunction(
       () => document.activeElement?.getAttribute('role') === 'region',
     );
+    // Chromium scrolls on the compositor, with the scroll range of the last
+    // frame it received: an End in the frame that shows the addresses stops
+    // where the menu ended without them (#332).
+    await settle(page);
+    step = 'address-keyboard-scroll: final address in view after End';
     await page.keyboard.press('End');
-    // Native scroll is animated on some engines: wait for the final address,
-    // not merely for a rendered element below the viewport.
+    // Native scroll is animated on some engines: wait for the end of the
+    // popup and the final address, not merely for a rendered element below
+    // the viewport. Focusing the region already scrolls most of it in view.
     await page.waitForFunction(() => {
       const region = document.querySelector('[role=region][tabindex="0"]');
       const last = region?.querySelector('dl:last-child dd:last-child');
-      if (!region || !last) return false;
+      const scroller = region?.closest('[role="dialog"]');
+      if (!region || !last || !scroller) return false;
       const r = region.getBoundingClientRect(),
         d = last.getBoundingClientRect(),
-        popup = region.closest('[role="dialog"]')?.getBoundingClientRect();
+        popup = scroller.getBoundingClientRect();
       return (
-        d.bottom <=
-          Math.min(r.bottom, popup?.bottom ?? innerHeight, innerHeight) + 1 &&
-        d.top >= Math.max(r.top, popup?.top ?? 0, 0)
+        scroller.scrollTop >=
+          scroller.scrollHeight - scroller.clientHeight - 1 &&
+        d.bottom <= Math.min(r.bottom, popup.bottom, innerHeight) + 1 &&
+        d.top >= Math.max(r.top, popup.top, 0)
       );
     });
     results.push({
@@ -5023,6 +5036,7 @@ async function contexts({ browser, origin }) {
           .filter({ hasText: origin + '/bob/_system/contexts/work' })
           .isVisible()),
     });
+    step = 'declined-cross-pod-draft';
     await page.keyboard.press('Escape');
     await page.waitForFunction(() =>
       document.activeElement?.getAttribute('aria-label')?.startsWith('List:'),
@@ -5043,6 +5057,7 @@ async function contexts({ browser, origin }) {
         (await page.getByLabel('target').textContent()).includes('/bob/') &&
         (await page.getByLabel('draft').textContent()) === 'dirty',
     });
+    step = 'accepted-cross-pod-draft';
     await trigger().click();
     await page
       .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
@@ -5057,6 +5072,7 @@ async function contexts({ browser, origin }) {
         (await page.getByLabel('target').textContent()).includes('/alice/') &&
         (await page.getByLabel('draft').textContent()) === 'clean',
     });
+    step = 'partial-failure';
     failed = true;
     await page.getByRole('button', { name: 'Reload second Pod' }).click();
     await trigger().click();
@@ -5069,6 +5085,7 @@ async function contexts({ browser, origin }) {
         (await page.getByRole('menuitemradio', { disabled: false }).count()) ===
           2,
     });
+    step = 'per-pod-retry';
     failed = false;
     await page.getByRole('menuitem', { name: /Familie/ }).click();
     await page
@@ -5083,6 +5100,7 @@ async function contexts({ browser, origin }) {
         (await page.getByRole('menuitemradio', { disabled: true }).count()) ===
         0,
     });
+    step = 'read-only-target';
     await page
       .getByRole('menuitemradio')
       .filter({ hasText: 'Familie/ · Nur lesen' })
@@ -5098,6 +5116,7 @@ async function contexts({ browser, origin }) {
         '/personal',
       ),
     });
+    step = 'one-group-per-ready-or-empty-pod';
     await trigger().click();
     await page
       .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
@@ -5126,6 +5145,7 @@ async function contexts({ browser, origin }) {
       name: 'Weitere Kontexte freigeben …: Familie/',
       exact: true,
     });
+    step = 'empty-pod-sharing-keeps-declined-draft';
     // A dirty draft must still guard sharing on the inactive empty Pod.
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Keep a draft' }).click();
@@ -5140,6 +5160,7 @@ async function contexts({ browser, origin }) {
         (await page.getByLabel('target').textContent()).includes('/alice/') &&
         (await page.getByLabel('draft').textContent()) === 'dirty',
     });
+    step = 'share-empty-inactive-pod';
     await trigger().click();
     await share.click();
     emptyBob = false;
@@ -5163,11 +5184,20 @@ async function contexts({ browser, origin }) {
     results.push({
       id: 'chooser-journey',
       pass: false,
+      step,
       error: String(error),
       details: await page.evaluate(() => {
         const region = document.querySelector('[role=region][tabindex="0"]');
         const last = region?.querySelector('dl:last-child dd:last-child');
+        const popup = region?.closest('[role="dialog"]');
         return {
+          viewport: { width: innerWidth, height: innerHeight },
+          popup: popup && {
+            ...popup.getBoundingClientRect().toJSON(),
+            scroll: popup.scrollTop,
+            scrollHeight: popup.scrollHeight,
+            clientHeight: popup.clientHeight,
+          },
           focus: document.activeElement?.outerHTML.slice(0, 250),
           items: Array.from(document.querySelectorAll('[role="menuitem"]')).map(
             (el) => ({
