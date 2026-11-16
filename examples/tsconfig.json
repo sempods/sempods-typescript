@@ -4,8 +4,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"],
-    "exactOptionalPropertyTypes": false
+    "types": ["node"]
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["todo/src/app.tsx", "todo/src/main.tsx"]
 }

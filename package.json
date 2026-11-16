@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc -b && node scripts/package-docs.mjs",
-    "typecheck": "pnpm build && tsc -p packages/client-sdk/tsconfig.node.json && tsc -p packages/client-sdk/tsconfig.browser.json && tsc -p tsconfig.tests.json && tsc -p tsconfig.todo-tests.json && tsc -p packages/app-ui/tsconfig.tests.json && tsc -p examples/tsconfig.json",
+    "typecheck": "pnpm build && tsc -p packages/client-sdk/tsconfig.node.json && tsc -p packages/client-sdk/tsconfig.browser.json && tsc -p tsconfig.tests.json && tsc -p tsconfig.todo-tests.json && tsc -p packages/app-ui/tsconfig.tests.json && tsc -p examples/tsconfig.json && tsc -p examples/todo/src/tsconfig.json",
     "test": "vitest run",
     "test:consumers": "pnpm build && node scripts/test-consumers.mjs",
     "lint": "eslint packages scripts tests examples eslint.config.mjs vitest.config.ts",
@@ -19,7 +19,7 @@
     "check:base": "pnpm format:check && pnpm lint && pnpm check:docs && pnpm typecheck && pnpm test && pnpm test:publish && pnpm test:consumers && pnpm test:runtime && pnpm test:todo",
     "test:runtime": "pnpm build && node scripts/test-runtime-consumer.mjs",
     "dev:todo": "pnpm build && node scripts/dev-todo.mjs",
-    "build:examples": "tsc -p examples/tsconfig.json && esbuild examples/node-script/src/main.ts --bundle --platform=node --format=esm --outfile=examples/node-script/dist/main.js",
+    "build:examples": "tsc -p examples/tsconfig.json && tsc -p examples/todo/src/tsconfig.json && esbuild examples/node-script/src/main.ts --bundle --platform=node --format=esm --outfile=examples/node-script/dist/main.js",
     "test:todo": "pnpm build && node scripts/test-todo-consumer.mjs",
     "test:publish": "node scripts/test-publish-packages.mjs",
     "check:docs": "node --test scripts/check-docs.test.mjs scripts/package-docs.test.mjs && node scripts/check-docs.mjs",

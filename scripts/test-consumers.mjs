@@ -162,17 +162,22 @@ try {
     checkReference(join(withReact, 'node_modules/@sempods/app-sdk')),
     [],
   );
-  // The shipped examples type-check with their own shipped config against the
-  // installed packages; nothing outside the package is needed.
-  run(
-    process.execPath,
-    [
-      join(withReact, 'node_modules/typescript/bin/tsc'),
-      '-p',
-      'node_modules/@sempods/app-sdk/examples/tsconfig.json',
-    ],
-    withReact,
-  );
+  // The shipped examples type-check with their own shipped configs against
+  // the installed packages; nothing outside the package is needed. The TODO
+  // screen on the UI kit has its own, without exactOptionalPropertyTypes.
+  for (const config of [
+    'examples/tsconfig.json',
+    'examples/todo/src/tsconfig.json',
+  ])
+    run(
+      process.execPath,
+      [
+        join(withReact, 'node_modules/typescript/bin/tsc'),
+        '-p',
+        `node_modules/@sempods/app-sdk/${config}`,
+      ],
+      withReact,
+    );
   const strict = {
     target: 'ES2022',
     strict: true,

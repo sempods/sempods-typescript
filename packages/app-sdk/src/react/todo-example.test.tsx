@@ -334,11 +334,7 @@ it('the TODO header names a single list and offers no other', async () => {
   render(<TodoApp runtime={session.runtime} />);
   expect(await screen.findByText(text.en.empty)).toBeTruthy();
   const menu = await openLists(/^List: work · /);
-  expect(
-    within(menu)
-      .getAllByRole('menuitemradio')
-      .map((item) => item.getAttribute('data-key') ?? item.textContent),
-  ).toHaveLength(1);
+  expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(1);
 });
 
 it('the TODO header says when sharing more lists cannot reach the Pod', async () => {

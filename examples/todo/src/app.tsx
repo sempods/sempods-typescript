@@ -356,13 +356,13 @@ function StandardScreen({
           />
         </header>
       )}
-      {/* Startup, sign-in (with the language before it), the list choice,
-          prompts and, from the menu, Pods & sharing. */}
+      {/* Startup, sign-in (with the language before it), the list
+          catalogue's loading and failure states, prompts and, from the menu,
+          Pods & sharing. The header's switch chooses the list. */}
       <AppAccess
         appName="TODO"
         icon={icon}
         description={m.description}
-        headingLevel={header ? 2 : 1}
         mode="single"
         open={open}
         onClose={() => setOpen(false)}

@@ -18,8 +18,9 @@ screens in your own app, set up the kit as its README describes, copy
 `src/domain.ts` and `src/app.tsx` into its `src/`, and render
 `<TodoApp runtime={runtime} />` from your entry with the runtime configuration
 shown in `src/main.tsx`. The shipped `package.json` names the exact SDK and kit
-versions the sources belong to. Like the kit, the sources compile without
-`exactOptionalPropertyTypes`, which React Aria's declarations do not support.
+versions the sources belong to. Like the kit, the screen compiles without
+`exactOptionalPropertyTypes`, which React Aria's declarations do not support
+(`src/tsconfig.json`); the other examples keep it.
 An app that already has a host (the template's starter, or any screen with its
 own `SempodsProvider`) does not render `TodoApp`: it brings a second provider
 and its own language state. Reuse `TaskScreen` and `TaskRow` inside the
@@ -40,8 +41,9 @@ for the HTML/manifest setup and the limits of native system bars.
 
 Open `http://127.0.0.1:5173/`; `pnpm dev:todo` builds the stylesheet with
 Tailwind CSS 4. The app uses only the SDK's standard UI and the kit:
-`AppAccess` for the startup screen, sign-in, the list choice, prompts and
-**Pods & sharing**, `ContextSwitch` as the header's list switch, `HeaderMenu`
+`AppAccess` for the startup screen, sign-in, the list catalogue's loading and
+failure states, prompts and **Pods & sharing**, `ContextSwitch` as the
+header's list switch, which also picks the first list, `HeaderMenu`
 for the header menu, `Input` and `ActionButton` for the new task, and
 `ResourceEditor` and `UpdateNotice` for editing and outcomes. The sign-in
 screen's settings (`AppAccess` `settings`) and the header menu pick the

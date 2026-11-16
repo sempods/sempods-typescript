@@ -621,7 +621,8 @@ try {
     assert.equal(writes, before + 1);
     // An unsaved draft asks before the document goes (#201); the SDK's one
     // `beforeunload` listener exists only while it is unsaved. React Aria
-    // (the UI kit) keeps its own, which never asks; count beside it.
+    // (the UI kit) adds a `once` listener of its own that never asks; it is
+    // not counted.
     const cdp = await context.newCDPSession(page);
     async function unloadListeners() {
       const { result } = await cdp.send('Runtime.evaluate', {
@@ -630,16 +631,16 @@ try {
       const { listeners } = await cdp.send('DOMDebugger.getEventListeners', {
         objectId: result.objectId,
       });
-      return listeners.filter((l) => l.type === 'beforeunload').length;
+      return listeners.filter((l) => l.type === 'beforeunload' && !l.once)
+        .length;
     }
-    const idle = await unloadListeners();
-    assert.ok(idle <= 1);
+    assert.equal(await unloadListeners(), 0);
     await page
       .getByRole('button', { name: 'After cache restore', exact: true })
       .click();
     const draft = page.getByLabel('Task', { exact: true });
     await draft.fill('Unsaved draft');
-    assert.equal(await unloadListeners(), idle + 1);
+    assert.equal(await unloadListeners(), 1);
     const prompt = page.waitForEvent('dialog');
     await page.close({ runBeforeUnload: true });
     const dialog = await prompt;
@@ -651,7 +652,7 @@ try {
     // returns from the back/forward cache.
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await draft.waitFor({ state: 'detached' });
-    assert.equal(await unloadListeners(), idle);
+    assert.equal(await unloadListeners(), 0);
     await returnFromCache();
     await page
       .getByRole('button', { name: 'After cache restore', exact: true })
