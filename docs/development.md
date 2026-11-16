@@ -31,7 +31,10 @@ manual runs; it is not part of `pnpm check`, because `typecheck` already compile
 them.
 
 Linux CI runs the same checks in parallel jobs: `pnpm check:base` with Chromium,
-and `pnpm test:ui` once each in Chromium, WebKit and Firefox. The required
+and `pnpm test:ui --lanes=3` once each in Chromium, WebKit and Firefox.
+`--lanes=<n>` (default 1) runs a browser's suites in n lanes side by side,
+longest first, each lane against its own loopback Pod and browser instance;
+locally, `pnpm test:ui --lanes=3` shortens the run too. The required
 status check `Packages and consumers` passes only when all of them do. These
 jobs run in the official Playwright image of the pinned Playwright version
 instead of installing browsers through apt. A Playwright bump must update that

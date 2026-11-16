@@ -3,10 +3,13 @@
 // the reference screen in tests/ui-browser against the packed declarations,
 // builds it with Vite and Tailwind CSS 4 (no @source line, no optimizeDeps
 // hint) and runs the checks of scripts/ui-checks.mjs against a loopback Pod
-// in each browser: Chromium and WebKit, plus Firefox on Linux.
+// in each browser: Chromium and WebKit, plus Firefox on Linux. With --lanes,
+// each browser runs its suites in that many lanes side by side, each lane
+// against its own Pod and browser instance.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod]
+//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod]
+//        [--lanes=<suites at once per browser, default 1>]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
@@ -38,8 +41,28 @@ const browsers = (
 ).split(',');
 const only = option('only')?.split(',');
 const evidence = option('evidence');
+const lanes = Number(option('lanes') ?? 1);
 for (const name of browsers)
   assert.ok(engines[name], `Unknown browser ${name}`);
+for (const suite of only ?? [])
+  assert.ok(suites[suite], `Unknown suite ${suite}`);
+assert.ok(Number.isInteger(lanes) && lanes >= 1, `Invalid --lanes=${lanes}`);
+// Lanes take the longest suites first (seconds in Firefox on CI, 2026-11-16),
+// so no lane is left with a long suite at the end; the rest keep their order.
+const expectedSeconds = {
+  contrast: 71,
+  theme: 57,
+  roundtrip: 30,
+  gate: 24,
+  interaction: 22,
+  routing: 22,
+};
+const selected = Object.keys(suites).filter(
+  (suite) => !only || only.includes(suite),
+);
+const queueOrder = [...selected].sort(
+  (a, b) => (expectedSeconds[b] ?? 0) - (expectedSeconds[a] ?? 0),
+);
 
 const root = process.cwd();
 const execute = promisify(execFile);
@@ -237,7 +260,7 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
   const running = new Map();
   const heartbeat = setInterval(() => {
     const mib = (bytes) => Math.round(bytes / 2 ** 20);
-    for (const [label, { suite, started }] of running)
+    for (const { label, suite, started } of running.values())
       console.log(
         `${label} ${suite} still running after ${Math.round((Date.now() - started) / 1000)}s; ` +
           `free memory ${mib(freemem())} of ${mib(totalmem())} MiB, gate process ${mib(process.memoryUsage().rss)} MiB`,
@@ -262,46 +285,63 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
       }),
     ]).finally(() => clearTimeout(timer));
   };
-  // Browsers run side by side, each against its own Pod (the checks reset it).
+  // Browsers run side by side, and so do the lanes of a browser. Each lane
+  // has its own Pod (the checks reset it) and browser instance, and takes the
+  // next suite of its browser's queue when its previous one ends.
+  const byBrowser = {};
   await Promise.all(
     browsers.map(async (name) => {
-      const pod = await startPod(dist);
-      pods.push(pod);
-      const browser = await engines[name].launch();
-      const label = `${name} ${browser.version()}`;
-      report[label] = {};
-      try {
-        for (const [suite, run] of Object.entries(suites)) {
-          if (only && !only.includes(suite)) continue;
-          // A suite prints its results when it ends; these lines show which
-          // one runs, and for how long.
-          console.log(`${label} ${suite} started`);
-          const started = Date.now();
-          running.set(label, { suite, started });
-          const results = await withinDeadline(
-            label,
-            suite,
-            run({ browser, origin: pod.origin, engine: name }),
-          );
-          running.delete(label);
-          console.log(
-            `${label} ${suite}: ${results.length} checks in ${((Date.now() - started) / 1000).toFixed(1)}s`,
-          );
-          report[label][suite] = results;
-          for (const r of results) {
-            // A check that this engine cannot run names why (`skip`).
-            const mark = r.skip ? '–' : r.pass ? '✓' : '✗';
-            const line = `${label} ${suite} ${mark} ${r.id}${r.timezoneId ? ' ' + r.timezoneId : ''}`;
-            if (r.skip) console.log(`${line} skipped: ${r.skip}`);
-            else console.log(r.pass ? line : `${line} ${JSON.stringify(r)}`);
-            if (!r.pass && !r.skip) failures.push(line);
+      const queue = [...queueOrder];
+      const lane = async () => {
+        const pod = await startPod(dist);
+        pods.push(pod);
+        const browser = await engines[name].launch();
+        const label = `${name} ${browser.version()}`;
+        byBrowser[name] ??= { label, suites: {} };
+        try {
+          for (let suite; (suite = queue.shift());) {
+            // A suite prints its results when it ends; these lines show which
+            // one runs, and for how long.
+            console.log(`${label} ${suite} started`);
+            const started = Date.now();
+            const key = `${name} ${suite}`;
+            running.set(key, { label, suite, started });
+            const checks = await withinDeadline(
+              label,
+              suite,
+              suites[suite]({ browser, origin: pod.origin, engine: name }),
+            );
+            running.delete(key);
+            console.log(
+              `${label} ${suite}: ${checks.length} checks in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+            );
+            byBrowser[name].suites[suite] = checks;
+            for (const r of checks) {
+              // A check that this engine cannot run names why (`skip`).
+              const mark = r.skip ? '–' : r.pass ? '✓' : '✗';
+              const line = `${label} ${suite} ${mark} ${r.id}${r.timezoneId ? ' ' + r.timezoneId : ''}`;
+              if (r.skip) console.log(`${line} skipped: ${r.skip}`);
+              else console.log(r.pass ? line : `${line} ${JSON.stringify(r)}`);
+              if (!r.pass && !r.skip) failures.push(line);
+            }
           }
+        } finally {
+          await browser.close();
         }
-      } finally {
-        await browser.close();
-      }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(lanes, queue.length) }, lane),
+      );
     }),
   );
+  // The report lists browsers and suites in their declared order, whichever
+  // lane ran them.
+  for (const name of browsers) {
+    const { label, suites: ran } = byBrowser[name];
+    report[label] = Object.fromEntries(
+      selected.map((suite) => [suite, ran[suite]]),
+    );
+  }
   if (evidence) {
     await mkdir(evidence, { recursive: true });
     await writeFile(
