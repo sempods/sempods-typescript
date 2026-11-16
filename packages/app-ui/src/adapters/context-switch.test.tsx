@@ -328,6 +328,103 @@ it('tells equal names within one Pod apart by a quieter qualifier, keeping it in
   expect(api.list.select).toHaveBeenCalledWith(second);
 });
 
+it("replaces every generic word for a Context with the app's own", async () => {
+  const texts = {
+    shareMore: 'Share more lists …',
+    chooseContext: 'Choose a list',
+    contextsLoading: 'Loading lists …',
+    contextsFailed: 'Lists could not be loaded.',
+    contextsEmpty: 'No readable lists shared.',
+    switchUnavailable: 'This list is currently unavailable.',
+    actionNotCompleted: 'Your current list is unchanged.',
+    noPods: 'Connect a Pod to choose a list.',
+    showAddresses: 'Show Pod and list addresses',
+    addresses: 'Pod and list addresses',
+  };
+  const generic = /context/i;
+  const switchWith = () =>
+    render(<ContextSwitch title="Groceries" label="List" texts={texts} />);
+  const words = () =>
+    [document.body.textContent, ...visibleNames()].filter(Boolean).join('\n');
+  const visibleNames = () =>
+    [...document.querySelectorAll('[aria-label]')].map((el) =>
+      el.getAttribute('aria-label'),
+    );
+
+  const failed = {
+    ...api.list.pods[1]!,
+    status: 'failed' as const,
+    choices: api.list.pods[1]!.choices.map((c) => ({
+      ...c,
+      selectable: false,
+    })),
+  };
+  api.authorize.mockResolvedValue(false);
+  api.list = {
+    ...api.list,
+    selected: null,
+    pods: [
+      { ...api.list.pods[0]!, status: 'loading', choices: [] },
+      failed,
+      {
+        ...api.list.pods[1]!,
+        connectionId: 'empty',
+        label: 'empty',
+        choices: [],
+      },
+    ],
+  };
+  switchWith();
+  expect(screen.getByText('Choose a list')).toBeTruthy();
+  await open();
+  for (const text of [
+    'Loading lists …',
+    'Lists could not be loaded.',
+    'No readable lists shared.',
+  ])
+    expect(screen.getByText(text)).toBeTruthy();
+  const retained = screen.getByRole('menuitemradio');
+  expect(
+    document.getElementById(retained.getAttribute('aria-describedby')!)
+      ?.textContent,
+  ).toBe('bob · Read only · This list is currently unavailable.');
+  // Before the addresses, whose exact Context IRIs say "contexts".
+  expect(words()).not.toMatch(generic);
+  await press(
+    screen.getByRole('menuitem', { name: 'Show Pod and list addresses' }),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Pod and list addresses' }),
+  ).toBeTruthy();
+  await press(
+    screen.getByRole('menuitem', { name: 'Share more lists …: empty' }),
+  );
+  expect(screen.getByRole('alert').textContent).toBe(
+    'Your current list is unchanged.',
+  );
+  cleanup();
+
+  api.list = { ...api.list, pods: [] };
+  switchWith();
+  await open();
+  expect(screen.getByText('Connect a Pod to choose a list.')).toBeTruthy();
+  expect(words()).not.toMatch(generic);
+});
+
+it('keeps the default wording for messages an app leaves out', async () => {
+  api.list = { ...api.list, selected: null, pods: [] };
+  render(
+    <ContextSwitch
+      title="Groceries"
+      label="List"
+      texts={{ contextsEmpty: 'No readable lists shared.', noPods: undefined }}
+    />,
+  );
+  expect(screen.getByText('Choose a context')).toBeTruthy();
+  await open();
+  expect(screen.getByText('Connect a Pod to choose a context.')).toBeTruthy();
+});
+
 it('shows the Pod under the list name only when there is a second Pod to choose', () => {
   const trigger = () => screen.getByRole('button', { name: /^List:/ });
   const { unmount } = show();
