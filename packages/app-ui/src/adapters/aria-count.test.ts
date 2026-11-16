@@ -29,8 +29,9 @@ const tick = () => new Promise((done) => setTimeout(done, 0));
 
 afterEach(async () => {
   document.body.innerHTML = '';
-  // A count waiting for React Aria's first message ends 150ms later.
-  await new Promise((done) => setTimeout(done, 160));
+  // A count waiting for React Aria's first message ends 100ms after React
+  // Aria creates its region.
+  await new Promise((done) => setTimeout(done, 110));
 });
 
 it('leaves out the one expected count of this commit, nothing else', async () => {
@@ -88,6 +89,30 @@ it('leaves out a count with which React Aria creates its region', async () => {
   say(assertive, '1 option available.');
   await first;
   expect(said(assertive)).toEqual([]);
+});
+
+/** Keeps the page busy, as a slow device between two effects. */
+const busy = (ms: number) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end);
+};
+
+it('leaves out the first count when the page is busy before React Aria creates its region', async () => {
+  expectAriaCount(3, 'en-US');
+  busy(60);
+  const [assertive] = announcer();
+  const first = later(assertive, '3 options available.');
+  await first;
+  expect(said(assertive)).toEqual([]);
+});
+
+it('expects no first count once React Aria did not create its region in that commit', async () => {
+  expectAriaCount(5, 'en-US');
+  await new Promise((done) => setTimeout(done, 110));
+  const [assertive] = announcer();
+  say(assertive, '5 options available.');
+  await tick();
+  expect(said(assertive)).toEqual(['5 options available.']);
 });
 
 it("keeps another message with the number while React Aria's first count waits", async () => {
