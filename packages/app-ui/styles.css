@@ -254,6 +254,13 @@
       outline-offset: 2px;
     }
   }
+  /* A checkbox's focus sits on its visually hidden input: the visible box
+     draws the outline from React Aria's data-focus-visible, which also
+     shows in forced colors, where its ring's box shadow is dropped. */
+  :where([data-slot='checkbox'])[data-focus-visible] {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   /* A suggest field has one focus cue, the outline around the whole field:
      its input draws none of its own, and the field's border and ring stay
      as they are (SuggestField). */

@@ -1368,9 +1368,13 @@ it.each(['required', 'on-demand'] as const)(
         expect(runtime.getSnapshot()[0]?.catalogue.kind).toBe('loading'),
       );
       expect(screen.getByRole('button', { name: 'Check access' })).toBe(check);
-      expect(document.activeElement).toBe(check);
+      // The reload disables the button. After the next rendering update the
+      // focus fixup has moved its focus to the body, as WebKit does (#332).
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       await act(async () => again.resolve());
       await screen.findByRole('combobox', { name: 'Data context' });
+      expect(screen.getByRole('button', { name: 'Check access' })).toBe(check);
+      await waitFor(() => expect(document.activeElement).toBe(check));
       expect(states, outcome).toEqual(['hidden', 'connection']);
       view.unmount();
       runtime.dispose();

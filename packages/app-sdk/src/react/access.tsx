@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -244,6 +245,63 @@ export function AppAccess({
  */
 export function ContextAccess(props: ContextAccessProps) {
   return <AccessSection {...props} manage={false} />;
+}
+
+/** What `PodChooser` receives. */
+export interface PodChooserProps {
+  /** Exact Pod URL → friendly name, as in `AppAccess`. A name never changes the destination. */
+  readonly podNames?: Readonly<Record<string, string>>;
+  /** Editable suggestion for a new address, as in `AppAccess`; default https://sempods.org/. Empty disables it. */
+  readonly podAddressPrefix?: string;
+  readonly className?: string;
+  readonly style?: CSSProperties;
+}
+
+/**
+ * The sign-in's Pod chooser, to add another Pod while signed in: for an app
+ * that reads several Pods at once and places it in its own panel. It is the
+ * gate's field (the address prefix, the saved Pods in its list, **Manage
+ * saved Pods** and help on request) with the same keyboard use and labels,
+ * and the same guarded `useApp` actions. It starts on a new address; a typed
+ * address is cleaned up as in the gate and matched to a saved connection,
+ * which is signed in to again (**Change sharing** for a signed-in one) rather
+ * than added twice. While that Pod restores the action is disabled, and a
+ * failed sign-out or removal is retried here first. Like `connect`, it makes
+ * the Pod it opens the active one. Without sign-in (`signIn: 'none'`) there is
+ * no other Pod to add, and it renders nothing. Render it inside
+ * `SempodsProvider`; it has no heading of its own.
+ */
+export function PodChooser({
+  podNames,
+  podAddressPrefix,
+  className,
+  style,
+}: PodChooserProps) {
+  const { messages: m, direction } = useSdkLocale();
+  const signIn = useAppState().signIn;
+  if (signIn === 'none') return null;
+  return (
+    <div
+      role="group"
+      aria-label={m.controls.connectAnother}
+      data-sempods-access=""
+      data-sempods-ui="access"
+      data-sempods-chooser=""
+      dir={direction}
+      className={className}
+      style={style}
+    >
+      <SdkStyles />
+      <style href="sempods-access" precedence="sempods">
+        {layered(styles)}
+      </style>
+      <SignInConnections
+        adding
+        {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
+        {...(podNames ? { podNames } : {})}
+      />
+    </div>
+  );
 }
 
 function Management({
@@ -851,8 +909,26 @@ function AccessConnections({
     // Without sign-in nothing is stored, on purpose.
     (state.startup.storage !== 'durable' && state.signIn !== 'none') ||
     Boolean(state.startupError);
+  // The control that started the running action. Its own action disables it,
+  // and a disabled control loses the focus in WebKit (the focus fixup rule),
+  // which stays on the body once the control is enabled again (#332).
+  const actionFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const target = actionFocus.current;
+    if (unavailable || !target) return;
+    actionFocus.current = null;
+    // Only a lost focus returns: one the action moved elsewhere stays there.
+    const active = target.ownerDocument.activeElement;
+    if (target.isConnected && (!active || active === target.ownerDocument.body))
+      target.focus();
+  }, [unavailable]);
   async function act(task: () => Promise<unknown>) {
     if (inFlight.current || unavailable) return;
+    const focused = document.activeElement;
+    actionFocus.current =
+      focused instanceof HTMLElement && focused !== document.body
+        ? focused
+        : null;
     inFlight.current = true;
     setBusy(true);
     setFailure(null);
@@ -1413,6 +1489,8 @@ const styles = `
 [data-sempods-access] .sp-access-wide { width:100%; }
 [data-sempods-access] .sp-access-description { font-size:.875rem; color:var(--sp-muted); margin-top:10px; }
 [data-sempods-access] .sp-sign-in { text-align:start; }
+/* PodChooser sits in the app's own panel: no padding or surface of its own. */
+[data-sempods-access][data-sempods-chooser] { padding:0; text-align:start; background:none; }
 [data-sempods-access] .sp-sign-in form { position:relative; }
 [data-sempods-access] .sp-sign-in .sp-access-primary { margin-top:16px; min-height:50px; border-radius:calc(var(--sp-radius) * 1.25); }
 [data-sempods-access] .sp-pod-field { position:relative; }
@@ -1459,6 +1537,13 @@ const styles = `
 .sp-access-settings > * { width:22px; height:22px; }
 .sp-access-settings svg { fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
 .sp-access-settings-content { padding:8px 24px 24px; }
+/* Plain choices in the app's settings: one per 44px row, groups apart. Without
+   specificity of their own, so the app's classes win. */
+.sp-access-settings-content :where(fieldset) { display:grid; min-inline-size:0; margin:0 0 16px; padding:0; border:0; }
+.sp-access-settings-content :where(fieldset:last-child) { margin-block-end:0; }
+.sp-access-settings-content :where(legend) { padding:0; margin-block-end:4px; font-weight:500; }
+.sp-access-settings-content :where(label:has(> input[type=radio], > input[type=checkbox])) { display:flex; align-items:center; gap:12px; min-height:44px; cursor:pointer; }
+.sp-access-settings-content :where(input[type=radio], input[type=checkbox]) { flex:none; width:20px; height:20px; margin:0; accent-color:var(--sp-accent); }
 .sp-access-dialog { width:min(28rem,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; }
 .sp-access-dialog-header { display:flex; align-items:center; gap:8px; padding:12px 12px 0 24px; }
 .sp-access-dialog-header h2 { flex:1; margin:0; }

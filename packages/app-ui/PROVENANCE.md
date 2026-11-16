@@ -12,9 +12,20 @@ were taken on 2026-11-02 from the same style's registry
 (`https://ui.shadcn.com/r/styles/aria-nova/<name>.json`) for chips
 (sempods/sempods-typescript#216), with the same mechanical changes and no
 others. `combobox` was taken on 2026-11-11 from the same registry for
-suggestion fields (sempods/sempods-apps-template#144).
+suggestion fields (sempods/sempods-apps-template#144). `checkbox` was taken
+on 2026-11-16 from the same registry for ticking list rows
+(sempods/sempods-typescript#337).
 
 Changes against the registry output:
+
+- `checkbox.tsx`: a 20px box (`size-5`, registry `size-4`) inside a 44px
+  target (`after:-inset-[13px]` from inside the 1px border, registry
+  `after:-inset-x-3 after:-inset-y-2`),
+  so a row's tick meets the kit's touch target; the check mark is lucide's
+  `CheckIcon` at 16px, hidden from assistive technology, and an
+  indeterminate box shows `MinusIcon` on the primary surface (the registry
+  shows the check mark for both); `cursor-pointer`. The registry's
+  `"use client"` and icon placeholder are dropped, as for the other files.
 
 - `button.tsx`: the `default` and `secondary` variants read the contract's
   action tokens (`bg-action`, `border-action-border`, `text-action-foreground`,
