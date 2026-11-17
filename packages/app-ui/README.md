@@ -410,6 +410,60 @@ export function QuickEdit({
 }
 ```
 
+A short confirmation of the app's own operation, for example clearing the
+bought items of a list, needs no component of its own: a `Dialog` with a
+`DialogFooter` that holds two `DialogClose` buttons, Cancel first and the
+answer with `variant="default"` and its `onPress` last. Both close the dialog.
+The footer keeps its actions in one row in that order at every width, as the
+SDK's confirmations do: Cancel left, the answer right. Actions that do not fit
+side by side wrap to another row, and a label wraps only when its action
+alone is too wide; each button is a 44px target, and `ActionButton` pills
+keep their 56px there. A long name in the dialog breaks inside it. The SDK's
+own questions, such as `RemoveButton`'s and an editor's, stay the SDK's.
+
+```tsx
+// confirm-dialog.tsx
+import type { ReactNode } from 'react';
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@sempods/app-ui';
+
+export function ConfirmDialog(props: {
+  readonly isOpen: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly title: string;
+  readonly children: ReactNode;
+  readonly cancel: string;
+  readonly confirm: string;
+  readonly onConfirm: () => void;
+}) {
+  return (
+    <Dialog
+      isOpen={props.isOpen}
+      onOpenChange={props.onOpenChange}
+      // Cancel is the way out; Escape and a press beside it still cancel.
+      showCloseButton={false}
+    >
+      <DialogHeader>
+        <DialogTitle>{props.title}</DialogTitle>
+        <DialogDescription>{props.children}</DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <DialogClose>{props.cancel}</DialogClose>
+        <DialogClose variant="default" onPress={props.onConfirm}>
+          {props.confirm}
+        </DialogClose>
+      </DialogFooter>
+    </Dialog>
+  );
+}
+```
+
 React Aria gives the components their locale: the order of typeahead,
 number and date formats, the reading direction and the texts it announces
 itself. Without a provider they follow the browser, so an app wraps its

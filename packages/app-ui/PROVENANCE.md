@@ -63,6 +63,14 @@ Changes against the registry output:
   `icon-sm` box at `top-2 right-2`; while it shows, a `DialogHeader` or
   `DialogTitle` that is a direct child keeps `pr-10` clear of it
   (sempods/sempods-typescript#288). The `icon-sm` button size is unchanged.
+- `dialog.tsx`: `DialogFooter` is one wrapping row in document order at
+  every width (`flex flex-wrap justify-end`, registry `flex flex-col-reverse`
+  and `sm:flex-row sm:justify-end`), as the SDK's confirmations; a button
+  or `DialogClose` directly in it is at least 44px high, a `pill` 56px, at most as wide as the
+  footer and wraps its label (`h-auto`, `py-1`, `whitespace-normal`,
+  `text-center`). `Dialog`'s content and inner dialog have one
+  `minmax(0,1fr)` column (`grid-cols-1`) and `wrap-anywhere`, so a long label
+  or name cannot widen them (sempods/sempods-typescript#368).
 - `calendar.tsx`: without the registry's `showWeekNumber` option, which only
   shifted the cells' rounding: React Aria renders no week-number column.
 - `calendar.tsx`: with `captionLayout="dropdown"` and several months, only
