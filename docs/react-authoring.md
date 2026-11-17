@@ -707,8 +707,10 @@ or fewer. Signing in and changing sharing are separate requests:
   startups do not.
 
 The standard controls already change sharing: **Change sharing** in
-[`AppAccess` management](#pods--sharing-management) and in the gate when
-required feature scopes are missing, **Share more …** in
+[`AppAccess` management](#pods--sharing-management), in the gate when
+required feature scopes are missing and in
+[`PodChooser`](#adding-another-pod-while-signed-in) for a Pod already signed
+in, **Share more …** in
 [`ContextSwitch`](#one-chooser-across-pods) for the active Pod and for a Pod
 without readable Contexts, and `useContexts().share()` for an own control.
 Their **Sign in** entries stay sign-ins. For another connection, or your own
@@ -720,14 +722,15 @@ import { useApp, useAppState, useSdkLocale } from '@sempods/app-sdk/react';
 
 export function ShareAnotherList({ connectionId }: { connectionId: string }) {
   const app = useApp();
-  const { changing, confirmingLeave, signIn } = useAppState();
+  const { changing, confirmingLeave, signIn, startup } = useAppState();
   const { error } = useSdkLocale();
   const [problem, setProblem] = useState<string | null>(null);
   if (signIn === 'none') return null;
   return (
     <>
       <button
-        disabled={changing || confirmingLeave}
+        // Until startup storage is durable, no sign-in can be prepared.
+        disabled={changing || confirmingLeave || startup?.storage !== 'durable'}
         onClick={() => {
           setProblem(null);
           app

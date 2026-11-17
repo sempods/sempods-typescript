@@ -114,6 +114,8 @@ it('ends an expired grant at restoration when its renewal is refused, never acti
     kind: 'ended',
   });
   expect(r.runtime.getSnapshot()[0]?.session).not.toHaveProperty('restorable');
+  // Recovery is the person's sign-in, never an authorization redirect (#362).
+  expect(r.f.navigate).toHaveBeenCalledTimes(1);
   // Retired as at a first request: the address stays, signed out next time.
   await vi.waitFor(async () =>
     expect((await savedRecords(r.f.factory))[0]).toMatchObject({

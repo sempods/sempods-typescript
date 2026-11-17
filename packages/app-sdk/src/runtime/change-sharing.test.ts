@@ -139,18 +139,6 @@ it('restores and renews a saved session at startup without authorizing, also aft
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
 });
 
-it('keeps the existing recovery when a saved session cannot be restored', async () => {
-  const { f, runtime } = await signedIn();
-  const navigations = f.navigate.mock.calls.length;
-  f.setToken(async () =>
-    Response.json({ error: 'invalid_grant' }, { status: 400 }),
-  );
-  vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 2 * 3600_000);
-  const next = await startup(f, runtime);
-  expect(next.getSnapshot()[0]?.session).toMatchObject({ kind: 'ended' });
-  expect(f.navigate).toHaveBeenCalledTimes(navigations);
-});
-
 it('rejects an unknown intent before any request or change', async () => {
   const { f, runtime, id } = await signedIn();
   const requests = f.fetch.mock.calls.length;

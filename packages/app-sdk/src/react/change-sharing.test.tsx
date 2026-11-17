@@ -13,6 +13,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import {
   AppAccess,
@@ -22,7 +23,13 @@ import {
   useContexts,
 } from './index.js';
 import { createAppController, runAccessAction } from '../authoring/app.js';
-import { fixture, pod, settleLease } from '../runtime/fixture.test.js';
+import {
+  catalogue,
+  fixture,
+  pod,
+  settleLease,
+  work,
+} from '../runtime/fixture.test.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 
 const cleanups: (() => void)[] = [];
@@ -145,7 +152,7 @@ it("asks for consent from a missing-scopes prompt's action", async () => {
   expect(prompt(f)).toBe('consent');
 });
 
-it('signs in to a signed-out Pod from management without asking for consent', async () => {
+it("signs in to a signed-out Pod from the gate's Sign in without asking for consent", async () => {
   const f = fixture();
   const logged = await f.login();
   cleanups.push(() => logged.runtime.dispose());
@@ -164,3 +171,49 @@ it('signs in to a signed-out Pod from management without asking for consent', as
   await leaves(f, navigations);
   expect(prompt(f)).toBeNull();
 });
+
+it.each(['saved Pod', 'Pod read without a token'] as const)(
+  "signs in from management's Sign in for a %s without asking for consent",
+  async (kind) => {
+    let f: ReturnType<typeof fixture>;
+    let runtime: BrowserRuntime;
+    if (kind === 'saved Pod') {
+      // Signed in to Alice; Bob is listed on this device, never signed in.
+      f = fixture({ allowedPods: [pod, 'https://pod.example/bob'] });
+      const logged = await f.login();
+      runtime = logged.runtime;
+      await runtime.connect('https://pod.example/bob');
+    } else {
+      // The active Pod reads without a token; management offers Sign in.
+      f = fixture({
+        preferences: null,
+        signIn: 'optional',
+        preset: { podUrl: pod },
+      });
+      f.setCatalogue(async () => catalogue([work], []));
+      runtime = f.runtime;
+    }
+    cleanups.push(() => runtime.dispose());
+    render(
+      <SempodsProvider runtime={runtime}>
+        <AppAccess appName="Tasks" open />
+      </SempodsProvider>,
+    );
+    const area = await screen.findByRole('region', { name: 'Pods & sharing' });
+    const button = await waitFor(() => {
+      const scope =
+        kind === 'saved Pod'
+          ? within(area).getByRole('list', { name: 'Pods on this device' })
+          : area;
+      const found = within(scope).getByRole<HTMLButtonElement>('button', {
+        name: 'Sign in',
+      });
+      expect(found.disabled).toBe(false);
+      return found;
+    });
+    const navigations = f.navigate.mock.calls.length;
+    await act(async () => fireEvent.click(button));
+    await leaves(f, navigations);
+    expect(prompt(f)).toBeNull();
+  },
+);
