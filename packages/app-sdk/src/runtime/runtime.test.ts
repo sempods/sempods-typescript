@@ -661,3 +661,24 @@ it('reports an unsupported record independently of a valid restored session', as
   expect(next.getSnapshot()[0]?.session.kind).toBe('active');
   expect((await store!.read('future-version'))?.value).toEqual({ version: 99 });
 });
+
+it("passes a bound view's SELECT through the client Context downscope", async () => {
+  const f = await logged();
+  const urls: URL[] = [];
+  f.setQuery(async (url) => {
+    urls.push(new URL(String(url)));
+    return new Response(
+      JSON.stringify({ head: { vars: ['x'] }, results: { bindings: [] } }),
+      { headers: { 'content-type': 'application/sparql-results+json' } },
+    );
+  });
+  expect(await f.view.sparql.select('SELECT ?x WHERE { ?x ?p ?o }')).toEqual({
+    kind: 'ok',
+    body: { variables: ['x'], rows: [] },
+  });
+  expect(urls).toHaveLength(1);
+  expect([...urls[0]!.searchParams]).toEqual([
+    ['default-graph-uri', f.view.contextIri],
+    ['named-graph-uri', f.view.contextIri],
+  ]);
+});

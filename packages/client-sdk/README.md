@@ -2,7 +2,7 @@
 
 Portable browser/Node protocol primitives. Current supported exports:
 
-- `.`: `createPod`, Pod SELECT/CONSTRUCT and Find, context reads/writes, `bearer`/`anonymous`, `PodAuth`,
+- `.`: `createPod`, Pod and Context SELECT/CONSTRUCT, Find, context reads/writes, `bearer`/`anonymous`, `PodAuth`,
   `decodeCatalogue`, `isContextIri`, result/failure and transport types. Membership never implies
   context access.
 - `./oauth`: `discoverPod`, `createClientRegistry`, `prepareAuthorization`,
@@ -252,7 +252,42 @@ Supported operations:
 | `pod.sparql.select(query)`                    | `POST {pod}/_system/sparql/query`, accepts SPARQL Results JSON; no SDK-added dataset parameters     | `ok` (`SelectResult`) · `refused` · `cancelled` · `stopped`                                                                      |
 | `pod.sparql.construct(query)`                 | Same route, accepts JSON-LD; no SDK-added dataset parameters                                        | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `view.sparql.construct(query)`                | `POST {pod}/_system/sparql/query` with `default-graph-uri` and `named-graph-uri` = the view context | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
+| `view.sparql.select(query)`                   | Same route and dataset parameters, accepts SPARQL Results JSON                                      | `ok` (`SelectResult`) · `refused` · `cancelled` · `stopped`                                                                      |
 | `pod.find(text, options)`                     | `POST {pod}/_system/find` (JSON body, `include_contexts: true`); accepts JSON-LD                    | `ok` (`FindGraph` per source Context) · `refused` · `cancelled` · `stopped`                                                      |
+
+### Querying one Context
+
+`view.sparql.select()` and `view.sparql.construct()` ask the Pod to evaluate
+the query against the view's Context only. Every dispatch, including an
+authentication retry, sets `default-graph-uri` and `named-graph-uri` to that
+Context; the query text is sent unchanged. A Pod that does not support this
+downscope may answer `400`; the call then rejects with `http`, and the SDK
+never retries the query unscoped. Whether a Pod may instead ignore the
+parameters is still open (SPS-SPARQL-011,
+[sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129)); the
+SDK cannot tell that from the answer. An empty result is a valid `ok`. SELECT results decode as described under
+[Reading across the Pod](#reading-across-the-pod).
+
+```ts
+import type { ContextView } from '@sempods/client-sdk';
+
+export async function openTasks(tasks: ContextView, signal: AbortSignal) {
+  return tasks.sparql.select(
+    `
+    PREFIX schema: <https://schema.org/>
+    SELECT ?task ?title WHERE { ?task a schema:Action ; schema:name ?title }
+  `,
+    { signal },
+  );
+}
+```
+
+A view covers one Context. To query several Contexts of one Pod, query each
+view, or write a Pod query whose own text limits the graphs, for example
+`GRAPH ?g { … } VALUES ?g { <context-a> <context-b> }`. Only the server's
+dataset parameters bound a query; a `VALUES` restriction holds only for query
+text the app wrote itself. Text from elsewhere, such as an agent, can still
+reach beyond it, for example through `FROM`, `SERVICE` or another graph pattern.
 
 ### One value at a time
 
@@ -412,7 +447,7 @@ not silently emulated:
 | LOD addresses (`{pod}/{path}`)                                     | SPS-CRUD-001–004, §4                 | The system route serves the same resource (SPS-CRUD-002)                              |
 | Union or multi-context CRUD reads (no or repeated `?context=`)     | SPS-CRUD-014–017                     | Use Pod SPARQL for cross-Context queries; CRUD stays Context-bound                    |
 | `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -057, -058 | JSON-LD only; no provenance per value, also not on a slot read                        |
-| SPARQL ASK                                                         | `sparql.md`                          | Pod SELECT/CONSTRUCT or Context CONSTRUCT                                             |
+| SPARQL ASK                                                         | `sparql.md`                          | Pod or Context SELECT/CONSTRUCT                                                       |
 | The Find `type` filter, the flat Find form and N-Quads             | SPS-FIND-006–008, -018, -020         | `pod.find` always asks for the Context-grouped JSON-LD form                           |
 | Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`             | Out of scope for the client                                                           |
 | Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                          | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |

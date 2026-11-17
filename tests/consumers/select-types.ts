@@ -84,8 +84,8 @@ export function loaders(view: BoundView, pod: BoundPod) {
   const scoped = createViewLoader(view, (target, signal) => {
     const context: BoundView = target;
     void context;
-    // @ts-expect-error A Context callback does not acquire Pod SELECT operations.
-    void target.sparql.select;
+    // @ts-expect-error A Context callback does not acquire the Pod's Find.
+    void target.find;
     return target.sparql.construct('CONSTRUCT {} WHERE {}', { signal });
   });
   const overview = createViewLoader(pod, (target, signal) => {
