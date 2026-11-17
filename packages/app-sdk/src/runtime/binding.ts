@@ -3,6 +3,7 @@ import type {
   JsonLd,
   QueryResult,
   ReadOptions,
+  SelectResult,
   WriteResult,
   Cancelled,
   Stopped,
@@ -180,7 +181,10 @@ export function bindView(
     beforeDispatch: () => permission(true),
   });
   async function read<
-    R extends GetResult<JsonLd> | QueryResult<readonly JsonLd[]>,
+    R extends
+      | GetResult<JsonLd>
+      | QueryResult<readonly JsonLd[]>
+      | QueryResult<SelectResult>,
   >(
     action: () => Promise<R>,
     options?: ReadOptions,
@@ -267,6 +271,8 @@ export function bindView(
         write(() => writes.subjects.delete(iri, condition, options), options),
     }),
     sparql: Object.freeze({
+      select: (query, options) =>
+        read(() => reads.sparql.select(query, options), options),
       construct: (query, options) =>
         read(() => reads.sparql.construct(query, options), options),
     }),

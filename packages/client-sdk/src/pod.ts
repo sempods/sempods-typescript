@@ -183,11 +183,19 @@ export interface SubjectOperations {
   ): Promise<WriteResult>;
 }
 
+/**
+ * Queries downscoped to this Context: every dispatch, including an
+ * authentication retry, sends `default-graph-uri` and `named-graph-uri` set to
+ * it, and the query text unchanged. Never retried unscoped; an unsupported
+ * downscope (for example `400`) is a failure, and an empty result is a valid `ok`.
+ */
 export interface SparqlOperations {
-  /**
-   * Sends both dataset parameters for this Context; never retries unscoped.
-   * An unsupported downscope is a failure, and an empty result is a valid `ok`.
-   */
+  /** SELECT bindings, decoded as `Pod.sparql.select` decodes them. */
+  select(
+    query: string,
+    options?: ReadOptions,
+  ): Promise<QueryResult<SelectResult>>;
+  /** Expanded JSON-LD nodes, without automatic source-Context provenance. */
   construct(
     query: string,
     options?: ReadOptions,

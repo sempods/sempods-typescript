@@ -89,6 +89,10 @@ export interface BoundView extends Pick<ContextView, 'podUrl' | 'contextIri'> {
     ): Promise<BoundRead<GetResult<JsonLd>>>;
   };
   readonly sparql: {
+    select(
+      query: string,
+      options?: ReadOptions,
+    ): Promise<BoundRead<QueryResult<SelectResult>>>;
     construct(
       query: string,
       options?: ReadOptions,
