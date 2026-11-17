@@ -1,4 +1,5 @@
 import type {
+  AuthorizationIntent,
   BrowserRuntime,
   Connection,
   StartupReport,
@@ -911,9 +912,15 @@ export function createAppController(
     connect(url = defaultPodUrl) {
       return guard(connecting(url));
     },
-    /** Guarded like `selectConnection`; failed retirement rejects with `RuntimeError('storage')` until retried. */
-    authorize(id: string) {
-      return guard(authorizing(id));
+    /**
+     * Signs in to an existing connection, or, with
+     * `{ intent: 'change-sharing' }`, asks its Pod to show the consent page so
+     * the person can change what this app may access (see
+     * `BrowserRuntime.beginAuthorization`). Guarded like `selectConnection`;
+     * failed retirement rejects with `RuntimeError('storage')` until retried.
+     */
+    authorize(id: string, options?: { readonly intent?: AuthorizationIntent }) {
+      return guard(authorizing(id, options?.intent));
     },
     /**
      * Guarded like `selectConnection`. `true` means the action ran, not that
@@ -968,13 +975,15 @@ export function createAppController(
     )
       throw new RuntimeError('storage');
   }
-  function authorizing(id: string) {
+  function authorizing(id: string, intent?: AuthorizationIntent) {
     return async () => {
       callbackNotice = false;
       checkRetirement(
         runtime.getSnapshot().find((connection) => connection.id === id),
       );
-      return runtime.beginAuthorization(id);
+      return intent === undefined
+        ? runtime.beginAuthorization(id)
+        : runtime.beginAuthorization(id, { intent });
     };
   }
   function disconnecting(id: string) {
@@ -1019,7 +1028,15 @@ export function createAppController(
       case 'forget':
         return id ? guarded(forgetting(id)) : false;
       case 'sign-in':
-        if (id) return guarded(authorizing(id));
+        // Missing scopes are granted on the consent page, which a reused
+        // grant would skip.
+        if (id)
+          return guarded(
+            authorizing(
+              id,
+              prompt.reason === 'missing-scopes' ? 'change-sharing' : undefined,
+            ),
+          );
         // Without a fixed address the app asks for one (`connect(url)`).
         return defaultPodUrl === undefined
           ? false

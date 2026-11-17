@@ -660,6 +660,8 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   errors. An empty ready Pod offers sharing directly for that Pod, including
   an inactive one. The general sharing action names the active Pod; sign-in
   and retry actions identify their Pod for assistive technology and typeahead.
+  A sharing action asks the Pod for its consent page, also when it could reuse
+  the grant; a sign-in action may reuse it.
   SDK actions still own draft/pending/unconfirmed-write guards. Apps
   supply domain words and content, not a second catalogue, guard or generic
   recovery UI. `AppAccess` keeps access management and its own focus target.
@@ -1078,6 +1080,12 @@ export function ListMenu({ shareMore }: { readonly shareMore: () => void }) {
   );
 }
 ```
+
+`shareMore` changes sharing: pass `useContexts().share`, or call
+`useApp().authorize(id, { intent: 'change-sharing' })` for a given Pod, so the
+Pod shows its consent page even when it could reuse the grant. A plain
+`authorize(id)` is a sign-in and may return without asking
+([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.2/docs/react-authoring.md#changing-what-the-app-may-access)).
 
 A workspace with a canvas and a filter panel. The canvas keeps its size and
 element while the panel opens and closes, and stays usable beside it:

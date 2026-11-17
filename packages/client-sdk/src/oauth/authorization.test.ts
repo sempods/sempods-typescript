@@ -441,3 +441,36 @@ it('validates portable preparation input before generating any secret', async ()
   const valid = await prepareAuthorization({ pod, client });
   expect(new URL(valid.url).searchParams.has('scope')).toBe(false);
 });
+
+it('asks for the consent page only when prompted, and keeps it out of the attempt', async () => {
+  const plain = await prepareAuthorization({ pod, client, scopes: [] });
+  expect(new URL(plain.url).searchParams.has('prompt')).toBe(false);
+  const asked = await prepareAuthorization(
+    { pod, client, scopes: [] },
+    { prompt: 'consent' },
+  );
+  expect(new URL(asked.url).searchParams.getAll('prompt')).toEqual(['consent']);
+  expect(Object.keys(asked.attempt).sort()).toEqual(
+    Object.keys(plain.attempt).sort(),
+  );
+  // A prompt in the discovered endpoint is never forwarded.
+  const announced = {
+    ...pod,
+    endpoints: {
+      ...pod.endpoints,
+      authorization: pod.endpoints.authorization + '?prompt=none',
+    },
+  };
+  const own = await prepareAuthorization({
+    pod: announced,
+    client,
+    scopes: [],
+  });
+  expect(new URL(own.url).searchParams.has('prompt')).toBe(false);
+  await expect(
+    prepareAuthorization(
+      { pod, client, scopes: [] },
+      { prompt: 'none' as unknown as 'consent' },
+    ),
+  ).rejects.toMatchObject({ problem: 'configuration' });
+});

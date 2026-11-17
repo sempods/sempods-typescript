@@ -656,10 +656,31 @@ it('hides usable/read-only access, keeps drafts through read loss, and guards ex
   expect(
     screen.getByRole('heading', { level: 2, name: 'Pods & sharing' }),
   ).toBeTruthy();
+  const navigations = f.navigate.mock.calls.length;
   fireEvent.click(screen.getByRole('button', { name: 'Change sharing' }));
   expect(await screen.findByRole('alertdialog')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
   expect((draft as HTMLInputElement).value).toBe('Keep this');
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  // Leaving opens the Pod's consent page, even with a reusable grant (#362).
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  fireEvent.click(
+    await waitFor(() => {
+      const button = screen.getByRole<HTMLButtonElement>('button', {
+        name: 'Change sharing',
+      });
+      expect(button.disabled).toBe(false);
+      return button;
+    }),
+  );
+  await screen.findByRole('alertdialog');
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+  expect(
+    new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.get('prompt'),
+  ).toBe('consent');
 });
 
 it('keeps the current target and draft when sign-in preparation for a known other Pod fails', async () => {
@@ -1948,6 +1969,10 @@ it.each(['app', 'management'] as const)(
     await waitFor(() =>
       expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
     );
+    // Management changes sharing; the app's own `authorize(id)` signs in.
+    expect(
+      new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.get('prompt'),
+    ).toBe(from === 'management' ? 'consent' : null);
     await act(async () => {});
     expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('leaving');
     expect(signIns.every((count) => count === 0)).toBe(true);

@@ -230,8 +230,13 @@ Disposing the runtime while a connect waits makes it reject with
 `RuntimeError('disconnected')`, without starting new discovery.
 Connecting alone does not sign in:
 once startup storage is durable and the connection has finished restoring, call
-`beginAuthorization(connection.id)` to sign in or change sharing. React and
-headless authoring use the guarded `app.connect()`, which does both and prefers
+`beginAuthorization(connection.id)` to sign in, or
+`beginAuthorization(connection.id, { intent: 'change-sharing' })` when the
+person asks to change what the app may access: only then does the Pod show its
+consent page although it could reuse the grant (`prompt=consent`). The request
+is not stored, so a later sign-in or startup never inherits it; see
+[changing sharing](react-authoring.md#changing-what-the-app-may-access). React and
+headless authoring use the guarded `app.connect()`, which connects and signs in, and prefers
 an already active matching connection. `PodChooser` relies on this reuse to
 add another Pod while signed in
 ([adding another Pod](react-authoring.md#adding-another-pod-while-signed-in)).
@@ -750,8 +755,8 @@ as it honours the advertised token lifetime. If it refuses an unexpired token
 without a challenge, for example after revocation or a restart that lost its
 tokens, the session stays active and requests return `refused 401` until the
 renewal near the credential's own expiry, or until the session ends as
-`expired` without a refresh token. `beginAuthorization(id)` (**Change sharing**
-in the SDK components) recovers sooner. Pods should answer an expired token
+`expired` without a refresh token. `beginAuthorization(id)` recovers sooner
+(**Change sharing** in the SDK components passes `intent: 'change-sharing'`). Pods should answer an expired token
 with `401` and `WWW-Authenticate: Bearer error="invalid_token"`, and expose that
 header to cross-origin apps.
 The runtime shares one refresh across callers; cancelling one waiter does not

@@ -1,0 +1,166 @@
+// @vitest-environment jsdom
+/**
+ * Which controls change sharing (#362): each one labelled "Change sharing" or
+ * sharing more Contexts asks the Pod for its consent page; a sign-in, also
+ * the app's own `authorize(id)`, may reuse the grant.
+ */
+import { webcrypto } from 'node:crypto';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import {
+  AppAccess,
+  SempodsProvider,
+  useApp,
+  useAppState,
+  useContexts,
+} from './index.js';
+import { createAppController, runAccessAction } from '../authoring/app.js';
+import { fixture, pod, settleLease } from '../runtime/fixture.test.js';
+import type { BrowserRuntime } from '../runtime/types.js';
+
+const cleanups: (() => void)[] = [];
+beforeEach(async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubGlobal(
+    'ArrayBuffer',
+    (await webcrypto.subtle.digest('SHA-256', new Uint8Array())).constructor,
+  );
+});
+afterEach(() => {
+  cleanup();
+  cleanups.splice(0).forEach((fn) => fn());
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+const prompt = (f: ReturnType<typeof fixture>) =>
+  new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.get('prompt');
+async function leaves(f: ReturnType<typeof fixture>, navigations: number) {
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+}
+
+function Custom() {
+  const app = useApp();
+  const { activeId } = useAppState();
+  const lists = useContexts();
+  return (
+    <>
+      <button onClick={() => void app.authorize(activeId!)}>Sign in</button>
+      <button
+        onClick={() =>
+          void app.authorize(activeId!, { intent: 'change-sharing' })
+        }
+      >
+        Share another list
+      </button>
+      <button disabled={!lists.canShare} onClick={() => void lists.share()}>
+        Share more lists
+      </button>
+    </>
+  );
+}
+
+it.each([
+  ['Sign in', null],
+  ['Share another list', 'consent'],
+  ['Share more lists', 'consent'],
+] as const)(
+  'asks for consent from a custom control only when it changes sharing (%s)',
+  async (name, expected) => {
+    const f = fixture();
+    const logged = await f.login();
+    cleanups.push(() => logged.runtime.dispose());
+    render(
+      <SempodsProvider runtime={logged.runtime}>
+        <Custom />
+      </SempodsProvider>,
+    );
+    const button = await waitFor(() => {
+      const found = screen.getByRole<HTMLButtonElement>('button', { name });
+      expect(found.disabled).toBe(false);
+      return found;
+    });
+    const navigations = f.navigate.mock.calls.length;
+    fireEvent.click(button);
+    await leaves(f, navigations);
+    expect(prompt(f)).toBe(expected);
+  },
+);
+
+async function missingScopes() {
+  const f = fixture({
+    allowedPods: [pod],
+    preferences: null,
+    scopes: { required: ['tasks'] },
+  });
+  await f.begin();
+  f.runtime.dispose();
+  await settleLease();
+  // The fixture's default token grants no scopes, so `tasks` stays missing.
+  const runtime: BrowserRuntime = f.returned();
+  cleanups.push(() => runtime.dispose());
+  return { f, runtime };
+}
+
+it('asks for consent when the gate offers to grant missing required scopes', async () => {
+  const { f, runtime } = await missingScopes();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" />
+    </SempodsProvider>,
+  );
+  await screen.findByText('Review required feature access: tasks.');
+  const navigations = f.navigate.mock.calls.length;
+  await act(async () =>
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Change sharing' }),
+    ),
+  );
+  await leaves(f, navigations);
+  expect(prompt(f)).toBe('consent');
+});
+
+it("asks for consent from a missing-scopes prompt's action", async () => {
+  const { f, runtime } = await missingScopes();
+  const app = createAppController(runtime);
+  cleanups.push(app.subscribe(() => {}));
+  app.start();
+  cleanups.push(() => app.stop());
+  const blocking = await waitFor(() => {
+    const found = app.getSnapshot().access.blocking;
+    expect(found?.reason).toBe('missing-scopes');
+    return found!;
+  });
+  const navigations = f.navigate.mock.calls.length;
+  expect(await runAccessAction(app, blocking, 'sign-in')).toBe(true);
+  await leaves(f, navigations);
+  expect(prompt(f)).toBe('consent');
+});
+
+it('signs in to a signed-out Pod from management without asking for consent', async () => {
+  const f = fixture();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  await act(async () => {
+    await logged.runtime.disconnect(logged.id);
+  });
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <AppAccess appName="Tasks" />
+    </SempodsProvider>,
+  );
+  const navigations = f.navigate.mock.calls.length;
+  await act(async () =>
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' })),
+  );
+  await leaves(f, navigations);
+  expect(prompt(f)).toBeNull();
+});

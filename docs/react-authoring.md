@@ -176,6 +176,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Translate the app's texts](#app-texts-usemessages)                     | `useMessages` (React)                                                      | One `{ en, de }` catalogue outside components                                |
 | [Switch between Contexts](#apps-that-switch-contexts)                   | `useContexts` (React)                                                      | Mount outside `TargetScreen`                                                 |
 | [Switch across Pods](#one-chooser-across-pods)                          | `usePodContexts` (React)                                                   | Optional `podNames`; `select({ connectionId, contextIri })`                  |
+| [Share more Contexts with the app](#changing-what-the-app-may-access)   | `AppAccess`, `useContexts().share()` (React), `ContextSwitch` (app-ui)     | Own control: `authorize(id, { intent: 'change-sharing' })`                   |
 | [Add another Pod while signed in](#adding-another-pod-while-signed-in)  | `PodChooser` (React)                                                       | Optional `podNames`, `podAddressPrefix`; place it in the app's own panel     |
 | [Create in another Context](#creating-in-an-explicit-context)           | `useCreation` with `context` (React), `bindCreation` (app)                 | The Context IRI; one hook per Context                                        |
 | [Read across the Pod](#pod-overviews-with-contexts-on-demand)           | `usePodLoad` (React)                                                       | `pod.sparql.select`/`construct`; provider `contextSelection="on-demand"`     |
@@ -602,7 +603,9 @@ const lists = useContexts();
   `label` joins both (`Tasks · work`) and is unique within the Pod.
 - Without a remembered or preset Context it selects the first writable, else
   the first readable; an exact preset keeps only its Context.
-- `select` and `share()` (the Pod's consent page) run under the leave policy.
+- `select` and `share()` run under the leave policy; `share()`
+  [changes sharing](#changing-what-the-app-may-access) on the Pod's consent
+  page.
 - While mounted, `AppAccess` shows no chooser (only its loading status until
   the hook selects) and management names only the selected Context. Sign-in,
   recovery, **Change sharing** and **Sign out** stay in `AppAccess`.
@@ -688,6 +691,77 @@ contract below; the standard component already does so.
   question and switches nothing.
 - Unlike `useContexts` it selects nothing by itself; the runtime restores a
   remembered or preset Context. While mounted, `AppAccess` shows no chooser.
+
+### Changing what the app may access
+
+The Pod's consent page is where the person shares more Contexts with this app,
+or fewer. Signing in and changing sharing are separate requests:
+
+- **Sign in** (`connect()`, `authorize(id)`) lets the Pod reuse the grant this
+  app already has, so it may return at once without asking. Startup never
+  authorizes at all: it restores a saved session, renewing it with its refresh
+  token when due, and offers recovery when that fails.
+- **Change sharing** (`authorize(id, { intent: 'change-sharing' })`) asks the
+  Pod to show its consent page even when it could reuse the grant
+  (`prompt=consent`). Only that one request carries it; later sign-ins and
+  startups do not.
+
+The standard controls already change sharing: **Change sharing** in
+[`AppAccess` management](#pods--sharing-management) and in the gate when
+required feature scopes are missing, **Share more …** in
+[`ContextSwitch`](#one-chooser-across-pods) for the active Pod and for a Pod
+without readable Contexts, and `useContexts().share()` for an own control.
+Their **Sign in** entries stay sign-ins. For another connection, or your own
+label, a guarded action:
+
+```tsx
+import { useState } from 'react';
+import { useApp, useAppState, useSdkLocale } from '@sempods/app-sdk/react';
+
+export function ShareAnotherList({ connectionId }: { connectionId: string }) {
+  const app = useApp();
+  const { changing, confirmingLeave, signIn } = useAppState();
+  const { error } = useSdkLocale();
+  const [problem, setProblem] = useState<string | null>(null);
+  if (signIn === 'none') return null;
+  return (
+    <>
+      <button
+        disabled={changing || confirmingLeave}
+        onClick={() => {
+          setProblem(null);
+          app
+            .authorize(connectionId, { intent: 'change-sharing' })
+            .catch((cause: unknown) => setProblem(error(cause)));
+        }}
+      >
+        Share another list
+      </button>
+      {problem && <p role="alert">{problem}</p>}
+    </>
+  );
+}
+```
+
+- It runs under the leave policy, like choosing another Pod: with a draft or
+  an unconfirmed write the person is asked first. Declining resolves `false`
+  and changes nothing.
+- A failure before the Pod (discovery, storage) rejects; the session, the
+  selected Pod and Context stay as they were. Show it with
+  `useSdkLocale().error`.
+- Otherwise the page leaves for the Pod: the connection is `leaving` and the
+  content inert. After consent the app returns to `returnTo`, the new grant
+  replaces the old one and that Pod is the active one; the catalogue is read
+  again, and the remembered Context is selected while it stays readable.
+- Cancelled or declined, the earlier session resumes with its access
+  (`startup.resumed`), and a notice says that sharing is unchanged.
+- Leaving for the Pod is real navigation. Drafts and other in-memory state do
+  not survive it, which is why the leave policy asks. Going back may restore
+  the page from the browser's back/forward cache; do not rely on it.
+
+This grants **this app** access. Choosing a Context already shared with it is
+`select`, and inviting another person to a Context happens in the Pod's own
+sharing settings, not through this app.
 
 ### Creating in an explicit Context
 
@@ -1150,7 +1224,8 @@ function AppContent() {
   of a sign-in.
 - These are the catalogue's rights for this session, not whether a Context is
   shared or public; changing them is the Pod's consent behind **Change
-  sharing**. It sends one catalogue request and no extra label reads.
+  sharing** ([changing sharing](#changing-what-the-app-may-access)). It sends
+  one catalogue request and no extra label reads.
 
 ### Startup screen and static splash
 
@@ -1336,7 +1411,9 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
   hovered, and hiding dismisses them, so they do not return. It passes its
   `focusTarget` prop on to each prompt (`AppAccess` passes its own).
 - Own buttons call the guarded actions directly: `sign-in` is
-  `authorize(connectionId)`, or without a connection `connect()` for a preset or
+  `authorize(connectionId)` (for `missing-scopes`, labelled **Change sharing**,
+  `authorize(connectionId, { intent: 'change-sharing' })`), or without a
+  connection `connect()` for a preset or
   sole allowed Pod and otherwise `connect(url)` from an address field; `retry`
   is `retryRestore(id)` for `unreachable` (not guarded) and `disconnect(id)` for
   `sign-out-failed` (it forgets too when the person asked to); `forget` is
@@ -1377,7 +1454,10 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
   built in, unsupported UI languages fall back to English. Localize `appName`
   and `description` in the app with the same provider. Language changes keep
   the field and connection state in place.
-- No silent auth or automatic redirect; login and consent use the Pod's UI.
+- No sign-in or consent without the person's action: login and consent use
+  the Pod's UI. Startup still restores and renews a saved session without
+  interaction. A sign-in may reuse this app's grant; **Change sharing** always
+  shows the consent page ([changing sharing](#changing-what-the-app-may-access)).
 - `podAddress="hidden"` works only while exactly one Pod is permitted, also
   when signing in again. A `podNames` name remains; without one no Pod line
   shows and duplicate saved connections are numbered. With several or
@@ -1669,6 +1749,10 @@ ancestors `inert` and test tools such as Playwright click them directly.
 Keep the provider and compose `CallbackNotice`, `AccessNotice` and own controls
 from the guarded `useApp()` actions.
 
+- A control that shares more or changes what the app may access passes
+  `{ intent: 'change-sharing' }` to `authorize`
+  ([changing sharing](#changing-what-the-app-may-access)); a sign-in control
+  does not.
 - Call actions only from user input. Disable controls until startup storage is
   durable and while `changing` or `confirmingLeave`; show errors with
   `useSdkLocale().error`. `false` means the leave policy declined (a sign-in it

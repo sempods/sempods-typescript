@@ -27,11 +27,21 @@ type ProtocolOptions = {
   readonly development?: DiscoveryOptions['development'];
 };
 
-/** Preparation returns data; the host owns retention, lifetime and user interaction. */
+/**
+ * Preparation returns data; the host owns retention, lifetime and user interaction.
+ * Without `prompt` the Pod may reuse an existing grant and answer at once.
+ * `prompt: 'consent'` asks it to show its consent page even then, so the person
+ * can change what this app may access. The attempt does not record it: the
+ * exchange is the same either way.
+ */
 export async function prepareAuthorization(
   input: Omit<OAuthBinding, 'scopes'> & { readonly scopes?: readonly string[] },
-  options: Pick<ProtocolOptions, 'development'> = {},
+  options: Pick<ProtocolOptions, 'development'> & {
+    readonly prompt?: 'consent';
+  } = {},
 ): Promise<{ readonly attempt: AuthorizationAttempt; readonly url: string }> {
+  if (options.prompt !== undefined && options.prompt !== 'consent')
+    throw new OAuthError('configuration');
   const binding = validateOAuthBinding(
     { ...input, scopes: input.scopes ?? [] },
     options.development,
@@ -51,6 +61,8 @@ export async function prepareAuthorization(
   );
   if (scopes.length) url.searchParams.set('scope', scopes.join(' '));
   else url.searchParams.delete('scope');
+  if (options.prompt) url.searchParams.set('prompt', options.prompt);
+  else url.searchParams.delete('prompt');
   return {
     attempt: Object.freeze({ ...binding, state, verifier }),
     url: url.href,
