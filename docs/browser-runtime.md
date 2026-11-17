@@ -361,10 +361,12 @@ The attempt runs at most once per tab. The runtime notes it in
 the Pod without an answer or a failed answer never starts it again; `tabStorage`
 replaces that storage in tests, and without one nothing is tried. A preparation
 that fails (an unreachable Pod) leaves the person signed out without an error.
-A new tab with nothing stored tries again. After a sign-out the default
-`rememberPods: true` keeps the Pod's address, so no tab on that device signs in
-silently any more; with `rememberPods: false` a new tab does, because signing
-out of the app does not sign out of the Pod.
+A tab that started with something stored, or returned from a sign-in, never
+tries, also after a sign-out deletes the records. A new tab with nothing stored
+tries again. After a sign-out the default `rememberPods: true` keeps the Pod's
+address, so no tab on that device signs in silently any more; with
+`rememberPods: false` a new tab does, because signing out of the app does not
+sign out of the Pod.
 
 `silent` needs a `did:web` identity and a default Pod (a `preset` or a single
 `allowedPods` entry); otherwise construction throws

@@ -228,6 +228,66 @@ it('ends signed out, as if never started, when the page returns from the back/fo
   }
 });
 
+it('keeps the attempt silent across a callback for another state', async () => {
+  const f = silent();
+  await f.runtime.initialize();
+  const id = f.runtime.getSnapshot()[0]!.id;
+  f.runtime.dispose();
+  await settleLease();
+  const forged = createBrowserRuntime({
+    ...f.options,
+    location: () => `${callback}?error=login_required&state=forged`,
+  });
+  keep(forged);
+  expect(await forged.initialize()).toMatchObject({
+    interaction: 'failed',
+    problem: 'attempt',
+  });
+  const runtime = await answered(
+    { ...f, runtime: forged },
+    'error=login_required',
+  );
+  expect(await runtime.initialize()).toMatchObject({
+    interaction: 'none',
+    firstSignIn: { connectionId: id, problem: 'login-required' },
+  });
+  expect(runtime.getSnapshot()[0]?.session).toEqual({ kind: 'signed-out' });
+  expect([...f.tab.map.values()]).toEqual(['tried']);
+});
+
+it.each([true, false])(
+  'never signs in silently after a sign-out in a tab that restored a session (rememberPods: %s)',
+  async (rememberPods) => {
+    const plain = silent({ firstSignIn: 'click', rememberPods });
+    const { connection } = await plain.begin();
+    plain.runtime.dispose();
+    await settleLease();
+    const back = plain.returned();
+    keep(back);
+    await back.initialize();
+    // A fresh tab restores the existing session, then signs out.
+    const tab = memoryStorage();
+    const restored = await restart(plain, back, keep, {
+      firstSignIn: 'silent',
+      tabStorage: tab,
+    });
+    expect(restored.getSnapshot()[0]?.session.kind).toBe('active');
+    await restored.disconnect(connection.id);
+    expect(await savedRecords(plain.factory)).toHaveLength(
+      rememberPods ? 1 : 0,
+    );
+    await restart(plain, restored, keep, {
+      firstSignIn: 'silent',
+      tabStorage: tab,
+    });
+    expect(
+      plain.navigate.mock.calls.filter(
+        ([url]) => new URL(url).searchParams.get('prompt') === 'none',
+      ),
+    ).toEqual([]);
+  },
+);
+
 it('tries again in a new tab: signing out of the app is not signing out of the Pod', async () => {
   const f = silent({ rememberPods: false });
   await f.runtime.initialize();

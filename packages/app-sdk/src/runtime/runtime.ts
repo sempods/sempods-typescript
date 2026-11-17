@@ -1708,21 +1708,26 @@ export function createBrowserRuntime(
       void restoring;
       if (disposed) throw new RuntimeError('disconnected');
       initialized = true;
-      if (silentState !== undefined) noteSilent('tried');
       if (!callback) {
-        // Nothing stored, judged by the durable listing: a record that an
-        // app policy (`allowedPods`) hides is still an existing installation.
-        // Only addresses this start deletes (`rememberPods: false`) and the
-        // abandoned silent attempt are as if never stored.
-        if (
-          silentNote === null &&
-          listing.unreadable.length === 0 &&
-          listing.records.every(
-            (saved) =>
-              abandonedSilent.has(saved.id) || forgotten.includes(saved),
+        // The silent attempt left without an answer is over.
+        if (silentState !== undefined) noteSilent('tried');
+        if (silentNote === null) {
+          // Nothing stored, judged by the durable listing: a record that an
+          // app policy (`allowedPods`) hides is still an existing
+          // installation. Only addresses this start deletes (`rememberPods:
+          // false`) and the abandoned silent attempt are as if never stored.
+          if (
+            listing.unreadable.length === 0 &&
+            listing.records.every(
+              (saved) =>
+                abandonedSilent.has(saved.id) || forgotten.includes(saved),
+            )
           )
-        )
-          await signInSilently();
+            await signInSilently();
+          // An existing installation: this tab never signs in silently, also
+          // after a sign-out that deletes its records.
+          else noteSilent('tried');
+        }
         return report;
       }
       if (!pending || pending.value.kind !== 'authorizing')
@@ -1754,9 +1759,14 @@ export function createBrowserRuntime(
         // Not eligible (another answer, an expired earlier session, a changed
         // binding): the callback ends the connection as for a first sign-in.
       }
+      // The note keeps the silent attempt's state until its own callback is
+      // consumed here: a callback for another state leaves it, so the real
+      // answer is still known as the silent one. Any other callback is an
+      // existing installation's, which never signs in silently in this tab.
       const silent =
         silentState !== undefined &&
         pending.value.attempt.state === silentState;
+      if (silent || silentNote === null) noteSilent('tried');
       try {
         const connectionId = await redeem(
           pending.id,

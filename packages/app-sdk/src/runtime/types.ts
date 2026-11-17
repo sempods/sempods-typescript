@@ -288,9 +288,10 @@ export interface BrowserRuntimeOptions {
    * the Pod's link for it. Any other answer fails like a sign-in.
    *
    * It is tried at most once per tab (`tabStorage`), never again in a loop,
-   * also after a sign-out, a reload or coming back without an answer. A
-   * new tab tries again: signing out of the app does not sign out of the
-   * Pod. A preparation that fails (an unreachable Pod) leaves the person
+   * also after a sign-out, a reload or coming back without an answer; a
+   * tab that started with something stored, or returned from a sign-in,
+   * never tries. A new tab with nothing stored tries again: signing out of
+   * the app does not sign out of the Pod. A preparation that fails (an unreachable Pod) leaves the person
    * signed out, without an error. Without a `did:web` identity (a Pod
    * never grants a dynamically registered client silently, SPS-AUTH-040,
    * and `signIn: 'none'` has none) or a default Pod, `silent` is a
