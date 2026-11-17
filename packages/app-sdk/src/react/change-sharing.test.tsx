@@ -4,6 +4,7 @@
  * sharing more Contexts asks the Pod for its consent page; a sign-in, also
  * the app's own `authorize(id)`, may reuse the grant.
  */
+import { useState } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -21,6 +22,7 @@ import {
   useApp,
   useAppState,
   useContexts,
+  useDraftGuard,
 } from './index.js';
 import { createAppController, runAccessAction } from '../authoring/app.js';
 import {
@@ -217,3 +219,67 @@ it.each(['saved Pod', 'Pod read without a token'] as const)(
     expect(prompt(f)).toBeNull();
   },
 );
+
+it('resolves share() to false instead of rejecting; shareProblem tells a failure from a declined question (#380)', async () => {
+  const f = fixture();
+  const logged = await f.login();
+  cleanups.push(() => logged.runtime.dispose());
+  const outcomes: boolean[] = [];
+  function Menu() {
+    const lists = useContexts();
+    const [dirty, setDirty] = useState(false);
+    useDraftGuard(dirty, () => setDirty(false));
+    return (
+      <>
+        <button onClick={() => setDirty(true)}>Edit</button>
+        <button onClick={() => setDirty(false)}>Save</button>
+        <button
+          disabled={!lists.canShare}
+          // No catch: share() never rejects.
+          onClick={() => void lists.share().then((ok) => outcomes.push(ok))}
+        >
+          Share more lists
+        </button>
+        <output aria-label="problem">{lists.shareProblem ?? ''}</output>
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={logged.runtime}>
+      <Menu />
+    </SempodsProvider>,
+  );
+  const share = await waitFor(() => {
+    const found = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'Share more lists',
+    });
+    expect(found.disabled).toBe(false);
+    return found;
+  });
+  const problem = () => screen.getByLabelText('problem').textContent;
+  const navigations = f.navigate.mock.calls.length;
+  // Declined: the leave question keeps the draft; nothing failed.
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+  fireEvent.click(share);
+  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+  await waitFor(() => expect(outcomes).toEqual([false]));
+  expect(problem()).toBe('');
+  // The Pod's discovery does not answer: a failure before the Pod.
+  f.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+  // After a confirmed leave question, the SDK's confirmation reports it.
+  fireEvent.click(share);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Discard and continue' }),
+  );
+  await waitFor(() => expect(outcomes).toEqual([false, false]));
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'The operation could not be completed.',
+  );
+  expect(problem()).toBe('');
+  // The draft stays, since nothing left. Without a question, shareProblem reports it.
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  fireEvent.click(share);
+  await waitFor(() => expect(outcomes).toEqual([false, false, false]));
+  await waitFor(() => expect(problem()).not.toBe(''));
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+});
