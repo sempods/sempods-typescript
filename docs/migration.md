@@ -240,6 +240,18 @@ mode, or passed `items={[]}` and kept the false "No suggestions", by
 instead of querying the DOM. Recognizing and opening an address stays app
 code. See [the UI kit's adapters](../packages/app-ui/README.md#adapters).
 
+### A visual and a notice for SuggestField
+
+0.9.0 adds two optional props to `@sempods/app-ui`'s `SuggestField`. A
+`Suggestion`'s `media` is an element shown in a 40px box before its label,
+such as a photo the app loads or an icon for the resource's type; it is
+hidden from assistive technology. `notice` on the field is a line under the
+open suggestions about the search, such as results cut off at a limit; the
+field does not announce it. Existing fields look and speak as before. After
+upgrading, replace a combobox rebuilt from `Combobox` parts only to show a
+picture per result or a note about the search by `SuggestField` with `media`
+and `notice`. See [the UI kit's adapters](../packages/app-ui/README.md#adapters).
+
 ### SDK questions in Playwright 1.65 and later
 
 0.9.0 keeps the SDK's modal dialogs (the leave and delete questions, the access

@@ -97,7 +97,9 @@ language, and palette defaults sit in the `theme` layer without specificity.
 `SuggestField` (`src/adapters/suggest-field.tsx`) and its single focus cue
 in `styles.css` are this package's own, written on the registry's combo box
 for sempods/sempods-apps-template#144; its address mode (`suggest`) and input
-`ref` are for sempods/sempods-typescript#324. `src/adapters/aria-count.ts`
+`ref` are for sempods/sempods-typescript#324, its suggestions' `media` box
+and its `notice` line for sempods/sempods-typescript#361. Its popover is a
+flex column, so that the lines under the list stay inside its height. `src/adapters/aria-count.ts`
 keeps React Aria's combo box count for the field out of React Aria's
 announcer (sempods/sempods-typescript#326). It relies on that announcer's
 region (`data-live-announcer` with two `role="log"` children), on the combo

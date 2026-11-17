@@ -9,7 +9,8 @@
 // workspace with its nonmodal filter panel instead of the tasks. With
 // `?screen=search`, the page is a search bar with suggestions (SuggestField)
 // whose results the checks set through `window.searchGate`, as an app's
-// search would; with `&mode=address` as well, the bar sits in a nonmodal
+// search would, with a photo or a type icon per suggestion and a notice
+// under them (#361); with `&mode=address` as well, the bar sits in a nonmodal
 // panel and searches only text that is no address and at least two
 // characters long, as an address bar does, and Ctrl/Cmd-K focuses and
 // selects it. With `?screen=checkbox`, the page is ticked rows with the
@@ -30,7 +31,14 @@
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
-import { StrictMode, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  StrictMode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import { UsersIcon } from 'lucide-react';
 import { createBrowserRuntime, type BrowserRuntime } from '@sempods/app-sdk';
@@ -604,11 +612,36 @@ function Tasks({
   );
 }
 
+/** A suggestion as the checks set it: `picture` stands for its `media`. */
+type GateSuggestion = Omit<Suggestion, 'media'> & {
+  readonly picture?: 'photo' | 'icon';
+};
+
 /** What the app's search has found for the typed text, set by the checks. */
 interface SearchState {
-  readonly items: readonly Suggestion[];
+  readonly items: readonly GateSuggestion[];
   readonly loading?: boolean;
   readonly failed?: 'some' | 'all';
+  readonly notice?: string;
+}
+
+/** A photo wider than the box, as a person's picture usually is. */
+const photo =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="60"><rect width="80" height="60" fill="#c2410c"/><circle cx="40" cy="24" r="12" fill="#fed7aa"/></svg>',
+  );
+
+/** The suggestions with their media, as an app renders them. */
+function withMedia(items: readonly GateSuggestion[]): Suggestion[] {
+  return items.map(({ picture, ...item }) => ({
+    ...item,
+    ...(picture === 'photo'
+      ? { media: <img src={photo} alt="" loading="lazy" /> }
+      : picture === 'icon'
+        ? { media: <UsersIcon className="size-5" /> }
+        : {}),
+  }));
 }
 
 /**
@@ -746,6 +779,7 @@ function SearchGate() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+  const items = useMemo(() => withMedia(found.items), [found.items]);
   const query = text.trim();
   // An address bar searches neither an address nor a single character.
   const suggest = !addressBar || (!URL.canParse(query) && query.length >= 2);
@@ -761,9 +795,10 @@ function SearchGate() {
       }
       value={text}
       onChange={setText}
-      items={query ? found.items : []}
+      items={query ? items : []}
       loading={found.loading}
       failed={found.failed}
+      notice={found.notice}
       suggest={suggest}
       onSelect={(item) => setOpened((o) => [...o, 'select ' + item.id])}
       onSubmit={(value) => setOpened((o) => [...o, 'submit ' + value])}

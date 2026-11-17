@@ -35,6 +35,10 @@ const bob: Suggestion = {
   label: 'Bob',
   detail: 'https://pod.example/bob#me',
 };
+const carol: Suggestion = {
+  id: 'https://pod.example/carol#me',
+  label: 'Carol',
+};
 
 function Field(props: {
   readonly items?: readonly Suggestion[];
@@ -44,6 +48,7 @@ function Field(props: {
   readonly onSubmit?: (value: string) => void;
   /** Whether the field suggests, or which text it suggests for. */
   readonly suggest?: boolean | ((value: string) => boolean);
+  readonly notice?: ReactNode;
   readonly inputRef?: Ref<HTMLInputElement>;
 }) {
   const [value, setValue] = useState('');
@@ -60,6 +65,7 @@ function Field(props: {
       onSelect={props.onSelect ?? (() => {})}
       onSubmit={props.onSubmit}
       suggest={suggest}
+      notice={props.notice}
       ref={props.inputRef}
     />
   );
@@ -245,6 +251,118 @@ it('shows the exact value and the source with the label', async () => {
   expect(option.textContent).toContain('https://pod.example/alice#me');
   expect(option.textContent).toContain('Work');
   expect(option.getAttribute('aria-labelledby')).toBeTruthy();
+});
+
+/** A suggestion with a picture, as an app loads it, by its alt text. */
+const pictured = (item: Suggestion, picture: string): Suggestion => ({
+  ...item,
+  media: <img src={`https://pod.example/${picture}.jpg`} alt={picture} />,
+});
+
+const boxes = () => [
+  ...document.querySelectorAll(
+    '[role="option"] [data-slot="suggestion-media"]',
+  ),
+];
+
+it('shows a visual in a box before the label, hidden from assistive technology (#361)', async () => {
+  render(<Field items={[pictured(alice, 'alice-photo'), bob]} />);
+  await type('a');
+  const [first, second] = screen.getAllByRole('option');
+  // Both rows keep the box, so that their labels line up.
+  expect(boxes()).toHaveLength(2);
+  const box = first!.querySelector('[data-slot="suggestion-media"]')!;
+  expect(box.getAttribute('aria-hidden')).toBe('true');
+  expect(box.querySelector('img')?.getAttribute('src')).toBe(
+    'https://pod.example/alice-photo.jpg',
+  );
+  // The box comes before the label.
+  const label = first!.querySelector('[slot="label"]')!;
+  expect(
+    box.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    second!.querySelector('[data-slot="suggestion-media"]')?.childNodes,
+  ).toHaveLength(0);
+  // Named and described as without the picture.
+  expect(screen.getByRole('option', { name: 'Alice' })).toBe(first);
+  expect(
+    document.getElementById(first!.getAttribute('aria-describedby')!)
+      ?.textContent,
+  ).toBe('https://pod.example/alice#meWork');
+  expect(screen.queryByRole('img')).toBeNull();
+});
+
+it('keeps the box out of suggestions without a visual (#361)', async () => {
+  const { rerender } = render(<Field items={[alice, bob]} />);
+  await type('a');
+  expect(screen.getAllByRole('option')).toHaveLength(2);
+  expect(boxes()).toHaveLength(0);
+  // The same suggestion objects show the box once another one has a visual.
+  await act(async () => {
+    rerender(<Field items={[alice, bob, pictured(carol, 'carol-photo')]} />);
+  });
+  expect(boxes()).toHaveLength(3);
+  await act(async () => {
+    rerender(<Field items={[alice, bob]} />);
+  });
+  expect(boxes()).toHaveLength(0);
+});
+
+it('keeps the active suggestion while its visual is replaced and the results reorder (#361)', async () => {
+  const { rerender } = render(
+    <Field items={[alice, pictured(bob, 'bob-icon')]} />,
+  );
+  await type('a');
+  await key('ArrowDown');
+  await key('ArrowDown');
+  expect(active()).toContain('Bob');
+  await act(async () => {
+    rerender(
+      <Field
+        items={[
+          pictured(carol, 'carol-icon'),
+          pictured(bob, 'bob-photo'),
+          alice,
+        ]}
+      />,
+    );
+  });
+  expect(active()).toContain('Bob');
+  const bobOption = screen.getByRole('option', { name: 'Bob' });
+  expect(bobOption.querySelector('img')?.getAttribute('alt')).toBe('bob-photo');
+  await key('ArrowDown');
+  expect(active()).toContain('Alice');
+});
+
+it('shows the notice under the open suggestions and announces nothing of it (#361)', async () => {
+  const notice = 'Showing the first 50 results.';
+  const { rerender } = render(<Field items={[alice]} notice={notice} />);
+  // Not while the suggestions are closed.
+  expect(screen.queryByText(notice)).toBeNull();
+  const heard = listen();
+  await type('a');
+  const shown = screen.getByText(notice);
+  expect(shown.closest('[data-slot="suggest-notice"]')).toBeTruthy();
+  // Under the list, inside the suggestions' popover.
+  const list = screen.getByRole('listbox');
+  expect(
+    list.compareDocumentPosition(shown) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(shown.closest('[data-slot="combobox-content"]')).toBeTruthy();
+  expect(shown.closest('[aria-live], [role="status"]')).toBeNull();
+  // Also with nothing found, for example before any source is connected.
+  await act(async () => {
+    rerender(<Field notice={notice} />);
+  });
+  expect(screen.getByText(notice)).toBeTruthy();
+  expect(heard()).toEqual(['1 suggestion.', 'No suggestions.']);
+  expect(screen.getByRole('status').textContent).toBe('No suggestions.');
+  // Nothing, or nothing to render, adds no line.
+  await act(async () => {
+    rerender(<Field items={[alice]} notice={false} />);
+  });
+  expect(document.querySelector('[data-slot="suggest-notice"]')).toBeNull();
 });
 
 it('calls the latest onSelect for suggestions it keeps across a rerender', async () => {

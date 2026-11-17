@@ -4204,6 +4204,253 @@ async function search({ browser, origin }) {
         ...m,
       };
     },
+    // A visual per suggestion (#361) at 375 and 1280px, light and dark: a
+    // 40px box before the label, hidden from assistive technology, a photo
+    // filling it and an icon centred in it; rows with a photo, an icon and
+    // none line up; a long label still wraps to two lines, the exact
+    // address stays on one, rows are 44px or more and nothing is wider
+    // than the screen.
+    async 'search-media-layout'() {
+      const long = {
+        ...suggestion(
+          'a-very-long-resource-name-without-any-spaces-that-keeps-going#it',
+          'A very long resource label that goes on and on across more than two lines on a phone screen of 375 pixels',
+          'A Pod with a long name',
+        ),
+        picture: 'photo',
+      };
+      const cases = [];
+      for (const width of [375, 1280])
+        for (const scheme of ['light', 'dark']) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await open({ width });
+          await found({ items: [long, { ...bob, picture: 'icon' }, carol] });
+          await field.click();
+          await page.keyboard.type('a');
+          await listbox.waitFor();
+          await page.waitForFunction(() =>
+            [...document.querySelectorAll('[role="option"] img')].every(
+              (img) => img.complete && img.naturalWidth > 0,
+            ),
+          );
+          await settle(page);
+          const m = await page.evaluate(() => {
+            const rect = (el) => el.getBoundingClientRect();
+            const lines = (el) =>
+              Math.round(
+                rect(el).height / parseFloat(getComputedStyle(el).lineHeight),
+              );
+            const popover = document.querySelector(
+              '[data-slot="combobox-content"]',
+            );
+            const rows = [...document.querySelectorAll('[role="option"]')].map(
+              (o) => {
+                const box = o.querySelector('[data-slot="suggestion-media"]');
+                const label = o.querySelector('[slot="label"]');
+                const detail = o.querySelector('[slot="description"] span');
+                const img = box?.querySelector('img');
+                const icon = box?.querySelector('svg');
+                const centre = (r) => [
+                  (r.left + r.right) / 2,
+                  (r.top + r.bottom) / 2,
+                ];
+                return {
+                  height: rect(o).height,
+                  box: box
+                    ? {
+                        left: rect(box).left,
+                        right: rect(box).right,
+                        width: rect(box).width,
+                        height: rect(box).height,
+                        hidden: box.getAttribute('aria-hidden'),
+                      }
+                    : null,
+                  labelLeft: rect(label).left,
+                  labelLines: lines(label),
+                  detailLines: detail ? lines(detail) : null,
+                  detailCut: detail
+                    ? detail.scrollWidth > detail.clientWidth
+                    : null,
+                  img: img
+                    ? { width: rect(img).width, height: rect(img).height }
+                    : null,
+                  icon: icon
+                    ? {
+                        width: rect(icon).width,
+                        offset: Math.max(
+                          ...centre(rect(icon)).map((c, i) =>
+                            Math.abs(c - centre(rect(box))[i]),
+                          ),
+                        ),
+                      }
+                    : null,
+                };
+              },
+            );
+            return {
+              rows,
+              popoverRight: rect(popover).right,
+              pageWidth: document.documentElement.scrollWidth,
+              viewport: innerWidth,
+            };
+          });
+          const [first, second, third] = m.rows;
+          const same = (values) =>
+            values.every((v) => Math.abs(v - values[0]) < 0.5);
+          const pass =
+            m.rows.length === 3 &&
+            m.rows.every(
+              (r) =>
+                r.height >= 44 &&
+                r.box?.width === 40 &&
+                r.box.height === 40 &&
+                r.box.hidden === 'true' &&
+                r.box.right <= r.labelLeft &&
+                r.labelLines <= 2 &&
+                (r.detailLines === null || r.detailLines === 1),
+            ) &&
+            same(m.rows.map((r) => r.box.left)) &&
+            same(m.rows.map((r) => r.labelLeft)) &&
+            (width > 375 || (first.labelLines === 2 && first.detailCut)) &&
+            first.img?.width === 40 &&
+            first.img.height === 40 &&
+            second.icon?.width === 20 &&
+            second.icon.offset < 1 &&
+            third.img === null &&
+            third.icon === null &&
+            m.popoverRight <= m.viewport &&
+            m.pageWidth <= m.viewport;
+          cases.push({ width, scheme, pass, ...m });
+        }
+      await page.emulateMedia({ colorScheme: null });
+      return { pass: cases.every((c) => c.pass), cases };
+    },
+    // With visuals, assistive technology reads the suggestions as without
+    // them (#361): the same accessibility tree, names and descriptions, and
+    // the field's announcements unchanged while results with visuals load
+    // and arrive.
+    async 'search-media-unheard'() {
+      const pictured = [
+        { ...alice, picture: 'photo' },
+        { ...bob, picture: 'icon' },
+        carol,
+      ];
+      await open();
+      await field.click();
+      await page.keyboard.type('a');
+      const read = async (items) => {
+        await found({ items });
+        await listbox.getByRole('option').nth(2).waitFor();
+        await settle(page);
+        return {
+          tree: await listbox.ariaSnapshot(),
+          described: await listbox.evaluate((list) =>
+            [...list.querySelectorAll('[role="option"]')].map((o) =>
+              (o.getAttribute('aria-describedby') ?? '')
+                .split(' ')
+                .map((id) => document.getElementById(id)?.textContent ?? '')
+                .join('|'),
+            ),
+          ),
+        };
+      };
+      const plain = await read([alice, bob, carol]);
+      const withMedia = await read(pictured);
+      const media = await listbox
+        .locator('[data-slot="suggestion-media"]')
+        .count();
+      const steps = [
+        [null, 'Searching …'],
+        [
+          { items: pictured.slice(0, 1), loading: true },
+          '1 suggestion. Searching for more …',
+        ],
+        [{ items: pictured }, '3 suggestions.'],
+      ];
+      const said = await searchHeard(page, 'en', steps);
+      const expected = [
+        ...steps.map(([, text]) => text),
+        ...(said.apple ? ['Alice'] : []),
+      ];
+      return {
+        pass:
+          media === 3 &&
+          withMedia.tree === plain.tree &&
+          withMedia.described.join() === plain.described.join() &&
+          said.active === 'Alice' &&
+          said.said.join('|') === expected.join('|'),
+        plain,
+        withMedia,
+        media,
+        said,
+      };
+    },
+    // The app's notice (#361) shows under the open suggestions, below the
+    // field's own status line, both inside the popover's height while the
+    // suggestions scroll, at 375px; it reaches no live region, and it goes
+    // with the suggestions.
+    async 'search-notice'() {
+      const notice = 'Showing the first 30 results.';
+      const many = Array.from({ length: 30 }, (_, i) =>
+        suggestion(`r${i}`, `Result ${i + 1}`, 'Work'),
+      );
+      await open({ width: 375 });
+      await found({ items: many, loading: true, notice });
+      await field.click();
+      await listen();
+      await page.keyboard.type('a');
+      await listbox.waitFor();
+      const status = await announced('30 suggestions. Searching for more …');
+      const heardNow = await heard();
+      const m = await page.evaluate((notice) => {
+        const rect = (el) => el.getBoundingClientRect();
+        const popover = document.querySelector(
+          '[data-slot="combobox-content"]',
+        );
+        const list = popover.querySelector('[role="listbox"]');
+        const line = popover.querySelector('[data-slot="suggest-notice"]');
+        const status = line?.previousElementSibling;
+        return {
+          text: line?.textContent,
+          scrolls: list.scrollHeight > list.clientHeight,
+          listBottom: rect(list).bottom,
+          statusTop: status ? rect(status).top : null,
+          statusBottom: status ? rect(status).bottom : null,
+          lineTop: line ? rect(line).top : null,
+          lineBottom: line ? rect(line).bottom : null,
+          popoverBottom: rect(popover).bottom,
+          live: !!line?.closest(
+            '[aria-live], [role="status"], [role="log"], [role="alert"]',
+          ),
+          inLive: [
+            ...document.querySelectorAll(
+              '[aria-live], [role="status"], [role="log"], [role="alert"]',
+            ),
+          ].some((region) => region.textContent.includes(notice)),
+        };
+      }, notice);
+      await page.keyboard.press('Escape');
+      await hidden(listbox);
+      const gone = await page.getByText(notice).count();
+      return {
+        pass:
+          m.text === notice &&
+          m.scrolls &&
+          m.statusTop >= m.listBottom - 0.5 &&
+          m.lineTop >= m.statusBottom - 0.5 &&
+          m.lineBottom <= m.popoverBottom + 0.5 &&
+          !m.live &&
+          !m.inLive &&
+          status === '30 suggestions. Searching for more …' &&
+          heardNow.said.every((text) => !text.includes(notice)) &&
+          heardNow.said.at(-1) === status &&
+          gone === 0,
+        ...m,
+        status,
+        said: heardNow.said,
+        gone,
+      };
+    },
     // An address bar (#324): for an address and a single character the
     // field neither opens its suggestions nor announces a search, also on
     // the arrow keys; Enter submits and the first Escape reaches the panel.

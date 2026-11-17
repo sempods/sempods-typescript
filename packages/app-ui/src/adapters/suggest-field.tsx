@@ -38,6 +38,14 @@ export interface Suggestion {
   readonly detail?: string;
   /** Where it was found, in a few words, such as a Pod's name. */
   readonly source?: string;
+  /**
+   * One visual before the label, such as a person's photo or an icon for
+   * the resource's type, in a 40px box. It is decorative and hidden from
+   * assistive technology: the label, `detail` and `source` name the
+   * suggestion. The app loads a picture itself; the field does not wait for
+   * it. An `<img>` fills the box.
+   */
+  readonly media?: ReactNode;
 }
 
 export interface SuggestFieldProps<T extends Suggestion> {
@@ -76,10 +84,21 @@ export interface SuggestFieldProps<T extends Suggestion> {
    * submits the text (`onSubmit`).
    */
   readonly suggest?: boolean;
+  /**
+   * A quiet line under the open suggestions about the search, such as
+   * results cut off at a limit or a source that needs signing in again.
+   * It adds nothing to the field's announcements; the app announces it
+   * itself when it needs to. Ignored while the field does not suggest.
+   */
+  readonly notice?: ReactNode;
   /** The input element, for example to focus and select it on Ctrl/Cmd-K. */
   readonly ref?: Ref<HTMLInputElement>;
   readonly className?: string;
 }
+
+/** Whether React renders something for `node`, as for `{cut && …}`. */
+const shows = (node: ReactNode) =>
+  node != null && node !== false && node !== true && node !== '';
 
 /** The suggestions while the field does not suggest: always the same. */
 const none: readonly never[] = [];
@@ -111,7 +130,9 @@ function statusText<T extends Suggestion>(
  * is still running, that failed or found nothing, and React Aria's own
  * count of the options stays silent. With `suggest` false,
  * for an address or text too short to search, it is a plain text field
- * that submits with Enter, without suggestions or announcements.
+ * that submits with Enter, without suggestions or announcements. A
+ * suggestion may carry a decorative visual (`media`), and `notice` adds the
+ * app's own line about its search under the open suggestions.
  */
 export function SuggestField<T extends Suggestion>(
   props: SuggestFieldProps<T>,
@@ -126,6 +147,7 @@ export function SuggestField<T extends Suggestion>(
     onSelect,
     onSubmit,
     suggest = true,
+    notice,
     ref,
     className,
   } = props;
@@ -142,6 +164,9 @@ export function SuggestField<T extends Suggestion>(
   const typed = suggest && value.trim() !== '';
   const loading = suggest && props.loading;
   const failed = suggest ? props.failed : undefined;
+  // With a visual for any suggestion, every one keeps the box, so that
+  // their labels line up.
+  const withMedia = suggest && items.some((item) => shows(item.media));
   return (
     <Combobox
       data-slot="suggest-field"
@@ -174,8 +199,17 @@ export function SuggestField<T extends Suggestion>(
           className="h-11 w-full has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-0"
         />
       </FieldKeys>
-      <ComboboxContent placement="bottom start" offset={4}>
+      <ComboboxContent
+        placement="bottom start"
+        offset={4}
+        // The lines under the suggestions stay inside the popover's height.
+        className="flex flex-col"
+      >
         <ComboboxList<T>
+          className="min-h-0 flex-1"
+          // React Aria keeps rendered suggestions while their objects stay
+          // the same; they render again when the box comes or goes.
+          dependencies={[withMedia]}
           renderEmptyState={() =>
             typed ? (
               <p
@@ -192,38 +226,57 @@ export function SuggestField<T extends Suggestion>(
               id={item.id}
               textValue={item.label}
               onAction={() => select.current(item)}
-              className="grid min-h-11 gap-0.5 py-1.5 pr-2"
+              className="min-h-11 gap-3 py-1.5 pr-2"
             >
-              <Text slot="label" className="line-clamp-2 wrap-anywhere">
-                {item.label}
-              </Text>
-              {item.detail || item.source ? (
-                <Text
-                  slot="description"
-                  className="flex min-w-0 gap-2 text-xs text-muted-foreground"
+              {withMedia ? (
+                <span
+                  aria-hidden="true"
+                  data-slot="suggestion-media"
+                  className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md [&>img]:size-full [&>img]:object-cover"
                 >
-                  {item.detail ? (
-                    <span className="min-w-0 flex-1 truncate">
-                      {item.detail}
-                    </span>
-                  ) : null}
-                  {item.source ? (
-                    <span className="max-w-[40%] shrink-0 truncate">
-                      {item.source}
-                    </span>
-                  ) : null}
-                </Text>
+                  {item.media}
+                </span>
               ) : null}
+              <span className="grid min-w-0 flex-1 gap-0.5">
+                <Text slot="label" className="line-clamp-2 wrap-anywhere">
+                  {item.label}
+                </Text>
+                {item.detail || item.source ? (
+                  <Text
+                    slot="description"
+                    className="flex min-w-0 gap-2 text-xs text-muted-foreground"
+                  >
+                    {item.detail ? (
+                      <span className="min-w-0 flex-1 truncate">
+                        {item.detail}
+                      </span>
+                    ) : null}
+                    {item.source ? (
+                      <span className="max-w-[40%] shrink-0 truncate">
+                        {item.source}
+                      </span>
+                    ) : null}
+                  </Text>
+                ) : null}
+              </span>
             </ComboboxItem>
           )}
         </ComboboxList>
         {items.length > 0 && (loading || failed) ? (
           <p
             aria-hidden="true"
-            className="border-t px-3 py-2 text-xs text-muted-foreground"
+            className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground"
           >
             {status}
           </p>
+        ) : null}
+        {suggest && shows(notice) ? (
+          <div
+            data-slot="suggest-notice"
+            className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground"
+          >
+            {notice}
+          </div>
         ) : null}
       </ComboboxContent>
       {/* One polite announcement for every state, open or closed, and the
