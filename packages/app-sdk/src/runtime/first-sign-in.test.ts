@@ -268,6 +268,22 @@ it('never asks silently when anything is stored, or without a tab memory', async
       ([url]) => new URL(url).searchParams.get('prompt') === 'none',
     ),
   ).toEqual([]);
+  // A record of a Pod that a changed `allowedPods` now excludes is still
+  // stored: the installation is not new.
+  const other = 'https://pod.example/bob';
+  const excluded = await restart(plain, remembered, keep, {
+    firstSignIn: 'silent',
+    tabStorage: memoryStorage(),
+    preset: { podUrl: other },
+    allowedPods: [other],
+  });
+  expect(excluded.getSnapshot()).toEqual([]);
+  expect(await savedRecords(plain.factory)).toHaveLength(1);
+  expect(
+    plain.navigate.mock.calls.filter(
+      ([url]) => new URL(url).searchParams.get('prompt') === 'none',
+    ),
+  ).toEqual([]);
   // Without a tab memory nothing could stop a loop.
   for (const tabStorage of [
     null,

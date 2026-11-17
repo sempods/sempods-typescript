@@ -1575,6 +1575,8 @@ export function createBrowserRuntime(
       const lost: { e: Entry; resend: RefreshResend }[] = [];
       /** Addresses an earlier start remembered, deleted under `rememberPods: false`. */
       const forgotten: SessionSnapshot[] = [];
+      /** The silent first sign-in's own attempt, deleted after coming back without an answer. */
+      const abandonedSilent = new Set<string>();
       // Old SDKs could save several connections for one address. Retire only
       // redundant address-only records, under the namespace lease and revision
       // check. Never merge sessions, attempts, or different exact Pod URLs.
@@ -1606,6 +1608,7 @@ export function createBrowserRuntime(
         ) {
           try {
             await erase(saved.id, saved.revision);
+            abandonedSilent.add(saved.id);
             continue;
           } catch {
             // Listed as an interrupted attempt; deleted by signing out.
@@ -1707,10 +1710,17 @@ export function createBrowserRuntime(
       initialized = true;
       if (silentState !== undefined) noteSilent('tried');
       if (!callback) {
+        // Nothing stored, judged by the durable listing: a record that an
+        // app policy (`allowedPods`) hides is still an existing installation.
+        // Only addresses this start deletes (`rememberPods: false`) and the
+        // abandoned silent attempt are as if never stored.
         if (
           silentNote === null &&
-          entries.size === 0 &&
-          listing.unreadable.length === 0
+          listing.unreadable.length === 0 &&
+          listing.records.every(
+            (saved) =>
+              abandonedSilent.has(saved.id) || forgotten.includes(saved),
+          )
         )
           await signInSilently();
         return report;

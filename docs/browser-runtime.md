@@ -339,7 +339,8 @@ const runtime = createBrowserRuntime({
 ```
 
 When nothing is stored for the app on this device (no session, no remembered
-Pod, no unreadable record), `initialize()` connects the default Pod and
+Pod, no unreadable record, also none of a Pod that `allowedPods` now
+excludes), `initialize()` connects the default Pod and
 navigates to its provider once with `prompt=none`, instead of resolving. The
 Pod answers at once, without showing anything:
 
