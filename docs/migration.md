@@ -7,7 +7,7 @@ automatic conversion of legacy app data or stored credentials.
 ## From 0.8.0 to 0.9.0
 
 0.9.0 is not released yet; this section collects its upgrade steps. The
-prerelease `0.9.0-dev.2` carries them, and the [0.9.0 release
+prerelease `0.9.0-dev.3` carries them, and the [0.9.0 release
 notes](releases/0.9.0.md) list the changes.
 
 ### Shared palette defaults
