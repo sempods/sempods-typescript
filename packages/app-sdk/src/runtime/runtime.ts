@@ -36,10 +36,13 @@ import {
   type SessionSnapshot,
 } from '../sessions/records.js';
 import type {
+  AuthorizationIntent,
   BrowserRuntime,
   BrowserRuntimeOptions,
   Connection,
   DisconnectResult,
+  PreferenceStorage,
+  SessionFact,
   StartupReport,
 } from './types.js';
 import {
@@ -197,6 +200,50 @@ export function createBrowserRuntime(
     throw new RuntimeError('configuration');
   // Whether a Pod address outlives its session (sign-out, a session that ends).
   const rememberPods = options.rememberPods ?? true;
+  const firstSignIn = options.firstSignIn ?? 'click';
+  // Silently only with one default Pod to ask, and a client it can answer:
+  // a Pod never grants a dynamically registered client without its consent
+  // screen (SPS-AUTH-040), so prompt=none could never succeed for one.
+  if (
+    (firstSignIn !== 'click' && firstSignIn !== 'silent') ||
+    (firstSignIn === 'silent' &&
+      (identity?.kind !== 'did-web' || defaultPodUrl === undefined))
+  )
+    throw new RuntimeError('configuration');
+  /**
+   * This tab's note on the silent first sign-in: `tried`, or `attempt:` and
+   * the state of the attempt that is out. Read lazily: construction touches
+   * no storage.
+   */
+  const silentKey = `sempods.first-sign-in:${namespace}`;
+  function tabMemory(): PreferenceStorage | null {
+    if (options.tabStorage !== undefined) return options.tabStorage;
+    try {
+      return globalThis.sessionStorage ?? null;
+    } catch {
+      return null;
+    }
+  }
+  /** `null` while not tried in this tab; a note that cannot be read counts as tried. */
+  function readSilentNote(): string | null {
+    try {
+      const memory = tabMemory();
+      return memory ? memory.getItem(silentKey) : 'tried';
+    } catch {
+      return 'tried';
+    }
+  }
+  /** Whether the note was kept: without it, nothing is tried silently. */
+  function noteSilent(value: string): boolean {
+    try {
+      const memory = tabMemory();
+      if (!memory) return false;
+      memory.setItem(silentKey, value);
+      return memory.getItem(silentKey) === value;
+    } catch {
+      return false;
+    }
+  }
   const gracePeriod = options.refreshGracePeriod ?? REFRESH_GRACE_PERIOD;
   if (!Number.isFinite(gracePeriod) || gracePeriod < 0)
     throw new RuntimeError('configuration');
@@ -384,29 +431,8 @@ export function createBrowserRuntime(
     retireRecord = true,
     hadSession = true,
   ) {
-    delete e.credentials;
-    delete e.credential;
-    invalidate(e);
-    invalidatePod(e);
-    invalidateContexts(e);
-    resetLabels(e);
-    delete e.boundPod;
-    delete e.explicit;
-    delete e.observations;
-    e.lifetime.abort(new RuntimeError('disconnected'));
     const problem = runtimeProblem(error);
-    e.view = {
-      ...e.view,
-      session: Object.freeze({
-        kind: 'ended',
-        problem,
-        ...runtimeFailure(error),
-      }),
-      catalogue: Object.freeze({ kind: 'unknown' }),
-      grantedScopes: Object.freeze([]),
-      missingRequiredScopes: required,
-    };
-    settle(e);
+    stop(e, { kind: 'ended', problem, ...runtimeFailure(error) });
     const ended = e.view.session;
     publish();
     if (!retireRecord) return;
@@ -423,6 +449,31 @@ export function createBrowserRuntime(
         }
       },
     );
+  }
+  /**
+   * Stops everything of the session and shows `session` without access;
+   * under `signIn: 'optional'` the connection then reads without a token.
+   * Publishes nothing itself.
+   */
+  function stop(e: Entry, session: SessionFact) {
+    delete e.credentials;
+    delete e.credential;
+    invalidate(e);
+    invalidatePod(e);
+    invalidateContexts(e);
+    resetLabels(e);
+    delete e.boundPod;
+    delete e.explicit;
+    delete e.observations;
+    e.lifetime.abort(new RuntimeError('disconnected'));
+    e.view = {
+      ...e.view,
+      session: Object.freeze(session),
+      catalogue: Object.freeze({ kind: 'unknown' }),
+      grantedScopes: Object.freeze([]),
+      missingRequiredScopes: required,
+    };
+    settle(e);
   }
   /**
    * Under `signIn: 'optional'` or `'none'`, a connection whose session is
@@ -1200,7 +1251,12 @@ export function createBrowserRuntime(
    * an abandoned re-authorization resumes its earlier session there too, and a
    * first sign-in shows its interruption.
    */
-  function watchReturn(e: Entry, generation: string) {
+  /**
+   * A page restored from the back/forward cache while leaving for a sign-in
+   * resumes the session it started from; the silent first sign-in instead
+   * ends signed out, as if never started.
+   */
+  function watchReturn(e: Entry, generation: string, silent = false) {
     const page = globalThis as {
       addEventListener?: (
         type: string,
@@ -1217,6 +1273,11 @@ export function createBrowserRuntime(
       if (!(event as Event & { persisted?: boolean }).persisted) return;
       stop();
       if (eligible(e, generation) && e.view.session.kind === 'leaving') {
+        if (silent) {
+          noteSilent('tried');
+          decline(e);
+          return;
+        }
         e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
         publish();
         void resumeAbandoned(e, 'interrupted');
@@ -1268,6 +1329,8 @@ export function createBrowserRuntime(
     destination: string,
     /** A re-authorization: its failure ends the session it started from. */
     hadSession: boolean,
+    /** The silent first sign-in: a Pod that needs the person first ends nothing. */
+    silent = false,
   ): Promise<string> {
     const e = get(id);
     const generation = e.generation;
@@ -1306,11 +1369,148 @@ export function createBrowserRuntime(
       if (eligible(e, generation)) {
         if (error instanceof OAuthError && error.problem === 'invalid-client')
           registry.clear(e.view.podUrl);
-        end(e, error, true, hadSession);
+        if (silent && declined(error)) decline(e);
+        else end(e, error, true, hadSession);
         await e.persistence;
       }
       throw error;
     }
+  }
+  /**
+   * The silent first sign-in's answers that ask for the person (sign in,
+   * consent, another step) rather than fail.
+   */
+  function declined(error: unknown) {
+    return error instanceof OAuthError &&
+      (error.problem === 'login-required' ||
+        error.problem === 'consent-required' ||
+        error.problem === 'interaction-required')
+      ? error.problem
+      : undefined;
+  }
+  /**
+   * The silent first sign-in came back without a session: signed out as a
+   * connection never signed in to, and its record deleted, so nothing is
+   * remembered. A deletion that fails ends it as `storage`, like `end`.
+   */
+  function decline(e: Entry) {
+    stop(e, { kind: 'signed-out' });
+    const signedOut = e.view.session;
+    publish();
+    void retire(e, undefined, true).catch(() => {
+      if (entries.get(e.view.id) === e && e.view.session === signedOut) {
+        e.view = {
+          ...e.view,
+          session: Object.freeze({ kind: 'ended', problem: 'storage' }),
+        };
+        publish();
+      }
+    });
+  }
+  /**
+   * Under `firstSignIn: 'silent'`, with nothing stored: connects the default
+   * Pod and asks it with `prompt=none`. Noted for this tab first, so nothing
+   * after it can try again; a preparation that fails stays signed out.
+   */
+  async function signInSilently() {
+    if (!noteSilent('tried')) return;
+    try {
+      if (ensureDefault()) publish();
+      const c = await runtime.connect(defaultPodUrl);
+      await authorize(c.id, 'silent');
+    } catch {
+      // Signed out as before: the person signs in with a click.
+    }
+  }
+  /**
+   * Prepares and starts a sign-in. `silent` asks the Pod with `prompt=none`
+   * and notes the attempt's state for this tab before it is stored, so its
+   * callback is known as the silent one.
+   */
+  async function authorize(
+    id: string,
+    intent: AuthorizationIntent | 'silent',
+  ): Promise<void> {
+    const e = get(id);
+    // An ended session has no live lifetime left. Preparing needs a fresh
+    // one (and generation, so no operation of the ended one revives), which
+    // a later disconnect or dispose cancels like any other.
+    if (e.lifetime.signal.aborted) {
+      if (disconnects.has(id)) throw new RuntimeError('disconnected');
+      e.lifetime = new AbortController();
+      e.generation = crypto.randomUUID();
+    }
+    // An unsafe return address rejects before any request or change.
+    const destination = returnTo();
+    // Prepare while the current session keeps working: if discovery,
+    // registration or persisting the attempt fails, nothing was reset.
+    const before = e.generation;
+    const signal = e.lifetime.signal;
+    const pod = await discover(e.view.podUrl, signal);
+    current(e, before);
+    const client = await registry.resolve(pod, identity!, { signal });
+    current(e, before);
+    const generation = crypto.randomUUID();
+    const { attempt, url } = await prepareSessionAuthorization(
+      {
+        configKey: namespace,
+        connectionId: e.view.id,
+        generation,
+        pod,
+        client,
+        returnTo: destination,
+        scopes: requested,
+        // Only an explicit request to change sharing asks the Pod for its
+        // consent page; a sign-in may reuse the existing grant. The silent
+        // first sign-in asks it to show nothing.
+        ...(intent === 'change-sharing'
+          ? { prompt: 'consent' as const }
+          : intent === 'silent'
+            ? { prompt: 'none' as const }
+            : {}),
+      },
+      Date.now(),
+      options.development,
+    );
+    // Without the note, its callback would end the connection as a failed
+    // sign-in: nothing is stored or started.
+    if (intent === 'silent' && !noteSilent(`attempt:${attempt.state}`))
+      throw new RuntimeError('storage');
+    await serial(e, async () => {
+      current(e, before);
+      accepted(e, await sessions!.prepare(attempt, e.revision));
+      // The revision is recorded first, so a disconnect that ran during the
+      // commit retires the new attempt; this lifetime must not continue.
+      current(e, before);
+      // Committed durably: switch to the new lifetime in the same step, so no
+      // queued refresh of the old one can act on the replaced record. The
+      // facts stay for display until the page leaves; only the session says
+      // that nothing of the earlier one dispatches any more.
+      const shown = e.view;
+      const subject =
+        shown.session.kind === 'active' ||
+        shown.session.kind === 'renewing' ||
+        shown.session.kind === 'leaving'
+          ? shown.session.subject
+          : undefined;
+      renewLifetime(e, generation);
+      e.pod = pod;
+      e.client = client;
+      // Signing in again replaces a forget that could not be saved.
+      delete e.forgetting;
+      e.view = {
+        ...shown,
+        session: Object.freeze(
+          subject === undefined
+            ? { kind: 'leaving' }
+            : { kind: 'leaving', subject },
+        ),
+      };
+      publish();
+    });
+    current(e, generation);
+    watchReturn(e, generation, intent === 'silent');
+    (options.navigate ?? ((url) => window.location.assign(url)))(url);
   }
   async function bootstrap(): Promise<StartupReport> {
     let report: StartupReport = {
@@ -1358,6 +1558,11 @@ export function createBrowserRuntime(
         ...protocol,
       });
       const listing = await sessions.list();
+      // The silent first sign-in's note for this tab, and its attempt's state.
+      const silentNote = firstSignIn === 'silent' ? readSilentNote() : 'tried';
+      const silentState = silentNote?.startsWith('attempt:')
+        ? silentNote.slice('attempt:'.length)
+        : undefined;
       report = {
         ...report,
         storage: 'durable',
@@ -1390,6 +1595,21 @@ export function createBrowserRuntime(
         ) {
           if (pending) throw new RuntimeError('attempt');
           pending = saved;
+        }
+        // A silent first sign-in left without an answer (back navigation)
+        // is as if never started; this tab does not try it again.
+        if (
+          !callback &&
+          silentState !== undefined &&
+          saved.value.kind === 'authorizing' &&
+          saved.value.attempt.state === silentState
+        ) {
+          try {
+            await erase(saved.id, saved.revision);
+            continue;
+          } catch {
+            // Listed as an interrupted attempt; deleted by signing out.
+          }
         }
         if (!allows(b.pod.podUrl)) continue;
         if (saved.value.kind === 'disconnected' && !rememberPods) {
@@ -1485,7 +1705,16 @@ export function createBrowserRuntime(
       void restoring;
       if (disposed) throw new RuntimeError('disconnected');
       initialized = true;
-      if (!callback) return report;
+      if (silentState !== undefined) noteSilent('tried');
+      if (!callback) {
+        if (
+          silentNote === null &&
+          entries.size === 0 &&
+          listing.unreadable.length === 0
+        )
+          await signInSilently();
+        return report;
+      }
       if (!pending || pending.value.kind !== 'authorizing')
         throw new RuntimeError('attempt');
       destination = pending.value.attempt.returnTo;
@@ -1515,14 +1744,34 @@ export function createBrowserRuntime(
         // Not eligible (another answer, an expired earlier session, a changed
         // binding): the callback ends the connection as for a first sign-in.
       }
-      const connectionId = await redeem(
-        pending.id,
-        pending.revision,
-        location,
-        destination,
-        pending.value.previous !== undefined,
-      );
-      return { ...report, interaction: 'completed', connectionId };
+      const silent =
+        silentState !== undefined &&
+        pending.value.attempt.state === silentState;
+      try {
+        const connectionId = await redeem(
+          pending.id,
+          pending.revision,
+          location,
+          destination,
+          pending.value.previous !== undefined,
+          silent,
+        );
+        return { ...report, interaction: 'completed', connectionId };
+      } catch (error) {
+        const problem = silent ? declined(error) : undefined;
+        if (!problem || !entries.has(pending.id)) throw error;
+        const failure = (error as OAuthError).reason;
+        return {
+          ...report,
+          firstSignIn: Object.freeze({
+            connectionId: pending.id,
+            problem,
+            ...(failure.code === 'oauth' && failure.providerLink
+              ? { providerLink: failure.providerLink }
+              : {}),
+          }),
+        };
+      }
     } catch (error) {
       const problem = runtimeProblem(error);
       if (!initialized) {
@@ -1755,79 +2004,7 @@ export function createBrowserRuntime(
         (intent !== 'sign-in' && intent !== 'change-sharing')
       )
         throw new RuntimeError('configuration');
-      const e = get(id);
-      // An ended session has no live lifetime left. Preparing needs a fresh
-      // one (and generation, so no operation of the ended one revives), which
-      // a later disconnect or dispose cancels like any other.
-      if (e.lifetime.signal.aborted) {
-        if (disconnects.has(id)) throw new RuntimeError('disconnected');
-        e.lifetime = new AbortController();
-        e.generation = crypto.randomUUID();
-      }
-      // An unsafe return address rejects before any request or change.
-      const destination = returnTo();
-      // Prepare while the current session keeps working: if discovery,
-      // registration or persisting the attempt fails, nothing was reset.
-      const before = e.generation;
-      const signal = e.lifetime.signal;
-      const pod = await discover(e.view.podUrl, signal);
-      current(e, before);
-      const client = await registry.resolve(pod, identity!, { signal });
-      current(e, before);
-      const generation = crypto.randomUUID();
-      const { attempt, url } = await prepareSessionAuthorization(
-        {
-          configKey: namespace,
-          connectionId: e.view.id,
-          generation,
-          pod,
-          client,
-          returnTo: destination,
-          scopes: requested,
-          // Only an explicit request to change sharing asks the Pod for its
-          // consent page; a sign-in may reuse the existing grant.
-          ...(intent === 'change-sharing'
-            ? { prompt: 'consent' as const }
-            : {}),
-        },
-        Date.now(),
-        options.development,
-      );
-      await serial(e, async () => {
-        current(e, before);
-        accepted(e, await sessions!.prepare(attempt, e.revision));
-        // The revision is recorded first, so a disconnect that ran during the
-        // commit retires the new attempt; this lifetime must not continue.
-        current(e, before);
-        // Committed durably: switch to the new lifetime in the same step, so no
-        // queued refresh of the old one can act on the replaced record. The
-        // facts stay for display until the page leaves; only the session says
-        // that nothing of the earlier one dispatches any more.
-        const shown = e.view;
-        const subject =
-          shown.session.kind === 'active' ||
-          shown.session.kind === 'renewing' ||
-          shown.session.kind === 'leaving'
-            ? shown.session.subject
-            : undefined;
-        renewLifetime(e, generation);
-        e.pod = pod;
-        e.client = client;
-        // Signing in again replaces a forget that could not be saved.
-        delete e.forgetting;
-        e.view = {
-          ...shown,
-          session: Object.freeze(
-            subject === undefined
-              ? { kind: 'leaving' }
-              : { kind: 'leaving', subject },
-          ),
-        };
-        publish();
-      });
-      current(e, generation);
-      watchReturn(e, generation);
-      (options.navigate ?? ((url) => window.location.assign(url)))(url);
+      return authorize(id, intent);
     },
     disconnect(id) {
       return leave(id, false);

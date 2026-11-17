@@ -56,6 +56,10 @@ const { attempt, url } = await prepareAuthorization({
 Without a `prompt` the Pod may reuse an existing grant and answer at once;
 `prepareAuthorization(binding, { prompt: 'consent' })` asks it to show its
 consent page anyway, so the person can change what the app may access.
+`{ prompt: 'none' }` asks it to show nothing: it answers with a code only when
+the person is signed in there and the app's grant stands, otherwise with
+`login_required`, `consent_required` or `interaction_required`. The host must
+not send it again on that answer without the person's action, or it loops.
 
 `OAuthBinding` contains only Pod, client and scope facts. Preparation returns
 state and PKCE verifier; code/refresh exchanges capture a detached binding before
@@ -78,8 +82,10 @@ clock, because Pods and devices drift: a token must be internally plausible
 subject and `field: 'continuity'` for a valid token that does not continue the
 session (changed subject, reused refresh token, widened scopes).
 `validateAuthorizationCallback` classifies an error answer bound to the attempt
-by its code only, as documented on `OAuthProblem`; the provider's free-text
-description is dropped. A forged or malformed callback is `callback`. Callback URLs may not carry authorization-response parameters
+by its code, as documented on `OAuthProblem`; the provider's free-text
+description is dropped. Its `error_uri`, such as a link to the provider's own
+login page, is kept as `reason.providerLink` only when it is one absolute URL
+on the issuer's origin without user information. A forged or malformed callback is `callback`. Callback URLs may not carry authorization-response parameters
 (`code`, `state`, `iss`, `error`, `error_description`, `error_uri`, `response`).
 
 ## Reading across the Pod

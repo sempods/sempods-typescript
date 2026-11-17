@@ -390,6 +390,40 @@ it('rejects error and denial callbacks distinctly and duplicate reserved paramet
     expect(JSON.stringify((thrown as OAuthError).reason)).not.toContain('evil');
     expect((thrown as Error).message).not.toContain('evil');
   }
+  // A provider link survives only on the issuer's origin, once, without
+  // user information; the free text never does.
+  const linked = (uri: string, extra = '') => {
+    try {
+      validateAuthorizationCallback(
+        a,
+        callback(
+          `error=login_required&error_description=Visit+evil.example&error_uri=${encodeURIComponent(uri)}${extra}&state=${a.state}`,
+        ),
+      );
+    } catch (error) {
+      return (error as OAuthError).reason;
+    }
+    throw new Error('accepted');
+  };
+  expect(linked('https://pod.example/login?from=app')).toEqual({
+    code: 'oauth',
+    stage: 'authorization',
+    problem: 'login-required',
+    providerLink: 'https://pod.example/login?from=app',
+  });
+  for (const [uri, extra] of [
+    ['https://evil.example/login', ''],
+    ['http://pod.example/login', ''],
+    ['https://pod.example:8443/login', ''],
+    ['https://me:secret@pod.example/login', ''],
+    ['/login', ''],
+    ['javascript:alert(1)', ''],
+    [
+      'https://pod.example/login',
+      '&error_uri=https%3A%2F%2Fpod.example%2Fother',
+    ],
+  ] as const)
+    expect(linked(uri, extra), uri + extra).not.toHaveProperty('providerLink');
   for (const query of [
     `error=access_denied&code=x&state=${a.state}`,
     `error=login_required&state=other`,
@@ -470,7 +504,19 @@ it('asks for the consent page only when prompted, and keeps it out of the attemp
   await expect(
     prepareAuthorization(
       { pod, client, scopes: [] },
-      { prompt: 'none' as unknown as 'consent' },
+      { prompt: 'login' as unknown as 'consent' },
     ),
   ).rejects.toMatchObject({ problem: 'configuration' });
+});
+
+it('asks the Pod to show nothing with prompt none, and keeps it out of the attempt', async () => {
+  const plain = await prepareAuthorization({ pod, client, scopes: [] });
+  const silent = await prepareAuthorization(
+    { pod, client, scopes: [] },
+    { prompt: 'none' },
+  );
+  expect(new URL(silent.url).searchParams.getAll('prompt')).toEqual(['none']);
+  expect(Object.keys(silent.attempt).sort()).toEqual(
+    Object.keys(plain.attempt).sort(),
+  );
 });

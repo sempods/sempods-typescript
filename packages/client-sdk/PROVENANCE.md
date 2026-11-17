@@ -81,6 +81,14 @@ cross-read in `sempods/sempods-kotlin` at
 `none`, `login` or another value. This is source reading and deterministic
 fixtures; the live check against a deployed `did:web` app remains open in #362.
 
+`prompt: 'none'` and `providerLink` (#373) were checked against the same
+specification revision: SPS-AUTH-039 and -040 (`spec/core/auth.md` §7) let
+`prompt=none` succeed only for a remembered person, a client that is not
+dynamically registered and a standing grant, and answer `login_required` or
+`consent_required` otherwise; SPS-AUTH-025 (§4) allows `error_uri` on an error
+answer. The SDK still never sends `login` or another value. This is source
+reading and deterministic fixtures, not live wire evidence.
+
 No source licence file was found at the source revisions above; they and this
 port are by the same author. Since 0.1.0 this package, including the ported code,
 is licensed under the Apache License, Version 2.0 (see LICENSE and NOTICE).

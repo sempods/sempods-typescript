@@ -52,6 +52,14 @@ export interface AccessPrompt {
   /** Why the session ended, for `signed-out`. */
   readonly problem?: RuntimeProblem;
   readonly failure?: SdkFailure;
+  /**
+   * The Pod's own link for signing in there, on its issuer's origin: from a
+   * provider's answer that asked the person to sign in or act there first
+   * (`failure.providerLink`), or, while the default Pod's connection is still
+   * signed out, from the silent first sign-in (`StartupReport.firstSignIn`).
+   * Offer it beside signing in, never instead.
+   */
+  readonly providerLink?: string;
 }
 
 /** What `AppSnapshot.access` reports. */
@@ -95,6 +103,7 @@ interface Cause {
   readonly actions: readonly Action[];
   readonly problem?: RuntimeProblem | undefined;
   readonly failure?: SdkFailure | undefined;
+  readonly providerLink?: string | undefined;
 }
 
 const pendingState: AccessState = Object.freeze({
@@ -188,7 +197,8 @@ function samePrompt(a: AccessPrompt | null, b: AccessPrompt | null) {
     a.connectionId === b.connectionId &&
     a.actions.join() === b.actions.join() &&
     a.problem === b.problem &&
-    a.failure === b.failure
+    a.failure === b.failure &&
+    a.providerLink === b.providerLink
   );
 }
 
@@ -310,8 +320,30 @@ export function createAccessTracker() {
     }
     let blocking: AccessPrompt | null = null;
     const prompts: { prompt: AccessPrompt; order: number }[] = [];
+    const first = f.startup?.firstSignIn;
+    // The silent first sign-in's link lasts while its connection is still
+    // signed out as one never signed in to.
+    const firstLink =
+      first?.providerLink &&
+      f.connections.some(
+        (c) =>
+          c.id === first.connectionId &&
+          c.session.kind === 'signed-out' &&
+          c.session.problem === undefined,
+      )
+        ? first.providerLink
+        : undefined;
     for (const cause of causes) {
       const { id, order } = idOf(cause.key, kept);
+      const providerLink =
+        cause.failure?.code === 'oauth' && cause.failure.providerLink
+          ? cause.failure.providerLink
+          : firstLink !== undefined &&
+              (cause.connectionId === first!.connectionId ||
+                (cause.connectionId === null &&
+                  cause.reason === 'no-connection'))
+            ? firstLink
+            : undefined;
       const prompt: AccessPrompt = Object.freeze({
         id,
         severity: cause.severity,
@@ -320,6 +352,7 @@ export function createAccessTracker() {
         actions: Object.freeze([...cause.actions]),
         ...(cause.problem ? { problem: cause.problem } : {}),
         ...(cause.failure ? { failure: cause.failure } : {}),
+        ...(providerLink ? { providerLink } : {}),
       });
       if (prompt.severity === 'blocking') blocking ??= prompt;
       // Dismissal never hides a prompt that does not offer it.

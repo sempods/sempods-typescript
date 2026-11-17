@@ -224,6 +224,34 @@ does not conform to the specification and its cause is unknown: acting on it
 could spend refresh tokens in a loop or sign people out on a Pod that uses `401`
 for other refusals.
 
+## A silent first sign-in is an opt-in, tried once per tab
+
+Signing in stays one explicit action. A deployed `did:web` app in front of one
+Pod (a preset or a single allowed Pod) may opt in to `firstSignIn: 'silent'`:
+with nothing stored for the app on the device, startup asks that Pod once with
+`prompt=none`. A session at the Pod with a standing grant signs the person in
+without a click. `login_required`, `consent_required` and
+`interaction_required` are not failures: the connection is signed out as one
+never signed in to, and nothing is remembered. A per-tab note, written before
+the redirect, makes it one attempt per tab, also after coming back without an
+answer; without a tab storage nothing is tried. The portable client allows
+`prompt: 'none'` as a protocol building block and keeps an authorization error's
+`error_uri` as `providerLink` only when it has the issuer's origin and no user
+information; the provider's free text is never kept.
+
+_Why:_ a redirect without a click risks loops and lost drafts, so the opt-in is
+bound to the first start, where neither a session nor a draft exists, and to
+one note per tab, so no answer can start it again. Where a person usually has a
+session at the app's only Pod (single sign-on), the click is redundant. A Pod
+never grants a dynamically registered client silently
+([SPS-AUTH-040](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/auth.md#SPS-AUTH-040)),
+so `silent` needs a `did:web` identity. A link on the issuer's own origin leads
+nowhere the person was not about to go to sign in, whereas provider text or a
+foreign link inside the app's UI would let any Pod speak with the app's
+voice. The flow stays internal to the runtime; an app with other needs builds
+it from the client's building blocks until a second use shows its shape
+([#373](https://github.com/sempods/sempods-typescript/issues/373)).
+
 ## Bound views, guarded navigation, safe UI defaults
 
 The runtime binds a view to one connection and context for one target lifetime;

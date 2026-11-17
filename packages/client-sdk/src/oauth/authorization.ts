@@ -31,16 +31,25 @@ type ProtocolOptions = {
  * Preparation returns data; the host owns retention, lifetime and user interaction.
  * Without `prompt` the Pod may reuse an existing grant and answer at once.
  * `prompt: 'consent'` asks it to show its consent page even then, so the person
- * can change what this app may access. The attempt does not record it: the
- * exchange is the same either way.
+ * can change what this app may access. `prompt: 'none'` asks it to show
+ * nothing: it answers at once with a code when the person is signed in there
+ * and this app's grant covers the request, otherwise with an error such as
+ * `login_required`, `consent_required` or `interaction_required`. Never send
+ * it again on its own error answer without a person's action: that is a
+ * redirect loop. The attempt does not record the prompt: the exchange is the
+ * same either way.
  */
 export async function prepareAuthorization(
   input: Omit<OAuthBinding, 'scopes'> & { readonly scopes?: readonly string[] },
   options: Pick<ProtocolOptions, 'development'> & {
-    readonly prompt?: 'consent';
+    readonly prompt?: 'consent' | 'none';
   } = {},
 ): Promise<{ readonly attempt: AuthorizationAttempt; readonly url: string }> {
-  if (options.prompt !== undefined && options.prompt !== 'consent')
+  if (
+    options.prompt !== undefined &&
+    options.prompt !== 'consent' &&
+    options.prompt !== 'none'
+  )
     throw new OAuthError('configuration');
   const binding = validateOAuthBinding(
     { ...input, scopes: input.scopes ?? [] },
@@ -127,9 +136,36 @@ export function validateAuthorizationCallback(
     return params;
   } catch (error) {
     // The library checks issuer and state first: this error answers the attempt.
-    if (error instanceof oauth.AuthorizationResponseError)
-      throw new OAuthError(authorizationProblem(error.error));
+    if (error instanceof oauth.AuthorizationResponseError) {
+      const link = providerLink(callback, attempt.pod.issuer);
+      throw new OAuthError(
+        authorizationProblem(error.error),
+        undefined,
+        undefined,
+        'authorization',
+        link,
+      );
+    }
     throw new OAuthError('callback');
+  }
+}
+
+/**
+ * The error answer's `error_uri`, only as one absolute URL on the issuer's
+ * origin without user information; anything else is dropped, never shown.
+ */
+function providerLink(callback: URL, issuer: string): string | undefined {
+  const values = callback.searchParams.getAll('error_uri');
+  if (values.length !== 1) return undefined;
+  try {
+    const link = new URL(values[0]!);
+    return link.origin === new URL(issuer).origin &&
+      !link.username &&
+      !link.password
+      ? link.href
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 

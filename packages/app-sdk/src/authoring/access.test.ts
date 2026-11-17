@@ -663,3 +663,82 @@ describe('without required sign-in (#240)', () => {
     expect(shape(state.blocking)).toMatchObject({ reason: 'sign-out-failed' });
   });
 });
+
+describe('the Pod’s own sign-in link (#373)', () => {
+  const link = 'https://pod.example/login';
+  const declined: StartupReport = {
+    ...started,
+    firstSignIn: {
+      connectionId: 'a',
+      problem: 'login-required',
+      providerLink: link,
+    },
+  };
+  it('lasts on the silent first sign-in’s connection while it is signed out', () => {
+    const tracker = createAccessTracker();
+    const signedOut = tracker.derive(
+      facts({
+        startup: declined,
+        connections: [connection('a', { kind: 'signed-out' })],
+        activeId: 'a',
+      }),
+    );
+    expect(shape(signedOut.blocking)).toEqual({
+      severity: 'blocking',
+      reason: 'signed-out',
+      connectionId: 'a',
+      actions: ['sign-in', 'forget'],
+      providerLink: link,
+    });
+    // Once the connection is signed in or ended otherwise, the link goes.
+    const ended = tracker.derive(
+      facts({
+        startup: declined,
+        connections: [connection('a', { kind: 'ended', problem: 'expired' })],
+        activeId: 'a',
+      }),
+    );
+    expect(ended.blocking).not.toHaveProperty('providerLink');
+    expect(
+      tracker.derive(
+        facts({
+          startup: declined,
+          connections: [
+            connection('a', active, {
+              missingRequiredScopes: ['tasks'],
+            }),
+          ],
+          activeId: 'a',
+        }),
+      ).blocking,
+    ).not.toHaveProperty('providerLink');
+  });
+  it('comes from a failure’s provider link on its own prompt only', () => {
+    const failure = {
+      code: 'oauth' as const,
+      stage: 'authorization' as const,
+      problem: 'login-required' as const,
+      providerLink: link,
+    };
+    const state = derive(
+      facts({
+        connections: [
+          connection('a', {
+            kind: 'ended',
+            problem: 'login-required',
+            failure,
+          }),
+          connection('b', { kind: 'ended', problem: 'expired' }),
+        ],
+        activeId: 'a',
+      }),
+    );
+    expect(state.blocking).toMatchObject({
+      connectionId: 'a',
+      providerLink: link,
+    });
+    expect(state.prompts).toEqual([
+      expect.not.objectContaining({ providerLink: expect.anything() }),
+    ]);
+  });
+});

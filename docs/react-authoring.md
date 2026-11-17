@@ -1375,9 +1375,15 @@ still do:
 While `access.pending` (startup, or the active connection restoring), nothing
 is derived. A prompt's
 `reason` names the cause, `connectionId` its connection and `actions` the
-offered steps, the first primary. A prompt keeps its `id` while its cause
-lasts; `dismiss(id)` retires a prompt that offers `dismiss` for the
-controller's lifetime, and returns `false` for any other.
+offered steps, the first primary. `providerLink`, when present, is the Pod's
+own page for signing in there, on its issuer's origin: from a Pod that answered
+a sign-in with `login_required` or a similar step, or from a
+[silent first sign-in](browser-runtime.md#silent-first-sign-in) while its
+connection stays signed out. `AccessGate` and `AccessPrompt` show it as a link
+beside **Sign in** that opens in a new tab (`controls.providerLink`). A prompt
+keeps its `id` while its cause lasts; `dismiss(id)` retires a prompt that
+offers `dismiss` for the controller's lifetime, and returns `false` for any
+other.
 
 To place them yourself, compose the parts and render management on its own:
 
