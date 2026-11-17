@@ -144,9 +144,7 @@ needs them; preserve the minimal screen's recovery when adapting it.
 - **One data meaning.** Define the type, predicates, text language and status
   values from the domain, not just the example's names. Use `fields()` and
   suitable helpers (`trim: true` for text, `dateTime` for instants, `date` for
-  calendar days). For when a record was created or last changed, let the
-  standard writes maintain [timestamps](timestamps.md) instead of writing
-  them in the app. Show a stored date with `format.dateOnly(value) ?? value`
+  calendar days). Show a stored date with `format.dateOnly(value) ?? value`
   and an instant with `format.dateTime(value) ?? value`; never parse it with
   `new Date`, which rolls `2026-02-30` over to March and reads a time without
   a zone in the device's zone. `dateOnly` shows a day from years 0001 to 9999

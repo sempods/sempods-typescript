@@ -491,16 +491,9 @@ orDateTime: true })` owns one value that is either a day or a zoned
   `EditDefinition` (`read`/`patch`/`valid`) is the escape hatch for other
   mappings. `isFieldDefinition(definition)` tells whether a definition was
   created by `fields()` (copies and look-alikes are not).
-- `fields(spec, { timestamps: { created, modified } })` opts in to instants
-  outside the draft: `prepareCreation` writes both, and an `updateFields` or
-  editor save that changes something also replaces `modified`'s
-  `xsd:dateTime` value in the same conditional request. Each is captured from
-  the device clock once per command, so a retried creation and a bounded
-  rebase reuse it; nothing is written for a no-op. A list of predicates reads
-  older ones as fallbacks (`created: [schema, dcterms]`); only the first is
-  written. `timestampsOf(snapshot)` reads `{ created, modified }`, `null` when
-  absent or unusable, and never hides the row. They are app-maintained, not
-  the Pod's commit time.
+- `fields(spec, { timestamps: { created, modified } })` lets creation,
+  `updateFields` and editor saves maintain device-clock instants outside the
+  draft; `timestampsOf(snapshot)` reads them.
 - `classifyDate(value)` tells what a stored lexical form names, without
   `Date`: `{ kind: 'day', year, month, day, timeZone? }` for an `xsd:date` on
   a real day (a stored time zone is reported, not applied),

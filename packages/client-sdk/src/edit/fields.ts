@@ -474,7 +474,8 @@ function timestampPredicates(
  *
  * `timestamps` opts in to app-maintained instants, outside the draft: a
  * creation writes `created` and `modified`, and every update or editor save
- * that changes something also replaces `modified`'s `xsd:dateTime` value.
+ * that changes something also replaces `modified`'s `xsd:dateTime` values
+ * with one; its other values stay.
  * Each instant is captured from the device clock once per write command.
  * Give a list to also read older predicates (`created: [schema, dcterms]`):
  * only the first is written. Read them with `timestampsOf(snapshot)`.
