@@ -20,6 +20,7 @@ export type {
   PodOptions,
   SparqlOperations,
   SubjectOperations,
+  ValueOperations,
 } from './pod.js';
 export type {
   Cancelled,
@@ -36,6 +37,7 @@ export type {
   ReadOptions,
   Refused,
   Stopped,
+  ValueOutcome,
   WriteOptions,
   WriteResult,
 } from './results.js';

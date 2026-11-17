@@ -33,6 +33,7 @@ import type {
   ReadOptions,
   Refused,
   Stopped,
+  ValueOutcome,
   WriteOptions,
   WriteResult,
 } from './results.js';
@@ -44,6 +45,16 @@ const stopped: Stopped = Object.freeze({ kind: 'stopped' });
 const JSON_LD = 'application/ld+json';
 /** RFC 9110 strong entity-tag: quoted, no `W/`, no wildcard. */
 const STRONG_ETAG = /^"[\x21\x23-\x7E\x80-\xFF]*"$/;
+
+/**
+ * How a value write's success is read beyond its status (SPS-CRUD-044,
+ * -047, -052): each outcome this operation may report, with the status that
+ * must carry it, and for an added IRI the edge route its `Location` names.
+ */
+interface ValueAnswer {
+  readonly outcomes: Readonly<Partial<Record<ValueOutcome, 200 | 201>>>;
+  readonly edge?: string;
+}
 
 /**
  * A pod handle for one canonical pod and one credential owner. Requests go only
@@ -125,6 +136,7 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     exchange: Exchange,
     url: string,
     success: readonly number[],
+    value?: ValueAnswer,
   ): Promise<WriteResult> {
     if (exchange.kind === 'not-sent')
       return { kind: 'not-sent', reason: exchange.reason };
@@ -134,15 +146,17 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
         failure: { code: 'transport', problem: exchange.reason },
       };
     const response = exchange.response;
-    discard(response);
+    const status = response.status;
+    const untrusted = untrustedTarget(response, url);
+    if (untrusted || !value || !success.includes(status)) discard(response);
     // A seen answer may still be untrustworthy; the write may have happened.
-    if (untrustedTarget(response, url))
+    if (untrusted)
       return {
         kind: 'uncertain',
         failure: { code: 'response', problem: 'redirected' },
       };
-    const status = response.status;
     if (success.includes(status)) {
+      if (value) return valueApplied(response, url, value);
       const location = createdAt(response, url);
       return {
         kind: 'applied',
@@ -162,16 +176,21 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
   }
 
   /**
-   * Writes claim no entity tag (SPS-CRUD-030). A creation's `Location` must name
+   * Resource writes claim no entity tag (SPS-CRUD-030). A creation's `Location` must name
    * the created subject's own system route (SPS-CRUD-043), with no query or the
-   * request's `?context=`; anything else is not adopted as its identity. Empty
+   * request's `?context=`; anything else is not adopted as its identity. An
+   * added value's `Location` names its edge route instead (`created`). Empty
    * query/fragment delimiters are removed from an otherwise accepted URL.
    */
-  function createdAt(response: Response, url: string): string | undefined {
+  function createdAt(
+    response: Response,
+    url: string,
+    created = url,
+  ): string | undefined {
     const header = response.headers.get('location');
     if (response.status !== 201 || !header) return undefined;
     try {
-      const route = new URL(url);
+      const route = new URL(created);
       const location = new URL(header, url);
       if (
         location.origin !== route.origin ||
@@ -192,6 +211,32 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     }
   }
 
+  /**
+   * A value write that succeeded. Its outcome body and tag are informative:
+   * when one is missing or does not fit, the write still happened and only
+   * that field is left out.
+   */
+  async function valueApplied(
+    response: Response,
+    url: string,
+    value: ValueAnswer,
+  ): Promise<WriteResult> {
+    const status = response.status as 200 | 201 | 204;
+    const etag = response.headers.get('etag');
+    const location =
+      value.edge === undefined
+        ? undefined
+        : createdAt(response, url, value.edge);
+    const outcome = await outcomeOf(response, value);
+    return {
+      kind: 'applied',
+      status,
+      ...(location ? { location } : {}),
+      ...(etag && STRONG_ETAG.test(etag) ? { etag } : {}),
+      ...(outcome ? { outcome } : {}),
+    };
+  }
+
   function context(
     contextIri: string,
     contextOptions: ContextOptions = {},
@@ -202,10 +247,13 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
       ? [...podGuards, contextOptions.beforeDispatch]
       : podGuards;
 
-    function resourceUrl(iri: string): string {
-      if (!ABSOLUTE_IRI.test(iri))
+    /** The resource, slot or single-edge route (SPS-CRUD-005) in this Context. */
+    function resourceUrl(...iris: readonly string[]): string {
+      if (!iris.every((iri) => ABSOLUTE_IRI.test(iri)))
         throw failure({ code: 'invalid-argument', argument: 'iri' });
-      const url = new URL(`${base}/_system/resources/${base64url(iri)}`);
+      const url = new URL(
+        `${base}/_system/resources/${iris.map(base64url).join('/')}`,
+      );
       url.searchParams.set('context', contextIri);
       return url.href;
     }
@@ -224,14 +272,17 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     }
 
     async function change(
-      method: 'PUT' | 'PATCH' | 'DELETE',
-      iri: string,
+      method: 'PUT' | 'PATCH' | 'POST' | 'DELETE',
+      url: string,
       condition: CreateCondition | MatchCondition | Overwrite,
       options: WriteOptions,
       success: readonly number[],
-      body?: { readonly type: string; readonly value: JsonLd },
+      body?: {
+        readonly type: string;
+        readonly value: JsonLd | readonly JsonLd[];
+      },
+      value?: ValueAnswer,
     ): Promise<WriteResult> {
-      const url = resourceUrl(iri);
       const headers = {
         ...conditionHeaders(condition),
         ...(body ? { 'content-type': body.type } : {}),
@@ -246,7 +297,7 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
           body ? JSON.stringify(body.value) : undefined,
         ),
       );
-      return write(exchange, url, success);
+      return write(exchange, url, success, value);
     }
 
     return Object.freeze({
@@ -279,31 +330,133 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
             () => ({ kind: 'not-found' as const }),
           );
         },
-        put: (
+        put: async (
           iri: string,
           body: JsonLd,
           condition: CreateCondition | MatchCondition | Overwrite,
           options: WriteOptions = {},
         ) =>
-          change('PUT', iri, condition, options, [200, 201, 204], {
+          change('PUT', resourceUrl(iri), condition, options, [200, 201, 204], {
             type: JSON_LD,
             value: body,
           }),
-        patch: (
+        patch: async (
           iri: string,
           patch: JsonLd,
           condition: MatchCondition | Overwrite,
           options: WriteOptions = {},
         ) =>
-          change('PATCH', iri, condition, options, [200, 204], {
+          change('PATCH', resourceUrl(iri), condition, options, [200, 204], {
             type: 'application/merge-patch+json',
             value: patch,
           }),
-        delete: (
+        delete: async (
           iri: string,
           condition: MatchCondition | Overwrite,
           options: WriteOptions = {},
-        ) => change('DELETE', iri, condition, options, [200, 204]),
+        ) => change('DELETE', resourceUrl(iri), condition, options, [200, 204]),
+      }),
+      values: Object.freeze({
+        async get(
+          iri: string,
+          predicate: string,
+          options: ReadOptions = {},
+        ): Promise<GetResult<readonly JsonLd[]>> {
+          const url = resourceUrl(iri, predicate);
+          const exchange = await execute(
+            request('GET', url, { accept: JSON_LD }, guards, options.signal),
+          );
+          return read(
+            exchange,
+            url,
+            options.signal,
+            async (response) => {
+              // One Context with a value always has a tag (SPS-CRUD-050).
+              const etag = response.headers.get('etag');
+              if (!etag || !STRONG_ETAG.test(etag)) {
+                discard(response);
+                throw failure({ code: 'response', problem: 'etag' });
+              }
+              const body = await json(response);
+              if (!Array.isArray(body) || !body.every(isNode))
+                throw failure({ code: 'response', problem: 'body' });
+              return { kind: 'ok' as const, body: Object.freeze(body), etag };
+            },
+            () => ({ kind: 'not-found' as const }),
+          );
+        },
+        add: async (
+          iri: string,
+          predicate: string,
+          value: JsonLd,
+          condition: CreateCondition | MatchCondition | Overwrite,
+          options: WriteOptions = {},
+        ) => {
+          const url = resourceUrl(iri, predicate);
+          const target = value['@id'];
+          return change(
+            'POST',
+            url,
+            condition,
+            options,
+            [200, 201, 204],
+            { type: JSON_LD, value },
+            {
+              outcomes: { created: 201, already_present: 200 },
+              // Only an added IRI has an edge for `Location` to name.
+              ...(typeof target === 'string' && ABSOLUTE_IRI.test(target)
+                ? { edge: resourceUrl(iri, predicate, target) }
+                : {}),
+            },
+          );
+        },
+        replace: async (
+          iri: string,
+          predicate: string,
+          values: readonly JsonLd[],
+          condition: CreateCondition | MatchCondition | Overwrite,
+          options: WriteOptions = {},
+        ) =>
+          change(
+            'PUT',
+            resourceUrl(iri, predicate),
+            condition,
+            options,
+            [200, 204],
+            { type: JSON_LD, value: values },
+            { outcomes: {} },
+          ),
+        clear: async (
+          iri: string,
+          predicate: string,
+          condition: MatchCondition | Overwrite,
+          options: WriteOptions = {},
+        ) =>
+          change(
+            'DELETE',
+            resourceUrl(iri, predicate),
+            condition,
+            options,
+            [200, 204],
+            undefined,
+            { outcomes: { cleared: 200, already_empty: 200 } },
+          ),
+        remove: async (
+          iri: string,
+          predicate: string,
+          target: string,
+          condition: CreateCondition | MatchCondition | Overwrite,
+          options: WriteOptions = {},
+        ) =>
+          change(
+            'DELETE',
+            resourceUrl(iri, predicate, target),
+            condition,
+            options,
+            [200, 204],
+            undefined,
+            { outcomes: { removed: 200, already_absent: 200 } },
+          ),
       }),
       sparql: Object.freeze({
         construct: (query: string, options: ReadOptions = {}) =>
@@ -463,6 +616,40 @@ async function json(response: Response, expected = JSON_LD): Promise<unknown> {
   } catch (cause) {
     throw failure({ code: 'response', problem: 'body' }, cause);
   }
+}
+
+/**
+ * The `{"outcome": …}` body of a value write (SPS-CRUD-044), when it is one
+ * this operation reports with the answered status; otherwise nothing.
+ */
+async function outcomeOf(
+  response: Response,
+  value: ValueAnswer,
+): Promise<ValueOutcome | undefined> {
+  const type = response.headers
+    .get('content-type')
+    ?.split(';')[0]
+    ?.trim()
+    .toLowerCase();
+  if (
+    response.status === 204 ||
+    (type !== 'application/json' && type !== JSON_LD)
+  ) {
+    discard(response);
+    return undefined;
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  const outcome = isNode(body) ? body['outcome'] : undefined;
+  return typeof outcome === 'string' &&
+    Object.hasOwn(value.outcomes, outcome) &&
+    value.outcomes[outcome as ValueOutcome] === response.status
+    ? (outcome as ValueOutcome)
+    : undefined;
 }
 
 function constructBody(body: unknown): readonly JsonLd[] {

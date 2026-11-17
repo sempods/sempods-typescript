@@ -52,6 +52,17 @@ This is source reading and deterministic fixtures, not live wire evidence;
 pinned live validation remains pending. Re-check these revisions when the
 specification changes.
 
+Value-level operations (`ContextView.values`, #370) were checked on
+2026-11-17 against `sempods/sempods-spec` at
+`c6308c157d8c78be0ba6e9d91dba39a11a9ce883`: SPS-CRUD-041–054 and -059–061,
+with the response shapes cross-read in `sempods/sempods-kotlin` at
+`4e6414ff4c77627be319eb6dc83a4d616ff6db2d` (`PodSystemResourcesEndpoint`,
+`SempodsPodSlots`): `404` for an empty slot read, `{"outcome": …}` bodies as
+`application/json`, an echoed slot `ETag` on every write and a `Location`
+without a query on an added IRI's edge. sempods-spec#68 may replace the
+outcome bodies with `204`; the client keeps such a write `applied`. Fixture
+tests only, no live Pod.
+
 Pod SELECT/CONSTRUCT (#37) was checked against that same spec revision on
 2026-10-06: SPS-SPARQL-001–018, including server dataset authorization and result
 media types. SELECT decoding follows the
