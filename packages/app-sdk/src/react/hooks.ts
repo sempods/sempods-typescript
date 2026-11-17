@@ -126,8 +126,13 @@ function definitionKey(definition: unknown): string | null {
   if (!isFieldDefinition(definition as EditDefinition<unknown>)) return null;
   const d = definition as FieldDefinition<unknown>;
   // Independent of construction order: the same fields written in another
-  // order map the same terms and must keep drafts and lifetimes.
-  return JSON.stringify([d.type ?? null, sorted(d.fields)]);
+  // order map the same terms and must keep drafts and lifetimes. Other
+  // timestamps write other terms: a separate structure.
+  return JSON.stringify([
+    d.type ?? null,
+    sorted(d.fields),
+    ...(d.timestamps ? [d.timestamps] : []),
+  ]);
 }
 /** A plain value with object keys in a fixed order. */
 function sorted(value: unknown): unknown {

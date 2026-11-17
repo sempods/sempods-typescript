@@ -1,8 +1,10 @@
 import type { JsonLd, WriteResult } from '../results.js';
 import {
   changedFields,
+  instantNow,
   isFieldDefinition,
   sameOwnedTerms,
+  stamped,
   storedDraft,
   withFields,
   type EditDefinition,
@@ -488,6 +490,8 @@ export function createResourceEditor<D>(
         return Promise.resolve({ kind: 'not-saved', reason: 'not-ready' });
       const submitted = draft!;
       const at = base!.version!;
+      // One instant per save command, also for its bounded rebase.
+      const instant = instantNow();
       return exclusive<SaveOutcome>(
         'write',
         { kind: 'not-saved', reason: 'not-ready' },
@@ -501,7 +505,12 @@ export function createResourceEditor<D>(
           let result!: WriteResult;
           try {
             for (;;) {
-              change = definition.patch(onto.body, mine);
+              change = stamped(
+                definition,
+                onto.body,
+                definition.patch(onto.body, mine),
+                instant,
+              );
               // Host callbacks can revoke access even before the first request.
               // A stopped retry retains its known 412; a stopped first write
               // has no result to settle and is simply not ready.

@@ -29,6 +29,8 @@ references for the task at hand, not prerequisites to read in order.
   [task-with-note](../examples/todo/recipes/task-with-note.tsx) recipes.
 - [RDF values](rdf-values.md): readable text, exact terms, dates and web
   addresses for values a SPARQL read returns.
+- [Creation and modification times](timestamps.md): instants the standard
+  writes maintain, and lists ordered by them.
 - [Resource cards](resource-cards.md): cards with pictures and dates from
   every connected Pod, with the source of each value and bounded reads.
 - [Neighborhood](neighborhood.md): the statements around a resource, page by

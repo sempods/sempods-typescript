@@ -67,6 +67,7 @@ it.each([
       'selectTextVariant',
       'snapshots',
       'text',
+      'timestampsOf',
       'updateFields',
     ],
   ],

@@ -491,6 +491,9 @@ orDateTime: true })` owns one value that is either a day or a zoned
   `EditDefinition` (`read`/`patch`/`valid`) is the escape hatch for other
   mappings. `isFieldDefinition(definition)` tells whether a definition was
   created by `fields()` (copies and look-alikes are not).
+- `fields(spec, { timestamps: { created, modified } })` lets creation,
+  `updateFields` and editor saves maintain device-clock instants outside the
+  draft; `timestampsOf(snapshot)` reads them.
 - `classifyDate(value)` tells what a stored lexical form names, without
   `Date`: `{ kind: 'day', year, month, day, timeZone? }` for an `xsd:date` on
   a real day (a stored time zone is reported, not applied),

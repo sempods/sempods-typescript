@@ -28,8 +28,15 @@ export type {
   FlagField,
   IriField,
   TextField,
+  TimestampPredicates,
+  Timestamps,
 } from './fields.js';
-export { removeSnapshot, snapshots, updateFields } from './snapshots.js';
+export {
+  removeSnapshot,
+  snapshots,
+  timestampsOf,
+  updateFields,
+} from './snapshots.js';
 export type {
   RemoveSnapshotOutcome,
   SkippedRecord,
