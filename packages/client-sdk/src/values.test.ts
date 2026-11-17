@@ -445,26 +445,63 @@ describe('value-level operations on one slot', () => {
   });
 
   it('waits for an outcome body only so long, and keeps a write applied when it stalls or is cancelled', async () => {
-    const stalled = () =>
-      new Response(new ReadableStream({ start() {} }), {
+    let cancelled = 0;
+    let more: ((chunk: string) => void) | undefined;
+    const stalled = () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          stream.enqueue(new TextEncoder().encode('{"outcome":'));
+          more = (chunk) => stream.enqueue(new TextEncoder().encode(chunk));
+        },
+        cancel() {
+          cancelled++;
+        },
+      });
+      return new Response(body, {
         status: 200,
         headers: { 'content-type': 'application/json', etag: '"7"' },
       });
+    };
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const { fetch } = answering(stalled);
       const pending = viewOf(fetch).values.remove(bob, knows, carol, {
         overwrite: true,
       });
-      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(cancelled).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
       expect(await pending).toEqual({
         kind: 'applied',
         status: 200,
         etag: '"7"',
       });
+      // The abandoned body is cancelled, so nothing reads or buffers it.
+      expect(cancelled).toBe(1);
+      expect(() => more?.('"removed"}')).toThrow();
     } finally {
       vi.useRealTimers();
     }
+    // A body far larger than an outcome is not read to its end.
+    let oversized = 0;
+    const { fetch: large } = answering(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(stream) {
+              stream.enqueue(new Uint8Array(16 * 1024).fill(32));
+            },
+            cancel() {
+              oversized++;
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    expect(
+      await viewOf(large).values.clear(bob, knows, { overwrite: true }),
+    ).toEqual({ kind: 'applied', status: 200 });
+    expect(oversized).toBe(1);
     // As fetch does, the caller's signal errors a body still arriving.
     const controller = new AbortController();
     const cancelling: PodFetch = async (_url, init) => {

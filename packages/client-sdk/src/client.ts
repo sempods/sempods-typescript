@@ -54,6 +54,8 @@ const STRONG_ETAG = /^"[\x21\x23-\x7E\x80-\xFF]*"$/;
 /** How long an applied value write waits for its outcome body. */
 const OUTCOME_WAIT_MS = 5000;
 const STALLED = Symbol('stalled');
+/** An outcome body is a few bytes; a larger one is not read further. */
+const OUTCOME_LIMIT = 64 * 1024;
 
 interface ValueAnswer {
   readonly outcomes: Readonly<Partial<Record<ValueOutcome, 200 | 201>>>;
@@ -644,21 +646,30 @@ async function outcomeOf(
     discard(response);
     return undefined;
   }
-  // The write already happened: a body that stalls must not hold its result.
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  // The write already happened: a body that stalls must not hold its result,
+  // and one given up on is cancelled, not left reading and buffering.
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stalled = new Promise<typeof STALLED>((resolve) => {
     timer = setTimeout(() => resolve(STALLED), OUTCOME_WAIT_MS);
   });
-  let body: unknown;
+  let text: string | typeof STALLED | undefined;
   try {
-    body = await Promise.race([response.json() as Promise<unknown>, stalled]);
+    text = await Promise.race([readOutcome(reader), stalled]);
   } catch {
-    return undefined;
+    text = undefined;
   } finally {
     clearTimeout(timer);
   }
-  if (body === STALLED) {
-    discard(response);
+  if (typeof text !== 'string') {
+    void reader.cancel().catch(() => {});
+    return undefined;
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
     return undefined;
   }
   const outcome = isNode(body) ? body['outcome'] : undefined;
@@ -667,6 +678,22 @@ async function outcomeOf(
     value.outcomes[outcome as ValueOutcome] === response.status
     ? (outcome as ValueOutcome)
     : undefined;
+}
+
+/** The body as text, or `undefined` once it grows past an outcome's size. */
+async function readOutcome(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<string | undefined> {
+  const decoder = new TextDecoder();
+  let text = '';
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    size += value.byteLength;
+    if (size > OUTCOME_LIMIT) return undefined;
+    text += decoder.decode(value, { stream: true });
+  }
 }
 
 function constructBody(body: unknown): readonly JsonLd[] {
