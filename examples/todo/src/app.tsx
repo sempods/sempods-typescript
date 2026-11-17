@@ -55,7 +55,7 @@ const text = {
     dark: 'Dark',
     description: 'Tasks, stored in a Pod.',
     list: 'List',
-    shareMore: 'Share more lists',
+    shareLists: 'Share lists …',
   },
   de: {
     tasks: 'Aufgaben',
@@ -74,7 +74,7 @@ const text = {
     dark: 'Dunkel',
     description: 'Aufgaben, gespeichert in einem Pod.',
     list: 'Liste',
-    shareMore: 'Weitere Listen freigeben',
+    shareLists: 'Listen freigeben …',
   },
 };
 
@@ -386,12 +386,12 @@ function StandardScreen(settings: Settings) {
     <main className="mx-auto max-w-160 px-4 pt-2 pb-8">
       {header && (
         <header className="flex items-center justify-between gap-2">
-          {/* The list switch across the connected Pods, with sharing more. */}
+          {/* The list switch across the connected Pods; sharing is in Pods & sharing. */}
           <ContextSwitch
             title="TODO"
             label={m.list}
             icon={icon}
-            texts={{ shareMore: m.shareMore }}
+            texts={{ shareContexts: m.shareLists }}
           />
           <HeaderMenu
             ref={menu}

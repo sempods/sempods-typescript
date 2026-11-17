@@ -608,14 +608,22 @@ const lists = useContexts();
   recovery, **Change sharing** and **Sign out** stay in `AppAccess`.
 
 The [TODO example](../examples/todo/src/app.tsx) puts `ContextSwitch` (below)
-in its header, with **Share more lists**.
+in its header and keeps sharing in **Pods & sharing**.
 
 #### One chooser across Pods
 
-For the default UI, use `ContextSwitch` from `@sempods/app-ui`. It supplies
-Pod groups, a trigger with the Context and, once a second Pod is connected,
-its Pod, permission icons and their visible legend,
-full-address details, per-Pod recovery and guarded selection feedback:
+For the default UI, use `ContextSwitch` from `@sempods/app-ui`. It
+supplies Pod groups, a trigger with the Context and, once a second Pod is
+connected, its Pod, a **Read only** mark on Contexts the app cannot change,
+per-Pod recovery and guarded selection feedback.
+
+The chooser selects a Context; it does not manage access. Changing what is
+shared, connecting another Pod and signing out stay in `AppAccess`, which an
+app opens from its menu (the TODO example's **Pods & sharing**). The one
+sharing action in the chooser is contextual: a Pod that loaded and shares no
+readable Context offers **Share contexts …** for exactly that Pod. A Pod that
+is still loading, failed or signed out is not empty and offers its retry or
+sign-in instead.
 
 ```tsx
 import { ContextSwitch } from '@sempods/app-ui';
@@ -624,24 +632,24 @@ import { ContextSwitch } from '@sempods/app-ui';
 <ContextSwitch
   title="Groceries"
   label="List"
-  texts={{ shareMore: 'Share more lists …' }}
+  texts={{ shareContexts: 'Share lists …' }}
 />;
 ```
 
 `label` names a Context in the trigger's and menu's accessible names. The
 adapter's own messages say "context" until the app names its Contexts in
-`texts`, as strings in its current language: `shareMore`, `chooseContext`
+`texts`, as strings in its current language: `shareContexts`, `chooseContext`
 (the trigger while nothing is selected), `contextsLoading`, `contextsFailed`,
-`contextsEmpty`, `switchUnavailable`, `actionNotCompleted`, `noPods`,
-`showAddresses` and `addresses`. Each one left out keeps the English or German
-default, so a German shopping app writes the gender and plural it needs:
+`contextsEmpty`, `switchUnavailable`, `actionNotCompleted` and `noPods`. Each
+one left out keeps the English or German default, so a German shopping app
+writes the gender and plural it needs:
 
 ```tsx
 <ContextSwitch
   title="Einkauf"
   label="Liste"
   texts={{
-    shareMore: 'Weitere Listen freigeben …',
+    shareContexts: 'Listen freigeben …',
     chooseContext: 'Liste auswählen',
     contextsLoading: 'Listen werden geladen …',
     contextsEmpty: 'Keine lesbaren Listen freigegeben.',

@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { Menu, Popover, Text } from 'react-aria-components';
-import { ChevronDownIcon, EyeIcon, PencilIcon } from 'lucide-react';
+import { ChevronDownIcon } from 'lucide-react';
 import {
   useApp,
   useAppState,
@@ -10,12 +10,12 @@ import {
   type PodContextChoice,
   type PodContextGroup,
 } from '@sempods/app-sdk/react';
+import { Badge } from '../components/badge.js';
 import { Button } from '../components/button.js';
 import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/dropdown-menu.js';
 import { useAdapterTexts, type AdapterTexts } from './texts.js';
@@ -27,8 +27,8 @@ import { useAdapterTexts, type AdapterTexts } from './texts.js';
  * omitted one keeps the adapter's English or German default.
  */
 export interface ContextSwitchTexts {
-  /** The sharing action, e.g. "Share more lists …". */
-  readonly shareMore?: string;
+  /** Sharing on a Pod that shares no readable Context, e.g. "Share lists …". */
+  readonly shareContexts?: string;
   /** The trigger's second line while nothing is selected. */
   readonly chooseContext?: string;
   /** A Pod whose Contexts are still loading. */
@@ -43,10 +43,6 @@ export interface ContextSwitchTexts {
   readonly actionNotCompleted?: string;
   /** The menu without any connected Pod. */
   readonly noPods?: string;
-  /** The action that shows the exact addresses. */
-  readonly showAddresses?: string;
-  /** The name of the address region. */
-  readonly addresses?: string;
 }
 
 export interface ContextSwitchProps {
@@ -67,10 +63,13 @@ export interface ContextSwitchProps {
 
 /**
  * The standard chooser for an app working in one Context at a time. Mount it
- * outside TargetScreen, alongside AppAccess (which still owns access management).
- * It groups by Pod, keeps permission and selection separate, and uses the SDK's
- * guarded actions. Like useContexts, it initially selects the active Pod's first
- * writable, else readable Context when none was remembered or configured.
+ * outside TargetScreen, alongside AppAccess, which owns changing what is
+ * shared, connecting Pods and signing out. It groups by Pod, marks read-only
+ * Contexts, keeps the selection's check separate, offers each Pod's own
+ * recovery and sharing only where that Pod shares nothing readable, and uses
+ * the SDK's guarded actions. Like useContexts, it initially selects the active
+ * Pod's first writable, else readable Context when none was remembered or
+ * configured.
  * It reads no data beyond the hooks' bounded catalogue/label demand.
  */
 export function ContextSwitch({
@@ -81,24 +80,18 @@ export function ContextSwitch({
   texts,
 }: ContextSwitchProps) {
   const lists = usePodContexts(podNames ? { podNames } : {});
-  const active = useContexts();
+  // Selects the first writable, else readable Context when none is known.
+  useContexts();
   const actions = useApp();
-  const { signIn, activeId } = useAppState();
+  const { signIn } = useAppState();
   const { messages, error } = useSdkLocale();
   const t = withTexts(useAdapterTexts(), texts);
   const noun = label ?? t.context;
   const selected = lists.selected;
-  const activePod = lists.pods.find((pod) => pod.connectionId === activeId);
   const shareLabel = t.shareContexts;
+  // Loading or failure is not an empty grant: only a loaded Pod offers it.
   const shareEmpty = (pod: PodContextGroup) =>
     signIn !== 'none' && pod.status === 'ready' && pod.choices.length === 0;
-  const shareActive = active.canShare && activePod && !shareEmpty(activePod);
-  const [open, setOpen] = useState(false);
-  const [addresses, setAddresses] = useState(false);
-  const addressRegion = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (addresses) addressRegion.current?.focus();
-  }, [addresses]);
   const [problem, setProblem] = useState<string | null>(null);
   const run = async (action: () => Promise<void>) => {
     setProblem(null);
@@ -132,7 +125,7 @@ export function ContextSwitch({
         return pod.choices.length === 0 ? t.contextsEmpty : null;
     }
   };
-  const shareItem = (pod: PodContextGroup, showPod = false) => (
+  const shareItem = (pod: PodContextGroup) => (
     <DropdownMenuItem
       key={`share:${pod.connectionId}`}
       id={`share:${pod.connectionId}`}
@@ -150,11 +143,8 @@ export function ContextSwitch({
         slot="label"
         className="sr-only"
       >{`${shareLabel}: ${pod.label}`}</Text>
-      <span aria-hidden="true" className="grid min-w-0 wrap-anywhere">
-        <span>{shareLabel}</span>
-        {showPod && (
-          <span className="text-xs text-muted-foreground">{pod.label}</span>
-        )}
+      <span aria-hidden="true" className="min-w-0 wrap-anywhere">
+        {shareLabel}
       </span>
     </DropdownMenuItem>
   );
@@ -172,22 +162,10 @@ export function ContextSwitch({
     );
   const permission = (writable: boolean) =>
     writable ? messages.controls.canChange : messages.controls.canRead;
-  const permissionIcon = (writable: boolean) =>
-    writable ? (
-      <PencilIcon aria-hidden="true" className="size-4 shrink-0" />
-    ) : (
-      <EyeIcon aria-hidden="true" className="size-4 shrink-0" />
-    );
   return (
     <div className="grid min-w-0 max-w-full gap-1" data-slot="context-switch">
       <h1 className="sr-only">{title}</h1>
-      <DropdownMenuTrigger
-        isOpen={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          if (!next) setAddresses(false);
-        }}
-      >
+      <DropdownMenuTrigger>
         <Button
           variant="ghost"
           className="h-16 min-w-48 max-w-full justify-start gap-3 rounded-xl px-4 text-start whitespace-normal"
@@ -251,10 +229,19 @@ export function ContextSwitch({
                         onAction={() => select(choice)}
                         className="min-h-13 gap-3 py-3 ps-4 pe-10 [&>[data-slot=dropdown-menu-radio-item-indicator]]:right-4"
                       >
-                        {permissionIcon(choice.writable)}
-                        <Text slot="label" className="min-w-0 wrap-anywhere">
+                        <Text
+                          slot="label"
+                          className="min-w-0 flex-1 wrap-anywhere"
+                        >
                           {contextText(choice)}
                         </Text>
+                        {/* Editable needs no marker; the description says
+                            both to assistive technology. */}
+                        {!choice.writable && (
+                          <Badge variant="secondary" aria-hidden="true">
+                            {permission(false)}
+                          </Badge>
+                        )}
                         <Text
                           slot="description"
                           className="sr-only"
@@ -326,52 +313,7 @@ export function ContextSwitch({
                 {t.noPods}
               </DropdownMenuItem>
             )}
-            {shareActive && <DropdownMenuSeparator />}
-            {shareActive && shareItem(activePod, true)}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              id="addresses"
-              className="min-h-11 px-4"
-              shouldCloseOnSelect={false}
-              onAction={() => setAddresses((shown) => !shown)}
-            >
-              {addresses ? t.hideAddresses : t.showAddresses}
-            </DropdownMenuItem>
           </Menu>
-          <div className="mt-2 border-t px-4 pt-3 text-xs text-muted-foreground">
-            <div className="flex flex-wrap gap-x-4 gap-y-2">
-              <span className="flex items-center gap-2">
-                {permissionIcon(true)}
-                {permission(true)}
-              </span>
-              <span className="flex items-center gap-2">
-                {permissionIcon(false)}
-                {permission(false)}
-              </span>
-            </div>
-            {addresses && (
-              <div
-                ref={addressRegion}
-                role="region"
-                aria-label={t.addresses}
-                tabIndex={0}
-                className="mt-3 grid gap-2 rounded-sm p-1 pb-3 wrap-anywhere outline-none focus-visible:outline-2 focus-visible:outline-ring"
-              >
-                {lists.pods.map((pod) => (
-                  <dl key={pod.connectionId}>
-                    <dt className="font-medium">{pod.label}</dt>
-                    <dd>{pod.podUrl}</dd>
-                    {pod.choices.map((choice) => (
-                      <Fragment key={choice.key}>
-                        <dt>{choice.label}</dt>
-                        <dd>{choice.contextIri}</dd>
-                      </Fragment>
-                    ))}
-                  </dl>
-                ))}
-              </div>
-            )}
-          </div>
         </Popover>
       </DropdownMenuTrigger>
       {problem && (
@@ -389,10 +331,8 @@ export function ContextSwitch({
 // An app's supplied wording over the defaults; an omitted key keeps its default.
 function withTexts(
   defaults: AdapterTexts,
-  { shareMore, ...texts }: ContextSwitchTexts = {},
+  texts: ContextSwitchTexts = {},
 ): AdapterTexts {
-  const own = Object.entries({ shareContexts: shareMore, ...texts }).filter(
-    ([, text]) => text !== undefined,
-  );
+  const own = Object.entries(texts).filter(([, text]) => text !== undefined);
   return { ...defaults, ...Object.fromEntries(own) };
 }

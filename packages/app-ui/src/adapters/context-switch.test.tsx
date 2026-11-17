@@ -83,10 +83,19 @@ const open = async () => {
   await press(screen.getByRole('button', { name: /^List:/ }));
 };
 
-it('groups concise names, announces access, and selects by the pair of identities', async () => {
+it('groups concise names, marks only read-only lists, and selects by the pair of identities', async () => {
   show();
   await open();
   const menu = within(screen.getByRole('menu'));
+  // Selection only: no permanent sharing, address details or icon legend.
+  expect(menu.getAllByRole('menuitemradio')).toHaveLength(2);
+  expect(menu.queryAllByRole('menuitem')).toHaveLength(0);
+  expect(screen.queryByRole('region')).toBeNull();
+  expect(screen.queryByText(/address/i)).toBeNull();
+  expect(screen.queryByText('Read and write')).toBeNull();
+  expect(
+    document.querySelector('svg.lucide-pencil, svg.lucide-eye'),
+  ).toBeNull();
   expect(menu.getAllByRole('group')).toHaveLength(2);
   expect(menu.getByRole('group', { name: 'alice' })).toBeTruthy();
   expect(menu.getByRole('group', { name: 'bob' })).toBeTruthy();
@@ -103,7 +112,13 @@ it('groups concise names, announces access, and selects by the pair of identitie
   expect(
     within(screen.getByRole('menu')).queryByText('Shopping · bob'),
   ).toBeNull();
-  expect(screen.getByText('Read only', { selector: 'span' })).toBeTruthy();
+  // The visible mark is on bob's row only; the description already says it.
+  const badge = screen.getByText('Read only', { selector: 'span' });
+  expect(rows[1]!.contains(badge)).toBe(true);
+  expect(badge.getAttribute('aria-hidden')).toBe('true');
+  expect(screen.getAllByText('Read only', { selector: 'span' })).toHaveLength(
+    1,
+  );
   await press(rows[1]!);
   expect(api.list.select).toHaveBeenCalledWith(api.list.pods[1]!.choices[0]);
   expect(screen.queryByRole('menu')).toBeNull();
@@ -146,6 +161,17 @@ it('keeps a failed Pod distinct from empty, disables its retained choices, and r
   ).toBe('true');
   expect(screen.getByText('Contexts could not be loaded.')).toBeTruthy();
   expect(screen.getByRole('group', { name: 'bob: Pod actions' })).toBeTruthy();
+  // Unavailable is distinct from read-only: the retained row keeps its mark
+  // but cannot be chosen, and its description says why.
+  const retained = screen.getAllByRole('menuitemradio')[1]!;
+  expect(within(retained).getByText('Read only')).toBeTruthy();
+  expect(
+    document.getElementById(retained.getAttribute('aria-describedby')!)
+      ?.textContent,
+  ).toBe('bob · Read only · This context is currently unavailable.');
+  expect(
+    screen.queryByRole('menuitem', { name: /^Share contexts/ }),
+  ).toBeNull();
   await press(screen.getByRole('menuitem', { name: 'Try again: bob' }));
   expect(failed.retry).toHaveBeenCalledOnce();
   expect(api.list.pods[0]!.retry).not.toHaveBeenCalled();
@@ -174,23 +200,73 @@ it('shows loading, empty, and signed-out Pods as different states', async () => 
     'Sign in to use this Pod.',
   ])
     expect(screen.getByText(text)).toBeTruthy();
+  // Loading and signed-out are not empty grants: only bob offers sharing.
+  expect(
+    screen
+      .getAllByRole('menuitem', { name: /^Share contexts/ })
+      .map((item) => item.getAttribute('aria-label')),
+  ).toEqual(['Share contexts …: bob']);
   await press(screen.getByRole('menuitem', { name: 'Sign in: bob' }));
   expect(api.authorize).toHaveBeenCalledWith('ended');
 });
 
+it('offers retry, not sharing, for a restorable Pod without lists', async () => {
+  api.list = {
+    ...api.list,
+    pods: [
+      api.list.pods[0]!,
+      {
+        ...api.list.pods[1]!,
+        status: 'restoring',
+        restorable: true,
+        choices: [],
+      },
+    ],
+  };
+  show();
+  await open();
+  expect(screen.getByText('Reconnecting …')).toBeTruthy();
+  expect(
+    screen.queryByRole('menuitem', { name: /^Share contexts/ }),
+  ).toBeNull();
+  expect(screen.queryByRole('menuitem', { name: /^Sign in/ })).toBeNull();
+  await press(screen.getByRole('menuitem', { name: 'Try again: bob' }));
+  expect(api.list.pods[1]!.retry).toHaveBeenCalledOnce();
+});
+
+it('shows no read-only mark when every list is editable', async () => {
+  api.list = {
+    ...api.list,
+    pods: api.list.pods.map((p) => ({
+      ...p,
+      choices: p.choices.map((c) => ({ ...c, writable: true })),
+    })),
+  };
+  show();
+  await open();
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(2);
+  expect(screen.queryByText('Read only')).toBeNull();
+  expect(screen.queryByText('Read and write')).toBeNull();
+});
+
 it('localizes authorization errors through the SDK and allows another attempt', async () => {
   api.authorize.mockRejectedValueOnce(new Error('private diagnostics'));
+  api.list = {
+    ...api.list,
+    selected: null,
+    pods: [{ ...api.list.pods[0]!, choices: [] }],
+  };
   show();
   await open();
   await press(
-    screen.getByRole('menuitem', { name: 'Share more contexts …: alice' }),
+    screen.getByRole('menuitem', { name: 'Share contexts …: alice' }),
   );
   expect(screen.getByRole('alert').textContent).not.toContain(
     'private diagnostics',
   );
   await open();
   await press(
-    screen.getByRole('menuitem', { name: 'Share more contexts …: alice' }),
+    screen.getByRole('menuitem', { name: 'Share contexts …: alice' }),
   );
   expect(screen.queryByRole('alert')).toBeNull();
   expect(api.authorize).toHaveBeenCalledTimes(2);
@@ -206,9 +282,7 @@ it('offers sharing directly on an empty inactive Pod without selecting it first'
   const bob = within(screen.getByRole('group', { name: 'bob' }));
   expect(screen.getAllByRole('group')).toHaveLength(2);
   expect(bob.getByText('No readable contexts shared.')).toBeTruthy();
-  await press(
-    bob.getByRole('menuitem', { name: 'Share more contexts …: bob' }),
-  );
+  await press(bob.getByRole('menuitem', { name: 'Share contexts …: bob' }));
   expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob');
   expect(api.list.select).not.toHaveBeenCalled();
 });
@@ -223,10 +297,10 @@ it('offers one share action per empty Pod, with no duplicate active-Pod action',
   await open();
   expect(screen.getAllByRole('group')).toHaveLength(2);
   expect(
-    screen.getAllByRole('menuitem', { name: /^Share more contexts/ }),
+    screen.getAllByRole('menuitem', { name: /^Share contexts/ }),
   ).toHaveLength(2);
   await press(
-    screen.getByRole('menuitem', { name: 'Share more contexts …: alice' }),
+    screen.getByRole('menuitem', { name: 'Share contexts …: alice' }),
   );
   expect(api.authorize).toHaveBeenCalledExactlyOnceWith('alice');
 });
@@ -260,20 +334,8 @@ it('offers no sharing or sign-in when signIn is none', async () => {
   show();
   await open();
   expect(
-    screen.queryByRole('menuitem', { name: /^(Sign in:|Share more contexts)/ }),
+    screen.queryByRole('menuitem', { name: /^(Sign in:|Share contexts)/ }),
   ).toBeNull();
-});
-
-it('updates the sharing target when the active Pod changes while the menu is open', async () => {
-  const { rerender } = render(<ContextSwitch title="Groceries" label="List" />);
-  await open();
-  api.activeId = 'bob';
-  api.list = { ...api.list, selected: api.list.pods[1]!.choices[0]! };
-  rerender(<ContextSwitch title="Groceries" label="List" />);
-  await press(
-    screen.getByRole('menuitem', { name: 'Share more contexts …: bob' }),
-  );
-  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob');
 });
 
 it('tells equal names within one Pod apart by a quieter qualifier, keeping it in accessible names', async () => {
@@ -330,7 +392,7 @@ it('tells equal names within one Pod apart by a quieter qualifier, keeping it in
 
 it("replaces every generic word for a Context with the app's own", async () => {
   const texts = {
-    shareMore: 'Share more lists …',
+    shareContexts: 'Share lists …',
     chooseContext: 'Choose a list',
     contextsLoading: 'Loading lists …',
     contextsFailed: 'Lists could not be loaded.',
@@ -338,8 +400,6 @@ it("replaces every generic word for a Context with the app's own", async () => {
     switchUnavailable: 'This list is currently unavailable.',
     actionNotCompleted: 'Your current list is unchanged.',
     noPods: 'Connect a Pod to choose a list.',
-    showAddresses: 'Show Pod and list addresses',
-    addresses: 'Pod and list addresses',
   };
   const generic = /context/i;
   const switchWith = () =>
@@ -388,17 +448,8 @@ it("replaces every generic word for a Context with the app's own", async () => {
     document.getElementById(retained.getAttribute('aria-describedby')!)
       ?.textContent,
   ).toBe('bob · Read only · This list is currently unavailable.');
-  // Before the addresses, whose exact Context IRIs say "contexts".
   expect(words()).not.toMatch(generic);
-  await press(
-    screen.getByRole('menuitem', { name: 'Show Pod and list addresses' }),
-  );
-  expect(
-    screen.getByRole('region', { name: 'Pod and list addresses' }),
-  ).toBeTruthy();
-  await press(
-    screen.getByRole('menuitem', { name: 'Share more lists …: empty' }),
-  );
+  await press(screen.getByRole('menuitem', { name: 'Share lists …: empty' }));
   expect(screen.getByRole('alert').textContent).toBe(
     'Your current list is unchanged.',
   );

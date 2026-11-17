@@ -316,6 +316,12 @@ it('the TODO header switches lists and marks a read-only one', async () => {
   });
   // The kit names the access beside the list: personal is read only.
   expect(personalList.textContent).toContain('Read only');
+  // Changing what is shared stays in Pods & sharing, not in the switch.
+  expect(
+    within(menu)
+      .queryAllByRole('menuitem')
+      .map((item) => item.getAttribute('aria-label') ?? item.textContent),
+  ).toEqual([]);
   expect(
     within(menu)
       .getByRole('menuitemradio', { name: 'work' })
@@ -342,12 +348,15 @@ it('the TODO header names a single list and offers no other', async () => {
   expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(1);
 });
 
-it('the TODO header says when sharing more lists cannot reach the Pod', async () => {
+it('the TODO header says when sharing lists cannot reach the Pod', async () => {
   const f = await signedIn('en', async () => Response.json([]));
   expect(await screen.findByText(text.en.empty)).toBeTruthy();
-  const menu = await openLists(/^List: work · /);
-  const share = within(menu).getByRole('menuitem', {
-    name: /^Share more lists: /,
+  // A Pod that shares no readable list offers sharing for it, in the header.
+  f.setCatalogue(async () => catalogue([], []));
+  await act(() => f.runtime.loadContexts(f.id));
+  const menu = await openLists(/^List: TODO$/);
+  const share = await within(menu).findByRole('menuitem', {
+    name: /^Share lists …: /,
   });
   // Preparing the consent fails before the page leaves: the session stays.
   const navigations = f.navigate.mock.calls.length;
@@ -355,7 +364,6 @@ it('the TODO header says when sharing more lists cannot reach the Pod', async ()
   await press(share);
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
-  expect(screen.getByText(text.en.empty)).toBeTruthy();
 });
 
 it('the TODO list locks only the row whose tick is being saved', async () => {
