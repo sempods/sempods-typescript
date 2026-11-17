@@ -97,6 +97,7 @@ entire SDK or protocol before implementing an ordinary screen.
 | Share more lists or change the app's access   | [Changing sharing](react-authoring.md#changing-what-the-app-may-access)                                           |
 | A search across one or several Pods           | [Search across Pods](react-authoring.md#search-across-pods)                                                       |
 | Values of any vocabulary from a SPARQL read   | [RDF values](rdf-values.md)                                                                                       |
+| When records were created or last changed     | [Creation and modification times](timestamps.md)                                                                  |
 | Cards or pictures of resources across Pods    | [Resource cards](resource-cards.md)                                                                               |
 | Statements around a resource, in pages        | [Neighborhood](neighborhood.md)                                                                                   |
 | Public RDF about an IRI no Pod describes      | [Public RDF](public-rdf.md)                                                                                       |
@@ -143,7 +144,9 @@ needs them; preserve the minimal screen's recovery when adapting it.
 - **One data meaning.** Define the type, predicates, text language and status
   values from the domain, not just the example's names. Use `fields()` and
   suitable helpers (`trim: true` for text, `dateTime` for instants, `date` for
-  calendar days). Show a stored date with `format.dateOnly(value) ?? value`
+  calendar days). For when a record was created or last changed, let the
+  standard writes maintain [timestamps](timestamps.md) instead of writing
+  them in the app. Show a stored date with `format.dateOnly(value) ?? value`
   and an instant with `format.dateTime(value) ?? value`; never parse it with
   `new Date`, which rolls `2026-02-30` over to March and reads a time without
   a zone in the device's zone. `dateOnly` shows a day from years 0001 to 9999

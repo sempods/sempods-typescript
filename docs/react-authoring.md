@@ -203,6 +203,10 @@ of trimming before `create()`.
   by itself, its latest value is used when an editor or form starts, and a
   changed identity is reported once in the console. Remount (for example with a
   `key`) to apply another custom mapping.
+- `fields(spec, { timestamps })` lets creation, row updates and editor saves
+  maintain creation and modification instants outside the draft; read them
+  with `timestampsOf(row)` to order a list
+  ([creation and modification times](timestamps.md)).
 - `text()` edits one fixed language. To show and edit whichever variant the app
   prefers, define the custom mapping once at module level with the
   [preferred-language recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant)
@@ -282,6 +286,9 @@ a partial `change`, `create`, `canEdit`, `canCreate`, `outcome`, `notice` and
   navigation and asks before a Context, Pod or disconnect change.
 - Advanced clients may keep a portable `prepareCreation` command and retry the
   same IRI explicitly.
+- With [timestamps](timestamps.md) declared, the creation carries its creation
+  and modification instants, captured with the command; a retry sends the
+  same ones.
 
 #### Create at a known IRI
 
@@ -403,6 +410,9 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
 - After a confirmed update `row.data` shows the new values while the list
   reads again; until then the row stays locked (`update` would resolve
   `not-sent`, `stale`).
+- An update that changes something also writes the definition's
+  [modification instant](timestamps.md), if it declares one, in the same
+  conditional request; a concurrent change to another field still rebases.
 - One hook for the list, not one per row. The app controller owns the write
   lanes of a target, not the component: a pending or unresolved write keeps
   its outcome and leave guard while its row or whole screen is not rendered,
@@ -501,6 +511,9 @@ supplies save, delete, discard and comparison controls around your inputs.
   accessibility of custom fields stay the app's job.
 - Feedback applies only to the state it settled on: a newer dirty draft is
   never labelled saved.
+- A save that changes something also writes the definition's
+  [modification instant](timestamps.md), if it declares one; it is not a
+  field, so it never appears in the form or causes a conflict.
 
 ### Notices: UpdateNotice
 

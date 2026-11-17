@@ -1,11 +1,15 @@
 import type { JsonLd, WriteOptions, WriteResult } from '../results.js';
 import {
   failingFields,
+  instantNow,
   isFieldDefinition,
   owned,
+  readTimestamps,
+  stamped,
   storedDraft,
   type Field,
   type FieldDefinition,
+  type Timestamps,
 } from './fields.js';
 import {
   fetchResource,
@@ -179,6 +183,17 @@ export function snapshots<D>(
     skipped,
     skippedRecords: Object.freeze(records),
   });
+}
+
+/**
+ * The instants of the subject as the snapshot saw it, by its definition's
+ * `timestamps` (see `fields()`). Each is `null` when absent or not usable,
+ * also when the query did not return its predicate; the row stays listed.
+ */
+export function timestampsOf<D>(snapshot: Snapshot<D>): Timestamps {
+  const proof = evidence.get(snapshot);
+  if (!proof) throw new TypeError('Not a snapshot taken by snapshots().');
+  return readTimestamps(proof.definition, proof.node);
 }
 
 type Failed = {
@@ -377,6 +392,8 @@ export async function updateFields<D>(
     ),
   ) as Partial<D>;
   const names = Object.keys(command);
+  // Its instant too, kept for the bounded rebase.
+  const at = instantNow();
   for (const name of names)
     if (!(name in definition.fields))
       throw new TypeError(`Unknown field: ${name}`);
@@ -395,7 +412,12 @@ export async function updateFields<D>(
       wanted = { ...now.snapshot.data, ...command };
       if (definition.valid && !definition.valid(wanted))
         throw new TypeError('The changed values are not valid.');
-      const patch = definition.patch(now.body, wanted);
+      const patch = stamped(
+        definition,
+        now.body,
+        definition.patch(now.body, wanted),
+        at,
+      );
       // Nothing differs: no request; settles as saved like an applied patch.
       if (Object.keys(patch).length === 0)
         return Promise.resolve({ kind: 'applied', status: 204 } as const);

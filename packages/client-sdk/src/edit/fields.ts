@@ -157,6 +157,29 @@ export interface FieldDefinition<D> extends EditDefinition<D> {
   readonly fields: { readonly [K in keyof D]: Field };
   /** The subject type (`rdf:type`) for lists and creation, when declared. */
   readonly type?: string;
+  /** The instants the standard writes maintain, when declared. */
+  readonly timestamps?: TimestampPredicates;
+}
+
+/**
+ * The predicates of the instants a `fields()` definition maintains (see
+ * `fields(spec, { timestamps })`). The first predicate of each list is
+ * written; the others are only read, as fallbacks for older records.
+ * An undeclared instant is an empty list.
+ */
+export interface TimestampPredicates {
+  readonly created: readonly string[];
+  readonly modified: readonly string[];
+}
+
+/**
+ * A subject's instants as `xsd:dateTime` lexical forms with a time zone,
+ * `null` when absent or not usable (several values, no time zone, not an
+ * `xsd:dateTime`). Compare them with `classifyDate(value).epochMilliseconds`.
+ */
+export interface Timestamps {
+  readonly created: string | null;
+  readonly modified: string | null;
 }
 
 /** A BCP 47 language tag's syntax, as RDF 1.1 accepts it. */
@@ -416,13 +439,52 @@ function overlaps(a: Field, b: Field): boolean {
     : a.language.toLowerCase() === b.language.toLowerCase();
 }
 
+type TimestampOptions = {
+  readonly created?: string | readonly string[];
+  readonly modified?: string | readonly string[];
+};
+
+function timestampPredicates(
+  options: TimestampOptions,
+  spec: { readonly [name: string]: Field },
+): TimestampPredicates | undefined {
+  const list = (value: string | readonly string[] | undefined) =>
+    Object.freeze(
+      (typeof value === 'string' ? [value] : [...(value ?? [])]).map(
+        predicateOf,
+      ),
+    );
+  const created = list(options.created);
+  const modified = list(options.modified);
+  const all = [...created, ...modified];
+  if (all.length === 0) return undefined;
+  if (new Set(all).size !== all.length)
+    throw new TypeError('Each timestamp predicate may be named only once.');
+  const field = Object.values(spec).find((f) => all.includes(f.predicate));
+  if (field)
+    throw new TypeError(
+      `${field.predicate} is a field's predicate and cannot be a timestamp.`,
+    );
+  return Object.freeze({ created, modified });
+}
+
 /**
  * Declares the draft as named fields. Fields that would write the same terms
  * are rejected here, not at save time.
+ *
+ * `timestamps` opts in to app-maintained instants, outside the draft: a
+ * creation writes `created` and `modified`, and every update or editor save
+ * that changes something also replaces `modified`'s `xsd:dateTime` value.
+ * Each instant is captured from the device clock once per write command.
+ * Give a list to also read older predicates (`created: [schema, dcterms]`):
+ * only the first is written. Read them with `timestampsOf(snapshot)`.
  */
 export function fields<S extends { readonly [name: string]: Field }>(
   spec: S,
-  options: { readonly type?: string } = {},
+  options: {
+    readonly type?: string;
+    readonly timestamps?: TimestampOptions;
+  } = {},
 ): FieldDefinition<DraftOf<S>> & FieldsMark {
   if (options.type !== undefined) predicateOf(options.type);
   const entries = Object.entries(spec) as [keyof S & string, Field][];
@@ -433,10 +495,13 @@ export function fields<S extends { readonly [name: string]: Field }>(
         `Fields ${name} and ${other[0]} write the same terms.`,
       );
   });
+  const timestamps =
+    options.timestamps && timestampPredicates(options.timestamps, spec);
   type D = DraftOf<S>;
   const definition: FieldDefinition<D> = Object.freeze({
     fields: Object.freeze({ ...spec }) as FieldDefinition<D>['fields'],
     ...(options.type === undefined ? {} : { type: options.type }),
+    ...(timestamps ? { timestamps } : {}),
     read(resource: JsonLd): D {
       return Object.freeze(
         Object.fromEntries(
@@ -572,6 +637,8 @@ export function describeNew<D>(
   definition: FieldDefinition<D>,
   iri: string,
   draft: D,
+  /** The creation's instant, captured once with its command. */
+  at: string = instantNow(),
 ): JsonLd {
   if (!isFieldDefinition(definition))
     throw new TypeError('Creation needs a definition created by fields().');
@@ -592,7 +659,77 @@ export function describeNew<D>(
         ...terms,
       ];
   }
+  const { created, modified } = definition.timestamps ?? NO_TIMESTAMPS;
+  for (const predicate of [created[0], modified[0]])
+    if (predicate !== undefined) body[predicate] = [instantTerm(at)];
   return body;
+}
+
+const NO_TIMESTAMPS: TimestampPredicates = Object.freeze({
+  created: Object.freeze([]),
+  modified: Object.freeze([]),
+});
+
+/** Now, from the device clock, as an `xsd:dateTime` lexical form in UTC. */
+export function instantNow(): string {
+  return new Date().toISOString();
+}
+
+function instantTerm(at: string): Term {
+  return { '@value': at, '@type': XSD_DATE_TIME };
+}
+
+/**
+ * `patch` with the definition's modification instant: a patch that changes
+ * something also replaces the `xsd:dateTime` values of the written `modified`
+ * predicate with `at`; its other values stay. An empty patch stays empty, so
+ * a no-op touches nothing. The creation instant is never written here.
+ */
+export function stamped<D>(
+  definition: EditDefinition<D>,
+  resource: JsonLd,
+  patch: JsonLd,
+  at: string,
+): JsonLd {
+  const predicate = isFieldDefinition(definition)
+    ? definition.timestamps?.modified[0]
+    : undefined;
+  if (predicate === undefined || Object.keys(patch).length === 0) return patch;
+  return {
+    ...patch,
+    [predicate]: [
+      ...termsOf(resource, predicate).filter((t) => !isDateTime(t)),
+      instantTerm(at),
+    ],
+  };
+}
+
+/** The first predicate of the list that has an `xsd:dateTime` value decides. */
+function readInstant(node: JsonLd, predicates: readonly string[]) {
+  for (const predicate of predicates) {
+    let instants: readonly Term[];
+    try {
+      instants = termsOf(node, predicate).filter(isDateTime);
+    } catch {
+      return null;
+    }
+    if (instants.length === 0) continue;
+    const value = instants[0]!['@value'] as string;
+    return instants.length === 1 && isZonedDateTime(value) ? value : null;
+  }
+  return null;
+}
+
+/** A description's instants by the definition's timestamp predicates. */
+export function readTimestamps(
+  definition: FieldDefinition<unknown>,
+  node: JsonLd,
+): Timestamps {
+  const { created, modified } = definition.timestamps ?? NO_TIMESTAMPS;
+  return Object.freeze({
+    created: readInstant(node, created),
+    modified: readInstant(node, modified),
+  });
 }
 
 /** The value as it is written: a `trim` text field without outer whitespace. */
