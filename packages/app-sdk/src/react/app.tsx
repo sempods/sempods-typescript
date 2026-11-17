@@ -22,7 +22,7 @@ import {
 } from '../index.js';
 import { demandSelection, targetProblem } from '../authoring/app.js';
 import type { CatalogueContext } from '@sempods/client-sdk';
-import type { CatalogueFact } from '../runtime/types.js';
+import type { AuthorizationIntent, CatalogueFact } from '../runtime/types.js';
 import { SdkLocaleProvider, useSdkLocale } from './locale.js';
 import { ConfirmDialog, TopLayerSlot } from './confirm.js';
 import { useCommands } from './commands.js';
@@ -67,8 +67,17 @@ export interface AppActions {
   selectContext(iri: string): Promise<boolean>;
   /** Sign in to a Pod; omit the URL to reuse/connect the preset or sole allowed Pod. */
   connect(url?: string): Promise<boolean>;
-  /** Sign in again for an existing connection, also a remembered `signed-out` one. */
-  authorize(id: string): Promise<boolean>;
+  /**
+   * Sign in again for an existing connection, also a remembered `signed-out`
+   * one; the Pod may reuse this app's grant and return at once. For a control
+   * that changes what the app may access ("Share more lists", "Change
+   * sharing"), pass `{ intent: 'change-sharing' }`: the Pod then shows its
+   * consent page even when a grant exists.
+   */
+  authorize(
+    id: string,
+    options?: { readonly intent?: AuthorizationIntent },
+  ): Promise<boolean>;
   /**
    * Sign out on this device; does not revoke grants or delete Pod data. The
    * Pod stays listed as `signed-out` with its address unless the runtime has
@@ -195,7 +204,10 @@ export function SempodsProvider({
       selectConnection: (id: string) => controller.selectConnection(id),
       selectContext: (iri: string) => controller.selectContext(iri),
       connect: (url?: string) => controller.connect(url),
-      authorize: (id: string) => controller.authorize(id),
+      authorize: (
+        id: string,
+        options?: { readonly intent?: AuthorizationIntent },
+      ) => controller.authorize(id, options),
       disconnect: (id: string) => controller.disconnect(id),
       forget: (id: string) => controller.forget(id),
       refreshContexts: (id: string) => runtime.loadContexts(id),
@@ -445,7 +457,7 @@ export function useContexts() {
     if (!id || signIn === 'none') return false;
     setShareFailure(null);
     try {
-      return await actions.authorize(id);
+      return await actions.authorize(id, { intent: 'change-sharing' });
     } catch (cause) {
       setShareFailure({ id, cause });
       return false;
@@ -471,7 +483,8 @@ export function useContexts() {
     canShare: id !== null && signIn !== 'none',
     /**
      * Asks the Pod to share more Contexts with this app: its consent page
-     * opens, and the catalogue reloads on return. Runs under the leave policy.
+     * opens (also when a grant exists), and the catalogue reloads on return.
+     * Runs under the leave policy.
      */
     share,
     /** Why the last `share` failed before reaching the Pod, in the UI language. */

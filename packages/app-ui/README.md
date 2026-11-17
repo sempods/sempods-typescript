@@ -662,13 +662,14 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   errors. A Pod that loaded and shares no readable Context offers
   **Share contexts …** for that Pod, including an inactive one; a loading,
   failed or signed-out Pod offers its retry or sign-in instead. Under
-  `signIn: 'none'` it offers neither. A read-only Context stays selectable; a
-  retained one that is unavailable does not. Sign-in and retry actions
-  identify their Pod for assistive technology and typeahead. SDK actions
-  still own draft/pending/unconfirmed-write guards. Apps supply domain words
-  and content, not a second catalogue, guard or generic recovery UI.
-  `AppAccess` keeps access management and its own focus target. No global
-  Button or menu padding changes are needed.
+  `signIn: 'none'` it offers neither. Sharing asks the Pod for its consent
+  page, also when it could reuse the grant; a sign-in action may reuse it. A
+  read-only Context stays selectable; a retained one that is unavailable does
+  not. Sign-in and retry actions identify their Pod for assistive technology
+  and typeahead. SDK actions still own draft/pending/unconfirmed-write guards.
+  Apps supply domain words and content, not a second catalogue, guard or
+  generic recovery UI. `AppAccess` keeps access management and its own focus
+  target. No global Button or menu padding changes are needed.
 
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and groups of checked choices
@@ -1098,6 +1099,12 @@ export function ListMenu({ shareMore }: { readonly shareMore: () => void }) {
   );
 }
 ```
+
+`shareMore` changes sharing: pass `useContexts().share`, or call
+`useApp().authorize(id, { intent: 'change-sharing' })` for a given Pod, so the
+Pod shows its consent page even when it could reuse the grant. A plain
+`authorize(id)` is a sign-in and may return without asking
+([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.2/docs/react-authoring.md#changing-what-the-app-may-access)).
 
 A workspace with a canvas and a filter panel. The canvas keeps its size and
 element while the panel opens and closes, and stays usable beside it:

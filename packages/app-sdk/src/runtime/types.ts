@@ -10,6 +10,11 @@ import type { SessionLocks, SessionStore } from '../sessions/types.js';
 import type { RuntimeProblem } from './errors.js';
 import type { BoundPod, BoundRead, BoundView } from './view.js';
 
+/**
+ * Why an interactive authorization starts: `'sign-in'` may reuse this app's
+ * existing grant; `'change-sharing'` asks the Pod to show its consent page.
+ */
+export type AuthorizationIntent = 'sign-in' | 'change-sharing';
 export type FeatureScopes = {
   readonly required?: readonly string[];
   readonly optional?: readonly string[];
@@ -337,8 +342,17 @@ export interface BrowserRuntime {
    * RuntimeError (disconnected); neither resets the connection. A connection
    * that reads without a token keeps reading until the page leaves. Rejects
    * with RuntimeError (configuration) under `signIn: 'none'`.
+   *
+   * `intent` says why. `'sign-in'` (the default) lets the Pod reuse a grant
+   * this app already has and return at once. `'change-sharing'` asks the
+   * Pod to show its consent page (`prompt=consent`) even then, so the person
+   * can share more or fewer Contexts. Only that one request carries it:
+   * restoring, renewing and later sign-ins do not.
    */
-  beginAuthorization(id: string): Promise<void>;
+  beginAuthorization(
+    id: string,
+    options?: { readonly intent?: AuthorizationIntent },
+  ): Promise<void>;
   /**
    * Signs out on this device: blocks this connection locally, then removes its
    * saved session. The connection stays listed as

@@ -69,6 +69,8 @@ export async function prepareSessionAuthorization(
   input: Omit<SessionBinding, 'scopes'> & {
     readonly scopes?: readonly string[];
     readonly returnTo: string;
+    /** Not stored in the attempt: a later sign-in or restore never inherits it. */
+    readonly prompt?: 'consent';
   },
   now = Date.now(),
   development?: DiscoveryOptions['development'],
@@ -80,10 +82,10 @@ export async function prepareSessionAuthorization(
     development,
   );
   const returnTo = safeReturnTo(input.returnTo, input.client.redirectUri);
-  const { attempt, url } = await prepareAuthorization(
-    binding,
-    development ? { development } : {},
-  );
+  const { attempt, url } = await prepareAuthorization(binding, {
+    ...(development ? { development } : {}),
+    ...(input.prompt ? { prompt: input.prompt } : {}),
+  });
   return {
     url,
     attempt: {

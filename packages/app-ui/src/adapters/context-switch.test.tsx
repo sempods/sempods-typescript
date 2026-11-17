@@ -207,7 +207,8 @@ it('shows loading, empty, and signed-out Pods as different states', async () => 
       .map((item) => item.getAttribute('aria-label')),
   ).toEqual(['Share contexts …: bob']);
   await press(screen.getByRole('menuitem', { name: 'Sign in: bob' }));
-  expect(api.authorize).toHaveBeenCalledWith('ended');
+  // Signing in may reuse the grant; only sharing asks for consent (#362).
+  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('ended');
 });
 
 it('offers retry, not sharing, for a restorable Pod without lists', async () => {
@@ -270,6 +271,9 @@ it('localizes authorization errors through the SDK and allows another attempt', 
   );
   expect(screen.queryByRole('alert')).toBeNull();
   expect(api.authorize).toHaveBeenCalledTimes(2);
+  expect(api.authorize).toHaveBeenLastCalledWith('alice', {
+    intent: 'change-sharing',
+  });
 });
 
 it('offers sharing directly on an empty inactive Pod without selecting it first', async () => {
@@ -283,7 +287,9 @@ it('offers sharing directly on an empty inactive Pod without selecting it first'
   expect(screen.getAllByRole('group')).toHaveLength(2);
   expect(bob.getByText('No readable contexts shared.')).toBeTruthy();
   await press(bob.getByRole('menuitem', { name: 'Share contexts …: bob' }));
-  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob');
+  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('bob', {
+    intent: 'change-sharing',
+  });
   expect(api.list.select).not.toHaveBeenCalled();
 });
 
@@ -302,7 +308,9 @@ it('offers one share action per empty Pod, with no duplicate active-Pod action',
   await press(
     screen.getByRole('menuitem', { name: 'Share contexts …: alice' }),
   );
-  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('alice');
+  expect(api.authorize).toHaveBeenCalledExactlyOnceWith('alice', {
+    intent: 'change-sharing',
+  });
 });
 
 it('distinguishes sign-in actions for two ended Pods and retains one group each', async () => {

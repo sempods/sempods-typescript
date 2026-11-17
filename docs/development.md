@@ -106,7 +106,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   renders a provider/hook consumer in Chromium; language change retains the draft.
   Both bundles resolve installed artifacts, not workspace aliases.
 - Documented apps: compiles the quickstart and its PWA adaptation, read from the
-  installed app-sdk reference, against packed SDKs. Chromium checks startup and, with a registration spy, verifies that
+  installed app-sdk reference, against packed SDKs, and the React guide's
+  custom sharing action. Chromium checks startup and, with a registration spy, verifies that
   importing the PWA `App` component registers no worker while the production
   entry registers exactly once. Native worker behavior is covered by `test:todo`.
 

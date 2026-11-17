@@ -134,7 +134,12 @@ export function ContextSwitch({
       className="min-h-11 px-4 py-2"
       onAction={() =>
         void run(async () => {
-          if (!(await actions.authorize(pod.connectionId)))
+          // The Pod shows its consent page even when it could reuse the grant.
+          if (
+            !(await actions.authorize(pod.connectionId, {
+              intent: 'change-sharing',
+            }))
+          )
             setProblem(t.actionNotCompleted);
         })
       }

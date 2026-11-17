@@ -71,6 +71,16 @@ leaves an empty downscope to SPS-CRUD-014
 ([sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129)), so
 the SDK rejects any group in the answer to `[]`.
 
+The consent prompt of `prepareAuthorization` (#362) was checked against
+`sempods/sempods-spec` at `c6308c157d8c78be0ba6e9d91dba39a11a9ce883`
+(`spec/core/auth.md` §7): SPS-AUTH-039 lets a Pod reuse standing grants without
+`prompt` and forbids it with `prompt=consent`. The Pod's prompt table was
+cross-read in `sempods/sempods-kotlin` at
+`4e6414ff4c77627be319eb6dc83a4d616ff6db2d`
+(`sempods-server/docs/auth/connections.md`). The SDK sends only `consent`, never
+`none`, `login` or another value. This is source reading and deterministic
+fixtures; the live check against a deployed `did:web` app remains open in #362.
+
 No source licence file was found at the source revisions above; they and this
 port are by the same author. Since 0.1.0 this package, including the ported code,
 is licensed under the Apache License, Version 2.0 (see LICENSE and NOTICE).
