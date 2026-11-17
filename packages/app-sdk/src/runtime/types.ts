@@ -155,6 +155,22 @@ export interface StartupReport {
   /** The returning sign-in's outcome; `none` without a callback, even when startup fails. */
   readonly interaction: 'none' | 'completed' | 'cancelled' | 'failed';
   readonly storage: 'durable' | 'unavailable' | 'busy';
+  /**
+   * Present only when the silent first sign-in (`firstSignIn: 'silent'`)
+   * came back without a session because the Pod needs the person first:
+   * not signed in there, consent missing, or another step. This is no
+   * failure (`interaction` stays `none`): `connectionId` is the default Pod's
+   * connection, signed out as one never signed in to, and signing in is one
+   * click as usual. `providerLink` is the Pod's own link for that step (its
+   * `error_uri`), only on its issuer's origin; the Pod's free text is never
+   * kept.
+   */
+  readonly firstSignIn?: {
+    readonly connectionId: string;
+    readonly problem:
+      'login-required' | 'consent-required' | 'interaction-required';
+    readonly providerLink?: string;
+  };
   readonly problem?: RuntimeProblem;
   readonly failure?: SdkFailure;
   readonly unreadable: readonly {
@@ -254,6 +270,40 @@ export interface BrowserRuntimeOptions {
    * page unloads, and startup deletes addresses an earlier start remembered.
    */
   readonly rememberPods?: boolean;
+  /**
+   * How a first sign-in starts (default `click`): with the person's click on
+   * the sign-in screen.
+   *
+   * `silent` is for a deployed `did:web` app in front of one Pod (a
+   * `preset`, or a single `allowedPods` entry) where people usually have a
+   * session at that Pod already (single sign-on). When nothing is stored
+   * for this app on the device (no session, no remembered Pod, also none
+   * that `allowedPods` excludes now), `initialize()` connects the
+   * default Pod and navigates to its provider once with `prompt=none`
+   * instead of resolving: signed in there with a grant for this app, the
+   * person returns signed in without a click. Otherwise the Pod answers
+   * `login_required`, `consent_required` or `interaction_required`; that is
+   * no failure: the connection is signed out as one never signed in to,
+   * nothing is remembered, and `StartupReport.firstSignIn` says why, with
+   * the Pod's link for it. Any other answer fails like a sign-in.
+   *
+   * It is tried at most once per tab (`tabStorage`), never again in a loop,
+   * also after a sign-out, a reload or coming back without an answer; a
+   * tab that started with something stored, or returned from a sign-in,
+   * never tries. A new tab with nothing stored tries again: signing out of
+   * the app does not sign out of the Pod. A preparation that fails (an unreachable Pod) leaves the person
+   * signed out, without an error. Without a `did:web` identity (a Pod
+   * never grants a dynamically registered client silently, SPS-AUTH-040,
+   * and `signIn: 'none'` has none) or a default Pod, `silent` is a
+   * configuration error.
+   */
+  readonly firstSignIn?: 'click' | 'silent';
+  /**
+   * Advanced/test: where `firstSignIn: 'silent'` notes, for this tab, that it
+   * tried. Defaults to `sessionStorage`; `null`, or a storage that cannot be
+   * read or written, never signs in silently, so it can never loop.
+   */
+  readonly tabStorage?: PreferenceStorage | null;
   /**
    * The Pod's refresh rotation grace period in milliseconds (default
    * `60_000`, the sempods server's default). When the answer to a renewal

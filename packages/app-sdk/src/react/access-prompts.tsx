@@ -80,6 +80,27 @@ export function usePromptText(prompt: AccessPromptFact): string | null {
   }
 }
 
+/**
+ * Internal: the Pod's own link for signing in there, when the prompt carries
+ * one. It opens in a new tab, so this page and its drafts stay; signing in
+ * here afterwards needs no second sign-in at the Pod.
+ */
+export function ProviderLink({
+  prompt,
+}: {
+  readonly prompt: AccessPromptFact;
+}) {
+  const { messages: m } = useSdkLocale();
+  if (!prompt.providerLink) return null;
+  return (
+    <p className="sp-provider-link">
+      <a href={prompt.providerLink} target="_blank" rel="noopener noreferrer">
+        {m.controls.providerLink ?? m.controls.signIn}
+      </a>
+    </p>
+  );
+}
+
 /** Internal: a prompt's action buttons, run through the controller's guards. */
 export function PromptActions({
   prompt,
@@ -220,6 +241,7 @@ export function AccessPrompt({ prompt, focusTarget }: AccessPromptProps) {
       <SdkStyles />
       {other && <p className="sp-prompt-pod">{other}</p>}
       {text && <p>{text}</p>}
+      <ProviderLink prompt={prompt} />
       <PromptActions prompt={prompt} primary={prompt.severity !== 'info'} />
     </div>
   );
