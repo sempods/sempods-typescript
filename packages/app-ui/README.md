@@ -633,39 +633,43 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   Context at a time, across all connected Pods. Supply the app's `title`, an
   optional decorative `icon`, its word for a Context (`label`, e.g. "List"),
   optional `texts` that name its Contexts in the adapter's messages
-  (`shareMore`, `chooseContext`, `contextsLoading`, `contextsFailed`,
-  `contextsEmpty`, `switchUnavailable`, `actionNotCompleted`, `noPods`,
-  `showAddresses`, `addresses`; each left out keeps its default), and optional
-  `podNames` keyed by exact Pod URL.
+  (`shareContexts`, `chooseContext`, `contextsLoading`, `contextsFailed`,
+  `contextsEmpty`, `switchUnavailable`, `actionNotCompleted`, `noPods`; each
+  left out keeps its default), and optional `podNames` keyed by exact Pod URL.
   Mount outside `TargetScreen`, alongside `AppAccess`. It initially selects
   the active Pod's first writable, else readable Context when none was
   remembered or configured, just like `useContexts`.
 
+  The chooser only selects. Changing what is shared, connecting Pods and
+  signing out stay in `AppAccess` (an app's **Pods & sharing**), so the menu
+  has no permanent sharing action, no address details and no icon legend.
+
   The trigger shows the Context and, below it, its Pod, with 16px inline
   padding, a 12px gap and a 64px height; with a single connected Pod it shows
-  only the Context, and its accessible name still names the Pod. The menu groups concise Context names under
-  their Pod, with 52px minimum rows. Equal names within one Pod show their
-  `qualifier` more quietly; equal names on different Pods need none. A fixed pencil/eye column identifies
-  write/read-only access; the check marks selection separately. A visible
-  localized legend explains the icons, and each row has an accessible access
-  description. Long names wrap in the menu; the trigger keeps the full name
-  available to assistive technology. The address disclosure shows exact Pod
-  URLs and Context IRIs. Only URL fallbacks lose a terminal slash (and are
-  decoded); supplied names keep theirs. Opening the details focuses a named address region;
-  keyboard scrolling reaches its final address even in a short viewport,
-  and Escape closes the popup and returns focus to the trigger.
+  only the Context, and its accessible name still names the Pod. The menu
+  groups concise Context names under their Pod, with 52px minimum rows. Equal
+  names within one Pod show their `qualifier` more quietly; equal names on
+  different Pods need none. An editable Context has no mark; a read-only one
+  shows a small **Read only** badge (German **Nur lesen**), and the check
+  marks the selection separately. Each row's accessible description names its
+  Pod and access, and whether it is unavailable. Long names wrap in the menu;
+  the trigger keeps the full name available to assistive technology. Only URL
+  fallbacks for Pod names lose a terminal slash (and are decoded); supplied
+  names keep theirs. Escape closes the popup and returns focus to the trigger.
 
   The adapter owns loading, empty, signed-out and failed groups, per-Pod
   retry/sign-in, unavailable retained choices, blocked selection and share
-  errors. An empty ready Pod offers sharing directly for that Pod, including
-  an inactive one. The general sharing action names the active Pod; sign-in
-  and retry actions identify their Pod for assistive technology and typeahead.
-  A sharing action asks the Pod for its consent page, also when it could reuse
-  the grant; a sign-in action may reuse it.
-  SDK actions still own draft/pending/unconfirmed-write guards. Apps
-  supply domain words and content, not a second catalogue, guard or generic
-  recovery UI. `AppAccess` keeps access management and its own focus target.
-  No global Button or menu padding changes are needed.
+  errors. A Pod that loaded and shares no readable Context offers
+  **Share contexts …** for that Pod, including an inactive one; a loading,
+  failed or signed-out Pod offers its retry or sign-in instead. Under
+  `signIn: 'none'` it offers neither. Sharing asks the Pod for its consent
+  page, also when it could reuse the grant; a sign-in action may reuse it. A
+  read-only Context stays selectable; a retained one that is unavailable does
+  not. Sign-in and retry actions identify their Pod for assistive technology
+  and typeahead. SDK actions still own draft/pending/unconfirmed-write guards.
+  Apps supply domain words and content, not a second catalogue, guard or
+  generic recovery UI. `AppAccess` keeps access management and its own focus
+  target. No global Button or menu padding changes are needed.
 
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and groups of checked choices

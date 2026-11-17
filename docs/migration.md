@@ -129,7 +129,10 @@ a copied list chooser with the standard component, retaining domain words and
 scope configuration. Remove app-owned generic selection feedback, permission
 rows and label parsing: a custom chooser reads `contextLabel`, `qualifier` and
 `podLabel` instead of splitting `name` or `label`. Keep domain data operations
-and `AppAccess`. See [the chooser
+and `AppAccess`, which keeps changing what is shared. An app that tried a
+0.9.0 prerelease renames `texts.shareMore` to `shareContexts`, now the action
+of a Pod that shares no readable Context ("Share lists …"), and drops
+`showAddresses` and `addresses`. See [the chooser
 guide](react-authoring.md#one-chooser-across-pods).
 
 ### Change a waiting Pod read's priority in place

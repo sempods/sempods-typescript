@@ -5654,6 +5654,16 @@ async function contexts({ browser, origin }) {
         }),
       );
       const rect = await trigger().boundingBox();
+      // Only the two read-only rows carry a visible mark (#365); there is no
+      // legend, address disclosure or sharing while every Pod shares lists.
+      const marks = page.getByText('Nur lesen', { exact: true });
+      const marked = await marks.evaluateAll((els) =>
+        els.map((el) => ({
+          row: el.closest('[role=menuitemradio]')?.textContent,
+          hidden: el.getAttribute('aria-hidden'),
+          right: el.getBoundingClientRect().right,
+        })),
+      );
       results.push({
         id: `grouped-${scheme}`,
         pass:
@@ -5665,10 +5675,27 @@ async function contexts({ browser, origin }) {
             (r) => r.height >= 52 && r.left >= 0 && r.right <= 375,
           ) &&
           rect.height >= 64 &&
+          marked.length === 2 &&
+          marked.every(
+            (m) =>
+              m.row && !m.row.startsWith('Einkaufsliste') && m.right <= 375,
+          ) &&
           (await page
             .getByText('Lesen und schreiben', { exact: true })
-            .count()) === 1,
+            .count()) === 0 &&
+          (await page.getByRole('menuitem').count()) === 0 &&
+          (await page.getByRole('region').count()) === 0,
         geometry,
+        marked,
+      });
+      await page.addScriptTag({ content: contrastScript });
+      const failing = await page
+        .locator('[role="dialog"]:has([role="menu"])')
+        .evaluate((el) => window.uiContrast(el).filter((r) => !r.pass));
+      results.push({
+        id: `grouped-contrast-${scheme}`,
+        pass: failing.length === 0,
+        failing,
       });
       step = `escape-${scheme}`;
       await page.keyboard.press('Escape');
@@ -5680,59 +5707,27 @@ async function contexts({ browser, origin }) {
         pass: await trigger().evaluate((el) => el === document.activeElement),
       });
     }
-    step = 'address-keyboard-scroll: focus on the address region';
+    step = 'keyboard-reaches-last-row';
+    // A short phone viewport: the long names wrap and the popup scrolls.
     await page.setViewportSize({ width: 375, height: 400 });
-    await trigger().click();
-    await page
-      .getByRole('menuitem', { name: 'Pod- und Kontextadressen anzeigen' })
-      .focus();
+    await trigger().focus();
     await page.keyboard.press('Enter');
-    const addresses = page.getByRole('region', {
-      name: 'Pod- und Kontextadressen',
-      exact: true,
-    });
-    await page.waitForFunction(
-      () => document.activeElement?.getAttribute('role') === 'region',
-    );
-    // Chromium scrolls on the compositor, with the scroll range of the last
-    // frame it received: an End in the frame that shows the addresses stops
-    // where the menu ended without them (#332).
+    await page.getByRole('menuitemradio').first().waitFor();
     await settle(page);
-    step = 'address-keyboard-scroll: final address in view after End';
     await page.keyboard.press('End');
-    // Native scroll is animated on some engines: wait for the end of the
-    // popup and the final address, not merely for a rendered element below
-    // the viewport. Focusing the region already scrolls most of it in view.
     await page.waitForFunction(() => {
-      const region = document.querySelector('[role=region][tabindex="0"]');
-      const last = region?.querySelector('dl:last-child dd:last-child');
-      const scroller = region?.closest('[role="dialog"]');
-      if (!region || !last || !scroller) return false;
-      const r = region.getBoundingClientRect(),
-        d = last.getBoundingClientRect(),
-        popup = scroller.getBoundingClientRect();
+      const rows = document.querySelectorAll('[role=menuitemradio]');
+      const last = rows[rows.length - 1];
+      const popup = last?.closest('[role="dialog"]');
+      if (!last || !popup || document.activeElement !== last) return false;
+      const r = last.getBoundingClientRect(),
+        p = popup.getBoundingClientRect();
       return (
-        scroller.scrollTop >=
-          scroller.scrollHeight - scroller.clientHeight - 1 &&
-        d.bottom <= Math.min(r.bottom, popup.bottom, innerHeight) + 1 &&
-        d.top >= Math.max(r.top, popup.top, 0)
+        r.bottom <= Math.min(p.bottom, innerHeight) + 1 &&
+        r.top >= Math.max(p.top, 0)
       );
     });
-    results.push({
-      id: 'address-keyboard-scroll',
-      pass: await addresses.evaluate((el) => el === document.activeElement),
-    });
-    results.push({
-      id: 'exact-address-details',
-      pass:
-        (await page
-          .getByText(origin + '/alice', { exact: true })
-          .isVisible()) &&
-        (await page
-          .locator('dd')
-          .filter({ hasText: origin + '/bob/_system/contexts/work' })
-          .isVisible()),
-    });
+    results.push({ id: 'keyboard-reaches-last-row', pass: true });
     step = 'declined-cross-pod-draft';
     await page.keyboard.press('Escape');
     await page.waitForFunction(() =>
@@ -5839,7 +5834,7 @@ async function contexts({ browser, origin }) {
           .count()) === 1,
     });
     const share = page.getByRole('menuitem', {
-      name: 'Weitere Kontexte freigeben …: Familie/',
+      name: 'Kontexte freigeben …: Familie/',
       exact: true,
     });
     step = 'empty-pod-sharing-keeps-declined-draft';
@@ -5884,9 +5879,9 @@ async function contexts({ browser, origin }) {
       step,
       error: String(error),
       details: await page.evaluate(() => {
-        const region = document.querySelector('[role=region][tabindex="0"]');
-        const last = region?.querySelector('dl:last-child dd:last-child');
-        const popup = region?.closest('[role="dialog"]');
+        const rows = document.querySelectorAll('[role=menuitemradio]');
+        const last = rows[rows.length - 1];
+        const popup = last?.closest('[role="dialog"]');
         return {
           viewport: { width: innerWidth, height: innerHeight },
           popup: popup && {
@@ -5903,10 +5898,7 @@ async function contexts({ browser, origin }) {
               labelledBy: el.getAttribute('aria-labelledby'),
             }),
           ),
-          region: region?.getBoundingClientRect().toJSON(),
           last: last?.getBoundingClientRect().toJSON(),
-          scroll: region?.scrollTop,
-          scrollHeight: region?.scrollHeight,
         };
       }),
     });
