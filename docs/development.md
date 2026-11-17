@@ -120,7 +120,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   installed README's `task-dialog.tsx` and `places.ts` examples as shipped, so
   every check below runs the documented recipe; its compact quick edit is the
   README's `quick-edit.tsx`, its view links on `?screen=tabs` the README's
-  `view-tabs.tsx`; the screen routes with the
+  `view-tabs.tsx`, its confirmation on `?screen=confirm` the README's
+  `confirm-dialog.tsx`; the screen routes with the
   package's `useNav` and uses the README's stylesheet setup. The README's other
   TSX examples are compiled. It is
   built with Vite and Tailwind CSS 4. The
@@ -145,6 +146,13 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     a 16px glyph, inside the dialog and clear of its title and fields, at
     375px and 1280px in light and dark, and closes it by pointer anywhere in
     the target and by keyboard;
+  - a short confirmation (#368), the README's and one with `ActionButton`
+    pills, labelled "Abbrechen" and "Gekaufte Artikel löschen" around a long
+    unbroken list name, at 1280, 375 and 320px (1280px at 400% zoom) in light
+    and dark: the dialog, its footer and every line of text inside the screen
+    and the dialog, no sideways scroll, room for the focus rings, 44px targets
+    (56px pills), Cancel before the answer and, for the README's buttons, side
+    by side at 1280px; Tab reaches Cancel, then the answer, which Enter gives;
   - `ScreenDialog` full screen with safe-area insets, emulated through the
     DevTools protocol in Chromium only (other engines report a skip): Close
     below a 47px top inset, the last action after scrolling above a 34px

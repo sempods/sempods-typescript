@@ -24,10 +24,14 @@
 // while signed in (#329). With `?screen=tabs`, the page is the README's
 // views as links: the two views as ghost links, the shown one marked by
 // `nav.link`, and a link to a task, a screen over a view (#342, #343).
+// With `?screen=confirm`, the page is the README's confirmation, open, with
+// long German labels and a long unbroken list name; with `&footer=pill` as
+// well, the same dialog parts hold `ActionButton` pills instead (#368).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
-// links, view-tabs.tsx, and the address model, places.ts, are the package
+// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, and the
+// address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
@@ -59,6 +63,11 @@ import {
   Checkbox,
   Chip,
   ChipGroup,
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   HeaderMenu,
   ScreenDialog,
   SuggestField,
@@ -74,6 +83,7 @@ import { TaskDialog, taskFields } from './task-dialog';
 import { QuickEdit } from './quick-edit';
 import { Workspace } from './workspace';
 import { ViewTabs } from './view-tabs';
+import { ConfirmDialog } from './confirm-dialog';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 
@@ -231,6 +241,7 @@ const addPod =
     sessionStorage.getItem('add-pod-gate') === '1');
 const checkboxes = settings.get('screen') === 'checkbox';
 const tabs = settings.get('screen') === 'tabs';
+const confirmation = settings.get('screen') === 'confirm';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -352,6 +363,8 @@ function App() {
         <CheckboxGate />
       ) : tabs ? (
         <TabsGate />
+      ) : confirmation ? (
+        <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (
@@ -732,6 +745,57 @@ function CheckboxGate() {
         />
         <span id="remember-device">Remember this device</span>
       </div>
+    </main>
+  );
+}
+
+/** One unbroken name, as a list or resource name may be (#368). */
+const longName = 'Wocheneinkauf-' + 'GemüseObstGetränkeDrogerie'.repeat(4);
+
+/**
+ * A short confirmation with Konsum's labels (#368), open at load: the
+ * README's `ConfirmDialog`, or with `pills` the same dialog parts holding
+ * `ActionButton` pills. The answer shows on the page; the button reopens it.
+ */
+function ConfirmGate({ pills }: { readonly pills: boolean }) {
+  const [open, setOpen] = useState(true);
+  const [answer, setAnswer] = useState('none');
+  const title = 'Gekaufte Artikel löschen?';
+  const text = `Alle gekauften Artikel aus „${longName}“ werden gelöscht.`;
+  const confirm = () => setAnswer('confirmed');
+  return (
+    <main className="gate-main">
+      <button className="min-h-11" onClick={() => setOpen(true)}>
+        Bestätigung öffnen
+      </button>
+      <output data-answer={answer}>{answer}</output>
+      {pills ? (
+        <Dialog isOpen={open} onOpenChange={setOpen} showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{text}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <ActionButton variant="secondary" slot="close">
+              Abbrechen
+            </ActionButton>
+            <ActionButton slot="close" onPress={confirm}>
+              Gekaufte Artikel löschen
+            </ActionButton>
+          </DialogFooter>
+        </Dialog>
+      ) : (
+        <ConfirmDialog
+          isOpen={open}
+          onOpenChange={setOpen}
+          title={title}
+          cancel="Abbrechen"
+          confirm="Gekaufte Artikel löschen"
+          onConfirm={confirm}
+        >
+          {text}
+        </ConfirmDialog>
+      )}
     </main>
   );
 }

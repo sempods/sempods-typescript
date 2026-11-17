@@ -156,6 +156,20 @@ remove app CSS that only enlarged `[data-slot=dialog-close]` (a minimum width or
 height, padding) and check a header with its own right padding. Other `icon-sm`
 buttons keep their 28px size.
 
+### One row of actions in DialogFooter
+
+Up to 0.9.0-dev.2, `@sempods/app-ui`'s `DialogFooter` stacked its actions in
+reverse order below 640px and kept them in one row that did not wrap above,
+so long labels pushed the footer out of the dialog. 0.9.0 keeps them in one
+row in document order at every width, Cancel first as in the SDK's
+confirmations, wraps actions and then labels that do not fit, and gives its
+buttons a 44px minimum height (`ActionButton` pills keep 56px). `Dialog`'s
+column no longer grows with its content, and long words break inside it.
+After upgrading, drop footer classes such as `flex-row flex-wrap
+justify-end` and minimum heights on its buttons, and put Cancel before the
+answer if an app relied on the reversed order. See the
+[confirmation recipe](../packages/app-ui/README.md#components).
+
 ### App settings in the access gate
 
 0.9.0 adds `settings` to `AppAccess` and `AccessGate` in

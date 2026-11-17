@@ -102,16 +102,17 @@ function Dialog({
       <ModalPrimitive
         data-slot="dialog-content"
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm',
+          'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 grid-cols-1 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 wrap-anywhere outline-none sm:max-w-sm',
           className,
         )}
       >
         {/* The corner Close is a 44px target around the compact glyph; a
-            header or title beside it keeps clear of that target. */}
+            header or title beside it keeps clear of that target. Its column
+            never grows with its content: a long name breaks instead. */}
         <DialogPrimitive
           data-slot="dialog"
           className={cn(
-            '[display:inherit] [gap:inherit] outline-none',
+            'grid-cols-1 [display:inherit] [gap:inherit] outline-none',
             showCloseButton &&
               '*:data-[slot=dialog-header]:pr-10 *:data-[slot=dialog-title]:pr-10',
           )}
@@ -157,11 +158,16 @@ function DialogFooter({
   closeLabel?: string;
 }) {
   const { messages } = useSdkLocale();
+  // One row in reading order at every width, as the SDK's confirmations:
+  // Cancel first, the answer last. Actions wrap to further rows when they do
+  // not fit, and a label wraps only when its action alone is too wide. Each
+  // button, a DialogClose included, is a 44px target; a pill keeps its 56px
+  // (its attribute outranks the button rule).
   return (
     <div
       data-slot="dialog-footer"
       className={cn(
-        '-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end',
+        '-mx-4 -mb-4 flex flex-wrap justify-end gap-2 rounded-b-xl border-t bg-muted/50 p-4 [&>:is([data-slot=button],[data-slot=dialog-close])]:h-auto [&>:is([data-slot=button],[data-slot=dialog-close])]:min-h-11 [&>:is([data-slot=button],[data-slot=dialog-close])]:max-w-full [&>:is([data-slot=button],[data-slot=dialog-close])]:py-1 [&>:is([data-slot=button],[data-slot=dialog-close])]:text-center [&>:is([data-slot=button],[data-slot=dialog-close])]:whitespace-normal [&>[data-slot][data-shape=pill]]:min-h-14',
         className,
       )}
       {...props}

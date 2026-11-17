@@ -5567,6 +5567,168 @@ async function viewTabs({ browser, origin }) {
   return results;
 }
 
+/**
+ * A short confirmation with long German labels and a long unbroken list name
+ * (#368), on `?screen=confirm`: the README's `ConfirmDialog` and, with
+ * `&footer=pill`, the same parts holding `ActionButton` pills. At 1280, 375
+ * and 320px (1280px at 400% browser zoom), light and dark: the dialog and
+ * every text in it inside the screen and the dialog, its actions inside the
+ * footer with room for their focus rings, 44px targets (56px pills), Cancel
+ * before the answer in reading order (left of it, or above it once they
+ * wrap), and side by side on the desktop for the README's buttons. By
+ * keyboard, Tab reaches Cancel, then the answer, which Enter gives.
+ */
+async function confirmation({ browser, origin, engine }) {
+  const { context, page, errors } = await newPage(browser);
+  const dialog = page.getByRole('dialog', {
+    name: 'Gekaufte Artikel löschen?',
+  });
+  const results = [];
+  try {
+    for (const footer of ['button', 'pill']) {
+      const address =
+        origin + `/?screen=confirm${footer === 'pill' ? '&footer=pill' : ''}`;
+      results.push(
+        await attempt(`confirm-footer-inside-${footer}`, async () => {
+          const cases = [];
+          try {
+            for (const width of [1280, 375, 320])
+              for (const scheme of ['light', 'dark']) {
+                await page.setViewportSize({ width, height: 800 });
+                await page.emulateMedia({ colorScheme: scheme });
+                await page.goto(address);
+                await dialog.waitFor();
+                await settle(page);
+                const m = await page.evaluate(() => {
+                  const content = document.querySelector(
+                    '[data-slot=dialog-content]',
+                  );
+                  const frame = content.getBoundingClientRect();
+                  const foot = content
+                    .querySelector('[data-slot=dialog-footer]')
+                    .getBoundingClientRect();
+                  const within = (r, f, pad = 0) =>
+                    r.left - pad >= f.left - 0.5 &&
+                    r.right + pad <= f.right + 0.5 &&
+                    r.top - pad >= f.top - 0.5 &&
+                    r.bottom + pad <= f.bottom + 0.5;
+                  // Each line of text inside the dialog, and a label inside
+                  // its button.
+                  const walker = document.createTreeWalker(
+                    content,
+                    4, // NodeFilter.SHOW_TEXT
+                  );
+                  const spilled = [];
+                  for (let node; (node = walker.nextNode());) {
+                    if (!node.textContent.trim()) continue;
+                    const range = document.createRange();
+                    range.selectNodeContents(node);
+                    const owner =
+                      node.parentElement.closest('button') ?? content;
+                    const box = owner.getBoundingClientRect();
+                    for (const line of range.getClientRects())
+                      if (!within(line, box))
+                        spilled.push(node.textContent.slice(0, 24));
+                  }
+                  const buttons = [
+                    ...content.querySelectorAll(
+                      '[data-slot=dialog-footer] > button',
+                    ),
+                  ].map((b) => ({
+                    label: b.textContent,
+                    pill: b.dataset.shape === 'pill',
+                    rect: b.getBoundingClientRect().toJSON(),
+                  }));
+                  const [cancel, answer] = buttons.map((b) => b.rect);
+                  const sideBySide =
+                    Math.abs(cancel.top - answer.top) < 1 &&
+                    cancel.right <= answer.left;
+                  return {
+                    labels: buttons.map((b) => b.label),
+                    targets: buttons.map((b) => [
+                      Math.round(b.rect.width),
+                      Math.round(b.rect.height),
+                    ]),
+                    sized: buttons.every(
+                      (b) =>
+                        b.rect.width >= 44 &&
+                        b.rect.height >= (b.pill ? 56 : 44),
+                    ),
+                    // React Aria's focus ring is 3px outside the button.
+                    rings: buttons.every((b) => within(b.rect, foot, 3)),
+                    footerInside: within(foot, frame),
+                    dialogInside:
+                      frame.left >= 16 - 0.5 &&
+                      frame.right <= innerWidth - 16 + 0.5,
+                    noSideScroll:
+                      document.documentElement.scrollWidth <= innerWidth,
+                    spilled,
+                    sideBySide,
+                    inOrder: sideBySide || cancel.bottom <= answer.top + 0.5,
+                  };
+                });
+                cases.push({ width, scheme, ...m });
+              }
+          } finally {
+            await page.emulateMedia({ colorScheme: null });
+            await page.setViewportSize({ width: 1280, height: 800 });
+          }
+          return {
+            pass:
+              cases.length === 6 &&
+              cases.every(
+                (c) =>
+                  c.labels.join('|') === 'Abbrechen|Gekaufte Artikel löschen' &&
+                  c.sized &&
+                  c.rings &&
+                  c.footerInside &&
+                  c.dialogInside &&
+                  c.noSideScroll &&
+                  c.spilled.length === 0 &&
+                  c.inOrder &&
+                  (footer === 'pill' || c.width !== 1280 || c.sideBySide),
+              ),
+            cases,
+          };
+        }),
+      );
+      results.push(
+        await attempt(`confirm-keyboard-${footer}`, async () => {
+          const tab = tabKey(engine);
+          await page.goto(address);
+          await dialog.waitFor();
+          await settle(page);
+          const focused = [];
+          for (let i = 0; i < 2; i++) {
+            await page.keyboard.press(tab);
+            focused.push(
+              await page.evaluate(() => document.activeElement?.textContent),
+            );
+          }
+          await page.keyboard.press('Enter');
+          const closed = await gone(dialog);
+          const answer = await page
+            .locator('output')
+            .getAttribute('data-answer');
+          return {
+            pass:
+              focused.join('|') === 'Abbrechen|Gekaufte Artikel löschen' &&
+              closed &&
+              answer === 'confirmed',
+            focused,
+            closed,
+            answer,
+          };
+        }),
+      );
+    }
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -5585,6 +5747,7 @@ export const suites = {
   startup,
   addPod,
   checkbox,
+  confirmation,
   viewTabs,
 };
 

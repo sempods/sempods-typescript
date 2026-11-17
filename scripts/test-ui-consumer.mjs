@@ -8,7 +8,7 @@
 // against its own Pod and browser instance.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox]
+//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,viewTabs]
 //        [--lanes=<suites at once per browser, default 1>]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
@@ -143,7 +143,7 @@ try {
   const app = join(temp, 'app');
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
   // The installed README's examples: its task dialog, its quick edit, its
-  // workspace, its view links and its address model are the reference
+  // workspace, its view links, its confirmation and its address model are the reference
   // screen's, so the checks run them as shipped; other TSX examples are only
   // compiled. Its stylesheet setup is the one the screen uses.
   const readme = await readFile(
@@ -166,6 +166,7 @@ try {
     await ship('tsx', 'quick-edit.tsx'),
     await ship('tsx', 'workspace.tsx'),
     await ship('tsx', 'view-tabs.tsx'),
+    await ship('tsx', 'confirm-dialog.tsx'),
   ];
   for (const [i, example] of blocks('tsx').entries())
     if (!shipped.includes(example))
