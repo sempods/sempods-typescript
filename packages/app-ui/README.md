@@ -56,7 +56,7 @@ layer statement puts the SDK's own styles (layer `sempods`) above Tailwind's
 reset and below the utilities: package components keep their look inside SDK
 surfaces such as the `ResourceEditor`, and the SDK's confirmations stay
 centred. The SDK's
-[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.2/docs/react-authoring.md#cascade-layer-order)
+[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#cascade-layer-order)
 explains the order and which app rules still override SDK rules.
 
 `styles.css` adds:
@@ -1158,7 +1158,7 @@ export function ListMenu({ shareMore }: { readonly shareMore: () => void }) {
 `useApp().authorize(id, { intent: 'change-sharing' })` for a given Pod, so the
 Pod shows its consent page even when it could reuse the grant. A plain
 `authorize(id)` is a sign-in and may return without asking
-([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.2/docs/react-authoring.md#changing-what-the-app-may-access)).
+([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#changing-what-the-app-may-access)).
 
 A workspace with a canvas and a filter panel. The canvas keeps its size and
 element while the panel opens and closes, and stays usable beside it:
