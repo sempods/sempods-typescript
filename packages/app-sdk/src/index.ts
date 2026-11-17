@@ -27,6 +27,7 @@ export { createBrowserRuntime } from './runtime/runtime.js';
 export { RuntimeError } from './runtime/errors.js';
 export type { RuntimeProblem } from './runtime/errors.js';
 export type {
+  AuthorizationIntent,
   BrowserRuntime,
   BrowserRuntimeOptions,
   Connection,

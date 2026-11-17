@@ -129,20 +129,21 @@ export function SignInConnections({
   const retry =
     targetConnection?.session.kind === 'ended' &&
     targetConnection.session.restorable;
+  const signedIn =
+    targetConnection?.session.kind === 'active' ||
+    targetConnection?.session.kind === 'renewing';
+  // With a session, signing in again changes sharing: the Pod shows its
+  // consent page rather than reusing the grant (missing scopes too).
+  const changesSharing =
+    signedIn && (again || !(readable || state.signIn !== 'required'));
   const label =
     retry || failedRetirement
       ? m.controls.retry
-      : again
-        ? targetConnection?.session.kind === 'active' ||
-          targetConnection?.session.kind === 'renewing'
-          ? m.controls.updateAccess
-          : m.controls.signIn
-        : readable || state.signIn !== 'required'
-          ? (m.controls.open ?? m.controls.signIn)
-          : targetConnection?.session.kind === 'active' ||
-              targetConnection?.session.kind === 'renewing'
-            ? m.controls.updateAccess
-            : m.controls.signIn;
+      : changesSharing
+        ? m.controls.updateAccess
+        : again || !(readable || state.signIn !== 'required')
+          ? m.controls.signIn
+          : (m.controls.open ?? m.controls.signIn);
   const saved = connections.filter(
     (entry) =>
       entry.session.kind === 'signed-out' ||
@@ -200,6 +201,10 @@ export function SignInConnections({
       if (restoring) return;
       let ran = true;
       if (retry) await app.retryRestore(targetConnection.id);
+      else if (changesSharing)
+        ran = await app.authorize(targetConnection.id, {
+          intent: 'change-sharing',
+        });
       else if (again) ran = await app.authorize(targetConnection.id);
       else if (readable || state.signIn !== 'required')
         ran = await app.selectConnection(targetConnection.id);

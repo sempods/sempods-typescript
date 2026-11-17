@@ -86,6 +86,7 @@ version, app origin and browser. Keep credentials and private data out of report
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Connect and consent                            | Sign-in occurs on the Pod/provider; the callback returns to the app; context choice is explicit                                                                                             |
 | Cancel sign-in                                 | Visible cancellation/failure; existing connections and drafts remain usable where eligible                                                                                                  |
+| **Change sharing** with an existing grant      | The Pod shows its consent page, also when it would reuse the grant for a sign-in; a changed choice of contexts shows after the return                                                       |
 | Cancel **Change sharing**                      | The earlier session resumes with the same context and data; the app says that sharing was not changed and offers **Change sharing** as the one action                                       |
 | Create, list, complete, reopen, rename, delete | Correct resource in the selected context; list updates after confirmed writes; deletion checks the version the person saw                                                                   |
 | Reload                                         | Accepted connection restores; the last readable context is selected again; no app-owned token handling                                                                                      |
@@ -99,6 +100,11 @@ version, app origin and browser. Keep credentials and private data out of report
 | Another Pod                                    | Sequential connection leaves the first connection available; switching remains guarded                                                                                                      |
 | Pod overview with on-demand Contexts           | The overview loads without a context choice or catalogue request; a refused read shows as failed; editing a row opens it in its own context with no context chooser and no selection change |
 | Language, phone layout, keyboard               | Labels and feedback are understandable; locale changes preserve drafts; controls remain reachable                                                                                           |
+
+A local app signs in as a dynamically registered client, for which the Pod
+shows consent on every interactive sign-in. Whether a sign-in reuses the grant
+while **Change sharing** still asks therefore shows only with a deployed
+`did:web` app.
 
 For concurrent edits, use another browser profile, a private window or another
 device. Two tabs in the same profile intentionally exercise the busy state.

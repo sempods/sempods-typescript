@@ -280,6 +280,20 @@ places next to its view links, an `aria-current` it set from it, and classes
 such as `aria-[current=page]:bg-muted` it added for the chosen look. See
 [views as links](../packages/app-ui/README.md#views-as-links).
 
+### Change sharing shows the Pod's consent page
+
+Up to 0.9.0-dev.2, **Change sharing** and **Share more …** prepared the same
+request as a sign-in. A Pod that could reuse the app's grant, as it does for a
+deployed `did:web` app, returned at once without asking. 0.9.0 tells them
+apart: `authorize(id, { intent: 'change-sharing' })` (and
+`beginAuthorization(id, { intent })` without React) asks for the consent page
+(`prompt=consent`). `AppAccess`, `ContextSwitch` and `useContexts().share()`
+pass it; a plain `authorize(id)` stays a sign-in, and startup restoration and
+renewal are unchanged. After upgrading, pass the intent from the app's own
+sharing controls, such as a `shareMore` callback, and leave its sign-in
+controls as they are. See
+[changing sharing](react-authoring.md#changing-what-the-app-may-access).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

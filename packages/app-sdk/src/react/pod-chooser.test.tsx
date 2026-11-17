@@ -128,6 +128,10 @@ it('offers the saved Pods by keyboard and signs in to a chosen one again without
   expect(button.textContent).toBe('Change sharing');
   await act(async () => fireEvent.submit(input.closest('form')!));
   await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
+  // Changing sharing asks for the consent page (#362).
+  expect(
+    new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.get('prompt'),
+  ).toBe('consent');
   expect(runtime.getSnapshot().map((c) => c.id)).toEqual([id]);
 });
 
@@ -143,6 +147,10 @@ it('matches a typed address of a connected Pod instead of connecting it again', 
   expect(action(group)?.textContent).toBe('Change sharing');
   await act(async () => fireEvent.submit(input.closest('form')!));
   await waitFor(() => expect(f.navigate).toHaveBeenCalledTimes(2));
+  // Changing sharing asks for the consent page (#362).
+  expect(
+    new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.get('prompt'),
+  ).toBe('consent');
   expect(runtime.getSnapshot().map((c) => c.id)).toEqual([id]);
 });
 

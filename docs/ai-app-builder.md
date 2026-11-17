@@ -94,6 +94,7 @@ entire SDK or protocol before implementing an ordinary screen.
 | SDK integration in an existing React project  | [Quickstart](quickstart.md)                                                                                       |
 | A hook, component or its lifecycle            | [API map](react-authoring.md#api-at-a-glance), [state ownership](react-authoring.md#state-ownership-and-lifetime) |
 | Several lists or an overview                  | [Context choices](react-authoring.md#choose-the-app-shape)                                                        |
+| Share more lists or change the app's access   | [Changing sharing](react-authoring.md#changing-what-the-app-may-access)                                           |
 | A search across one or several Pods           | [Search across Pods](react-authoring.md#search-across-pods)                                                       |
 | Values of any vocabulary from a SPARQL read   | [RDF values](rdf-values.md)                                                                                       |
 | Cards or pictures of resources across Pods    | [Resource cards](resource-cards.md)                                                                               |
@@ -157,7 +158,9 @@ needs them; preserve the minimal screen's recovery when adapting it.
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
   do not implement your own Context enumeration, consent handling, token store,
-  credential-bearing fetch or OAuth callback handler. Use `ContextSwitch` from `@sempods/app-ui` for the standard
+  credential-bearing fetch or OAuth callback handler. A request to share
+  another list is [changing sharing](react-authoring.md#changing-what-the-app-may-access),
+  not a custom OAuth flow. Use `ContextSwitch` from `@sempods/app-ui` for the standard
   Context picker (`useContexts`/`usePodContexts` supply custom headless views) and `usePodList`/`usePodLoad` for Pod-wide reads;
   [one read per connection](react-authoring.md#reads-per-connection) passes
   each `runtime.bindPod(id)` handle to `usePodLoad`, not an own loader hook.

@@ -1165,7 +1165,11 @@ function AccessConnections({
               {active && (
                 <button
                   disabled={unavailable}
-                  onClick={() => void act(() => app.authorize(c.id))}
+                  onClick={() =>
+                    void act(() =>
+                      app.authorize(c.id, { intent: 'change-sharing' }),
+                    )
+                  }
                 >
                   {m.controls.updateAccess}
                 </button>

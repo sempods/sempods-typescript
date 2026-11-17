@@ -39,7 +39,8 @@ export interface AccessPrompt {
   readonly connectionId: string | null;
   /**
    * In the order to offer them; the first is primary. Each maps to an
-   * existing call: `sign-in` → `authorize(id)`, or `connect()` without a
+   * existing call: `sign-in` → `authorize(id)` (for `missing-scopes`
+   * `authorize(id, { intent: 'change-sharing' })`), or `connect()` without a
    * connection; `retry` → `retryRestore(id)` for `unreachable`, else
    * `disconnect(id)` (which forgets as well when the person asked to);
    * `forget` → `forget(id)`; `dismiss` → `dismiss(id)`; `reload` →

@@ -388,6 +388,21 @@ try {
     await writeFile(join(withReact, file), recipe[1]);
     appRecipeFiles.push(file);
   }
+  // The custom sharing action of the shipped guide, verbatim (#362).
+  const authoring = await readFile(
+    join(withReact, 'node_modules/@sempods/app-sdk/docs/react-authoring.md'),
+    'utf8',
+  );
+  const sharing = authoring
+    .split('\n### Changing what the app may access\n')[1]
+    ?.split('\n### ')[0]
+    ?.match(/```tsx\n([\s\S]*?)```/)?.[1];
+  assert.ok(
+    sharing?.includes("intent: 'change-sharing'"),
+    'Changing sharing example missing',
+  );
+  await writeFile(join(withReact, 'change-sharing.tsx'), sharing);
+  appRecipeFiles.push('change-sharing.tsx');
 
   const assets = new Map();
   for (const [path, file, react] of [

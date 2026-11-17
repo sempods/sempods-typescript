@@ -53,6 +53,10 @@ const { attempt, url } = await prepareAuthorization({
 // The host owns retaining attempt, opening url and handling the callback.
 ```
 
+Without a `prompt` the Pod may reuse an existing grant and answer at once;
+`prepareAuthorization(binding, { prompt: 'consent' })` asks it to show its
+consent page anyway, so the person can change what the app may access.
+
 `OAuthBinding` contains only Pod, client and scope facts. Preparation returns
 state and PKCE verifier; code/refresh exchanges capture a detached binding before
 awaiting, so caller mutations cannot change validation of the reply.

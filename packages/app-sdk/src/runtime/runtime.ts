@@ -1747,8 +1747,13 @@ export function createBrowserRuntime(
         if (connecting.get(url) === operation) connecting.delete(url);
       }
     },
-    async beginAuthorization(id) {
-      if (!initialized || disposed || signIn === 'none')
+    async beginAuthorization(id, { intent = 'sign-in' } = {}) {
+      if (
+        !initialized ||
+        disposed ||
+        signIn === 'none' ||
+        (intent !== 'sign-in' && intent !== 'change-sharing')
+      )
         throw new RuntimeError('configuration');
       const e = get(id);
       // An ended session has no live lifetime left. Preparing needs a fresh
@@ -1779,6 +1784,11 @@ export function createBrowserRuntime(
           client,
           returnTo: destination,
           scopes: requested,
+          // Only an explicit request to change sharing asks the Pod for its
+          // consent page; a sign-in may reuse the existing grant.
+          ...(intent === 'change-sharing'
+            ? { prompt: 'consent' as const }
+            : {}),
         },
         Date.now(),
         options.development,
