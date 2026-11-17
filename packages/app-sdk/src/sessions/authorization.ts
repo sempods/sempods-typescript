@@ -70,7 +70,7 @@ export async function prepareSessionAuthorization(
     readonly scopes?: readonly string[];
     readonly returnTo: string;
     /** Not stored in the attempt: a later sign-in or restore never inherits it. */
-    readonly prompt?: 'consent';
+    readonly prompt?: 'consent' | 'none';
   },
   now = Date.now(),
   development?: DiscoveryOptions['development'],

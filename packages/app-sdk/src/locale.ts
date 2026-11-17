@@ -308,6 +308,12 @@ export interface UiMessages {
   readonly anonymous?: string;
   readonly open?: string;
   readonly noPublicData?: string;
+  /**
+   * The link to the Pod's own page for signing in there
+   * (`AccessPrompt.providerLink`, added in 0.9.0; optional in the type,
+   * `createLocale` fills it).
+   */
+  readonly providerLink?: string;
 }
 
 export interface SdkMessages {
@@ -444,6 +450,7 @@ export const englishMessages: SdkMessages = {
     open: 'Open',
     noPublicData:
       'This Pod shares no public data. Sign in to see what you have access to.',
+    providerLink: 'Sign in at your Pod',
   },
   activePod: 'Active pod',
   dataContext: 'Data context',
@@ -614,6 +621,7 @@ export const germanMessages: SdkMessages = {
     open: 'Öffnen',
     noPublicData:
       'Dieser Pod teilt keine öffentlichen Daten. Melde dich an, um zu sehen, worauf du Zugriff hast.',
+    providerLink: 'Bei deinem Pod anmelden',
   },
   activePod: 'Aktiver Pod',
   dataContext: 'Datenkontext',

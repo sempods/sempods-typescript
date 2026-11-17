@@ -321,6 +321,65 @@ Configure the policy once outside rendering and use the existing guarded actions
 for Pod/context switches; replacing the runtime first requires settling drafts
 and unresolved operations, as with presets.
 
+## Silent first sign-in
+
+A deployed app in front of one Pod, where people usually have a session at
+that Pod already (single sign-on), can skip the first click on **Sign in**:
+
+```ts
+const runtime = createBrowserRuntime({
+  identity: {
+    kind: 'did-web',
+    clientId: 'did:web:chat.example.org',
+    redirectUri: 'https://chat.example.org/callback',
+  },
+  preset: { podUrl: 'https://pods.example/team' },
+  firstSignIn: 'silent',
+});
+```
+
+When nothing is stored for the app on this device (no session, no remembered
+Pod, no unreadable record, also none of a Pod that `allowedPods` now
+excludes), `initialize()` connects the default Pod and
+navigates to its provider once with `prompt=none`, instead of resolving. The
+Pod answers at once, without showing anything:
+
+| The Pod's answer                                                | Result                                                                                                                                                                     |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A code: the person has a session there and a grant for this app | `interaction: 'completed'`, signed in without a click                                                                                                                      |
+| `login_required`, `consent_required` or `interaction_required`  | `interaction: 'none'`; the connection is `signed-out` as one never signed in to, nothing is remembered, and `StartupReport.firstSignIn` names the cause and the Pod's link |
+| Anything else, such as `server_error`                           | `interaction: 'failed'`, as for a clicked sign-in                                                                                                                          |
+
+`firstSignIn.providerLink` is the Pod's `error_uri`, for example its own login
+page, kept only on the issuer's origin; the Pod's `error_description` is never
+kept. The access prompts carry it as `AccessPrompt.providerLink` while the
+connection stays signed out, and `AppAccess` shows it beside **Sign in** as a
+link that opens in a new tab.
+
+The attempt runs at most once per tab. The runtime notes it in
+`sessionStorage` before the redirect, so a reload, a sign-out, coming back from
+the Pod without an answer or a failed answer never starts it again; `tabStorage`
+replaces that storage in tests, and without one nothing is tried. A preparation
+that fails (an unreachable Pod) leaves the person signed out without an error.
+A tab that started with something stored, or returned from a sign-in, never
+tries, also after a sign-out deletes the records. A new tab with nothing stored
+tries again. After a sign-out the default `rememberPods: true` keeps the Pod's
+address, so no tab on that device signs in silently any more; with
+`rememberPods: false` a new tab does, because signing out of the app does not
+sign out of the Pod.
+
+`silent` needs a `did:web` identity and a default Pod (a `preset` or a single
+`allowedPods` entry); otherwise construction throws
+`RuntimeError('configuration')`. A Pod answers `prompt=none` with a code only
+when it remembers the person, the client is not dynamically registered, and the
+app's grant still stands
+([SPS-AUTH-040](https://github.com/sempods/sempods-spec/blob/c6308c157d8c78be0ba6e9d91dba39a11a9ce883/spec/core/auth.md#SPS-AUTH-040)).
+Until the person has granted the app once, on any device, the answer is
+`consent_required`. The flow is runtime
+policy, not public API: an app that needs another one (another time, another
+Pod) builds it from `prepareAuthorization(…, { prompt: 'none' })` and
+`OAuthFailure.providerLink` in `@sempods/client-sdk/oauth`.
+
 ## Apps without sign-in
 
 Some apps show a Pod's public data: a recipe collection linked to one Pod, or

@@ -39,6 +39,7 @@ import {
 import {
   AccessPrompts,
   PromptActions,
+  ProviderLink,
   usePromptText,
 } from './access-prompts.js';
 import { useFirst } from './first.js';
@@ -686,6 +687,7 @@ function GateDialog({
               {blocking.reason === 'missing-scopes' && text && (
                 <p role="status">{text}</p>
               )}
+              <ProviderLink prompt={blocking} />
               {Connections ? (
                 <Connections
                   mode={mode}

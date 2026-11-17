@@ -90,8 +90,8 @@ first or set `podAddressPrefix=""`. The placeholder is `sempods.org/your-name`.
 
 `controls` has new optional messages: `podHelp`, `clearPodAddress`,
 `manageSavedPods`, `removeSavedPod`, `forgetHint` and `podPlaceholder`, and,
-from the sections below, `starting`, `noValue`, `emptyText` and
-`severalValues`. `createLocale` fills English and German defaults for every
+from the sections below, `starting`, `noValue`, `emptyText`,
+`severalValues` and `providerLink`. `createLocale` fills English and German defaults for every
 one of them, and `podHint` and `loginHint` now default to a short text instead
 of `''`. An app that translates the controls into another language should add
 the new messages; one that set `forget` should also set `removeSavedPod`,

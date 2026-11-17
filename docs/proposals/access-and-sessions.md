@@ -301,8 +301,10 @@ contains. It is recorded on the issue.
   On Android an installed PWA and a browser tab of the same app share storage, so
   the second one opened sees this prompt. Cross-tab coordination is separate work.
 - **Automatic re-authorization at startup.** Redirecting without a click risks
-  loops and lost drafts. Signing in again stays one explicit action. An opt-in can
-  follow once the server changes have shown how often it is needed.
+  loops and lost drafts. Signing in again stays one explicit action. The one
+  opt-in that followed is the silent _first_ sign-in of a `did:web` app bound to
+  one Pod (`firstSignIn: 'silent'`, #373): only with nothing stored, once per
+  tab ([decision](../decisions.md#a-silent-first-sign-in-is-an-opt-in-tried-once-per-tab)).
 
 ## Order
 
