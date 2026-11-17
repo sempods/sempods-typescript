@@ -749,7 +749,7 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 - **`SuggestField`**: a text field with suggestions the app finds as the
   person types, such as a search or address bar, on React Aria's combo box.
   It is controlled (`value`, `onChange`) and only shows: the app searches for
-  `value`, passes the `items` it found (`{ id, label, detail?, source? }`)
+  `value`, passes the `items` it found (`{ id, label, detail?, source?, media? }`)
   with `loading` and `failed` (`'some'` or `'all'` of its sources), and
   cancels a search whose text has changed. The input keeps the focus; arrow
   keys move through the suggestions, Enter or a press chooses one
@@ -779,7 +779,22 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   and Enter submits. When `suggest` turns true again while the field has
   the focus, the suggestions open as typing would open them. Telling an
   address from a search stays with the app. `ref` reaches the input, for
-  example to focus and select it on Ctrl/Cmd-K.
+  example to focus and select it on Ctrl/Cmd-K. A suggestion's `media`, an
+  element such as a person's photo or an icon for the resource's type,
+  shows in a 40px box before the label; an `<img>` fills it, cropped, and an
+  icon sized by the app sits in its centre. The app loads a picture itself,
+  for example scoped to its source and with a fallback for a broken one, and
+  the field does not wait for it. The box is hidden from assistive
+  technology, so the label, `detail` and `source` name and describe the
+  suggestion as before; once any suggestion has `media`, every one keeps
+  the box, so their labels line up, and the rows stay 44px or more.
+  `notice` is the app's own quiet line about its search under the open
+  suggestions, below the field's status line, such as results cut off at a
+  limit, no sources to search yet or a source that needs signing in again.
+  It shows also when nothing was found, stays inside the suggestions'
+  height while they scroll, and is not announced: the app announces it
+  itself when it must. Keep it text: the focus stays in the field, so offer
+  an action such as signing in again outside it.
 
 A main action usually stands alone above a group of the others, as in the
 reference screen's Zen view:
