@@ -244,10 +244,85 @@ Supported operations:
 | `view.subjects.put(iri, body, condition)`     | `PUT` with `If-None-Match: *`, `If-Match` or explicit `{ overwrite: true }`                         | `applied` (`status` 200/201/204, `location` on 201) · `precondition-failed` · `not-found` · `refused` · `not-sent` · `uncertain` |
 | `view.subjects.patch(iri, change, condition)` | `PATCH` JSON Merge Patch                                                                            | `applied` (200/204) · same as above                                                                                              |
 | `view.subjects.delete(iri, condition)`        | `DELETE`                                                                                            | `applied` (204/200) · same as above                                                                                              |
+| `view.values.get(iri, predicate)`             | `GET {pod}/_system/resources/{b64url(iri)}/{b64url(predicate)}?context=`                            | `ok` (value objects + strong slot ETag) · `not-found` (no value here) · `refused` · `cancelled` · `stopped`                      |
+| `view.values.add(iri, predicate, value, c)`   | `POST` one value object to that slot route                                                          | `applied` (201 `created`, 200 `already_present`; slot `etag`, `location` of an added IRI) · same as above                        |
+| `view.values.replace(iri, predicate, vs, c)`  | `PUT` a value array to that slot route; `[]` clears                                                 | `applied` (204/200, slot `etag`) · same as above                                                                                 |
+| `view.values.clear(iri, predicate, c)`        | `DELETE` that slot route                                                                            | `applied` (`cleared` or `already_empty`, slot `etag`) · same as above                                                            |
+| `view.values.remove(iri, predicate, t, c)`    | `DELETE {pod}/_system/resources/{b64url(iri)}/{b64url(predicate)}/{b64url(t)}?context=`             | `applied` (`removed` or `already_absent`, slot `etag`) · same as above                                                           |
 | `pod.sparql.select(query)`                    | `POST {pod}/_system/sparql/query`, accepts SPARQL Results JSON; no SDK-added dataset parameters     | `ok` (`SelectResult`) · `refused` · `cancelled` · `stopped`                                                                      |
 | `pod.sparql.construct(query)`                 | Same route, accepts JSON-LD; no SDK-added dataset parameters                                        | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `view.sparql.construct(query)`                | `POST {pod}/_system/sparql/query` with `default-graph-uri` and `named-graph-uri` = the view context | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `pod.find(text, options)`                     | `POST {pod}/_system/find` (JSON body, `include_contexts: true`); accepts JSON-LD                    | `ok` (`FindGraph` per source Context) · `refused` · `cancelled` · `stopped`                                                      |
+
+### One value at a time
+
+`view.values` reads and writes the values of one predicate of a subject in the
+view's Context, its slot (SPS-CRUD-041–054, -059). Use it where a caller does
+not know the vocabulary in advance, such as an agent's tools. Adding or
+removing one value needs no read first, sends no other value and does not
+conflict with another value's change unless the write carries a condition.
+
+```ts
+import type { ContextView, WriteResult } from '@sempods/client-sdk';
+
+const knows = 'http://xmlns.com/foaf/0.1/knows';
+
+export function addFriend(
+  people: ContextView,
+  person: string,
+  friend: string,
+): Promise<WriteResult> {
+  // Adding a value that is already there changes nothing (SPS-CRUD-045).
+  return people.values.add(
+    person,
+    knows,
+    { '@id': friend },
+    { overwrite: true },
+  );
+}
+
+export async function removeNickname(
+  people: ContextView,
+  person: string,
+  nickname: string,
+) {
+  const nick = 'http://xmlns.com/foaf/0.1/nick';
+  const read = await people.values.get(person, nick);
+  if (read.kind !== 'ok') return read;
+  const rest = read.body.filter((value) => value['@value'] !== nickname);
+  return people.values.replace(person, nick, rest, { ifMatch: read.etag });
+}
+```
+
+- **Conditions name the slot.** An `ifMatch` tag is the slot's tag in this
+  Context, from `values.get` or from the `etag` an `applied` value write
+  returns (SPS-CRUD-052), so writes can follow each other without a read.
+  `remove` takes it too: a value has no tag of its own (SPS-CRUD-059).
+  `{ ifNoneMatch: '*' }` means the predicate has no value here, whatever else
+  the subject holds (SPS-CRUD-053). `{ overwrite: true }` sends no condition;
+  `add`, `clear` and `remove` are idempotent, so that is safe for them.
+- **Outcomes.** `add`, `clear` and `remove` report what the Pod did as
+  `outcome`: `created` or `already_present`, `cleared` or `already_empty`,
+  `removed` or `already_absent` (SPS-CRUD-044). A `201` names an added IRI's
+  edge as `location`. When the Pod answers no readable outcome (a `204`, a
+  body that does not fit the operation, or one still incomplete after 5
+  seconds), the write is still `applied`, without `outcome`; the same holds
+  for a missing or weak `etag`.
+- **Literals have no edge.** `remove` takes an IRI value only (SPS-CRUD-042,
+  -048). Remove a literal as `removeNickname` does: `get`, filter, `replace`
+  at the read version.
+- **Reads.** `values.get` answers an unordered array of `{"@id"}` and
+  `{"@value"}` objects (SPS-CRUD-046) with the slot's strong ETag; a missing
+  or weak one, or a body that is not an array of objects, rejects like
+  `subjects.get`. No value in this Context is `not-found`, the same as an
+  unreadable or unknown Context (SPS-CRUD-017); so is an empty array without
+  a tag. After `not-found`, write with `{ ifNoneMatch: '*' }`.
+- **Unknown outcomes.** `uncertain`, `not-sent` and the other results mean
+  what they mean for `subjects`; the SDK never resends. An `uncertain` `add`,
+  `clear` or `remove` without a condition can be sent again, because it is
+  idempotent (SPS-CRUD-045). With a condition, the first attempt may have
+  changed the tag, so a resend can be `precondition-failed` by its own earlier
+  write: reread first, as for an `uncertain` `replace`.
 
 ### JSON-LD read bodies
 
@@ -332,22 +407,22 @@ Checked against the sempods specification revision recorded in
 The client is a supported subset, not the whole protocol. Not implemented, and
 not silently emulated:
 
-| Capability                                                         | Spec                           | Use instead / status                                                                  |
-| ------------------------------------------------------------------ | ------------------------------ | ------------------------------------------------------------------------------------- |
-| LOD addresses (`{pod}/{path}`)                                     | SPS-CRUD-001–004, §4           | The system route serves the same resource (SPS-CRUD-002)                              |
-| Union or multi-context CRUD reads (no or repeated `?context=`)     | SPS-CRUD-014–017               | Use Pod SPARQL for cross-Context queries; CRUD stays Context-bound                    |
-| `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -058 | JSON-LD only; no provenance per value                                                 |
-| Slots, single edges and the `outcome` representation               | SPS-CRUD-041–057               | Merge-patch replaces a predicate wholesale (SPS-CRUD-038)                             |
-| SPARQL ASK                                                         | `sparql.md`                    | Pod SELECT/CONSTRUCT or Context CONSTRUCT                                             |
-| The Find `type` filter, the flat Find form and N-Quads             | SPS-FIND-006–008, -018, -020   | `pod.find` always asks for the Context-grouped JSON-LD form                           |
-| Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`       | Out of scope for the client                                                           |
-| Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                    | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |
+| Capability                                                         | Spec                                 | Use instead / status                                                                  |
+| ------------------------------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------- |
+| LOD addresses (`{pod}/{path}`)                                     | SPS-CRUD-001–004, §4                 | The system route serves the same resource (SPS-CRUD-002)                              |
+| Union or multi-context CRUD reads (no or repeated `?context=`)     | SPS-CRUD-014–017                     | Use Pod SPARQL for cross-Context queries; CRUD stays Context-bound                    |
+| `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -057, -058 | JSON-LD only; no provenance per value, also not on a slot read                        |
+| SPARQL ASK                                                         | `sparql.md`                          | Pod SELECT/CONSTRUCT or Context CONSTRUCT                                             |
+| The Find `type` filter, the flat Find form and N-Quads             | SPS-FIND-006–008, -018, -020         | `pod.find` always asks for the Context-grouped JSON-LD form                           |
+| Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`             | Out of scope for the client                                                           |
+| Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                          | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |
 
 Protocol facts the client preserves: JSON-LD read bodies are returned as
 answered; SELECT decodes wire terms without changing their lexical values, language
 tags or datatype IRIs; writes return the answered
-status and a pod-local `Location` for a creation, but no entity tag
-(SPS-CRUD-030); conflicts are explicit results. A 404 or a missing catalogue
+status and a pod-local `Location` for a creation; resource writes return no
+entity tag (SPS-CRUD-030), value writes the slot's (SPS-CRUD-052); conflicts
+are explicit results. A 404 or a missing catalogue
 entry never redirects a request to another context. Creation locations must match
 that subject's system route, with no query or the request's context query and no
 nonempty fragment. Relative locations resolve against the request URL; bare `?`,

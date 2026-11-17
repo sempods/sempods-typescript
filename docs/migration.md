@@ -230,6 +230,17 @@ their representation, and an edit writes one plain value in the selected
 language. See [the
 recipe](../packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant).
 
+### One value at a time
+
+`ContextView` in `@sempods/client-sdk` has a new member, `values`, for the
+Pod's slot and single-edge routes. A typed test double of `ContextView` adds
+it; app-sdk's `BoundView` is unchanged. Code that adds or removes one value
+through `subjects.get` and a merge patch of the whole predicate can call
+`values.add` or `values.remove` instead, which send no other value and need no
+read. `WriteResult`'s `applied` gains the optional `etag` and `outcome`, set
+only by value writes. See [one value at a
+time](../packages/client-sdk/README.md#one-value-at-a-time).
+
 ### Structured values in recovery comparisons
 
 `ResourceEditor`'s review and `UpdateNotice` now show structured draft values

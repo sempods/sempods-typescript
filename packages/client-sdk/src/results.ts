@@ -50,13 +50,31 @@ export type ContextDescriptionResult = QueryResult<ContextDescription>;
 export type WriteResult =
   | {
       readonly kind: 'applied';
-      /** The answered success status: 201 created, 200/204 replaced, changed or deleted. */
+      /**
+       * The answered success status: 201 created, 200/204 replaced, changed
+       * or deleted. For `values.add`: 201 a new value, 200 one already present.
+       */
       readonly status: 200 | 201 | 204;
       /**
        * A creation's `Location` (SPS-CRUD-043), resolved to an absolute URL;
-       * kept only when it is an operations address of this pod.
+       * kept only when it is an operations address of this pod: the created
+       * subject's route, or for `values.add` the added IRI value's edge route.
        */
       readonly location?: string;
+      /**
+       * Value writes only (`values.*`): the slot's new strong entity tag in
+       * this Context (SPS-CRUD-052), usable as the next `ifMatch` without a
+       * read. Never on `subjects` writes (SPS-CRUD-030), and absent when the
+       * Pod sends none or not a strong one.
+       */
+      readonly etag?: string;
+      /**
+       * `values.add`, `values.clear` and `values.remove` only: what the Pod
+       * reports it did (SPS-CRUD-044). Absent when the Pod sends no readable
+       * outcome within 5 seconds, one that does not belong to the operation,
+       * or a `204`.
+       */
+      readonly outcome?: ValueOutcome;
     }
   | { readonly kind: 'precondition-failed' }
   | { readonly kind: 'not-found' }
@@ -64,7 +82,24 @@ export type WriteResult =
   | { readonly kind: 'not-sent'; readonly reason: 'cancelled' | 'stopped' }
   | { readonly kind: 'uncertain'; readonly failure: SdkFailure };
 
-/** Create only if absent (`If-None-Match: *`). */
+/**
+ * The Pod's account of an idempotent value write (SPS-CRUD-044), as answered:
+ * `values.add` is `created` (`201`) or `already_present` (`200`),
+ * `values.clear` is `cleared` or `already_empty`, `values.remove` is
+ * `removed` or `already_absent`.
+ */
+export type ValueOutcome =
+  | 'created'
+  | 'already_present'
+  | 'cleared'
+  | 'already_empty'
+  | 'removed'
+  | 'already_absent';
+
+/**
+ * Create only if absent (`If-None-Match: *`). On a value write: only if the
+ * predicate has no value in this Context (SPS-CRUD-053).
+ */
 export type CreateCondition = { readonly ifNoneMatch: '*' };
 /** Change only the version that was read (`If-Match`). */
 export type MatchCondition = { readonly ifMatch: string };

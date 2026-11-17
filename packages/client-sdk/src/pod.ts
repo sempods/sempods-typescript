@@ -95,7 +95,70 @@ export interface ContextView {
   readonly contextIri: string;
   /** Any subject IRI through the Pod's system resource route (SPS-CRUD-040). */
   readonly subjects: SubjectOperations;
+  /** The values of one predicate of a subject in this Context: its slot (SPS-CRUD-041). */
+  readonly values: ValueOperations;
   readonly sparql: SparqlOperations;
+}
+
+/**
+ * Value-level reads and writes through the Pod's slot and single-edge routes
+ * (SPS-CRUD-041–054, -059). Unlike a merge patch of `subjects`, adding or
+ * removing one value neither needs a read first nor sends the other values.
+ * A condition names the slot's tag in this Context, also on `remove`: a
+ * value has no tag of its own. `ifNoneMatch: '*'` means the predicate has no
+ * value here (SPS-CRUD-053), whatever else the subject holds.
+ */
+export interface ValueOperations {
+  /**
+   * `GET` the slot: its values as an unordered array of `{"@id"}` and
+   * `{"@value"}` objects (SPS-CRUD-046) with the slot's strong ETag. No
+   * value in this Context is `not-found`, like an unreadable Context
+   * (SPS-CRUD-017); so is an empty array answered without a tag.
+   */
+  get(
+    iri: string,
+    predicate: string,
+    options?: ReadOptions,
+  ): Promise<GetResult<readonly JsonLd[]>>;
+  /**
+   * `POST` one value object: `{"@id": iri}`, or `{"@value": …}` with an
+   * optional `@language` or `@type` (SPS-CRUD-049). A value already present
+   * is `applied` with `already_present` (SPS-CRUD-045).
+   */
+  add(
+    iri: string,
+    predicate: string,
+    value: JsonLd,
+    condition: CreateCondition | MatchCondition | Overwrite,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  /** `PUT` the slot: these values replace all of the predicate's values; `[]` clears it. */
+  replace(
+    iri: string,
+    predicate: string,
+    values: readonly JsonLd[],
+    condition: CreateCondition | MatchCondition | Overwrite,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  /** `DELETE` the slot: removes every value of the predicate. */
+  clear(
+    iri: string,
+    predicate: string,
+    condition: MatchCondition | Overwrite,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  /**
+   * `DELETE` one IRI value through its edge (SPS-CRUD-042); the other values
+   * stay. A literal has no edge (SPS-CRUD-048): `get`, then `replace` with
+   * the remaining values and `ifMatch`.
+   */
+  remove(
+    iri: string,
+    predicate: string,
+    target: string,
+    condition: CreateCondition | MatchCondition | Overwrite,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
 }
 
 export interface SubjectOperations {
