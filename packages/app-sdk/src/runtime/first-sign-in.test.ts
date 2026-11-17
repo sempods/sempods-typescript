@@ -228,32 +228,45 @@ it('ends signed out, as if never started, when the page returns from the back/fo
   }
 });
 
-it('keeps the attempt silent across a callback for another state', async () => {
-  const f = silent();
-  await f.runtime.initialize();
-  const id = f.runtime.getSnapshot()[0]!.id;
-  f.runtime.dispose();
-  await settleLease();
-  const forged = createBrowserRuntime({
-    ...f.options,
-    location: () => `${callback}?error=login_required&state=forged`,
-  });
-  keep(forged);
-  expect(await forged.initialize()).toMatchObject({
-    interaction: 'failed',
-    problem: 'attempt',
-  });
-  const runtime = await answered(
-    { ...f, runtime: forged },
-    'error=login_required',
-  );
-  expect(await runtime.initialize()).toMatchObject({
-    interaction: 'none',
-    firstSignIn: { connectionId: id, problem: 'login-required' },
-  });
-  expect(runtime.getSnapshot()[0]?.session).toEqual({ kind: 'signed-out' });
-  expect([...f.tab.map.values()]).toEqual(['tried']);
-});
+it.each([
+  ['another state', () => 'error=login_required&state=forged', 'attempt'],
+  [
+    'both a code and an error',
+    (state: string) => `code=x&error=login_required&state=${state}`,
+    'callback',
+  ],
+] as const)(
+  'keeps the attempt silent across a callback with %s, refused before its claim',
+  async (_, query, problem) => {
+    const f = silent();
+    await f.runtime.initialize();
+    const id = f.runtime.getSnapshot()[0]!.id;
+    const state = new URL(f.navigate.mock.calls[0]![0]).searchParams.get(
+      'state',
+    )!;
+    f.runtime.dispose();
+    await settleLease();
+    const forged = createBrowserRuntime({
+      ...f.options,
+      location: () => `${callback}?${query(state)}`,
+    });
+    keep(forged);
+    expect(await forged.initialize()).toMatchObject({
+      interaction: 'failed',
+      problem,
+    });
+    const runtime = await answered(
+      { ...f, runtime: forged },
+      'error=login_required',
+    );
+    expect(await runtime.initialize()).toMatchObject({
+      interaction: 'none',
+      firstSignIn: { connectionId: id, problem: 'login-required' },
+    });
+    expect(runtime.getSnapshot()[0]?.session).toEqual({ kind: 'signed-out' });
+    expect([...f.tab.map.values()]).toEqual(['tried']);
+  },
+);
 
 it.each([true, false])(
   'never signs in silently after a sign-out in a tab that restored a session (rememberPods: %s)',

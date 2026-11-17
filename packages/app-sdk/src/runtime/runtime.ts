@@ -1347,6 +1347,8 @@ export function createBrowserRuntime(
       e.revision = c.revision;
       return c;
     });
+    // Claimed: the silent attempt's answer is consumed now.
+    if (silent) noteSilent('tried');
     current(e, generation);
     (
       options.replaceUrl ??
@@ -1759,14 +1761,15 @@ export function createBrowserRuntime(
         // Not eligible (another answer, an expired earlier session, a changed
         // binding): the callback ends the connection as for a first sign-in.
       }
-      // The note keeps the silent attempt's state until its own callback is
-      // consumed here: a callback for another state leaves it, so the real
-      // answer is still known as the silent one. Any other callback is an
-      // existing installation's, which never signs in silently in this tab.
+      // The note keeps the silent attempt's state until `redeem` has claimed
+      // its callback: a callback for another state, or one refused before
+      // the claim, leaves it, so the real answer is still known as the
+      // silent one. Any other callback is an existing installation's, which
+      // never signs in silently in this tab.
       const silent =
         silentState !== undefined &&
         pending.value.attempt.state === silentState;
-      if (silent || silentNote === null) noteSilent('tried');
+      if (!silent && silentNote === null) noteSilent('tried');
       try {
         const connectionId = await redeem(
           pending.id,
