@@ -298,9 +298,10 @@ export async function removeNickname(
 - **Outcomes.** `add`, `clear` and `remove` report what the Pod did as
   `outcome`: `created` or `already_present`, `cleared` or `already_empty`,
   `removed` or `already_absent` (SPS-CRUD-044). A `201` names an added IRI's
-  edge as `location`. When the Pod answers no readable outcome (a `204`, or a
-  body that does not fit the operation), the write is still `applied`, without
-  `outcome`; the same holds for a missing or weak `etag`.
+  edge as `location`. When the Pod answers no readable outcome (a `204`, a
+  body that does not fit the operation, or one still incomplete after 5
+  seconds), the write is still `applied`, without `outcome`; the same holds
+  for a missing or weak `etag`.
 - **Literals have no edge.** `remove` takes an IRI value only (SPS-CRUD-042,
   -048). Remove a literal as `removeNickname` does: `get`, filter, `replace`
   at the read version.
@@ -308,7 +309,8 @@ export async function removeNickname(
   `{"@value"}` objects (SPS-CRUD-046) with the slot's strong ETag; a missing
   or weak one, or a body that is not an array of objects, rejects like
   `subjects.get`. No value in this Context is `not-found`, the same as an
-  unreadable or unknown Context (SPS-CRUD-017).
+  unreadable or unknown Context (SPS-CRUD-017); so is an empty array without
+  a tag. After `not-found`, write with `{ ifNoneMatch: '*' }`.
 - **Unknown outcomes.** `uncertain`, `not-sent` and the other results mean
   what they mean for `subjects`; the SDK never resends. An `uncertain` `add`,
   `clear` or `remove` without a condition can be sent again, because it is

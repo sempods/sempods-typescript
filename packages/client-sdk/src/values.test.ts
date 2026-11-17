@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   bearer,
   createPod,
@@ -444,10 +444,117 @@ describe('value-level operations on one slot', () => {
     });
   });
 
+  it('waits for an outcome body only so long, and keeps a write applied when it stalls or is cancelled', async () => {
+    const stalled = () =>
+      new Response(new ReadableStream({ start() {} }), {
+        status: 200,
+        headers: { 'content-type': 'application/json', etag: '"7"' },
+      });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { fetch } = answering(stalled);
+      const pending = viewOf(fetch).values.remove(bob, knows, carol, {
+        overwrite: true,
+      });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await pending).toEqual({
+        kind: 'applied',
+        status: 200,
+        etag: '"7"',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    // As fetch does, the caller's signal errors a body still arriving.
+    const controller = new AbortController();
+    const cancelling: PodFetch = async (_url, init) => {
+      setTimeout(() => controller.abort(), 0);
+      return new Response(
+        new ReadableStream({
+          start(stream) {
+            init?.signal?.addEventListener('abort', () =>
+              stream.error(new DOMException('aborted', 'AbortError')),
+            );
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json', etag: '"7"' },
+        },
+      );
+    };
+    expect(
+      await viewOf(cancelling).values.clear(
+        bob,
+        knows,
+        { overwrite: true },
+        { signal: controller.signal },
+      ),
+    ).toEqual({ kind: 'applied', status: 200, etag: '"7"' });
+  });
+
+  it("keeps an added value's Location only when it names that value's edge in this Pod", async () => {
+    const edge = route(bob, knows, carol);
+    const created =
+      (location: string, status = 201) =>
+      () =>
+        new Response(null, { status, headers: { location } });
+    const { fetch } = answering(
+      created(`${edge}?context=${encodeURIComponent(ctx)}`),
+      created(edge.replace('https://pod.example', 'https://other.example')),
+      created(edge.replace('/alice/', '/bob/')),
+      created(`${edge}?context=other`),
+      created(edge, 200),
+      created(route(bob, nick, 'urn:x')),
+    );
+    const view = viewOf(fetch);
+    const any = { overwrite: true } as const;
+    const add = () => view.values.add(bob, knows, { '@id': carol }, any);
+    expect(await add()).toEqual({
+      kind: 'applied',
+      status: 201,
+      location: `${edge}?context=${encodeURIComponent(ctx)}`,
+    });
+    for (let i = 0; i < 3; i++)
+      expect(await add()).toEqual({ kind: 'applied', status: 201 });
+    expect(await add()).toEqual({ kind: 'applied', status: 200 });
+    // A literal has no edge, so no Location is adopted for it.
+    expect(await view.values.add(bob, nick, { '@value': 'x' }, any)).toEqual({
+      kind: 'applied',
+      status: 201,
+    });
+  });
+
+  it('sends If-None-Match: * on remove to ask whether the slot is empty', async () => {
+    const { fetch, seen } = slotPod();
+    const view = viewOf(fetch);
+    expect(
+      await view.values.remove(bob, knows, carol, { ifNoneMatch: '*' }),
+    ).toMatchObject({ kind: 'applied', outcome: 'already_absent' });
+    expect(seen[0]?.headers.get('if-none-match')).toBe('*');
+    await view.values.add(bob, knows, { '@id': dave }, { overwrite: true });
+    expect(
+      await view.values.remove(bob, knows, carol, { ifNoneMatch: '*' }),
+    ).toEqual({ kind: 'precondition-failed' });
+  });
+
+  it('reads an empty array without a tag as no value', async () => {
+    const { fetch } = answering(
+      () =>
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/ld+json' },
+        }),
+    );
+    expect(await viewOf(fetch).values.get(bob, knows)).toEqual({
+      kind: 'not-found',
+    });
+  });
+
   it('rejects an untrusted slot read', async () => {
     const reads = answering(
       () =>
-        new Response('[]', {
+        new Response('[{"@id":"urn:x"}]', {
           status: 200,
           headers: { 'content-type': 'application/ld+json' },
         }),
@@ -483,6 +590,23 @@ describe('value-level operations on one slot', () => {
     await expect(
       view.values.add(bob, 'name', { '@id': carol }, { overwrite: true }),
     ).rejects.toMatchObject(invalid);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects, never throws, an invalid IRI on whole-resource writes', async () => {
+    const { fetch, calls } = answering();
+    const view = viewOf(fetch);
+    const any = { overwrite: true } as const;
+    const invalid = { reason: { code: 'invalid-argument', argument: 'iri' } };
+    await expect(view.subjects.put('relative', {}, any)).rejects.toMatchObject(
+      invalid,
+    );
+    await expect(
+      view.subjects.patch('relative', {}, any),
+    ).rejects.toMatchObject(invalid);
+    await expect(view.subjects.delete('relative', any)).rejects.toMatchObject(
+      invalid,
+    );
     expect(calls).toHaveLength(0);
   });
 

@@ -51,6 +51,10 @@ const STRONG_ETAG = /^"[\x21\x23-\x7E\x80-\xFF]*"$/;
  * -047, -052): each outcome this operation may report, with the status that
  * must carry it, and for an added IRI the edge route its `Location` names.
  */
+/** How long an applied value write waits for its outcome body. */
+const OUTCOME_WAIT_MS = 5000;
+const STALLED = Symbol('stalled');
+
 interface ValueAnswer {
   readonly outcomes: Readonly<Partial<Record<ValueOutcome, 200 | 201>>>;
   readonly edge?: string;
@@ -371,15 +375,17 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
             url,
             options.signal,
             async (response) => {
-              // One Context with a value always has a tag (SPS-CRUD-050).
               const etag = response.headers.get('etag');
-              if (!etag || !STRONG_ETAG.test(etag)) {
-                discard(response);
-                throw failure({ code: 'response', problem: 'etag' });
-              }
               const body = await json(response);
               if (!Array.isArray(body) || !body.every(isNode))
                 throw failure({ code: 'response', problem: 'body' });
+              if (!etag || !STRONG_ETAG.test(etag)) {
+                // An empty slot carries no tag (SPS-CRUD-050, -059): absent.
+                if (body.length === 0 && !etag)
+                  return { kind: 'not-found' as const };
+                // One Context with a value always has one.
+                throw failure({ code: 'response', problem: 'etag' });
+              }
               return { kind: 'ok' as const, body: Object.freeze(body), etag };
             },
             () => ({ kind: 'not-found' as const }),
@@ -638,10 +644,21 @@ async function outcomeOf(
     discard(response);
     return undefined;
   }
+  // The write already happened: a body that stalls must not hold its result.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stalled = new Promise<typeof STALLED>((resolve) => {
+    timer = setTimeout(() => resolve(STALLED), OUTCOME_WAIT_MS);
+  });
   let body: unknown;
   try {
-    body = await response.json();
+    body = await Promise.race([response.json() as Promise<unknown>, stalled]);
   } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (body === STALLED) {
+    discard(response);
     return undefined;
   }
   const outcome = isNode(body) ? body['outcome'] : undefined;

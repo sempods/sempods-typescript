@@ -113,7 +113,7 @@ export interface ValueOperations {
    * `GET` the slot: its values as an unordered array of `{"@id"}` and
    * `{"@value"}` objects (SPS-CRUD-046) with the slot's strong ETag. No
    * value in this Context is `not-found`, like an unreadable Context
-   * (SPS-CRUD-017).
+   * (SPS-CRUD-017); so is an empty array answered without a tag.
    */
   get(
     iri: string,

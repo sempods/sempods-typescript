@@ -50,11 +50,15 @@ export type ContextDescriptionResult = QueryResult<ContextDescription>;
 export type WriteResult =
   | {
       readonly kind: 'applied';
-      /** The answered success status: 201 created, 200/204 replaced, changed or deleted. */
+      /**
+       * The answered success status: 201 created, 200/204 replaced, changed
+       * or deleted. For `values.add`: 201 a new value, 200 one already present.
+       */
       readonly status: 200 | 201 | 204;
       /**
        * A creation's `Location` (SPS-CRUD-043), resolved to an absolute URL;
-       * kept only when it is an operations address of this pod.
+       * kept only when it is an operations address of this pod: the created
+       * subject's route, or for `values.add` the added IRI value's edge route.
        */
       readonly location?: string;
       /**
@@ -67,7 +71,8 @@ export type WriteResult =
       /**
        * `values.add`, `values.clear` and `values.remove` only: what the Pod
        * reports it did (SPS-CRUD-044). Absent when the Pod sends no readable
-       * outcome, one that does not belong to the operation, or a `204`.
+       * outcome within 5 seconds, one that does not belong to the operation,
+       * or a `204`.
        */
       readonly outcome?: ValueOutcome;
     }
