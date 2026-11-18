@@ -586,6 +586,54 @@ it('resends a refresh another tab left for a sign-in this tab missed', async () 
   expect(resent?.get('refresh_token')).toBe(first?.get('refresh_token'));
 });
 
+it('lists a new connection to a Pod once it followed the forget of the earlier one it missed', async () => {
+  const pageshow = bfcache();
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  t.b.dispose();
+  // This tab's store holds its reads while `gate` is set.
+  let gate: Promise<void> | undefined;
+  const b = createBrowserRuntime({
+    ...t.options,
+    openStore: storeWith(
+      t.factory,
+      (store) => ({
+        async read(id) {
+          const stored = await store.read(id);
+          if (gate) await gate;
+          return stored;
+        },
+      }),
+      channels,
+    ),
+  });
+  runtimes.push(b);
+  await b.initialize();
+  await restored(b);
+  // Tab b misses a forget and a new sign-in to the same Pod.
+  freeze(true);
+  expect(await t.a.forget(t.id)).toEqual({ kind: 'disconnected' });
+  const connection = await t.a.connect(pod);
+  expect(connection.id).not.toBe(t.id);
+  await t.a.beginAuthorization(connection.id);
+  t.a.dispose();
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  const reads = deferred<void>();
+  gate = reads.promise;
+  freeze(false);
+  pageshow();
+  await quiet();
+  gate = undefined;
+  reads.resolve();
+  await vi.waitFor(() =>
+    expect(b.getSnapshot()).toMatchObject([
+      { id: connection.id, session: { kind: 'active' } },
+    ]),
+  );
+});
+
 it('retires only the session that ended, not one it adopted while that waited', async () => {
   const { channels, freeze } = freezable();
   // Sessions without a refresh token: an expired one ends here.

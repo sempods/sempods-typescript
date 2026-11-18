@@ -1746,14 +1746,16 @@ export function createBrowserRuntime(
   };
   page.addEventListener?.('online', online);
   // A page restored from the back/forward cache missed the other tabs'
-  // announcements: it reads every record again.
+  // announcements: it reads every record again. Records it does not list
+  // yet are listed after its connections followed theirs, so a connection
+  // another tab forgot meanwhile no longer keeps its Pod's new one out.
   const shown = (event?: unknown) => {
     if (!(event as { persisted?: boolean } | undefined)?.persisted) return;
-    for (const e of entries.values()) void sync(e);
+    const synced = Promise.all([...entries.values()].map(sync));
     if (lease?.store.watch)
-      void sessions
-        ?.list()
-        .then(({ records }) => records.forEach(admit))
+      void synced
+        .then(() => sessions?.list())
+        .then((listing) => listing?.records.forEach(admit))
         .catch(() => {
           // Listed by the next start.
         });
