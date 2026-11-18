@@ -480,3 +480,41 @@ it('checks Context access again for a new session it adopts without the sign-in 
   );
   expect(() => t.b.bind(t.id)).toThrow();
 });
+
+it('stops the earlier session for a refresh another tab claimed for a newer sign-in', async () => {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  let frozen = false;
+  const t = await tabs(
+    memoryChannels((send) => {
+      if (!frozen) setTimeout(send);
+    }),
+  );
+  // Tab b misses a new sign-in in tab a and that session's refresh claim.
+  frozen = true;
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  await back.loadContexts(t.id);
+  back.selectContext(t.id, work);
+  const answer = deferred<Response>();
+  t.setToken(() => answer.promise);
+  advance(3600_000);
+  void back.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  const view = t.b.bind(t.id);
+  frozen = false;
+  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({
+      kind: 'ended',
+      problem: 'interrupted',
+    }),
+  );
+  const sent = t.sent.length;
+  expect(await view.sparql.construct(query)).toEqual({ kind: 'invalidated' });
+  expect(t.sent).toHaveLength(sent);
+});

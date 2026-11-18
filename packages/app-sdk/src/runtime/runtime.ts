@@ -472,8 +472,16 @@ export function createBrowserRuntime(
       return true;
     }
     const value = stored.value;
-    if (value.kind === 'claimed' && value.operation === 'refresh') return false;
     const b = sessionBinding(value);
+    // A refresh of this session that another tab claimed stays that tab's
+    // (see `latest`); one of a newer sign-in ends this tab's earlier session
+    // below, until its result is stored.
+    if (
+      value.kind === 'claimed' &&
+      value.operation === 'refresh' &&
+      b.generation === e.generation
+    )
+      return false;
     e.revision = stored.revision;
     if (value.kind === 'ready') {
       if (e.lost) clearTimeout(e.lost.timer);
@@ -509,7 +517,8 @@ export function createBrowserRuntime(
       publish();
       return true;
     }
-    // Another tab signs in to this connection (an attempt or its code claim).
+    // Another tab signs in to this connection (an attempt or its code claim),
+    // or renews a session it signed in to since.
     if (inSession(e)) {
       stop(e, { kind: 'ended', problem: 'interrupted' });
       publish();
@@ -556,14 +565,8 @@ export function createBrowserRuntime(
           }
           return { changed: false, resend: value.resend };
         }
-        // Another session's claim: left for the next start to resend.
-        e.revision = stored!.revision;
-        if (inSession(e)) {
-          stop(e, { kind: 'ended', problem: 'interrupted' });
-          publish();
-        }
-        return { changed: true };
       }
+      // Also another session's claim, which `adopt` stops this tab for.
       return { changed: adopt(e, stored) };
     });
   }
