@@ -2,7 +2,9 @@ import type { PreferenceStorage } from './types.js';
 
 /**
  * Remembers the person's last explicit context choice per connection, so a
- * reload can offer the same target again. A convenience, never an access grant:
+ * reload can offer the same target again. With a tab storage, a tab's own
+ * choice comes first, so a reload keeps it beside another tab's choice; the
+ * shared one serves a new tab and the next start. A convenience, never an access grant:
  * the runtime reselects it only when the fresh catalogue still lists it as
  * readable. Storage failures (private mode, quota, blocked site data) only
  * disable the convenience.
@@ -30,6 +32,8 @@ const activePrefix = '@sempods/app-sdk:active:';
 export function createContextMemory(
   namespace: string,
   storage: PreferenceStorage | null | undefined,
+  /** This tab's storage (`sessionStorage`), read lazily; none by default. */
+  tab: () => PreferenceStorage | null | undefined = () => undefined,
 ): ContextMemory {
   const key = prefix + namespace;
   const activeKey = activePrefix + namespace;
@@ -50,9 +54,9 @@ export function createContextMemory(
       }
     },
   };
-  const read = (): Record<string, string> => {
+  const read = (from = storage): Record<string, string> => {
     try {
-      const value: unknown = JSON.parse(storage?.getItem(key) ?? '{}');
+      const value: unknown = JSON.parse(from?.getItem(key) ?? '{}');
       if (!value || typeof value !== 'object' || Array.isArray(value))
         return {};
       return Object.fromEntries(
@@ -64,33 +68,42 @@ export function createContextMemory(
       return {};
     }
   };
-  const write = (choices: Record<string, string>) => {
+  const write = (choices: Record<string, string>, to = storage) => {
     try {
-      if (Object.keys(choices).length === 0) storage?.removeItem(key);
-      else storage?.setItem(key, JSON.stringify(choices));
+      if (Object.keys(choices).length === 0) to?.removeItem(key);
+      else to?.setItem(key, JSON.stringify(choices));
     } catch {
       // The choice simply is not remembered.
     }
   };
+  const own = () => {
+    try {
+      return tab() ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
   return {
-    recall: (id) => read()[id],
+    recall: (id) => read(own())[id] ?? read()[id],
     remember(id, iri) {
-      if (!storage || read()[id] === iri) return;
-      write({ ...read(), [id]: iri });
+      for (const to of [own(), storage])
+        if (to && read(to)[id] !== iri) write({ ...read(to), [id]: iri }, to);
     },
     active,
     forget(id) {
-      if (!storage) return;
-      if (active.recall() === id)
+      if (storage && active.recall() === id)
         try {
           storage.removeItem(activeKey);
         } catch {
           // Left behind, it names a connection that no longer exists.
         }
-      const choices = read();
-      if (!(id in choices)) return;
-      delete choices[id];
-      write(choices);
+      for (const from of [own(), storage]) {
+        if (!from) continue;
+        const choices = read(from);
+        if (!(id in choices)) continue;
+        delete choices[id];
+        write(choices, from);
+      }
     },
   };
 }

@@ -298,6 +298,9 @@ export function createBrowserRuntime(
     options.preferences === undefined
       ? browserPreferences()
       : options.preferences,
+    // A tab's own choice survives its reload beside another tab's; without
+    // remembering (`preferences: null`) nothing is kept in the tab either.
+    () => (options.preferences === null ? null : tabMemory()),
   );
   const protocol = {
     ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -483,6 +486,18 @@ export function createBrowserRuntime(
     )
       return false;
     e.revision = stored.revision;
+    // A sign-out or forget here that could not be saved keeps this session
+    // blocked, and a retry applies to the newer record; only a new sign-in
+    // elsewhere, or a sign-out there that saves a sign-out, replaces it.
+    const blocked = e.view.session;
+    if (
+      blocked.kind === 'ended' &&
+      blocked.problem === 'disconnected' &&
+      blocked.saved === false &&
+      b.generation === e.generation &&
+      (value.kind !== 'disconnected' || e.forgetting)
+    )
+      return false;
     if (value.kind === 'ready') {
       if (e.lost) clearTimeout(e.lost.timer);
       delete e.lost;
@@ -508,12 +523,19 @@ export function createBrowserRuntime(
     }
     if (value.kind === 'disconnected') {
       const problem = knownProblem(value.reason);
-      stop(
-        e,
-        problem ? { kind: 'signed-out', problem } : { kind: 'signed-out' },
+      const signedOut = Object.freeze(
+        problem
+          ? { kind: 'signed-out' as const, problem }
+          : { kind: 'signed-out' as const },
       );
-      // As this tab's own sign-out leaves it.
-      e.view = { ...e.view, selectedContext: null };
+      // A connection reading without a token keeps doing so: it had no
+      // session here to end.
+      if (e.anonymous) e.view = { ...e.view, session: signedOut };
+      else {
+        stop(e, signedOut);
+        // As this tab's own sign-out leaves it.
+        e.view = { ...e.view, selectedContext: null };
+      }
       publish();
       return true;
     }
@@ -524,6 +546,65 @@ export function createBrowserRuntime(
       publish();
     }
     return true;
+  }
+  /**
+   * Lists a connection another tab saved, which this tab does not list yet
+   * (a sign-in there, or a Pod remembered there), so one Pod address keeps
+   * one saved connection. A connection of this tab to the same Pod without a
+   * record of its own and without a session gives way to it. Returns whether
+   * the record is listed now.
+   */
+  function admit(stored: SessionSnapshot): boolean {
+    if (disposed || !initialized || entries.has(stored.id)) return false;
+    const b = sessionBinding(stored.value);
+    if (!allows(b.pod.podUrl)) return false;
+    const same = [...entries.values()].filter(
+      (x) => x.view.podUrl === b.pod.podUrl,
+    );
+    if (
+      same.some(
+        (x) =>
+          x.revision !== null || inSession(x) || disconnects.has(x.view.id),
+      )
+    )
+      return false;
+    for (const x of same) {
+      x.lifetime.abort(new RuntimeError('disconnected'));
+      invalidate(x);
+      invalidatePod(x);
+      invalidateContexts(x);
+      resetLabels(x);
+      entries.delete(x.view.id);
+    }
+    const e = createEntry(
+      b.pod.podUrl,
+      b.pod,
+      b.client,
+      stored.id,
+      b.generation,
+    );
+    e.view = { ...e.view, requestedScopes: b.scopes };
+    entries.set(stored.id, e);
+    if (!adopt(e, stored)) publish();
+    if (settle(e)) publish();
+    return true;
+  }
+  /** Lists a record another tab announced, once it holds a session or an address. */
+  function announced(id: string) {
+    void sessions
+      ?.read(id)
+      .then((stored) => {
+        if (
+          stored &&
+          !entries.has(id) &&
+          (stored.value.kind === 'ready' ||
+            stored.value.kind === 'disconnected')
+        )
+          admit(stored);
+      })
+      .catch(() => {
+        // Listed by the next start.
+      });
   }
   /** Reads the record again and adopts what another tab stored; best effort. */
   function sync(e: Entry): Promise<void> {
@@ -1897,15 +1978,17 @@ export function createBrowserRuntime(
         redirectUri: identity!.redirectUri,
         ...protocol,
       });
-      // Another tab of this app changed a record: this tab shows it too. A
-      // connection this tab does not list yet appears at its next start;
-      // changes during this start are read once it lists its connections.
+      // Another tab of this app changed a record: this tab shows it too,
+      // also a connection it does not list yet. Changes during this start are
+      // read once it lists its connections.
       const early = new Set<string>();
       let listed = false;
       lease.store.watch?.((id) => {
         const e = entries.get(id);
         if (!listed) early.add(id);
-        else if (e && !disposed) void sync(e);
+        else if (disposed) return;
+        else if (e) void sync(e);
+        else announced(id);
       });
       const listing = await sessions.list();
       // The silent first sign-in's note for this tab, and its attempt's state.
@@ -2039,10 +2122,7 @@ export function createBrowserRuntime(
       }
       publish();
       listed = true;
-      for (const id of early) {
-        const e = entries.get(id);
-        if (e) void sync(e);
-      }
+      const announcedEarly = [...early];
       // Best effort: a record left by a failed deletion is deleted next time.
       for (const saved of forgotten)
         void erase(saved.id, saved.revision).catch(() => {});
@@ -2063,6 +2143,11 @@ export function createBrowserRuntime(
       void restoring;
       if (disposed) throw new RuntimeError('disconnected');
       initialized = true;
+      for (const id of announcedEarly) {
+        const e = entries.get(id);
+        if (e) void sync(e);
+        else announced(id);
+      }
       if (!callback) {
         // The silent attempt left without an answer is over.
         if (silentState !== undefined) noteSilent('tried');
@@ -2349,6 +2434,25 @@ export function createBrowserRuntime(
       const pending = connecting.get(url);
       if (pending) return pending;
       const operation = (async () => {
+        // A connection another tab saved for this Pod (signed in, or
+        // remembered) is this tab's too; alone, no other tab saves any.
+        if (sessions && lease?.store.watch) {
+          try {
+            const { records } = await sessions.list();
+            const saved = records.filter(
+              (r) =>
+                sessionBinding(r.value).pod.podUrl === url &&
+                (r.value.kind === 'ready' || r.value.kind === 'disconnected'),
+            );
+            const pick =
+              saved.find((r) => r.value.kind === 'ready') ?? saved[0];
+            if (pick && (admit(pick) || entries.has(pick.id)))
+              return entries.get(pick.id)!.view;
+          } catch {
+            // Unreadable: a new connection, as before.
+          }
+          if (disposed) throw new RuntimeError('disconnected');
+        }
         if (readsAnonymously) {
           // Reading needs neither discovery nor a client: a sign-in
           // discovers the Pod and resolves the client itself. Creating the

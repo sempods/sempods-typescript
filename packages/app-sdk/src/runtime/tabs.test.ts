@@ -6,15 +6,17 @@
  * Locks stand for two tabs.
  */
 import { IDBFactory } from 'fake-indexeddb';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBrowserRuntime } from './runtime.js';
-import type { BrowserRuntime } from './types.js';
+import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
   deferred,
   fixture,
   fixtureNamespace,
   jwt,
   memoryLocks,
+  memoryStorage,
+  pod,
   personal,
   restored,
   work,
@@ -83,11 +85,26 @@ function mint(jti: string) {
 }
 const bearer = (jti: string) => `Bearer ${minted.get(jti)}`;
 /** Two tabs on one IndexedDB, Web Locks and channel; the first is signed in. */
-async function tabs(channels = memoryChannels(), { refresh = true } = {}) {
-  const factory = new IDBFactory();
+async function tabs(
+  channels = memoryChannels(),
+  {
+    refresh = true,
+    options = {},
+    second = {},
+    factory = new IDBFactory(),
+  }: {
+    refresh?: boolean;
+    factory?: IDBFactory;
+    /** For both tabs. */
+    options?: Partial<BrowserRuntimeOptions>;
+    /** For the second tab only. */
+    second?: Partial<BrowserRuntimeOptions>;
+  } = {},
+) {
   const f = fixture({
     locks: memoryLocks(),
     openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    ...options,
   });
   // A rotating refresh token and a distinct access token for every answer.
   f.setToken(async () =>
@@ -105,7 +122,7 @@ async function tabs(channels = memoryChannels(), { refresh = true } = {}) {
   runtimes.push(f.runtime);
   const { runtime: a, id } = await f.login();
   runtimes.push(a);
-  const b = createBrowserRuntime(f.options);
+  const b = createBrowserRuntime({ ...f.options, ...second });
   runtimes.push(b);
   expect(await b.initialize()).toMatchObject({ storage: 'durable' });
   await restored(b);
@@ -584,4 +601,158 @@ it('retires only the session that ended, not one it adopted while that waited', 
   const [saved] = await records(t.factory);
   expect(saved?.value).toMatchObject({ kind: 'ready' });
   expect(t.session(b)).toMatchObject({ kind: 'active' });
+});
+
+it('keeps a sign-out that could not be saved blocked when another tab renews that session', async () => {
+  let failing = false;
+  const channels = memoryChannels();
+  const factory = new IDBFactory();
+  const t = await tabs(channels, {
+    factory,
+    second: {
+      openStore: async (namespace) => {
+        const store = await openSessionStore(namespace, factory, channels);
+        return {
+          ...store,
+          watch: store.watch!,
+          commit: (...args) =>
+            failing
+              ? Promise.reject(new Error('quota'))
+              : store.commit(...args),
+        };
+      },
+    },
+  });
+  failing = true;
+  expect(await t.b.disconnect(t.id)).toEqual({ kind: 'blocked-locally' });
+  expect(t.session(t.b)).toMatchObject({ saved: false });
+  advance(3600_000);
+  expect(await t.a.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes()).toHaveLength(1);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(t.session(t.b)).toMatchObject({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
+  // The retry signs out the session as the other tab renewed it.
+  failing = false;
+  expect(await t.b.disconnect(t.id)).toEqual({ kind: 'disconnected' });
+  const [saved] = await records(t.factory);
+  expect(saved?.value).toMatchObject({ kind: 'disconnected' });
+});
+
+it('keeps reading without a token when another tab ends a sign-in it stopped this tab for', async () => {
+  const t = await tabs(memoryChannels(), { options: { signIn: 'optional' } });
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()[0]?.reading).toBe('anonymous'),
+  );
+  t.a.dispose();
+  const back = t.returned(undefined, 'error=login_required');
+  runtimes.push(back);
+  await back.initialize();
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({ kind: 'signed-out' }),
+  );
+  expect(t.b.getSnapshot()[0]?.reading).toBe('anonymous');
+  expect(await t.b.loadContexts(t.id)).toMatchObject({ kind: 'ok' });
+});
+
+describe('one saved connection per Pod across tabs', () => {
+  async function opened() {
+    const factory = new IDBFactory();
+    const channels = memoryChannels();
+    const f = fixture({
+      locks: memoryLocks(),
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    runtimes.push(f.runtime);
+    const b = createBrowserRuntime(f.options);
+    runtimes.push(b);
+    await b.initialize();
+    return { f, factory, b };
+  }
+  it('lists the connection another tab signed in to, instead of a second one', async () => {
+    const { f, factory, b } = await opened();
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id, session: { kind: 'active' } },
+      ]),
+    );
+    expect((await b.connect(pod)).id).toBe(id);
+    expect(await records(factory)).toHaveLength(1);
+  });
+  it('replaces this tab’s connection without a record by the one another tab signed in to', async () => {
+    const { f, factory, b } = await opened();
+    const own = await b.connect(pod);
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    expect(id).not.toBe(own.id);
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id, session: { kind: 'active' } },
+      ]),
+    );
+    expect((await b.connect(pod)).id).toBe(id);
+    expect(await records(factory)).toHaveLength(1);
+  });
+  it('connects to a Pod another tab signed in to while this tab was open without listing it', async () => {
+    const { f, factory, b } = await opened();
+    const muted = createBrowserRuntime({
+      ...f.options,
+      // A store that announces nothing to this runtime.
+      openStore: async (namespace) => {
+        const store = await openSessionStore(namespace, factory, () => null);
+        return { ...store, watch: () => () => {} };
+      },
+    });
+    runtimes.push(muted);
+    await muted.initialize();
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    expect(muted.getSnapshot()).toEqual([]);
+    expect((await muted.connect(pod)).id).toBe(id);
+    expect(muted.getSnapshot()).toMatchObject([{ id }]);
+    await vi.waitFor(() =>
+      expect(muted.getSnapshot()[0]?.session.kind).toBe('active'),
+    );
+    expect(await records(factory)).toHaveLength(1);
+    void b;
+  });
+});
+
+it('reselects each tab’s own Context after its reload', async () => {
+  const shared = memoryStorage();
+  const tabA = memoryStorage();
+  const tabB = memoryStorage();
+  const t = await tabs(memoryChannels(), {
+    options: { preferences: shared, tabStorage: tabA },
+    second: { tabStorage: tabB },
+  });
+  await t.a.loadContexts(t.id);
+  t.a.selectContext(t.id, personal);
+  // Tab b chose `work` after tab a; reloading tab a keeps its own choice.
+  t.b.selectContext(t.id, work);
+  t.a.dispose();
+  const reloaded = createBrowserRuntime({ ...t.options, tabStorage: tabA });
+  runtimes.push(reloaded);
+  await reloaded.initialize();
+  await restored(reloaded);
+  await reloaded.loadContexts(t.id);
+  expect(reloaded.getSnapshot()[0]?.selectedContext).toBe(personal);
+  // A new tab starts from the last choice on this device.
+  const fresh = createBrowserRuntime({
+    ...t.options,
+    tabStorage: memoryStorage(),
+  });
+  runtimes.push(fresh);
+  await fresh.initialize();
+  await restored(fresh);
+  await fresh.loadContexts(t.id);
+  expect(fresh.getSnapshot()[0]?.selectedContext).toBe(work);
 });

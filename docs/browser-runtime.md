@@ -773,9 +773,15 @@ to the app's other tabs with a `BroadcastChannel`:
 
 Context selection, bound views and drafts stay per tab: another tab's renewal
 keeps them, and a new sign-in in another tab resets them as in the signing-in
-tab. A connection added in another tab (a first sign-in to a new Pod) appears
-at this tab's next start. A tab's own sign-out also applies to a record another
-tab changed meanwhile.
+tab. A reload reselects the tab's own Context choice, kept in `tabStorage`
+(`sessionStorage`); a new tab starts from the last choice on the device. A
+connection another tab saves for a Pod this tab has not saved (a first sign-in)
+is listed here too, replacing a connection to the same Pod without a record or
+session, and `connect()` returns it, so one Pod keeps one saved connection. A
+tab's own sign-out also applies to a record another tab changed meanwhile, and
+one that could not be saved stays blocked when another tab renews that
+session. Under `optional`, a connection reading without a token keeps doing so
+when another tab ends a session.
 
 The table describes tabs that are open. A tab that starts, or reloads, while
 another tab is away at the Pod for a re-authorization treats that attempt as

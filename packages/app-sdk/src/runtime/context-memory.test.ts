@@ -158,3 +158,27 @@ it('storage failures and foreign values only disable the convenience', () => {
   // Namespaces stay separate.
   expect(createContextMemory('other', storage).recall('b')).toBeUndefined();
 });
+
+it('prefers this tab’s own choice, keeps the last one for new tabs, and forgets both', () => {
+  const shared = memoryStorage();
+  const tabA = memoryStorage();
+  const tabB = memoryStorage();
+  const a = createContextMemory('ns', shared, () => tabA);
+  const b = createContextMemory('ns', shared, () => tabB);
+  a.remember('pod', personal);
+  b.remember('pod', work);
+  expect(a.recall('pod')).toBe(personal);
+  expect(b.recall('pod')).toBe(work);
+  // A new tab has no choice of its own yet.
+  expect(
+    createContextMemory('ns', shared, () => memoryStorage()).recall('pod'),
+  ).toBe(work);
+  a.forget('pod');
+  expect(a.recall('pod')).toBeUndefined();
+  // A tab storage that fails leaves the shared memory working.
+  const broken = createContextMemory('ns', shared, () => {
+    throw new Error('blocked');
+  });
+  broken.remember('pod', personal);
+  expect(broken.recall('pod')).toBe(personal);
+});
