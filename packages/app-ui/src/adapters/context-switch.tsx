@@ -184,7 +184,7 @@ export function ContextSwitch({
           {icon && (
             <span
               aria-hidden="true"
-              className={`flex shrink-0 items-center justify-center overflow-hidden [&_svg]:size-full! [&_img]:size-full [&_img]:object-contain ${showSubtitle ? 'size-9 text-3xl/none' : 'size-7 text-xl/none'}`}
+              className={`flex shrink-0 items-center justify-center overflow-hidden [&_svg]:size-full! [&_img]:size-full [&_img]:object-contain ${showSubtitle ? 'size-10 text-4xl/none' : 'size-7 text-xl/none'}`}
             >
               {icon}
             </span>
