@@ -447,3 +447,36 @@ it('sends no refresh under a lock that an injected Web Locks did not grant', asy
     problem: 'coordination',
   });
 });
+
+it('checks Context access again for a new session it adopts without the sign-in in between', async () => {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  let frozen = false;
+  const t = await tabs(
+    memoryChannels((send) => {
+      if (!frozen) setTimeout(send);
+    }),
+  );
+  expect(t.b.getSnapshot()[0]).toMatchObject({
+    catalogue: { kind: 'ready' },
+    selectedContext: work,
+  });
+  // Tab b sits in the back/forward cache while tab a signs in again.
+  frozen = true;
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  frozen = false;
+  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()[0]).toMatchObject({
+      session: { kind: 'active' },
+      catalogue: { kind: 'unknown' },
+      selectedContext: null,
+    }),
+  );
+  expect(() => t.b.bind(t.id)).toThrow();
+});

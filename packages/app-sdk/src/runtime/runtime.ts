@@ -484,7 +484,14 @@ export function createBrowserRuntime(
         // session continues.
         renewLifetime(e, b.generation, new RuntimeError('disconnected'));
         delete e.forgetting;
-        e.view = { ...e.view, requestedScopes: b.scopes };
+        // As a start shows it: Context access is checked again before any
+        // view of the new session uses it, and the choice reselected then.
+        e.view = {
+          ...e.view,
+          requestedScopes: b.scopes,
+          catalogue: Object.freeze({ kind: 'unknown' }),
+          selectedContext: null,
+        };
       }
       e.pod = b.pod;
       e.client = b.client;
