@@ -37,21 +37,35 @@ export function createContextMemory(
 ): ContextMemory {
   const key = prefix + namespace;
   const activeKey = activePrefix + namespace;
+  /** This tab's storage first, then the device's. */
+  const stores = (): PreferenceStorage[] => {
+    let own: PreferenceStorage | null | undefined;
+    try {
+      own = tab();
+    } catch {
+      own = undefined;
+    }
+    return [own, storage].filter((s): s is PreferenceStorage => !!s);
+  };
+  // Like a Context choice: this tab's own first, the device's for a new tab.
   const active: ActiveMemory = {
     recall() {
-      try {
-        return storage?.getItem(activeKey) ?? undefined;
-      } catch {
-        return undefined;
-      }
+      for (const from of stores())
+        try {
+          const id = from.getItem(activeKey);
+          if (id !== null) return id;
+        } catch {
+          // Not remembered there.
+        }
+      return undefined;
     },
     remember(id) {
-      try {
-        if (storage && storage.getItem(activeKey) !== id)
-          storage.setItem(activeKey, id);
-      } catch {
-        // The connection simply is not remembered.
-      }
+      for (const to of stores())
+        try {
+          if (to.getItem(activeKey) !== id) to.setItem(activeKey, id);
+        } catch {
+          // The connection simply is not remembered there.
+        }
     },
   };
   const read = (from: PreferenceStorage): Record<string, string> => {
@@ -76,16 +90,6 @@ export function createContextMemory(
       // The choice simply is not remembered.
     }
   };
-  /** This tab's storage first, then the device's. */
-  const stores = (): PreferenceStorage[] => {
-    let own: PreferenceStorage | null | undefined;
-    try {
-      own = tab();
-    } catch {
-      own = undefined;
-    }
-    return [own, storage].filter((s): s is PreferenceStorage => !!s);
-  };
   return {
     recall(id) {
       for (const from of stores()) {
@@ -102,9 +106,9 @@ export function createContextMemory(
     },
     active,
     forget(id) {
-      if (storage && active.recall() === id)
+      for (const from of stores())
         try {
-          storage.removeItem(activeKey);
+          if (from.getItem(activeKey) === id) from.removeItem(activeKey);
         } catch {
           // Left behind, it names a connection that no longer exists.
         }

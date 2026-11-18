@@ -773,22 +773,27 @@ to the app's other tabs with a `BroadcastChannel`:
 
 Context selection, bound views and drafts stay per tab: another tab's renewal
 keeps them, and a new sign-in in another tab resets them as in the signing-in
-tab. A reload reselects the tab's own Context choice, kept in `tabStorage`
-(`sessionStorage`); a new tab starts from the last choice on the device. A
-connection another tab saves for a Pod this tab has not saved (a first sign-in)
-is listed here too, replacing a connection to the same Pod without a record or
-session, and `connect()` returns it, so one Pod keeps one saved connection. A
-tab's own sign-out also applies to a record another tab changed meanwhile, and
-one that could not be saved stays blocked when another tab renews that
-session. Under `optional`, a connection reading without a token keeps doing so
-when another tab ends a session.
+tab. A reload reselects the tab's own Context choice and its last active
+connection, kept in `tabStorage` (`sessionStorage`); a new tab starts from the
+last ones on the device. A connection another tab saves for a Pod this tab has
+not saved (a first sign-in) is listed here too, replacing a connection to the
+same Pod without a record or session, unless this tab is preparing a sign-in
+there. `connect()` returns a connection another tab saved for its Pod, also
+one whose sign-in is under way there, and a sign-in prepared here uses a
+session another tab stored for that Pod meanwhile instead of leaving for it,
+so one Pod keeps one saved connection. A connection another tab forgot leaves
+this tab with its Context choice. A tab's own sign-out also applies to a
+record another tab changed meanwhile, and one that could not be saved stays
+blocked when another tab renews that session. Under `optional`, a connection
+reading without a token keeps doing so when another tab ends a session.
 
 The table describes tabs that are open. A tab that starts, or reloads, while
 another tab is away at the Pod for a re-authorization treats that attempt as
 abandoned and resumes the earlier session, so the sign-in in the other tab
 fails when it returns and is started again. Announcements are best effort: a
-page restored from the back/forward cache reads every record again, and a tab
-that missed one otherwise reads the record at its next renewal or write.
+page restored from the back/forward cache reads every record again and lists
+connections added meanwhile, and a tab that missed one otherwise reads the
+record at its next renewal or write.
 
 A store without change announcements (an `openStore` whose store has no
 `watch`, or a browser without `BroadcastChannel`) keeps one active tab: its

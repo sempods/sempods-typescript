@@ -658,18 +658,46 @@ it('keeps reading without a token when another tab ends a sign-in it stopped thi
 });
 
 describe('one saved connection per Pod across tabs', () => {
-  async function opened() {
+  /** A signed-out tab b beside tab a, which signs in with `f.login()`. */
+  async function opened({
+    channels = memoryChannels(),
+    held = false,
+  }: { channels?: ReturnType<typeof memoryChannels>; held?: boolean } = {}) {
     const factory = new IDBFactory();
-    const channels = memoryChannels();
     const f = fixture({
       locks: memoryLocks(),
       openStore: (namespace) => openSessionStore(namespace, factory, channels),
     });
     runtimes.push(f.runtime);
-    const b = createBrowserRuntime(f.options);
+    // With `held`, tab b's discoveries wait for `release()` once `hold()`.
+    let gate: Promise<void> | undefined;
+    let open = () => {};
+    const b = createBrowserRuntime({
+      ...f.options,
+      ...(held
+        ? {
+            fetch: async (url: string, init?: RequestInit) => {
+              if (gate && url.endsWith('/.well-known/oauth-protected-resource'))
+                await gate;
+              return f.fetch(url, init);
+            },
+          }
+        : {}),
+    });
     runtimes.push(b);
     await b.initialize();
-    return { f, factory, b };
+    return {
+      f,
+      factory,
+      b,
+      hold() {
+        gate = new Promise((resolve) => (open = resolve));
+      },
+      release() {
+        gate = undefined;
+        open();
+      },
+    };
   }
   it('lists the connection another tab signed in to, instead of a second one', async () => {
     const { f, factory, b } = await opened();
@@ -716,6 +744,106 @@ describe('one saved connection per Pod across tabs', () => {
     );
     expect(await records(factory)).toHaveLength(1);
   });
+  it('keeps one connection when another tab signs in while this tab connects', async () => {
+    const { f, factory, b, hold, release } = await opened({ held: true });
+    hold();
+    const connecting = b.connect(pod);
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id, session: { kind: 'active' } },
+      ]),
+    );
+    release();
+    expect((await connecting).id).toBe(id);
+    expect(b.getSnapshot()).toHaveLength(1);
+    expect(await records(factory)).toHaveLength(1);
+  });
+  it('uses the session another tab signed in to while this tab prepares its own sign-in', async () => {
+    const { f, factory, b, hold, release } = await opened({ held: true });
+    const own = await b.connect(pod);
+    hold();
+    const signingIn = b.beginAuthorization(own.id);
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    const navigations = f.navigate.mock.calls.length;
+    // Its sign-in keeps this tab's connection listed meanwhile.
+    await quiet();
+    expect(b.getSnapshot()).toMatchObject([{ id: own.id }]);
+    release();
+    await signingIn;
+    expect(f.navigate.mock.calls).toHaveLength(navigations);
+    expect(b.getSnapshot()).toMatchObject([
+      { id, session: { kind: 'active' } },
+    ]);
+    expect(await records(factory)).toHaveLength(1);
+  });
+  it('joins a sign-in another tab has out instead of starting a second connection', async () => {
+    const { f, factory, b } = await opened();
+    const { authorization } = await f.begin();
+    f.runtime.dispose();
+    const own = await b.connect(pod);
+    expect(own.session).toEqual({ kind: 'signed-out' });
+    const back = f.returned(authorization);
+    runtimes.push(back);
+    expect(await back.initialize()).toMatchObject({
+      interaction: 'completed',
+    });
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id: own.id, session: { kind: 'active' } },
+      ]),
+    );
+    expect(await records(factory)).toHaveLength(1);
+  });
+  it('lists a connection another tab added while this page was in the back/forward cache', async () => {
+    const pageshow = bfcache();
+    const { channels, freeze } = freezable();
+    const { f, b } = await opened({ channels });
+    freeze(true);
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    await quiet();
+    expect(b.getSnapshot()).toEqual([]);
+    freeze(false);
+    pageshow();
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id, session: { kind: 'active' } },
+      ]),
+    );
+  });
+});
+
+it('forgets this tab’s Context for a connection another tab forgot', async () => {
+  const shared = memoryStorage();
+  const tabB = memoryStorage();
+  const t = await tabs(memoryChannels(), {
+    options: {
+      signIn: 'optional',
+      preset: { podUrl: pod },
+      preferences: shared,
+      tabStorage: memoryStorage(),
+    },
+    second: { tabStorage: tabB },
+  });
+  // The default Pod's connection has the same id in every tab.
+  expect(t.id).toBe(pod);
+  const key = `@sempods/app-sdk:context:${fixtureNamespace}`;
+  expect(JSON.parse(tabB.map.get(key)!)).toEqual({ [pod]: work });
+  expect(await t.a.forget(t.id)).toEqual({ kind: 'disconnected' });
+  await vi.waitFor(() =>
+    expect(JSON.parse(tabB.map.get(key) ?? '{}')).toEqual({}),
+  );
+  // Listed again as a connection never signed in to, without that Context.
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()).toMatchObject([
+      { id: pod, session: { kind: 'signed-out' } },
+    ]),
+  );
+  await t.b.loadContexts(pod);
+  expect(t.b.getSnapshot()[0]?.selectedContext).toBeNull();
 });
 
 it('reselects each tab’s own Context after its reload', async () => {

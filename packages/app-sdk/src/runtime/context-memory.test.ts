@@ -182,3 +182,18 @@ it('prefers this tab’s own choice, keeps the last one for new tabs, and forget
   broken.remember('pod', personal);
   expect(broken.recall('pod')).toBe(personal);
 });
+
+it('prefers this tab’s last active connection, and the device’s in a new tab', () => {
+  const shared = memoryStorage();
+  const tabA = memoryStorage();
+  const a = createContextMemory('ns', shared, () => tabA);
+  const b = createContextMemory('ns', shared, () => memoryStorage());
+  a.active.remember('x');
+  b.active.remember('y');
+  expect(a.active.recall()).toBe('x');
+  expect(
+    createContextMemory('ns', shared, () => memoryStorage()).active.recall(),
+  ).toBe('y');
+  a.forget('x');
+  expect(a.active.recall()).toBe('y');
+});

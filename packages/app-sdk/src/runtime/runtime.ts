@@ -306,6 +306,8 @@ export function createBrowserRuntime(
     }
   }
   const connecting = new Map<string, Promise<Connection>>();
+  /** Connections whose sign-in is being prepared here. */
+  const preparing = new Set<string>();
   const contexts = createContextMemory(
     namespace,
     options.preferences === undefined
@@ -490,9 +492,11 @@ export function createBrowserRuntime(
       return false;
     }
     if (!stored) {
-      // Forgotten in another tab, or signed out there without remembering it.
+      // Forgotten in another tab, or signed out there without remembering
+      // it: so is the Context this tab chose for it.
       stop(e, { kind: 'signed-out' });
       entries.delete(e.view.id);
+      contexts.forget(e.view.id);
       ensureDefault();
       publish();
       return true;
@@ -574,8 +578,6 @@ export function createBrowserRuntime(
    */
   function admit(stored: SessionSnapshot): boolean {
     if (disposed || !initialized || entries.has(stored.id)) return false;
-    if (stored.value.kind !== 'ready' && stored.value.kind !== 'disconnected')
-      return false;
     const b = sessionBinding(stored.value);
     if (!allows(b.pod.podUrl)) return false;
     const same = [...entries.values()].filter(
@@ -584,7 +586,10 @@ export function createBrowserRuntime(
     if (
       same.some(
         (x) =>
-          x.revision !== null || inSession(x) || disconnects.has(x.view.id),
+          x.revision !== null ||
+          inSession(x) ||
+          disconnects.has(x.view.id) ||
+          preparing.has(x.view.id),
       )
     )
       return false;
@@ -602,11 +607,33 @@ export function createBrowserRuntime(
     );
     e.view = { ...e.view, requestedScopes: b.scopes };
     entries.set(stored.id, e);
-    if (!adopt(e, stored)) publish();
-    if (settle(e)) publish();
+    // A refresh another tab claimed: its result follows.
+    if (!adopt(e, stored)) follow(e, stored.revision);
+    settle(e);
+    publish();
     return true;
   }
-  /** Lists a record another tab announced, once it holds a session or an address. */
+  /**
+   * The record another tab saved for `podUrl`, with a shared store: a
+   * session first, then a remembered address, then a sign-in under way.
+   */
+  async function savedFor(podUrl: string) {
+    if (!sessions || !lease?.store.watch) return undefined;
+    try {
+      const saved = (await sessions.list()).records.filter(
+        (r) => sessionBinding(r.value).pod.podUrl === podUrl,
+      );
+      return (
+        saved.find((r) => r.value.kind === 'ready') ??
+        saved.find((r) => r.value.kind === 'disconnected') ??
+        saved[0]
+      );
+    } catch {
+      // Unreadable: none, as before.
+      return undefined;
+    }
+  }
+  /** Lists a record another tab announced. */
   function announced(id: string) {
     void sessions
       ?.read(id)
@@ -1589,8 +1616,15 @@ export function createBrowserRuntime(
   // A page restored from the back/forward cache missed the other tabs'
   // announcements: it reads every record again.
   const shown = (event?: unknown) => {
-    if ((event as { persisted?: boolean } | undefined)?.persisted)
-      for (const e of entries.values()) void sync(e);
+    if (!(event as { persisted?: boolean } | undefined)?.persisted) return;
+    for (const e of entries.values()) void sync(e);
+    if (lease?.store.watch)
+      void sessions
+        ?.list()
+        .then(({ records }) => records.forEach(admit))
+        .catch(() => {
+          // Listed by the next start.
+        });
   };
   page.addEventListener?.('pageshow', shown);
   /**
@@ -1688,8 +1722,13 @@ export function createBrowserRuntime(
       problem = runtimeProblem(error);
       cause = error;
     }
-    // Unless this tab adopted what another tab stored meanwhile.
-    if (eligible(e, generation) && e.adopted === adopted) {
+    // Unless this tab adopted, or is about to read, what another tab stored
+    // meanwhile.
+    if (
+      eligible(e, generation) &&
+      e.adopted === adopted &&
+      !superseded(cause)
+    ) {
       e.view = {
         ...e.view,
         session: Object.freeze({
@@ -1811,6 +1850,8 @@ export function createBrowserRuntime(
     try {
       if (ensureDefault()) publish();
       const c = await runtime.connect(defaultPodUrl);
+      // Another tab signed in meanwhile.
+      if (c.session.kind === 'active') return;
       await authorize(c.id, 'silent');
     } catch {
       // Signed out as before: the person signs in with a click.
@@ -1822,6 +1863,18 @@ export function createBrowserRuntime(
    * callback is known as the silent one.
    */
   async function authorize(
+    id: string,
+    intent: AuthorizationIntent | 'silent',
+  ): Promise<void> {
+    // Kept while preparing, so another tab's record does not replace it.
+    preparing.add(id);
+    try {
+      await prepareAuthorization(id, intent);
+    } finally {
+      preparing.delete(id);
+    }
+  }
+  async function prepareAuthorization(
     id: string,
     intent: AuthorizationIntent | 'silent',
   ): Promise<void> {
@@ -1844,6 +1897,16 @@ export function createBrowserRuntime(
     current(e, before);
     const client = await registry.resolve(pod, identity!, { signal });
     current(e, before);
+    if (e.revision === null) {
+      // Another tab signed in to this Pod meanwhile: its session is this
+      // tab's too, without leaving for the Pod.
+      const saved = await savedFor(e.view.podUrl);
+      current(e, before);
+      if (saved?.value.kind === 'ready') {
+        preparing.delete(id);
+        if (admit(saved)) return;
+      }
+    }
     const generation = crypto.randomUUID();
     const { attempt, url } = await prepareSessionAuthorization(
       {
@@ -2399,25 +2462,17 @@ export function createBrowserRuntime(
       const pending = connecting.get(url);
       if (pending) return pending;
       const operation = (async () => {
-        // A connection another tab saved for this Pod (signed in, or
-        // remembered) is this tab's too; alone, no other tab saves any.
-        if (sessions && lease?.store.watch) {
-          try {
-            const { records } = await sessions.list();
-            const saved = records.filter(
-              (r) => sessionBinding(r.value).pod.podUrl === url,
-            );
-            const pick =
-              saved.find((r) => r.value.kind === 'ready') ??
-              saved.find((r) => r.value.kind === 'disconnected');
-            if (pick) admit(pick);
-            const listed = pick && entries.get(pick.id);
-            if (listed) return listed.view;
-          } catch {
-            // Unreadable: a new connection, as before.
-          }
-          if (disposed) throw new RuntimeError('disconnected');
-        }
+        // A connection another tab saved for this Pod (signed in, remembered
+        // or being signed in to) is this tab's too; alone, no other tab
+        // saves any.
+        const saved = await savedFor(url);
+        if (saved) admit(saved);
+        if (disposed) throw new RuntimeError('disconnected');
+        /** One listed meanwhile, also announced by another tab. */
+        const listed = () =>
+          [...entries.values()].find((x) => x.view.podUrl === url)?.view;
+        const found = listed();
+        if (found) return found;
         if (readsAnonymously) {
           // Reading needs neither discovery nor a client: a sign-in
           // discovers the Pod and resolves the client itself. Creating the
@@ -2429,6 +2484,8 @@ export function createBrowserRuntime(
         const pod = await discover(url, runtimeLifetime.signal);
         const client = await registry.resolve(pod, identity!);
         if (disposed) throw new RuntimeError('disconnected');
+        const meanwhile = listed();
+        if (meanwhile) return meanwhile;
         const e = createEntry(url, pod, client);
         entries.set(e.view.id, e);
         publish();
