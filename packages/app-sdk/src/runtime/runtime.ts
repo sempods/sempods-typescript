@@ -733,12 +733,17 @@ export function createBrowserRuntime(
       saved[0]
     );
   }
-  /** Lists a record another tab announced. */
+  /**
+   * Lists a record another tab announced. Listed meanwhile (by an earlier
+   * announcement's read), the connection reads it again in turn instead.
+   */
   function announced(id: string) {
     void sessions
       ?.read(id)
       .then((stored) => {
-        if (stored) admit(stored);
+        const listed = entries.get(id);
+        if (listed) void sync(listed);
+        else if (stored) admit(stored);
       })
       .catch(() => {
         // Listed by the next start.

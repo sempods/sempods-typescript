@@ -620,7 +620,7 @@ it('reads a change queued for a connection that an earlier change replaced', asy
       t.factory,
       (store) => ({
         async read(id) {
-          const stored = store.read(id);
+          const stored = await store.read(id);
           if (gate) {
             reading = true;
             await gate;
@@ -1049,6 +1049,57 @@ describe('one saved connection per Pod across tabs', () => {
     const saved = await records(factory);
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({ id, value: { kind: 'ready' } });
+  });
+  it('follows a sign-in another tab completes while its announcements are read', async () => {
+    const channels = memoryChannels();
+    const factory = new IDBFactory();
+    const f = fixture({
+      locks: memoryLocks(),
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    runtimes.push(f.runtime);
+    // While `gate` is set, tab b's reads return the record as it was when
+    // read, after the gate opens.
+    let gate: Promise<void> | undefined;
+    let reads = 0;
+    const b = createBrowserRuntime({
+      ...f.options,
+      openStore: storeWith(
+        factory,
+        (store) => ({
+          async read(id) {
+            const stored = await store.read(id);
+            if (gate) {
+              reads++;
+              await gate;
+            }
+            return stored;
+          },
+        }),
+        channels,
+      ),
+    });
+    runtimes.push(b);
+    await b.initialize();
+    const release = deferred<void>();
+    gate = release.promise;
+    // Tab b reads tab a's attempt and its completion, both held.
+    const { connection, authorization } = await f.begin();
+    f.runtime.dispose();
+    await vi.waitFor(() => expect(reads).toBe(1));
+    const back = f.returned(authorization);
+    runtimes.push(back);
+    expect(await back.initialize()).toMatchObject({
+      interaction: 'completed',
+    });
+    await vi.waitFor(() => expect(reads).toBeGreaterThan(1));
+    gate = undefined;
+    release.resolve();
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id: connection.id, session: { kind: 'active' } },
+      ]),
+    );
   });
   it('lists a connection another tab added while this page was in the back/forward cache', async () => {
     const pageshow = bfcache();
