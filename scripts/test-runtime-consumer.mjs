@@ -1152,9 +1152,47 @@ try {
     'active',
   );
   assert.deepEqual({ exchanges, refreshes }, beforeCancel);
+  // A tab opened from the one at the Pod copies its session storage (#374):
+  // it does not take the attempt, and the callback completes it.
+  const reauthorized = await page.evaluate(
+    () => window.fixture.runtime.getSnapshot()[0].id,
+  );
+  consent = 'open';
+  await Promise.all([page.waitForURL('**/authorize?**'), reauthorize()]);
+  const [opened] = await Promise.all([
+    page.waitForEvent('popup'),
+    page.evaluate(
+      (url) => void window.open(url),
+      origin + '/app?identity=dynamic',
+    ),
+  ]);
+  await opened.waitForFunction(() => document.body.dataset.ready === 'true');
+  assert.deepEqual(
+    await opened.evaluate(
+      (id) =>
+        window.fixture.runtime.getSnapshot().find((c) => c.id === id).session,
+      reauthorized,
+    ),
+    { kind: 'ended', problem: 'interrupted' },
+  );
+  await Promise.all([page.waitForURL('**/callback?**'), page.reload()]);
+  await page.waitForURL('**/app?identity=dynamic');
+  await ready();
+  assert.equal(
+    await page.evaluate(() => window.fixture.report.interaction),
+    'completed',
+  );
+  assert.equal(exchanges, beforeCancel.exchanges + 1);
+  await opened.waitForFunction(
+    (id) =>
+      window.fixture.runtime.getSnapshot().find((c) => c.id === id).session
+        .kind === 'active',
+    reauthorized,
+  );
+  await opened.close();
   await page.evaluate(() => sessionStorage.removeItem('fixture-kinds'));
   console.log(
-    'Packed re-authorization in Chromium: a denied consent and a back navigation keep the session without a signed-out state or token request passed.',
+    'Packed re-authorization in Chromium: a denied consent and a back navigation keep the session without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');

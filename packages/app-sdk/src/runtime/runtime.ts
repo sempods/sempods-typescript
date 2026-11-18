@@ -284,10 +284,21 @@ export function createBrowserRuntime(
       if (!memory) return undefined;
       const state = memory.getItem(leavingKey);
       memory.removeItem(leavingKey);
-      return state;
+      // A tab opened from this one copies its tab storage, note included:
+      // only a back or forward navigation returns to the page that left.
+      return state !== null && cameBack() ? state : null;
     } catch {
       return undefined;
     }
+  }
+  /** Whether this page was loaded by a back or forward navigation, if known. */
+  function cameBack() {
+    const [entry] =
+      globalThis.performance?.getEntriesByType?.('navigation') ?? [];
+    return (
+      entry === undefined ||
+      (entry as PerformanceNavigationTiming).type === 'back_forward'
+    );
   }
   function noteLeaving(state: string) {
     try {
@@ -533,7 +544,14 @@ export function createBrowserRuntime(
       return false;
     }
     if (same && !e.lifetime.signal.aborted) {
-      if (value.kind === 'claimed' && value.operation === 'refresh')
+      // Its result follows here when this tab uses or restores the session;
+      // a tab not in it lists the claim anew, and the refresh lock decides
+      // whether it is due a resend.
+      if (
+        value.kind === 'claimed' &&
+        value.operation === 'refresh' &&
+        inSession(e)
+      )
         return false;
       // Only under the binding this connection has: a resumed earlier grant
       // under another client is restored as a start restores it, which
@@ -549,6 +567,13 @@ export function createBrowserRuntime(
     }
     replace(e, stored);
     return true;
+  }
+  /** A session, or its refresh under way: another tab's sign-in to join. */
+  function holdsSession(value: SessionRecord) {
+    return (
+      value.kind === 'ready' ||
+      (value.kind === 'claimed' && value.operation === 'refresh')
+    );
   }
   /** Whether `value` binds the client and scopes this connection uses. */
   function sameBinding(e: Entry, value: SessionRecord) {
@@ -2081,7 +2106,7 @@ export function createBrowserRuntime(
       // The first record for this Pod, decided under its lock: two tabs
       // preparing at once do not both create one.
       const outcome = await locked<
-        | { joined: Entry; kind: SessionRecord['kind'] }
+        | { joined: Entry; session: boolean }
         | { prepared: { generation: string; url: string } }
       >(`sempods:connect:${namespace}:${e.view.podUrl}`, e, async () => {
         const saved = await savedFor(e.view.podUrl);
@@ -2089,30 +2114,31 @@ export function createBrowserRuntime(
         if (saved?.id === id) {
           // This connection's own record, which an announcement did not
           // bring yet (the default Pod's stable id): a session another tab
-          // stored is this tab's too; otherwise the attempt replaces it.
-          const { kind } = saved.value;
-          if (kind === 'ready' || kind === 'claimed') {
+          // stored is this tab's too; otherwise the attempt replaces it, as
+          // it replaces an interrupted code exchange.
+          if (holdsSession(saved.value)) {
             await serial(e, async () => {
               adopt(e, saved);
             });
             const joined = entries.get(id);
-            if (joined) return { joined, kind };
+            if (joined) return { joined, session: true };
           }
           e.revision = saved.revision;
         } else if (saved) {
           preparing.delete(id);
           admit(saved);
           const joined = entries.get(saved.id);
-          if (joined) return { joined, kind: saved.value.kind };
+          if (joined) return { joined, session: holdsSession(saved.value) };
         }
         return { prepared: await store() };
       });
       if ('joined' in outcome) {
         // Another tab signed in to this Pod meanwhile (or is renewing that
         // session): it is this tab's too, without leaving for the Pod.
-        if (outcome.kind === 'ready' || outcome.kind === 'claimed') return;
-        // A remembered address, or a sign-in under way in another tab: this
-        // sign-in continues on that connection, replacing the attempt.
+        if (outcome.session) return;
+        // A remembered address, or a sign-in under way or interrupted in
+        // another tab: this sign-in continues on that connection, replacing
+        // the attempt.
         return authorize(outcome.joined.view.id, intent);
       }
       prepared = outcome.prepared;
@@ -2272,7 +2298,6 @@ export function createBrowserRuntime(
         const e = fromRecord(saved, resumes);
         if (resumes && !callback)
           abandoned.push({ e, problem: interruption(saved.value) });
-        entries.set(saved.id, e);
         entries.set(saved.id, e);
       }
       publish();

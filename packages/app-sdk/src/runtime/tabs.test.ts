@@ -20,6 +20,7 @@ import {
   pod,
   restart,
   savedRecords,
+  settleLease,
   storeWith,
   personal,
   restored,
@@ -543,6 +544,48 @@ it('stops the earlier session for a refresh another tab claimed for a newer sign
   expect(t.sent).toHaveLength(sent);
 });
 
+it('resends a refresh another tab left for a sign-in this tab missed', async () => {
+  const pageshow = bfcache();
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  // Tab b sees tab a leave for a new sign-in, then misses its completion.
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({
+      kind: 'ended',
+      problem: 'interrupted',
+    }),
+  );
+  freeze(true);
+  t.a.dispose();
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  await back.loadContexts(t.id);
+  back.selectContext(t.id, work);
+  // That tab closes during its first refresh.
+  t.setToken(() => new Promise<Response>(() => {}));
+  advance(3600_000);
+  void back.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  back.dispose();
+  t.setToken(async () =>
+    Response.json({
+      access_token: mint('resent'),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-resent',
+    }),
+  );
+  freeze(false);
+  pageshow();
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({ kind: 'active' }),
+  );
+  const [first, resent] = t.refreshes();
+  expect(t.refreshes()).toHaveLength(2);
+  expect(resent?.get('refresh_token')).toBe(first?.get('refresh_token'));
+});
+
 it('retires only the session that ended, not one it adopted while that waited', async () => {
   const { channels, freeze } = freezable();
   // Sessions without a refresh token: an expired one ends here.
@@ -720,8 +763,29 @@ describe('a re-authorization another tab is away for', () => {
       expect(t.session(c)).toMatchObject({ kind: 'active' }),
     );
   });
+  it('is left to that tab by a tab opened from it with a copy of its tab storage', async () => {
+    const { t, tabA, start } = await away();
+    const copy = memoryStorage();
+    tabA.map.forEach((value, key) => copy.setItem(key, value));
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
+      { type: 'navigate' } as PerformanceNavigationTiming,
+    ]);
+    const c = await start(copy);
+    expect(t.session(c)).toMatchObject({
+      kind: 'ended',
+      problem: 'interrupted',
+    });
+    const back = t.returned();
+    runtimes.push(back);
+    expect(await back.initialize()).toMatchObject({
+      interaction: 'completed',
+    });
+  });
   it('resumes the earlier session when that tab comes back without a callback', async () => {
     const { t, tabA, start } = await away();
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
+      { type: 'back_forward' } as PerformanceNavigationTiming,
+    ]);
     const again = await start(tabA);
     await restored(again);
     expect(t.session(again)).toMatchObject({ kind: 'active' });
@@ -1013,6 +1077,42 @@ describe('one saved connection per Pod across tabs', () => {
     const saved = await records(factory);
     expect(saved).toHaveLength(1);
     expect(saved[0]?.value).toMatchObject({ kind: 'ready' });
+  });
+  it('signs in on the first call after another tab closed during the default Pod’s code exchange', async () => {
+    const { channels, freeze } = freezable();
+    const factory = new IDBFactory();
+    const f = fixture({
+      locks: memoryLocks(),
+      signIn: 'optional',
+      preset: { podUrl: pod },
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    runtimes.push(f.runtime);
+    const b = createBrowserRuntime(f.options);
+    runtimes.push(b);
+    await b.initialize();
+    freeze(true);
+    const { authorization } = await f.begin();
+    f.runtime.dispose();
+    await settleLease();
+    // The callback tab closes while it exchanges the code.
+    f.setToken(() => new Promise<Response>(() => {}));
+    const back = f.returned(authorization);
+    runtimes.push(back);
+    void back.initialize().catch(() => {});
+    await vi.waitFor(async () =>
+      expect((await records(factory))[0]?.value).toMatchObject({
+        kind: 'claimed',
+        operation: 'code',
+      }),
+    );
+    back.dispose();
+    const navigations = f.navigate.mock.calls.length;
+    await b.beginAuthorization(pod);
+    expect(f.navigate.mock.calls).toHaveLength(navigations + 1);
+    const saved = await records(factory);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.value).toMatchObject({ kind: 'authorizing' });
   });
   it('leaves the saved connections alone when a first sign-in cannot list them', async () => {
     const { channels, freeze } = freezable();

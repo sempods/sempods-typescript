@@ -796,9 +796,11 @@ A tab that starts, or reloads, while another tab is away at the Pod for a
 re-authorization shows that connection `interrupted` as the open tabs do, and
 leaves the attempt to the tab that left for it: only that tab, which noted the
 attempt in its `tabStorage`, resumes the earlier session when it comes back
-without a callback. An attempt nobody returns to (its tab closed at the Pod)
-resumes the earlier session in the other tabs once it expires after 10
-minutes. Without a tab storage, any start resumes it, as before 0.9.0.
+without a callback by a back or forward navigation. A tab opened from it
+copies its `sessionStorage` and leaves the attempt alone too; so does the tab
+that left when it opens the app anew instead of going back. An attempt nobody
+returns to (its tab closed at the Pod) resumes the earlier session in the
+other tabs once it expires after 10 minutes. Without a tab storage, any start resumes it, as before 0.9.0.
 Announcements are best effort: a
 page restored from the back/forward cache reads every record again and lists
 connections added meanwhile, and a tab that missed one otherwise reads the
