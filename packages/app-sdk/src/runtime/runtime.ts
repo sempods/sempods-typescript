@@ -777,7 +777,11 @@ export function createBrowserRuntime(
      */
     insist = false,
   ) {
+    // The record of the session that ended; one this tab adopted from
+    // another tab while the retirement waited is not this tab's to retire.
+    const ended = e.revision;
     return serial(e, async () => {
+      if (!insist && e.revision !== ended) return e.revision !== null;
       for (let round = 0; ; round++) {
         if (!sessions || !e.revision) {
           contexts.forget(e.view.id);

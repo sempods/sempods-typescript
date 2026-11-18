@@ -74,8 +74,16 @@ function memoryChannels(
 }
 
 let issued = 0;
+/** Access tokens as issued: a token's `iat`/`exp` follow the clock when issued. */
+const minted = new Map<string, string>();
+function mint(jti: string) {
+  const token = jwt({ jti });
+  minted.set(jti, token);
+  return token;
+}
+const bearer = (jti: string) => `Bearer ${minted.get(jti)}`;
 /** Two tabs on one IndexedDB, Web Locks and channel; the first is signed in. */
-async function tabs(channels = memoryChannels()) {
+async function tabs(channels = memoryChannels(), { refresh = true } = {}) {
   const factory = new IDBFactory();
   const f = fixture({
     locks: memoryLocks(),
@@ -86,7 +94,7 @@ async function tabs(channels = memoryChannels()) {
     Response.json({
       access_token: jwt({ jti: String(++issued) }),
       token_type: 'Bearer',
-      refresh_token: 'refresh-' + issued,
+      ...(refresh ? { refresh_token: 'refresh-' + issued } : {}),
     }),
   );
   const sent: string[] = [];
@@ -138,7 +146,7 @@ it('sends one refresh for concurrent requests of two tabs near expiry, and both 
   t.setToken(async () => {
     await answer.promise;
     return Response.json({
-      access_token: jwt({ jti: 'renewed' }),
+      access_token: mint('renewed'),
       token_type: 'Bearer',
       refresh_token: 'refresh-renewed',
     });
@@ -154,7 +162,7 @@ it('sends one refresh for concurrent requests of two tabs near expiry, and both 
   expect(await first).toMatchObject({ kind: 'ok' });
   expect(await second).toMatchObject({ kind: 'ok' });
   // The other tab adopted the stored result instead of refreshing itself.
-  const renewed = `Bearer ${jwt({ jti: 'renewed' })}`;
+  const renewed = bearer('renewed');
   expect(t.sent.slice(before)).toEqual([renewed, renewed]);
   expect(t.refreshes()).toHaveLength(1);
   expect(t.session(t.a)).toMatchObject({ kind: 'active' });
@@ -223,7 +231,7 @@ it('signs out in one tab while another tab waits for its refresh answer, which i
   t.setToken(async () => {
     await answer.promise;
     return Response.json({
-      access_token: jwt({ jti: 'late' }),
+      access_token: mint('late'),
       token_type: 'Bearer',
       refresh_token: 'refresh-late',
     });
@@ -254,7 +262,7 @@ it('resends once from another tab a refresh whose tab closed before its answer',
   t.a.dispose();
   t.setToken(async () =>
     Response.json({
-      access_token: jwt({ jti: 'resent' }),
+      access_token: mint('resent'),
       token_type: 'Bearer',
       refresh_token: 'refresh-resent',
     }),
@@ -264,7 +272,7 @@ it('resends once from another tab a refresh whose tab closed before its answer',
   });
   expect(t.refreshes()).toHaveLength(2);
   expect(t.refreshes()[1]!.get('refresh_token')).toBe(spent);
-  expect(t.sent.at(-1)).toBe(`Bearer ${jwt({ jti: 'resent' })}`);
+  expect(t.sent.at(-1)).toBe(bearer('resent'));
   expect(t.session(t.b)).toMatchObject({ kind: 'active' });
 });
 
@@ -280,7 +288,7 @@ it('stops the other tab while one tab re-authorizes, and gives it the new sessio
   t.a.dispose();
   t.setToken(async () =>
     Response.json({
-      access_token: jwt({ jti: 'consented' }),
+      access_token: mint('consented'),
       token_type: 'Bearer',
       refresh_token: 'refresh-consented',
     }),
@@ -296,7 +304,7 @@ it('stops the other tab while one tab re-authorizes, and gives it the new sessio
   expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
     kind: 'ok',
   });
-  expect(t.sent.at(-1)).toBe(`Bearer ${jwt({ jti: 'consented' })}`);
+  expect(t.sent.at(-1)).toBe(bearer('consented'));
   expect(t.refreshes()).toHaveLength(0);
 });
 
@@ -327,7 +335,7 @@ it('waits at startup for the refresh another tab has out, then restores its resu
   t.setToken(async () => {
     await answer.promise;
     return Response.json({
-      access_token: jwt({ jti: 'renewed' }),
+      access_token: mint('renewed'),
       token_type: 'Bearer',
       refresh_token: 'refresh-renewed',
     });
@@ -349,7 +357,7 @@ it('waits at startup for the refresh another tab has out, then restores its resu
   expect(await c.bind(t.id).sparql.construct(query)).toMatchObject({
     kind: 'ok',
   });
-  expect(t.sent.at(-1)).toBe(`Bearer ${jwt({ jti: 'renewed' })}`);
+  expect(t.sent.at(-1)).toBe(bearer('renewed'));
   expect(t.refreshes()).toHaveLength(1);
 });
 
@@ -361,7 +369,7 @@ it('sends no spent refresh token from a tab that restores while another tab rene
   t.setToken(async () => {
     await answer.promise;
     return Response.json({
-      access_token: jwt({ jti: 'renewed' }),
+      access_token: mint('renewed'),
       token_type: 'Bearer',
       refresh_token: 'refresh-renewed',
     });
@@ -517,4 +525,63 @@ it('stops the earlier session for a refresh another tab claimed for a newer sign
   const sent = t.sent.length;
   expect(await view.sparql.construct(query)).toEqual({ kind: 'invalidated' });
   expect(t.sent).toHaveLength(sent);
+});
+
+it('retires only the session that ended, not one it adopted while that waited', async () => {
+  let frozen = false;
+  const channels = memoryChannels((send) => {
+    if (!frozen) setTimeout(send);
+  });
+  // Sessions without a refresh token: an expired one ends here.
+  const t = await tabs(channels, { refresh: false });
+  t.b.dispose();
+  // This tab's store holds its reads while `gate` is set.
+  let gate: Promise<void> | undefined;
+  let reading = false;
+  const b = createBrowserRuntime({
+    ...t.options,
+    openStore: async (namespace) => {
+      const store = await openSessionStore(namespace, t.factory, channels);
+      return {
+        ...store,
+        watch: store.watch!,
+        async read(id) {
+          if (gate) {
+            reading = true;
+            await gate;
+          }
+          return store.read(id);
+        },
+      };
+    },
+  });
+  runtimes.push(b);
+  await b.initialize();
+  await restored(b);
+  await b.loadContexts(t.id);
+  b.selectContext(t.id, work);
+  // Tab b misses the attempt; it reads the completed sign-in slowly.
+  frozen = true;
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  const release = deferred<void>();
+  gate = release.promise;
+  frozen = false;
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  await vi.waitFor(() => expect(reading).toBe(true));
+  // Meanwhile tab b's earlier session expires and ends here.
+  advance(3600_000);
+  await b.bind(t.id).sparql.construct(query);
+  expect(t.session(b)).toMatchObject({ kind: 'ended', problem: 'expired' });
+  gate = undefined;
+  release.resolve();
+  await vi.waitFor(() =>
+    expect(t.session(b)).toMatchObject({ kind: 'active' }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const [saved] = await records(t.factory);
+  expect(saved?.value).toMatchObject({ kind: 'ready' });
+  expect(t.session(b)).toMatchObject({ kind: 'active' });
 });
