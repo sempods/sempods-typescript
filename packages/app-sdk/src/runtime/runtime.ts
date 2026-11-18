@@ -563,11 +563,16 @@ export function createBrowserRuntime(
   /**
    * Lists the record anew, as a start would, in place of `e`: nothing of this
    * tab's connection continues. A deleted record removes the connection and
-   * the Context chosen for it.
+   * the Context chosen for it. `resumes` resumes the session an abandoned
+   * re-authorization started from, as a start does.
    */
-  function replace(e: Entry, stored: SessionSnapshot | undefined) {
+  function replace(
+    e: Entry,
+    stored: SessionSnapshot | undefined,
+    resumes = false,
+  ) {
     const id = e.view.id;
-    const next = stored && fromRecord(stored);
+    const next = stored && fromRecord(stored, resumes);
     // Replaced first, so the old connection does not settle to read without
     // a token, and keeps its place in the list.
     if (next) entries.set(id, next);
@@ -575,7 +580,8 @@ export function createBrowserRuntime(
     stop(e, { kind: 'signed-out' });
     if (next) {
       settle(next);
-      begin(next, stored!.value);
+      if (resumes) void resumeAbandoned(next, interruption(stored!.value));
+      else begin(next, stored!.value);
     } else {
       contexts.forget(id);
       ensureDefault();
@@ -648,19 +654,27 @@ export function createBrowserRuntime(
    */
   function resumeOnExpiry(e: Entry, expiresAt: number) {
     const revision = e.revision;
-    const timer = setTimeout(
+    // Not tied to the lifetime: a connection that reads without a token
+    // meanwhile (`settle`) still resumes. A replaced one is skipped.
+    setTimeout(
       () => {
-        if (!eligible(e) || e.revision !== revision) return;
-        e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
-        publish();
-        void resumeAbandoned(e, 'expired');
+        if (disposed || entries.get(e.view.id) !== e) return;
+        if (e.revision !== revision) return;
+        void serial(e, async () => {
+          if (!sessions || disposed || entries.get(e.view.id) !== e) return;
+          const stored = await sessions.read(e.view.id);
+          // As a start lists an expired attempt: with its binding and
+          // generation, resuming the session it started from.
+          if (stored?.revision === revision) replace(e, stored, true);
+          else adopt(e, stored);
+        }).catch(() => {
+          // Unreadable: listed by the next start.
+        });
       },
       Math.min(MAX_DELAY, Math.max(0, expiresAt - Date.now())),
     );
-    e.lifetime.signal.addEventListener('abort', () => clearTimeout(timer), {
-      once: true,
-    });
   }
+
   /**
    * Lists a connection another tab saved, which this tab does not list yet
    * (a sign-in there, or a Pod remembered there), so one Pod address keeps

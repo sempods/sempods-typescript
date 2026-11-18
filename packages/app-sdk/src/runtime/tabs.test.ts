@@ -686,9 +686,11 @@ it('restores an earlier grant another tab resumed under its own client', async (
 
 describe('a re-authorization another tab is away for', () => {
   /** Tab a leaves for a re-authorization and is at the Pod; tab b is closed. */
-  async function away() {
+  async function away(options: Partial<BrowserRuntimeOptions> = {}) {
     const tabA = memoryStorage();
-    const t = await tabs(memoryChannels(), { options: { tabStorage: tabA } });
+    const t = await tabs(memoryChannels(), {
+      options: { ...options, tabStorage: tabA },
+    });
     t.b.dispose();
     await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
     t.a.dispose();
@@ -737,6 +739,26 @@ describe('a re-authorization another tab is away for', () => {
     );
     const [saved] = await records(t.factory);
     expect(saved?.value).toMatchObject({ kind: 'ready' });
+  });
+  it('resumes it with its binding in a tab reading without a token meanwhile', async () => {
+    const { t, start } = await away({ signIn: 'optional' });
+    advance(10 * 60_000 - 100);
+    const c = await start();
+    // Under `optional`, the interrupted connection reads without a token.
+    expect(t.session(c)).toMatchObject({ kind: 'ended' });
+    await vi.waitFor(() =>
+      expect(t.session(c)).toMatchObject({ kind: 'active' }),
+    );
+    // The resumed session renews under its stored binding.
+    await c.loadContexts(t.id);
+    c.selectContext(t.id, work);
+    const renewals = t.refreshes().length;
+    advance(3600_000);
+    expect(await c.bind(t.id).sparql.construct(query)).toMatchObject({
+      kind: 'ok',
+    });
+    expect(t.refreshes()).toHaveLength(renewals + 1);
+    expect(t.session(c)).toMatchObject({ kind: 'active' });
   });
 });
 
