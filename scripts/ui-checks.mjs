@@ -5943,9 +5943,18 @@ async function contexts({ browser, origin }) {
               );
             }).flat();
           }, dir);
+          const groupGap = await menu
+            .getByRole('group')
+            .evaluateAll(
+              ([first, second]) =>
+                second.getBoundingClientRect().top -
+                first.getBoundingClientRect().bottom,
+            );
           results.push({
             id: `context-layout-${width}-${rootSize}-${dir}`,
+            groupGap,
             pass:
+              groupGap >= rootSize / 2 - 1 &&
               measured.length === 4 &&
               measured.every(
                 (row) =>
