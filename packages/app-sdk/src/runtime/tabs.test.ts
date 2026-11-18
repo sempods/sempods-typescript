@@ -775,25 +775,35 @@ it('restores an earlier grant another tab resumed under its own client', async (
   expect(t.session(t.b)).toMatchObject({ kind: 'active' });
 });
 
+/** A tab's history: its current entry's state, as a router keeps it. */
+function memoryHistory(state: unknown = null) {
+  return {
+    state,
+    replaceState(data: unknown) {
+      this.state = structuredClone(data);
+    },
+  };
+}
 describe('a re-authorization another tab is away for', () => {
   /** Tab a leaves for a re-authorization and is at the Pod; tab b is closed. */
   async function away(options: Partial<BrowserRuntimeOptions> = {}) {
-    const tabA = memoryStorage();
-    const t = await tabs(memoryChannels(), {
-      options: { ...options, tabStorage: tabA },
-    });
+    const t = await tabs(memoryChannels(), { options });
     t.b.dispose();
+    // Tab a's history entry, with its router's state.
+    const historyA = memoryHistory({ route: 'tasks' });
+    vi.stubGlobal('history', historyA);
     await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
     t.a.dispose();
-    const start = async (tabStorage = memoryStorage()) => {
-      const runtime = createBrowserRuntime({ ...t.options, tabStorage });
+    const start = async (history = memoryHistory()) => {
+      vi.stubGlobal('history', history);
+      const runtime = createBrowserRuntime(t.options);
       runtimes.push(runtime);
       await runtime.initialize();
       return runtime;
     };
-    return { t, tabA, start };
+    return { t, historyA, start };
   }
-  it('is left to that tab by a tab that starts meanwhile', async () => {
+  it('is left to that tab by a tab that starts meanwhile or is opened from it', async () => {
     const { t, start } = await away();
     const c = await start();
     expect(t.session(c)).toMatchObject({
@@ -811,30 +821,13 @@ describe('a re-authorization another tab is away for', () => {
       expect(t.session(c)).toMatchObject({ kind: 'active' }),
     );
   });
-  it('is left to that tab by a tab opened from it with a copy of its tab storage', async () => {
-    const { t, tabA, start } = await away();
-    const copy = memoryStorage();
-    tabA.map.forEach((value, key) => copy.setItem(key, value));
-    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
-      { type: 'navigate' } as PerformanceNavigationTiming,
-    ]);
-    const c = await start(copy);
-    expect(t.session(c)).toMatchObject({
-      kind: 'ended',
-      problem: 'interrupted',
-    });
-    const back = t.returned();
-    runtimes.push(back);
-    expect(await back.initialize()).toMatchObject({
-      interaction: 'completed',
-    });
-  });
   it('resumes the earlier session when that tab comes back without a callback', async () => {
-    const { t, tabA, start } = await away();
-    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
-      { type: 'back_forward' } as PerformanceNavigationTiming,
-    ]);
-    const again = await start(tabA);
+    const { t, historyA, start } = await away();
+    // The note keeps the router's state of that entry.
+    expect(historyA.state).toMatchObject({ route: 'tasks' });
+    // Also when the page is restored from the back/forward cache and the
+    // app starts a runtime again: the history entry is the same.
+    const again = await start(historyA);
     await restored(again);
     expect(t.session(again)).toMatchObject({ kind: 'active' });
     const [saved] = await records(t.factory);
@@ -1155,6 +1148,41 @@ describe('one saved connection per Pod across tabs', () => {
       }),
     );
     back.dispose();
+    const navigations = f.navigate.mock.calls.length;
+    await b.beginAuthorization(pod);
+    expect(f.navigate.mock.calls).toHaveLength(navigations + 1);
+    const saved = await records(factory);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.value).toMatchObject({ kind: 'authorizing' });
+  });
+  it('signs in on the first call when another tab’s refresh of the default Pod can no longer be resent', async () => {
+    const { channels, freeze } = freezable();
+    const factory = new IDBFactory();
+    const f = fixture({
+      locks: memoryLocks(),
+      signIn: 'optional',
+      preset: { podUrl: pod },
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    runtimes.push(f.runtime);
+    const b = createBrowserRuntime(f.options);
+    runtimes.push(b);
+    await b.initialize();
+    freeze(true);
+    const { runtime: a, view } = await f.login();
+    runtimes.push(a);
+    // Tab a closes during a refresh; its grace period passes.
+    f.setToken(() => new Promise<Response>(() => {}));
+    advance(3600_000);
+    void view.sparql.construct(query).catch(() => {});
+    await vi.waitFor(async () =>
+      expect((await records(factory))[0]?.value).toMatchObject({
+        kind: 'claimed',
+        operation: 'refresh',
+      }),
+    );
+    a.dispose();
+    advance(61_000);
     const navigations = f.navigate.mock.calls.length;
     await b.beginAuthorization(pod);
     expect(f.navigate.mock.calls).toHaveLength(navigations + 1);

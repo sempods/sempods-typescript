@@ -273,38 +273,39 @@ export function createBrowserRuntime(
     }
   }
   /**
-   * The state of the sign-in this tab left for, so only this tab treats it
-   * as abandoned when it comes back without a callback. `undefined` without
-   * a tab storage: then any start may, as before 0.9.0. Read once per start.
+   * The state of the re-authorization the page's history entry left for, so
+   * only the page that left treats it as abandoned when it comes back to
+   * that entry without a callback (back navigation, also from the
+   * back/forward cache); a tab opened from it has a history of its own.
+   * `undefined` without a history (outside a browser): then any start may,
+   * as before 0.9.0.
    */
   const leavingKey = `sempods.leaving:${namespace}`;
-  function takeLeaving(): string | null | undefined {
+  function leftFrom(): string | null | undefined {
     try {
-      const memory = tabMemory();
-      if (!memory) return undefined;
-      const state = memory.getItem(leavingKey);
-      memory.removeItem(leavingKey);
-      // A tab opened from this one copies its tab storage, note included:
-      // only a back or forward navigation returns to the page that left.
-      return state !== null && cameBack() ? state : null;
+      const history = globalThis.history;
+      if (!history) return undefined;
+      const state: unknown = history.state;
+      const noted =
+        state !== null && typeof state === 'object'
+          ? (state as Record<string, unknown>)[leavingKey]
+          : undefined;
+      return typeof noted === 'string' ? noted : null;
     } catch {
-      return undefined;
+      return null;
     }
   }
-  /** Whether this page was loaded by a back or forward navigation, if known. */
-  function cameBack() {
-    const [entry] =
-      globalThis.performance?.getEntriesByType?.('navigation') ?? [];
-    return (
-      entry === undefined ||
-      (entry as PerformanceNavigationTiming).type === 'back_forward'
-    );
-  }
+  /** Notes the attempt in the current history entry, keeping its state. */
   function noteLeaving(state: string) {
     try {
-      tabMemory()?.setItem(leavingKey, state);
+      const history = globalThis.history;
+      const current: unknown = history?.state;
+      // Another value than an object cannot carry the note: unnoted, this
+      // tab's return waits as another tab's would.
+      if (current !== null && typeof current !== 'object') return;
+      history?.replaceState({ ...current, [leavingKey]: state }, '');
     } catch {
-      // Unnoted, this tab's return waits as another tab's would.
+      // Unnoted as well.
     }
   }
   const gracePeriod = options.refreshGracePeriod ?? REFRESH_GRACE_PERIOD;
@@ -568,12 +569,15 @@ export function createBrowserRuntime(
     replace(e, stored);
     return true;
   }
-  /** A session, or its refresh under way: another tab's sign-in to join. */
+  /**
+   * Another tab's sign-in to join: a session, or its refresh claim that no
+   * tab sends (read under the refresh lock) while it can still be resent.
+   */
   function holdsSession(value: SessionRecord) {
-    return (
-      value.kind === 'ready' ||
-      (value.kind === 'claimed' && value.operation === 'refresh')
-    );
+    if (value.kind === 'ready') return true;
+    if (value.kind !== 'claimed' || value.operation !== 'refresh') return false;
+    const { resend } = value;
+    return !!resend && !resend.resent && withinGrace(resend.sentAt);
   }
   /** Whether `value` binds the client and scopes this connection uses. */
   function sameBinding(e: Entry, value: SessionRecord) {
@@ -2099,7 +2103,7 @@ export function createBrowserRuntime(
         );
       });
       // A re-authorization resumes its session when this tab comes back
-      // without a callback; see `takeLeaving`.
+      // without a callback; see `leftFrom`.
       if (reauthorizing) noteLeaving(attempt.state);
       return { generation, url };
     };
@@ -2111,8 +2115,25 @@ export function createBrowserRuntime(
         | { joined: Entry; session: boolean }
         | { prepared: { generation: string; url: string } }
       >(`sempods:connect:${namespace}:${e.view.podUrl}`, e, async () => {
-        const saved = await savedFor(e.view.podUrl);
+        let saved = await savedFor(e.view.podUrl);
         current(e, before);
+        // A refresh another tab claimed is read again under its refresh
+        // lock: a tab still sending it finishes first, and a claim left then
+        // is joined only while it can be resent (`holdsSession`).
+        const shared = sessions;
+        if (
+          shared &&
+          saved?.value.kind === 'claimed' &&
+          saved.value.operation === 'refresh'
+        ) {
+          const claimed = saved.id;
+          saved = await locked(
+            `sempods:refresh:${namespace}:${claimed}`,
+            e,
+            () => shared.read(claimed),
+          );
+          current(e, before);
+        }
         if (saved?.id === id) {
           // This connection's own record, which an announcement did not
           // bring yet (the default Pod's stable id): a session another tab
@@ -2210,7 +2231,7 @@ export function createBrowserRuntime(
       const listing = await sessions.list();
       // The silent first sign-in's note for this tab, and its attempt's state.
       const silentNote = firstSignIn === 'silent' ? readSilentNote() : 'tried';
-      const leaving = takeLeaving();
+      const leaving = leftFrom();
       const silentState = silentNote?.startsWith('attempt:')
         ? silentNote.slice('attempt:'.length)
         : undefined;

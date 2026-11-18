@@ -794,13 +794,16 @@ reading without a token keeps doing so when another tab ends a session.
 
 A tab that starts, or reloads, while another tab is away at the Pod for a
 re-authorization shows that connection `interrupted` as the open tabs do, and
-leaves the attempt to the tab that left for it: only that tab, which noted the
-attempt in its `tabStorage`, resumes the earlier session when it comes back
-without a callback by a back or forward navigation. A tab opened from it
-copies its `sessionStorage` and leaves the attempt alone too; so does the tab
+leaves the attempt to the tab that left for it: only that tab resumes the
+earlier session when it comes back to the page it left from without a
+callback, by a back navigation, also one that restores the page from the
+back/forward cache. The SDK notes the attempt in that page's history entry
+(`history.state`, keeping the state a router stored there); a tab opened from
+it has a history of its own and leaves the attempt alone, and so does the tab
 that left when it opens the app anew instead of going back. An attempt nobody
 returns to (its tab closed at the Pod) resumes the earlier session in the
-other tabs once it expires after 10 minutes. Without a tab storage, any start resumes it, as before 0.9.0.
+other tabs once it expires after 10 minutes. Outside a browser (no `history`),
+any start resumes it, as before 0.9.0.
 Announcements are best effort: a
 page restored from the back/forward cache reads every record again and lists
 connections added meanwhile, and a tab that missed one otherwise reads the

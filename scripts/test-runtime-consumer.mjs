@@ -1191,8 +1191,60 @@ try {
   );
   await opened.close();
   await page.evaluate(() => sessionStorage.removeItem('fixture-kinds'));
+  // Back from the Pod restores the page that left from the back/forward
+  // cache (#374): the app starts a runtime again, and that history entry
+  // resumes the earlier session. Playwright disables the cache by default.
+  const cachingBrowser = await chromium.launch({
+    channel: 'chromium',
+    headless: true,
+    ignoreDefaultArgs: ['--disable-back-forward-cache'],
+  });
+  try {
+    const cached = await (await cachingBrowser.newContext()).newPage();
+    cached.on('pageerror', (error) => errors.push(error));
+    await cached.goto(origin + '/app?identity=dynamic');
+    await cached.waitForFunction(() => document.body.dataset.ready === 'true');
+    await cached.locator('#alice').click();
+    await cached.waitForFunction(
+      () =>
+        window.fixture.runtime.getSnapshot().at(-1)?.session.kind ===
+        'signed-out',
+    );
+    await Promise.all([
+      cached.waitForURL('**/app?identity=dynamic'),
+      cached.locator('#login').click(),
+    ]);
+    await cached.waitForFunction(
+      () =>
+        document.body.dataset.ready === 'true' &&
+        window.fixture.runtime.getSnapshot()[0]?.session.kind === 'active',
+    );
+    const beforeBack = { exchanges, refreshes };
+    consent = 'open';
+    await Promise.all([
+      cached.waitForURL('**/authorize?**'),
+      cached.evaluate(() => {
+        const r = window.fixture.runtime;
+        void r.beginAuthorization(r.getSnapshot()[0].id);
+      }),
+    ]);
+    await cached.goBack({ waitUntil: 'commit' });
+    await cached.waitForFunction(
+      () => document.documentElement.dataset.restores === '1',
+    );
+    await cached.waitForFunction(
+      () => window.fixture.runtime.getSnapshot()[0]?.session.kind === 'active',
+    );
+    assert.equal(
+      await cached.evaluate(() => window.fixture.report.interaction),
+      'none',
+    );
+    assert.deepEqual({ exchanges, refreshes }, beforeBack);
+  } finally {
+    await cachingBrowser.close();
+  }
   console.log(
-    'Packed re-authorization in Chromium: a denied consent and a back navigation keep the session without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
+    'Packed re-authorization in Chromium: a denied consent and a back navigation, also from the back/forward cache, keep the session without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');
