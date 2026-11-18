@@ -8,29 +8,39 @@ export interface SessionLease {
   close(): void;
 }
 
-/** One active durable coordinator per configuration until concurrent-tab propagation is implemented. */
-export function acquireSessionLease(
+/**
+ * Opens the app's session store and takes its lease, never waiting for it.
+ * A store that announces its changes (`watch`) shares the lease with the
+ * app's other tabs; one without needs it alone, so a second tab is `busy`.
+ * The two exclude each other, also across SDK versions that only knew the
+ * exclusive lease.
+ */
+export async function acquireSessionLease(
   namespace: string,
   locks: SessionLocks | null | undefined,
   openStore: () => Promise<SessionStore> = () => openSessionStore(namespace),
 ): Promise<SessionLease> {
-  if (!locks) return Promise.reject(new RuntimeError('coordination'));
+  if (!locks) throw new RuntimeError('coordination');
+  let store: SessionStore;
+  try {
+    store = await openStore();
+  } catch {
+    throw new RuntimeError('storage');
+  }
+  const mode = store.watch ? 'shared' : 'exclusive';
   return new Promise((resolve, reject) => {
+    const fail = (error: RuntimeError) => {
+      store.close();
+      reject(error);
+    };
     try {
       void locks
         .request(
           `sempods:sessions:${namespace}`,
-          { ifAvailable: true },
+          { ifAvailable: true, mode },
           async (lock) => {
             if (!lock) {
-              reject(new RuntimeError('busy'));
-              return;
-            }
-            let store: SessionStore;
-            try {
-              store = await openStore();
-            } catch {
-              reject(new RuntimeError('storage'));
+              fail(new RuntimeError('busy'));
               return;
             }
             await new Promise<void>((release) =>
@@ -44,9 +54,9 @@ export function acquireSessionLease(
             );
           },
         )
-        .catch(() => reject(new RuntimeError('coordination')));
+        .catch(() => fail(new RuntimeError('coordination')));
     } catch {
-      reject(new RuntimeError('coordination'));
+      fail(new RuntimeError('coordination'));
     }
   });
 }

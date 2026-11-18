@@ -1171,7 +1171,7 @@ not a failure. A `ready` source with no hits is a successful empty answer.
   scopes it is the sign-in view: one Pod choice and one main action,
   in one editable chooser, with saved-address management in its dropdown
   (see [sign-in](#sign-in-and-pod-addresses)); a failed or cancelled callback
-  names its cause there. A startup failure or a second tab offer **Reload**,
+  names its cause there. A startup failure or a tab beside one that holds the session alone (`busy`) offer **Reload**,
   unavailable session storage only explains; a sign-out or forget that could
   not be saved offers **Try again** and never a sign-in. With `settings`, a
   corner button opens the app's own settings above it, for every reason.

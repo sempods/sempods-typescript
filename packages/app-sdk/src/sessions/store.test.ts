@@ -6,6 +6,7 @@ import {
 } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  browserChannel,
   openSessionStore,
   type SessionCommit,
   type SessionStore,
@@ -355,5 +356,64 @@ describe('atomic session records (storage only, no session acceptance)', () => {
       store.commit('pod', null, () => 'not cloneable'),
     ).rejects.toMatchObject({ problem: 'configuration' });
     expect(await store.list()).toEqual({ records: [], unreadable: [] });
+  });
+});
+
+describe('change announcements to other tabs (#374)', () => {
+  /** Two handles on one database, as two tabs, over a real BroadcastChannel. */
+  async function tabs() {
+    const factory = new IDBFactory();
+    // Unique per test: a channel reaches every worker of this process.
+    const namespace = crypto.randomUUID();
+    const a = await openSessionStore(namespace, factory, browserChannel);
+    const b = await openSessionStore(namespace, factory, browserChannel);
+    opened.push(a, b);
+    return { factory, namespace, a, b };
+  }
+  it('tells the other handle which record changed, after the change is durable', async () => {
+    const { a, b } = await tabs();
+    const own = vi.fn();
+    a.watch!(own);
+    const heard = new Promise<string>((resolve) =>
+      b.watch!((id) => {
+        resolve(id);
+      }),
+    );
+    const record = committed(await a.commit('pod-a', null, { v: 1 }));
+    expect(await heard).toBe('pod-a');
+    expect(await b.read('pod-a')).toEqual(record);
+    const removed = new Promise<string>((resolve) => b.watch!(resolve));
+    expect(await a.remove('pod-a', record.revision)).toEqual({
+      kind: 'removed',
+    });
+    expect(await removed).toBe('pod-a');
+    // A channel does not deliver its own messages.
+    expect(own).not.toHaveBeenCalled();
+  });
+  it('announces no conflict, and stops after unsubscribing or closing', async () => {
+    const { a, b } = await tabs();
+    const heard: string[] = [];
+    const stop = b.watch!((id) => heard.push(id));
+    expect(await a.commit('pod-a', 'stale', { v: 1 })).toEqual({
+      kind: 'conflict',
+    });
+    const record = committed(await a.commit('pod-b', null, { v: 1 }));
+    await vi.waitFor(() => expect(heard).toEqual(['pod-b']));
+    stop();
+    committed(await a.commit('pod-b', record.revision, { v: 2 }));
+    const later = vi.fn();
+    b.watch!(later);
+    b.close();
+    committed(await a.commit('pod-c', null, { v: 1 }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(heard).toEqual(['pod-b']);
+    expect(later).not.toHaveBeenCalled();
+  });
+  it('has no watch without a channel, so it keeps one active tab', async () => {
+    const store = await open();
+    expect(store.watch).toBeUndefined();
+    const silent = await openSessionStore('app', new IDBFactory(), () => null);
+    opened.push(silent);
+    expect(silent.watch).toBeUndefined();
   });
 });

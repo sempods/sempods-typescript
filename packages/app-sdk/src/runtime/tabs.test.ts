@@ -1,0 +1,349 @@
+/**
+ * Several tabs of one app share its durable sessions (#374): a refresh is
+ * claimed under the connection's refresh lock and compare-and-swap, so its
+ * token is sent once; the other tabs adopt the stored result, and a sign-out
+ * or forget reaches every tab. Two runtimes on one store and one set of Web
+ * Locks stand for two tabs.
+ */
+import { IDBFactory } from 'fake-indexeddb';
+import { afterEach, expect, it, vi } from 'vitest';
+import { createBrowserRuntime } from './runtime.js';
+import type { BrowserRuntime } from './types.js';
+import {
+  deferred,
+  fixture,
+  fixtureNamespace,
+  jwt,
+  memoryLocks,
+  personal,
+  restored,
+  work,
+} from './fixture.test.js';
+import { openSessionStore, type SessionChannel } from '../sessions/store.js';
+
+const runtimes: BrowserRuntime[] = [];
+const realNow = Date.now.bind(Date);
+let offset = 0;
+afterEach(() => {
+  runtimes.splice(0).forEach((r) => r.dispose());
+  vi.restoreAllMocks();
+  offset = 0;
+});
+/** Moves this device's clock; issued tokens and expiry checks follow it. */
+function advance(ms: number) {
+  if (!vi.isMockFunction(Date.now))
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
+  offset += ms;
+}
+
+/** `BroadcastChannel`s of one browser profile: a message reaches the others later. */
+function memoryChannels() {
+  const members = new Map<string, Set<Member>>();
+  type Member = SessionChannel & {
+    listeners: Set<(event: { readonly data: unknown }) => void>;
+  };
+  return (name: string): SessionChannel => {
+    const group = members.get(name) ?? new Set<Member>();
+    members.set(name, group);
+    const self: Member = {
+      listeners: new Set(),
+      postMessage(message) {
+        const data = structuredClone(message);
+        for (const other of group)
+          if (other !== self)
+            setTimeout(() =>
+              other.listeners.forEach((listener) => listener({ data })),
+            );
+      },
+      addEventListener(_type, listener) {
+        self.listeners.add(listener);
+      },
+      close() {
+        group.delete(self);
+      },
+    };
+    group.add(self);
+    return self;
+  };
+}
+
+let issued = 0;
+/** Two tabs on one IndexedDB, Web Locks and channel; the first is signed in. */
+async function tabs() {
+  const factory = new IDBFactory();
+  const channels = memoryChannels();
+  const f = fixture({
+    locks: memoryLocks(),
+    openStore: (namespace) => openSessionStore(namespace, factory, channels),
+  });
+  // A rotating refresh token and a distinct access token for every answer.
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt({ jti: String(++issued) }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-' + issued,
+    }),
+  );
+  const sent: string[] = [];
+  f.setQuery(async (_url, init) => {
+    sent.push(new Headers(init?.headers).get('authorization')!);
+    return Response.json([]);
+  });
+  runtimes.push(f.runtime);
+  const { runtime: a, id } = await f.login();
+  runtimes.push(a);
+  const b = createBrowserRuntime(f.options);
+  runtimes.push(b);
+  expect(await b.initialize()).toMatchObject({ storage: 'durable' });
+  await restored(b);
+  await b.loadContexts(id);
+  b.selectContext(id, work);
+  const refreshes = () =>
+    f.fetch.mock.calls
+      .filter(([url]) => url.endsWith('/token'))
+      .map(([, init]) => new URLSearchParams(String(init?.body)))
+      .filter((body) => body.get('grant_type') === 'refresh_token');
+  const session = (runtime: BrowserRuntime) =>
+    runtime.getSnapshot().find((c) => c.id === id)?.session;
+  return { ...f, factory, a, b, id, sent, refreshes, session };
+}
+async function records(factory: IDBFactory) {
+  const store = await openSessionStore(fixtureNamespace, factory, undefined);
+  try {
+    return (await store.list()).records;
+  } finally {
+    store.close();
+  }
+}
+const query = 'CONSTRUCT {} WHERE {}';
+
+it('starts a second tab on the same session instead of reporting busy', async () => {
+  const t = await tabs();
+  expect(t.session(t.a)).toMatchObject({ kind: 'active' });
+  expect(t.session(t.b)).toMatchObject({ kind: 'active' });
+  expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes()).toHaveLength(0);
+});
+
+it('sends one refresh for concurrent requests of two tabs near expiry, and both use its result', async () => {
+  const t = await tabs();
+  const answer = deferred<void>();
+  t.setToken(async () => {
+    await answer.promise;
+    return Response.json({
+      access_token: jwt({ jti: 'renewed' }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-renewed',
+    });
+  });
+  // Expired: neither request is sent before the renewal.
+  advance(3600_000);
+  const before = t.sent.length;
+  const first = t.a.bind(t.id).sparql.construct(query);
+  const second = t.b.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  expect(t.sent).toHaveLength(before);
+  answer.resolve();
+  expect(await first).toMatchObject({ kind: 'ok' });
+  expect(await second).toMatchObject({ kind: 'ok' });
+  // The other tab adopted the stored result instead of refreshing itself.
+  const renewed = `Bearer ${jwt({ jti: 'renewed' })}`;
+  expect(t.sent.slice(before)).toEqual([renewed, renewed]);
+  expect(t.refreshes()).toHaveLength(1);
+  expect(t.session(t.a)).toMatchObject({ kind: 'active' });
+  expect(t.session(t.b)).toMatchObject({ kind: 'active' });
+  const [saved] = await records(t.factory);
+  expect(saved?.value).toMatchObject({
+    kind: 'ready',
+    credentials: { refreshToken: 'refresh-renewed' },
+  });
+});
+
+it('gives a tab without requests the credential another tab renewed, keeping its own Context', async () => {
+  const t = await tabs();
+  await t.a.loadContexts(t.id);
+  t.a.selectContext(t.id, personal);
+  const notified = vi.fn();
+  t.b.subscribe(notified);
+  advance(3600_000);
+  expect(await t.a.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  const renewed = t.sent.at(-1)!;
+  expect(t.refreshes()).toHaveLength(1);
+  // Announced: tab b takes the new credential without sending anything.
+  await vi.waitFor(() => expect(notified).toHaveBeenCalled());
+  const sent = t.sent.length;
+  expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.sent.slice(sent)).toEqual([renewed]);
+  expect(t.refreshes()).toHaveLength(1);
+  expect(t.b.getSnapshot()[0]?.selectedContext).toBe(work);
+  expect(t.a.getSnapshot()[0]?.selectedContext).toBe(personal);
+});
+
+it('ends the other tab with a sign-out in one tab', async () => {
+  const t = await tabs();
+  const view = t.b.bind(t.id);
+  expect(await t.a.disconnect(t.id)).toEqual({ kind: 'disconnected' });
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toEqual({
+      kind: 'signed-out',
+      problem: 'disconnected',
+    }),
+  );
+  const sent = t.sent.length;
+  expect(await view.sparql.construct(query)).toEqual({ kind: 'invalidated' });
+  expect(t.sent).toHaveLength(sent);
+  expect(t.b.getSnapshot()[0]).toMatchObject({
+    grantedScopes: [],
+    catalogue: { kind: 'unknown' },
+    selectedContext: null,
+  });
+});
+
+it('removes the connection from the other tab with a forget in one tab', async () => {
+  const t = await tabs();
+  expect(await t.b.forget(t.id)).toEqual({ kind: 'disconnected' });
+  await vi.waitFor(() => expect(t.a.getSnapshot()).toEqual([]));
+  expect(await records(t.factory)).toEqual([]);
+});
+
+it('signs out in one tab while another tab waits for its refresh answer, which is not kept', async () => {
+  const t = await tabs();
+  const answer = deferred<void>();
+  t.setToken(async () => {
+    await answer.promise;
+    return Response.json({
+      access_token: jwt({ jti: 'late' }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-late',
+    });
+  });
+  advance(3600_000 - 30_000);
+  const pending = t.a.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  expect(await t.b.disconnect(t.id)).toEqual({ kind: 'disconnected' });
+  answer.resolve();
+  await pending;
+  await vi.waitFor(() =>
+    expect(t.session(t.a)).toMatchObject({ kind: 'signed-out' }),
+  );
+  const [saved] = await records(t.factory);
+  expect(saved?.value).toMatchObject({ kind: 'disconnected' });
+  expect(JSON.stringify(saved?.value)).not.toContain('refresh-late');
+});
+
+it('resends once from another tab a refresh whose tab closed before its answer', async () => {
+  const t = await tabs();
+  const never = deferred<Response>();
+  t.setToken(() => never.promise);
+  advance(3600_000);
+  void t.a.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  const spent = t.refreshes()[0]!.get('refresh_token');
+  // The tab closes with its claim stored and the answer unknown.
+  t.a.dispose();
+  t.setToken(async () =>
+    Response.json({
+      access_token: jwt({ jti: 'resent' }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-resent',
+    }),
+  );
+  expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes()).toHaveLength(2);
+  expect(t.refreshes()[1]!.get('refresh_token')).toBe(spent);
+  expect(t.sent.at(-1)).toBe(`Bearer ${jwt({ jti: 'resent' })}`);
+  expect(t.session(t.b)).toMatchObject({ kind: 'active' });
+});
+
+it('stops the other tab while one tab re-authorizes, and gives it the new session afterwards', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({
+      kind: 'ended',
+      problem: 'interrupted',
+    }),
+  );
+  t.a.dispose();
+  t.setToken(async () =>
+    Response.json({
+      access_token: jwt({ jti: 'consented' }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-consented',
+    }),
+  );
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({ kind: 'active' }),
+  );
+  await t.b.loadContexts(t.id);
+  t.b.selectContext(t.id, work);
+  expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.sent.at(-1)).toBe(`Bearer ${jwt({ jti: 'consented' })}`);
+  expect(t.refreshes()).toHaveLength(0);
+});
+
+it('excludes a tab with an exclusive lease, as an earlier SDK takes it', async () => {
+  const locks = memoryLocks();
+  const factory = new IDBFactory();
+  const release = deferred<void>();
+  const held = locks.request(
+    `sempods:sessions:${fixtureNamespace}`,
+    { ifAvailable: true },
+    async () => release.promise,
+  );
+  const f = fixture({
+    locks,
+    openStore: (namespace) =>
+      openSessionStore(namespace, factory, memoryChannels()),
+  });
+  runtimes.push(f.runtime);
+  expect(await f.runtime.initialize()).toMatchObject({ storage: 'busy' });
+  release.resolve();
+  await held;
+});
+
+it('waits at startup for the refresh another tab has out, then restores its result', async () => {
+  const t = await tabs();
+  t.b.dispose();
+  const answer = deferred<void>();
+  t.setToken(async () => {
+    await answer.promise;
+    return Response.json({
+      access_token: jwt({ jti: 'renewed' }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-renewed',
+    });
+  });
+  advance(3600_000);
+  const pending = t.a.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  // A new tab finds the claim of a refresh whose answer is still out.
+  const c = createBrowserRuntime(t.options);
+  runtimes.push(c);
+  await c.initialize();
+  expect(c.getSnapshot()[0]?.session).toEqual({ kind: 'restoring' });
+  answer.resolve();
+  expect(await pending).toMatchObject({ kind: 'ok' });
+  await restored(c);
+  expect(c.getSnapshot()[0]?.session).toMatchObject({ kind: 'active' });
+  await c.loadContexts(t.id);
+  c.selectContext(t.id, work);
+  expect(await c.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.sent.at(-1)).toBe(`Bearer ${jwt({ jti: 'renewed' })}`);
+  expect(t.refreshes()).toHaveLength(1);
+});

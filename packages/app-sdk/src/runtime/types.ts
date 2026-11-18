@@ -154,6 +154,12 @@ export interface StartupReport {
   readonly resumed?: true;
   /** The returning sign-in's outcome; `none` without a callback, even when startup fails. */
   readonly interaction: 'none' | 'completed' | 'cancelled' | 'failed';
+  /**
+   * `durable` when the session store opened, also beside the app's other
+   * tabs, which share it; `busy` when another tab holds the lease alone (a
+   * store without `watch`, or a tab of an SDK before 0.9.0); `unavailable`
+   * without durable storage or Web Locks.
+   */
   readonly storage: 'durable' | 'unavailable' | 'busy';
   /**
    * Present only when the silent first sign-in (`firstSignIn: 'silent'`)
@@ -247,7 +253,12 @@ export interface BrowserRuntimeOptions {
   readonly location?: () => string;
   readonly navigate?: (url: string) => void;
   readonly replaceUrl?: (url: string) => void;
-  /** Advanced/test storage adapters; omitted adapters use IndexedDB and Web Locks. */
+  /**
+   * Advanced/test storage adapters; omitted adapters use IndexedDB with a
+   * `BroadcastChannel` and Web Locks. Several tabs share their sessions only
+   * with a store that has `watch`; `locks` must also make a request without
+   * `ifAvailable` wait for a held lock, until its `signal` aborts.
+   */
   readonly openStore?: (namespace: string) => Promise<SessionStore>;
   readonly locks?: SessionLocks | null;
   /**

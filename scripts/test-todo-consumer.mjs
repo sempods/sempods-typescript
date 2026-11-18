@@ -2097,25 +2097,15 @@ try {
       path: join(tmpdir(), 'issue18-todo-standard.png'),
       fullPage: true,
     });
-    const busy = await context.newPage();
-    await busy.goto(origin + '/');
-    // A second tab gets the gate with a reload; the header menu stays behind
-    // it (#238), and the gate offers the app's settings for every reason.
-    // The German text is covered by the unit tests.
-    const busyGate = busy.locator('[data-sempods-ui="gate"]');
-    await busyGate
-      .getByRole('alert')
-      .filter({ hasText: 'another tab' })
+    // A second tab shares the session (#374): it lists the tasks without a
+    // sign-in of its own and without a gate.
+    const second = await context.newPage();
+    await second.goto(origin + '/');
+    await second
+      .getByRole('button', { name: 'After unknown deletion', exact: true })
       .waitFor();
-    assert.deepEqual(
-      await busyGate
-        .getByRole('button')
-        .evaluateAll((buttons) =>
-          buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent),
-        ),
-      ['Settings', 'Reload'],
-    );
-    await busy.close();
+    assert.equal(await second.locator('[data-sempods-ui="gate"]').count(), 0);
+    await second.close();
     // A reload keeps the session and reselects the last chosen context from
     // localStorage while it is still readable; no new login, no new choice.
     await page.reload();
@@ -2532,7 +2522,7 @@ try {
   assert.deepEqual(JSON.parse(await node(['list'])), []);
   assert.deepEqual(serverErrors, []);
   console.log(
-    'Packed TODO: standard UI, EN/DE, CRUD, row delete of a done task, conflict/unknown save/create/delete, custom message/picker, draft guards, A-B-A, keyboard/mobile, second-tab notice, reload with remembered context; shared Node CRUD passed.',
+    'Packed TODO: standard UI, EN/DE, CRUD, row delete of a done task, conflict/unknown save/create/delete, custom message/picker, draft guards, A-B-A, keyboard/mobile, a second tab sharing the session, reload with remembered context; shared Node CRUD passed.',
   );
 } finally {
   await browser?.close();

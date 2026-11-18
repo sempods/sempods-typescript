@@ -105,9 +105,11 @@ accessibility gate; custom fallback content needs its own labels and focus polic
 
 Use one host runtime, one provider and one guard registry for this composition.
 This is an ownership rule, not a global JavaScript singleton: constructing a
-runtime does not acquire a lease. Initializing another runtime with the same
-identity/storage partition can report `busy`. Changing its identity to get
-around that creates another session rather than sharing the first one.
+runtime does not acquire a lease. Another runtime with the same identity in the
+same page shares the sessions as [another tab](browser-runtime.md#several-tabs)
+would, with its own drafts and guards, so the widgets would not share them.
+Changing its identity creates another session rather than sharing the first
+one.
 
 - Removing and remounting the read-only list leaves the sibling's draft and host
   session intact. The list subscribes again and reads through the same view.
