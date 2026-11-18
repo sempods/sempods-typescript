@@ -860,7 +860,8 @@ Start with these checks:
   `interaction: 'cancelled'` and `resumed: true`, and the connection stays
   `active`. When the person comes back without a callback (back navigation, an
   abandoned attempt), it resumes the same way during startup, with
-  `interaction: 'none'` and the connection going `restoring` → `active`. Every other failure
+  `interaction: 'none'` and the connection going `restoring` → `active`; from
+  0.9.0 only in the tab that left, or in any tab once the attempt expired. Every other failure
   still ends it; a successful narrower grant replaces the earlier one. Code
   that treated a cancelled callback as "signed out" checks the connection's
   session instead.

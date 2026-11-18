@@ -100,13 +100,13 @@ its stored attempt. Two outcomes resume it, if its credential is still usable
 (unexpired, or renewable with its refresh token) and fresh discovery confirms
 its binding:
 
-| Outcome of the re-authorization                                            | Result                                                                    |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| The provider answers `access_denied` for this attempt                      | Earlier session resumes; report `cancelled` with `resumed: true`          |
-| The person returns without a callback (back navigation, abandoned attempt) | Earlier session resumes (`restoring` → `active`); interaction `none`      |
-| Any other provider error, a lost code answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                  |
-| An expired earlier credential without a refresh token, or a disconnect     | Connection ends; nothing resumes                                          |
-| A successful answer                                                        | The new grant replaces the earlier one, also when narrower; never a merge |
+| Outcome of the re-authorization                                            | Result                                                                                                                       |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| The provider answers `access_denied` for this attempt                      | Earlier session resumes; report `cancelled` with `resumed: true`                                                             |
+| The person returns without a callback (back navigation, abandoned attempt) | Earlier session resumes in the tab that left (`restoring` → `active`); interaction `none`; see [several tabs](#several-tabs) |
+| Any other provider error, a lost code answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                                                                     |
+| An expired earlier credential without a refresh token, or a disconnect     | Connection ends; nothing resumes                                                                                             |
+| A successful answer                                                        | The new grant replaces the earlier one, also when narrower; never a merge                                                    |
 
 Resuming sends no token request and consumes the attempt: a replayed callback
 then fails with `attempt` while the session stays. A denied first sign-in ends
@@ -792,10 +792,14 @@ record another tab changed meanwhile, and one that could not be saved stays
 blocked when another tab renews that session. Under `optional`, a connection
 reading without a token keeps doing so when another tab ends a session.
 
-The table describes tabs that are open. A tab that starts, or reloads, while
-another tab is away at the Pod for a re-authorization treats that attempt as
-abandoned and resumes the earlier session, so the sign-in in the other tab
-fails when it returns and is started again. Announcements are best effort: a
+A tab that starts, or reloads, while another tab is away at the Pod for a
+re-authorization shows that connection `interrupted` as the open tabs do, and
+leaves the attempt to the tab that left for it: only that tab, which noted the
+attempt in its `tabStorage`, resumes the earlier session when it comes back
+without a callback. An attempt nobody returns to (its tab closed at the Pod)
+resumes the earlier session in the other tabs once it expires after 10
+minutes. Without a tab storage, any start resumes it, as before 0.9.0.
+Announcements are best effort: a
 page restored from the back/forward cache reads every record again and lists
 connections added meanwhile, and a tab that missed one otherwise reads the
 record at its next renewal or write.

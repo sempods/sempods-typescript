@@ -272,6 +272,30 @@ export function createBrowserRuntime(
       return false;
     }
   }
+  /**
+   * The state of the sign-in this tab left for, so only this tab treats it
+   * as abandoned when it comes back without a callback. `undefined` without
+   * a tab storage: then any start may, as before 0.9.0. Read once per start.
+   */
+  const leavingKey = `sempods.leaving:${namespace}`;
+  function takeLeaving(): string | null | undefined {
+    try {
+      const memory = tabMemory();
+      if (!memory) return undefined;
+      const state = memory.getItem(leavingKey);
+      memory.removeItem(leavingKey);
+      return state;
+    } catch {
+      return undefined;
+    }
+  }
+  function noteLeaving(state: string) {
+    try {
+      tabMemory()?.setItem(leavingKey, state);
+    } catch {
+      // Unnoted, this tab's return waits as another tab's would.
+    }
+  }
   const gracePeriod = options.refreshGracePeriod ?? REFRESH_GRACE_PERIOD;
   if (!Number.isFinite(gracePeriod) || gracePeriod < 0)
     throw new RuntimeError('configuration');
@@ -610,6 +634,32 @@ export function createBrowserRuntime(
   function begin(e: Entry, value: SessionRecord) {
     if (value.kind === 'ready') void restore(e, value);
     else if (value.kind === 'claimed' && value.resend) void resumeLost(e);
+    else if (
+      value.kind === 'authorizing' &&
+      value.previous &&
+      e.view.session.kind !== 'restoring'
+    )
+      resumeOnExpiry(e, value.attempt.expiresAt);
+  }
+  /**
+   * Another tab's re-authorization that no tab completes by its expiry (its
+   * tab closed at the Pod) is abandoned: the earlier session resumes then,
+   * unless the record changed meanwhile.
+   */
+  function resumeOnExpiry(e: Entry, expiresAt: number) {
+    const revision = e.revision;
+    const timer = setTimeout(
+      () => {
+        if (!eligible(e) || e.revision !== revision) return;
+        e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+        publish();
+        void resumeAbandoned(e, 'expired');
+      },
+      Math.min(MAX_DELAY, Math.max(0, expiresAt - Date.now())),
+    );
+    e.lifetime.signal.addEventListener('abort', () => clearTimeout(timer), {
+      once: true,
+    });
   }
   /**
    * Lists a connection another tab saved, which this tab does not list yet
@@ -1962,11 +2012,12 @@ export function createBrowserRuntime(
       // sign-in: nothing is stored or started.
       if (intent === 'silent' && !noteSilent(`attempt:${attempt.state}`))
         throw new RuntimeError('storage');
-      await serial(e, async () => {
+      const reauthorizing = await serial(e, async () => {
         current(e, before);
         // Another tab changed the record first: shown here, and a retry
         // prepares on it.
-        accepted(e, await sessions!.prepare(attempt, e.revision));
+        const change = await sessions!.prepare(attempt, e.revision);
+        accepted(e, change);
         // The revision is recorded first, so a disconnect that ran during the
         // commit retires the new attempt; this lifetime must not continue.
         current(e, before);
@@ -1995,7 +2046,15 @@ export function createBrowserRuntime(
           ),
         };
         publish();
+        return (
+          change.kind === 'committed' &&
+          change.record.value.kind === 'authorizing' &&
+          change.record.value.previous !== undefined
+        );
       });
+      // A re-authorization resumes its session when this tab comes back
+      // without a callback; see `takeLeaving`.
+      if (reauthorizing) noteLeaving(attempt.state);
       return { generation, url };
     };
     let prepared: { generation: string; url: string };
@@ -2104,6 +2163,7 @@ export function createBrowserRuntime(
       const listing = await sessions.list();
       // The silent first sign-in's note for this tab, and its attempt's state.
       const silentNote = firstSignIn === 'silent' ? readSilentNote() : 'tried';
+      const leaving = takeLeaving();
       const silentState = silentNote?.startsWith('attempt:')
         ? silentNote.slice('attempt:'.length)
         : undefined;
@@ -2173,18 +2233,23 @@ export function createBrowserRuntime(
           represented.add(b.pod.podUrl);
         }
         if (disposed) throw new RuntimeError('disconnected');
-        // A re-authorization the person left without a callback (back
-        // navigation, an abandoned attempt) resumes the session it started
-        // from; a denial on the callback route does so below. On the callback
-        // route no other attempt is touched: a callback with a missing or
-        // wrong state must not consume one whose real callback may follow.
+        // A re-authorization this tab left without a callback (back
+        // navigation, an abandoned attempt), or one that expired, resumes the
+        // session it started from; a denial on the callback route does so
+        // below. Another tab's attempt may still return: it waits as in the
+        // open tabs (`begin`). On the callback route no other attempt is
+        // touched: a callback with a missing or wrong state must not consume
+        // one whose real callback may follow.
         const resumes =
           saved.value.kind === 'authorizing' &&
           saved.value.previous !== undefined &&
-          (!callback ||
-            (pending === saved &&
+          (!callback
+            ? leaving === undefined ||
+              leaving === saved.value.attempt.state ||
+              saved.value.attempt.expiresAt <= Date.now()
+            : pending === saved &&
               location.searchParams.has('error') &&
-              !location.searchParams.has('code')));
+              !location.searchParams.has('code'));
         const e = fromRecord(saved, resumes);
         if (resumes && !callback)
           abandoned.push({ e, problem: interruption(saved.value) });

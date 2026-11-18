@@ -313,7 +313,9 @@ export interface BrowserRuntimeOptions {
    * Advanced/test: what this tab keeps for itself. `firstSignIn: 'silent'`
    * notes there that it tried, and each connection's Context choice and the
    * last active connection are kept there too, so a reload reselects this
-   * tab's choices rather than another tab's (0.9.0). Defaults to `sessionStorage`; `null`, or a storage that
+   * tab's choices rather than another tab's, and a re-authorization this tab
+   * left for, which only this tab resumes when it comes back without a
+   * callback (0.9.0). Defaults to `sessionStorage`; `null`, or a storage that
    * cannot be read or written, never signs in silently, so it can never loop,
    * and keeps Context choices only in `preferences`.
    */

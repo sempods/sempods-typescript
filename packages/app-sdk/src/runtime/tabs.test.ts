@@ -684,6 +684,62 @@ it('restores an earlier grant another tab resumed under its own client', async (
   expect(t.session(t.b)).toMatchObject({ kind: 'active' });
 });
 
+describe('a re-authorization another tab is away for', () => {
+  /** Tab a leaves for a re-authorization and is at the Pod; tab b is closed. */
+  async function away() {
+    const tabA = memoryStorage();
+    const t = await tabs(memoryChannels(), { options: { tabStorage: tabA } });
+    t.b.dispose();
+    await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+    t.a.dispose();
+    const start = async (tabStorage = memoryStorage()) => {
+      const runtime = createBrowserRuntime({ ...t.options, tabStorage });
+      runtimes.push(runtime);
+      await runtime.initialize();
+      return runtime;
+    };
+    return { t, tabA, start };
+  }
+  it('is left to that tab by a tab that starts meanwhile', async () => {
+    const { t, start } = await away();
+    const c = await start();
+    expect(t.session(c)).toMatchObject({
+      kind: 'ended',
+      problem: 'interrupted',
+    });
+    const [saved] = await records(t.factory);
+    expect(saved?.value).toMatchObject({ kind: 'authorizing' });
+    const back = t.returned();
+    runtimes.push(back);
+    expect(await back.initialize()).toMatchObject({
+      interaction: 'completed',
+    });
+    await vi.waitFor(() =>
+      expect(t.session(c)).toMatchObject({ kind: 'active' }),
+    );
+  });
+  it('resumes the earlier session when that tab comes back without a callback', async () => {
+    const { t, tabA, start } = await away();
+    const again = await start(tabA);
+    await restored(again);
+    expect(t.session(again)).toMatchObject({ kind: 'active' });
+    const [saved] = await records(t.factory);
+    expect(saved?.value).toMatchObject({ kind: 'ready' });
+  });
+  it('resumes the earlier session in another tab once the attempt expired', async () => {
+    const { t, start } = await away();
+    // Its tab closed at the Pod: the attempt expires shortly.
+    advance(10 * 60_000 - 100);
+    const c = await start();
+    expect(t.session(c)).toMatchObject({ kind: 'ended' });
+    await vi.waitFor(() =>
+      expect(t.session(c)).toMatchObject({ kind: 'active' }),
+    );
+    const [saved] = await records(t.factory);
+    expect(saved?.value).toMatchObject({ kind: 'ready' });
+  });
+});
+
 it('keeps a sign-out that could not be saved blocked when another tab renews that session', async () => {
   let failing = false;
   const channels = memoryChannels();
