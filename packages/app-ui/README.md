@@ -707,7 +707,8 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   The trigger places the chevron beside the Context name. With several Pods,
   it adds the Pod below and sizes the app icon for both lines. With one Pod,
   it uses a smaller icon and keeps the Pod in the accessible name. The menu
-  groups concise Context names under their Pod, with 52px minimum rows. Equal
+  indents Context names below each Pod heading and leaves space between Pods.
+  Rows are at least 2.75rem tall (44px at the default text size). Equal
   names within one Pod show their `qualifier` more quietly; equal names on
   different Pods need none. An editable Context has no mark; a read-only one
   shows a small **Read only** badge (German **Nur lesen**), and the check

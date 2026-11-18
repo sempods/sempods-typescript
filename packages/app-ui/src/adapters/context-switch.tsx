@@ -215,6 +215,7 @@ export function ContextSwitch({
               <Fragment key={pod.connectionId}>
                 {pod.choices.length > 0 && (
                   <DropdownMenuGroup
+                    className="mt-2 first:mt-0"
                     selectionMode="single"
                     selectedKeys={
                       selected?.connectionId === pod.connectionId
@@ -222,7 +223,7 @@ export function ContextSwitch({
                         : []
                     }
                   >
-                    <DropdownMenuLabel className="px-4 py-2 wrap-anywhere">
+                    <DropdownMenuLabel className="px-2 py-1 wrap-anywhere">
                       {pod.label}
                     </DropdownMenuLabel>
                     {pod.choices.map((choice) => (
@@ -232,7 +233,7 @@ export function ContextSwitch({
                         textValue={choice.label}
                         isDisabled={!choice.selectable}
                         onAction={() => select(choice)}
-                        className="min-h-13 gap-3 py-3 ps-4 pe-10 [&>[data-slot=dropdown-menu-radio-item-indicator]]:right-4"
+                        className="min-h-11 gap-2 px-4 py-1.5 [&>[data-slot=dropdown-menu-radio-item-indicator]]:static [&>[data-slot=dropdown-menu-radio-item-indicator]]:order-last [&>[data-slot=dropdown-menu-radio-item-indicator]]:min-w-4"
                       >
                         <Text
                           slot="label"
@@ -257,6 +258,9 @@ export function ContextSwitch({
                 )}
                 {(status(pod) || pod.restorable) && (
                   <DropdownMenuGroup
+                    className={
+                      pod.choices.length === 0 ? 'mt-2 first:mt-0' : undefined
+                    }
                     aria-label={
                       pod.choices.length > 0
                         ? `${pod.label}: ${t.podActions}`
@@ -264,7 +268,7 @@ export function ContextSwitch({
                     }
                   >
                     {pod.choices.length === 0 && (
-                      <DropdownMenuLabel className="px-4 py-2 wrap-anywhere">
+                      <DropdownMenuLabel className="px-2 py-1 wrap-anywhere">
                         {pod.label}
                       </DropdownMenuLabel>
                     )}

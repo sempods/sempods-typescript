@@ -5858,7 +5858,7 @@ async function contexts({ browser, origin }) {
             .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
             .count()) === 2 &&
           geometry.every(
-            (r) => r.height >= 52 && r.left >= 0 && r.right <= 375,
+            (r) => r.height >= 44 && r.left >= 0 && r.right <= 375,
           ) &&
           rect.height >= 64 &&
           marked.length === 2 &&
@@ -5893,6 +5893,80 @@ async function contexts({ browser, origin }) {
         pass: await trigger().evaluate((el) => el === document.activeElement),
       });
     }
+    // Contrast, keyboard navigation and selection are checked above. Verify
+    // the hierarchy as rendered by the packed CSS, including the portal.
+    for (const width of [375, 960]) {
+      await page.setViewportSize({ width, height: 812 });
+      for (const rootSize of [16, 18]) {
+        for (const dir of ['ltr', 'rtl']) {
+          await page.evaluate((size) => {
+            document.documentElement.style.fontSize = size + 'px';
+          }, rootSize);
+          await page
+            .getByRole('checkbox', { name: 'Right-to-left layout' })
+            .setChecked(dir === 'rtl');
+          await trigger().click();
+          const menu = page.getByRole('menu');
+          await menu.waitFor();
+          const measured = await menu.evaluate((el, dir) => {
+            const edge = dir === 'ltr' ? 'left' : 'right';
+            const sign = dir === 'ltr' ? 1 : -1;
+            return Array.from(el.querySelectorAll('[role=group]'), (group) => {
+              const heading = group.querySelector(
+                '[data-slot=dropdown-menu-label]',
+              );
+              const range = document.createRange();
+              range.selectNodeContents(heading);
+              const headingEdge = range.getBoundingClientRect()[edge];
+              return Array.from(
+                group.querySelectorAll('[role=menuitemradio]'),
+                (row) => {
+                  const label = row.querySelector('[slot=label]');
+                  const badge = row.querySelector('[data-slot=badge]');
+                  const indicator = row.querySelector(
+                    '[data-slot=dropdown-menu-radio-item-indicator]',
+                  );
+                  const preceding = (badge ?? label).getBoundingClientRect();
+                  const check = indicator.getBoundingClientRect();
+                  return {
+                    height: row.getBoundingClientRect().height,
+                    short: label.textContent === 'Einkaufsliste',
+                    indent:
+                      sign *
+                      (label.getBoundingClientRect()[edge] - headingEdge),
+                    trailingGap:
+                      dir === 'ltr'
+                        ? check.left - preceding.right
+                        : preceding.left - check.right,
+                  };
+                },
+              );
+            }).flat();
+          }, dir);
+          results.push({
+            id: `context-layout-${width}-${rootSize}-${dir}`,
+            pass:
+              measured.length === 4 &&
+              measured.every(
+                (row) =>
+                  Math.abs(row.indent - rootSize / 2) < 1 &&
+                  row.trailingGap >= 0 &&
+                  (row.short
+                    ? Math.abs(row.height - rootSize * 2.75) < 1
+                    : row.height >= rootSize * 2.75),
+              ),
+            measured,
+          });
+          await page.keyboard.press('Escape');
+        }
+      }
+    }
+    await page
+      .getByRole('checkbox', { name: 'Right-to-left layout' })
+      .uncheck();
+    await page.evaluate(() =>
+      document.documentElement.style.removeProperty('font-size'),
+    );
     step = 'keyboard-reaches-last-row';
     // A short phone viewport: the long names wrap and the popup scrolls.
     await page.setViewportSize({ width: 375, height: 400 });
