@@ -156,6 +156,34 @@ it.each(['required', 'on-demand'] as const)(
   },
 );
 
+it('selects and reads labels once when a second component uses the hook (#380)', async () => {
+  // As ContextSwitch beside an app's own menu that calls useContexts().share.
+  function Menu() {
+    const lists = useContexts();
+    return <output aria-label="menu">{lists.selected?.name ?? ''}</output>;
+  }
+  const f = await returnedSession(keep);
+  f.setCatalogue(async () => catalogue([personal, work], [work]));
+  f.setDescriptions(labelled({ [work]: 'Work', [personal]: 'Home' }));
+  const selections = vi.spyOn(f.runtime, 'selectContext');
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <Switch />
+      <Menu />
+      <TargetScreen>
+        <p>Content</p>
+      </TargetScreen>
+    </SempodsProvider>,
+  );
+  await screen.findByText('Content');
+  await waitFor(() =>
+    expect(items()).toEqual(['Homeread only', 'Workcan change']),
+  );
+  expect(screen.getByLabelText('menu').textContent).toBe('Work');
+  expect(selections).toHaveBeenCalledTimes(1);
+  expect(descriptions(f)).toBe(2);
+});
+
 it('tells equal labels apart by their short names', async () => {
   const f = await returnedSession(keep);
   f.setDescriptions(labelled({ [work]: 'Tasks', [personal]: 'Tasks' }));

@@ -476,18 +476,27 @@ export function useContexts() {
     failed: catalogue?.kind === 'failed',
     retry,
     /**
-     * Whether `share` can ask the Pod now: a connection that reads, where the
-     * app signs in at all (not under `signIn: 'none'`). Without a session,
-     * sharing signs in.
+     * Whether `share` has a connection to ask: one that reads, where the app
+     * signs in at all (not under `signIn: 'none'`). Without a session,
+     * sharing signs in. It does not follow transient state: an own control
+     * also stays disabled while `changing` or `confirmingLeave`, and until
+     * `startup.storage` is `'durable'`.
      */
     canShare: id !== null && signIn !== 'none',
     /**
      * Asks the Pod to share more Contexts with this app: its consent page
      * opens (also when a grant exists), and the catalogue reloads on return.
-     * Runs under the leave policy.
+     * Runs under the leave policy. Never rejects: `false` means the page did
+     * not leave, because the person declined, another change was running or
+     * it failed before the Pod. Only a failure without a leave question
+     * reaches `shareProblem`; after a confirmed one, the SDK's confirmation
+     * reports it.
      */
     share,
-    /** Why the last `share` failed before reaching the Pod, in the UI language. */
+    /**
+     * Why the last `share` failed before reaching the Pod, in the UI language;
+     * `null` when it was declined or reported by the leave confirmation.
+     */
     shareProblem:
       shareFailure && shareFailure.id === id ? error(shareFailure.cause) : null,
   };

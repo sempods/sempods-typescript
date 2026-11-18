@@ -593,7 +593,7 @@ const lists = useContexts();
 // lists.selected: the selected one or null
 // lists.select(iri): guarded; resolves false when refused or not selectable
 // lists.loading / lists.failed / lists.retry(): catalogue state
-// lists.canShare / lists.share(): ask the Pod to share more Contexts
+// lists.canShare / lists.share(): ask the Pod to share more Contexts (never rejects)
 // lists.shareProblem: why the last share failed before the Pod, or null
 ```
 
@@ -609,6 +609,18 @@ const lists = useContexts();
 - `select` and `share()` run under the leave policy; `share()`
   [changes sharing](#changing-what-the-app-may-access) on the Pod's consent
   page.
+- `share()` never rejects, so `void lists.share()` is safe. `false` means
+  the page did not leave: declined, another change running, or a failure
+  before the Pod. `shareProblem` holds that failure, or stays `null` when the
+  person declined; after a confirmed leave question the SDK's confirmation
+  reports the failure instead.
+- `canShare` only says whether there is a connection to ask. Like any
+  [own control](#custom-layouts-without-appaccess), a menu entry also stays
+  disabled while `changing` or `confirmingLeave` and until
+  `startup.storage === 'durable'` (all from `useAppState()`).
+- Several components may call the hook, for example an own menu beside
+  `ContextSwitch`, which calls it too: the initial selection and the label
+  reads still happen once.
 - While mounted, `AppAccess` shows no chooser (only its loading status until
   the hook selects) and management names only the selected Context. Sign-in,
   recovery, **Change sharing** and **Sign out** stay in `AppAccess`.
@@ -629,7 +641,9 @@ app opens from its menu (the TODO example's **Pods & sharing**). The one
 sharing action in the chooser is contextual: a Pod that loaded and shares no
 readable Context offers **Share contexts …** for exactly that Pod. A Pod that
 is still loading, failed or signed out is not empty and offers its retry or
-sign-in instead.
+sign-in instead. An app may still offer its own entry, such as **Share another
+list …** in its menu, with `useContexts().share()` beside the chooser
+([changing sharing](#changing-what-the-app-may-access)).
 
 ```tsx
 import { ContextSwitch } from '@sempods/app-ui';
@@ -762,7 +776,8 @@ export function ShareAnotherList({ connectionId }: { connectionId: string }) {
   and changes nothing.
 - A failure before the Pod (discovery, storage) rejects; the session, the
   selected Pod and Context stay as they were. Show it with
-  `useSdkLocale().error`.
+  `useSdkLocale().error`. After a confirmed leave question it resolves
+  `false` instead, and the SDK's confirmation reports the failure.
 - Otherwise the page leaves for the Pod: the connection is `leaving` and the
   content inert. After consent the app returns to `returnTo`, the new grant
   replaces the old one and that Pod is the active one; the catalogue is read
