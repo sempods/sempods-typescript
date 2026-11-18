@@ -5799,7 +5799,7 @@ async function contexts({ browser, origin }) {
     await page
       .getByRole('button', { name: 'List: Einkaufsliste · Privat' })
       .waitFor();
-    const mark = trigger().getByText('K', { exact: true }).locator('..');
+    const mark = trigger().getByText('K', { exact: true });
     const singleMark = await mark.boundingBox();
     await page.getByRole('button', { name: 'Connect second Pod' }).click();
     await page
