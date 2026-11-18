@@ -511,7 +511,10 @@ export function createBrowserRuntime(
     if (same && !e.lifetime.signal.aborted) {
       if (value.kind === 'claimed' && value.operation === 'refresh')
         return false;
-      if (value.kind === 'ready') {
+      // Only under the binding this connection has: a resumed earlier grant
+      // under another client is restored as a start restores it, which
+      // checks its binding and takes its client.
+      if (value.kind === 'ready' && sameBinding(e, value)) {
         e.revision = stored!.revision;
         if (e.lost) clearTimeout(e.lost.timer);
         delete e.lost;
@@ -522,6 +525,16 @@ export function createBrowserRuntime(
     }
     replace(e, stored);
     return true;
+  }
+  /** Whether `value` binds the client and scopes this connection uses. */
+  function sameBinding(e: Entry, value: SessionRecord) {
+    const b = sessionBinding(value);
+    return (
+      e.client?.clientId === b.client.clientId &&
+      e.client.issuer === b.client.issuer &&
+      e.view.requestedScopes.length === b.scopes.length &&
+      e.view.requestedScopes.every((s) => b.scopes.includes(s))
+    );
   }
   /**
    * Lists the record anew, as a start would, in place of `e`: nothing of this
@@ -637,22 +650,24 @@ export function createBrowserRuntime(
   /**
    * The record another tab saved for `podUrl`, with a shared store: a
    * session first, then a remembered address, then a sign-in under way.
+   * Rejects with `storage` when the records cannot be listed.
    */
   async function savedFor(podUrl: string) {
     if (!sessions || !lease?.store.watch) return undefined;
+    let records: readonly SessionSnapshot[];
     try {
-      const saved = (await sessions.list()).records.filter(
-        (r) => sessionBinding(r.value).pod.podUrl === podUrl,
-      );
-      return (
-        saved.find((r) => r.value.kind === 'ready') ??
-        saved.find((r) => r.value.kind === 'disconnected') ??
-        saved[0]
-      );
+      ({ records } = await sessions.list());
     } catch {
-      // Unreadable: none, as before.
-      return undefined;
+      throw new RuntimeError('storage');
     }
+    const saved = records.filter(
+      (r) => sessionBinding(r.value).pod.podUrl === podUrl,
+    );
+    return (
+      saved.find((r) => r.value.kind === 'ready') ??
+      saved.find((r) => r.value.kind === 'disconnected') ??
+      saved[0]
+    );
   }
   /** Lists a record another tab announced. */
   function announced(id: string) {
@@ -665,14 +680,23 @@ export function createBrowserRuntime(
         // Listed by the next start.
       });
   }
-  /** Reads the record again and adopts what another tab stored; best effort. */
+  /**
+   * Reads the record again and adopts what another tab stored; best effort.
+   * A read queued for a connection replaced meanwhile reads for the one that
+   * replaced it.
+   */
   function sync(e: Entry): Promise<void> {
     return serial(e, async () => {
-      if (!sessions || disposed || entries.get(e.view.id) !== e) return;
+      if (!sessions || disposed) return undefined;
+      if (entries.get(e.view.id) !== e) return entries.get(e.view.id);
       adopt(e, await sessions.read(e.view.id));
-    }).catch(() => {
-      // An unreadable record is listed by the next start.
-    });
+      return undefined;
+    }).then(
+      (successor) => (successor ? sync(successor) : undefined),
+      () => {
+        // An unreadable record is listed by the next start.
+      },
+    );
   }
   /**
    * Under the refresh lock: reads the record and adopts what another tab
@@ -1984,10 +2008,20 @@ export function createBrowserRuntime(
       >(`sempods:connect:${namespace}:${e.view.podUrl}`, e, async () => {
         const saved = await savedFor(e.view.podUrl);
         current(e, before);
-        // This connection's own record, which an announcement did not
-        // bring yet: the attempt replaces it.
-        if (saved?.id === id) e.revision = saved.revision;
-        else if (saved) {
+        if (saved?.id === id) {
+          // This connection's own record, which an announcement did not
+          // bring yet (the default Pod's stable id): a session another tab
+          // stored is this tab's too; otherwise the attempt replaces it.
+          const { kind } = saved.value;
+          if (kind === 'ready' || kind === 'claimed') {
+            await serial(e, async () => {
+              adopt(e, saved);
+            });
+            const joined = entries.get(id);
+            if (joined) return { joined, kind };
+          }
+          e.revision = saved.revision;
+        } else if (saved) {
           preparing.delete(id);
           admit(saved);
           const joined = entries.get(saved.id);
@@ -2463,7 +2497,8 @@ export function createBrowserRuntime(
         // A connection another tab saved for this Pod (signed in, remembered
         // or being signed in to) is this tab's too; alone, no other tab
         // saves any.
-        const saved = await savedFor(url);
+        // Best effort: unreadable, this tab lists none.
+        const saved = await savedFor(url).catch(() => undefined);
         if (saved) admit(saved);
         if (disposed) throw new RuntimeError('disconnected');
         /** One listed meanwhile, also announced by another tab. */

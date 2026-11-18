@@ -606,6 +606,84 @@ it('retires only the session that ended, not one it adopted while that waited', 
   expect(t.session(b)).toMatchObject({ kind: 'active' });
 });
 
+it('reads a change queued for a connection that an earlier change replaced', async () => {
+  const channels = memoryChannels();
+  const t = await tabs(channels);
+  t.b.dispose();
+  // While `gate` is set, tab b's reads return the record as it was when
+  // read, after the gate opens.
+  let gate: Promise<void> | undefined;
+  let reading = false;
+  const b = createBrowserRuntime({
+    ...t.options,
+    openStore: storeWith(
+      t.factory,
+      (store) => ({
+        async read(id) {
+          const stored = store.read(id);
+          if (gate) {
+            reading = true;
+            await gate;
+          }
+          return stored;
+        },
+      }),
+      channels,
+    ),
+  });
+  runtimes.push(b);
+  await b.initialize();
+  await restored(b);
+  const release = deferred<void>();
+  gate = release.promise;
+  // Tab b reads tab a's attempt, and hears of its completion meanwhile.
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  await vi.waitFor(() => expect(reading).toBe(true));
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  await quiet();
+  gate = undefined;
+  release.resolve();
+  // The attempt replaces tab b's connection; the completion follows it.
+  await quiet();
+  expect(t.session(b)).toMatchObject({ kind: 'active' });
+  expect(b.bindPod(t.id)).toBeDefined();
+});
+
+it('restores an earlier grant another tab resumed under its own client', async () => {
+  const t = await tabs();
+  // Tab a's re-authorization registers another client, then is declined.
+  const original = t.fetch.getMockImplementation()!;
+  t.fetch.mockImplementation(async (url, init) => {
+    const response = await original(url, init);
+    if (!url.endsWith('/register')) return response;
+    const body = (await response.json()) as Record<string, unknown>;
+    return Response.json({ ...body, client_id: 'dyn:second' }, { status: 201 });
+  });
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({ kind: 'ended' }),
+  );
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'cancelled' });
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({ kind: 'active' }),
+  );
+  // Tab b renews with the client of the grant it uses.
+  await t.b.loadContexts(t.id);
+  t.b.selectContext(t.id, work);
+  advance(3600_000);
+  expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes().at(-1)?.get('client_id')).toBe('dyn:test');
+  expect(t.session(t.b)).toMatchObject({ kind: 'active' });
+});
+
 it('keeps a sign-out that could not be saved blocked when another tab renews that session', async () => {
   let failing = false;
   const channels = memoryChannels();
@@ -825,6 +903,74 @@ describe('one saved connection per Pod across tabs', () => {
       ]),
     );
     expect(await records(factory)).toHaveLength(1);
+  });
+  it('joins the default Pod’s session another tab stored that this tab missed', async () => {
+    const { channels, freeze } = freezable();
+    const factory = new IDBFactory();
+    const f = fixture({
+      locks: memoryLocks(),
+      signIn: 'optional',
+      preset: { podUrl: pod },
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    runtimes.push(f.runtime);
+    const b = createBrowserRuntime(f.options);
+    runtimes.push(b);
+    await b.initialize();
+    // The default Pod's connection has the same id in every tab.
+    expect(b.getSnapshot()).toMatchObject([
+      { id: pod, session: { kind: 'signed-out' } },
+    ]);
+    freeze(true);
+    const { runtime: a } = await f.login();
+    runtimes.push(a);
+    const navigations = f.navigate.mock.calls.length;
+    await b.beginAuthorization(pod);
+    expect(f.navigate.mock.calls).toHaveLength(navigations);
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id: pod, session: { kind: 'active' } },
+      ]),
+    );
+    const saved = await records(factory);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.value).toMatchObject({ kind: 'ready' });
+  });
+  it('leaves the saved connections alone when a first sign-in cannot list them', async () => {
+    const { channels, freeze } = freezable();
+    const factory = new IDBFactory();
+    let failing = false;
+    const f = fixture({
+      locks: memoryLocks(),
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    runtimes.push(f.runtime);
+    const b = createBrowserRuntime({
+      ...f.options,
+      openStore: storeWith(
+        factory,
+        (store) => ({
+          list: () =>
+            failing ? Promise.reject(new Error('unreadable')) : store.list(),
+        }),
+        channels,
+      ),
+    });
+    runtimes.push(b);
+    await b.initialize();
+    const own = await b.connect(pod);
+    freeze(true);
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    failing = true;
+    const navigations = f.navigate.mock.calls.length;
+    await expect(b.beginAuthorization(own.id)).rejects.toMatchObject({
+      problem: 'storage',
+    });
+    expect(f.navigate.mock.calls).toHaveLength(navigations);
+    const saved = await records(factory);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ id, value: { kind: 'ready' } });
   });
   it('lists a connection another tab added while this page was in the back/forward cache', async () => {
     const pageshow = bfcache();

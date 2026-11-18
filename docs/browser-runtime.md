@@ -785,7 +785,8 @@ one whose sign-in is under way there (`interrupted` until it is stored), and a s
 session another tab stored for that Pod meanwhile instead of leaving for it,
 or continues on the connection another tab started signing in to; tabs decide
 the first record for a Pod under a Web Lock, so one Pod keeps one saved
-connection. A connection another tab forgot leaves
+connection; a sign-in that cannot list the saved records there rejects with
+`storage` and changes nothing. A connection another tab forgot leaves
 this tab with its Context choice. A tab's own sign-out also applies to a
 record another tab changed meanwhile, and one that could not be saved stays
 blocked when another tab renews that session. Under `optional`, a connection
