@@ -5799,10 +5799,33 @@ async function contexts({ browser, origin }) {
     await page
       .getByRole('button', { name: 'List: Einkaufsliste · Privat' })
       .waitFor();
+    const mark = trigger().getByText('K', { exact: true }).locator('..');
+    const singleMark = await mark.boundingBox();
     await page.getByRole('button', { name: 'Connect second Pod' }).click();
     await page
       .getByRole('button', { name: 'List: Einkaufsliste · Familie/' })
       .waitFor();
+    const doubleMark = await mark.boundingBox();
+    const title = await trigger()
+      .getByText('Einkaufsliste', { exact: true })
+      .boundingBox();
+    const chevron = await trigger().locator('svg').boundingBox();
+    const titleCenter = title.y + title.height / 2;
+    const chevronCenter = chevron.y + chevron.height / 2;
+    const gap = chevron.x - (title.x + title.width);
+    results.push({
+      id: 'trigger-title-layout',
+      pass:
+        doubleMark.height > singleMark.height &&
+        Math.abs(chevronCenter - titleCenter) <= 1 &&
+        gap >= 0 &&
+        gap <= 8,
+      singleMark,
+      doubleMark,
+      gap,
+      titleCenter,
+      chevronCenter,
+    });
     for (const scheme of ['light', 'dark']) {
       step = `grouped-${scheme}`;
       await page.emulateMedia({ colorScheme: scheme });

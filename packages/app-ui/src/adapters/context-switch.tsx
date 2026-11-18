@@ -50,7 +50,7 @@ export interface ContextSwitchProps {
   readonly title: string;
   /** The app's word for a Context, for example "List". Defaults to "Context". */
   readonly label?: string;
-  /** Decorative app icon, shown in a fixed leading column. */
+  /** Decorative app icon, sized to the visible title block. */
   readonly icon?: ReactNode;
   /** Optional configured Pod names, keyed by exact Pod URL; no extra requests. */
   readonly podNames?: Readonly<Record<string, string>>;
@@ -88,6 +88,7 @@ export function ContextSwitch({
   const t = withTexts(useAdapterTexts(), texts);
   const noun = label ?? t.context;
   const selected = lists.selected;
+  const showSubtitle = !selected || lists.pods.length > 1;
   const shareLabel = t.shareContexts;
   // Loading or failure is not an empty grant: only a loaded Pod offers it.
   const shareEmpty = (pod: PodContextGroup) =>
@@ -173,7 +174,7 @@ export function ContextSwitch({
       <DropdownMenuTrigger>
         <Button
           variant="ghost"
-          className="h-16 min-w-48 max-w-full justify-start gap-3 rounded-xl px-4 text-start whitespace-normal"
+          className="h-16 w-fit min-w-11 max-w-full justify-start gap-2 rounded-xl px-4 text-start whitespace-normal"
           aria-label={
             selected
               ? `${noun}: ${selected.label} · ${selected.podLabel}`
@@ -183,27 +184,26 @@ export function ContextSwitch({
           {icon && (
             <span
               aria-hidden="true"
-              className="flex size-7 shrink-0 items-center justify-center overflow-hidden [&_svg]:size-7"
+              className={`flex shrink-0 items-center justify-center overflow-hidden [&_svg]:size-full! [&_img]:size-full [&_img]:object-contain ${showSubtitle ? 'size-9' : 'size-7'}`}
             >
               {icon}
             </span>
           )}
-          <span className="grid min-w-0 flex-1 gap-0.5">
-            <span className="truncate text-lg font-semibold">
-              {selected ? contextText(selected) : title}
+          <span className="grid min-w-0 gap-0.5">
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="truncate text-lg font-semibold">
+                {selected ? contextText(selected) : title}
+              </span>
+              <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0" />
             </span>
             {/* With one Pod its name says nothing to choose between; the
                 accessible name keeps it. */}
-            {(!selected || lists.pods.length > 1) && (
+            {showSubtitle && (
               <span className="truncate text-xs font-normal text-muted-foreground">
                 {selected?.podLabel ?? t.chooseContext}
               </span>
             )}
           </span>
-          <ChevronDownIcon
-            aria-hidden="true"
-            className="ms-1 size-4 shrink-0"
-          />
         </Button>
         <Popover
           placement="bottom start"

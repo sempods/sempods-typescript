@@ -704,9 +704,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   ([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#changing-what-the-app-may-access),
   installed as `node_modules/@sempods/app-sdk/docs/react-authoring.md`).
 
-  The trigger shows the Context and, below it, its Pod, with 16px inline
-  padding, a 12px gap and a 64px height; with a single connected Pod it shows
-  only the Context, and its accessible name still names the Pod. The menu
+  The trigger places the chevron beside the Context name. With several Pods,
+  it adds the Pod below and sizes the app icon for both lines. With one Pod,
+  it uses a smaller icon and keeps the Pod in the accessible name. The menu
   groups concise Context names under their Pod, with 52px minimum rows. Equal
   names within one Pod show their `qualifier` more quietly; equal names on
   different Pods need none. An editable Context has no mark; a read-only one
