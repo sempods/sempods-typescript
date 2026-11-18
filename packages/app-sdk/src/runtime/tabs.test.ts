@@ -536,10 +536,7 @@ it('stops the earlier session for a refresh another tab claimed for a newer sign
   freeze(false);
   pageshow();
   await vi.waitFor(() =>
-    expect(t.session(t.b)).toMatchObject({
-      kind: 'ended',
-      problem: 'interrupted',
-    }),
+    expect(t.session(t.b)).toMatchObject({ kind: 'restoring' }),
   );
   const sent = t.sent.length;
   expect(await view.sparql.construct(query)).toEqual({ kind: 'invalidated' });
@@ -582,6 +579,14 @@ it('retires only the session that ended, not one it adopted while that waited', 
   const release = deferred<void>();
   gate = release.promise;
   freeze(false);
+  // The newer session outlives tab b's earlier one.
+  t.setToken(async () =>
+    Response.json({
+      access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 3 * 3600 }),
+      token_type: 'Bearer',
+      expires_in: 3 * 3600,
+    }),
+  );
   const back = t.returned();
   runtimes.push(back);
   expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
@@ -775,9 +780,11 @@ describe('one saved connection per Pod across tabs', () => {
     release();
     await signingIn;
     expect(f.navigate.mock.calls).toHaveLength(navigations);
-    expect(b.getSnapshot()).toMatchObject([
-      { id, session: { kind: 'active' } },
-    ]);
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id, session: { kind: 'active' } },
+      ]),
+    );
     expect(await records(factory)).toHaveLength(1);
   });
   it('continues on the connection another tab starts signing in to while this tab prepares', async () => {
@@ -806,7 +813,7 @@ describe('one saved connection per Pod across tabs', () => {
     const { authorization } = await f.begin();
     f.runtime.dispose();
     const own = await b.connect(pod);
-    expect(own.session).toEqual({ kind: 'signed-out' });
+    expect(own.session).toEqual({ kind: 'ended', problem: 'interrupted' });
     const back = f.returned(authorization);
     runtimes.push(back);
     expect(await back.initialize()).toMatchObject({

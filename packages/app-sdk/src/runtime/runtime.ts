@@ -414,11 +414,6 @@ export function createBrowserRuntime(
     if (change.kind === 'conflict') throw changedElsewhere(e);
     e.revision = change.record.revision;
   }
-  /** Records a revision another tab stored, which this tab now follows. */
-  function follow(e: Entry, revision: string | null) {
-    e.revision = revision;
-    e.adopted++;
-  }
   /**
    * Runs `work` while this tab holds the connection's refresh lock, which
    * every tab of the app takes to claim, send or resend a refresh: another
@@ -483,99 +478,125 @@ export function createBrowserRuntime(
     return s.kind !== 'signed-out' && !(s.kind === 'ended' && !s.restorable);
   }
   /**
-   * Shows what another tab stored for this connection as a start would list
-   * it, without starting anything: a renewed credential or a new sign-in is
-   * used here too, a sign-out ends this tab's session and a deletion removes
-   * the connection, and a sign-in under way elsewhere stops this tab's
-   * session until its result is stored. A refresh another tab claimed stays
-   * that tab's (see `latest`). Runs inside `serial`; returns whether it
-   * changed this tab's connection.
+   * Follows what another tab stored for this connection. A renewal of this
+   * session is used here too and a refresh another tab claimed for it stays
+   * that tab's (see `latest`); anything else lists the record anew, as a
+   * start would (`replace`). Runs inside `serial`; returns whether it changed
+   * this tab's connection.
    */
   function adopt(e: Entry, stored: SessionSnapshot | undefined): boolean {
     if ((stored?.revision ?? null) === e.revision) return false;
     if (entries.get(e.view.id) !== e || disposed) return false;
     // This tab's own sign-out or forget continues on the newer record.
     if (disconnects.has(e.view.id)) {
-      follow(e, stored?.revision ?? null);
+      e.revision = stored?.revision ?? null;
       return false;
     }
-    if (!stored) {
-      // Forgotten in another tab, or signed out there without remembering
-      // it: so is the Context this tab chose for it.
-      stop(e, { kind: 'signed-out' });
-      entries.delete(e.view.id);
-      contexts.forget(e.view.id);
-      ensureDefault();
-      publish();
-      return true;
-    }
-    const value = stored.value;
-    const b = sessionBinding(value);
-    // A refresh of this session that another tab claimed stays that tab's
-    // (see `latest`); one of a newer sign-in ends this tab's earlier session
-    // below, until its result is stored.
-    if (
-      value.kind === 'claimed' &&
-      value.operation === 'refresh' &&
-      b.generation === e.generation
-    )
-      return false;
-    follow(e, stored.revision);
+    const value = stored?.value;
+    const same = value && sessionBinding(value).generation === e.generation;
     // A sign-out or forget here that could not be saved keeps this session
     // blocked, and a retry applies to the newer record; only a new sign-in
     // elsewhere, or a sign-out there that saves a sign-out, replaces it.
-    const blocked = e.view.session;
+    const s = e.view.session;
     if (
-      blocked.kind === 'ended' &&
-      blocked.problem === 'disconnected' &&
-      blocked.saved === false &&
-      b.generation === e.generation &&
+      same &&
+      s.kind === 'ended' &&
+      s.problem === 'disconnected' &&
+      s.saved === false &&
       (value.kind !== 'disconnected' || e.forgetting)
-    )
+    ) {
+      e.revision = stored!.revision;
       return false;
-    if (value.kind === 'ready') {
-      if (e.lost) clearTimeout(e.lost.timer);
-      delete e.lost;
-      delete e.restorable;
-      if (b.generation !== e.generation || e.lifetime.signal.aborted) {
-        // A new sign-in in another tab: nothing of this tab's earlier
-        // session continues.
-        renewLifetime(e, b.generation, new RuntimeError('disconnected'));
-        delete e.forgetting;
-        // As a start shows it: Context access is checked again before any
-        // view of the new session uses it, and the choice reselected then.
-        e.view = {
-          ...e.view,
-          requestedScopes: b.scopes,
-          catalogue: Object.freeze({ kind: 'unknown' }),
-          selectedContext: null,
-        };
+    }
+    if (same && !e.lifetime.signal.aborted) {
+      if (value.kind === 'claimed' && value.operation === 'refresh')
+        return false;
+      if (value.kind === 'ready') {
+        e.revision = stored!.revision;
+        if (e.lost) clearTimeout(e.lost.timer);
+        delete e.lost;
+        delete e.restorable;
+        install(e, value.credentials);
+        return true;
       }
-      e.pod = b.pod;
-      e.client = b.client;
-      install(e, value.credentials);
-      return true;
     }
-    if (value.kind === 'disconnected') {
-      const fact = signedOut(value.reason);
-      // A connection reading without a token keeps doing so: it had no
-      // session here to end.
-      if (e.anonymous) e.view = { ...e.view, session: fact };
-      else {
-        stop(e, fact);
-        // As this tab's own sign-out leaves it.
-        e.view = { ...e.view, selectedContext: null };
-      }
-      publish();
-      return true;
-    }
-    // Another tab signs in to this connection (an attempt or its code claim),
-    // or renews a session it signed in to since.
-    if (inSession(e)) {
-      stop(e, { kind: 'ended', problem: 'interrupted' });
-      publish();
-    }
+    replace(e, stored);
     return true;
+  }
+  /**
+   * Lists the record anew, as a start would, in place of `e`: nothing of this
+   * tab's connection continues. A deleted record removes the connection and
+   * the Context chosen for it.
+   */
+  function replace(e: Entry, stored: SessionSnapshot | undefined) {
+    const id = e.view.id;
+    const next = stored && fromRecord(stored);
+    // Replaced first, so the old connection does not settle to read without
+    // a token, and keeps its place in the list.
+    if (next) entries.set(id, next);
+    else entries.delete(id);
+    stop(e, { kind: 'signed-out' });
+    if (next) {
+      settle(next);
+      begin(next, stored!.value);
+    } else {
+      contexts.forget(id);
+      ensureDefault();
+    }
+    publish();
+  }
+  /**
+   * A connection for a saved record, as a start lists it: a session or a
+   * refresh claim restores, a remembered address is signed out, and a sign-in
+   * under way shows as interrupted, or restores the session it started from
+   * (`resumes`).
+   */
+  function fromRecord(saved: SessionSnapshot, resumes = false): Entry {
+    const value = saved.value;
+    const b = sessionBinding(value);
+    const e = createEntry(
+      b.pod.podUrl,
+      b.pod,
+      b.client,
+      saved.id,
+      b.generation,
+    );
+    e.revision = saved.revision;
+    if (value.kind === 'disconnected') {
+      // A retired record holds only the address (binding) and why its
+      // session ended: a remembered Pod, signed out.
+      e.view = { ...e.view, session: signedOut(value.reason) };
+      return e;
+    }
+    const problem = interruption(value);
+    const restores =
+      value.kind === 'ready' ||
+      resumes ||
+      (value.kind === 'claimed' && value.resend !== undefined);
+    e.view = {
+      ...e.view,
+      requestedScopes: b.scopes,
+      session: Object.freeze(
+        restores ? { kind: 'restoring' } : { kind: 'ended', problem },
+      ),
+    };
+    return e;
+  }
+  /** How a sign-in under way elsewhere, or left, shows here. */
+  function interruption(value: SessionRecord): RuntimeProblem {
+    return value.kind === 'authorizing' && value.attempt.expiresAt <= Date.now()
+      ? 'expired'
+      : 'interrupted';
+  }
+  /**
+   * Starts what `fromRecord` lists as restoring, apart from a resumed
+   * sign-in: a session restores, and a refresh claim no tab finished is
+   * resent once within the grace period (also one of SDK 0.8), or ends as
+   * `interrupted`.
+   */
+  function begin(e: Entry, value: SessionRecord) {
+    if (value.kind === 'ready') void restore(e, value);
+    else if (value.kind === 'claimed' && value.resend) void resumeLost(e);
   }
   /**
    * Lists a connection another tab saved, which this tab does not list yet
@@ -606,18 +627,10 @@ export function createBrowserRuntime(
       entries.delete(x.view.id);
       stop(x, { kind: 'signed-out' });
     }
-    const e = createEntry(
-      b.pod.podUrl,
-      b.pod,
-      b.client,
-      stored.id,
-      b.generation,
-    );
-    e.view = { ...e.view, requestedScopes: b.scopes };
+    const e = fromRecord(stored);
     entries.set(stored.id, e);
-    // A refresh another tab claimed: its result follows.
-    if (!adopt(e, stored)) follow(e, stored.revision);
     settle(e);
+    begin(e, stored.value);
     publish();
     return true;
   }
@@ -684,7 +697,7 @@ export function createBrowserRuntime(
           value.binding.generation === e.generation)
       ) {
         if (stored.revision !== e.revision) {
-          follow(e, stored.revision);
+          e.revision = stored.revision;
           // The claim spent the refresh token this tab still holds.
           if (e.credentials) e.credentials = withoutRefresh(e.credentials);
         }
@@ -908,11 +921,7 @@ export function createBrowserRuntime(
      */
     insist = false,
   ) {
-    // A record this tab adopted from another tab while the retirement
-    // waited is not the ended session's to retire.
-    const adopted = e.adopted;
     return serial(e, async () => {
-      if (!insist && e.adopted !== adopted) return e.revision !== null;
       for (let round = 0; ; round++) {
         if (!sessions || !e.revision) {
           contexts.forget(e.view.id);
@@ -1376,7 +1385,6 @@ export function createBrowserRuntime(
       podReads: new AbortController(),
       podEpoch: 0,
       revision: null,
-      adopted: 0,
       persistence: Promise.resolve(),
       epoch: 0,
       selectedVersion: 0,
@@ -1488,9 +1496,8 @@ export function createBrowserRuntime(
   ) {
     const generation = e.generation;
     const events = onlineEvents;
-    // Another tab may store a newer state meanwhile, which this tab adopts.
-    const adopted = e.adopted;
-    const newer = () => e.adopted !== adopted;
+    // Another tab may renew the session meanwhile, which this tab installs.
+    const newer = () => e.view.session.kind !== 'restoring';
     try {
       const pod = await discover(e.view.podUrl, e.lifetime.signal);
       current(e, generation);
@@ -1548,10 +1555,9 @@ export function createBrowserRuntime(
     saved: Extract<SessionRecord, { kind: 'ready' }>,
   ) {
     const progress = { consumed: false };
-    // The record restoration listed; another tab's change, adopted while this
-    // tab waited for the lock, replaces it (and its spent refresh token).
-    const adopted = e.adopted;
-    const fresh = () => e.adopted === adopted;
+    // The record restoration listed; another tab's renewal, installed while
+    // this tab waited for the lock, replaces it (and its spent refresh token).
+    const fresh = () => e.view.session.kind === 'restoring';
     const failed = (error: unknown) => {
       if (!fresh()) return;
       refreshFailed(e, generation, error, progress.consumed, () => {
@@ -1721,7 +1727,6 @@ export function createBrowserRuntime(
   /** Resumes an abandoned re-authorization at startup; publishes its own outcome. */
   async function resumeAbandoned(e: Entry, ineligible: RuntimeProblem) {
     const generation = e.generation;
-    const adopted = e.adopted;
     let problem: RuntimeProblem = ineligible;
     let cause: unknown;
     try {
@@ -1730,11 +1735,11 @@ export function createBrowserRuntime(
       problem = runtimeProblem(error);
       cause = error;
     }
-    // Unless this tab adopted, or is about to read, what another tab stored
-    // meanwhile.
+    // Unless another tab renewed it meanwhile, or this tab is about to read
+    // what another tab stored.
     if (
       eligible(e, generation) &&
-      e.adopted === adopted &&
+      e.view.session.kind === 'restoring' &&
       !superseded(cause)
     ) {
       e.view = {
@@ -1981,7 +1986,7 @@ export function createBrowserRuntime(
         current(e, before);
         // This connection's own record, which an announcement did not
         // bring yet: the attempt replaces it.
-        if (saved?.id === id) follow(e, saved.revision);
+        if (saved?.id === id) e.revision = saved.revision;
         else if (saved) {
           preparing.delete(id);
           admit(saved);
@@ -2076,8 +2081,6 @@ export function createBrowserRuntime(
       if (disposed) throw new RuntimeError('disconnected');
       let pending: SessionSnapshot | undefined;
       const abandoned: { e: Entry; problem: RuntimeProblem }[] = [];
-      /** Refreshes an earlier page sent without an answer, resent once below. */
-      const lost: Entry[] = [];
       /** Addresses an earlier start remembered, deleted under `rememberPods: false`. */
       const forgotten: SessionSnapshot[] = [];
       /** The silent first sign-in's own attempt, deleted after coming back without an answer. */
@@ -2136,26 +2139,6 @@ export function createBrowserRuntime(
           represented.add(b.pod.podUrl);
         }
         if (disposed) throw new RuntimeError('disconnected');
-        const e = createEntry(
-          b.pod.podUrl,
-          b.pod,
-          b.client,
-          saved.id,
-          b.generation,
-        );
-        e.revision = saved.revision;
-        if (saved.value.kind === 'disconnected') {
-          // A retired record holds only the address (binding) and why its
-          // session ended: a remembered Pod, signed out.
-          e.view = { ...e.view, session: signedOut(saved.value.reason) };
-          entries.set(saved.id, e);
-          continue;
-        }
-        const problem =
-          saved.value.kind === 'authorizing' &&
-          saved.value.attempt.expiresAt <= Date.now()
-            ? 'expired'
-            : 'interrupted';
         // A re-authorization the person left without a callback (back
         // navigation, an abandoned attempt) resumes the session it started
         // from; a denial on the callback route does so below. On the callback
@@ -2168,43 +2151,24 @@ export function createBrowserRuntime(
             (pending === saved &&
               location.searchParams.has('error') &&
               !location.searchParams.has('code')));
-        if (resumes && !callback) abandoned.push({ e, problem });
-        // A refresh claim of SDK 0.8 keeps its token: resent once below
-        // within the grace period, or ended as `interrupted` otherwise.
-        const resend =
-          saved.value.kind === 'claimed' ? saved.value.resend : undefined;
-        if (resend) lost.push(e);
-        e.view = {
-          ...e.view,
-          requestedScopes: b.scopes,
-          requiredScopes: required,
-          optionalScopes: optional,
-          session: Object.freeze(
-            saved.value.kind === 'ready' || resumes || resend
-              ? { kind: 'restoring' }
-              : { kind: 'ended', problem },
-          ),
-        };
+        const e = fromRecord(saved, resumes);
+        if (resumes && !callback)
+          abandoned.push({ e, problem: interruption(saved.value) });
+        entries.set(saved.id, e);
         entries.set(saved.id, e);
       }
       publish();
       // Best effort: a record left by a failed deletion is deleted next time.
       for (const saved of forgotten)
         void erase(saved.id, saved.revision).catch(() => {});
-      const restoring = Promise.all(
-        listing.records.map((saved) => {
-          const e = entries.get(saved.id);
-          return e && saved.value.kind === 'ready'
-            ? restore(e, saved.value)
-            : undefined;
-        }),
-      );
-      for (const { e, problem } of abandoned) void resumeAbandoned(e, problem);
-      for (const e of lost) void resumeLost(e);
       // Restoration publishes per connection (`restoring` → `active`/`ended`).
       // Neither the startup report nor a callback waits for another Pod, so
       // one Pod whose discovery never settles cannot hold the app open.
-      void restoring;
+      for (const saved of listing.records) {
+        const e = entries.get(saved.id);
+        if (e) begin(e, saved.value);
+      }
+      for (const { e, problem } of abandoned) void resumeAbandoned(e, problem);
       if (disposed) throw new RuntimeError('disconnected');
       initialized = true;
       const heard = early;

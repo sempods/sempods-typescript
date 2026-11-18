@@ -199,7 +199,9 @@ once, and the other tabs wait for that lock and then read the stored result.
 The store announces each change to the other tabs (`BroadcastChannel`), so a
 renewal, a new sign-in, a sign-out or a forget reaches every tab; a sign-in
 under way in one tab stops the session in the others until its result is
-stored. Context selection and drafts stay per tab. A store that cannot
+stored. A tab uses another tab's renewal of the same session as it is; any
+other change makes it list that connection anew, as a reload would, so
+nothing of the earlier state continues. Context selection and drafts stay per tab. A store that cannot
 announce changes keeps one active tab per app, and a second tab shows a clear
 notice. Renewal happens on demand: before a request whose credential is about to expire,
 or after a request refused with a Bearer challenge. There is no background timer.
@@ -227,7 +229,10 @@ the server would accept, and another attempt would only trigger reuse
 detection. People keep several conversations or lists open side by side; the
 lock makes the other tabs wait for one refresh instead of failing its
 compare-and-swap, and a claim no tab holds the lock for is one whose tab left,
-so another tab may send its one resend. The two leases exclude each other, also
+so another tab may send its one resend. Listing a changed record as a start
+does reuses one path instead of a rule for each pair of local and stored
+state; the cost is a short `restoring` where a tab could have taken a stored
+session as it is. The two leases exclude each other, also
 against a tab of an SDK before 0.9.0. The token's own lifetime justifies renewal
 without trusting a response, so a Pod that omits its challenge cannot strand a
 session past its token's expiry; idle apps send nothing. A challenge-less `401`

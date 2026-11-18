@@ -760,7 +760,9 @@ takes a shared lease; a connection's refresh is claimed under its own Web Lock
 after the tab read the record again, so one refresh token is sent once, also
 when several tabs need a new credential at the same time. The other tabs wait
 for that lock and then use the stored result. The store announces every change
-to the app's other tabs with a `BroadcastChannel`:
+to the app's other tabs with a `BroadcastChannel`. A renewal of the same
+session is used as it is; any other change lists the connection anew, as a
+reload would:
 
 | In one tab                               | The other tabs                                                              |
 | ---------------------------------------- | --------------------------------------------------------------------------- |
@@ -768,7 +770,7 @@ to the app's other tabs with a `BroadcastChannel`:
 | Signs out, or a session ends there       | `signed-out` (with `problem`), as a reload would list it                    |
 | Forgets the connection                   | The connection leaves their snapshot                                        |
 | Leaves for a sign-in or re-authorization | `ended { problem: 'interrupted' }` until the result is stored               |
-| Completes that sign-in                   | `active` with the new session; its catalogue loads again                    |
+| Completes that sign-in                   | `restoring`, then `active` with the new session; its catalogue loads again  |
 | Closes while its refresh answer is out   | The next tab that needs the session resends it once within the grace period |
 
 Context selection, bound views and drafts stay per tab: another tab's renewal
@@ -779,7 +781,7 @@ last ones on the device. A connection another tab saves for a Pod this tab has
 not saved (a first sign-in) is listed here too, replacing a connection to the
 same Pod without a record or session, unless this tab is preparing a sign-in
 there. `connect()` returns a connection another tab saved for its Pod, also
-one whose sign-in is under way there, and a sign-in prepared here uses a
+one whose sign-in is under way there (`interrupted` until it is stored), and a sign-in prepared here uses a
 session another tab stored for that Pod meanwhile instead of leaving for it,
 or continues on the connection another tab started signing in to; tabs decide
 the first record for a Pod under a Web Lock, so one Pod keeps one saved
