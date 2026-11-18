@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="light dark">
+<title>Pods &amp; Freigaben · Interaktiver Entwurf</title>
+<style>
+:root{color-scheme:light dark;--bg:light-dark(#f4f6f2,#16201b);--paper:light-dark(#fffefa,#1c2821);--ink:light-dark(#22332a,#e0ebe2);--muted:light-dark(#536759,#b0c1b4);--line:light-dark(#d6ded5,#435448);--tint:light-dark(#e9f1e8,#293e30);--green:light-dark(#345e45,#aad4b2);--on:light-dark(#fff,#16291b);font:100%/1.45 system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+*{box-sizing:border-box}body{margin:0}main{max-width:48rem;margin:auto;padding:2rem 1.2rem}main header, .row {display:flex;align-items:center;gap:.8rem}main header strong{font-size:1.2rem}main button{margin-left:auto}main ul{list-style:none;padding:0}main li{padding:1rem 0;border-bottom:1px solid var(--line)}button,input{font:inherit;color:inherit}button{background:transparent;border:0;cursor:pointer}button:focus-visible,input:focus-visible{outline:3px solid var(--green);outline-offset:2px}button{min-height:44px}button:disabled{opacity:.55;cursor:default}svg{width:1.25rem;height:1.25rem;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+dialog{color:var(--ink);background:var(--paper);padding:0;border:1px solid var(--line);border-radius:1.25rem;width:min(31rem,calc(100% - 2rem));max-height:min(84dvh,48rem);box-shadow:0 18px 80px #101b1a35}
+dialog[open]{display:flex;flex-direction:column}dialog::backdrop{background:rgb(17 27 22/.38)}.head{padding:1.1rem 1.25rem .6rem;display:flex;align-items:center;gap:.4rem;flex:none}h1{font-size:1.33rem;line-height:1.2;letter-spacing:-.025em;margin:0}.icon{display:grid;place-items:center;min-width:44px;border-radius:50%}.close{margin-left:auto}.icon:hover,.quiet:hover{background:var(--tint)}.body{overflow:auto;overscroll-behavior:contain;padding:.3rem 1.3rem .9rem}.pod{border:1px solid var(--line);border-radius:.85rem;margin-bottom:.65rem}.toggle{width:100%;display:flex;align-items:center;gap:.7rem;padding:.8rem;text-align:left}.tile{display:grid;place-items:center;width:2.5rem;height:2.5rem;flex:none;background:var(--tint);color:var(--green);border-radius:.75rem}.name{flex:1;min-width:0}.name strong,.name small{display:block;overflow-wrap:anywhere}.name small,.hint,.right{color:var(--muted);font-size:.86rem}.chev{width:1rem}.open .chev{transform:rotate(180deg)}.details{margin:0 .85rem;padding:.5rem 0 .65rem;border-top:1px solid var(--line)}.rights{margin:0;padding:0;list-style:none}.rights li{display:flex;justify-content:space-between;align-items:baseline;gap:.65rem;padding:.34rem .1rem}.right{text-align:right}.actions{display:flex;align-items:center;gap:.2rem .6rem;flex-wrap:wrap;margin-top:.55rem}.btn,.quiet,.add{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;border-radius:.6rem;font-weight:600;padding:.45rem .75rem}.btn{background:var(--green);color:var(--on)}.quiet{font-size:.875rem;color:var(--muted);font-weight:500}.add{color:var(--green);width:100%;border:1px solid var(--line)}.footer{padding:.85rem 1.3rem max(1rem,env(safe-area-inset-bottom));border-top:1px solid var(--line);flex:none}h2{font-size:1.12rem;margin:.2rem 0}.hint{margin:.4rem 0 1rem}label{display:block;margin:.85rem 0 .35rem}input{width:100%;border:1px solid var(--line);border-radius:.5rem;padding:.65rem;background:var(--paper)}.choice{display:flex;gap:.6rem;align-items:center;min-height:44px;margin:0}.choice input{width:1.2rem;height:1.2rem}.step{padding-bottom:.5rem}.note{color:var(--muted);font-size:.8rem;margin-top:2rem}
+@media(max-width:34rem){dialog{width:100%;max-width:100%;max-height:calc(100dvh - max(.75rem,env(safe-area-inset-top)));margin:auto 0 0;border-radius:1.2rem 1.2rem 0 0}.head{padding:.75rem .85rem .45rem}.body,.footer{padding-left:1rem;padding-right:1rem}.actions{align-items:flex-start}.btn,.quiet{padding-inline:.6rem}}
+@media(max-height:26rem){dialog{max-height:98dvh}.head,.footer{padding-block:.3rem}}
+dialog{width:min(35rem,calc(100% - 2rem));border-radius:1rem}
+.head{padding:.9rem 1.25rem .2rem}.body{padding:.2rem 1.25rem .35rem}
+.pod{border:0;border-radius:0;border-top:1px solid var(--line);margin:0}
+.pod-head{display:flex;align-items:center;gap:.15rem;padding:.15rem 0}
+.toggle{flex:1;min-width:0;gap:.55rem;padding:.15rem .2rem;font-weight:600}
+.toggle svg{color:var(--muted);width:1rem;height:1rem}
+.toggle[aria-expanded=true] svg{transform:rotate(90deg)}
+.name strong{font-size:1rem}.status{font-size:.78rem;font-weight:500;color:var(--muted)}
+.details{margin:0 0 0 1.75rem;border:0;padding:0 .45rem .6rem 0}
+.rights li{padding:.2rem 0;font-size:.9rem;overflow-wrap:anywhere}.right{font-size:.82rem}
+.scope{margin:.1rem 0 .85rem;color:var(--muted);font-size:.9rem}
+.footer{padding:.35rem 1.25rem max(.4rem,env(safe-area-inset-bottom))}
+.add{width:auto;border:none;padding:.35rem .25rem;font-size:.94rem}.add:hover{color:var(--ink)}
+.more{min-width:44px;color:var(--muted)}.more svg{width:1.15rem}.more[aria-expanded=true]{background:var(--tint)}
+#commands{position:fixed;inset:auto;margin:0;padding:.25rem;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:.7rem;box-shadow:0 .4rem 1.5rem #10231826;max-width:calc(100vw - 1rem);max-height:80dvh;overflow:auto}
+#commands button{display:block;width:100%;padding:.4rem .75rem;text-align:left;border-radius:.4rem;font-size:.91rem}
+#commands button:hover,#commands button:focus-visible{background:var(--tint)}
+[hidden]{display:none!important}.preview a{color:var(--green)}
+@media(max-width:34rem){dialog{width:100%;border-radius:1rem 1rem 0 0}.head{padding:.6rem .9rem .1rem}.body,.footer{padding-inline:1rem}.details{margin-left:1.6rem}}
+#welcome{max-width:24rem;margin:clamp(3rem,17vh,11rem) auto 3rem}
+#welcome h1{margin-bottom:1.3rem}.mark{display:inline-grid;place-items:center;color:var(--on);background:var(--green);border-radius:.6rem;width:2.2rem;height:2.2rem;margin-right:.65rem}
+#first-action{margin-top:1rem}.empty-copy{margin:.35rem 0 1rem;color:var(--muted)}
+#welcome{position:fixed;inset:0;z-index:1;margin:0;max-width:none;background:var(--paper)}
+#welcome iframe{display:block;width:100%;height:100%;border:0}
+</style>
+<main><section id="welcome" hidden></section><section id="workspace"><header><strong id="appname">Aufgaben</strong><button id="launch" class="add" style="width:auto">Pods &amp; Freigaben</button></header><p id="viewname"></p><ul id="examples"></ul></section><p class="note">Interaktiver Entwurf mit Beispieldaten</p><p class="preview"><a href="?ansicht=gemeinsam">Gemeinsame Ansicht</a> · <a href="?ansicht=einzeln">Einzelauswahl</a> · <a href="?ansicht=start">Erster Start</a> · <a href="?ansicht=abgemeldet">Erneut anmelden</a> · <a href="?ansicht=leer">Leere Verwaltung</a></p></main>
+<dialog id="dlg" aria-labelledby="title"><header class="head"><button class="icon" id="back" aria-label="Zurück"></button><h1 id="title" tabindex="-1"></h1><button class="icon close" id="close" aria-label="Schließen"></button></header><div class="body" id="body"></div><footer class="footer" id="foot"></footer><div popover="auto" id="commands" role="group"></div></dialog>
+<script>
+const $=id=>document.getElementById(id),dlg=$('dlg'),body=$('body'),foot=$('foot');
+const icons={pod:'<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 4 16 4 16 0V5M4 12v6c0 4 16 4 16 0v-6"/>',chev:'<path d="m6 9 6 6 6-6"/>',plus:'<path d="M12 5v14M5 12h14"/>',close:'<path d="m6 6 12 12M18 6 6 18"/>',back:'<path d="m14 5-7 7 7 7"/>'};
+function icon(key){return '<svg aria-hidden="true" viewBox="0 0 24 24">'+icons[key]+'</svg>'}
+const scenario=new URLSearchParams(location.search).get('ansicht');
+const multi=scenario==='gemeinsam'||!scenario;
+const commands=$('commands');
+icons.right='<path d="m9 6 6 6-6 6"/>';
+icons.more='<g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g>';
+const pods=[{name:'Privat',rights:[['Haushalt',true],['Garten',false]],online:true},{name:'Verein',rights:[['Sommerfest',true]],online:true}];
+if(['start','abgemeldet','leer'].includes(scenario))pods.length=0;
+let active=pods.length?0:-1,expanded=active,step='home',target=0,origin='add';
+let pendingName='',fromWelcome=false;
+function addressForm(){
+ return '<form id="form"><label for="address">Pod-Adresse</label><input id="address" required value="https://sempods.org/" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="url"></form>';
+}
+function bindAddress(first){
+ const input=$('address');
+ if(pendingName)input.value='https://'+pendingName;
+ const submit=document.querySelector('button[form="form"]');
+ const incomplete=()=>['','https://sempods.org','https://sempods.org/','sempods.org','sempods.org/'].includes(input.value.trim());
+ const update=()=>{input.setCustomValidity('');submit.disabled=incomplete()};
+ update();
+ $('form').onsubmit=e=>{
+   e.preventDefault();
+   if(incomplete())return;
+   try {
+     const raw=input.value.trim(), url=new URL(raw.includes('://')?raw:'https://'+raw);
+     if(url.protocol!=='https:'||!url.hostname.includes('.')||url.username||url.password||url.search||url.hash)throw Error();
+     pendingName=url.host+url.pathname.replace(/\/$/,'');
+   } catch {input.setCustomValidity('Gib eine gültige Pod-Adresse ein.');input.reportValidity();return}
+   fromWelcome=first;
+   if(first){$('welcome').replaceChildren();dlg.showModal()}
+   go('consent');
+ };
+ input.oninput=update;
+}
+function showWelcome(){
+ const welcome=$('welcome');welcome.hidden=false;$('workspace').hidden=true;
+ if(!welcome.firstElementChild){
+   const frame=document.createElement('iframe');frame.title='Focus · Anmeldevorschau';
+   frame.src='login.html'+(scenario==='abgemeldet'?'?saved=1':'');
+   welcome.appendChild(frame);
+ }
+}
+window.addEventListener('message',event=>{
+ const frame=$('welcome').firstElementChild;
+ if(!frame||event.source!==frame.contentWindow||event.origin!==location.origin||event.data?.type!=='mock-pod-chosen'||dlg.open)return;
+ const url=new URL(event.data.address);pendingName=url.host+url.pathname.replace(/\/$/,'');
+ fromWelcome=true;dlg.showModal();go('consent');
+});
+function cancelConsent(){
+ if(fromWelcome){dlg.close();showWelcome()}else{go(pods.length?'add':'home');focusId('address')}
+}
+
+function esc(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function button(txt,id,cls='btn'){return '<button type="button" id="'+id+'" class="'+cls+'">'+txt+'</button>'}
+function focusId(id){($(id)||$('title')).focus()}
+function go(next,i=target,trigger='add'){step=next;target=i;origin=trigger;render();focusId('title')}
+function home(id){step='home';render();focusId(id)}
+function render(){
+ $('back').hidden=step==='home';$('back').style.display=step==='home'?'none':'';$('back').innerHTML=icon('back');$('close').innerHTML=icon('close');$('title').textContent=({home:'Pods & Freigaben',add:'Pod verbinden',share:'Freigabe ändern',consent:'Freigabe auf dem Pod',leave:'Auf diesem Gerät abmelden?'})[step];body.scrollTop=0;foot.hidden=false;
+ if(step==='home'){
+ $('viewname').textContent=multi?'Aufgaben aus verbundenen Pods':active>=0?'Aufgaben aus '+pods[active].name:'Kein Pod ausgewählt';
+ $('examples').innerHTML=pods.flatMap((p,i)=>p.online&&(multi||active===i)?p.rights.map(([name])=>'<li>'+esc(name)+' <small>· '+esc(p.name)+'</small></li>'):[]).join('');
+ if(!pods.length){
+   body.innerHTML='<p class="empty-copy">Noch kein Pod verbunden.</p>'+addressForm();
+   foot.innerHTML='<button form="form" class="btn">Anmelden</button>';
+   bindAddress(false);return;
+ }
+ const summary=multi?'<p class="scope">Diese Ansicht zeigt Aufgaben aus allen angemeldeten Pods.</p>':'';
+ body.innerHTML=summary+pods.map((p,i)=>{
+   const open=i===expanded, status=!p.online?'Abgemeldet':!multi&&i===active?'Ausgewählt':'';
+   const rights=p.rights.map(([name,write])=>'<li><span>'+esc(name)+'</span><span class="right">'+(write?'Lesen und bearbeiten':'Nur lesen')+'</span></li>').join('');
+   const details=p.online?(rights?'<ul aria-label="Freigaben" class="rights">'+rights+'</ul>':'<small>Noch keine Freigaben.</small>'):'<small>Melde dich an, um die Freigaben zu sehen.</small>';
+   return '<section class="pod" aria-labelledby="name'+i+'"><div class="pod-head"><button class="toggle" id="pod'+i+'" aria-expanded="'+open+'" aria-controls="detail'+i+'">'+icon('right')+'<span class="name"><strong id="name'+i+'">'+esc(p.name)+'</strong></span><span class="status">'+status+'</span></button><button class="icon more" id="actions'+i+'" aria-expanded="false" aria-controls="commands" aria-label="Aktionen für '+esc(p.name)+'" title="Aktionen für '+esc(p.name)+'">'+icon('more')+'</button></div><div class="details" id="detail'+i+'" '+(open?'':'hidden')+'>'+details+'</div></section>';
+ }).join('');
+ pods.forEach((p,i)=>{
+   $('pod'+i).onclick=()=>{expanded=i===expanded?-1:i;home('pod'+i)};
+   $('actions'+i).onclick=()=>openActions(i);
+ });
+ foot.innerHTML=button(icon('plus')+'Weiteren Pod verbinden','add','add');
+ $('add').onclick=()=>{pendingName='';go('add')};
+ return}
+ if(step==='add'){
+ body.innerHTML=addressForm();foot.innerHTML='<button form="form" class="btn">Anmelden</button>';bindAddress(false);return}
+ if(step==='consent'){
+   body.innerHTML='<h2>'+esc(pendingName)+'</h2><p class="hint">Simulierte Pod-Seite mit Beispieldaten</p><label class="choice"><input type="checkbox" id="grant" checked> Haushalt zum Lesen freigeben</label>';
+   foot.innerHTML=button('Abbrechen','cancel','quiet')+button('Bestätigen','confirm');
+   $('cancel').onclick=cancelConsent;
+   $('confirm').onclick=()=>{
+     let index=pods.findIndex(p=>p.name===pendingName);
+     if(index<0){index=pods.length;pods.push({name:pendingName,rights:[],online:true})}
+     const pod=pods[index];pod.online=true;pod.rights=$('grant').checked?[['Haushalt',false]]:[];
+     if(active<0)active=index;expanded=index;pendingName='';
+     $('workspace').hidden=false;$('welcome').hidden=true;
+     const first=fromWelcome;fromWelcome=false;home('pod'+index);
+     if(first)dlg.close();
+   };return}
+ const p=pods[target];body.innerHTML='<h2>'+esc(p.name)+'</h2>';
+ if(step==='share'){body.innerHTML+='<p class="hint">Im echten Dialog wählst du die Freigaben auf diesem Pod. Hier kannst du die Rückkehr zur Übersicht ausprobieren.</p>';foot.innerHTML=button('Zur Übersicht','return');$('return').onclick=()=>home(origin)}
+ if(step==='leave'){body.innerHTML+='<p>Die App wird auf diesem Gerät von diesem Pod abgemeldet.</p>';foot.innerHTML=button('Abbrechen','cancel','quiet')+button('Abmelden','confirm');$('cancel').onclick=()=>home(origin);$('confirm').onclick=()=>{p.online=false;if(active===target)active=pods.findIndex(o=>o.online);home('pod'+target)}}
+}
+let anchor=null;
+function placeCommands(){
+ if(!anchor||!commands.matches(':popover-open'))return;
+ const rect=anchor.getBoundingClientRect(),width=commands.offsetWidth,height=commands.offsetHeight;
+ commands.style.left=Math.max(8,Math.min(rect.right-width,innerWidth-width-8))+'px';
+ const top=rect.bottom+height+8<=innerHeight?rect.bottom:rect.top-height;
+ commands.style.top=Math.max(8,Math.min(top,innerHeight-height-8))+'px';
+}
+function openActions(i){
+ const trigger=$('actions'+i),p=pods[i];
+ if(commands.matches(':popover-open')){const same=anchor===trigger;commands.hidePopover();if(same)return}
+ if(anchor)anchor.setAttribute('aria-expanded','false');
+ anchor=trigger;
+ commands.setAttribute('aria-label','Aktionen für '+p.name);
+ commands.innerHTML=p.online?button('Freigabe ändern','share','')+(!multi&&active!==i?button('Diesen Pod auswählen','use',''):'')+button('Auf diesem Gerät abmelden','leave',''):button('Anmelden','login','');
+ commands.showPopover({source:trigger});trigger.setAttribute('aria-expanded','true');placeCommands();
+ commands.querySelector('button').focus();
+ for(const cmd of commands.querySelectorAll('button')){
+   cmd.onclick=()=>{
+     commands.hidePopover();
+     if(cmd.id==='leave'||cmd.id==='share'){go(cmd.id,i,trigger.id);return}
+     p.online=true;if(cmd.id==='use'||active<0)active=i;
+     home(trigger.id);
+   };
+ }
+}
+commands.addEventListener('toggle',()=>{if(anchor&&!commands.matches(':popover-open')){anchor.setAttribute('aria-expanded','false');anchor=null}});
+commands.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();const trigger=anchor;commands.hidePopover();trigger?.focus()}});
+window.addEventListener('resize',placeCommands);body.addEventListener('scroll',placeCommands);
+$('back').onclick=()=>step==='consent'?cancelConsent():home(origin);
+$('close').onclick=()=>step==='consent'?cancelConsent():dlg.close();
+dlg.oncancel=e=>{if(step!=='home'){e.preventDefault();if(step==='consent')cancelConsent();else home(origin)}};
+dlg.onclose=()=>{if(!$('welcome').hidden)$('welcome').firstElementChild?.focus();else focusId('launch')};
+$('launch').onclick=()=>{step='home';render();dlg.showModal();focusId('title')};if(scenario==='start'||scenario==='abgemeldet')showWelcome();else $('launch').click();
+</script></html>
