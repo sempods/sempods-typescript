@@ -27,6 +27,7 @@ let offset = 0;
 afterEach(() => {
   runtimes.splice(0).forEach((r) => r.dispose());
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   offset = 0;
 });
 /** Moves this device's clock; issued tokens and expiry checks follow it. */
@@ -36,8 +37,13 @@ function advance(ms: number) {
   offset += ms;
 }
 
-/** `BroadcastChannel`s of one browser profile: a message reaches the others later. */
-function memoryChannels() {
+/**
+ * `BroadcastChannel`s of one browser profile: a message reaches the others
+ * later, by default after a timer; `deliver` can make it arrive sooner.
+ */
+function memoryChannels(
+  deliver: (send: () => void) => void = (send) => void setTimeout(send),
+) {
   const members = new Map<string, Set<Member>>();
   type Member = SessionChannel & {
     listeners: Set<(event: { readonly data: unknown }) => void>;
@@ -51,7 +57,7 @@ function memoryChannels() {
         const data = structuredClone(message);
         for (const other of group)
           if (other !== self)
-            setTimeout(() =>
+            deliver(() =>
               other.listeners.forEach((listener) => listener({ data })),
             );
       },
@@ -69,9 +75,8 @@ function memoryChannels() {
 
 let issued = 0;
 /** Two tabs on one IndexedDB, Web Locks and channel; the first is signed in. */
-async function tabs() {
+async function tabs(channels = memoryChannels()) {
   const factory = new IDBFactory();
-  const channels = memoryChannels();
   const f = fixture({
     locks: memoryLocks(),
     openStore: (namespace) => openSessionStore(namespace, factory, channels),
@@ -346,4 +351,99 @@ it('waits at startup for the refresh another tab has out, then restores its resu
   });
   expect(t.sent.at(-1)).toBe(`Bearer ${jwt({ jti: 'renewed' })}`);
   expect(t.refreshes()).toHaveLength(1);
+});
+
+it('sends no spent refresh token from a tab that restores while another tab renews', async () => {
+  // The announcement arrives before the refresh lock passes on.
+  const t = await tabs(memoryChannels(queueMicrotask));
+  t.b.dispose();
+  const answer = deferred<void>();
+  t.setToken(async () => {
+    await answer.promise;
+    return Response.json({
+      access_token: jwt({ jti: 'renewed' }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-renewed',
+    });
+  });
+  advance(3600_000);
+  // A new tab lists the record still `ready`, then waits in its discovery.
+  const discovery = deferred<void>();
+  const held: typeof t.fetch = vi.fn(async (url, init) => {
+    if (url.endsWith('/.well-known/oauth-protected-resource'))
+      await discovery.promise;
+    return t.fetch(url, init);
+  });
+  const c = createBrowserRuntime({ ...t.options, fetch: held });
+  runtimes.push(c);
+  await c.initialize();
+  expect(c.getSnapshot()[0]?.session).toEqual({ kind: 'restoring' });
+  // Meanwhile the first tab claims the refresh, and the new tab waits for it.
+  const pending = t.a.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  discovery.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  answer.resolve();
+  expect(await pending).toMatchObject({ kind: 'ok' });
+  await restored(c);
+  await vi.waitFor(() =>
+    expect(c.getSnapshot()[0]?.session).toMatchObject({ kind: 'active' }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(t.refreshes()).toHaveLength(1);
+  const [saved] = await records(t.factory);
+  expect(saved?.value).toMatchObject({
+    kind: 'ready',
+    credentials: { refreshToken: 'refresh-renewed' },
+  });
+});
+
+it('reads the records again on a return from the back/forward cache, which missed a sign-out', async () => {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  let frozen = false;
+  const t = await tabs(
+    memoryChannels((send) => {
+      // A page in the back/forward cache receives no messages.
+      if (!frozen) setTimeout(send);
+    }),
+  );
+  frozen = true;
+  expect(await t.a.disconnect(t.id)).toEqual({ kind: 'disconnected' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(t.session(t.b)).toMatchObject({ kind: 'active' });
+  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toEqual({
+      kind: 'signed-out',
+      problem: 'disconnected',
+    }),
+  );
+});
+
+it('sends no refresh under a lock that an injected Web Locks did not grant', async () => {
+  const t = await tabs();
+  const granted = memoryLocks();
+  const b = createBrowserRuntime({
+    ...t.options,
+    // A double written for 0.8 that answers every request like `ifAvailable`.
+    locks: {
+      request: (name, options, callback) =>
+        options.ifAvailable
+          ? granted.request(name, options, callback)
+          : callback(null),
+    },
+  });
+  runtimes.push(b);
+  t.b.dispose();
+  await b.initialize();
+  await restored(b);
+  advance(3600_000);
+  await b.loadContexts(t.id).catch(() => {});
+  expect(t.refreshes()).toHaveLength(0);
+  expect(t.session(b)).toMatchObject({
+    kind: 'ended',
+    problem: 'coordination',
+  });
 });

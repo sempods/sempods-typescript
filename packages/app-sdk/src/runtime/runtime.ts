@@ -416,8 +416,13 @@ export function createBrowserRuntime(
           .request(
             `sempods:refresh:${namespace}:${e.view.id}`,
             { signal },
-            async () => {
+            async (lock) => {
               granted = true;
+              // Only a granted lock excludes the other tabs.
+              if (!lock) {
+                reject(new RuntimeError('coordination'));
+                return;
+              }
               try {
                 const result = await work();
                 await e.persistence;
@@ -1393,6 +1398,10 @@ export function createBrowserRuntime(
   ) {
     const before = saved.credentials;
     let consumed = false;
+    // The record restoration listed; another tab's change, adopted while this
+    // tab waited for the lock, replaces it (and its spent refresh token).
+    const revision = e.revision;
+    const newer = () => e.revision !== revision && !consumed;
     try {
       await exclusive(e, async () => {
         try {
@@ -1409,7 +1418,7 @@ export function createBrowserRuntime(
             return;
           }
           // Another tab renewed, signed out or signed in meanwhile.
-          if (found.changed || !eligible(e, generation)) return;
+          if (found.changed || newer() || !eligible(e, generation)) return;
           const claim = await serial(e, async () => {
             current(e, generation);
             if (!sessions || !e.revision) throw new RuntimeError('storage');
@@ -1455,7 +1464,7 @@ export function createBrowserRuntime(
         void sync(e);
         return;
       }
-      if (!eligible(e, generation)) return;
+      if (!eligible(e, generation) || newer()) return;
       if (error instanceof OAuthError && error.problem === 'invalid-client')
         registry.clear(e.view.podUrl);
       if (!consumed && transientBeforeClaim(error)) {
@@ -1506,6 +1515,13 @@ export function createBrowserRuntime(
     for (const e of entries.values()) void retryRestore(e);
   };
   page.addEventListener?.('online', online);
+  // A page restored from the back/forward cache missed the other tabs'
+  // announcements: it reads every record again.
+  const shown = (event?: unknown) => {
+    if ((event as { persisted?: boolean } | undefined)?.persisted)
+      for (const e of entries.values()) void sync(e);
+  };
+  page.addEventListener?.('pageshow', shown);
   /**
    * Resumes the session a denied (`callback`) or abandoned re-authorization
    * started from, and publishes it. Returns false, changing nothing, when the
@@ -1785,7 +1801,11 @@ export function createBrowserRuntime(
       throw new RuntimeError('storage');
     await serial(e, async () => {
       current(e, before);
-      accepted(e, await sessions!.prepare(attempt, e.revision));
+      const prepared = await sessions!.prepare(attempt, e.revision);
+      // Another tab changed the record first: shown here, and a retry
+      // prepares on it.
+      if (prepared.kind === 'conflict') void sync(e);
+      accepted(e, prepared);
       // The revision is recorded first, so a disconnect that ran during the
       // commit retires the new attempt; this lifetime must not continue.
       current(e, before);
@@ -2470,6 +2490,7 @@ export function createBrowserRuntime(
       initialized = false;
       runtimeLifetime.abort();
       page.removeEventListener?.('online', online);
+      page.removeEventListener?.('pageshow', shown);
       for (const e of entries.values()) {
         delete e.credentials;
         delete e.credential;

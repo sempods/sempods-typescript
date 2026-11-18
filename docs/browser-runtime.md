@@ -772,10 +772,17 @@ to the app's other tabs with a `BroadcastChannel`:
 | Closes while its refresh answer is out   | The next tab that needs the session resends it once within the grace period |
 
 Context selection, bound views and drafts stay per tab: another tab's renewal
-keeps them, and a sign-in of another subject resets them as in the signing-in
+keeps them, and a new sign-in in another tab resets them as in the signing-in
 tab. A connection added in another tab (a first sign-in to a new Pod) appears
 at this tab's next start. A tab's own sign-out also applies to a record another
 tab changed meanwhile.
+
+The table describes tabs that are open. A tab that starts, or reloads, while
+another tab is away at the Pod for a re-authorization treats that attempt as
+abandoned and resumes the earlier session, so the sign-in in the other tab
+fails when it returns and is started again. Announcements are best effort: a
+page restored from the back/forward cache reads every record again, and a tab
+that missed one otherwise reads the record at its next renewal or write.
 
 A store without change announcements (an `openStore` whose store has no
 `watch`, or a browser without `BroadcastChannel`) keeps one active tab: its
