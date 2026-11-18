@@ -467,6 +467,15 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
           ),
       }),
       sparql: Object.freeze({
+        select: (query: string, options: ReadOptions = {}) =>
+          sparql(
+            query,
+            'application/sparql-results+json',
+            decodeSelect,
+            guards,
+            options,
+            contextIri,
+          ),
         construct: (query: string, options: ReadOptions = {}) =>
           sparql(query, JSON_LD, constructBody, guards, options, contextIri),
       }),

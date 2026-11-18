@@ -72,6 +72,11 @@ Pod or 10,000-Context backend scalability. Dataset downscope clarification remai
 owned by [sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129);
 Context failure has no unscoped fallback.
 
+Context SELECT (`ContextView.sparql.select`, #371) was checked on 2026-11-17
+against `sempods/sempods-spec` at `c6308c157d8c78be0ba6e9d91dba39a11a9ce883`:
+SPS-SPARQL-011–015. It sends the same dataset parameters as Context CONSTRUCT
+and shares its open dependency on sempods-spec#129. Fixture tests only, no live Pod.
+
 Find (#233) was checked against `sempods/sempods-spec` at
 `c6308c157d8c78be0ba6e9d91dba39a11a9ce883` (`spec/core/find.md`, 2026-11-02): SPS-FIND-004, -005, -009–015 and
 -018–020. The named-graph JSON-LD form was cross-read in `sempods/sempods-kotlin`

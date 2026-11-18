@@ -481,44 +481,80 @@ describe.each(['select', 'construct'] as const)('Pod %s requests', (method) => {
   });
 });
 
-it('retains the scoped dataset and both guards on renewal, with no unscoped failure fallback', async () => {
-  let credential = { authorization: 'Bearer old' };
-  const auth: PodAuth = {
-    credential: async () => credential,
-    renew: async () => {
-      credential = { authorization: 'Bearer new' };
-      return true;
-    },
-  };
-  const podGuard = vi.fn(() => true);
-  const viewGuard = vi.fn(() => true);
-  const fetch = vi
-    .fn<PodFetch>()
-    .mockImplementationOnce(
-      async () =>
-        new Response(null, {
-          status: 401,
-          headers: { 'www-authenticate': 'Bearer' },
-        }),
-    )
-    .mockImplementationOnce(async () => new Response(null, { status: 400 }));
-  const view = createPod(base, {
-    auth,
-    fetch,
-    beforeDispatch: podGuard,
-  }).context(context, { beforeDispatch: viewGuard });
-  await expect(
-    view.sparql.construct('CONSTRUCT WHERE { ?s ?p ?o }'),
-  ).rejects.toMatchObject({ reason: { code: 'http', status: 400 } });
-  expect(fetch).toHaveBeenCalledTimes(2);
-  for (const [url] of fetch.mock.calls) {
-    expect(
-      new URL(String(url)).searchParams.getAll('default-graph-uri'),
-    ).toEqual([context]);
-    expect(new URL(String(url)).searchParams.getAll('named-graph-uri')).toEqual(
-      [context],
-    );
-  }
-  expect(podGuard).toHaveBeenCalled();
-  expect(viewGuard).toHaveBeenCalled();
-});
+describe.each(['select', 'construct'] as const)(
+  'Context %s requests',
+  (method) => {
+    const query =
+      method === 'select'
+        ? 'SELECT ?x WHERE { GRAPH ?g { ?x ?p ?o } }'
+        : 'CONSTRUCT WHERE { ?s ?p ?o }';
+    const type = method === 'select' ? media : 'application/ld+json';
+
+    it('sends one POST with both dataset parameters, the query unchanged, and accepts an empty result', async () => {
+      const empty = method === 'select' ? result() : [];
+      const fetch = vi.fn<PodFetch>(async () => response(empty, type));
+      const view = createPod(base, { auth: bearer('test'), fetch }).context(
+        context,
+      );
+      expect(await view.sparql[method](query)).toEqual({
+        kind: 'ok',
+        body: method === 'select' ? { variables: ['x'], rows: [] } : [],
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [url, init] = fetch.mock.calls[0]!;
+      expect([...new URL(String(url)).searchParams]).toEqual([
+        ['default-graph-uri', context],
+        ['named-graph-uri', context],
+      ]);
+      expect(init).toMatchObject({ method: 'POST', body: query });
+      const headers = new Headers(init?.headers);
+      expect(headers.get('accept')).toBe(type);
+      expect(headers.get('content-type')).toBe('application/sparql-query');
+    });
+
+    it('retains the scoped dataset and both guards on renewal, with no unscoped failure fallback', async () => {
+      let credential = { authorization: 'Bearer old' };
+      const auth: PodAuth = {
+        credential: async () => credential,
+        renew: async () => {
+          credential = { authorization: 'Bearer new' };
+          return true;
+        },
+      };
+      const podGuard = vi.fn(() => true);
+      const viewGuard = vi.fn(() => true);
+      const fetch = vi
+        .fn<PodFetch>()
+        .mockImplementationOnce(
+          async () =>
+            new Response(null, {
+              status: 401,
+              headers: { 'www-authenticate': 'Bearer' },
+            }),
+        )
+        // An unsupported downscope (sempods-spec#129) fails; it never widens.
+        .mockImplementationOnce(
+          async () => new Response(null, { status: 400 }),
+        );
+      const view = createPod(base, {
+        auth,
+        fetch,
+        beforeDispatch: podGuard,
+      }).context(context, { beforeDispatch: viewGuard });
+      await expect(view.sparql[method](query)).rejects.toMatchObject({
+        reason: { code: 'http', status: 400 },
+      });
+      expect(fetch).toHaveBeenCalledTimes(2);
+      for (const [url] of fetch.mock.calls) {
+        expect(
+          new URL(String(url)).searchParams.getAll('default-graph-uri'),
+        ).toEqual([context]);
+        expect(
+          new URL(String(url)).searchParams.getAll('named-graph-uri'),
+        ).toEqual([context]);
+      }
+      expect(podGuard).toHaveBeenCalled();
+      expect(viewGuard).toHaveBeenCalled();
+    });
+  },
+);
