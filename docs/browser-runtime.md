@@ -359,7 +359,10 @@ link that opens in a new tab.
 The attempt runs at most once per tab. The runtime notes it in
 `sessionStorage` before the redirect, so a reload, a sign-out, coming back from
 the Pod without an answer or a failed answer never starts it again; `tabStorage`
-replaces that storage in tests, and without one nothing is tried. A preparation
+replaces that storage in tests, and without one nothing is tried. Coming back
+to the page that left (its history entry, also from the back/forward cache)
+forgets the attempt; a tab opened from the one at the Pod copies the note but
+leaves the attempt to that tab's answer. A preparation
 that fails (an unreachable Pod) leaves the person signed out without an error.
 A tab that started with something stored, or returned from a sign-in, never
 tries, also after a sign-out deletes the records. A new tab with nothing stored

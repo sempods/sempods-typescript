@@ -114,6 +114,15 @@ export function memoryStorage(): PreferenceStorage & {
     removeItem: (key) => void map.delete(key),
   };
 }
+/** A tab's history: its current entry's state, as a router keeps it. */
+export function memoryHistory(state: unknown = null) {
+  return {
+    state,
+    replaceState(data: unknown) {
+      this.state = structuredClone(data);
+    },
+  };
+}
 /**
  * Web Locks of one browser profile, as the runtime uses them: `shared` or
  * `exclusive`, `ifAvailable` or waiting in order until `signal` aborts.

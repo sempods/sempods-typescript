@@ -15,6 +15,7 @@ import {
   fixture,
   fixtureNamespace,
   jwt,
+  memoryHistory,
   memoryLocks,
   memoryStorage,
   pod,
@@ -775,15 +776,6 @@ it('restores an earlier grant another tab resumed under its own client', async (
   expect(t.session(t.b)).toMatchObject({ kind: 'active' });
 });
 
-/** A tab's history: its current entry's state, as a router keeps it. */
-function memoryHistory(state: unknown = null) {
-  return {
-    state,
-    replaceState(data: unknown) {
-      this.state = structuredClone(data);
-    },
-  };
-}
 describe('a re-authorization another tab is away for', () => {
   /** Tab a leaves for a re-authorization and is at the Pod; tab b is closed. */
   async function away(options: Partial<BrowserRuntimeOptions> = {}) {

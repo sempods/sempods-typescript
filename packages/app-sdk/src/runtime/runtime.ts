@@ -2102,9 +2102,10 @@ export function createBrowserRuntime(
           change.record.value.previous !== undefined
         );
       });
-      // A re-authorization resumes its session when this tab comes back
-      // without a callback; see `leftFrom`.
-      if (reauthorizing) noteLeaving(attempt.state);
+      // A re-authorization resumes its session, and a silent first sign-in
+      // is forgotten, only when this page comes back without a callback; see
+      // `leftFrom`.
+      if (reauthorizing || intent === 'silent') noteLeaving(attempt.state);
       return { generation, url };
     };
     let prepared: { generation: string; url: string };
@@ -2269,10 +2270,13 @@ export function createBrowserRuntime(
           pending = saved;
         }
         // A silent first sign-in left without an answer (back navigation)
-        // is as if never started; this tab does not try it again.
+        // is as if never started; this tab does not try it again. A tab
+        // opened from the one at the Pod copies its note, but not its
+        // history entry: that attempt stays the other tab's.
         if (
           !callback &&
           silentState !== undefined &&
+          (leaving === undefined || leaving === silentState) &&
           saved.value.kind === 'authorizing' &&
           saved.value.attempt.state === silentState
         ) {
