@@ -428,6 +428,18 @@ export function createBrowserRuntime(
    * with the connection's lifetime.
    */
   function exclusive<T>(e: Entry, work: () => Promise<T>): Promise<T> {
+    return locked(`sempods:refresh:${namespace}:${e.view.id}`, e, work);
+  }
+  /**
+   * Runs `work` while this tab holds the Web Lock `name`, waited for until
+   * the connection's lifetime ends; `e`'s queued writes land before it passes
+   * on.
+   */
+  function locked<T>(
+    name: string,
+    e: Entry,
+    work: () => Promise<T>,
+  ): Promise<T> {
     const signal = e.lifetime.signal;
     return new Promise<T>((resolve, reject) => {
       if (!locks) {
@@ -441,26 +453,22 @@ export function createBrowserRuntime(
         );
       try {
         locks
-          .request(
-            `sempods:refresh:${namespace}:${e.view.id}`,
-            { signal },
-            async (lock) => {
-              granted = true;
-              // Only a granted lock excludes the other tabs.
-              if (!lock) {
-                reject(new RuntimeError('coordination'));
-                return;
-              }
-              try {
-                const result = await work();
-                await e.persistence;
-                resolve(result);
-              } catch (error) {
-                await e.persistence;
-                reject(error);
-              }
-            },
-          )
+          .request(name, { signal }, async (lock) => {
+            granted = true;
+            // Only a granted lock excludes the other tabs.
+            if (!lock) {
+              reject(new RuntimeError('coordination'));
+              return;
+            }
+            try {
+              const result = await work();
+              await e.persistence;
+              resolve(result);
+            } catch (error) {
+              await e.persistence;
+              reject(error);
+            }
+          })
           .catch(() => {
             if (!granted) failed();
           });
@@ -1897,76 +1905,102 @@ export function createBrowserRuntime(
     current(e, before);
     const client = await registry.resolve(pod, identity!, { signal });
     current(e, before);
-    if (e.revision === null) {
-      // Another tab signed in to this Pod meanwhile: its session is this
-      // tab's too, without leaving for the Pod.
-      const saved = await savedFor(e.view.podUrl);
-      current(e, before);
-      if (saved?.value.kind === 'ready') {
-        preparing.delete(id);
-        if (admit(saved)) return;
+    /** Prepares and stores the attempt; nothing changes before it is stored. */
+    const store = async () => {
+      const generation = crypto.randomUUID();
+      const { attempt, url } = await prepareSessionAuthorization(
+        {
+          configKey: namespace,
+          connectionId: e.view.id,
+          generation,
+          pod,
+          client,
+          returnTo: destination,
+          scopes: requested,
+          // Only an explicit request to change sharing asks the Pod for its
+          // consent page; a sign-in may reuse the existing grant. The silent
+          // first sign-in asks it to show nothing.
+          ...(intent === 'change-sharing'
+            ? { prompt: 'consent' as const }
+            : intent === 'silent'
+              ? { prompt: 'none' as const }
+              : {}),
+        },
+        Date.now(),
+        options.development,
+      );
+      // Without the note, its callback would end the connection as a failed
+      // sign-in: nothing is stored or started.
+      if (intent === 'silent' && !noteSilent(`attempt:${attempt.state}`))
+        throw new RuntimeError('storage');
+      await serial(e, async () => {
+        current(e, before);
+        // Another tab changed the record first: shown here, and a retry
+        // prepares on it.
+        accepted(e, await sessions!.prepare(attempt, e.revision));
+        // The revision is recorded first, so a disconnect that ran during the
+        // commit retires the new attempt; this lifetime must not continue.
+        current(e, before);
+        // Committed durably: switch to the new lifetime in the same step, so no
+        // queued refresh of the old one can act on the replaced record. The
+        // facts stay for display until the page leaves; only the session says
+        // that nothing of the earlier one dispatches any more.
+        const shown = e.view;
+        const subject =
+          shown.session.kind === 'active' ||
+          shown.session.kind === 'renewing' ||
+          shown.session.kind === 'leaving'
+            ? shown.session.subject
+            : undefined;
+        renewLifetime(e, generation);
+        e.pod = pod;
+        e.client = client;
+        // Signing in again replaces a forget that could not be saved.
+        delete e.forgetting;
+        e.view = {
+          ...shown,
+          session: Object.freeze(
+            subject === undefined
+              ? { kind: 'leaving' }
+              : { kind: 'leaving', subject },
+          ),
+        };
+        publish();
+      });
+      return { generation, url };
+    };
+    let prepared: { generation: string; url: string };
+    if (e.revision === null && lease?.store.watch) {
+      // The first record for this Pod, decided under its lock: two tabs
+      // preparing at once do not both create one.
+      const outcome = await locked<
+        | { joined: Entry; kind: SessionRecord['kind'] }
+        | { prepared: { generation: string; url: string } }
+      >(`sempods:connect:${namespace}:${e.view.podUrl}`, e, async () => {
+        const saved = await savedFor(e.view.podUrl);
+        current(e, before);
+        // This connection's own record, which an announcement did not
+        // bring yet: the attempt replaces it.
+        if (saved?.id === id) follow(e, saved.revision);
+        else if (saved) {
+          preparing.delete(id);
+          admit(saved);
+          const joined = entries.get(saved.id);
+          if (joined) return { joined, kind: saved.value.kind };
+        }
+        return { prepared: await store() };
+      });
+      if ('joined' in outcome) {
+        // Another tab signed in to this Pod meanwhile (or is renewing that
+        // session): it is this tab's too, without leaving for the Pod.
+        if (outcome.kind === 'ready' || outcome.kind === 'claimed') return;
+        // A remembered address, or a sign-in under way in another tab: this
+        // sign-in continues on that connection, replacing the attempt.
+        return authorize(outcome.joined.view.id, intent);
       }
-    }
-    const generation = crypto.randomUUID();
-    const { attempt, url } = await prepareSessionAuthorization(
-      {
-        configKey: namespace,
-        connectionId: e.view.id,
-        generation,
-        pod,
-        client,
-        returnTo: destination,
-        scopes: requested,
-        // Only an explicit request to change sharing asks the Pod for its
-        // consent page; a sign-in may reuse the existing grant. The silent
-        // first sign-in asks it to show nothing.
-        ...(intent === 'change-sharing'
-          ? { prompt: 'consent' as const }
-          : intent === 'silent'
-            ? { prompt: 'none' as const }
-            : {}),
-      },
-      Date.now(),
-      options.development,
-    );
-    // Without the note, its callback would end the connection as a failed
-    // sign-in: nothing is stored or started.
-    if (intent === 'silent' && !noteSilent(`attempt:${attempt.state}`))
-      throw new RuntimeError('storage');
-    await serial(e, async () => {
-      current(e, before);
-      // Another tab changed the record first: shown here, and a retry
-      // prepares on it.
-      accepted(e, await sessions!.prepare(attempt, e.revision));
-      // The revision is recorded first, so a disconnect that ran during the
-      // commit retires the new attempt; this lifetime must not continue.
-      current(e, before);
-      // Committed durably: switch to the new lifetime in the same step, so no
-      // queued refresh of the old one can act on the replaced record. The
-      // facts stay for display until the page leaves; only the session says
-      // that nothing of the earlier one dispatches any more.
-      const shown = e.view;
-      const subject =
-        shown.session.kind === 'active' ||
-        shown.session.kind === 'renewing' ||
-        shown.session.kind === 'leaving'
-          ? shown.session.subject
-          : undefined;
-      renewLifetime(e, generation);
-      e.pod = pod;
-      e.client = client;
-      // Signing in again replaces a forget that could not be saved.
-      delete e.forgetting;
-      e.view = {
-        ...shown,
-        session: Object.freeze(
-          subject === undefined
-            ? { kind: 'leaving' }
-            : { kind: 'leaving', subject },
-        ),
-      };
-      publish();
-    });
+      prepared = outcome.prepared;
+    } else prepared = await store();
+    const { generation, url } = prepared;
     current(e, generation);
     watchReturn(e, generation, intent === 'silent');
     (options.navigate ?? ((url) => window.location.assign(url)))(url);

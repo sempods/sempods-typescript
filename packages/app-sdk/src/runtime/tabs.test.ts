@@ -7,6 +7,7 @@
  */
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PodFetch } from '@sempods/client-sdk';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
@@ -676,11 +677,11 @@ describe('one saved connection per Pod across tabs', () => {
       ...f.options,
       ...(held
         ? {
-            fetch: async (url: string, init?: RequestInit) => {
+            fetch: (async (url, init) => {
               if (gate && url.endsWith('/.well-known/oauth-protected-resource'))
                 await gate;
               return f.fetch(url, init);
-            },
+            }) satisfies PodFetch,
           }
         : {}),
     });
@@ -778,6 +779,27 @@ describe('one saved connection per Pod across tabs', () => {
       { id, session: { kind: 'active' } },
     ]);
     expect(await records(factory)).toHaveLength(1);
+  });
+  it('continues on the connection another tab starts signing in to while this tab prepares', async () => {
+    const { f, factory, b, hold, release } = await opened({ held: true });
+    const own = await b.connect(pod);
+    hold();
+    const signingIn = b.beginAuthorization(own.id);
+    // Tab a stores its attempt for the same Pod first.
+    const { connection } = await f.begin();
+    expect(connection.id).not.toBe(own.id);
+    const navigations = f.navigate.mock.calls.length;
+    release();
+    await signingIn;
+    // One saved connection: tab b's attempt replaced tab a's.
+    const saved = await records(factory);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      id: connection.id,
+      value: { kind: 'authorizing' },
+    });
+    expect(f.navigate.mock.calls).toHaveLength(navigations + 1);
+    expect(b.getSnapshot()).toMatchObject([{ id: connection.id }]);
   });
   it('joins a sign-in another tab has out instead of starting a second connection', async () => {
     const { f, factory, b } = await opened();
