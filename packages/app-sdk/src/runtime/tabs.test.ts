@@ -17,6 +17,9 @@ import {
   memoryLocks,
   memoryStorage,
   pod,
+  restart,
+  savedRecords,
+  storeWith,
   personal,
   restored,
   work,
@@ -137,15 +140,32 @@ async function tabs(
     runtime.getSnapshot().find((c) => c.id === id)?.session;
   return { ...f, factory, a, b, id, sent, refreshes, session };
 }
-async function records(factory: IDBFactory) {
-  const store = await openSessionStore(fixtureNamespace, factory, undefined);
-  try {
-    return (await store.list()).records;
-  } finally {
-    store.close();
-  }
-}
+const records = savedRecords;
 const query = 'CONSTRUCT {} WHERE {}';
+/** Lets announcements and queued writes land. */
+const quiet = () => new Promise((resolve) => setTimeout(resolve, 20));
+/** Channels that deliver nothing while frozen, as for a page in the back/forward cache. */
+function freezable() {
+  let frozen = false;
+  return {
+    channels: memoryChannels((send) => {
+      if (!frozen) setTimeout(send);
+    }),
+    freeze(on: boolean) {
+      frozen = on;
+    },
+  };
+}
+/** Stubs the page's events; returns a return from the back/forward cache. */
+function bfcache() {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  return () =>
+    page.dispatchEvent(
+      Object.assign(new Event('pageshow'), { persisted: true }),
+    );
+}
 
 it('starts a second tab on the same session instead of reporting busy', async () => {
   const t = await tabs();
@@ -407,14 +427,14 @@ it('sends no spent refresh token from a tab that restores while another tab rene
   const pending = t.a.bind(t.id).sparql.construct(query);
   await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
   discovery.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await quiet();
   answer.resolve();
   expect(await pending).toMatchObject({ kind: 'ok' });
   await restored(c);
   await vi.waitFor(() =>
     expect(c.getSnapshot()[0]?.session).toMatchObject({ kind: 'active' }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await quiet();
   expect(t.refreshes()).toHaveLength(1);
   const [saved] = await records(t.factory);
   expect(saved?.value).toMatchObject({
@@ -424,21 +444,14 @@ it('sends no spent refresh token from a tab that restores while another tab rene
 });
 
 it('reads the records again on a return from the back/forward cache, which missed a sign-out', async () => {
-  const page = new EventTarget();
-  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
-  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
-  let frozen = false;
-  const t = await tabs(
-    memoryChannels((send) => {
-      // A page in the back/forward cache receives no messages.
-      if (!frozen) setTimeout(send);
-    }),
-  );
-  frozen = true;
+  const pageshow = bfcache();
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  freeze(true);
   expect(await t.a.disconnect(t.id)).toEqual({ kind: 'disconnected' });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await quiet();
   expect(t.session(t.b)).toMatchObject({ kind: 'active' });
-  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  pageshow();
   await vi.waitFor(() =>
     expect(t.session(t.b)).toEqual({
       kind: 'signed-out',
@@ -474,28 +487,22 @@ it('sends no refresh under a lock that an injected Web Locks did not grant', asy
 });
 
 it('checks Context access again for a new session it adopts without the sign-in in between', async () => {
-  const page = new EventTarget();
-  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
-  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
-  let frozen = false;
-  const t = await tabs(
-    memoryChannels((send) => {
-      if (!frozen) setTimeout(send);
-    }),
-  );
+  const pageshow = bfcache();
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
   expect(t.b.getSnapshot()[0]).toMatchObject({
     catalogue: { kind: 'ready' },
     selectedContext: work,
   });
   // Tab b sits in the back/forward cache while tab a signs in again.
-  frozen = true;
+  freeze(true);
   await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
   t.a.dispose();
   const back = t.returned();
   runtimes.push(back);
   expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
-  frozen = false;
-  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  freeze(false);
+  pageshow();
   await vi.waitFor(() =>
     expect(t.b.getSnapshot()[0]).toMatchObject({
       session: { kind: 'active' },
@@ -507,17 +514,11 @@ it('checks Context access again for a new session it adopts without the sign-in 
 });
 
 it('stops the earlier session for a refresh another tab claimed for a newer sign-in', async () => {
-  const page = new EventTarget();
-  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
-  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
-  let frozen = false;
-  const t = await tabs(
-    memoryChannels((send) => {
-      if (!frozen) setTimeout(send);
-    }),
-  );
+  const pageshow = bfcache();
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
   // Tab b misses a new sign-in in tab a and that session's refresh claim.
-  frozen = true;
+  freeze(true);
   await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
   t.a.dispose();
   const back = t.returned();
@@ -531,8 +532,8 @@ it('stops the earlier session for a refresh another tab claimed for a newer sign
   void back.bind(t.id).sparql.construct(query);
   await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
   const view = t.b.bind(t.id);
-  frozen = false;
-  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  freeze(false);
+  pageshow();
   await vi.waitFor(() =>
     expect(t.session(t.b)).toMatchObject({
       kind: 'ended',
@@ -545,10 +546,7 @@ it('stops the earlier session for a refresh another tab claimed for a newer sign
 });
 
 it('retires only the session that ended, not one it adopted while that waited', async () => {
-  let frozen = false;
-  const channels = memoryChannels((send) => {
-    if (!frozen) setTimeout(send);
-  });
+  const { channels, freeze } = freezable();
   // Sessions without a refresh token: an expired one ends here.
   const t = await tabs(channels, { refresh: false });
   t.b.dispose();
@@ -557,11 +555,9 @@ it('retires only the session that ended, not one it adopted while that waited', 
   let reading = false;
   const b = createBrowserRuntime({
     ...t.options,
-    openStore: async (namespace) => {
-      const store = await openSessionStore(namespace, t.factory, channels);
-      return {
-        ...store,
-        watch: store.watch!,
+    openStore: storeWith(
+      t.factory,
+      (store) => ({
         async read(id) {
           if (gate) {
             reading = true;
@@ -569,8 +565,9 @@ it('retires only the session that ended, not one it adopted while that waited', 
           }
           return store.read(id);
         },
-      };
-    },
+      }),
+      channels,
+    ),
   });
   runtimes.push(b);
   await b.initialize();
@@ -578,12 +575,12 @@ it('retires only the session that ended, not one it adopted while that waited', 
   await b.loadContexts(t.id);
   b.selectContext(t.id, work);
   // Tab b misses the attempt; it reads the completed sign-in slowly.
-  frozen = true;
+  freeze(true);
   await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
   t.a.dispose();
   const release = deferred<void>();
   gate = release.promise;
-  frozen = false;
+  freeze(false);
   const back = t.returned();
   runtimes.push(back);
   expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
@@ -597,7 +594,7 @@ it('retires only the session that ended, not one it adopted while that waited', 
   await vi.waitFor(() =>
     expect(t.session(b)).toMatchObject({ kind: 'active' }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await quiet();
   const [saved] = await records(t.factory);
   expect(saved?.value).toMatchObject({ kind: 'ready' });
   expect(t.session(b)).toMatchObject({ kind: 'active' });
@@ -610,17 +607,16 @@ it('keeps a sign-out that could not be saved blocked when another tab renews tha
   const t = await tabs(channels, {
     factory,
     second: {
-      openStore: async (namespace) => {
-        const store = await openSessionStore(namespace, factory, channels);
-        return {
-          ...store,
-          watch: store.watch!,
+      openStore: storeWith(
+        factory,
+        (store) => ({
           commit: (...args) =>
             failing
               ? Promise.reject(new Error('quota'))
               : store.commit(...args),
-        };
-      },
+        }),
+        channels,
+      ),
     },
   });
   failing = true;
@@ -631,7 +627,7 @@ it('keeps a sign-out that could not be saved blocked when another tab renews tha
     kind: 'ok',
   });
   expect(t.refreshes()).toHaveLength(1);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await quiet();
   expect(t.session(t.b)).toMatchObject({
     kind: 'ended',
     problem: 'disconnected',
@@ -702,14 +698,11 @@ describe('one saved connection per Pod across tabs', () => {
     expect(await records(factory)).toHaveLength(1);
   });
   it('connects to a Pod another tab signed in to while this tab was open without listing it', async () => {
-    const { f, factory, b } = await opened();
+    const { f, factory } = await opened();
     const muted = createBrowserRuntime({
       ...f.options,
-      // A store that announces nothing to this runtime.
-      openStore: async (namespace) => {
-        const store = await openSessionStore(namespace, factory, () => null);
-        return { ...store, watch: () => () => {} };
-      },
+      // A store that shares the lease but announces nothing to this runtime.
+      openStore: storeWith(factory, () => ({ watch: () => () => {} })),
     });
     runtimes.push(muted);
     await muted.initialize();
@@ -722,7 +715,6 @@ describe('one saved connection per Pod across tabs', () => {
       expect(muted.getSnapshot()[0]?.session.kind).toBe('active'),
     );
     expect(await records(factory)).toHaveLength(1);
-    void b;
   });
 });
 
@@ -738,11 +730,9 @@ it('reselects each tab’s own Context after its reload', async () => {
   t.a.selectContext(t.id, personal);
   // Tab b chose `work` after tab a; reloading tab a keeps its own choice.
   t.b.selectContext(t.id, work);
-  t.a.dispose();
-  const reloaded = createBrowserRuntime({ ...t.options, tabStorage: tabA });
-  runtimes.push(reloaded);
-  await reloaded.initialize();
-  await restored(reloaded);
+  const reloaded = await restart(t, t.a, (r) => runtimes.push(r), {
+    tabStorage: tabA,
+  });
   await reloaded.loadContexts(t.id);
   expect(reloaded.getSnapshot()[0]?.selectedContext).toBe(personal);
   // A new tab starts from the last choice on this device.

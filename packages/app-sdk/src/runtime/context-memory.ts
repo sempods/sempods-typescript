@@ -54,9 +54,9 @@ export function createContextMemory(
       }
     },
   };
-  const read = (from = storage): Record<string, string> => {
+  const read = (from: PreferenceStorage): Record<string, string> => {
     try {
-      const value: unknown = JSON.parse(from?.getItem(key) ?? '{}');
+      const value: unknown = JSON.parse(from.getItem(key) ?? '{}');
       if (!value || typeof value !== 'object' || Array.isArray(value))
         return {};
       return Object.fromEntries(
@@ -68,26 +68,37 @@ export function createContextMemory(
       return {};
     }
   };
-  const write = (choices: Record<string, string>, to = storage) => {
+  const write = (to: PreferenceStorage, choices: Record<string, string>) => {
     try {
-      if (Object.keys(choices).length === 0) to?.removeItem(key);
-      else to?.setItem(key, JSON.stringify(choices));
+      if (Object.keys(choices).length === 0) to.removeItem(key);
+      else to.setItem(key, JSON.stringify(choices));
     } catch {
       // The choice simply is not remembered.
     }
   };
-  const own = () => {
+  /** This tab's storage first, then the device's. */
+  const stores = (): PreferenceStorage[] => {
+    let own: PreferenceStorage | null | undefined;
     try {
-      return tab() ?? undefined;
+      own = tab();
     } catch {
-      return undefined;
+      own = undefined;
     }
+    return [own, storage].filter((s): s is PreferenceStorage => !!s);
   };
   return {
-    recall: (id) => read(own())[id] ?? read()[id],
+    recall(id) {
+      for (const from of stores()) {
+        const iri = read(from)[id];
+        if (iri !== undefined) return iri;
+      }
+      return undefined;
+    },
     remember(id, iri) {
-      for (const to of [own(), storage])
-        if (to && read(to)[id] !== iri) write({ ...read(to), [id]: iri }, to);
+      for (const to of stores()) {
+        const choices = read(to);
+        if (choices[id] !== iri) write(to, { ...choices, [id]: iri });
+      }
     },
     active,
     forget(id) {
@@ -97,12 +108,11 @@ export function createContextMemory(
         } catch {
           // Left behind, it names a connection that no longer exists.
         }
-      for (const from of [own(), storage]) {
-        if (!from) continue;
+      for (const from of stores()) {
         const choices = read(from);
         if (!(id in choices)) continue;
         delete choices[id];
-        write(choices, from);
+        write(from, choices);
       }
     },
   };

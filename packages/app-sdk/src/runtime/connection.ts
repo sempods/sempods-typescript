@@ -34,6 +34,8 @@ export interface Entry {
   credentials?: ExchangeResult;
   credential?: AuthCredential;
   revision: string | null;
+  /** How often this tab followed a record another tab stored (`adopt`). */
+  adopted: number;
   persistence: Promise<void>;
   epoch: number;
   selectedVersion: number;

@@ -27,14 +27,16 @@ export async function savedRecords(factory: IDBFactory) {
 }
 /**
  * An `openStore` on `factory` with some methods replaced, for storage
- * failures; the replacements receive the real store.
+ * failures; the replacements receive the real store. With `channel`, the
+ * store announces its changes to other tabs.
  */
 export function storeWith(
   factory: IDBFactory,
   overrides: (store: SessionStore) => Partial<SessionStore>,
+  channel?: Parameters<typeof openSessionStore>[2],
 ): NonNullable<BrowserRuntimeOptions['openStore']> {
   return async (namespace) => {
-    const store = await openSessionStore(namespace, factory);
+    const store = await openSessionStore(namespace, factory, channel);
     return { ...store, ...overrides(store) };
   };
 }
@@ -116,10 +118,7 @@ export function memoryStorage(): PreferenceStorage & {
  * Web Locks of one browser profile, as the runtime uses them: `shared` or
  * `exclusive`, `ifAvailable` or waiting in order until `signal` aborts.
  */
-export function memoryLocks(): SessionLocks & {
-  /** How often a waiting request was granted. */
-  waited: number;
-} {
+export function memoryLocks(): SessionLocks {
   type Held = { mode: 'exclusive' | 'shared'; count: number };
   type Waiting = {
     mode: 'exclusive' | 'shared';
@@ -143,7 +142,6 @@ export function memoryLocks(): SessionLocks & {
     while (queue.length && free(name, queue[0]!.mode)) queue.shift()!.grant();
   };
   const locks = {
-    waited: 0,
     async request(
       name: string,
       options: {
@@ -164,7 +162,6 @@ export function memoryLocks(): SessionLocks & {
             mode,
             grant: () => {
               options.signal?.removeEventListener('abort', abort);
-              locks.waited++;
               take(name, mode);
               resolve();
             },
