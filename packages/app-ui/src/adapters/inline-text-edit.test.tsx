@@ -171,8 +171,7 @@ it('dismisses on a press beside it that moves no focus', () => {
 });
 
 it('keeps a press on its own plain button that drops the focus', async () => {
-  // WebKit: a press on a plain button takes no focus and may leave it on
-  // the body.
+  // WebKit: a press on a plain button may leave the focus on the body.
   const onDismiss = vi.fn();
   render(
     <Field onDismiss={onDismiss}>
@@ -184,13 +183,5 @@ it('keeps a press on its own plain button that drops the focus', async () => {
   act(() => input.blur());
   await landed();
   expect(onDismiss).not.toHaveBeenCalled();
-  expect(document.activeElement).toBe(
-    document.querySelector('[data-sempods-ui=inline-text-edit]'),
-  );
-  // Released, the next departure dismisses again.
-  fireEvent.pointerUp(document.body);
-  await landed();
-  act(() => screen.getByRole('button', { name: 'Outside' }).focus());
-  await landed();
-  expect(onDismiss).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(input);
 });

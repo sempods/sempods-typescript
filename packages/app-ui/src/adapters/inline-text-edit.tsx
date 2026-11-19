@@ -158,32 +158,16 @@ export function InlineTextEdit({
     };
   }, []);
 
-  // A press inside the field, until the focus change it causes has been
-  // decided: a plain button, as in the row's notice, takes no focus on a
-  // press in WebKit, which may leave the focus on the body.
-  const pressedInside = useRef(false);
   // A press beside the field. On touch devices a tap on text that takes no
   // focus does not move the focus, so the focus alone would not tell.
   useEffect(() => {
     const press = (event: PointerEvent) => {
       if (event.target === document.documentElement) return; // a scrollbar
-      pressedInside.current = inside(event.target);
-      if (!pressedInside.current) leave();
+      if (!inside(event.target)) leave();
     };
-    // Queued after the focus decision of the press's own blur.
-    const release = () =>
-      setTimeout(() => {
-        pressedInside.current = false;
-      });
     document.addEventListener('pointerdown', press, true);
-    document.addEventListener('pointerup', release, true);
-    document.addEventListener('pointercancel', release, true);
     // `leave` and `inside` read refs only, so the first ones stay current.
-    return () => {
-      document.removeEventListener('pointerdown', press, true);
-      document.removeEventListener('pointerup', release, true);
-      document.removeEventListener('pointercancel', release, true);
-    };
+    return () => document.removeEventListener('pointerdown', press, true);
   }, []);
 
   // A departure that came during the write is settled now.
@@ -197,22 +181,17 @@ export function InlineTextEdit({
   useEffect(() => () => clearTimeout(timer.current), []);
   const onBlur = (event: ReactFocusEvent) => {
     if (inside(event.relatedTarget)) return;
-    const from = event.target;
     clearTimeout(timer.current);
-    // Decided once the focus has landed: the window losing the focus keeps
-    // the active element here, and a control that became disabled or left
-    // the page drops the focus without the person moving it.
+    // Decided once the focus has landed. The window losing the focus keeps
+    // the active element here. A focus dropped on the body is no departure:
+    // a control that became disabled or left the page drops it, and so may
+    // a press on the field's own plain button (the notice's), which takes
+    // no focus in WebKit. A press beside the field is told by its own
+    // listener; Tab moves the focus to another element.
     timer.current = setTimeout(() => {
       const active = document.activeElement;
       if (inside(active)) return;
-      const dropped = !active || active === document.body;
-      // A press on the field's own text or plain buttons keeps it: the
-      // field takes the focus the press left on the body.
-      if (pressedInside.current) {
-        if (dropped) root.current?.focus({ preventScroll: true });
-        return;
-      }
-      if (dropped && (!from.isConnected || from.matches(':disabled'))) {
+      if (!active || active === document.body) {
         input.current?.focus({ preventScroll: true });
         return;
       }
@@ -221,7 +200,6 @@ export function InlineTextEdit({
   };
   const onFocus = () => {
     clearTimeout(timer.current);
-    pressedInside.current = false;
     dismissed.current = false;
     left.current = false;
   };

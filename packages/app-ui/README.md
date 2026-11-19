@@ -1095,8 +1095,9 @@ stays inside it, so an enclosing dialog stays open.
   pointer in WebKit, where a press on a plain button does not focus it.
 - A press beside it, a tap on text beside it on a touch device, or Tab past
   it calls `onDismiss`: close the field without saving and keep or drop the
-  draft as the app decides. The window losing the focus, and a control that
-  becomes disabled while focused, do not.
+  draft as the app decides. The window losing the focus does not, nor a
+  focus that falls to the page, as when a focused control becomes disabled:
+  the input takes it back.
 - `pending` locks the value while the write runs: Save shows that it is
   pending and keeps its focus, Cancel is unavailable, and leaving then
   dismisses only once the write has settled. `readOnly` (for example
