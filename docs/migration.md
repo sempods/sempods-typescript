@@ -350,6 +350,18 @@ definition's modification instant, so an exact `toEqual({ kind: 'saved' })`
 in a test of a definition with `timestamps` expects it. See [before the list
 reads again](timestamps.md#before-the-list-reads-again).
 
+### ResourceEditor actions in confirmation order
+
+Up to 0.9.0-dev.3, `ResourceEditor` showed **Save**, **Cancel** (or
+**Discard changes**), **Check again** while blocked and **Delete** at the
+end. 0.9.0 reverses that: **Delete** first, set apart, then **Check again**,
+**Cancel** or **Discard changes**, and **Save** last, in DOM order and with
+the actions after Delete aligned to the end. After upgrading, find the
+editor's actions in tests by name instead of position (`getByRole('button',
+{ name: 'Save' })`, not the first button), and drop app CSS that selected
+them by position or by the internal class `sp-sdk-end`, which is gone. See
+[editing a form](react-authoring.md#editing-a-form-useresourceeditor).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

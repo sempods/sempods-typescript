@@ -49,6 +49,8 @@ afterEach(() => {
 
 type Props = Pick<Parameters<typeof ResourceEditor>[0], 'presentation'> & {
   readonly closable: boolean;
+  /** Another resource than `urn:one`, which the Pod does not have. */
+  readonly missing?: boolean;
 };
 const outerKeys: string[] = [];
 
@@ -125,12 +127,17 @@ async function setup(props: Props) {
   );
   await waitFor(() => expect(api.selection).toBeDefined());
   await act(async () => {
-    expect(await api.selection.select('urn:one')).toBe(true);
+    expect(
+      await api.selection.select(props.missing ? 'urn:missing' : 'urn:one'),
+    ).toBe(true);
   });
-  const field = (await screen.findByLabelText('Title')) as HTMLInputElement;
+  if (props.missing) await screen.findByRole('button', { name: 'Check again' });
+  const field = (
+    props.missing ? null : await screen.findByLabelText('Title')
+  ) as HTMLInputElement;
   return {
     field,
-    editor: field.closest('[data-sempods-ui="editor"]')!,
+    editor: document.querySelector('[data-sempods-ui="editor"]')!,
     writes,
     answer: (status: number) => {
       answer = status;
@@ -281,4 +288,45 @@ it('Escape in a nested chooser or a portal leaves the parent draft alone', async
   expect(writes).toEqual([]);
   // The chooser's own keys still reach the app around it.
   expect(outerKeys).toEqual(['Escape', 'Escape', 'Enter']);
+});
+
+/** The footer's buttons in DOM order, the order keyboard and assistive technology follow. */
+const actions = (editor: Element) =>
+  [...editor.querySelectorAll(':scope > .sp-sdk-actions > button')].map(
+    (button) => button.textContent,
+  );
+
+it('the footer leads with Delete and ends with Cancel or Discard, then Save (#401)', async () => {
+  for (const presentation of ['plain', 'card'] as const) {
+    const closable = await setup({ presentation, closable: true });
+    expect(actions(closable.editor)).toEqual(['Delete', 'Cancel', 'Save']);
+    cleanup();
+  }
+  const inPlace = await setup({ closable: false });
+  expect(actions(inPlace.editor)).toEqual([
+    'Delete',
+    'Discard changes',
+    'Save',
+  ]);
+  cleanup();
+  // Blocked: recovery right after Delete, ahead of the editing actions, with
+  // only Cancel enabled besides it.
+  const blocked = await setup({
+    presentation: 'plain',
+    closable: true,
+    missing: true,
+  });
+  expect(actions(blocked.editor)).toEqual([
+    'Delete',
+    'Check again',
+    'Cancel',
+    'Save',
+  ]);
+  expect(
+    [
+      ...blocked.editor.querySelectorAll<HTMLButtonElement>(
+        ':scope > .sp-sdk-actions > button',
+      ),
+    ].map((button) => button.disabled),
+  ).toEqual([true, false, false, true]);
 });

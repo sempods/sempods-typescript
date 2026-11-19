@@ -242,6 +242,14 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     counts at 320 and 375px and a root font size of 100% and 125%, the
     strip stays inside the screen beside the action, each count on one line,
     with 2.75rem targets;
+  - the SDK editor's actions (#401) in the README's task dialog and quick
+    edit, in German with long labels (one an unbroken word) at 1280, 375 and
+    320px and with the default labels at 1280 and 320px, for a task and for a
+    missing one whose blocked editor offers Check again with Delete and Save
+    disabled: Delete, Check again, Cancel and Save in DOM and reading order,
+    Delete at the row's start and 24px apart from an action beside it, Save
+    at its end, 44px targets with room for their focus rings, every label
+    line inside its button and nothing wider than the dialog;
   - ghost actions without Preflight (#392): a `Button`, an icon `LinkButton`,
     an `ActionButton` and `HeaderMenu`'s button rest without a surface under
     the app's stylesheet and under a host that imports only Tailwind's theme
