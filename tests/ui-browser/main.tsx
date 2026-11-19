@@ -38,11 +38,14 @@
 // Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
 // button; the checks swap the stylesheet for no-preflight.css, a host that
 // imports only Tailwind's theme and utilities (#392).
+// With `?screen=date-choice`, the page is a task with the README's "Not
+// today" action, a DateChoice in a ScreenDialog (#400).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
 // links, view-tabs.tsx, the view strip, view-strip.tsx, the confirmation,
-// confirm-dialog.tsx, and the address model, places.ts, are the package
+// confirm-dialog.tsx, the "Not today" action, not-today.tsx, and the
+// address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
@@ -101,6 +104,7 @@ import { ConfirmDialog } from './confirm-dialog';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
+import { DateChoiceGate } from './date-choice';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -260,6 +264,7 @@ const strip = settings.get('screen') === 'strip';
 const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
+const dateChoice = settings.get('screen') === 'date-choice';
 // Long translated editor actions, with `lang=de` (#401).
 const longLabels =
   settings.get('labels') === 'long'
@@ -402,6 +407,8 @@ function App() {
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : menuConfirm ? (
         <MenuConfirmGate />
+      ) : dateChoice ? (
+        <DateChoiceGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (

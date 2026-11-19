@@ -772,7 +772,26 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   outside 0001–9999. Month names and the first weekday follow the SDK
   provider's locale; days and month buttons are 44px targets. Apply and Remove
   date stay in a bar at the chooser's bottom edge, visible on a phone as it
-  opens.
+  opens. It holds a `DateChoice`, so `presets`, `min` and typed entry work
+  the same; a preset applies and closes at once.
+- **`DateChoice`**: the same calendar-day choice without a trigger or
+  popover, for an app's own dialog such as a `ScreenDialog`
+  ([example](#a-date-choice-in-a-screen-dialog)). `presets` are the app's
+  localized `{ label, day }` choices with concrete days (`YYYY-MM-DD`); one
+  activation calls `onChange` with its day. A custom day comes from the
+  calendar or is typed as `YYYY-MM-DD`, and reaches `onChange` only with
+  Apply; Enter in the typed entry neither applies it nor submits a form or
+  saves a `ResourceEditor` around the choice. The calendar ends at
+  0001-01-01 and 9999-12-31, the days a stored value can name. `min` disables earlier calendar days and presets (they stay
+  visible) and marks an earlier typed day invalid; a typed day that does not
+  exist (`2026-02-30`) is marked invalid too, and so is a stored `value` before `min` as it opens. Neither is corrected, and Apply
+  stays disabled. `optional` adds "Remove date" while there is a `value`,
+  which calls `onChange(null)`. `value` is the selected day; a new one from
+  the caller, such as a preset's, replaces the person's unapplied draft. The
+  app computes the presets' days and decides when to write a value; closing
+  the dialog without a call keeps it. Texts follow the SDK provider's
+  language, `labels` overrides Apply, Remove date and the typed entry's label.
+  The calendar needs 308px of width for its 44px days.
 - **`ActionButton`**: an app's own action in the theme's variants: `variant`
   `primary` (default), `secondary`, `ghost` or `destructive`; `shape` `pill`
   (56px high), `round-sm` (44px, as `HeaderMenu`'s button, for icon actions
@@ -1022,6 +1041,69 @@ export function ViewMenu(props: {
         },
       ]}
     />
+  );
+}
+```
+
+### A date choice in a screen dialog
+
+A "Not today" action that postpones a task: presets for tomorrow and a week
+later, no day before tomorrow, and "Remove date" to end the postponement. The
+app owns the arithmetic and the write; Escape or Close keeps the stored day.
+The UI gate runs this file as written:
+
+```tsx
+// not-today.tsx
+import { useMessages } from '@sempods/app-sdk/react';
+import { DateChoice, ScreenDialog } from '@sempods/app-ui';
+
+const text = {
+  en: { title: 'Not today', tomorrow: 'Tomorrow', week: 'In a week' },
+  de: { title: 'Nicht heute', tomorrow: 'Morgen', week: 'In einer Woche' },
+};
+
+/**
+ * The calendar day `days` after `day`, both `YYYY-MM-DD`: the app's own
+ * arithmetic, on a day it computed itself, at midnight UTC.
+ */
+function addDays(day: string, days: number): string {
+  const date = new Date(day + 'T00:00:00Z');
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function NotToday(props: {
+  readonly open: boolean;
+  /** Today in the app's time zone, as `YYYY-MM-DD`. */
+  readonly today: string;
+  /** The stored day the task waits for, or `null`. */
+  readonly until: string | null;
+  readonly postpone: (until: string | null) => void;
+  readonly close: () => void;
+}) {
+  const t = useMessages(text);
+  const tomorrow = addDays(props.today, 1);
+  return (
+    <ScreenDialog
+      title={t.title}
+      open={props.open}
+      onRequestClose={props.close}
+    >
+      <DateChoice
+        label={t.title}
+        value={props.until}
+        presets={[
+          { label: t.tomorrow, day: tomorrow },
+          { label: t.week, day: addDays(props.today, 7) },
+        ]}
+        min={tomorrow}
+        optional
+        onChange={(until) => {
+          props.postpone(until);
+          props.close();
+        }}
+      />
+    </ScreenDialog>
   );
 }
 ```
@@ -1784,9 +1866,13 @@ links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
 Context, plus fragment entries, a source address without a Context choice and
 a path with two leading slashes; and views as links, their current link
-marked by the router and drawn chosen in every action combination; and views
-on one baseline, switched by touch both ways, by pointer and by keyboard in
-forced colours, with long counts at 320px. It uses a loopback fixture Pod: it is not
+marked by the router and drawn chosen in every action combination; views on
+one baseline, switched by touch both ways, by pointer and by keyboard in
+forced colours, with long counts at 320px; and the "Not today" `DateChoice` in
+a `ScreenDialog` with a preset, a typed day, an impossible and an early day,
+Enter in a form, Remove date, Escape after a picked day, reopening the date
+chooser during its exit, the focus trap and 44px targets without horizontal
+overflow at 375 and 360px wide. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
