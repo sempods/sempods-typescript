@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { SdkLocaleProvider } from '@sempods/app-sdk/react';
 import { DateChooser } from './date-chooser.js';
 
@@ -63,4 +63,29 @@ it.each([
 
 it('shows no value with its label', () => {
   expect(shown(null)).toBe('Kein Datum');
+});
+
+it('applies a preset of its DateChoice and closes', () => {
+  const onChange = vi.fn();
+  render(
+    <SdkLocaleProvider locale="en-GB">
+      <DateChooser
+        label="Start"
+        value="2026-11-25"
+        onChange={onChange}
+        presets={[
+          { label: 'Today', day: '2026-11-19' },
+          { label: 'Tomorrow', day: '2026-11-20' },
+        ]}
+        min="2026-11-20"
+      />
+    </SdkLocaleProvider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^Start: / }));
+  expect(
+    screen.getByRole('button', { name: 'Today' }).hasAttribute('disabled'),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Tomorrow' }));
+  expect(onChange).toHaveBeenCalledExactlyOnceWith('2026-11-20');
+  expect(screen.queryByRole('dialog')).toBeNull();
 });

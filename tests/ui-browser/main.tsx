@@ -38,10 +38,13 @@
 // With `?screen=notices`, the page is a shopping list with a composer at the
 // bottom and an app dialog beside the SDK's shared notification host (#385);
 // with `&gate` as well, the SDK's sign-in gate shows before sign-in.
+// With `?screen=date-choice`, the page is a task with the README's "Not
+// today" action, a DateChoice in a ScreenDialog (#400).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
-// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, and the
+// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, the "Not
+// today" action, not-today.tsx, and the
 // address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
@@ -101,6 +104,7 @@ import './index.css';
 import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
 import { NoticesGate } from './notices';
+import { DateChoiceGate } from './date-choice';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -260,6 +264,7 @@ const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
 const notices = settings.get('screen') === 'notices';
+const dateChoice = settings.get('screen') === 'date-choice';
 // Long translated editor actions, with `lang=de` (#401).
 const longLabels =
   settings.get('labels') === 'long'
@@ -402,6 +407,8 @@ function App() {
         <MenuConfirmGate />
       ) : notices ? (
         <NoticesGate gate={settings.has('gate')} />
+      ) : dateChoice ? (
+        <DateChoiceGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (
