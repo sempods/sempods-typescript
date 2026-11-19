@@ -295,6 +295,35 @@ function useAnnouncer() {
 const aboveGate =
   'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]';
 
+/**
+ * The order in which open dialogs were first seen open, per document: the
+ * top layer stacks modals by opening order, which no API reports.
+ */
+const opened = new WeakMap<
+  Document,
+  { sequence: number; readonly of: Map<Element, number> }
+>();
+/**
+ * Records dialogs that opened since the last call, in document order, and
+ * `last` after them when it is new; forgets closed ones, so one that opens
+ * again counts as opened then.
+ */
+function trackOpened(document: Document, last?: Element) {
+  let order = opened.get(document);
+  if (!order) {
+    order = { sequence: 0, of: new Map() };
+    opened.set(document, order);
+  }
+  for (const element of order.of.keys())
+    if (!element.isConnected || !element.hasAttribute('open'))
+      order.of.delete(element);
+  for (const element of document.querySelectorAll('dialog[open]'))
+    if (element !== last && !order.of.has(element))
+      order.of.set(element, ++order.sequence);
+  if (last && !order.of.has(last)) order.of.set(last, ++order.sequence);
+  return order.of;
+}
+
 function usePageCover(
   own: RefObject<HTMLElement | null>,
   enabled = true,
@@ -311,6 +340,8 @@ function usePageCover(
       frame = 0;
       const element = own.current;
       if (!element) return;
+      // Every host keeps the opening order, from its first measure on.
+      trackOpened(document);
       const modal = isCovered(element, layer);
       const height = view.innerHeight;
       let avoid = 0;
@@ -392,13 +423,24 @@ function usePageCover(
 function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
   const document = element.ownerDocument;
   const gate = layer === 'gate' ? element.closest('dialog') : null;
-  if (gate)
+  if (gate) {
+    const order = trackOpened(document, gate);
+    const gateOpened = order.get(gate) ?? 0;
     return (
       [...gate.querySelectorAll('dialog[open]')].some(isModal) ||
       [...document.querySelectorAll(aboveGate)].some(
         (other) => !gate.contains(other) && isModal(other),
+      ) ||
+      // A dialog of the app that opened after the gate lies above it; one
+      // that was open before (#264) lies below.
+      [...document.querySelectorAll('dialog[open]')].some(
+        (other) =>
+          !gate.contains(other) &&
+          (order.get(other) ?? 0) > gateOpened &&
+          isModal(other),
       )
     );
+  }
   return (
     // An overlay library hides the page around its modal.
     Boolean(element.closest('[inert], [aria-hidden="true"]')) ||

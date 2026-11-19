@@ -797,10 +797,12 @@ it('shows notices inside a gate that opened above an app modal (#264)', async ()
   }
   render(
     <SempodsProvider runtime={f.runtime}>
-      {/* The app's own modal, open before the gate. */}
+      {/* The app's own modals, open before the gate: an overlay library's
+          and a native dialog (open stands for showModal in jsdom). */}
       <div role="dialog" aria-modal="true">
         <input aria-label="Draft" />
       </div>
+      <dialog open aria-label="Earlier dialog" />
       <AppAccess appName="Tasks" />
       <Notices />
       <Update />
@@ -878,4 +880,46 @@ it('drops the failure of an action whose notice was dismissed before it failed',
   act(() => actions.show({ key: 'copy', text: 'Copied.' }));
   expect(texts()).toEqual(['Copied.OK']);
   expect(within(items()[0]!).queryByRole('alert')).toBeNull();
+});
+
+it('waits inside the gate while an app dialog opened after the gate is open', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  let setOpen!: (open: boolean) => void;
+  function AppDialog() {
+    const [open, set] = useState(false);
+    setOpen = set;
+    // jsdom has no top layer: an open dialog stands for `showModal()`.
+    return open ? <dialog open aria-label="App dialog" /> : null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Tasks" />
+      <Notices />
+      <Publisher />
+      <AppDialog />
+    </SempodsProvider>,
+  );
+  const gate = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(element?.dataset.reason).toBe('no-connection');
+    return element!;
+  });
+  const inGate = () =>
+    gate.querySelector<HTMLElement>(
+      '[data-sempods-ui="notices"][data-placement="gate"]',
+    )!;
+  await waitFor(() => expect(inGate()).not.toBeNull());
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  act(() => setOpen(true));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(items(inGate())).toEqual([]);
+  expect(announced(inGate())).toEqual([]);
+  act(() => setOpen(false));
+  await waitFor(() => expect(texts(inGate())).toEqual(['Saved.OK']));
+  await waitFor(() => expect(announced(inGate())).toEqual(['Saved.']));
 });
