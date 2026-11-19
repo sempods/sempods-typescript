@@ -362,9 +362,10 @@ the Pod without an answer or a failed answer never starts it again; `tabStorage`
 replaces that storage in tests, and without one nothing is tried. Coming back
 to the page that left (its history entry, also from the back/forward cache)
 forgets the attempt; a tab opened from the one at the Pod copies the note but
-leaves the attempt to that tab's answer. A tab whose silent sign-in starts while
-another tab's sign-in to the default Pod is under way follows that sign-in
-instead of asking the Pod again. A preparation
+leaves the attempt to that tab's answer. A tab whose silent sign-in starts while another tab's sign-in to the default
+Pod is under way, up to the end of its code exchange, follows that sign-in
+instead of asking the Pod again, also when it listed that sign-in meanwhile.
+A preparation
 that fails (an unreachable Pod) leaves the person signed out without an error.
 A tab that started with something stored, or returned from a sign-in, never
 tries, also after a sign-out deletes the records. A new tab with nothing stored

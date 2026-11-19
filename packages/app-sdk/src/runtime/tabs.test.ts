@@ -1299,6 +1299,103 @@ describe('one saved connection per Pod across tabs', () => {
       ]),
     );
   });
+  it.each(['preparing', 'exchanging its code'])(
+    'lets a silent first sign-in that reaches the Pod later follow the one another tab is %s',
+    async (phase) => {
+      const channels = memoryChannels();
+      const factory = new IDBFactory();
+      const identity = {
+        kind: 'did-web' as const,
+        clientId: 'did:web:app.example',
+        redirectUri: callback,
+      };
+      const f = fixture({
+        identity,
+        preset: { podUrl: pod },
+        firstSignIn: 'silent',
+        preferences: null,
+        locks: memoryLocks(),
+        openStore: (namespace) =>
+          openSessionStore(namespace, factory, channels),
+      });
+      const exchange = deferred<Response>();
+      f.setToken(() => exchange.promise);
+      // Tab b starts first, with nothing stored, and reaches the Pod late.
+      const discovery = deferred<void>();
+      let discovering = false;
+      const slow: typeof f.fetch = vi.fn(async (url, init) => {
+        if (url.endsWith('/.well-known/oauth-protected-resource')) {
+          discovering = true;
+          await discovery.promise;
+        }
+        return f.fetch(url, init);
+      });
+      const open = (fetch: typeof f.fetch) => {
+        const runtime = createBrowserRuntime({
+          ...f.options,
+          fetch,
+          tabStorage: memoryStorage(),
+        });
+        runtimes.push(runtime);
+        return runtime;
+      };
+      const b = open(slow);
+      const bStarted = b.initialize();
+      await vi.waitFor(() => expect(discovering).toBe(true));
+      const a = open(f.fetch);
+      await a.initialize();
+      const silentAttempts = () =>
+        f.navigate.mock.calls.filter(
+          ([url]) => new URL(url).searchParams.get('prompt') === 'none',
+        );
+      expect(silentAttempts()).toHaveLength(1);
+      a.dispose();
+      await settleLease();
+      const back = f.returned();
+      runtimes.push(back);
+      let returned: ReturnType<typeof back.initialize> | undefined;
+      if (phase === 'exchanging its code') {
+        returned = back.initialize();
+        // Its code is claimed before the token request is sent.
+        await vi.waitFor(() =>
+          expect(
+            f.fetch.mock.calls.some(([url]) => url.endsWith('/token')),
+          ).toBe(true),
+        );
+      }
+      // Tab b lists that sign-in, then reaches the Pod.
+      await vi.waitFor(() =>
+        expect(b.getSnapshot()).toMatchObject([
+          { session: { kind: 'ended', problem: 'interrupted' } },
+        ]),
+      );
+      discovery.resolve();
+      await bStarted;
+      expect(silentAttempts()).toHaveLength(1);
+      exchange.resolve(
+        Response.json({
+          access_token: jwt({ client_id: identity.clientId }),
+          token_type: 'Bearer',
+          refresh_token: 'one',
+        }),
+      );
+      expect(await (returned ?? back.initialize())).toMatchObject({
+        interaction: 'completed',
+      });
+      const exchanges = f.fetch.mock.calls.filter(
+        ([url, init]) =>
+          url.endsWith('/token') &&
+          new URLSearchParams(String(init?.body)).get('grant_type') ===
+            'authorization_code',
+      );
+      expect(exchanges).toHaveLength(1);
+      await vi.waitFor(() =>
+        expect(b.getSnapshot()).toMatchObject([
+          { session: { kind: 'active' } },
+        ]),
+      );
+    },
+  );
   it('leaves the saved connections alone when a first sign-in cannot list them', async () => {
     const { channels, freeze } = freezable();
     const factory = new IDBFactory();

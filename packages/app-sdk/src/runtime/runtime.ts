@@ -2155,9 +2155,10 @@ export function createBrowserRuntime(
       return { generation, url };
     };
     let prepared: { generation: string; url: string };
-    if (e.revision === null && lease?.store.watch) {
+    if ((e.revision === null || intent === 'silent') && lease?.store.watch) {
       // The first record for this Pod, decided under its lock: two tabs
-      // preparing at once do not both create one.
+      // preparing at once do not both create one. A silent sign-in decides
+      // there too, also on a record it listed meanwhile (see `follows`).
       const outcome = await locked<
         | { joined: Entry; session: boolean }
         | { prepared: { generation: string; url: string } }
@@ -2182,11 +2183,14 @@ export function createBrowserRuntime(
           current(e, before);
         }
         // A silent first sign-in follows a sign-in another tab has under
-        // way for this Pod, rather than replacing its attempt.
+        // way for this Pod, up to the end of its code exchange, rather than
+        // replacing its attempt.
         const follows =
           intent === 'silent' &&
-          saved?.value.kind === 'authorizing' &&
-          saved.value.attempt.expiresAt > Date.now();
+          ((saved?.value.kind === 'authorizing' &&
+            saved.value.attempt.expiresAt > Date.now()) ||
+            (saved?.value.kind === 'claimed' &&
+              saved.value.operation === 'code'));
         if (saved?.id === id) {
           // This connection's own record, which an announcement did not
           // bring yet (the default Pod's stable id): a session another tab
