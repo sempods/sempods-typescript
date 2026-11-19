@@ -823,3 +823,59 @@ it('shows notices inside a gate that opened above an app modal (#264)', async ()
     ).toEqual(['A new version is ready.OK']),
   );
 });
+
+it('announces a notice published together with a modal only once the modal closes', async () => {
+  const runtime = await signedIn();
+  let setOpen!: (open: boolean) => void;
+  function Modal() {
+    const [open, set] = useState(false);
+    setOpen = set;
+    return open ? <div role="dialog" aria-modal="true" /> : null;
+  }
+  render(
+    <App runtime={runtime}>
+      <Modal />
+    </App>,
+  );
+  // One event opens the modal and publishes the notice.
+  act(() => {
+    setOpen(true);
+    actions.show({ key: 'sync', text: 'Not synchronised.', severity: 'error' });
+  });
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(items()).toEqual([]);
+  expect(announced()).toEqual([]);
+  act(() => setOpen(false));
+  await waitFor(() => expect(texts()).toEqual(['Not synchronised.OK']));
+  await waitFor(() => expect(announced()).toEqual(['Not synchronised.']));
+});
+
+it('drops the failure of an action whose notice was dismissed before it failed', async () => {
+  const runtime = await signedIn();
+  let fail!: (cause: unknown) => void;
+  render(<App runtime={runtime} />);
+  act(() =>
+    actions.show({
+      key: 'copy',
+      text: 'Not copied.',
+      severity: 'error',
+      action: {
+        label: 'Copy again',
+        run: () =>
+          new Promise<void>((_, reject) => {
+            fail = reject;
+          }),
+      },
+    }),
+  );
+  await act(async () =>
+    screen.getByRole('button', { name: 'Copy again' }).click(),
+  );
+  await act(async () => screen.getByRole('button', { name: 'OK' }).click());
+  expect(items()).toEqual([]);
+  await act(async () => fail(new Error('offline')));
+  // A later notice under the same key starts clean.
+  act(() => actions.show({ key: 'copy', text: 'Copied.' }));
+  expect(texts()).toEqual(['Copied.OK']);
+  expect(within(items()[0]!).queryByRole('alert')).toBeNull();
+});

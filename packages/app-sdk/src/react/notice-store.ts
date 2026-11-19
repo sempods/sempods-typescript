@@ -41,6 +41,11 @@ class NoticeStore {
   private running = new Set<string>();
   /** The last failed action of each, also for a notice that remounted. */
   private failures = new Map<string, { readonly cause: unknown }>();
+  /**
+   * Each notice or prompt id starts a new life when it retires, so a late
+   * answer of an action never reaches a later notice with the same key.
+   */
+  private lives = new Map<string, number>();
   private sequence = 0;
   private events = 0;
   private listeners = new Set<() => void>();
@@ -120,7 +125,7 @@ class NoticeStore {
     this.runs.delete(key);
     this.orders.delete('app\n' + key);
     this.announced.delete('app\n' + key);
-    this.failures.delete('app\n' + key);
+    this.endLife('app\n' + key);
     this.emit();
   }
   dismiss = (key: string) => {
@@ -148,16 +153,28 @@ class NoticeStore {
   run(key: string) {
     return this.runs.get(key);
   }
-  /** Marks an action of `id` as running; `false` while one already runs. */
+  private endLife(id: string) {
+    this.running.delete(id);
+    this.failures.delete(id);
+    this.lives.set(id, (this.lives.get(id) ?? 0) + 1);
+  }
+  /**
+   * Marks an action of `id` as running and returns its notice's life, or
+   * `null` while one already runs.
+   */
   begin(id: string) {
-    if (this.running.has(id)) return false;
+    if (this.running.has(id)) return null;
     this.running.add(id);
     this.failures.delete(id);
     this.listeners.forEach((listener) => listener());
-    return true;
+    return this.lives.get(id) ?? 0;
   }
-  /** Ends the action of `id`, keeping its failure for whoever shows it. */
-  end(id: string, failure?: { readonly cause: unknown }) {
+  /**
+   * Ends the action begun in `life`, keeping its failure for whoever shows
+   * the notice; nothing once that notice has retired.
+   */
+  end(id: string, life: number, failure?: { readonly cause: unknown }) {
+    if ((this.lives.get(id) ?? 0) !== life) return;
     this.running.delete(id);
     if (failure) this.failures.set(id, failure);
     this.listeners.forEach((listener) => listener());
@@ -177,7 +194,7 @@ class NoticeStore {
   forgetPrompt(id: string) {
     this.orders.delete(id);
     this.announced.delete(id);
-    this.failures.delete(id);
+    this.endLife(id);
   }
   /** Adds a host or replaces its options in place, keeping its position. */
   register(host: Host) {

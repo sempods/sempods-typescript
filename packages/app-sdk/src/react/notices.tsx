@@ -238,9 +238,10 @@ interface Announcement {
   readonly text: string;
   readonly assertive: boolean;
 }
-const Announce = createContext<(text: string, assertive: boolean) => void>(
-  () => {},
-);
+const Announce = createContext<{
+  readonly announce: (text: string, assertive: boolean) => void;
+  readonly layer: 'page' | 'gate';
+}>({ announce: () => {}, layer: 'page' });
 
 /**
  * One polite and one assertive live region. Each event is added once and
@@ -310,22 +311,7 @@ function usePageCover(
       frame = 0;
       const element = own.current;
       if (!element) return;
-      const gate = layer === 'gate' ? element.closest('dialog') : null;
-      const modal = gate
-        ? [...gate.querySelectorAll('dialog[open]')].some(isModal) ||
-          [...document.querySelectorAll(aboveGate)].some(
-            (other) => !gate.contains(other) && isModal(other),
-          )
-        : // An overlay library hides the page around its modal.
-          Boolean(element.closest('[inert], [aria-hidden="true"]')) ||
-          [
-            ...document.querySelectorAll('dialog[open], [aria-modal="true"]'),
-          ].some(
-            (other) =>
-              !other.contains(element) &&
-              !element.contains(other) &&
-              isModal(other),
-          );
+      const modal = isCovered(element, layer);
       const height = view.innerHeight;
       let avoid = 0;
       for (const zone of document.querySelectorAll<HTMLElement>(
@@ -402,6 +388,27 @@ function usePageCover(
   }, [own, enabled, layer]);
   return cover;
 }
+/** Whether a modal above `element`'s layer covers it, right now. */
+function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
+  const document = element.ownerDocument;
+  const gate = layer === 'gate' ? element.closest('dialog') : null;
+  if (gate)
+    return (
+      [...gate.querySelectorAll('dialog[open]')].some(isModal) ||
+      [...document.querySelectorAll(aboveGate)].some(
+        (other) => !gate.contains(other) && isModal(other),
+      )
+    );
+  return (
+    // An overlay library hides the page around its modal.
+    Boolean(element.closest('[inert], [aria-hidden="true"]')) ||
+    [...document.querySelectorAll('dialog[open], [aria-modal="true"]')].some(
+      (other) =>
+        !other.contains(element) && !element.contains(other) && isModal(other),
+    )
+  );
+}
+
 function isModal(element: Element) {
   if (element.localName !== 'dialog') return true;
   // Without a top layer (jsdom), an SDK dialog opens with the attribute.
@@ -457,6 +464,10 @@ export function Notices(props: NoticesProps) {
   const root = useRef<HTMLDivElement>(null);
   const cover = usePageCover(root);
   const { announce, regions } = useAnnouncer();
+  const pageAnnounce = useMemo(
+    () => ({ announce, layer: 'page' as const }),
+    [announce],
+  );
   const live = useRef(new Set<string>());
   const entries = useMemo(() => {
     const access: Entry[] =
@@ -498,7 +509,7 @@ export function Notices(props: NoticesProps) {
         {layered(styles)}
       </style>
       {first && regions}
-      <Announce.Provider value={announce}>
+      <Announce.Provider value={pageAnnounce}>
         <ul hidden={shown.length === 0}>
           {shown.map((entry) => (
             <NoticeItem
@@ -533,6 +544,10 @@ export function GateNotices() {
   // A dialog above the gate, such as the app's settings, makes the stack
   // wait: its notices time out and are announced once it closes.
   const cover = usePageCover(root, Boolean(host), 'gate');
+  const gateAnnounce = useMemo(
+    () => ({ announce, layer: 'gate' as const }),
+    [announce],
+  );
   const shown =
     host && !cover.modal ? visible(appEntries(records), host.limit) : [];
   // Room at the gate's end, so the stack never covers its last control.
@@ -568,7 +583,7 @@ export function GateNotices() {
         {layered(styles)}
       </style>
       {regions}
-      <Announce.Provider value={announce}>
+      <Announce.Provider value={gateAnnounce}>
         <ul hidden={shown.length === 0}>
           {shown.map((entry) => (
             <NoticeItem
@@ -597,13 +612,29 @@ function NoticeItem({
 }) {
   const store = useNoticeStore();
   const view = useNoticeView(entry);
-  const announce = useContext(Announce);
+  const { announce, layer } = useContext(Announce);
   const event = entry.app?.event ?? 0;
   const message = [view.pod, view.title, view.text].filter(Boolean).join('. ');
-  // Once per event, when it first shows: here, in the gate or after a modal.
+  const element = useRef<HTMLLIElement>(null);
+  // Once per event, when it first shows uncovered: here, in the gate or
+  // after a modal. A modal that opened in the same event as the notice is
+  // seen at once, before the host measures it: the event waits for it.
   useEffect(() => {
-    if (message && store.announce(entry.id, event))
-      announce(message, view.severity === 'error');
+    if (!message) return;
+    let frame = 0;
+    const attempt = () => {
+      frame = 0;
+      const li = element.current;
+      if (!li) return;
+      if (isCovered(li, layer)) {
+        frame = requestAnimationFrame(attempt);
+        return;
+      }
+      if (store.announce(entry.id, event))
+        announce(message, view.severity === 'error');
+    };
+    attempt();
+    return () => cancelAnimationFrame(frame);
     // Only a new event announces; a changed text or language does not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, entry.id, event]);
@@ -620,7 +651,6 @@ function NoticeItem({
     return () => clearTimeout(timer);
   }, [duration, held.hover, held.focus, renewed, event, expire]);
   // Focus returns from a notice that goes while it holds focus.
-  const element = useRef<HTMLLIElement>(null);
   const focus = useFocusHold();
   const previous = useRef<HTMLElement | null>(null);
   const target = useCommitted(focusTarget);
@@ -703,10 +733,11 @@ function useNoticeView(entry: Entry): NoticeView {
   );
   const disabled = busy || changing || confirmingLeave;
   const guarded = (run: () => Promise<unknown>) => () => {
-    if (disabled || !store.begin(entry.id)) return;
+    const life = disabled ? null : store.begin(entry.id);
+    if (life === null) return;
     void run().then(
-      () => store.end(entry.id),
-      (cause: unknown) => store.end(entry.id, { cause }),
+      () => store.end(entry.id, life),
+      (cause: unknown) => store.end(entry.id, life, { cause }),
     );
   };
   const dismissLabel = m.controls.dismiss ?? m.controls.close ?? 'OK';
