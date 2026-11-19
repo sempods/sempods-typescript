@@ -7348,6 +7348,38 @@ async function rename({ browser, origin, engine }) {
       }),
     );
     results.push(
+      await attemptOn(errors, 'tick-keeps-the-parked-rename', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        // The same row's tick writes from the snapshot the rename started from.
+        await tick(BOOKS);
+        await page
+          .getByRole('checkbox', { name: `Bought: ${BOOKS}`, checked: true })
+          .waitFor({ timeout: 15000 });
+        await page.waitForTimeout(500);
+        await trigger(page, BOOKS).click();
+        const editable = await input(page).isEditable();
+        const draft = await input(page).inputValue();
+        await page.keyboard.press('Enter');
+        const closed = await gone(field(page), 15000);
+        const stored = await title(4);
+        return {
+          pass:
+            editable &&
+            draft === 'Return the books' &&
+            closed &&
+            stored === 'Return the books',
+          editable,
+          draft,
+          closed,
+          stored,
+        };
+      }),
+    );
+    results.push(
       await attemptOn(errors, 'skipped-row-keeps-the-guard', async () => {
         await open(page);
         await trigger(page, BOOKS).click();

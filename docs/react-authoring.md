@@ -511,9 +511,10 @@ is the complete, tested shopping list; the core is:
   writer's name as what the person saw and overwrite it without a question.
   From the base, a change on the Pod is `changed-on-pod`: it locks the row
   (`readOnly` follows the base's `canMutate`), the notice's check reads the
-  current version and the list reads again. Only after the person
-  acknowledged it does the next read become the base, and the kept draft can
-  be saved onto it. A refusal keeps the draft and the field open with the
+  current version and the list reads again. A newer read becomes the base
+  only when its name still reads as the rename started from it, for example
+  after the row's own tick, which spends the old snapshot, or after the
+  person acknowledged the change; then the kept draft can be saved onto it. A refusal keeps the draft and the field open with the
   notice; the person may save again. Never resend on any other result.
 - **Leaving is a dismissal, not a save.** A press beside the field or Tab
   past it calls `onDismiss`. Park a changed draft, as the README example does

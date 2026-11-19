@@ -1295,11 +1295,15 @@ export function ShoppingList(props: {
       else next.delete(iri);
       return next;
     });
-  // After an acknowledged change on the Pod, the next read is the base.
+  // A newer read becomes the base when the name still reads as the rename
+  // started from it, for example after this row's own tick wrote from the
+  // base, or after the person acknowledged a change on the Pod. A name
+  // changed elsewhere keeps the old base, so Save reports the change.
   useEffect(() => {
     for (const [iri, draft] of drafts) {
       const now = shown.get(iri);
-      if (draft.rebase && now && now !== draft.base)
+      if (!now || now === draft.base) continue;
+      if (draft.rebase || now.data.title === draft.base.data.title)
         update(iri, (d) => d && { text: d.text, base: now });
     }
   });
