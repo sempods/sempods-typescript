@@ -276,8 +276,9 @@ read-only tags. shadcn's
 them. The adapters below are the sempods compositions; prefer them for screens,
 menus, dates and actions.
 
-`Checkbox` ticks a list row: a 20px box inside a 44px target, filled with the
-`primary` role and a check mark when selected (a dash while
+`Checkbox` ticks a list row: a 1.25rem box inside a 2.75rem target (20px and
+44px at the default text size; both grow with the root font size, as a
+`size-11` control does), filled with the `primary` role and a check mark when selected (a dash while
 `isIndeterminate`), the kit's focus ring for the keyboard, and Space or a press
 to change it. It takes React Aria's `isSelected`, `onChange` and
 `isDisabled`. Name it with `aria-label`, for example `Done: Buy milk` beside
