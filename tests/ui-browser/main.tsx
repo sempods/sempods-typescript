@@ -27,6 +27,8 @@
 // With `?screen=confirm`, the page is the README's confirmation, open, with
 // long German labels and a long unbroken list name; with `&footer=pill` as
 // well, the same dialog parts hold `ActionButton` pills instead (#368).
+// With `?screen=menu-confirm`, a screen's menu has an action that asks
+// first with the README's confirmation (#391).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
@@ -86,6 +88,7 @@ import { ViewTabs } from './view-tabs';
 import { ConfirmDialog } from './confirm-dialog';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
+import { MenuConfirmGate } from './menu-confirm';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -242,6 +245,7 @@ const addPod =
 const checkboxes = settings.get('screen') === 'checkbox';
 const tabs = settings.get('screen') === 'tabs';
 const confirmation = settings.get('screen') === 'confirm';
+const menuConfirm = settings.get('screen') === 'menu-confirm';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -365,6 +369,8 @@ function App() {
         <TabsGate />
       ) : confirmation ? (
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
+      ) : menuConfirm ? (
+        <MenuConfirmGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (

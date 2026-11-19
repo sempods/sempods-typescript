@@ -47,6 +47,10 @@ Changes against the registry output:
   mixes 10% of the text colour into a focused row. Hovering moves the focus to
   the row, and it keeps the focus while the pointer crosses a separator; the
   row now stays neutral there (#232).
+- `dropdown-menu.tsx`: `DropdownMenu` keys its popover by the number of
+  times it has opened, so a menu opened again during its exit animation
+  mounts a new popover, whose menu takes the focus, instead of keeping the
+  closing one (sempods/sempods-typescript#391).
 - `dialog.tsx`: no entry or exit animation on the overlay and the modal. In
   WebKit, React Aria kept a modal that closed during its entry animation
   mounted for good (`data-entering` and `data-exiting` at once); in headless

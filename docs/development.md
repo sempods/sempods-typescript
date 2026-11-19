@@ -120,8 +120,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   installed README's `task-dialog.tsx` and `places.ts` examples as shipped, so
   every check below runs the documented recipe; its compact quick edit is the
   README's `quick-edit.tsx`, its view links on `?screen=tabs` the README's
-  `view-tabs.tsx`, its confirmation on `?screen=confirm` the README's
-  `confirm-dialog.tsx`; the screen routes with the
+  `view-tabs.tsx`, its confirmation on `?screen=confirm` and
+  `?screen=menu-confirm` the README's `confirm-dialog.tsx`; the screen routes with the
   package's `useNav` and uses the README's stylesheet setup. The README's other
   TSX examples are compiled. It is
   built with Vite and Tailwind CSS 4. The
@@ -153,6 +153,13 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     and the dialog, no sideways scroll, room for the focus rings, 44px targets
     (56px pills), Cancel before the answer and, for the README's buttons, side
     by side at 1280px; Tab reaches Cancel, then the answer, which Enter gives;
+  - a menu action that asks first with the README's confirmation on
+    `?screen=menu-confirm` (#391), answered at once by pointer or keyboard
+    while the menu is still in its exit animation, at 375px in light and dark:
+    the menu opened again at once by pointer, or by Enter once the focus is
+    back on its button, holds the focus, moves with the arrow keys, closes with
+    Escape and returns the focus to its button; Escape and an action without a
+    dialog still play the menu's exit animation;
   - `ScreenDialog` full screen with safe-area insets, emulated through the
     DevTools protocol in Chromium only (other engines report a skip): Close
     below a 47px top inset, the last action after scrolling above a 34px
