@@ -33,10 +33,14 @@
 // Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
 // button; the checks swap the stylesheet for no-preflight.css, a host that
 // imports only Tailwind's theme and utilities (#392).
+// With `?screen=rename`, the page is the README's shopping list whose item
+// names are renamed in their rows (rename-row.tsx, #394); with `&shape=menu`
+// as well, the second shape, a list renamed from its rows' menus.
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
-// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, and the
+// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, the renamed
+// rows, rename-row.tsx, and the
 // address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
@@ -58,6 +62,7 @@ import {
   PodChooser,
   SempodsProvider,
   TargetScreen,
+  useApp,
   useAppState,
   useList,
   useMessages,
@@ -95,6 +100,8 @@ import { ConfirmDialog } from './confirm-dialog';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
+import { ShoppingList } from './rename-row';
+import { RenameMenuGate } from './rename-menu';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -253,6 +260,14 @@ const tabs = settings.get('screen') === 'tabs';
 const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
+// The sign-in callback returns to the renamed rows it started from.
+if (settings.get('screen') === 'rename')
+  sessionStorage.setItem('rename-gate', settings.toString());
+const renameSettings =
+  location.pathname === '/callback'
+    ? new URLSearchParams(sessionStorage.getItem('rename-gate') ?? '')
+    : settings;
+const renaming = renameSettings.get('screen') === 'rename';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -376,6 +391,8 @@ function App() {
         <TabsGate />
       ) : ghosts ? (
         <GhostGate />
+      ) : renaming ? (
+        <RenameGate menu={renameSettings.get('shape') === 'menu'} />
       ) : confirmation ? (
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : menuConfirm ? (
@@ -761,6 +778,48 @@ function CheckboxGate() {
         <span id="remember-device">Remember this device</span>
       </div>
     </main>
+  );
+}
+
+/**
+ * Rows renamed in place (`?screen=rename`, #394), after sign-in: the
+ * README's shopping list, or with `menu` the second shape. A button after
+ * the list is where Tab goes next.
+ */
+function RenameGate({ menu }: { readonly menu: boolean }) {
+  return (
+    <main className="gate-main">
+      <AppAccess appName="Konsum" />
+      <TargetScreen>
+        {menu ? (
+          <RenameMenuGate />
+        ) : (
+          <>
+            <h1>Konsum</h1>
+            <ShoppingList href={(iri) => `#item-${encodeURIComponent(iri)}`} />
+            <button type="button">After the list</button>
+            <SwitchList />
+          </>
+        )}
+      </TargetScreen>
+    </main>
+  );
+}
+
+/** A guarded change of the list: the leave policy asks about drafts. */
+function SwitchList() {
+  const actions = useApp();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        void actions.selectContext(
+          location.origin + '/alice/_system/contexts/personal',
+        )
+      }
+    >
+      Switch to personal
+    </button>
   );
 }
 

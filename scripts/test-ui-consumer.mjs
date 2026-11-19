@@ -167,6 +167,7 @@ try {
     await ship('tsx', 'workspace.tsx'),
     await ship('tsx', 'view-tabs.tsx'),
     await ship('tsx', 'confirm-dialog.tsx'),
+    await ship('tsx', 'rename-row.tsx'),
   ];
   for (const [i, example] of blocks('tsx').entries())
     if (!shipped.includes(example))

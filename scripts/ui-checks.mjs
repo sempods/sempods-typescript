@@ -5906,6 +5906,7 @@ export const suites = {
   menuDialog,
   viewTabs,
   ghost,
+  rename,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */
@@ -6498,6 +6499,624 @@ async function ghost({ browser, origin, engine }) {
   } finally {
     results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
     await context.close();
+  }
+  return results;
+}
+
+/**
+ * Rows renamed in place on `?screen=rename` (#394): the README's shopping
+ * list with `InlineTextEdit` and the row's `useFieldUpdate` command, and with
+ * `&shape=menu` the second shape, renamed from a row's menu. Keyboard and
+ * pointer, a touch tap beside the field, dismissal and resumption of a
+ * parked draft, an invalid name, a denied write, a change on the Pod, a slow
+ * save and where the focus goes after it, read-only access, German names
+ * and narrow widths.
+ */
+async function rename({ browser, origin, engine }) {
+  const results = [];
+  const tab = tabKey(engine);
+  const NEWSLETTER = 'Draft the club newsletter';
+  const BOOKS = 'Return the library books';
+  const work = origin + '/alice/_system/contexts/work';
+  const resource = (n) =>
+    `${origin}/alice/_system/resources/${Buffer.from(
+      `${origin}/alice/tasks/${n}`,
+    ).toString('base64url')}?context=${encodeURIComponent(work)}`;
+  /** The stored title of the fixture's task `n`. */
+  const title = async (n) =>
+    (await storedTasks(origin)).find(
+      (t) =>
+        t.context === work && t.body['@id'] === `${origin}/alice/tasks/${n}`,
+    )?.body['https://schema.org/name'][0]['@value'];
+  /** Another client renames task `n` on the Pod. */
+  const renameOnPod = async (n, name) => {
+    const etag = (await fetch(resource(n))).headers.get('etag');
+    await fetch(resource(n), {
+      method: 'PATCH',
+      headers: { 'if-match': etag, 'content-type': 'application/json' },
+      body: JSON.stringify({ 'https://schema.org/name': [{ '@value': name }] }),
+    });
+  };
+  const open = async (
+    page,
+    address = '/?screen=rename',
+    ready = /^(Rename|Umbenennen): /,
+  ) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await fetch(origin + '/__reset');
+    await page.goto(origin + address);
+    await page
+      .getByRole('button', { name: ready })
+      .first()
+      .waitFor({ timeout: 15000 });
+  };
+  const signedIn = async (page, address = '/?screen=rename') => {
+    await signIn(page, origin, address, { choose: false });
+    await chooser(page).selectOption({ label: 'work' });
+    await page
+      .getByRole('button', { name: /^(Rename|Umbenennen): / })
+      .first()
+      .waitFor({ timeout: 15000 });
+  };
+  const field = (page) => page.locator('[data-sempods-ui=inline-text-edit]');
+  const input = (page) => field(page).getByRole('textbox');
+  const trigger = (page, name) =>
+    page.getByRole('button', { name: new RegExp(`^Rename: ${name}`) });
+  /** The PATCH requests the page sends from now on. */
+  const patches = (page) => {
+    const sent = [];
+    page.on('request', (r) => {
+      if (r.method() === 'PATCH') sent.push(r.url());
+    });
+    return sent;
+  };
+  const focused = (page) =>
+    page.evaluate(
+      () =>
+        document.activeElement?.getAttribute('aria-label') ||
+        document.activeElement?.textContent?.trim() ||
+        document.activeElement?.tagName,
+    );
+
+  const { context, page, errors } = await newPage(browser);
+  const sent = patches(page);
+  try {
+    await signedIn(page);
+    results.push(
+      await attemptOn(errors, 'keyboard-rename-returns-focus', async () => {
+        await trigger(page, NEWSLETTER).focus();
+        await page.keyboard.press('Enter');
+        await input(page).waitFor();
+        const selected = await input(page).evaluate(
+          (el) =>
+            el.selectionStart === 0 && el.selectionEnd === el.value.length,
+        );
+        const name = await input(page).getAttribute('aria-label');
+        await page.keyboard.type('Draft the newsletter');
+        // Its own controls keep it open, forwards and back.
+        await page.keyboard.press(tab);
+        const onSave = await focused(page);
+        await page.keyboard.press(tab);
+        const onCancel = await focused(page);
+        await page.keyboard.press(`Shift+${tab}`);
+        await page.keyboard.press(`Shift+${tab}`);
+        const back = await focused(page);
+        const openAfterTabs = await field(page).isVisible();
+        await page.keyboard.press('Enter');
+        const closed = await gone(field(page));
+        const focus = await focusUntil(
+          page,
+          /^Rename: Draft the newsletter$/,
+          focused,
+        );
+        const stored = await title(2);
+        return {
+          pass:
+            selected &&
+            name === `Rename: ${NEWSLETTER}` &&
+            onSave === 'Save' &&
+            onCancel === 'Cancel' &&
+            back === `Rename: ${NEWSLETTER}` &&
+            openAfterTabs &&
+            closed &&
+            focus === 'Rename: Draft the newsletter' &&
+            stored === 'Draft the newsletter',
+          selected,
+          name,
+          onSave,
+          onCancel,
+          back,
+          focus,
+          stored,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'escape-cancels-without-writing', async () => {
+        await open(page);
+        const before = sent.length;
+        await trigger(page, BOOKS).click();
+        await input(page).waitFor();
+        await page.keyboard.type('Return the books');
+        await page.keyboard.press('Escape');
+        const closed = await gone(field(page));
+        const focus = await focusUntil(page, /^Rename: /, focused);
+        return {
+          pass:
+            closed &&
+            focus === `Rename: ${BOOKS}` &&
+            sent.length === before &&
+            (await title(4)) === BOOKS,
+          focus,
+          writes: sent.length - before,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'dismiss-parks-and-resumes', async () => {
+        await open(page);
+        const before = sent.length;
+        await trigger(page, BOOKS).click();
+        await input(page).waitFor();
+        await page.keyboard.type('Return the books');
+        // A press between its buttons, on the field itself, keeps it open.
+        const save = await field(page)
+          .getByRole('button', { name: 'Save' })
+          .boundingBox();
+        await page.mouse.click(
+          save.x + save.width + 4,
+          save.y + save.height / 2,
+        );
+        await page.waitForTimeout(100);
+        const openAfterInside = await field(page).isVisible();
+        const typing = await focused(page);
+        // A press beside it, on text that takes no focus.
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        const closed = await gone(field(page));
+        const parked = await trigger(page, BOOKS).getAttribute('aria-label');
+        const badge = await page
+          .getByText('Not saved', { exact: true })
+          .count();
+        await trigger(page, BOOKS).click();
+        const resumed = await input(page).inputValue();
+        // Tab past it dismisses as well.
+        await page.keyboard.press(tab);
+        await page.keyboard.press(tab);
+        await page.keyboard.press(tab);
+        const closedByTab = await gone(field(page));
+        const stillParked = await page
+          .getByText('Not saved', { exact: true })
+          .count();
+        // Cancel drops the parked draft.
+        await trigger(page, BOOKS).click();
+        await page.getByRole('button', { name: 'Cancel' }).click();
+        const dropped = await page
+          .getByText('Not saved', { exact: true })
+          .count();
+        return {
+          pass:
+            openAfterInside &&
+            closed &&
+            parked === `Rename: ${BOOKS} (Not saved)` &&
+            badge === 1 &&
+            resumed === 'Return the books' &&
+            closedByTab &&
+            stillParked === 1 &&
+            dropped === 0 &&
+            sent.length === before &&
+            (await title(4)) === BOOKS,
+          openAfterInside,
+          typing,
+          parked,
+          resumed,
+          closedByTab,
+          writes: sent.length - before,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'parked-draft-guards-the-list', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        // Changing the list asks about the parked name.
+        await page.getByRole('button', { name: 'Switch to personal' }).click();
+        const asked = await shown(page.getByRole('alertdialog'), 3000);
+        if (asked) await answerLeave(page, 'keep');
+        const kept = await page.getByText('Not saved', { exact: true }).count();
+        return { pass: asked && kept === 1, asked, kept };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'empty-name-is-invalid', async () => {
+        await open(page);
+        const before = sent.length;
+        await trigger(page, BOOKS).click();
+        await page.keyboard.press('Delete');
+        await page.keyboard.press('Enter');
+        const alert = field(page).getByRole('alert');
+        const text = await alert.textContent();
+        const invalid = await input(page).getAttribute('aria-invalid');
+        const described = await input(page).evaluate(
+          (el) =>
+            document.getElementById(el.getAttribute('aria-describedby') ?? '')
+              ?.textContent,
+        );
+        const stays = await field(page).isVisible();
+        await page.keyboard.type('Return the books');
+        const cleared = await alert.count();
+        return {
+          pass:
+            text === 'Enter a name.' &&
+            invalid === 'true' &&
+            described === 'Enter a name.' &&
+            stays &&
+            cleared === 0 &&
+            sent.length === before,
+          text,
+          invalid,
+          described,
+          cleared,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'denied-write-keeps-the-draft', async () => {
+        await open(page);
+        await page.route('**/_system/resources/**', (route) =>
+          route.request().method() === 'PATCH'
+            ? route.fulfill({ status: 403, body: '{}' })
+            : route.continue(),
+        );
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.keyboard.press('Enter');
+        const notice = field(page).getByText(
+          'The change was not saved. Check access and try again.',
+        );
+        const told = await shown(notice);
+        const draft = await input(page).inputValue();
+        const editable = await input(page).isEditable();
+        const stored = await title(4);
+        await page.unroute('**/_system/resources/**');
+        // Trying again is the person's choice; it is sent once more.
+        await input(page).press('Enter');
+        const closed = await gone(field(page));
+        const after = await title(4);
+        return {
+          pass:
+            told &&
+            draft === 'Return the books' &&
+            editable &&
+            stored === BOOKS &&
+            closed &&
+            after === 'Return the books',
+          told,
+          draft,
+          editable,
+          stored,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(
+        errors,
+        'change-on-the-pod-is-checked-first',
+        async () => {
+          await open(page);
+          await trigger(page, BOOKS).click();
+          await page.keyboard.type('Return the books');
+          await renameOnPod(4, 'Return the library books today');
+          await page.keyboard.press('Enter');
+          const told = await shown(
+            field(page).getByText(
+              'The pod has changed. Compare before continuing.',
+            ),
+          );
+          const locked = !(await input(page).isEditable());
+          const saveOff = await field(page)
+            .getByRole('button', { name: 'Save' })
+            .isDisabled();
+          // Its notice's controls are part of the field.
+          await field(page)
+            .getByRole('button', { name: 'Check current version' })
+            .click();
+          const acknowledge = field(page).getByRole('button', {
+            name: 'I have checked the pod',
+          });
+          await acknowledge.waitFor();
+          for (let end = Date.now() + 5000; Date.now() < end;) {
+            if (await acknowledge.isEnabled()) break;
+            await page.waitForTimeout(50);
+          }
+          await acknowledge.click();
+          const openAfterCheck = await field(page).isVisible();
+          // The current name is read again; the draft stays and is saved on it.
+          for (let end = Date.now() + 5000; Date.now() < end;) {
+            if (await input(page).isEditable()) break;
+            await page.waitForTimeout(50);
+          }
+          const label = await input(page).getAttribute('aria-label');
+          const draft = await input(page).inputValue();
+          await input(page).press('Enter');
+          const closed = await gone(field(page));
+          const after = await title(4);
+          return {
+            pass:
+              told &&
+              locked &&
+              saveOff &&
+              openAfterCheck &&
+              label === 'Rename: Return the library books today' &&
+              draft === 'Return the books' &&
+              closed &&
+              after === 'Return the books',
+            told,
+            locked,
+            saveOff,
+            openAfterCheck,
+            label,
+            draft,
+            after,
+          };
+        },
+      ),
+    );
+    const slow = async (hold) => {
+      let release;
+      const held = new Promise((resolve) => (release = resolve));
+      await page.route('**/_system/resources/**', async (route) => {
+        if (route.request().method() === 'PATCH') await held;
+        await route.fallback().catch(() => {});
+      });
+      return async () => {
+        await page.waitForTimeout(hold);
+        release();
+      };
+    };
+    results.push(
+      await attemptOn(errors, 'slow-save-returns-focus', async () => {
+        await open(page);
+        const finish = await slow(1500);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.keyboard.press('Enter');
+        const save = field(page).getByRole('button', { name: 'Save' });
+        await page.waitForTimeout(300);
+        const pending = {
+          busy: await field(page).getAttribute('aria-busy'),
+          save: await save.getAttribute('data-pending'),
+          locked: !(await input(page).isEditable()),
+          cancelOff: await field(page)
+            .getByRole('button', { name: 'Cancel' })
+            .isDisabled(),
+        };
+        // Escape and a second Enter do nothing while it is pending.
+        await page.keyboard.press('Escape');
+        await page.keyboard.press('Enter');
+        const stays = await field(page).isVisible();
+        await finish();
+        const closed = await gone(field(page));
+        const focus = await focusUntil(
+          page,
+          /^Rename: Return the books$/,
+          focused,
+        );
+        return {
+          pass:
+            pending.busy === 'true' &&
+            pending.save === 'true' &&
+            pending.locked &&
+            pending.cancelOff &&
+            stays &&
+            closed &&
+            focus === 'Rename: Return the books' &&
+            (await title(4)) === 'Return the books',
+          pending,
+          stays,
+          focus,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'slow-save-leaves-a-moved-focus', async () => {
+        await open(page);
+        const finish = await slow(1500);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(200);
+        // The person moves on while it saves: the field waits for the write.
+        await page.getByRole('button', { name: 'After the list' }).focus();
+        await page.waitForTimeout(200);
+        const waits = await field(page).isVisible();
+        await finish();
+        const closed = await gone(field(page));
+        await page.waitForTimeout(200);
+        const focus = await focused(page);
+        const parked = await page
+          .getByText('Not saved', { exact: true })
+          .count();
+        return {
+          pass:
+            waits &&
+            closed &&
+            focus === 'After the list' &&
+            parked === 0 &&
+            (await title(4)) === 'Return the books',
+          waits,
+          focus,
+          parked,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'menu-shape-focus', async () => {
+        await open(page, '/?screen=rename&shape=menu', / more$/);
+        await page.getByRole('button', { name: `${BOOKS}: more` }).click();
+        await page.getByRole('menuitem', { name: 'Rename' }).click();
+        await input(page).waitFor();
+        await settle(page);
+        await page.waitForTimeout(600);
+        const afterMenu = await focused(page);
+        const openAfterMenu = await field(page).isVisible();
+        // This shape keeps a changed field open on a press beside it.
+        await page.keyboard.type('Return the books');
+        await page.getByRole('heading', { name: 'Focus' }).click();
+        const keptOpen = await field(page).isVisible();
+        if (keptOpen) await input(page).press('Escape');
+        const closed = await gone(field(page));
+        const focus = await focusUntil(page, /: more$/, focused);
+        return {
+          pass:
+            afterMenu === `Rename: ${BOOKS}` &&
+            openAfterMenu &&
+            keptOpen &&
+            closed &&
+            focus === `${BOOKS}: more`,
+          afterMenu,
+          openAfterMenu,
+          keptOpen,
+          focus,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'german-names', async () => {
+        await open(page, '/?screen=rename&lang=de');
+        await page
+          .getByRole('button', { name: `Umbenennen: ${BOOKS}` })
+          .click();
+        const names = {
+          input: await input(page).getAttribute('aria-label'),
+          save: await field(page)
+            .getByRole('button', { name: 'Speichern' })
+            .count(),
+          cancel: await field(page)
+            .getByRole('button', { name: 'Abbrechen' })
+            .count(),
+          bought: await page
+            .getByRole('checkbox', { name: `Gekauft: ${BOOKS}` })
+            .count(),
+        };
+        await page.keyboard.press('Delete');
+        await page.keyboard.press('Enter');
+        const error = await field(page).getByRole('alert').textContent();
+        await page.keyboard.press('Escape');
+        return {
+          pass:
+            names.input === `Umbenennen: ${BOOKS}` &&
+            names.save === 1 &&
+            names.cancel === 1 &&
+            names.bought === 1 &&
+            error === 'Gib einen Namen ein.',
+          names,
+          error,
+        };
+      }),
+    );
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+
+  // A phone: taps, 44px targets and narrow widths.
+  for (const width of [320, 375]) {
+    const phone = await newPage(browser, {
+      viewport: { width, height: 740 },
+      hasTouch: true,
+      isMobile: engine !== 'firefox',
+    });
+    try {
+      await signedIn(phone.page);
+      results.push(
+        await attemptOn(phone.errors, `touch-${width}`, async () => {
+          const p = phone.page;
+          await trigger(p, NEWSLETTER).tap();
+          await input(p).waitFor();
+          const boxes = await p.evaluate(() => {
+            const el = document.querySelector(
+              '[data-sempods-ui=inline-text-edit]',
+            );
+            return [...el.querySelectorAll('input, button')].map((c) => {
+              const r = c.getBoundingClientRect();
+              return { h: r.height, left: r.left, right: r.right };
+            });
+          });
+          const overflow = await p.evaluate(
+            () => document.documentElement.scrollWidth - innerWidth,
+          );
+          // A tap on text beside it, which takes no focus on a phone.
+          await p.getByRole('heading', { name: 'Konsum' }).tap();
+          const closed = await gone(field(p));
+          return {
+            pass:
+              boxes.length === 3 &&
+              boxes.every(
+                (b) => b.h >= 44 && b.left >= 0 && b.right <= width,
+              ) &&
+              overflow <= 0 &&
+              closed,
+            boxes,
+            overflow,
+            closed,
+          };
+        }),
+      );
+    } finally {
+      results.push({
+        id: `no-page-errors-${width}`,
+        pass: phone.errors.length === 0,
+        errors: phone.errors,
+      });
+      await phone.context.close();
+    }
+  }
+
+  // Read-only: the list may be read but not written, so names are text.
+  const reader = await newPage(browser);
+  try {
+    await reader.page.route('**/_system/contexts', async (route) => {
+      const body = await (await route.fetch()).json();
+      body['https://schema.org/writableContext'] = [];
+      body['https://schema.sempods.org/writableContext'] = [];
+      await route.fulfill({ json: body });
+    });
+    await signIn(reader.page, origin, '/?screen=rename', { choose: false });
+    await chooser(reader.page).selectOption({ label: 'work' });
+    results.push(
+      await attemptOn(reader.errors, 'read-only-shows-names', async () => {
+        const p = reader.page;
+        await p.getByText(BOOKS, { exact: true }).waitFor({ timeout: 15000 });
+        const triggers = await p
+          .getByRole('button', { name: /^Rename: / })
+          .count();
+        const boxes = await p
+          .getByRole('checkbox')
+          .evaluateAll((els) =>
+            els.map(
+              (el) =>
+                el.hasAttribute('disabled') ||
+                el.closest('[data-disabled]') !== null,
+            ),
+          );
+        return {
+          pass: triggers === 0 && boxes.length > 0 && boxes.every(Boolean),
+          triggers,
+          boxes,
+        };
+      }),
+    );
+  } finally {
+    results.push({
+      id: 'no-page-errors-read-only',
+      pass: reader.errors.length === 0,
+      errors: reader.errors,
+    });
+    await reader.context.close();
   }
   return results;
 }

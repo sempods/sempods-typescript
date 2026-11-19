@@ -170,6 +170,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Show a list](#lists-uselist-and-loadnotice)                            | `useList`, `LoadNotice` (React)                                            | The definition; render `list.data?.items` and `<LoadNotice {...list} />`     |
 | [Add an item](#creating-usecreation)                                    | `useCreation` (React)                                                      | `{ initial, collection }`; inputs to `canEdit`, submit to `canCreate`        |
 | [Update or delete a row](#updating-and-deleting-rows-usefieldupdate)    | `useFieldUpdate`, `RemoveButton`, `UnresolvedNotices` (React)              | One hook per list; `const row = mutate.for(item)` per row                    |
+| [Rename one value in a row](#renaming-one-value-in-a-row)               | `useFieldUpdate` (React), `InlineTextEdit` (app-ui)                        | `row.update(change)`, the app's draft, `pending` and `readOnly`              |
 | [Edit one item in a form](#editing-a-form-useresourceeditor)            | `useResourceEditor`, `ResourceEditor` (React)                              | Selected IRI and definition; inputs calling `change`; `onClose` in place     |
 | [Explain an outcome](#notices-updatenotice)                             | `UpdateNotice` (React)                                                     | `{...creation.notice}` or `{...row.notice}`; `quiet` when the row confirms   |
 | [Open another item](#selection-useselection)                            | `useSelection` (React)                                                     | Guarded `select(iri)`; `select(null)` closes                                 |
@@ -464,6 +465,63 @@ snapshot and sends nothing once that target or hook lifetime has ended.
 `useCreation`'s `change` and `create`, `useList`'s `reload` and `cancel`, and
 `useSelection().select` retain their identities for their target and definition
 (and creation address/form ID, where applicable).
+
+### Renaming one value in a row
+
+To rename one text value in its row, such as a shopping item, compose the
+row's `useFieldUpdate` command with the UI kit's `InlineTextEdit`, the
+leave guard and the row's notice instead of opening a `ResourceEditor`. The
+[app-ui README's `rename-row.tsx`](../packages/app-ui/README.md#renaming-in-a-row)
+is the complete, tested shopping list; the core is:
+
+```tsx
+<InlineTextEdit
+  label={`${t.rename}: ${item.title}`}
+  value={draft}
+  onChange={setDraft}
+  onSave={async () => {
+    const title = draft.trim();
+    if (!title) return setError(t.required); // the app validates
+    setSaving(true);
+    const outcome = await row.update({ title }); // the row's snapshot
+    setSaving(false);
+    if (outcome.kind === 'saved') close(); // otherwise the draft stays
+  }}
+  onCancel={close}
+  onDismiss={park} // or close, or keep it open: the app's policy
+  returnFocus={() => trigger.current?.focus()}
+  pending={saving}
+  readOnly={!row.canMutate}
+  error={error}
+>
+  <UpdateNotice {...row.notice} quiet />
+</InlineTextEdit>
+```
+
+- **The app keeps** the trigger (the name as a button, a menu item, a deep
+  link beside it), the field it writes and its validation, the list snapshot
+  `row.update` writes from, the draft and its policy, and its own list
+  actions. Offer the trigger only with `useWorkflowAccess().write`; without
+  it the name is text.
+- **Write only through the row**: `row.update({ title })` with the snapshot
+  the person saw. A refusal keeps the draft and the field open with the
+  notice; the person may save again. A change on the Pod (`changed-on-pod`)
+  locks the row: `readOnly` follows `row.canMutate`, the notice's check reads
+  the current version, the list reads again, and after the acknowledgement
+  the kept draft can be saved onto it. Never resend on any other result.
+- **Leaving is a dismissal, not a save.** A press beside the field or Tab
+  past it calls `onDismiss`. Park a changed draft, as the README example does
+  with a "Not saved" mark and the next rename resuming it, or close an
+  unchanged one. Guard every changed draft, open or parked, with
+  `useDraftGuard(dirty, discard)`, so changing the list or the Pod asks first.
+- **Focus.** Save, Cancel and Escape return the focus to the trigger through
+  `returnFocus`, also after a slow save; a person who moved on meanwhile keeps
+  their focus. A trigger that the field replaces is focused after the app's
+  render, so keep its element by ref.
+- Pass the notice as `children` while the field is open and keep it in the
+  row while it is closed, so its controls are part of the field. Name the
+  input, the trigger and the row's other controls with the item's name in the
+  app's language; Save and Cancel take the SDK's texts.
 
 ### Editing a form: useResourceEditor
 
