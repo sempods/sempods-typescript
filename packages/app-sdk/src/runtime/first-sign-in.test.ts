@@ -2,11 +2,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
-import type { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory } from 'fake-indexeddb';
 import {
   callback,
   fixture,
   jwt,
+  memoryHistory,
   memoryStorage,
   pod,
   restart,
@@ -16,6 +17,7 @@ import {
 const runtimes: BrowserRuntime[] = [];
 afterEach(() => {
   runtimes.splice(0).forEach((runtime) => runtime.dispose());
+  vi.unstubAllGlobals();
 });
 const keep = (runtime: BrowserRuntime) => void runtimes.push(runtime);
 
@@ -193,6 +195,55 @@ it('does not try again after coming back without an answer, and forgets the atte
   expect(reloaded.getSnapshot()).toEqual([]);
   expect(await savedRecords(f.factory)).toEqual([]);
   expect([...f.tab.map.values()]).toEqual(['tried']);
+});
+
+it('forgets the attempt when the page that left comes back to its history entry', async () => {
+  const history = memoryHistory();
+  vi.stubGlobal('history', history);
+  const f = silent();
+  await f.runtime.initialize();
+  // Back navigation, also to a page the back/forward cache restores and the
+  // app starts a runtime on again: the same history entry.
+  const reloaded = await restart(f, f.runtime, keep);
+  expect(reloaded.getSnapshot()).toEqual([]);
+  expect(await savedRecords(f.factory)).toEqual([]);
+  expect(silentAttempts(f)).toBe(1);
+});
+
+it('leaves the attempt to the tab at the Pod in a tab opened from it', async () => {
+  // A store the app's tabs share (with `watch`).
+  const factory = new IDBFactory();
+  const channel = () => ({
+    postMessage() {},
+    addEventListener() {},
+    close() {},
+  });
+  vi.stubGlobal('history', memoryHistory());
+  const f = silent({
+    openStore: (namespace) => openSessionStore(namespace, factory, channel),
+  });
+  await f.runtime.initialize();
+  // The opened tab copies the tab storage, note included, but not the
+  // history entry that left.
+  const copy = memoryStorage();
+  f.tab.map.forEach((value, key) => copy.setItem(key, value));
+  vi.stubGlobal('history', memoryHistory());
+  const opened = createBrowserRuntime({
+    ...f.options,
+    tabStorage: copy,
+    location: () => 'https://app.example/',
+  });
+  keep(opened);
+  await opened.initialize();
+  expect(opened.getSnapshot()).toMatchObject([
+    { session: { kind: 'ended', problem: 'interrupted' } },
+  ]);
+  expect(silentAttempts(f)).toBe(1);
+  expect(await savedRecords(factory)).toMatchObject([
+    { value: { kind: 'authorizing' } },
+  ]);
+  const back = await answered(f, 'code=fixture-code');
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
 });
 
 it('ends signed out, as if never started, when the page returns from the back/forward cache', async () => {

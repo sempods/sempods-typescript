@@ -26,24 +26,28 @@ const mode = new URL(location.href).searchParams.get('identity') ?? 'dynamic';
 const redirectUri = location.origin + '/callback?identity=' + mode;
 // The harness changes deployment policy across reloads without changing identity.
 const policy = sessionStorage.getItem('fixture-policy');
-const runtime = createBrowserRuntime({
-  identity:
-    mode === 'did'
-      ? {
-          kind: 'did-web',
-          clientId: 'did:web:127.0.0.1%3A' + location.port,
-          redirectUri,
-        }
-      : { kind: 'dynamic', name: 'Wire fixture', redirectUri },
-  scopes: { required: ['tasks'], optional: ['ai'] },
-  returnTo: '/app?identity=' + mode,
-  development: 'loopback-http',
-  ...(policy === 'one'
-    ? { allowedPods: [location.origin + '/alice'] }
-    : policy === 'set'
-      ? { allowedPods: [location.origin + '/alice', location.origin + '/bob'] }
-      : {}),
-});
+const create = () =>
+  createBrowserRuntime({
+    identity:
+      mode === 'did'
+        ? {
+            kind: 'did-web',
+            clientId: 'did:web:127.0.0.1%3A' + location.port,
+            redirectUri,
+          }
+        : { kind: 'dynamic', name: 'Wire fixture', redirectUri },
+    scopes: { required: ['tasks'], optional: ['ai'] },
+    returnTo: '/app?identity=' + mode,
+    development: 'loopback-http',
+    ...(policy === 'one'
+      ? { allowedPods: [location.origin + '/alice'] }
+      : policy === 'set'
+        ? {
+            allowedPods: [location.origin + '/alice', location.origin + '/bob'],
+          }
+        : {}),
+  });
+let runtime = create();
 window.fixture = {
   runtime,
   async editTask(title) {
@@ -82,6 +86,21 @@ window.fixture = {
   },
 };
 window.addEventListener('pagehide', () => runtime.dispose());
+// As the TODO example: a page restored from the back/forward cache starts a
+// runtime again.
+window.addEventListener('pageshow', (event) => {
+  if (!event.persisted) return;
+  runtime = create();
+  window.fixture.runtime = runtime;
+  runtime.subscribe(draw);
+  void runtime.initialize().then((report) => {
+    window.fixture.report = report;
+    draw();
+    document.documentElement.dataset.restores = String(
+      Number(document.documentElement.dataset.restores ?? 0) + 1,
+    );
+  });
+});
 function draw() {
   document.querySelector('pre')!.textContent = JSON.stringify({
     report: window.fixture.report,

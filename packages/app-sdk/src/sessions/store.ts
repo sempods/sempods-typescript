@@ -1,4 +1,9 @@
-import type { StoredSession, SessionStore } from './types.js';
+import type {
+  SessionCommit,
+  SessionRemoval,
+  StoredSession,
+  SessionStore,
+} from './types.js';
 export type {
   StoredSession,
   SessionCommit,
@@ -17,6 +22,34 @@ export class SessionStorageError extends Error {
 }
 
 const databaseName = 'sempods:app-sdk:sessions';
+
+/**
+ * How a store tells this app's other tabs which record it changed; a
+ * `BroadcastChannel` fits. A channel does not deliver its own messages.
+ */
+export interface SessionChannel {
+  postMessage(message: unknown): void;
+  addEventListener(
+    type: 'message',
+    listener: (event: { readonly data: unknown }) => void,
+  ): void;
+  close(): void;
+}
+/** The browser's `BroadcastChannel`, or `null` without one. */
+export function browserChannel(name: string): SessionChannel | null {
+  const Channel = (
+    globalThis as { BroadcastChannel?: new (name: string) => SessionChannel }
+  ).BroadcastChannel;
+  if (!Channel) return null;
+  try {
+    const channel = new Channel(name);
+    // Node keeps a process alive for an open channel; a browser has no unref.
+    (channel as { unref?: () => void }).unref?.();
+    return channel;
+  } catch {
+    return null;
+  }
+}
 const records = 'connections';
 type Envelope = StoredSession & {
   readonly schema: 1;
@@ -50,10 +83,18 @@ function decode(value: unknown, namespace: string, id?: string): StoredSession {
   return { id: row.id, revision: row.revision, value: row.value };
 }
 
-/** No fallback to memory: callers must know when durable storage is unavailable. */
+/**
+ * No fallback to memory: callers must know when durable storage is
+ * unavailable. With a channel (by default for the browser's own IndexedDB),
+ * the store announces its changes to other tabs and offers `watch`.
+ */
 export function openSessionStore(
   namespace: string,
   factory: IDBFactory | undefined = globalThis.indexedDB,
+  channel: ((name: string) => SessionChannel | null) | undefined = factory ===
+    globalThis.indexedDB && factory !== undefined
+    ? browserChannel
+    : undefined,
 ): Promise<SessionStore> {
   return new Promise((resolve, reject) => {
     if (!nonempty(namespace)) {
@@ -92,7 +133,13 @@ export function openSessionStore(
     };
     request.onsuccess = () => {
       const database = request.result;
-      resolve(sessionStore(database, namespace));
+      resolve(
+        sessionStore(
+          database,
+          namespace,
+          channel?.(`${databaseName}:${namespace}`) ?? null,
+        ),
+      );
     };
   });
 }
@@ -103,11 +150,46 @@ type Transaction<T> = {
   read(request: IDBRequest, consume: (value: unknown) => void): void;
 };
 
-function sessionStore(database: IDBDatabase, namespace: string): SessionStore {
+function sessionStore(
+  database: IDBDatabase,
+  namespace: string,
+  channel: SessionChannel | null,
+): SessionStore {
   let closed = false;
+  const listeners = new Set<(id: string) => void>();
   function close() {
+    if (!closed) channel?.close();
     closed = true;
+    listeners.clear();
     database.close();
+  }
+  channel?.addEventListener('message', ({ data }) => {
+    if (closed || typeof data !== 'object' || data === null) return;
+    const id = (data as { id?: unknown }).id;
+    if (!nonempty(id)) return;
+    for (const listener of [...listeners]) {
+      try {
+        listener(id);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  });
+  /** Tells the other tabs after the change is durable; best effort. */
+  function announce<T extends { readonly kind: string }>(
+    id: string,
+    result: T,
+  ): T {
+    if (result.kind !== 'conflict' && !closed) {
+      try {
+        channel?.postMessage({ id });
+      } catch {
+        // A tab that misses it reads the record at its next refresh or write.
+      }
+    }
+    return result;
   }
   database.onversionchange = close;
   database.onclose = () => {
@@ -236,7 +318,7 @@ function sessionStore(database: IDBDatabase, namespace: string): SessionStore {
       } catch {
         return Promise.reject(new SessionStorageError('configuration'));
       }
-      return transact('readwrite', ({ store, read, accept }) => {
+      return transact<SessionCommit>('readwrite', ({ store, read, accept }) => {
         read(store.get([namespace, id]), (raw) => {
           const current =
             raw === undefined ? undefined : decode(raw, namespace, id);
@@ -258,24 +340,39 @@ function sessionStore(database: IDBDatabase, namespace: string): SessionStore {
             record: { id, revision: record.revision, value: snapshot },
           });
         });
-      });
+      }).then((result) => announce(id, result));
     },
     remove(id, expectedRevision) {
       if (!nonempty(id) || !nonempty(expectedRevision))
         return Promise.reject(new SessionStorageError('configuration'));
-      return transact('readwrite', ({ store, read, accept }) => {
-        read(store.get([namespace, id]), (raw) => {
-          const current =
-            raw === undefined ? undefined : decode(raw, namespace, id);
-          if (current?.revision !== expectedRevision) {
-            accept({ kind: 'conflict' });
-            return;
-          }
-          store.delete([namespace, id]);
-          accept({ kind: 'removed' });
-        });
-      });
+      return transact<SessionRemoval>(
+        'readwrite',
+        ({ store, read, accept }) => {
+          read(store.get([namespace, id]), (raw) => {
+            const current =
+              raw === undefined ? undefined : decode(raw, namespace, id);
+            if (current?.revision !== expectedRevision) {
+              accept({ kind: 'conflict' });
+              return;
+            }
+            store.delete([namespace, id]);
+            accept({ kind: 'removed' });
+          });
+        },
+      ).then((result) => announce(id, result));
     },
+    ...(channel
+      ? {
+          watch(listener: (id: string) => void) {
+            if (closed) return () => {};
+            const own = (id: string) => listener(id);
+            listeners.add(own);
+            return () => {
+              listeners.delete(own);
+            };
+          },
+        }
+      : {}),
     close,
   };
 }

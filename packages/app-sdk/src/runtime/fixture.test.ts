@@ -8,7 +8,7 @@ import type {
   PreferenceStorage,
 } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
-import type { SessionStore } from '../sessions/types.js';
+import type { SessionLocks, SessionStore } from '../sessions/types.js';
 
 export const pod = 'https://pod.example/alice';
 export const callback = 'https://app.example/oauth/callback';
@@ -27,14 +27,16 @@ export async function savedRecords(factory: IDBFactory) {
 }
 /**
  * An `openStore` on `factory` with some methods replaced, for storage
- * failures; the replacements receive the real store.
+ * failures; the replacements receive the real store. With `channel`, the
+ * store announces its changes to other tabs.
  */
 export function storeWith(
   factory: IDBFactory,
   overrides: (store: SessionStore) => Partial<SessionStore>,
+  channel?: Parameters<typeof openSessionStore>[2],
 ): NonNullable<BrowserRuntimeOptions['openStore']> {
   return async (namespace) => {
-    const store = await openSessionStore(namespace, factory);
+    const store = await openSessionStore(namespace, factory, channel);
     return { ...store, ...overrides(store) };
   };
 }
@@ -112,24 +114,87 @@ export function memoryStorage(): PreferenceStorage & {
     removeItem: (key) => void map.delete(key),
   };
 }
-export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
-  const factory = new IDBFactory();
-  let held = false;
+/** A tab's history: its current entry's state, as a router keeps it. */
+export function memoryHistory(state: unknown = null) {
+  return {
+    state,
+    replaceState(data: unknown) {
+      this.state = structuredClone(data);
+    },
+  };
+}
+/**
+ * Web Locks of one browser profile, as the runtime uses them: `shared` or
+ * `exclusive`, `ifAvailable` or waiting in order until `signal` aborts.
+ */
+export function memoryLocks(): SessionLocks {
+  type Held = { mode: 'exclusive' | 'shared'; count: number };
+  type Waiting = {
+    mode: 'exclusive' | 'shared';
+    grant: () => void;
+  };
+  const held = new Map<string, Held>();
+  const queues = new Map<string, Waiting[]>();
+  const free = (name: string, mode: 'exclusive' | 'shared') => {
+    const h = held.get(name);
+    return !h || (h.mode === 'shared' && mode === 'shared');
+  };
+  const take = (name: string, mode: 'exclusive' | 'shared') => {
+    const h = held.get(name);
+    if (h) h.count++;
+    else held.set(name, { mode, count: 1 });
+  };
+  const release = (name: string) => {
+    const h = held.get(name)!;
+    if (--h.count === 0) held.delete(name);
+    const queue = queues.get(name) ?? [];
+    while (queue.length && free(name, queue[0]!.mode)) queue.shift()!.grant();
+  };
   const locks = {
     async request(
-      _name: string,
-      _opts: { ifAvailable: true },
-      fn: (lock: { name: string } | null) => Promise<void>,
+      name: string,
+      options: {
+        readonly ifAvailable?: true;
+        readonly mode?: 'exclusive' | 'shared';
+        readonly signal?: AbortSignal;
+      },
+      fn: (lock: { readonly name: string } | null) => Promise<void>,
     ) {
-      if (held) return fn(null);
-      held = true;
+      const mode = options.mode ?? 'exclusive';
+      if (options.signal?.aborted) throw new DOMException('', 'AbortError');
+      const queue = queues.get(name) ?? [];
+      queues.set(name, queue);
+      if (!free(name, mode) || queue.length) {
+        if (options.ifAvailable) return fn(null);
+        await new Promise<void>((resolve, reject) => {
+          const waiting: Waiting = {
+            mode,
+            grant: () => {
+              options.signal?.removeEventListener('abort', abort);
+              take(name, mode);
+              resolve();
+            },
+          };
+          const abort = () => {
+            queue.splice(queue.indexOf(waiting), 1);
+            reject(new DOMException('', 'AbortError'));
+          };
+          options.signal?.addEventListener('abort', abort, { once: true });
+          queue.push(waiting);
+        });
+      } else take(name, mode);
       try {
-        await fn({ name: 'fixture' });
+        await fn({ name });
       } finally {
-        held = false;
+        release(name);
       }
     },
   };
+  return locks;
+}
+export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
+  const factory = new IDBFactory();
+  const locks = memoryLocks();
   let token: PodFetch = async () =>
     Response.json({
       access_token: jwt(),

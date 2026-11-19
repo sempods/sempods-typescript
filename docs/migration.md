@@ -322,6 +322,23 @@ sharing controls, such as a `shareMore` callback, and leave its sign-in
 controls as they are. See
 [changing sharing](react-authoring.md#changing-what-the-app-may-access).
 
+### Several tabs instead of busy
+
+A second tab of the app no longer reports `storage: 'busy'`: it restores the
+same sessions and stays usable beside the first, and a sign-out in one tab ends
+the session in all. An app that told people to close the other tab keeps that
+code for `busy`, which still occurs beside a tab of an SDK before 0.9.0 or with
+an injected store without `watch`. An app that keeps unsaved work across tabs
+in its own storage reviews it: each tab has its own drafts and Context choice,
+and a sign-in of another person in one tab resets the others' views too.
+
+Test doubles change with it. An injected `locks` is now also asked for a
+connection's refresh lock without `ifAvailable`, and must make that request
+wait while the lock is held, until its `signal` aborts; the session lease is
+requested with `mode: 'shared'` for a store with `watch`. An injected
+`openStore` keeps one active tab unless its store implements `watch`. See
+[several tabs](browser-runtime.md#several-tabs).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to
@@ -843,7 +860,8 @@ Start with these checks:
   `interaction: 'cancelled'` and `resumed: true`, and the connection stays
   `active`. When the person comes back without a callback (back navigation, an
   abandoned attempt), it resumes the same way during startup, with
-  `interaction: 'none'` and the connection going `restoring` → `active`. Every other failure
+  `interaction: 'none'` and the connection going `restoring` → `active`; from
+  0.9.0 only in the tab that left, when it goes back (the SDK notes the attempt for that page's history entry, see [several tabs](browser-runtime.md#several-tabs)), or in any tab once the attempt expired. Every other failure
   still ends it; a successful narrower grant replaces the earlier one. Code
   that treated a cancelled callback as "signed out" checks the connection's
   session instead.
@@ -1407,7 +1425,7 @@ notes so recovery can be deliberate.
 
 | Observation                                       | Next step                                                                                                   |
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Another tab is active (`busy`)                    | Close/dispose that runtime, then reload this tab; do not steal the lock                                     |
+| Another tab holds the lease alone (`busy`)        | Close/dispose that runtime, then reload this tab; do not steal the lock                                     |
 | Durable storage unavailable                       | Restore browser storage/Web Locks support, then reload; no silent in-memory fallback                        |
 | Expired, interrupted or rejected login            | Start a fresh sign-in through the app's connection controls                                                 |
 | Session ended after refresh or continuity failure | Sign in again; never replay a consumed refresh token or edit stored evidence                                |

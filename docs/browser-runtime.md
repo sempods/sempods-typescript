@@ -33,7 +33,7 @@ const report = await runtime.initialize();
 // Call from the host's sign-in button after startup.
 async function signIn(podUrl: string) {
   if (report.storage === 'busy') {
-    throw new Error('Close the other active tab, then reload this page.');
+    throw new Error('Close the other tab, then reload this page.');
   }
   if (report.storage === 'unavailable') {
     throw new Error('Restore browser storage access, then reload this page.');
@@ -100,13 +100,13 @@ its stored attempt. Two outcomes resume it, if its credential is still usable
 (unexpired, or renewable with its refresh token) and fresh discovery confirms
 its binding:
 
-| Outcome of the re-authorization                                            | Result                                                                    |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| The provider answers `access_denied` for this attempt                      | Earlier session resumes; report `cancelled` with `resumed: true`          |
-| The person returns without a callback (back navigation, abandoned attempt) | Earlier session resumes (`restoring` → `active`); interaction `none`      |
-| Any other provider error, a lost code answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                  |
-| An expired earlier credential without a refresh token, or a disconnect     | Connection ends; nothing resumes                                          |
-| A successful answer                                                        | The new grant replaces the earlier one, also when narrower; never a merge |
+| Outcome of the re-authorization                                            | Result                                                                                                                       |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| The provider answers `access_denied` for this attempt                      | Earlier session resumes; report `cancelled` with `resumed: true`                                                             |
+| The person returns without a callback (back navigation, abandoned attempt) | Earlier session resumes in the tab that left (`restoring` → `active`); interaction `none`; see [several tabs](#several-tabs) |
+| Any other provider error, a lost code answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                                                                     |
+| An expired earlier credential without a refresh token, or a disconnect     | Connection ends; nothing resumes                                                                                             |
+| A successful answer                                                        | The new grant replaces the earlier one, also when narrower; never a merge                                                    |
 
 Resuming sends no token request and consumes the attempt: a replayed callback
 then fails with `attempt` while the session stays. A denied first sign-in ends
@@ -266,7 +266,7 @@ possible, foreign stored connections restore normally, and a completed foreign
 callback still selects its connection. On an ordinary reload, the app controller
 prefers a restored preset connection; if none exists, it leaves the active Pod
 empty instead of silently using a foreign one. People can explicitly select
-another restored Pod. Identity alone continues to determine the storage/lease
+another restored Pod. Identity alone continues to determine the storage/lock
 namespace; changing the preset never deletes or migrates sessions. Required and
 optional scopes remain runtime-wide, including for explicitly connected other
 Pods. To restrict which Pods can be used, add the separate policy below. Per-Pod
@@ -312,7 +312,7 @@ A callback for an excluded Pod reports `interaction: 'failed'` with
 does not claim the code, and scrubs the URL to the stored safe return location.
 Its attempt remains untouched and expires normally; do not retry the callback
 automatically. Other permitted sessions restore independently. The identity-based
-storage namespace and single-tab lease remain unchanged when the policy changes.
+storage namespace and its tabs' lease remain unchanged when the policy changes.
 
 `AppAccess` presents one/set/free Pod configuration directly, including the
 finite picker. See [sign-in composition](react-authoring.md#sign-in-and-pod-addresses).
@@ -359,7 +359,13 @@ link that opens in a new tab.
 The attempt runs at most once per tab. The runtime notes it in
 `sessionStorage` before the redirect, so a reload, a sign-out, coming back from
 the Pod without an answer or a failed answer never starts it again; `tabStorage`
-replaces that storage in tests, and without one nothing is tried. A preparation
+replaces that storage in tests, and without one nothing is tried. Coming back
+to the page that left (its history entry, also from the back/forward cache)
+forgets the attempt; a tab opened from the one at the Pod copies the note but
+leaves the attempt to that tab's answer. A tab whose silent sign-in starts while another tab's sign-in to the default
+Pod is under way, up to the end of its code exchange, follows that sign-in
+instead of asking the Pod again, also when it listed that sign-in meanwhile.
+A preparation
 that fails (an unreachable Pod) leaves the person signed out without an error.
 A tab that started with something stored, or returned from a sign-in, never
 tries, also after a sign-out deletes the records. A new tab with nothing stored
@@ -457,8 +463,8 @@ require what only a session grants. Under `none`, any `scopes` are one.
 A signed-out connection keeps reading without a token under `optional`, also
 with `rememberPods: false`, which then only keeps the address from the next
 start. `forget(id)` removes the connection; a forgotten default Pod is listed
-again as a new connection that was never signed in. The other-tab lease still
-applies under `optional`: a second tab reports `storage: 'busy'`.
+again as a new connection that was never signed in. Under `optional` the tabs
+share their sessions as under `required`.
 
 The SDK reads public data with plain requests without a token. It does not use
 the anonymous `scope=public-read&prompt=none` token some Pods offer
@@ -738,7 +744,10 @@ explicit Pod read (`BoundPod.sparql.select`/`construct` or `find`, also through
 ## Durable sessions and refresh
 
 IndexedDB stores versioned validated records with compare-and-swap revisions.
-Web Locks permit one active runtime per application configuration on an origin.
+Tabs of the same app share durable sessions when their store announces
+changes. A store without change notifications uses an exclusive lease, and a
+second tab reports `busy`; see [several tabs](#several-tabs) for refresh
+coordination and compatibility with older SDKs.
 The storage/lock namespace is the identity kind plus the did:web `clientId`, or
 for dynamic identities the `redirectUri`. Display name, object property order and
 scope policy do not affect it. Restored grants are evaluated against the current
@@ -753,16 +762,80 @@ reported in `unreadable` and left untouched, so that person signs in again. A
 route outside the identity is never followed. Moving a dynamic client's callback
 changes its namespace, so it starts without saved sessions.
 
-A second tab reports `busy`; lack of durable storage or coordination (no Web
-Locks, `locks: null`) does not silently fall back to memory and leaves stored
-records untouched, so a later start with coordination restores them. The runtime
-requests its lock only if available and never steals it from another tab: the
-holder keeps working until it is closed or disposed. The
-runtime never retries a busy startup: after closing the holder, reload the busy
-page to create a fresh runtime and acquire the lease. A store closed by a newer
-database version (`versionchange`, e.g. after an upgrade in another tab) stays
-closed for this runtime; renewals then end the session with `storage`. Call
-`dispose()` on application shutdown to release the lease. See [React/headless authoring](react-authoring.md) for lifecycle integration.
+### Several tabs
+
+The app's tabs share their sessions and stay usable side by side. Each tab
+takes a shared lease; a connection's refresh is claimed under its own Web Lock
+after the tab read the record again, so one refresh token is sent once, also
+when several tabs need a new credential at the same time. The other tabs wait
+for that lock and then use the stored result. The store announces every change
+to the app's other tabs with a `BroadcastChannel`. A renewal of the same
+session is used as it is; any other change lists the connection anew, as a
+reload would:
+
+| In one tab                               | The other tabs                                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------- |
+| Renews the credential                    | Send with the new credential; nothing of theirs is reset                    |
+| Signs out, or a session ends there       | `signed-out` (with `problem`), as a reload would list it                    |
+| Forgets the connection                   | The connection leaves their snapshot                                        |
+| Leaves for a sign-in or re-authorization | `ended { problem: 'interrupted' }` until the result is stored               |
+| Completes that sign-in                   | `restoring`, then `active` with the new session; its catalogue loads again  |
+| Closes while its refresh answer is out   | The next tab that needs the session resends it once within the grace period |
+
+Context selection, bound views and drafts stay per tab: another tab's renewal
+keeps them, and a new sign-in in another tab resets them as in the signing-in
+tab. A reload reselects the tab's own Context choice and its last active
+connection, kept in `tabStorage` (`sessionStorage`); a new tab starts from the
+last ones on the device. A connection another tab saves for a Pod this tab has
+not saved (a first sign-in) is listed here too, replacing a connection to the
+same Pod without a record or session, unless this tab is preparing a sign-in
+there. `connect()` returns a connection another tab saved for its Pod, also
+one whose sign-in is under way there (`interrupted` until it is stored), and a sign-in prepared here uses a
+session another tab stored for that Pod meanwhile instead of leaving for it,
+or continues on the connection another tab started signing in to; tabs decide
+the first record for a Pod under a Web Lock, so one Pod keeps one saved
+connection; a sign-in that cannot list the saved records there rejects with
+`storage` and changes nothing. A connection another tab forgot leaves
+this tab with its Context choice. A tab's own sign-out also applies to a
+record another tab changed meanwhile, and one that could not be saved stays
+blocked when another tab renews that session. Under `optional`, a connection
+reading without a token keeps doing so when another tab ends a session.
+
+A tab that starts, or reloads, while another tab is away at the Pod for a
+re-authorization shows that connection `interrupted` as the open tabs do, and
+leaves the attempt to the tab that left for it: only that tab resumes the
+earlier session when it comes back to the page it left from without a
+callback, by a back navigation, also one that restores the page from the
+back/forward cache. The SDK notes the attempt for that page's history entry:
+with the entry's key in `tabStorage` where the browser names its entries
+(`navigation.currentEntry`), leaving `history.state` as it is, and otherwise
+in a plain-object `history.state` beside the router's fields. A router's own
+value there (a string, an array, a `Map`) is never changed; without named
+entries such an attempt waits for its expiry. A tab opened from
+it has a history of its own and leaves the attempt alone, and so does the tab
+that left when it opens the app anew instead of going back. An attempt nobody
+returns to (its tab closed at the Pod) resumes the earlier session in the
+other tabs once it expires after 10 minutes. Outside a browser (no `history`),
+any start resumes it, as before 0.9.0.
+Announcements are best effort: a
+page restored from the back/forward cache reads every record again and lists
+connections added meanwhile, and a tab that missed one otherwise reads the
+record at its next renewal or write.
+
+A store without change announcements (an `openStore` whose store has no
+`watch`, or a browser without `BroadcastChannel`) keeps one active tab: its
+lease is exclusive, and a second tab reports `busy`. The shared and the
+exclusive lease exclude each other, so a tab of an SDK before 0.9.0 and a
+newer tab never run beside each other. Lack of durable storage or coordination
+(no Web Locks, `locks: null`) does not silently fall back to memory and leaves
+stored records untouched, so a later start with coordination restores them.
+The runtime requests its lease only if available and never steals it: the
+holder keeps working until it is closed or disposed. The runtime never retries
+a busy startup: after closing the holder, reload the busy page to create a
+fresh runtime and acquire the lease. A store closed by a newer database version
+(`versionchange`, e.g. after an upgrade in another tab) stays closed for this
+runtime; renewals then end the session with `storage`. Call `dispose()` on
+application shutdown to release the lease. See [React/headless authoring](react-authoring.md) for lifecycle integration.
 
 The runtime persists an attempt before navigation, consumes it once before code
 exchange, and publishes credentials only after validation and durable acceptance.
@@ -863,6 +936,7 @@ right before the resend is recorded and when it is sent:
 | The resend loses its answer too                          | `ended { problem: 'interrupted' }`                                                         |
 | The resend is refused (reuse detection, `invalid_grant`) | `ended` with the server's problem (`exchange`), as before                                  |
 | A page left during the request (reload, suspended tab)   | The next start resends once within the grace period (`restoring` → `active`)               |
+| A tab closed during the request, another tab is open     | That tab resends once within the grace period when it next needs the session               |
 
 The resend is recorded durably before it is sent, so a reload never sends it a
 third time. A session that ends this way keeps its Pod address: it is listed as
@@ -1101,8 +1175,8 @@ Sign-in against a deployed Kotlin Pod in Chrome is recorded as live evidence for
 a dynamic client on a loopback origin; a deployed `did:web` origin is not.
 React `AppAccess` and localized
 recovery are covered by the [authoring guide](react-authoring.md) and packed TODO
-checks. Multi-tab concurrent operation and revocation are not implemented
-here. [Apps without sign-in](#apps-without-sign-in) have
+checks. [Several tabs](#several-tabs) are covered by fixture tests and the
+packed runtime check in Chromium. Revocation is not implemented here. [Apps without sign-in](#apps-without-sign-in) have
 [live evidence](https://github.com/sempods/sempods-typescript/issues/240#issuecomment-6824544194)
 for 0.8.0: a deployed Pod's public data read from another origin, signing in
 and out under `optional`, and two tabs under `none`. A session that ends through

@@ -970,38 +970,24 @@ try {
     ),
     2,
   );
-  const busy = await context.newPage();
-  await busy.goto(origin + '/app?identity=dynamic');
-  await busy.waitForFunction(() => document.body.dataset.ready === 'true');
+  // A second tab shares the durable sessions (#374): it restores both saved
+  // Pods from native IndexedDB while the first tab stays signed in.
+  const second = await context.newPage();
+  await second.goto(origin + '/app?identity=dynamic');
+  await second.waitForFunction(() => document.body.dataset.ready === 'true');
   assert.equal(
-    await busy.evaluate(() => window.fixture.report.storage),
-    'busy',
+    await second.evaluate(() => window.fixture.report.storage),
+    'durable',
   );
-  assert.deepEqual(
-    await busy.evaluate(() => window.fixture.runtime.getSnapshot()),
-    [],
-  );
-  // Handover: once the holding tab leaves (pagehide disposes its runtime and
-  // releases the Web Lock), a reload of the waiting tab takes the durable
-  // store over and restores both saved Pods from native IndexedDB.
-  await page.goto('about:blank');
-  let handedOver = false;
-  for (let attempt = 0; attempt < 20 && !handedOver; attempt++) {
-    await busy.reload();
-    await busy.waitForFunction(() => document.body.dataset.ready === 'true');
-    handedOver =
-      (await busy.evaluate(() => window.fixture.report.storage)) === 'durable';
-    if (!handedOver) await busy.waitForTimeout(100);
-  }
-  assert.ok(handedOver, 'The waiting tab never took the released lease over');
-  await busy.waitForFunction(
+  await second.waitForFunction(
     () =>
       window.fixture.runtime.getSnapshot().length === 2 &&
       window.fixture.runtime
         .getSnapshot()
         .every((c) => c.session.kind === 'active'),
   );
-  await busy.close();
+  await second.close();
+  await page.goto('about:blank');
   // A deployment can narrow its allowed Pods without changing the durable namespace.
   await page.goto(origin + '/app?identity=dynamic');
   await ready();
@@ -1166,9 +1152,108 @@ try {
     'active',
   );
   assert.deepEqual({ exchanges, refreshes }, beforeCancel);
+  // A tab opened from the one at the Pod copies its session storage (#374):
+  // it does not take the attempt, and the callback completes it.
+  const reauthorized = await page.evaluate(
+    () => window.fixture.runtime.getSnapshot()[0].id,
+  );
+  consent = 'open';
+  await Promise.all([page.waitForURL('**/authorize?**'), reauthorize()]);
+  const [opened] = await Promise.all([
+    page.waitForEvent('popup'),
+    page.evaluate(
+      (url) => void window.open(url),
+      origin + '/app?identity=dynamic',
+    ),
+  ]);
+  await opened.waitForFunction(() => document.body.dataset.ready === 'true');
+  assert.deepEqual(
+    await opened.evaluate(
+      (id) =>
+        window.fixture.runtime.getSnapshot().find((c) => c.id === id).session,
+      reauthorized,
+    ),
+    { kind: 'ended', problem: 'interrupted' },
+  );
+  await Promise.all([page.waitForURL('**/callback?**'), page.reload()]);
+  await page.waitForURL('**/app?identity=dynamic');
+  await ready();
+  assert.equal(
+    await page.evaluate(() => window.fixture.report.interaction),
+    'completed',
+  );
+  assert.equal(exchanges, beforeCancel.exchanges + 1);
+  await opened.waitForFunction(
+    (id) =>
+      window.fixture.runtime.getSnapshot().find((c) => c.id === id).session
+        .kind === 'active',
+    reauthorized,
+  );
+  await opened.close();
   await page.evaluate(() => sessionStorage.removeItem('fixture-kinds'));
+  // Back from the Pod restores the page that left from the back/forward
+  // cache (#374): the app starts a runtime again, and that history entry
+  // resumes the earlier session. Playwright disables the cache by default.
+  const cachingBrowser = await chromium.launch({
+    channel: 'chromium',
+    headless: true,
+    ignoreDefaultArgs: ['--disable-back-forward-cache'],
+  });
+  try {
+    const cached = await (await cachingBrowser.newContext()).newPage();
+    cached.on('pageerror', (error) => errors.push(error));
+    await cached.goto(origin + '/app?identity=dynamic');
+    await cached.waitForFunction(() => document.body.dataset.ready === 'true');
+    await cached.locator('#alice').click();
+    await cached.waitForFunction(
+      () =>
+        window.fixture.runtime.getSnapshot().at(-1)?.session.kind ===
+        'signed-out',
+    );
+    await Promise.all([
+      cached.waitForURL('**/app?identity=dynamic'),
+      cached.locator('#login').click(),
+    ]);
+    await cached.waitForFunction(
+      () =>
+        document.body.dataset.ready === 'true' &&
+        window.fixture.runtime.getSnapshot()[0]?.session.kind === 'active',
+    );
+    const beforeBack = { exchanges, refreshes };
+    consent = 'open';
+    await Promise.all([
+      cached.waitForURL('**/authorize?**'),
+      cached.evaluate(() => {
+        // A router's own state, which the note leaves as it is.
+        window.history.replaceState(new Map([['screen', 'tasks']]), '');
+        const r = window.fixture.runtime;
+        void r.beginAuthorization(r.getSnapshot()[0].id);
+      }),
+    ]);
+    await cached.goBack({ waitUntil: 'commit' });
+    await cached.waitForFunction(
+      () => document.documentElement.dataset.restores === '1',
+    );
+    await cached.waitForFunction(
+      () => window.fixture.runtime.getSnapshot()[0]?.session.kind === 'active',
+    );
+    assert.equal(
+      await cached.evaluate(() => window.fixture.report.interaction),
+      'none',
+    );
+    assert.deepEqual(
+      await cached.evaluate(() => [
+        window.history.state instanceof Map,
+        window.history.state?.get?.('screen'),
+      ]),
+      [true, 'tasks'],
+    );
+    assert.deepEqual({ exchanges, refreshes }, beforeBack);
+  } finally {
+    await cachingBrowser.close();
+  }
   console.log(
-    'Packed re-authorization in Chromium: a denied consent and a back navigation keep the session without a signed-out state or token request passed.',
+    'Packed re-authorization in Chromium: a denied consent and a back navigation, also from the back/forward cache, keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');
@@ -2222,8 +2307,38 @@ try {
     assert.notEqual(expiringQueries().at(-1).authorization, previous);
     assert.equal(expiredRejections, probes);
   }
+  // A second tab shares the session (#374), with native Web Locks and
+  // BroadcastChannel: once both credentials expired, a reload in each tab
+  // renews once. The fixture refuses a reused refresh token.
+  const twin = await context.newPage();
+  twin.on('pageerror', (error) => errors.push(error));
+  await twin.route('**/*', (route) =>
+    new URL(route.request().url()).origin === origin
+      ? route.continue()
+      : route.abort(),
+  );
+  await twin.goto(origin + '/app?identity=expiring');
+  await twin.getByText('urn:overview-note', { exact: false }).waitFor();
+  await page.waitForTimeout(expiringLifetime * 1000 + 1000);
+  const beforeTwin = { refreshes, queries: expiringQueries().length };
+  const reloaded = [page, twin].map((tab) =>
+    tab.waitForResponse((r) =>
+      r.url().endsWith('/expiring-pod/_system/sparql/query'),
+    ),
+  );
+  await Promise.all(
+    [page, twin].map((tab) =>
+      tab.getByRole('button', { name: 'Reload overview' }).click(),
+    ),
+  );
+  for (const answer of await Promise.all(reloaded))
+    assert.equal(answer.status(), 200);
+  assert.equal(refreshes, beforeTwin.refreshes + 1);
+  assert.equal(expiringQueries().length, beforeTwin.queries + 2);
+  assert.equal(expiredRejections, probes);
   // A refused renewal ends the session with a visible sign-in, without
-  // sending the expired token; signing in again restores the overview.
+  // sending the expired token, in both tabs; signing in again in one tab
+  // restores the overview in both.
   expiringRefusal = true;
   await page.waitForTimeout(expiringLifetime * 1000 + 1000);
   const beforeRefusal = expiringQueries().length;
@@ -2233,15 +2348,18 @@ try {
     exact: true,
   });
   await signInAgain.waitFor();
+  await twin.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
   assert.equal(expiringQueries().length, beforeRefusal);
   assert.equal(expiredRejections, probes);
   expiringRefusal = false;
   await Promise.all([page.waitForURL('**/callback?**'), signInAgain.click()]);
   await page.waitForURL(origin + '/app?identity=expiring');
   await overviewLoaded();
+  await twin.getByText('urn:overview-note', { exact: false }).waitFor();
   assert.equal(expiredRejections, probes);
+  await twin.close();
   console.log(
-    'Packed short-lived tokens: renewal before dispatch for Pods refusing expired tokens with or without a challenge, no expired token sent, refused renewal ends in a visible sign-in and recovers passed.',
+    'Packed short-lived tokens: renewal before dispatch for Pods refusing expired tokens with or without a challenge, no expired token sent, one renewal for two tabs, refused renewal ends in a visible sign-in in both tabs and a new sign-in recovers both passed.',
   );
   // The one-click recipe (#158): a task ticked in its own Context through
   // `usePodList` and `useContextUpdate`, kept in every frame while it reloads.
@@ -2403,7 +2521,7 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(serverErrors, []);
   console.log(
-    'Packed runtime in Chromium: PKCE redirects, durable reload, two pods with independent callback/restore, reactive refresh, conditional editing/conflict/unknown outcome, explicit Context binding, did:web, native IndexedDB/Web Locks with two-tab lease handover and cookie omission passed (production client).',
+    'Packed runtime in Chromium: PKCE redirects, durable reload, two pods with independent callback/restore, reactive refresh, conditional editing/conflict/unknown outcome, explicit Context binding, did:web, native IndexedDB/Web Locks with two tabs sharing their sessions and cookie omission passed (production client).',
   );
 } finally {
   await browser?.close();

@@ -96,7 +96,7 @@ version, app origin and browser. Keep credentials and private data out of report
 | Lose a write's response                        | The UI says unconfirmed and offers inspection of the captured resource; no blind resend or duplicate creation                                                                               |
 | Remove write access on the Pod                 | Readable data/draft remains; writes become disabled after access revalidation                                                                                                               |
 | Remove read access on the Pod                  | Ineligible server data is cleared after revalidation; no fallback to another context                                                                                                        |
-| Second tab                                     | One tab holds the runtime; the other shows busy rather than taking it over                                                                                                                  |
+| Second tab                                     | Both tabs stay signed in and usable; a sign-out in one ends the other; each keeps its own Context and drafts                                                                                |
 | Another Pod                                    | Sequential connection leaves the first connection available; switching remains guarded                                                                                                      |
 | Pod overview with on-demand Contexts           | The overview loads without a context choice or catalogue request; a refused read shows as failed; editing a row opens it in its own context with no context chooser and no selection change |
 | Language, phone layout, keyboard               | Labels and feedback are understandable; locale changes preserve drafts; controls remain reachable                                                                                           |
@@ -107,7 +107,7 @@ while **Change sharing** still asks therefore shows only with a deployed
 `did:web` app.
 
 For concurrent edits, use another browser profile, a private window or another
-device. Two tabs in the same profile intentionally exercise the busy state.
+device: two tabs in the same profile share one session.
 Access changes require a Pod operator or owner and become visible on revalidation,
 not through an assumed server push. To test a lost answer deterministically use a
 controlled test fixture/proxy that applies the write and withholds its response;
@@ -167,15 +167,15 @@ registration, token exchange) and token renewal also use `POST`. Treat any other
 
 ## When a step fails
 
-| Symptom                                    | Check first                                                                                                     |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Callback is a 404 or shows a hosting error | Serve the same app at `/callback`; for a subpath, use its matching callback and rewrite                         |
-| Callback rejected or login appears lost    | Exact app origin/path, app DID, stable port, stored attempt, fresh sign-in; use [recovery](migration.md)        |
-| Pod rejects the deployed app at sign-in    | Pod's host allow-list and [DID document](deployment.md#pods-that-also-require-a-did-document)                   |
-| Discovery fails                            | Full Pod URL, advertised endpoints, HTTPS/loopback policy, network and server version                           |
-| Browser reports CORS                       | Pod/proxy OPTIONS handling and exposed headers; keep SDK requests cookie-free                                   |
-| No contexts or no write controls           | Actual context grants and current catalogue; feature scopes are separate                                        |
-| Busy/unavailable storage                   | Close the other active tab, or use a browser/profile with IndexedDB and Web Locks; do not add a memory fallback |
+| Symptom                                    | Check first                                                                                                      |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Callback is a 404 or shows a hosting error | Serve the same app at `/callback`; for a subpath, use its matching callback and rewrite                          |
+| Callback rejected or login appears lost    | Exact app origin/path, app DID, stable port, stored attempt, fresh sign-in; use [recovery](migration.md)         |
+| Pod rejects the deployed app at sign-in    | Pod's host allow-list and [DID document](deployment.md#pods-that-also-require-a-did-document)                    |
+| Discovery fails                            | Full Pod URL, advertised endpoints, HTTPS/loopback policy, network and server version                            |
+| Browser reports CORS                       | Pod/proxy OPTIONS handling and exposed headers; keep SDK requests cookie-free                                    |
+| No contexts or no write controls           | Actual context grants and current catalogue; feature scopes are separate                                         |
+| Busy/unavailable storage                   | Close the tab of an older app version, or use a browser/profile with IndexedDB and Web Locks; no memory fallback |
 
 The inspected Kotlin CORS filter supports cookie-free bearer requests from other
 origins; a new Netlify domain does not inherently require its credentialed-origin
