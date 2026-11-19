@@ -243,7 +243,7 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     no scroll height added), inside the screen and above the composer, takes
     no focus, is announced once and passes rendered contrast; with the
     keyboard open (375 × 420) it stays above the composer, which keeps the
-    focus and its draft; three failures of one Pod update one warning, which
+    focus and its draft, also once the composer grows; three failures of one Pod update one warning, which
     retires once the Pod recovers; while the app's dialog is open the stack
     shows nothing and covers none of its controls, then shows and announces
     an error once it closes; Escape dismisses the focused notice and returns

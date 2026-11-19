@@ -6634,6 +6634,13 @@ async function notices({ browser, origin, engine }) {
         await settle(page);
         await page.waitForTimeout(100);
         const m = await measure();
+        // The composer grows, as an auto-growing field does: the stack moves.
+        await page
+          .locator('form[data-sempods-notices-avoid]')
+          .evaluate((form) => (form.style.paddingTop = '48px'));
+        await page.waitForTimeout(150);
+        await settle(page);
+        const grown = await measure();
         return {
           pass:
             m.items.length === 1 &&
@@ -6641,8 +6648,11 @@ async function notices({ browser, origin, engine }) {
             aboveComposer(m) &&
             m.composer.bottom <= m.height + 0.5 &&
             m.focus === 'New item' &&
-            (await input.inputValue()) === 'Oat milk',
+            (await input.inputValue()) === 'Oat milk' &&
+            grown.composer.top < m.composer.top &&
+            aboveComposer(grown),
           m,
+          grown,
         };
       }),
     );

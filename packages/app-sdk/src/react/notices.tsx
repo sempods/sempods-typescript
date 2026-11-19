@@ -322,8 +322,35 @@ function usePageCover(own: RefObject<HTMLElement | null>) {
     const schedule = () => {
       if (!frame) frame = view.requestAnimationFrame(measure);
     };
+    // An avoided zone that grows (an auto-growing composer) moves the stack.
+    const sizes =
+      typeof ResizeObserver === 'function'
+        ? new ResizeObserver(schedule)
+        : null;
+    const zones = new Set<Element>();
+    const watchZones = () => {
+      if (!sizes) return;
+      const now = new Set(
+        document.querySelectorAll('[data-sempods-notices-avoid]'),
+      );
+      for (const zone of zones)
+        if (!now.has(zone)) {
+          sizes.unobserve(zone);
+          zones.delete(zone);
+        }
+      for (const zone of now)
+        if (!zones.has(zone)) {
+          sizes.observe(zone, { box: 'border-box' });
+          zones.add(zone);
+        }
+    };
+    const changed = () => {
+      watchZones();
+      schedule();
+    };
+    watchZones();
     measure();
-    const observer = new MutationObserver(schedule);
+    const observer = new MutationObserver(changed);
     observer.observe(document.documentElement, {
       subtree: true,
       childList: true,
@@ -342,6 +369,7 @@ function usePageCover(own: RefObject<HTMLElement | null>) {
     view.visualViewport?.addEventListener('scroll', schedule);
     return () => {
       observer.disconnect();
+      sizes?.disconnect();
       view.removeEventListener('resize', schedule);
       view.removeEventListener('scroll', schedule);
       view.visualViewport?.removeEventListener('resize', schedule);
@@ -713,12 +741,12 @@ function useNoticeView(entry: Entry): NoticeView {
             disabled,
             run: guarded(async () => {
               const run = store.run(record.key);
-              const event = store.eventOf(record.key);
-              if (!run || event === undefined) return;
+              const before = store.recordOf(record.key);
+              if (!run || !before) return;
               await run();
               // A shown notice has done its job, unless the action showed it
               // again; a held one is its holder's.
-              store.settle(record.key, event);
+              store.settle(record.key, before);
             }),
           },
         ]

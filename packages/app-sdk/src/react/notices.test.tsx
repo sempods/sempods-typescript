@@ -568,6 +568,22 @@ it('keeps a notice its own action showed again, and settles only the event it ra
   expect(texts()).toEqual(['Two items still not copied.OK']);
 });
 
+it('keeps a notice its own action showed again identically, as a retry that fails the same way', async () => {
+  const runtime = await signedIn();
+  render(<App runtime={runtime} />);
+  const failed: Notice = {
+    key: 'copy',
+    text: 'Three items not copied.',
+    severity: 'error',
+    action: { label: 'Copy again', run: () => actions.show(failed) },
+  };
+  act(() => actions.show(failed));
+  await act(async () =>
+    screen.getByRole('button', { name: 'Copy again' }).click(),
+  );
+  expect(texts()).toEqual(['Three items not copied.Copy againOK']);
+});
+
 it('runs an action once also when its notice remounts while it runs, and guards a renderer that ignores disabled', async () => {
   const runtime = await signedIn();
   let release!: () => void;

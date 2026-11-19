@@ -132,14 +132,15 @@ class NoticeStore {
   };
   /**
    * After its action: a shown notice retires, a held one stays its holder's,
-   * and one the action published again (a new `event`) stays as published.
+   * and one the action showed again, even identically, stays as shown:
+   * every `show` stores a new record.
    */
-  settle(key: string, event: number) {
-    if (!this.holders.has(key) && this.records.get(key)?.event === event)
+  settle(key: string, before: NoticeRecord) {
+    if (!this.holders.has(key) && this.records.get(key) === before)
       this.retire(key);
   }
-  eventOf(key: string) {
-    return this.records.get(key)?.event;
+  recordOf(key: string) {
+    return this.records.get(key);
   }
   run(key: string) {
     return this.runs.get(key);
