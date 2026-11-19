@@ -268,8 +268,8 @@ against the installed kit; the React consumer of `test:consumers` installs the
 same packages for the shipped examples. The TODO's standard screen covers EN/DE sign-in,
 320px light/dark presentation, explicit context choice, creation and guarded
 management with a retained draft, and the full CRUD, conflict/unknown-outcome,
-guard, keyboard/mobile and second-tab checks, plus the shared Node domain/edit
-path.
+guard, keyboard/mobile and second-tab checks, the row checkbox's target at the
+default and a 112.5% root font size, plus the shared Node domain/edit path.
 It also enables native BFCache in full Chromium and checks repeated returns,
 sign-in afterwards, saved session/Context restoration and exactly one creation
 after return. The verbatim quickstart from the installed package is bundled and
