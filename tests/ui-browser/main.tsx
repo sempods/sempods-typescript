@@ -27,6 +27,10 @@
 // With `?screen=confirm`, the page is the README's confirmation, open, with
 // long German labels and a long unbroken list name; with `&footer=pill` as
 // well, the same dialog parts hold `ActionButton` pills instead (#368).
+// With `?screen=ghost`, the page is the ghost variant's icon actions, a
+// Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
+// button; the checks swap the stylesheet for no-preflight.css, a host that
+// imports only Tailwind's theme and utilities (#392).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
@@ -60,6 +64,7 @@ import {
 import {
   ActionButton,
   ActionGroup,
+  Button,
   Checkbox,
   Chip,
   ChipGroup,
@@ -69,6 +74,7 @@ import {
   DialogHeader,
   DialogTitle,
   HeaderMenu,
+  LinkButton,
   ScreenDialog,
   SuggestField,
   WorkspacePanel,
@@ -242,6 +248,7 @@ const addPod =
 const checkboxes = settings.get('screen') === 'checkbox';
 const tabs = settings.get('screen') === 'tabs';
 const confirmation = settings.get('screen') === 'confirm';
+const ghosts = settings.get('screen') === 'ghost';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -363,6 +370,8 @@ function App() {
         <CheckboxGate />
       ) : tabs ? (
         <TabsGate />
+      ) : ghosts ? (
+        <GhostGate />
       ) : confirmation ? (
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : gateSettings ? (
@@ -796,6 +805,43 @@ function ConfirmGate({ pills }: { readonly pills: boolean }) {
           {text}
         </ConfirmDialog>
       )}
+    </main>
+  );
+}
+
+/**
+ * The ghost variant's icon actions (`?screen=ghost`, #392), in tab order, and
+ * a native button that shows whether the host's reset reached buttons.
+ */
+function GhostGate() {
+  const dots = 'M5 12h.01M12 12h.01M19 12h.01';
+  return (
+    <main className="gate-main">
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" size="icon" aria-label="Ghost button">
+          <Icon path={dots} />
+        </Button>
+        <LinkButton
+          variant="ghost"
+          size="icon"
+          href="/list"
+          aria-label="Ghost link"
+        >
+          <Icon path="M9 18l6-6-6-6" />
+        </LinkButton>
+        <ActionButton variant="ghost" shape="round-sm" label="Ghost action">
+          <Icon path={dots} />
+        </ActionButton>
+        <HeaderMenu
+          icon="more"
+          variant="ghost"
+          label="Ghost menu"
+          items={[{ label: 'Rename', onSelect: () => {} }]}
+        />
+        <button type="button" id="native-button">
+          Native
+        </button>
+      </div>
     </main>
   );
 }
