@@ -7008,62 +7008,78 @@ async function rename({ browser, origin, engine }) {
         errors,
         'change-on-the-pod-is-checked-first',
         async () => {
-          await open(page);
-          await trigger(page, BOOKS).click();
-          await page.keyboard.type('Return the books');
-          await renameOnPod(4, 'Return the library books today');
-          await page.keyboard.press('Enter');
-          const told = await shown(
-            field(page).getByText(
-              'The pod has changed. Compare before continuing.',
-            ),
-          );
-          const locked = !(await input(page).isEditable());
-          const saveOff = await field(page)
-            .getByRole('button', { name: 'Save' })
-            .isDisabled();
-          // Its notice's controls are part of the field.
-          await field(page)
-            .getByRole('button', { name: 'Check current version' })
-            .click();
-          const acknowledge = field(page).getByRole('button', {
-            name: 'I have checked the pod',
-          });
-          await acknowledge.waitFor();
-          for (let end = Date.now() + 5000; Date.now() < end;) {
-            if (await acknowledge.isEnabled()) break;
-            await page.waitForTimeout(50);
-          }
-          await acknowledge.click();
-          const openAfterCheck = await field(page).isVisible();
-          // The current name is read again; the draft stays and is saved on it.
-          for (let end = Date.now() + 5000; Date.now() < end;) {
-            if (await input(page).isEditable()) break;
-            await page.waitForTimeout(50);
-          }
-          const label = await input(page).getAttribute('aria-label');
-          const draft = await input(page).inputValue();
-          await input(page).press('Enter');
-          const closed = await gone(field(page));
-          const after = await title(4);
-          return {
-            pass:
-              told &&
-              locked &&
-              saveOff &&
-              openAfterCheck &&
-              label === 'Rename: Return the library books today' &&
-              draft === 'Return the books' &&
-              closed &&
-              after === 'Return the books',
-            told,
-            locked,
-            saveOff,
-            openAfterCheck,
-            label,
-            draft,
-            after,
+          // The step that runs, so that a timeout names its wait.
+          let step = 'open';
+          /** Polls until `ready` (at most 15s): slow engines settle late. */
+          const until = async (ready) => {
+            for (let end = Date.now() + 15000; Date.now() < end;) {
+              if (await ready()) return true;
+              await page.waitForTimeout(50);
+            }
+            return false;
           };
+          try {
+            await open(page);
+            await trigger(page, BOOKS).click();
+            await page.keyboard.type('Return the books');
+            await renameOnPod(4, 'Return the library books today');
+            await page.keyboard.press('Enter');
+            step = 'conflict notice';
+            const told = await shown(
+              field(page).getByText(
+                'The pod has changed. Compare before continuing.',
+              ),
+              15000,
+            );
+            const locked = !(await input(page).isEditable());
+            const saveOff = await field(page)
+              .getByRole('button', { name: 'Save' })
+              .isDisabled();
+            // Its notice's controls are part of the field.
+            step = 'check';
+            const check = field(page).getByRole('button', {
+              name: 'Check current version',
+            });
+            await until(() => check.isEnabled());
+            await check.click({ timeout: 15000 });
+            step = 'acknowledge';
+            const acknowledge = field(page).getByRole('button', {
+              name: 'I have checked the pod',
+            });
+            await until(() => acknowledge.isEnabled());
+            await acknowledge.click({ timeout: 15000 });
+            const openAfterCheck = await field(page).isVisible();
+            // The current name is read again; the draft stays and is saved
+            // on it.
+            step = 'editable again';
+            await until(() => input(page).isEditable());
+            const label = await input(page).getAttribute('aria-label');
+            const draft = await input(page).inputValue();
+            step = 'save';
+            await input(page).press('Enter');
+            const closed = await gone(field(page), 15000);
+            const after = await title(4);
+            return {
+              pass:
+                told &&
+                locked &&
+                saveOff &&
+                openAfterCheck &&
+                label === 'Rename: Return the library books today' &&
+                draft === 'Return the books' &&
+                closed &&
+                after === 'Return the books',
+              told,
+              locked,
+              saveOff,
+              openAfterCheck,
+              label,
+              draft,
+              after,
+            };
+          } catch (error) {
+            throw new Error(`${step}: ${error.message}`, { cause: error });
+          }
         },
       ),
     );
