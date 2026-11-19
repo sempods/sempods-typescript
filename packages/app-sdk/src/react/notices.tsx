@@ -286,7 +286,19 @@ function useAnnouncer() {
 }
 
 /** Whether a modal outside `own` covers the page, and the avoided bottom zone. */
-function usePageCover(own: RefObject<HTMLElement | null>, enabled = true) {
+/**
+ * Inside the gate only these cover the stack: a dialog of the gate itself
+ * (its settings), and management or a leave question, which the gate raises
+ * above itself. An app modal that was open before the gate lies below it.
+ */
+const aboveGate =
+  'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]';
+
+function usePageCover(
+  own: RefObject<HTMLElement | null>,
+  enabled = true,
+  layer: 'page' | 'gate' = 'page',
+) {
   const [cover, setCover] = useState({ modal: false, avoid: 0 });
   useEffect(() => {
     if (!enabled) return;
@@ -298,18 +310,22 @@ function usePageCover(own: RefObject<HTMLElement | null>, enabled = true) {
       frame = 0;
       const element = own.current;
       if (!element) return;
-      const modal =
-        // An overlay library hides the page around its modal.
-        Boolean(element.closest('[inert], [aria-hidden="true"]')) ||
-        [
-          ...document.querySelectorAll('dialog[open], [aria-modal="true"]'),
-        ].some(
-          // A modal that holds this stack, as the gate does, is its layer.
-          (other) =>
-            !other.contains(element) &&
-            !element.contains(other) &&
-            isModal(other),
-        );
+      const gate = layer === 'gate' ? element.closest('dialog') : null;
+      const modal = gate
+        ? [...gate.querySelectorAll('dialog[open]')].some(isModal) ||
+          [...document.querySelectorAll(aboveGate)].some(
+            (other) => !gate.contains(other) && isModal(other),
+          )
+        : // An overlay library hides the page around its modal.
+          Boolean(element.closest('[inert], [aria-hidden="true"]')) ||
+          [
+            ...document.querySelectorAll('dialog[open], [aria-modal="true"]'),
+          ].some(
+            (other) =>
+              !other.contains(element) &&
+              !element.contains(other) &&
+              isModal(other),
+          );
       const height = view.innerHeight;
       let avoid = 0;
       for (const zone of document.querySelectorAll<HTMLElement>(
@@ -383,7 +399,7 @@ function usePageCover(own: RefObject<HTMLElement | null>, enabled = true) {
       view.visualViewport?.removeEventListener('scroll', schedule);
       if (frame) view.cancelAnimationFrame(frame);
     };
-  }, [own, enabled]);
+  }, [own, enabled, layer]);
   return cover;
 }
 function isModal(element: Element) {
@@ -516,7 +532,7 @@ export function GateNotices() {
   const root = useRef<HTMLDivElement>(null);
   // A dialog above the gate, such as the app's settings, makes the stack
   // wait: its notices time out and are announced once it closes.
-  const cover = usePageCover(root, Boolean(host));
+  const cover = usePageCover(root, Boolean(host), 'gate');
   const shown =
     host && !cover.modal ? visible(appEntries(records), host.limit) : [];
   // Room at the gate's end, so the stack never covers its last control.

@@ -783,3 +783,43 @@ it('waits inside the gate while the app settings above it are open', async () =>
   await waitFor(() => expect(texts(inGate())).toEqual(['Saved.OK']));
   await waitFor(() => expect(announced(inGate())).toEqual(['Saved.']));
 });
+
+it('shows notices inside a gate that opened above an app modal (#264)', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  function Update() {
+    useNotice({
+      key: 'app-update',
+      text: 'A new version is ready.',
+      duration: 'until-dismissed',
+    });
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      {/* The app's own modal, open before the gate. */}
+      <div role="dialog" aria-modal="true">
+        <input aria-label="Draft" />
+      </div>
+      <AppAccess appName="Tasks" />
+      <Notices />
+      <Update />
+    </SempodsProvider>,
+  );
+  const gate = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(element?.dataset.reason).toBe('no-connection');
+    return element!;
+  });
+  await waitFor(() =>
+    expect(
+      texts(
+        gate.querySelector(
+          '[data-sempods-ui="notices"][data-placement="gate"]',
+        )!,
+      ),
+    ).toEqual(['A new version is ready.OK']),
+  );
+});
