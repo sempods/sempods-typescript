@@ -5729,6 +5729,161 @@ async function confirmation({ browser, origin, engine }) {
   return results;
 }
 
+/**
+ * A menu action that asks first (#391): the README's confirmation opens while
+ * the menu is still in its exit animation and is answered at once, by pointer
+ * or by keyboard. The menu opened again by pointer right away, or by Enter
+ * once the focus is back on its button, takes the focus, moves with the arrow
+ * keys, closes with Escape and hands the focus back to its button; at 375px,
+ * in both colour schemes. A menu closed without a dialog still plays its exit
+ * animation.
+ */
+async function menuDialog({ browser, origin, engine }) {
+  const tab = tabKey(engine);
+  const { context, page, errors } = await newPage(browser, {
+    viewport: { width: 375, height: 812 },
+  });
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  const confirm = page.getByRole('dialog', { name: 'Delete bought items?' });
+  // Whether the menu that opened the confirmation is still leaving.
+  const exiting = () =>
+    page.evaluate(() =>
+      Boolean(
+        document.querySelector(
+          '[data-slot=dropdown-menu-content][data-exiting]',
+        ),
+      ),
+    );
+  const results = [];
+  try {
+    for (const scheme of ['light', 'dark'])
+      for (const how of ['pointer', 'keyboard-answer', 'keyboard']) {
+        results.push(
+          await attemptOn(errors, `menu-dialog-${how}-${scheme}`, async () => {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.goto(origin + '/?screen=menu-confirm');
+            await menu.waitFor();
+            await settle(page);
+            // Ask and answer without waiting for the menu's exit.
+            if (how === 'pointer') {
+              await menu.click();
+              await page
+                .getByRole('menuitem', { name: 'Delete bought items' })
+                .click();
+              await confirm.getByRole('button', { name: 'Delete' }).click();
+            } else {
+              await menu.focus();
+              await page.keyboard.press('Enter');
+              await page
+                .getByRole('menuitem', { name: 'Rename list' })
+                .waitFor();
+              await focusItem(page, 'Delete bought items');
+              await page.keyboard.press('Enter');
+              await confirm.waitFor();
+              await page.keyboard.press(tab);
+              await page.keyboard.press(tab);
+              await page.keyboard.press('Enter');
+            }
+            let duringExit = await exiting();
+            let returned = null;
+            if (how === 'keyboard') {
+              // The focus goes back to the button, where Enter opens again.
+              returned = await focusUntil(page, /Menu/, focused);
+              duringExit = await exiting();
+              await page.keyboard.press('Enter');
+            } else await menu.click();
+            const answered = await page
+              .locator('output')
+              .getAttribute('data-done');
+            const menuShown = await shown(
+              page.getByRole('menuitem', { name: 'Rename list' }),
+            );
+            const reopened = await focusUntil(
+              page,
+              /^menuitem|^menu /,
+              focused,
+            );
+            await page.keyboard.press('ArrowDown');
+            await page.waitForTimeout(100);
+            const first = await focused(page);
+            await page.keyboard.press('ArrowDown');
+            await page.waitForTimeout(100);
+            const second = await focused(page);
+            await page.keyboard.press('Escape');
+            const closed = await gone(page.getByRole('menu'), 3000);
+            const back = await focusUntil(page, /Menu/, focused);
+            return {
+              pass:
+                answered === 'deleted' &&
+                menuShown &&
+                /^menuitem|^menu /.test(reopened) &&
+                first !== second &&
+                /^menuitem/.test(first) &&
+                /^menuitem/.test(second) &&
+                closed &&
+                back === 'button "Menu"' &&
+                (how !== 'keyboard' || returned === 'button "Menu"'),
+              answered,
+              duringExit,
+              returned,
+              menuShown,
+              reopened,
+              arrows: [first, second],
+              closed,
+              back,
+            };
+          }),
+        );
+      }
+    // Ordinary dismissal keeps the menu's exit animation.
+    results.push(
+      await attemptOn(errors, 'menu-dialog-plain-exit', async () => {
+        await page.emulateMedia({ colorScheme: null });
+        await page.goto(origin + '/?screen=menu-confirm');
+        await menu.click();
+        await page.getByRole('menuitem', { name: 'Rename list' }).waitFor();
+        await settle(page);
+        const exits = [];
+        for (const close of ['Escape', 'action']) {
+          if (close === 'action') {
+            await menu.click();
+            await page.getByRole('menuitem', { name: 'Rename list' }).waitFor();
+            await settle(page);
+          }
+          const popover = page.locator('[data-slot=dropdown-menu-content]');
+          const animated = popover.evaluate(
+            (el) =>
+              new Promise((done) => {
+                const seen = () =>
+                  el.hasAttribute('data-exiting') &&
+                  el.getAnimations().length > 0;
+                if (seen()) return done(true);
+                const observer = new MutationObserver(() => {
+                  if (!seen()) return;
+                  observer.disconnect();
+                  done(true);
+                });
+                observer.observe(el, { attributes: true });
+                setTimeout(() => done(false), 3000);
+              }),
+          );
+          if (close === 'Escape') await page.keyboard.press('Escape');
+          else
+            await page.getByRole('menuitem', { name: 'Rename list' }).click();
+          exits.push({ close, animated: await animated });
+          await gone(page.getByRole('menu'));
+        }
+        return { pass: exits.every((e) => e.animated), exits };
+      }),
+    );
+  } finally {
+    await page.emulateMedia({ colorScheme: null });
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -5748,6 +5903,7 @@ export const suites = {
   addPod,
   checkbox,
   confirmation,
+  menuDialog,
   viewTabs,
   ghost,
 };

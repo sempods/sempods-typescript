@@ -8,6 +8,7 @@ import {
   Menu as MenuPrimitive,
   MenuSection as MenuSectionPrimitive,
   MenuTrigger as MenuTriggerPrimitive,
+  OverlayTriggerStateContext,
   Popover as PopoverPrimitive,
   Separator as SeparatorPrimitive,
   SubmenuTrigger as SubmenuTriggerPrimitive,
@@ -42,8 +43,17 @@ function DropdownMenu({
     className?: string;
     children?: React.ReactNode;
   }) {
+  // Opened again during its exit animation, a popover would stay mounted, and
+  // its menu takes the focus only on mount: a dialog an item opened, answered
+  // at once, left the menu shown without focus or Escape (#391). Each opening
+  // mounts a new popover, which ends the old one's exit.
+  const isOpen = React.useContext(OverlayTriggerStateContext)?.isOpen ?? false;
+  const [opening, setOpening] = React.useState({ isOpen, count: 0 });
+  if (opening.isOpen !== isOpen)
+    setOpening({ isOpen, count: opening.count + (isOpen ? 1 : 0) });
   return (
     <PopoverPrimitive
+      key={opening.count}
       data-slot={dataSlot}
       placement={placement}
       offset={offset}

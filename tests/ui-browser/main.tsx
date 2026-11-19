@@ -27,6 +27,8 @@
 // With `?screen=confirm`, the page is the README's confirmation, open, with
 // long German labels and a long unbroken list name; with `&footer=pill` as
 // well, the same dialog parts hold `ActionButton` pills instead (#368).
+// With `?screen=menu-confirm`, a screen's menu has an action that asks
+// first with the README's confirmation (#391).
 // With `?screen=ghost`, the page is the ghost variant's icon actions, a
 // Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
 // button; the checks swap the stylesheet for no-preflight.css, a host that
@@ -92,6 +94,7 @@ import { ViewTabs } from './view-tabs';
 import { ConfirmDialog } from './confirm-dialog';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
+import { MenuConfirmGate } from './menu-confirm';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -248,6 +251,7 @@ const addPod =
 const checkboxes = settings.get('screen') === 'checkbox';
 const tabs = settings.get('screen') === 'tabs';
 const confirmation = settings.get('screen') === 'confirm';
+const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
@@ -374,6 +378,8 @@ function App() {
         <GhostGate />
       ) : confirmation ? (
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
+      ) : menuConfirm ? (
+        <MenuConfirmGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (
