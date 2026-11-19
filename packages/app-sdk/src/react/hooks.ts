@@ -27,6 +27,7 @@ import {
   type FieldDefinition,
   type ResourceEditor,
   type Snapshot,
+  type Timestamps,
   type UpdateOutcome,
   type RemoveSnapshotOutcome,
   type CreateOutcome,
@@ -49,6 +50,7 @@ import {
   changedData,
   isSpent,
   notSent,
+  shownTimestamps,
   spentData,
   type Lane,
   type MutationOutcome,
@@ -1094,6 +1096,7 @@ export function useFieldUpdate<D>(input: FieldDefinition<D>) {
     return {
       ...state,
       data: spentData<D>(item) ?? item.data,
+      timestamps: shownTimestamps(item),
       update: (change: Partial<D>) =>
         run(
           item.iri,
@@ -1147,6 +1150,13 @@ export interface FieldUpdateRow<D> extends FieldUpdateState<D> {
    * until the list reads the resource again.
    */
   readonly data: D;
+  /**
+   * The instants to order and show it by: `timestampsOf(snapshot)`, with the
+   * modification instant a confirmed update wrote laid over until the list
+   * reads the resource again. A pending, refused, conflicting or unconfirmed
+   * write changes nothing here, as it changes nothing in `data`.
+   */
+  readonly timestamps: Timestamps;
   /** Updates the changed fields from this snapshot; see `useFieldUpdate`. */
   update(change: Partial<D>): Promise<UpdateOutcome<D> | NotSent>;
   /** Removes the version this snapshot shows. */

@@ -16,6 +16,7 @@ import {
 import {
   changedData,
   notSent,
+  shownTimestamps,
   spentData,
   type MutationOutcome,
   type NotSent,
@@ -190,6 +191,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
       ...state,
       // A confirmed update shows at once, until the list reads it again.
       data: spentData<D>(snapshot) ?? snapshot.data,
+      timestamps: shownTimestamps(snapshot),
       update: (change: Partial<D>) =>
         run(
           group,

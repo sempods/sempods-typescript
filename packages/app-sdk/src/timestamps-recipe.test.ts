@@ -1,6 +1,10 @@
 /** The timestamps recipe (#367): two orders over the maintained instants. */
 import { describe, expect, it } from 'vitest';
-import { snapshots, type ResourceSource } from '@sempods/client-sdk/edit';
+import {
+  snapshots,
+  timestampsOf,
+  type ResourceSource,
+} from '@sempods/client-sdk/edit';
 import type { JsonLd } from '@sempods/client-sdk';
 import {
   bought,
@@ -35,7 +39,7 @@ function item(
       : {}),
   };
 }
-const names = (rows: readonly { data: { name: string } }[]) =>
+const names = (rows: readonly { readonly data: { name: string } }[]) =>
   rows.map((row) => row.data.name);
 
 describe('timestamps recipe', () => {
@@ -62,6 +66,28 @@ describe('timestamps recipe', () => {
 
   it('lists bought items most recently modified first', () => {
     // 09:30-01:00 is 10:30Z, 11:00+01:00 is 10:00Z.
+    expect(names(bought(rows))).toEqual(['w', 'y', 'x', 'v']);
+  });
+
+  it('orders an item just ticked by its confirmed instant before the list reads it again', () => {
+    // Rows as `{ iri: item.iri, ...mutate.for(item) }` shows them: `c` was
+    // ticked at 12:00Z; its snapshot still reads it open and without an
+    // instant. The others are shown as read.
+    const shown = rows.map((row) =>
+      row.data.name === 'c'
+        ? {
+            iri: row.iri,
+            data: { ...row.data, bought: true },
+            timestamps: {
+              ...timestampsOf(row),
+              modified: '2026-11-17T12:00:00Z',
+            },
+          }
+        : { iri: row.iri, data: row.data, timestamps: timestampsOf(row) },
+    );
+    expect(names(bought(shown))).toEqual(['c', 'w', 'y', 'x', 'v']);
+    expect(names(toBuy(shown))).toEqual(['legacy', 'b', 'a', 'z']);
+    // The snapshots alone still order as read.
     expect(names(bought(rows))).toEqual(['w', 'y', 'x', 'v']);
   });
 

@@ -154,6 +154,7 @@ it('stamps creation, a row update and an editor save, and keys definitions by th
   await act(async () => {
     expect(await api.update.for(row()).update({ bought: true })).toEqual({
       kind: 'saved',
+      modified: T1,
     });
   });
   // The plain row's update was refused: only the stamped one was sent.

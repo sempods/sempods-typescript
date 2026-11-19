@@ -47,17 +47,32 @@ function epoch(value: string | null): number | null {
 }
 
 /**
+ * A row to order: a list snapshot, whose instants are read with
+ * `timestampsOf`, or a row as shown, `{ iri: item.iri, ...mutate.for(item) }`
+ * from `useFieldUpdate` (or `useContextUpdate`), whose `timestamps` carry a
+ * confirmed update's instant until the list reads the item again.
+ */
+export type Row = Snapshot<Item> | ShownRow;
+export interface ShownRow {
+  readonly iri: string;
+  readonly data: Item;
+  readonly timestamps: Timestamps;
+}
+const instantsOf = (row: Row): Timestamps =>
+  'timestamps' in row ? row.timestamps : timestampsOf(row);
+
+/**
  * Rows ordered by one instant. Rows without a usable one stay listed and
  * come last; ties and those rows are ordered by IRI, so the order is the
  * same after every read.
  */
-function byInstant<D>(
-  rows: readonly Snapshot<D>[],
+function byInstant<R extends Row>(
+  rows: readonly R[],
   instant: (timestamps: Timestamps) => string | null,
   direction: 1 | -1,
-): Snapshot<D>[] {
+): R[] {
   return rows
-    .map((row) => ({ row, at: epoch(instant(timestampsOf(row))) }))
+    .map((row) => ({ row, at: epoch(instant(instantsOf(row))) }))
     .sort((a, b) => {
       if (a.at !== b.at) {
         if (a.at === null) return 1;
@@ -70,7 +85,7 @@ function byInstant<D>(
 }
 
 /** Items still to buy, the oldest first. */
-export function toBuy(rows: readonly Snapshot<Item>[]): Snapshot<Item>[] {
+export function toBuy<R extends Row>(rows: readonly R[]): R[] {
   return byInstant(
     rows.filter((row) => !row.data.bought),
     (t) => t.created,
@@ -78,8 +93,12 @@ export function toBuy(rows: readonly Snapshot<Item>[]): Snapshot<Item>[] {
   );
 }
 
-/** Bought items, the most recently changed first (renaming counts too). */
-export function bought(rows: readonly Snapshot<Item>[]): Snapshot<Item>[] {
+/**
+ * Bought items, the most recently changed first (renaming counts too). Pass
+ * rows as shown, so an item just ticked comes first already before the list
+ * has read it again.
+ */
+export function bought<R extends Row>(rows: readonly R[]): R[] {
   return byInstant(
     rows.filter((row) => row.data.bought),
     (t) => t.modified,

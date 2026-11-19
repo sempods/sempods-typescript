@@ -203,7 +203,16 @@ type Failed = {
   readonly problem: EditProblem;
 };
 export type UpdateOutcome<D> =
-  | { readonly kind: 'saved' }
+  | {
+      readonly kind: 'saved';
+      /**
+       * The modification instant this update wrote (see `fields()`'s
+       * `timestamps`): captured once with the command, also kept across a
+       * bounded rebase. Absent when the definition maintains none or nothing
+       * differed, so nothing was written.
+       */
+      readonly modified?: string;
+    }
   /**
    * What this operation depends on changed. `current` is a fresh snapshot to
    * decide on, `null` when the resource is absent, `undefined` when it could
@@ -313,7 +322,7 @@ async function conditional<D, O>(
   write: (now: Current<D> & { kind: 'ok' }) => Promise<WriteResult>,
   desired: (now: Current<D>) => boolean,
   outcome: {
-    readonly done: O;
+    readonly done: () => O;
     readonly failed: (problem: EditProblem) => O;
     readonly changed: (current: Snapshot<D> | null | undefined) => O;
     readonly unconfirmed: (
@@ -355,7 +364,7 @@ async function conditional<D, O>(
   }
   switch (result.kind) {
     case 'applied':
-      return outcome.done;
+      return outcome.done();
     case 'uncertain': {
       const after = await current(
         source,
@@ -400,6 +409,8 @@ export async function updateFields<D>(
   let wanted: D | undefined;
   // What the write was based on: values it leaves untouched stay as they were.
   let onto: D | undefined;
+  // Whether the last request sent carried the instant.
+  let stamps = false;
   return conditional<D, UpdateOutcome<D>>(
     source,
     snapshot,
@@ -418,6 +429,9 @@ export async function updateFields<D>(
         definition.patch(now.body, wanted),
         at,
       );
+      stamps =
+        Object.keys(patch).length > 0 &&
+        definition.timestamps?.modified[0] !== undefined;
       // Nothing differs: no request; settles as saved like an applied patch.
       if (Object.keys(patch).length === 0)
         return Promise.resolve({ kind: 'applied', status: 204 } as const);
@@ -443,7 +457,8 @@ export async function updateFields<D>(
       );
     },
     {
-      done: { kind: 'saved' },
+      done: () =>
+        stamps ? { kind: 'saved', modified: at } : { kind: 'saved' },
       failed: (problem) => ({
         kind: 'not-saved',
         reason: problem.kind,
@@ -484,7 +499,7 @@ export async function removeSnapshot<D>(
       source.subjects.delete(snapshot.iri, { ifMatch: now.etag }, options),
     (now) => now.kind === 'absent',
     {
-      done: { kind: 'removed' },
+      done: () => ({ kind: 'removed' }),
       failed: (problem) => ({
         kind: 'not-removed',
         reason: problem.kind,
