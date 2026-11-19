@@ -8,7 +8,7 @@
 // against its own Pod and browser instance.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs,ghost]
+//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs,ghost,editorFooter]
 //        [--lanes=<suites at once per browser, default 1>]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
