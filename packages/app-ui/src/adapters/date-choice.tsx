@@ -162,7 +162,11 @@ export function DateChoiceBody({
                 className="h-auto min-h-11 flex-auto px-3 text-base whitespace-normal"
                 isDisabled={!enabled}
                 onPress={() => {
-                  if (day) onChange(day.toString());
+                  if (!day) return;
+                  // The preset's day replaces the draft also when it is
+                  // already the value, so Apply cannot send an older one.
+                  pick(day);
+                  onChange(day.toString());
                 }}
               >
                 {preset.label}

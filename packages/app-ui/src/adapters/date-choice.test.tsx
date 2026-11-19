@@ -222,3 +222,13 @@ it('names its group, calendar and entry in English', () => {
   ).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Apply' })).toBeTruthy();
 });
+
+it('replaces the draft with a preset of the current day', () => {
+  const onChange = renderChoice({ value: '2026-11-26', presets });
+  type('2026-11-27');
+  fireEvent.click(screen.getByRole('button', { name: 'Nächste Woche' }));
+  expect(onChange).toHaveBeenLastCalledWith('2026-11-26');
+  expect((typed() as HTMLInputElement).value).toBe('2026-11-26');
+  fireEvent.click(screen.getByRole('button', { name: 'Übernehmen' }));
+  expect(onChange).toHaveBeenLastCalledWith('2026-11-26');
+});
