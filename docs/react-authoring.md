@@ -1530,12 +1530,14 @@ export function Shell() {
   is no new event). Once dismissed it stays hidden until retired and passed
   again.
 - **`useNotices()`** returns `show` and `dismiss` for events: each `show` is
-  announced once and shows again after a dismissal; an identical repeat of
-  a visible notice only restarts its timer.
+  announced once, starts its full duration and shows again after a
+  dismissal; an identical repeat of a visible notice only restarts its
+  timer.
 - **One action**, `action: { label, run }`, runs through the host's guards:
   disabled while it runs and while a guarded change or its leave question is
   open, also when the notice remounts or moves into the gate; a rejection
-  shows its localized error in the notice. A shown notice retires once its
+  shows its localized error in the notice, also after a remount. A shown
+  notice retires once its
   action resolves, unless the action showed it again; a held one stays its
   holder's.
 - **The host** shows at most `limit` notices (3 by default); over the limit,
@@ -1554,7 +1556,8 @@ export function Shell() {
   once it closes, an error too, so keep an error that concerns the dialog
   inside it. Beside `AppAccess` the stack also waits while the app starts.
   Before sign-in, app notices show inside the SDK's sign-in gate, which keeps
-  room for them at its end.
+  room for them at its end; they wait there too while the gate's settings or
+  another dialog above it are open.
 - **Another renderer:** `components={{ Notice }}` receives a `NoticeView`
   (`source`, `severity`, `title`, `text`, `actions`, `dismiss`, …) for an
   app notice or an access prompt alike. The host still owns position,

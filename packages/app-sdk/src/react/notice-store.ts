@@ -39,6 +39,8 @@ class NoticeStore {
   private announced = new Map<string, number>();
   /** Notices and prompts whose action runs, across remounts and hosts. */
   private running = new Set<string>();
+  /** The last failed action of each, also for a notice that remounted. */
+  private failures = new Map<string, { readonly cause: unknown }>();
   private sequence = 0;
   private events = 0;
   private listeners = new Set<() => void>();
@@ -118,6 +120,7 @@ class NoticeStore {
     this.runs.delete(key);
     this.orders.delete('app\n' + key);
     this.announced.delete('app\n' + key);
+    this.failures.delete('app\n' + key);
     this.emit();
   }
   dismiss = (key: string) => {
@@ -149,12 +152,18 @@ class NoticeStore {
   begin(id: string) {
     if (this.running.has(id)) return false;
     this.running.add(id);
+    this.failures.delete(id);
     this.listeners.forEach((listener) => listener());
     return true;
   }
-  end(id: string) {
+  /** Ends the action of `id`, keeping its failure for whoever shows it. */
+  end(id: string, failure?: { readonly cause: unknown }) {
     this.running.delete(id);
+    if (failure) this.failures.set(id, failure);
     this.listeners.forEach((listener) => listener());
+  }
+  failureOf(id: string) {
+    return this.failures.get(id);
   }
   isRunning(id: string) {
     return this.running.has(id);
@@ -168,6 +177,7 @@ class NoticeStore {
   forgetPrompt(id: string) {
     this.orders.delete(id);
     this.announced.delete(id);
+    this.failures.delete(id);
   }
   /** Adds a host or replaces its options in place, keeping its position. */
   register(host: Host) {

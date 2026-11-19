@@ -665,3 +665,121 @@ it('leaves the access prompts to AppAccess with accessPrompts={false}', async ()
     1,
   );
 });
+
+it('restarts the timer for a changed event, but not for an update in place', async () => {
+  const runtime = await signedIn();
+  const timers = briefTimers();
+  function Held({ text }: { readonly text: string }) {
+    useNotice({ key: 'held', text });
+    return null;
+  }
+  const ui = (text: string) => (
+    <App runtime={runtime}>
+      <Held text={text} />
+    </App>
+  );
+  const view = render(ui('Synchronised.'));
+  act(() => actions.show({ key: 'shown', text: 'Copied.' }));
+  await waitFor(() => expect(running(timers)).toHaveLength(2));
+  const [held, shown] = running(timers);
+  // A changed `show` is a new event with a full duration of its own.
+  act(() => actions.show({ key: 'shown', text: 'Copied twice.' }));
+  await waitFor(() => expect(running(timers)).toHaveLength(2));
+  expect(running(timers)).toContain(held);
+  expect(running(timers)).not.toContain(shown);
+  // A held notice's text changes (a language): its timer runs on.
+  const before = running(timers);
+  view.rerender(ui('Synchronisiert.'));
+  expect(texts()).toContain('Synchronisiert.OK');
+  expect(running(timers)).toEqual(before);
+});
+
+it('shows an action failure that arrives while its notice was covered by a modal', async () => {
+  const runtime = await signedIn();
+  let fail!: (cause: unknown) => void;
+  const run = vi.fn(
+    () =>
+      new Promise<void>((_, reject) => {
+        fail = reject;
+      }),
+  );
+  function Modal({ open }: { readonly open: boolean }) {
+    return open ? <div role="dialog" aria-modal="true" /> : null;
+  }
+  const ui = (open: boolean) => (
+    <App runtime={runtime}>
+      <Modal open={open} />
+    </App>
+  );
+  const view = render(ui(false));
+  act(() =>
+    actions.show({
+      key: 'sync',
+      text: 'Not synchronised.',
+      severity: 'error',
+      action: { label: 'Synchronise', run },
+    }),
+  );
+  await act(async () =>
+    screen.getByRole('button', { name: 'Synchronise' }).click(),
+  );
+  view.rerender(ui(true));
+  await waitFor(() => expect(items()).toEqual([]));
+  await act(async () => fail(new Error('offline')));
+  view.rerender(ui(false));
+  await waitFor(() => expect(items()).toHaveLength(1));
+  expect(within(items()[0]!).getByRole('alert').textContent).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Synchronise' })).toHaveProperty(
+    'disabled',
+    false,
+  );
+});
+
+it('waits inside the gate while the app settings above it are open', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess
+        appName="Tasks"
+        settings={{ label: 'Settings', content: <p>Language</p> }}
+      />
+      <Notices />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  const gate = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(element?.dataset.reason).toBe('no-connection');
+    return element!;
+  });
+  const inGate = () =>
+    gate.querySelector<HTMLElement>(
+      '[data-sempods-ui="notices"][data-placement="gate"]',
+    )!;
+  await act(async () =>
+    within(gate).getByRole('button', { name: 'Settings' }).click(),
+  );
+  await waitFor(() =>
+    expect(gate.querySelector('dialog[data-sempods-ui="settings"]')).not.toBe(
+      null,
+    ),
+  );
+  // The host measures what covers it in the next frame.
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(items(inGate())).toEqual([]);
+  expect(announced(inGate())).toEqual([]);
+  // The settings close: the notice shows and is announced once.
+  const settings = gate.querySelector<HTMLElement>(
+    'dialog[data-sempods-ui="settings"]',
+  )!;
+  await act(async () =>
+    within(settings).getAllByRole('button').at(-1)!.click(),
+  );
+  await waitFor(() => expect(texts(inGate())).toEqual(['Saved.OK']));
+  await waitFor(() => expect(announced(inGate())).toEqual(['Saved.']));
+});

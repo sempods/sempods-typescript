@@ -286,9 +286,10 @@ function useAnnouncer() {
 }
 
 /** Whether a modal outside `own` covers the page, and the avoided bottom zone. */
-function usePageCover(own: RefObject<HTMLElement | null>) {
+function usePageCover(own: RefObject<HTMLElement | null>, enabled = true) {
   const [cover, setCover] = useState({ modal: false, avoid: 0 });
   useEffect(() => {
+    if (!enabled) return;
     const document = own.current?.ownerDocument;
     const view = document?.defaultView;
     if (!document || !view) return;
@@ -302,7 +303,13 @@ function usePageCover(own: RefObject<HTMLElement | null>) {
         Boolean(element.closest('[inert], [aria-hidden="true"]')) ||
         [
           ...document.querySelectorAll('dialog[open], [aria-modal="true"]'),
-        ].some((other) => !element.contains(other) && isModal(other));
+        ].some(
+          // A modal that holds this stack, as the gate does, is its layer.
+          (other) =>
+            !other.contains(element) &&
+            !element.contains(other) &&
+            isModal(other),
+        );
       const height = view.innerHeight;
       let avoid = 0;
       for (const zone of document.querySelectorAll<HTMLElement>(
@@ -376,15 +383,17 @@ function usePageCover(own: RefObject<HTMLElement | null>) {
       view.visualViewport?.removeEventListener('scroll', schedule);
       if (frame) view.cancelAnimationFrame(frame);
     };
-  }, [own]);
+  }, [own, enabled]);
   return cover;
 }
 function isModal(element: Element) {
   if (element.localName !== 'dialog') return true;
+  // Without a top layer (jsdom), an SDK dialog opens with the attribute.
+  if (typeof (element as HTMLDialogElement).showModal !== 'function')
+    return true;
   try {
     return element.matches(':modal');
   } catch {
-    // Without `:modal` (jsdom), an SDK dialog opens with the attribute.
     return true;
   }
 }
@@ -505,7 +514,11 @@ export function GateNotices() {
   const { direction } = useSdkLocale();
   const { announce, regions } = useAnnouncer();
   const root = useRef<HTMLDivElement>(null);
-  const shown = host ? visible(appEntries(records), host.limit) : [];
+  // A dialog above the gate, such as the app's settings, makes the stack
+  // wait: its notices time out and are announced once it closes.
+  const cover = usePageCover(root, Boolean(host));
+  const shown =
+    host && !cover.modal ? visible(appEntries(records), host.limit) : [];
   // Room at the gate's end, so the stack never covers its last control.
   useLayoutEffect(() => {
     const element = root.current;
@@ -578,7 +591,8 @@ function NoticeItem({
     // Only a new event announces; a changed text or language does not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, entry.id, event]);
-  // Timer, paused while hovered or focused; a repeat restarts it.
+  // Timer, paused while hovered or focused; a repeat or a new event
+  // restarts it, an update in place (a language change) does not.
   const [held, setHeld] = useState({ hover: false, focus: false });
   const duration = durationOf(entry);
   const renewed = entry.app?.renewed ?? 0;
@@ -588,7 +602,7 @@ function NoticeItem({
     // Hiding dismisses it, so a remount or a second host does not replay it.
     const timer = setTimeout(() => expire.current?.(), duration);
     return () => clearTimeout(timer);
-  }, [duration, held.hover, held.focus, renewed, expire]);
+  }, [duration, held.hover, held.focus, renewed, event, expire]);
   // Focus returns from a notice that goes while it holds focus.
   const element = useRef<HTMLLIElement>(null);
   const focus = useFocusHold();
@@ -655,9 +669,6 @@ function useNoticeView(entry: Entry): NoticeView {
         a.activeId === b.activeId,
     );
   const { messages: m, error } = useSdkLocale();
-  const [failure, setFailure] = useState<{ readonly cause: unknown } | null>(
-    null,
-  );
   const prompt = entry.prompt;
   // Hooks run for both kinds; only an access prompt has a text to derive.
   const promptText = usePromptText(prompt ?? placeholder);
@@ -668,13 +679,19 @@ function useNoticeView(entry: Entry): NoticeView {
     () => store.isRunning(entry.id),
     () => store.isRunning(entry.id),
   );
+  // So is its failure: the instance that shows it now displays it.
+  const failure = useSyncExternalStore(
+    store.subscribe,
+    () => store.failureOf(entry.id),
+    () => store.failureOf(entry.id),
+  );
   const disabled = busy || changing || confirmingLeave;
   const guarded = (run: () => Promise<unknown>) => () => {
     if (disabled || !store.begin(entry.id)) return;
-    setFailure(null);
-    void run()
-      .catch((cause: unknown) => setFailure({ cause }))
-      .finally(() => store.end(entry.id));
+    void run().then(
+      () => store.end(entry.id),
+      (cause: unknown) => store.end(entry.id, { cause }),
+    );
   };
   const dismissLabel = m.controls.dismiss ?? m.controls.close ?? 'OK';
   const failed = failure ? error(failure.cause) : null;
