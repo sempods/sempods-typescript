@@ -1,6 +1,11 @@
 // sempods adapters: SDK-aware compositions with the template's touch targets.
 export * from './adapters/action-button.js';
 export * from './adapters/chips.js';
+export {
+  DateChoice,
+  type DateChoicePreset,
+  type DateChoiceProps,
+} from './adapters/date-choice.js';
 export { DateChooser, type DateChooserProps } from './adapters/date-chooser.js';
 export * from './adapters/delete-icon.js';
 export * from './adapters/header-menu.js';
