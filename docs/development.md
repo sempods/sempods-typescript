@@ -249,7 +249,10 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     with `InlineTextEdit` and the row's `useFieldUpdate` command, renamed by
     keyboard with the focus back on the name; Escape and Cancel write
     nothing; a press beside the field and Tab past it park the draft, which
-    the next rename resumes and a list change guards; an empty name is
+    the next rename resumes and a list change guards, also while the list
+    cannot be read or skips the item, while an untouched one is dropped; a
+    parked rename still writes over the version it started from, so a rename
+    elsewhere meanwhile is a conflict, not overwritten; an empty name is
     invalid; a denied write keeps the field and the draft; a change on the
     Pod locks the row until it is checked and acknowledged, then the draft is
     saved onto the version read again; during a slow save the field stays

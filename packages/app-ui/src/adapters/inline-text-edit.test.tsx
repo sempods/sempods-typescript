@@ -189,3 +189,15 @@ it('keeps a press on its own plain button that drops the focus', async () => {
   expect(onDismiss).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(input);
 });
+
+it('dismisses on Tab past the last control of the page', async () => {
+  // Chromium leaves the body active when Tab leaves the page.
+  const onDismiss = vi.fn();
+  render(<Field onDismiss={onDismiss} />);
+  const cancel = screen.getByRole('button', { name: 'Cancel' });
+  act(() => cancel.focus());
+  fireEvent.keyDown(cancel, { key: 'Tab' });
+  act(() => cancel.blur());
+  await landed();
+  expect(onDismiss).toHaveBeenCalledOnce();
+});

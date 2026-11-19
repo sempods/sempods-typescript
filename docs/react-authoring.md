@@ -477,13 +477,14 @@ is the complete, tested shopping list; the core is:
 ```tsx
 <InlineTextEdit
   label={`${t.rename}: ${item.title}`}
-  value={draft}
-  onChange={setDraft}
+  value={draft.text}
+  onChange={setText}
   onSave={async () => {
-    const title = draft.trim();
+    const title = draft.text.trim();
     if (!title) return setError(t.required); // the app validates
     setSaving(true);
-    const outcome = await row.update({ title }); // the row's snapshot
+    // From the snapshot the rename started from, kept with the draft.
+    const outcome = await mutate.for(draft.base).update({ title });
     setSaving(false);
     if (outcome.kind === 'saved') close(); // otherwise the draft stays
   }}
@@ -491,32 +492,40 @@ is the complete, tested shopping list; the core is:
   onDismiss={park} // or close, or keep it open: the app's policy
   returnFocus={() => trigger.current?.focus()}
   pending={saving}
-  readOnly={!row.canMutate}
+  readOnly={!mutate.for(draft.base).canMutate}
   error={error}
 >
-  <UpdateNotice {...row.notice} quiet />
+  <UpdateNotice {...row.notice} onAcknowledge={acknowledgeAndRebase} quiet />
 </InlineTextEdit>
 ```
 
 - **The app keeps** the trigger (the name as a button, a menu item, a deep
   link beside it), the field it writes and its validation, the list snapshot
-  `row.update` writes from, the draft and its policy, and its own list
+  the rename started from, the draft and its policy, and its own list
   actions. Offer the trigger only with `useWorkflowAccess().write`; without
   it the name is text.
-- **Write only through the row**: `row.update({ title })` with the snapshot
-  the person saw. A refusal keeps the draft and the field open with the
-  notice; the person may save again. A change on the Pod (`changed-on-pod`)
-  locks the row: `readOnly` follows `row.canMutate`, the notice's check reads
-  the current version, the list reads again, and after the acknowledgement
-  the kept draft can be saved onto it. Never resend on any other result.
+- **Write from the snapshot the rename started from.** Keep the list
+  snapshot with the draft when the field opens, also while it is parked, and
+  save with `mutate.for(base).update({ title })`. A list read meanwhile
+  gives the row a newer snapshot; writing from that one would take the other
+  writer's name as what the person saw and overwrite it without a question.
+  From the base, a change on the Pod is `changed-on-pod`: it locks the row
+  (`readOnly` follows the base's `canMutate`), the notice's check reads the
+  current version and the list reads again. Only after the person
+  acknowledged it does the next read become the base, and the kept draft can
+  be saved onto it. A refusal keeps the draft and the field open with the
+  notice; the person may save again. Never resend on any other result.
 - **Leaving is a dismissal, not a save.** A press beside the field or Tab
   past it calls `onDismiss`. Park a changed draft, as the README example does
-  with a "Not saved" mark and the next rename resuming it, or close an
-  unchanged one. Guard every changed draft, open or parked, with
-  `useDraftGuard(dirty, discard)`, so changing the list or the Pod asks first.
-  Compare a draft with the name it started from while the list cannot be
-  read (`list.data` is undefined after lost read access); only a list read
-  without the item means the item was removed.
+  with a "Not saved" mark and the next rename resuming it, and drop one whose
+  trimmed text still equals its base: a parked copy of the old name would
+  later show as unsaved after a rename elsewhere. Guard every changed draft,
+  open or parked, with `useDraftGuard(dirty, discard)`, comparing it with
+  its base, so changing the list or the Pod asks first, also while the list
+  cannot be read (`list.data` is undefined after lost read access). An item
+  is gone only when a complete read (`skippedRecords.length === skipped`)
+  neither lists it nor skips it: an item whose name was cleared elsewhere is
+  skipped, not removed.
 - **Focus.** Save, Cancel and Escape return the focus to the trigger through
   `returnFocus`, also after a slow save; a person who moved on meanwhile keeps
   their focus. A trigger that the field replaces is focused after the app's

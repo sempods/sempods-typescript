@@ -186,19 +186,25 @@ export function InlineTextEdit({
 
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
+  // Tab was pressed in the field: a focus that leaves it now is the
+  // person's, also when no element of the page takes it.
+  const tabbed = useRef(false);
   const onBlur = (event: ReactFocusEvent) => {
     if (inside(event.relatedTarget)) return;
     clearTimeout(timer.current);
     // Decided once the focus has landed. The window losing the focus keeps
-    // the active element here. A focus dropped on the body is no departure:
-    // a control that became disabled or left the page drops it, and so may
-    // a press on the field's own plain button (the notice's), which takes
-    // no focus in WebKit. A press beside the field is told by its own
-    // listener; Tab moves the focus to another element.
+    // the active element here. Without Tab, a focus dropped on the body is
+    // no departure: a control that became disabled or left the page drops
+    // it, and so may a press on the field's own plain button (the
+    // notice's), which takes no focus in WebKit; a press beside the field is
+    // told by its own listener. Tab past the page's last control leaves the
+    // body active too, and that departure is the person's.
     timer.current = setTimeout(() => {
+      const tab = tabbed.current;
+      tabbed.current = false;
       const active = document.activeElement;
       if (inside(active)) return;
-      if (!active || active === document.body) {
+      if (!tab && (!active || active === document.body)) {
         input.current?.focus({ preventScroll: true });
         return;
       }
@@ -207,6 +213,7 @@ export function InlineTextEdit({
   };
   const onFocus = () => {
     clearTimeout(timer.current);
+    tabbed.current = false;
     dismissed.current = false;
     left.current = false;
   };
@@ -215,6 +222,7 @@ export function InlineTextEdit({
     if (!pending && !readOnly) onSave();
   };
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Tab') tabbed.current = true;
     // An input method's Escape ends its composition, not the edit.
     if (event.key !== 'Escape' || composing(event)) return;
     // Escape ends this edit only, never an enclosing dialog, also while a

@@ -1200,7 +1200,7 @@ row and guarded, and the next rename resumes it:
 
 ```tsx
 // rename-row.tsx
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   RemoveButton,
   UnresolvedNotices,
@@ -1212,7 +1212,7 @@ import {
   useWorkflowAccess,
   type FieldUpdateRow,
 } from '@sempods/app-sdk/react';
-import type { DraftOf } from '@sempods/client-sdk/edit';
+import type { DraftOf, Snapshot } from '@sempods/client-sdk/edit';
 import { Badge, Checkbox, InlineTextEdit } from '@sempods/app-ui';
 import { taskFields } from './task-dialog';
 
@@ -1239,6 +1239,17 @@ const texts = {
   },
 };
 
+/**
+ * A rename in progress, open or parked by a dismissal: its text and the
+ * list snapshot it started from, the version it writes over.
+ */
+interface Draft {
+  readonly text: string;
+  readonly base: Snapshot<Item>;
+  /** A change on the Pod was checked and acknowledged: rebase on the next read. */
+  readonly rebase?: boolean;
+}
+
 /** A list whose item names are renamed in their rows. */
 export function ShoppingList(props: {
   /** The app's own address of an item's screen. */
@@ -1248,65 +1259,82 @@ export function ShoppingList(props: {
   const mutate = useFieldUpdate(taskFields);
   const { write } = useWorkflowAccess();
   const t = useMessages(texts);
-  // The item being renamed, and the drafts by IRI: the open one and those
-  // a dismissal parked, until saved or cancelled, each with the name it
-  // started from.
+  // The item being renamed, and the drafts by IRI until saved or cancelled.
   const [open, setOpen] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<
-    ReadonlyMap<string, { readonly text: string; readonly from: string }>
-  >(new Map());
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, Draft>>(new Map());
   const triggers = useRef(new Map<string, HTMLButtonElement>());
   const items = list.data?.items ?? [];
-  const names = new Map(
-    items.map((item) => [item.iri, mutate.for(item).data.title]),
-  );
+  const shown = new Map(items.map((item) => [item.iri, item]));
+  // Gone only when a complete read lists it neither as an item nor as an
+  // entry it skipped (for example after its name was cleared elsewhere).
+  const skipped = new Set(list.data?.skippedRecords.map((r) => r.iri));
+  const complete =
+    list.data && list.data.skippedRecords.length === list.data.skipped;
+  const gone = (iri: string) =>
+    Boolean(complete && !shown.has(iri) && !skipped.has(iri));
   // A changed name is unsaved work: changing the list or Pod asks first,
-  // also while the list cannot be read. Only a list read that no longer
-  // shows an item leaves its draft nothing to rename.
+  // also while the list cannot be read.
   useDraftGuard(
     [...drafts].some(
-      ([iri, { text, from }]) =>
-        (!list.data || names.has(iri)) &&
-        text.trim() !== (names.get(iri) ?? from),
+      ([iri, draft]) =>
+        !gone(iri) && draft.text.trim() !== draft.base.data.title,
     ),
     () => {
       setDrafts(new Map());
       setOpen(null);
     },
   );
-  const setDraft = (iri: string, draft: string | null) =>
+  const update = (
+    iri: string,
+    change: (draft?: Draft) => Draft | null | undefined,
+  ) =>
     setDrafts((all) => {
       const next = new Map(all);
-      const from = all.get(iri)?.from ?? names.get(iri) ?? '';
-      if (draft === null) next.delete(iri);
-      else next.set(iri, { text: draft, from });
+      const draft = change(all.get(iri));
+      if (draft) next.set(iri, draft);
+      else next.delete(iri);
       return next;
     });
+  // After an acknowledged change on the Pod, the next read is the base.
+  useEffect(() => {
+    for (const [iri, draft] of drafts) {
+      const now = shown.get(iri);
+      if (draft.rebase && now && now !== draft.base)
+        update(iri, (d) => d && { text: d.text, base: now });
+    }
+  });
   return (
     <>
       <ul aria-label={t.list}>
         {items.map((item) => {
-          const row = mutate.for(item);
           const { iri } = item;
+          const draft = drafts.get(iri);
           return (
             <ItemRow
               key={iri}
-              row={row}
+              row={mutate.for(item)}
+              base={draft && mutate.for(draft.base)}
               href={props.href(iri)}
               writable={write}
-              draft={drafts.get(iri)?.text}
+              draft={draft?.text}
               editing={open === iri}
               trigger={(button) => {
                 if (button) triggers.current.set(iri, button);
                 else triggers.current.delete(iri);
               }}
               onOpen={() => {
-                setDraft(iri, drafts.get(iri)?.text ?? row.data.title);
+                update(iri, (d) => d ?? { text: item.data.title, base: item });
                 setOpen(iri);
               }}
-              onDraft={(draft) => setDraft(iri, draft)}
+              onDraft={(text) => update(iri, (d) => d && { ...d, text })}
+              onAcknowledged={() =>
+                update(iri, (d) => d && { ...d, rebase: true })
+              }
               onClose={(park) => {
-                if (!park) setDraft(iri, null);
+                // Only a changed name is parked.
+                update(iri, (d) =>
+                  park && d && d.text.trim() !== d.base.data.title ? d : null,
+                );
                 // Another item may be open by now, after a slow save.
                 setOpen((current) => (current === iri ? null : current));
               }}
@@ -1321,7 +1349,10 @@ export function ShoppingList(props: {
 }
 
 function ItemRow(props: {
+  /** The item as the list shows it now. */
   readonly row: FieldUpdateRow<Item>;
+  /** The item as the rename started from it: what Save writes over. */
+  readonly base: FieldUpdateRow<Item> | undefined;
   readonly href: string;
   /** Whether the list may be written; without it, names are plain text. */
   readonly writable: boolean;
@@ -1331,28 +1362,42 @@ function ItemRow(props: {
   readonly trigger: (button: HTMLButtonElement | null) => void;
   readonly onOpen: () => void;
   readonly onDraft: (draft: string) => void;
-  /** Ends the rename; `park` keeps its draft for the next one. */
+  /** The person checked and acknowledged the Pod's current version. */
+  readonly onAcknowledged: () => void;
+  /** Ends the rename; `park` keeps a changed draft for the next one. */
   readonly onClose: (park: boolean) => void;
   readonly returnFocus: () => void;
 }) {
   const t = useMessages(texts);
   const { row, draft } = props;
+  const writer = props.base ?? row;
   const item = row.data;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
-  const parked = draft !== undefined && draft.trim() !== item.title && !saving;
+  const parked = draft !== undefined && !props.editing && !saving;
   const save = async () => {
     const title = (draft ?? '').trim();
     if (!title) return setError(t.required);
-    if (title === item.title) return props.onClose(false);
+    if (title === writer.data.title) return props.onClose(false);
     setSaving(true);
-    const outcome = await row.update({ title });
+    // From the snapshot the rename started from: a change on the Pod since
+    // then is reported as changed-on-pod, never written over.
+    const outcome = await writer.update({ title });
     setSaving(false);
     // Saved: the row shows the new name. Otherwise the draft stays with the
     // row's notice; nothing is sent again.
     if (outcome.kind === 'saved') props.onClose(false);
   };
-  const notice = <UpdateNotice {...row.notice} quiet />;
+  const notice = (
+    <UpdateNotice
+      {...row.notice}
+      onAcknowledge={() => {
+        row.notice.onAcknowledge();
+        props.onAcknowledged();
+      }}
+      quiet
+    />
+  );
   return (
     <li className="flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 border-b py-1 *:data-[sempods-ui=notice]:basis-full">
       <Checkbox
@@ -1381,7 +1426,7 @@ function ItemRow(props: {
           }}
           returnFocus={props.returnFocus}
           pending={saving}
-          readOnly={!row.canMutate}
+          readOnly={!writer.canMutate}
           error={error}
         >
           {notice}

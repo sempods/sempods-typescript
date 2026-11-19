@@ -7308,6 +7308,95 @@ async function rename({ browser, origin, engine }) {
         return { pass: unread && asked, unread, asked };
       }),
     );
+    /** Ticks a row: a press beside an open field, and a write that makes the list read again. */
+    const tick = (name) =>
+      page
+        .getByRole('checkbox', { name: `Bought: ${name}` })
+        .locator('xpath=ancestor::label[1]')
+        .click();
+    results.push(
+      await attemptOn(errors, 'rename-keeps-its-snapshot', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        // Another client renames it; the list reads it again meanwhile.
+        await renameOnPod(4, 'Return the library books today');
+        await tick(NEWSLETTER);
+        await trigger(page, 'Return the library books today').waitFor({
+          timeout: 15000,
+        });
+        // The parked rename still writes over the version it started from.
+        await trigger(page, 'Return the library books today').click();
+        const draft = await input(page).inputValue();
+        await page.keyboard.press('Enter');
+        const told = await shown(
+          field(page).getByText(
+            'The pod has changed. Compare before continuing.',
+          ),
+          15000,
+        );
+        const stored = await title(4);
+        return {
+          pass:
+            draft === 'Return the books' &&
+            told &&
+            stored === 'Return the library books today',
+          draft,
+          told,
+          stored,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'skipped-row-keeps-the-guard', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        // Its name is cleared elsewhere: the list skips it, it still exists.
+        await renameOnPod(4, '');
+        await tick(NEWSLETTER);
+        const skipped = await gone(trigger(page, BOOKS), 15000);
+        await page.getByRole('button', { name: 'Switch list' }).click();
+        const asked = await shown(page.getByRole('alertdialog'), 3000);
+        if (asked) await answerLeave(page, 'keep');
+        // Switched without asking: back to the first list for the next checks.
+        else {
+          await page.getByRole('button', { name: 'Switch list' }).click();
+          await trigger(page, NEWSLETTER).waitFor();
+        }
+        return { pass: skipped && asked, skipped, asked };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'untouched-dismissal-parks-nothing', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await input(page).waitFor();
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        await renameOnPod(4, 'Return the library books today');
+        await tick(NEWSLETTER);
+        await trigger(page, 'Return the library books today').waitFor({
+          timeout: 15000,
+        });
+        const label = await trigger(
+          page,
+          'Return the library books today',
+        ).getAttribute('aria-label');
+        await trigger(page, 'Return the library books today').click();
+        const value = await input(page).inputValue();
+        await page.keyboard.press('Escape');
+        return {
+          pass:
+            label === 'Rename: Return the library books today' &&
+            value === 'Return the library books today',
+          label,
+          value,
+        };
+      }),
+    );
     results.push(
       await attemptOn(errors, 'empty-name-is-invalid', async () => {
         await open(page);
