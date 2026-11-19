@@ -43,7 +43,6 @@ const styles = `
 }
 :where([data-sempods-ui="access"]) { background:var(--sp-bg); }
 ${surfaces} :where(.sp-sdk-actions) { display:flex; flex-wrap:wrap; gap:8px; }
-${surfaces} :where(.sp-sdk-end) { margin-inline-start:auto; }
 ${surfaces}, ${surfaces} * { box-sizing:border-box; }
 ${surfaces} :where(button,input,select,textarea) { font:inherit; max-width:100%; min-width:0; min-height:44px; }
 /* Two action roles with three parts each: surface, text, border. Borders keep
@@ -81,7 +80,11 @@ ${surfaces} :where(summary) { min-height:44px; padding-block:10px; cursor:pointe
 :where([data-sempods-ui="notice"]) { margin-block:12px; }
 :where([data-sempods-ui="notice"][role=alert]) { border-inline-start:2px solid var(--sp-accent); padding-inline-start:12px; }
 :where([data-sempods-ui="editor"]) { margin-block:16px; }
-:where([data-sempods-ui="editor"]) :where(.sp-sdk-end) { color:var(--sp-muted); }
+/* The editor's row ends with Cancel and Save, as a confirmation does; the independent
+   Remove leads, set apart by the free space and at least 24px. Wrapped rows stay at the end. */
+:where([data-sempods-ui="editor"]) > :where(.sp-sdk-actions) { justify-content:flex-end; }
+:where([data-sempods-ui="editor"]) > :where(.sp-sdk-actions) > :where(.sp-sdk-apart) { color:var(--sp-muted); margin-inline-end:auto; }
+:where([data-sempods-ui="editor"]) > :where(.sp-sdk-actions) > :where(.sp-sdk-apart + *) { margin-inline-start:16px; }
 :where([data-sempods-ui="editor"][data-inline]) { margin-block:4px; padding:8px; border-radius:calc(var(--sp-radius) * 1.5); background:color-mix(in srgb,var(--sp-accent) 5%,transparent); }
 :where([data-sempods-ui="editor"][data-inline]) :where(input:not([type=checkbox]):not([type=radio]),select,textarea) { margin-block:0 8px; }
 :where([data-sempods-ui="editor"][data-presentation="plain"]) { margin-block:0; }

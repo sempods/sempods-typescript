@@ -5907,6 +5907,7 @@ export const suites = {
   viewTabs,
   ghost,
   notices,
+  editorFooter,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */
@@ -6835,6 +6836,180 @@ async function notices({ browser, origin, engine }) {
       );
   } finally {
     await page.emulateMedia({ colorScheme: null, reducedMotion: null });
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
+/**
+ * The SDK editor's actions in a routed `ScreenDialog` (the README's task
+ * dialog) and in the compact `Dialog` (the README's quick edit), in German
+ * (#401): with long labels, one an unbroken word (`labels=long`), at 1280,
+ * 375 and 320px, and with the default labels at 1280 and 320px, where
+ * Delete shares its row with the next action at 1280px. For a task and for a missing one, whose blocked editor
+ * offers Check again with Delete and Save disabled: Delete first, then Check
+ * again when blocked, Cancel and Save last in the DOM; Delete at the row's
+ * start, Save at its end, at least 24px between Delete and an action beside
+ * it; actions in reading order, 44px targets with room for their focus rings
+ * inside the dialog, every label line inside its button and no element
+ * between the editor and the dialog wider than its box.
+ */
+async function editorFooter({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser);
+  const results = [];
+  const sets = {
+    long: {
+      remove: 'Diese Aufgabe endgültig aus dem Pod löschen',
+      refresh: 'Noch einmal beim Pod nachsehen',
+      cancel: 'Abbrechen und Bearbeitung schließen',
+      save: 'Aufgabenänderungsspeicherungsbestätigung',
+    },
+    default: {
+      remove: 'Löschen',
+      refresh: 'Erneut prüfen',
+      cancel: 'Abbrechen',
+      save: 'Speichern',
+    },
+  };
+  const order = {
+    ready: ['remove', 'cancel', 'save'],
+    blocked: ['remove', 'refresh', 'cancel', 'save'],
+  };
+  const disabled = {
+    ready: [false, false, true],
+    blocked: [true, false, false, true],
+  };
+  const layouts = [
+    ['long', 1280],
+    ['long', 375],
+    ['long', 320],
+    ['default', 1280],
+    ['default', 320],
+  ];
+  const { at } = plumberTask(origin);
+  const missing = `/tasks/${Buffer.from(origin + '/alice/tasks/missing', 'utf8').toString('base64url')}`;
+  try {
+    await signIn(page, origin);
+    for (const kind of ['screen', 'compact'])
+      results.push(
+        await attempt(`editor-footer-${kind}`, async () => {
+          const dialog = page.getByRole('dialog', {
+            name: kind === 'screen' ? 'Details' : 'Umbenennen',
+          });
+          const cases = [];
+          try {
+            for (const state of ['ready', 'blocked'])
+              for (const [set, width] of layouts) {
+                const labels = sets[set];
+                await page.setViewportSize({ width, height: 800 });
+                await page.goto(
+                  origin +
+                    (state === 'ready' ? at : missing) +
+                    `?lang=de${set === 'long' ? '&labels=long' : ''}${kind === 'compact' ? '&dialog=compact' : ''}`,
+                );
+                await dialog
+                  .getByRole('button', {
+                    name: state === 'ready' ? labels.save : labels.refresh,
+                    exact: true,
+                  })
+                  .waitFor();
+                await settle(page);
+                const m = await dialog.evaluate((host) => {
+                  const editor = host.querySelector(
+                    '[data-sempods-ui="editor"]',
+                  );
+                  const row = editor.querySelector(':scope > .sp-sdk-actions');
+                  const frame = host.getBoundingClientRect();
+                  const box = row.getBoundingClientRect();
+                  const within = (r, f, pad = 0) =>
+                    r.left - pad >= f.left - 0.5 &&
+                    r.right + pad <= f.right + 0.5 &&
+                    r.top - pad >= f.top - 0.5 &&
+                    r.bottom + pad <= f.bottom + 0.5;
+                  const buttons = [...row.querySelectorAll(':scope > button')];
+                  const rects = buttons.map((b) => b.getBoundingClientRect());
+                  const spilled = [];
+                  for (const button of buttons) {
+                    const range = document.createRange();
+                    range.selectNodeContents(button);
+                    const own = button.getBoundingClientRect();
+                    for (const line of range.getClientRects())
+                      if (!within(line, own))
+                        spilled.push(button.textContent.slice(0, 24));
+                  }
+                  // Every box from the editor up to the dialog holds its content.
+                  const wider = [];
+                  for (
+                    let el = editor;
+                    el && el !== host.parentElement;
+                    el = el.parentElement
+                  )
+                    if (el.scrollWidth > el.clientWidth + 0.5)
+                      wider.push(el.tagName + '.' + el.className.slice(0, 40));
+                  const [remove] = rects;
+                  const save = rects.at(-1);
+                  const sameRow = (a, b) => Math.abs(a.top - b.top) < 1;
+                  const beside = rects[1] && sameRow(remove, rects[1]);
+                  return {
+                    labels: buttons.map((b) => b.textContent),
+                    disabled: buttons.map((b) => b.disabled),
+                    targets: rects.map((r) => [
+                      Math.round(r.width),
+                      Math.round(r.height),
+                    ]),
+                    sized: rects.every((r) => r.width >= 44 && r.height >= 44),
+                    // The SDK's focus outline: 2px, 3px outside the button.
+                    rings: rects.every((r) => within(r, frame, 5)),
+                    rowInside: within(box, frame),
+                    removeAtStart: Math.abs(remove.left - box.left) < 0.5,
+                    saveAtEnd: Math.abs(save.right - box.right) < 0.5,
+                    beside,
+                    apart: !beside || rects[1].left - remove.right >= 23.5,
+                    inOrder: rects.every(
+                      (r, i) =>
+                        i === 0 ||
+                        (sameRow(rects[i - 1], r)
+                          ? rects[i - 1].right <= r.left
+                          : rects[i - 1].bottom <= r.top + 0.5),
+                    ),
+                    spilled,
+                    wider,
+                    noSideScroll:
+                      document.documentElement.scrollWidth <= innerWidth,
+                  };
+                });
+                cases.push({ state, set, width, ...m });
+              }
+          } finally {
+            await page.setViewportSize({ width: 1280, height: 800 });
+          }
+          return {
+            pass:
+              cases.length === 10 &&
+              cases.every(
+                (c) =>
+                  c.labels.join('|') ===
+                    order[c.state].map((key) => sets[c.set][key]).join('|') &&
+                  c.disabled.join() === disabled[c.state].join() &&
+                  // Default labels beside Delete on the desktop: set apart.
+                  (c.set === 'long' || c.width !== 1280 || c.beside) &&
+                  c.sized &&
+                  c.rings &&
+                  c.rowInside &&
+                  c.removeAtStart &&
+                  c.saveAtEnd &&
+                  c.apart &&
+                  c.inOrder &&
+                  c.spilled.length === 0 &&
+                  c.wider.length === 0 &&
+                  c.noSideScroll,
+              ),
+            cases,
+          };
+        }),
+      );
+  } finally {
     results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
     await context.close();
   }
