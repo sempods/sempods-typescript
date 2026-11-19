@@ -296,7 +296,8 @@ function TimedPrompt({
  * dismisses them; action prompts stay until dismissed or resolved. Each
  * prompt gets `focusTarget` (see `AccessPrompt`). Shows nothing while a
  * blocking prompt holds the gate or the app still starts, and nothing while
- * a `Notices` host is mounted, which shows them instead.
+ * a `Notices` host is mounted that shows them instead (unless it is given
+ * `accessPrompts={false}`).
  */
 export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const { blocking, prompts } = useAccessPrompts();
@@ -307,7 +308,8 @@ export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const starting = useAppFacts((s) => s.starting);
   // A mounted `Notices` host shows them in the shared stack instead.
   const host = useNoticeHost();
-  const shown = blocking || !first || starting || host ? [] : prompts;
+  const taken = Boolean(host?.accessPrompts);
+  const shown = blocking || !first || starting || taken ? [] : prompts;
   return (
     <div
       data-sempods-ui="prompts"

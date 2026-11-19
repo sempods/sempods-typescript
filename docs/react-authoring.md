@@ -1465,7 +1465,10 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
 `<Notices />` is the shared notification host for the app's own notices and
 the access prompts. Render it once beneath `SempodsProvider`, beside
 `AppAccess`: while it is mounted, `AppAccess` shows no prompt stack of its own,
-and one stack holds both. Without it, `AppAccess` behaves as before.
+and one stack holds both. Without it, `AppAccess` behaves as before. An app
+that presents the access prompts itself (`AccessPrompt`, `useAccessPrompts`)
+or keeps `AppAccess`'s stack passes `accessPrompts={false}`, so no prompt
+shows twice.
 
 ```tsx
 import { Notices, useNotice, useNotices } from '@sempods/app-sdk/react';
@@ -1526,8 +1529,10 @@ export function Shell() {
   a visible notice only restarts its timer.
 - **One action**, `action: { label, run }`, runs through the host's guards:
   disabled while it runs and while a guarded change or its leave question is
-  open; a rejection shows its localized error in the notice. A shown notice
-  retires once its action resolves; a held one stays its holder's.
+  open, also when the notice remounts or moves into the gate; a rejection
+  shows its localized error in the notice. A shown notice retires once its
+  action resolves, unless the action showed it again; a held one stays its
+  holder's.
 - **The host** shows at most `limit` notices (3 by default); over the limit,
   those waiting for the person go first, so a burst of brief information
   never pushes a pending action out of reach. It is fixed at the bottom of the
@@ -1541,8 +1546,10 @@ export function Shell() {
   and `--sempods-danger` colour warnings and errors.
 - **Modals:** while a modal dialog covers the page (the app's own or an SDK
   one), the stack waits and covers nothing; its notices show and are announced
-  once it closes. Before sign-in, app notices show inside the SDK's sign-in
-  gate, which keeps room for them at its end.
+  once it closes, an error too, so keep an error that concerns the dialog
+  inside it. Beside `AppAccess` the stack also waits while the app starts.
+  Before sign-in, app notices show inside the SDK's sign-in gate, which keeps
+  room for them at its end.
 - **Another renderer:** `components={{ Notice }}` receives a `NoticeView`
   (`source`, `severity`, `title`, `text`, `actions`, `dismiss`, …) for an
   app notice or an access prompt alike. The host still owns position,

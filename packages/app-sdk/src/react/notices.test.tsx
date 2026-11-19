@@ -90,20 +90,30 @@ function App({
 
 /** Captures the 6 second notice timers; others run as usual. */
 function briefTimers() {
-  const timers: { fn: () => void; ms: number }[] = [];
+  const timers: { fn: () => void; ms: number; id: unknown; live: boolean }[] =
+    [];
   const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
   vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
     fn: () => void,
     ms?: number,
   ) => {
     if (ms === 6000 || ms === 1500) {
-      timers.push({ fn, ms });
-      return realSet(() => {}, 0);
+      const id = realSet(() => {}, 0);
+      timers.push({ fn, ms, id, live: true });
+      return id;
     }
     return realSet(fn, ms);
   }) as typeof setTimeout);
+  vi.spyOn(globalThis, 'clearTimeout').mockImplementation(((id: unknown) => {
+    for (const timer of timers) if (timer.id === id) timer.live = false;
+    realClear(id as ReturnType<typeof setTimeout>);
+  }) as typeof clearTimeout);
   return timers;
 }
+/** The brief timers still running. */
+const running = (timers: ReturnType<typeof briefTimers>) =>
+  timers.filter((timer) => timer.live);
 
 it('shows, updates, coalesces and dismisses a notice by key, announcing each event once', async () => {
   const runtime = await signedIn();
@@ -185,16 +195,25 @@ it('pauses a brief notice while hovered or focused, restarts it on a repeat, and
   act(() => actions.show({ key: 'info', text: 'Saved.' }));
   await waitFor(() => expect(timers).toHaveLength(1));
   const item = items()[0]!;
+  // Hovered, the timer stops; leaving starts a new one.
   fireEvent.pointerEnter(item);
+  expect(running(timers)).toEqual([]);
   fireEvent.pointerLeave(item);
-  await waitFor(() => expect(timers).toHaveLength(2));
+  await waitFor(() => expect(running(timers)).toHaveLength(1));
+  // A repeat replaces the running timer.
+  const before = running(timers)[0];
   act(() => actions.show({ key: 'info', text: 'Saved.' }));
-  await waitFor(() => expect(timers).toHaveLength(3));
-  // The earlier timers were cleared; only the latest one hides it.
+  await waitFor(() => expect(running(timers)).toHaveLength(1));
+  expect(running(timers)[0]).not.toBe(before);
+  // Focused, the timer stops too, and none starts while it stays.
   const ok = within(item).getByRole('button', { name: 'OK' });
   const back = screen.getByRole('button', { name: 'Back' });
   act(() => back.focus());
   act(() => ok.focus());
+  expect(running(timers)).toEqual([]);
+  const count = timers.length;
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  expect(timers).toHaveLength(count);
   fireEvent.keyDown(ok, { key: 'Escape' });
   expect(items()).toEqual([]);
   // The focus returns where it came from; nothing took it on appearing.
@@ -321,7 +340,7 @@ it('updates a held notice in place without a new announcement when its language 
   expect(announced()).toEqual(['A new version is ready.']);
 });
 
-it('shows an app notice inside the sign-in gate before sign-in, reserving room, and announces it once', async () => {
+it('shows an app notice inside the sign-in gate before sign-in and announces it once there', async () => {
   const f = fixture();
   cleanups.push(() => f.runtime.dispose());
   function Update() {
@@ -355,7 +374,9 @@ it('shows an app notice inside the sign-in gate before sign-in, reserving room, 
   });
   // The stack outside waits below the modal gate.
   expect(items()).toEqual([]);
-  expect(announced(inGate)).toEqual(['A new version is ready.']);
+  await waitFor(() =>
+    expect(announced(inGate)).toEqual(['A new version is ready.']),
+  );
   expect(announced()).toEqual([]);
   // The gate's own sign-in stays the focus; the notice took nothing.
   expect(inGate.contains(document.activeElement)).toBe(false);
@@ -382,7 +403,8 @@ it('waits while an app modal covers the page and shows the notice once it closes
   expect(announced()).toEqual([]);
   await act(async () => screen.getByRole('button', { name: 'Close' }).click());
   await waitFor(() => expect(texts()).toEqual(['Saved.OK']));
-  expect(announced()).toEqual(['Saved.']);
+  // Announced in the commit after it shows, once.
+  await waitFor(() => expect(announced()).toEqual(['Saved.']));
 });
 
 it('places the stack above an avoided composer', async () => {
@@ -510,7 +532,7 @@ it('takes over the access prompts of AppAccess once mounted, showing each once b
       .getAllByRole('button')
       .map((b) => b.textContent),
   ).toEqual(['Sign in', 'Forget', 'OK']);
-  expect(announced()).toHaveLength(1);
+  await waitFor(() => expect(announced()).toHaveLength(1));
   expect(announced()[0]).toContain('pod.example/alice');
   // An app notice joins the same stack after it.
   act(() => actions.show({ key: 'info', text: 'Saved.' }));
@@ -519,4 +541,111 @@ it('takes over the access prompts of AppAccess once mounted, showing each once b
     within(prompt).getByRole('button', { name: 'OK' }).click(),
   );
   expect(items().map((item) => item.dataset.source)).toEqual(['app']);
+});
+
+it('keeps a notice its own action showed again, and settles only the event it ran for', async () => {
+  const runtime = await signedIn();
+  render(<App runtime={runtime} />);
+  act(() =>
+    actions.show({
+      key: 'copy',
+      text: 'Three items not copied.',
+      severity: 'error',
+      action: {
+        label: 'Copy again',
+        run: () =>
+          actions.show({
+            key: 'copy',
+            text: 'Two items still not copied.',
+            severity: 'error',
+          }),
+      },
+    }),
+  );
+  await act(async () =>
+    screen.getByRole('button', { name: 'Copy again' }).click(),
+  );
+  expect(texts()).toEqual(['Two items still not copied.OK']);
+});
+
+it('runs an action once also when its notice remounts while it runs, and guards a renderer that ignores disabled', async () => {
+  const runtime = await signedIn();
+  let release!: () => void;
+  const run = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  function Eager({ notice }: NoticeProps) {
+    // Presses twice and never looks at `disabled`.
+    return notice.actions.map((action) => (
+      <button
+        key={action.label}
+        onClick={() => {
+          action.run();
+          action.run();
+        }}
+      >
+        {action.label}
+      </button>
+    ));
+  }
+  function Modal({ open }: { readonly open: boolean }) {
+    return open ? <div role="dialog" aria-modal="true" /> : null;
+  }
+  const ui = (open: boolean) => (
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: Eager }} />
+      <Publisher />
+      <Modal open={open} />
+    </SempodsProvider>
+  );
+  const view = render(ui(false));
+  act(() =>
+    actions.show({
+      key: 'sync',
+      text: 'Not synchronised.',
+      severity: 'error',
+      action: { label: 'Synchronise', run },
+    }),
+  );
+  await act(async () =>
+    screen.getByRole('button', { name: 'Synchronise' }).click(),
+  );
+  expect(run).toHaveBeenCalledTimes(1);
+  // A modal covers it and goes: the notice remounts while its action runs.
+  view.rerender(ui(true));
+  await waitFor(() => expect(items()).toEqual([]));
+  view.rerender(ui(false));
+  await waitFor(() => expect(items()).toHaveLength(1));
+  await act(async () =>
+    screen.getByRole('button', { name: 'Synchronise' }).click(),
+  );
+  expect(run).toHaveBeenCalledTimes(1);
+  await act(async () => release());
+  expect(items()).toEqual([]);
+});
+
+it('leaves the access prompts to AppAccess with accessPrompts={false}', async () => {
+  const { runtime } = await endedBeside();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" />
+      <Notices accessPrompts={false} />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  const stack = () =>
+    document.querySelector<HTMLElement>('[data-sempods-ui="prompts"]')!;
+  await waitFor(() =>
+    expect(stack().querySelectorAll('[data-sempods-ui="prompt"]')).toHaveLength(
+      1,
+    ),
+  );
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  expect(items().map((item) => item.dataset.source)).toEqual(['app']);
+  expect(document.querySelectorAll('[data-sempods-ui="prompt"]')).toHaveLength(
+    1,
+  );
 });

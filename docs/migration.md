@@ -357,7 +357,9 @@ once beneath `SempodsProvider` beside `AppAccess`; the access prompts then
 move from `AppAccess`'s stack into it. Their buttons and texts stay; the
 visible prompt has no `status` or `alert` role, because the host announces
 each one once through its own live region, so a test that finds a prompt by
-that role finds it by `[data-sempods-ui="prompt"]` instead. An app that copied
+that role finds it by `[data-sempods-ui="prompt"]` instead. An app that
+presents the prompts itself with `AccessPrompt` passes `accessPrompts={false}`.
+An app that copied
 the PWA recipe's `NewVersionNotice` copies it again: it now publishes through
 `useNotice` and renders nothing itself. Replace other app-wide paragraphs, such
 as a completed batch, with `useNotice` or `useNotices`, and keep recovery for

@@ -132,6 +132,12 @@ export interface NoticesProps {
   /** At most this many notices show at once; the rest wait. Default 3. */
   readonly limit?: number | undefined;
   /**
+   * `false` leaves the access prompts out of this stack, for an app that
+   * shows them itself (`AccessPrompt`, `useAccessPrompts`) or keeps the
+   * stack of `AppAccess`. Default `true`: this stack shows them instead.
+   */
+  readonly accessPrompts?: boolean | undefined;
+  /**
    * `Notice` replaces how one notice renders. The host still owns its
    * position, timers, announcement, keyboard dismissal and action guards.
    */
@@ -328,16 +334,18 @@ function usePageCover(own: RefObject<HTMLElement | null>) {
         'aria-hidden',
         'aria-modal',
         'data-sempods-notices-avoid',
-        'style',
-        'class',
       ],
     });
     view.addEventListener('resize', schedule);
+    view.addEventListener('scroll', schedule, { passive: true });
     view.visualViewport?.addEventListener('resize', schedule);
+    view.visualViewport?.addEventListener('scroll', schedule);
     return () => {
       observer.disconnect();
       view.removeEventListener('resize', schedule);
+      view.removeEventListener('scroll', schedule);
       view.visualViewport?.removeEventListener('resize', schedule);
+      view.visualViewport?.removeEventListener('scroll', schedule);
       if (frame) view.cancelAnimationFrame(frame);
     };
   }, [own]);
@@ -358,23 +366,29 @@ function isModal(element: Element) {
  * (`useNotice`, `useNotices`) and the access prompts of `AccessPrompts`,
  * fixed at the bottom of the viewport, outside the document flow. Render it
  * once beneath `SempodsProvider`; while it is mounted, `AppAccess` shows no
- * prompt stack of its own. Without it, `AppAccess` is unchanged.
+ * prompt stack of its own, unless `accessPrompts={false}` leaves the prompts
+ * there. Without it, `AppAccess` is unchanged.
  *
  * Each event is announced once through its own live region; nothing takes
  * the focus. Brief notices hide after their duration unless hovered or
  * focused, and Escape dismisses the focused one. The stack waits while a
- * modal covers the page; app notices show inside the sign-in gate instead.
+ * modal covers the page and, beside `AppAccess`, while the app starts; app
+ * notices show inside the sign-in gate instead.
  * It stays above elements marked `data-sempods-notices-avoid`, such as a
  * composer at the bottom, and above the safe area. A CSP must permit its
  * styles.
  */
 export function Notices(props: NoticesProps) {
   const store = useNoticeStore();
-  const latest = useCommitted(props);
   const [token] = useState(() => Symbol('notices'));
+  const limit = props.limit ?? defaultLimit;
+  const Notice = props.components?.Notice;
+  const accessPrompts = props.accessPrompts ?? true;
+  const { focusTarget } = props;
+  useEffect(() => () => store.unregister(token), [store, token]);
   useEffect(
-    () => store.register({ token, props: latest }),
-    [store, token, latest],
+    () => store.register({ token, limit, Notice, accessPrompts, focusTarget }),
+    [store, token, limit, Notice, accessPrompts, focusTarget],
   );
   // One stack per provider, also with several hosts.
   const first = useFirst('notices');
@@ -383,7 +397,7 @@ export function Notices(props: NoticesProps) {
     store.getSnapshot,
     store.getSnapshot,
   );
-  const { blocking, pending, prompts } = useAccessPrompts();
+  const { blocking, prompts } = useAccessPrompts();
   const starting = useAppFacts((s) => s.starting);
   const gateMounted = useMounted('gate');
   const { direction } = useSdkLocale();
@@ -393,7 +407,7 @@ export function Notices(props: NoticesProps) {
   const live = useRef(new Set<string>());
   const entries = useMemo(() => {
     const access: Entry[] =
-      blocking || starting
+      blocking || starting || !accessPrompts
         ? []
         : prompts.map((prompt) => ({
             id: prompt.id,
@@ -404,20 +418,17 @@ export function Notices(props: NoticesProps) {
     return [...access, ...appEntries(records)].sort(
       (a, b) => a.order - b.order,
     );
-  }, [blocking, starting, prompts, records, store]);
+  }, [blocking, starting, accessPrompts, prompts, records, store]);
   // Retired access prompts free their position and announcement.
   useEffect(() => {
     const ids = new Set(prompts.map((prompt) => prompt.id));
     for (const id of live.current) if (!ids.has(id)) store.forgetPrompt(id);
     live.current = ids;
   }, [prompts, store]);
-  // The SDK gate covers the page from its first render on; until access
-  // settles it may still open, and its notices then show inside it.
-  const gated = (Boolean(blocking) || starting || pending) && gateMounted;
-  const shown =
-    !first || cover.modal || gated
-      ? []
-      : visible(entries, props.limit ?? defaultLimit);
+  // The SDK gate covers the page from its first render on; during startup
+  // it may still open, and its notices then show inside it.
+  const gated = (Boolean(blocking) || starting) && gateMounted;
+  const shown = !first || cover.modal || gated ? [] : visible(entries, limit);
   return (
     <div
       ref={root}
@@ -440,8 +451,8 @@ export function Notices(props: NoticesProps) {
             <NoticeItem
               key={entry.id}
               entry={entry}
-              focusTarget={props.focusTarget}
-              Notice={props.components?.Notice ?? DefaultNotice}
+              focusTarget={focusTarget}
+              Notice={Notice ?? DefaultNotice}
             />
           ))}
         </ul>
@@ -466,10 +477,7 @@ export function GateNotices() {
   const { direction } = useSdkLocale();
   const { announce, regions } = useAnnouncer();
   const root = useRef<HTMLDivElement>(null);
-  const props = host?.props.current;
-  const shown = host
-    ? visible(appEntries(records), props?.limit ?? defaultLimit)
-    : [];
+  const shown = host ? visible(appEntries(records), host.limit) : [];
   // Room at the gate's end, so the stack never covers its last control.
   useLayoutEffect(() => {
     const element = root.current;
@@ -509,8 +517,10 @@ export function GateNotices() {
             <NoticeItem
               key={entry.id}
               entry={entry}
-              focusTarget={props?.focusTarget}
-              Notice={props?.components?.Notice ?? DefaultNotice}
+              // The app's focus target is inert behind the gate: focus
+              // returns to where it came from inside the gate.
+              focusTarget={undefined}
+              Notice={host.Notice ?? DefaultNotice}
             />
           ))}
         </ul>
@@ -617,21 +627,26 @@ function useNoticeView(entry: Entry): NoticeView {
         a.activeId === b.activeId,
     );
   const { messages: m, error } = useSdkLocale();
-  const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ readonly cause: unknown } | null>(
     null,
   );
   const prompt = entry.prompt;
   // Hooks run for both kinds; only an access prompt has a text to derive.
   const promptText = usePromptText(prompt ?? placeholder);
+  // Running is kept per notice in the store, so a remount (after a modal,
+  // in another host, after sign-in) never runs it twice at once.
+  const busy = useSyncExternalStore(
+    store.subscribe,
+    () => store.isRunning(entry.id),
+    () => store.isRunning(entry.id),
+  );
   const disabled = busy || changing || confirmingLeave;
   const guarded = (run: () => Promise<unknown>) => () => {
-    if (disabled) return;
-    setBusy(true);
+    if (disabled || !store.begin(entry.id)) return;
     setFailure(null);
     void run()
       .catch((cause: unknown) => setFailure({ cause }))
-      .finally(() => setBusy(false));
+      .finally(() => store.end(entry.id));
   };
   const dismissLabel = m.controls.dismiss ?? m.controls.close ?? 'OK';
   const failed = failure ? error(failure.cause) : null;
@@ -698,10 +713,12 @@ function useNoticeView(entry: Entry): NoticeView {
             disabled,
             run: guarded(async () => {
               const run = store.run(record.key);
-              if (!run) return;
+              const event = store.eventOf(record.key);
+              if (!run || event === undefined) return;
               await run();
-              // A shown notice has done its job; a held one is its holder's.
-              store.settle(record.key);
+              // A shown notice has done its job, unless the action showed it
+              // again; a held one is its holder's.
+              store.settle(record.key, event);
             }),
           },
         ]

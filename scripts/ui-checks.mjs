@@ -6725,10 +6725,9 @@ async function notices({ browser, origin, engine }) {
         await toast.getByRole('button', { name: 'OK' }).focus();
         await page.keyboard.press('Escape');
         const dismissed = await gone(toast);
-        const back = await focusUntil(page, /New item/, async () =>
-          page.evaluate(
-            () => document.activeElement?.getAttribute('aria-label') ?? '',
-          ),
+        // To the host's focusTarget, the list's Edit button.
+        const back = await focusUntil(page, /^Edit list$/, async () =>
+          page.evaluate(() => document.activeElement?.textContent ?? ''),
         );
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await call('show', { key: 'saved', text: 'Saved.' });
@@ -6739,7 +6738,7 @@ async function notices({ browser, origin, engine }) {
           pass:
             moving === 'sp-notice-in' &&
             dismissed &&
-            back === 'New item' &&
+            back === 'Edit list' &&
             still === 'none',
           moving,
           dismissed,
@@ -6796,6 +6795,15 @@ async function notices({ browser, origin, engine }) {
               },
               [box.x + box.width / 2, box.y + box.height / 2],
             );
+            // Escape on the notice keeps the focus inside the modal gate;
+            // the app's focus target behind it is inert.
+            await inGate.first().getByRole('button', { name: 'OK' }).focus();
+            await page.keyboard.press('Escape');
+            const dismissed = await gone(inGate);
+            await page.waitForTimeout(100);
+            const staysInGate = await gate.evaluate((element) =>
+              element.contains(document.activeElement),
+            );
             return {
               pass:
                 state.clear &&
@@ -6804,8 +6812,12 @@ async function notices({ browser, origin, engine }) {
                 state.outside === 0 &&
                 state.announced.length === 1 &&
                 state.announced[0] === update &&
-                state.focus === focusBefore,
+                state.focus === focusBefore &&
+                dismissed &&
+                staysInGate,
               state,
+              dismissed,
+              staysInGate,
               engine,
             };
           },

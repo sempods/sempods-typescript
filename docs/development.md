@@ -247,8 +247,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     retires once the Pod recovers; while the app's dialog is open the stack
     shows nothing and covers none of its controls, then shows and announces
     an error once it closes; Escape dismisses the focused notice and returns
-    the focus; reduced motion stops its entrance; before sign-in at 812 and
-    560px high it shows inside the SDK's gate, which keeps its Sign in clear.
+    the focus to the host's `focusTarget`; reduced motion stops its entrance;
+    before sign-in at 812 and 560px high it shows inside the SDK's gate,
+    which keeps its Sign in clear, and Escape on it keeps the focus inside
+    the gate. The keyboard is a shrinking layout viewport, as in Chrome on
+    Android; one that only shrinks the visual viewport (iOS) is not covered.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

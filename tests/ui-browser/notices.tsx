@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AppAccess,
   Notices,
@@ -78,6 +78,8 @@ export function NoticesGate({ gate }: { readonly gate: boolean }) {
   const [ready, setReady] = useState(false);
   const [failures, setFailures] = useState<Record<string, number>>({});
   const [editing, setEditing] = useState(false);
+  // Focus after a focused notice goes; behind the gate it is inert.
+  const edit = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     Object.assign(window, {
       noticesGate: {
@@ -93,7 +95,7 @@ export function NoticesGate({ gate }: { readonly gate: boolean }) {
   return (
     <>
       {gate && <AppAccess appName="Konsum" />}
-      <Notices />
+      <Notices focusTarget={edit} />
       <UpdateNotice ready={ready} />
       {Object.entries(failures).map(([pod, count]) => (
         <PodWarning key={pod} pod={pod} failures={count} />
@@ -101,7 +103,7 @@ export function NoticesGate({ gate }: { readonly gate: boolean }) {
       <main className="gate-main" style={{ paddingBottom: 96 }}>
         <header className="gate-header">
           <h1>Groceries</h1>
-          <Button variant="outline" onPress={() => setEditing(true)}>
+          <Button ref={edit} variant="outline" onPress={() => setEditing(true)}>
             Edit list
           </Button>
         </header>

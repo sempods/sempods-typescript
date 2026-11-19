@@ -1,6 +1,10 @@
-import { useSyncExternalStore, type RefObject } from 'react';
+import {
+  useSyncExternalStore,
+  type ComponentType,
+  type RefObject,
+} from 'react';
 import { useController } from './app.js';
-import type { Notice, NoticeAction, NoticesProps } from './notices.js';
+import type { Notice, NoticeAction, NoticeProps } from './notices.js';
 
 /**
  * Internal: the app notices of one provider and the mounted `Notices` hosts,
@@ -17,9 +21,13 @@ export interface NoticeRecord {
   readonly renewed: number;
   readonly dismissed: boolean;
 }
+/** A mounted `Notices` host and its current options. */
 export interface Host {
   readonly token: symbol;
-  readonly props: RefObject<NoticesProps>;
+  readonly limit: number;
+  readonly Notice: ComponentType<NoticeProps> | undefined;
+  readonly accessPrompts: boolean;
+  readonly focusTarget: RefObject<HTMLElement | null> | undefined;
 }
 
 class NoticeStore {
@@ -29,6 +37,8 @@ class NoticeStore {
   private holders = new Map<string, number>();
   private orders = new Map<string, number>();
   private announced = new Map<string, number>();
+  /** Notices and prompts whose action runs, across remounts and hosts. */
+  private running = new Set<string>();
   private sequence = 0;
   private events = 0;
   private listeners = new Set<() => void>();
@@ -120,12 +130,33 @@ class NoticeStore {
     } else this.retire(key);
     return true;
   };
-  /** After its action: a shown notice retires, a held one stays its holder's. */
-  settle(key: string) {
-    if (!this.holders.has(key)) this.retire(key);
+  /**
+   * After its action: a shown notice retires, a held one stays its holder's,
+   * and one the action published again (a new `event`) stays as published.
+   */
+  settle(key: string, event: number) {
+    if (!this.holders.has(key) && this.records.get(key)?.event === event)
+      this.retire(key);
+  }
+  eventOf(key: string) {
+    return this.records.get(key)?.event;
   }
   run(key: string) {
     return this.runs.get(key);
+  }
+  /** Marks an action of `id` as running; `false` while one already runs. */
+  begin(id: string) {
+    if (this.running.has(id)) return false;
+    this.running.add(id);
+    this.listeners.forEach((listener) => listener());
+    return true;
+  }
+  end(id: string) {
+    this.running.delete(id);
+    this.listeners.forEach((listener) => listener());
+  }
+  isRunning(id: string) {
+    return this.running.has(id);
   }
   /** Whether this event still needs its one announcement; marks it made. */
   announce(id: string, event: number) {
@@ -137,13 +168,18 @@ class NoticeStore {
     this.orders.delete(id);
     this.announced.delete(id);
   }
+  /** Adds a host or replaces its options in place, keeping its position. */
   register(host: Host) {
-    this.hosts = [...this.hosts, host];
+    const index = this.hosts.findIndex((entry) => entry.token === host.token);
+    this.hosts =
+      index < 0
+        ? [...this.hosts, host]
+        : this.hosts.map((entry, i) => (i === index ? host : entry));
     this.listeners.forEach((listener) => listener());
-    return () => {
-      this.hosts = this.hosts.filter((entry) => entry !== host);
-      this.listeners.forEach((listener) => listener());
-    };
+  }
+  unregister(token: symbol) {
+    this.hosts = this.hosts.filter((entry) => entry.token !== token);
+    this.listeners.forEach((listener) => listener());
   }
 }
 
@@ -171,7 +207,10 @@ export function useNoticeStore() {
   return store;
 }
 
-/** Internal: whether a `Notices` host is mounted; `AccessPrompts` then yields. */
+/**
+ * Internal: the first mounted `Notices` host. `AccessPrompts` yields to it
+ * unless it leaves the access prompts out (`accessPrompts={false}`).
+ */
 export function useNoticeHost() {
   const store = useNoticeStore();
   const hosts = useSyncExternalStore(
