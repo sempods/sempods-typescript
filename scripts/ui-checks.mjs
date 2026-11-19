@@ -5799,7 +5799,8 @@ async function contexts({ browser, origin }) {
     await page
       .getByRole('button', { name: 'List: Einkaufsliste · Privat' })
       .waitFor();
-    const mark = trigger().getByText('K', { exact: true }).locator('..');
+    const mark = trigger().getByText('K', { exact: true });
+    const markBox = await mark.locator('..').boundingBox();
     const singleTitle = await trigger()
       .getByText('Einkaufsliste', { exact: true })
       .boundingBox();
@@ -5828,12 +5829,13 @@ async function contexts({ browser, origin }) {
       id: 'trigger-title-layout',
       pass:
         singleMark.height === doubleMark.height &&
-        doubleMark.height >= 40 &&
+        markBox.height >= 40 &&
         Math.abs(singleCenterOffset) <= 1 &&
         Math.abs(lineGap) <= 0.5 &&
         Math.abs(chevronCenter - titleCenter) <= 1 &&
         gap >= 0 &&
         gap <= 8,
+      markBox,
       singleMark,
       doubleMark,
       singleCenterOffset,
