@@ -50,7 +50,7 @@ export interface ContextSwitchProps {
   readonly title: string;
   /** The app's word for a Context, for example "List". Defaults to "Context". */
   readonly label?: string;
-  /** Decorative app icon, sized to the visible title block. */
+  /** Decorative app icon beside the Context name. */
   readonly icon?: ReactNode;
   /** Optional configured Pod names, keyed by exact Pod URL; no extra requests. */
   readonly podNames?: Readonly<Record<string, string>>;
@@ -184,12 +184,12 @@ export function ContextSwitch({
           {icon && (
             <span
               aria-hidden="true"
-              className={`flex shrink-0 items-center justify-center overflow-hidden [&_svg]:size-full! [&_img]:size-full [&_img]:object-contain ${showSubtitle ? 'size-10 translate-y-[2px] text-4xl/none' : 'size-7 text-xl/none'}`}
+              className={`flex size-10 shrink-0 items-center justify-center overflow-hidden text-4xl/none [&_svg]:size-full! [&_img]:size-full [&_img]:object-contain ${showSubtitle ? 'translate-y-[2px]' : ''}`}
             >
               {icon}
             </span>
           )}
-          <span className="grid min-w-0 gap-0.5">
+          <span className="grid min-w-0">
             <span className="flex min-w-0 items-center gap-1">
               <span className="truncate text-lg font-semibold">
                 {selected ? contextText(selected) : title}

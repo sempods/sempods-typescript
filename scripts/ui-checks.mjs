@@ -5799,7 +5799,10 @@ async function contexts({ browser, origin }) {
     await page
       .getByRole('button', { name: 'List: Einkaufsliste · Privat' })
       .waitFor();
-    const mark = trigger().getByText('K', { exact: true });
+    const mark = trigger().getByText('K', { exact: true }).locator('..');
+    const singleTitle = await trigger()
+      .getByText('Einkaufsliste', { exact: true })
+      .boundingBox();
     const singleMark = await mark.boundingBox();
     await page.getByRole('button', { name: 'Connect second Pod' }).click();
     await page
@@ -5809,6 +5812,14 @@ async function contexts({ browser, origin }) {
     const title = await trigger()
       .getByText('Einkaufsliste', { exact: true })
       .boundingBox();
+    const subtitle = await trigger()
+      .getByText('Familie/', { exact: true })
+      .boundingBox();
+    const singleCenterOffset =
+      singleMark.y +
+      singleMark.height / 2 -
+      (singleTitle.y + singleTitle.height / 2);
+    const lineGap = subtitle.y - (title.y + title.height);
     const chevron = await trigger().locator('svg').boundingBox();
     const titleCenter = title.y + title.height / 2;
     const chevronCenter = chevron.y + chevron.height / 2;
@@ -5816,12 +5827,17 @@ async function contexts({ browser, origin }) {
     results.push({
       id: 'trigger-title-layout',
       pass:
-        doubleMark.height > singleMark.height &&
+        singleMark.height === doubleMark.height &&
+        doubleMark.height >= 40 &&
+        Math.abs(singleCenterOffset) <= 1 &&
+        Math.abs(lineGap) <= 0.5 &&
         Math.abs(chevronCenter - titleCenter) <= 1 &&
         gap >= 0 &&
         gap <= 8,
       singleMark,
       doubleMark,
+      singleCenterOffset,
+      lineGap,
       gap,
       titleCenter,
       chevronCenter,
