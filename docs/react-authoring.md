@@ -404,8 +404,9 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
 - Pass the original `useList` snapshot, never one rebuilt from plain values: it
   carries what the person saw. A write locks only its row and reports there.
 - After a confirmed update `row.data` shows the new values while the list
-  reads again; until then the row stays locked (`update` would resolve
-  `not-sent`, `stale`).
+  reads again, and `row.timestamps` the modification instant it wrote
+  ([timestamps](timestamps.md#before-the-list-reads-again)); until then the
+  row stays locked (`update` would resolve `not-sent`, `stale`).
 - One hook for the list, not one per row. The app controller owns the write
   lanes of a target, not the component: a pending or unresolved write keeps
   its outcome and leave guard while its row or whole screen is not rendered,
@@ -897,7 +898,7 @@ read.
 const list = usePodList(taskFields);
 const overview = useContextUpdate(taskFields);
 list.data?.items.map((item) => {
-  const row = overview.for(item); // { data, context, canMutate, notice, problem, update, remove }
+  const row = overview.for(item); // { data, timestamps, context, canMutate, notice, problem, update, remove }
   return (
     <li key={`${item.context} ${item.snapshot.iri}`}>
       <Checkbox

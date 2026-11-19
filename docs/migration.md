@@ -339,6 +339,17 @@ requested with `mode: 'shared'` for a store with `watch`. An injected
 `openStore` keeps one active tab unless its store implements `watch`. See
 [several tabs](browser-runtime.md#several-tabs).
 
+### Confirmed modification time on list rows
+
+`FieldUpdateRow` (and so `ContextUpdateRow`) has a new member, `timestamps`:
+a typed test double of a row adds it. An app that kept its own device-clock
+reading per ticked row, to order it before the list reads it again, orders
+by `row.timestamps` instead and drops that reading. `updateFields`' `saved`
+outcome gains the optional `modified`, set when the update wrote the
+definition's modification instant, so an exact `toEqual({ kind: 'saved' })`
+in a test of a definition with `timestamps` expects it. See [before the list
+reads again](timestamps.md#before-the-list-reads-again).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

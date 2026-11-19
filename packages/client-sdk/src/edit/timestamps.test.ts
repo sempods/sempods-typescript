@@ -233,9 +233,10 @@ describe('quick field updates', () => {
   it('check and uncheck replace only the modification instant', async () => {
     const pod = memoryPod();
     const [row] = listed(pod).items;
+    // The outcome names the instant written, for display before a new read.
     expect(
       await updateFields(pod.source, row!, item, { bought: true }),
-    ).toEqual({ kind: 'saved' });
+    ).toEqual({ kind: 'saved', modified: T1 });
     expect(pod.sent).toEqual([
       {
         method: 'patch',
@@ -290,7 +291,7 @@ describe('quick field updates', () => {
     });
     expect(
       await updateFields(pod.source, row!, item, { bought: true }),
-    ).toEqual({ kind: 'saved' });
+    ).toEqual({ kind: 'saved', modified: T1 });
     expect(pod.sent).toHaveLength(2);
     expect(pod.body()).toEqual(
       stored({

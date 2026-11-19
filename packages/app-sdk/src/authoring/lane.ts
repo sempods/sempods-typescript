@@ -1,9 +1,12 @@
 import { sdkFailure } from '@sempods/client-sdk';
-import type {
-  CreateOutcome,
-  FieldDefinition,
-  RemoveSnapshotOutcome,
-  UpdateOutcome,
+import {
+  timestampsOf,
+  type CreateOutcome,
+  type FieldDefinition,
+  type RemoveSnapshotOutcome,
+  type Snapshot,
+  type Timestamps,
+  type UpdateOutcome,
 } from '@sempods/client-sdk/edit';
 import type { AppController, LeaveGuard } from './app.js';
 import { changed, started, succeeded } from './changes.js';
@@ -38,12 +41,26 @@ export const notSent = (reason: NotSent['reason']): NotSent =>
  * read brings fresh ones. Kept apart from the lanes, whose feedback may be
  * evicted, for exactly as long as the snapshot itself lives.
  */
-const spentSnapshots = new WeakMap<object, { readonly after: unknown }>();
+const spentSnapshots = new WeakMap<
+  object,
+  { readonly after: unknown; readonly modified: string | undefined }
+>();
 /** Whether a confirmed update was made from this snapshot. */
 export const isSpent = (snapshot: object) => spentSnapshots.has(snapshot);
 /** What a spent snapshot shows after its confirmed update, if known. */
 export const spentData = <D>(snapshot: object) =>
   spentSnapshots.get(snapshot)?.after as D | undefined;
+/**
+ * The instants a snapshot shows: as read, with the modification instant its
+ * confirmed update wrote laid over (until the list reads the resource again).
+ */
+export function shownTimestamps<D>(snapshot: Snapshot<D>): Timestamps {
+  const read = timestampsOf(snapshot);
+  const modified = spentSnapshots.get(snapshot)?.modified;
+  return modified === undefined
+    ? read
+    : Object.freeze({ created: read.created, modified });
+}
 
 /**
  * What a snapshot shows once `change` is confirmed: its fields with the given
@@ -221,7 +238,10 @@ export class Lane<D> {
       return outcome;
     }
     if (outcome.kind === 'saved' && subject) {
-      spentSnapshots.set(subject, { after });
+      spentSnapshots.set(subject, {
+        after,
+        modified: 'modified' in outcome ? outcome.modified : undefined,
+      });
     }
     // A result may contain a read made before access was lost and regained.
     if (this.version !== version || !this.readable())
