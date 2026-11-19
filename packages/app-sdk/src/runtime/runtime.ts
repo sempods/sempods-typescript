@@ -2053,9 +2053,30 @@ export function createBrowserRuntime(
     preparing.add(id);
     try {
       await prepareAuthorization(id, intent);
+    } catch (error) {
+      preparing.delete(id);
+      // A record another tab saved for this Pod meanwhile was left to this
+      // preparation, which did not get to it: listed now.
+      listSavedFor(id);
+      throw error;
     } finally {
       preparing.delete(id);
     }
+  }
+  /** Lists the record another tab saved for the Pod of `id`'s connection without one. */
+  function listSavedFor(id: string) {
+    const e = entries.get(id);
+    if (!e || e.revision !== null || !lease?.store.watch) return;
+    void savedFor(e.view.podUrl)
+      .then((saved) => {
+        if (!saved) return;
+        const listed = entries.get(saved.id);
+        if (listed) void sync(listed);
+        else admit(saved);
+      })
+      .catch(() => {
+        // Listed by the next start.
+      });
   }
   async function prepareAuthorization(
     id: string,

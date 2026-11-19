@@ -1396,6 +1396,47 @@ describe('one saved connection per Pod across tabs', () => {
       );
     },
   );
+  it('lists the session another tab saved for a Pod while a sign-in here failed to prepare', async () => {
+    const channels = memoryChannels();
+    const factory = new IDBFactory();
+    const f = fixture({
+      locks: memoryLocks(),
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    runtimes.push(f.runtime);
+    // This tab's discovery waits, then fails.
+    const discovery = deferred<void>();
+    let discovering = false;
+    let hold = false;
+    const failing: typeof f.fetch = vi.fn(async (url, init) => {
+      if (hold && url.endsWith('/.well-known/oauth-protected-resource')) {
+        discovering = true;
+        await discovery.promise;
+        throw new TypeError('offline');
+      }
+      return f.fetch(url, init);
+    });
+    const b = createBrowserRuntime({ ...f.options, fetch: failing });
+    runtimes.push(b);
+    await b.initialize();
+    const local = await b.connect(pod);
+    hold = true;
+    const preparing = b.beginAuthorization(local.id);
+    await vi.waitFor(() => expect(discovering).toBe(true));
+    // Meanwhile another tab signs in to that Pod.
+    const { runtime: a, id } = await f.login();
+    runtimes.push(a);
+    expect(id).not.toBe(local.id);
+    await quiet();
+    discovery.resolve();
+    await expect(preparing).rejects.toBeDefined();
+    hold = false;
+    await vi.waitFor(() =>
+      expect(b.getSnapshot()).toMatchObject([
+        { id, session: { kind: 'active' } },
+      ]),
+    );
+  });
   it('leaves the saved connections alone when a first sign-in cannot list them', async () => {
     const { channels, freeze } = freezable();
     const factory = new IDBFactory();
