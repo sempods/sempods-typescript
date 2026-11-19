@@ -136,6 +136,12 @@ it('shows, updates, coalesces and dismisses a notice by key, announcing each eve
     'Three items bought.',
     'Done. Four items bought.',
   ]);
+  // Each addition is read alone: the regions are not atomic.
+  for (const region of host().querySelectorAll('.sp-notices-live'))
+    expect([
+      region.getAttribute('aria-atomic'),
+      region.getAttribute('aria-relevant'),
+    ]).toEqual(['false', 'additions']);
   act(() => expect(actions.dismiss('batch')).toBe(true));
   expect(items()).toEqual([]);
   expect(actions.dismiss('batch')).toBe(false);

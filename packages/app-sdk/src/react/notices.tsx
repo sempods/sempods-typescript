@@ -265,16 +265,30 @@ function useAnnouncer() {
     }, 7000);
     timers.current.add(timer);
   }, []);
+  // Not atomic, unlike the roles' default: only the added paragraph is
+  // read, never the retained ones again.
   const regions = (
     <>
-      <div className="sp-notices-live" role="status" aria-live="polite">
+      <div
+        className="sp-notices-live"
+        role="status"
+        aria-live="polite"
+        aria-atomic="false"
+        aria-relevant="additions"
+      >
         {items
           .filter((item) => !item.assertive)
           .map((item) => (
             <p key={item.id}>{item.text}</p>
           ))}
       </div>
-      <div className="sp-notices-live" role="alert" aria-live="assertive">
+      <div
+        className="sp-notices-live"
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="false"
+        aria-relevant="additions"
+      >
         {items
           .filter((item) => item.assertive)
           .map((item) => (
