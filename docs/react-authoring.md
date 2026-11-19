@@ -514,6 +514,9 @@ is the complete, tested shopping list; the core is:
   with a "Not saved" mark and the next rename resuming it, or close an
   unchanged one. Guard every changed draft, open or parked, with
   `useDraftGuard(dirty, discard)`, so changing the list or the Pod asks first.
+  Compare a draft with the name it started from while the list cannot be
+  read (`list.data` is undefined after lost read access); only a list read
+  without the item means the item was removed.
 - **Focus.** Save, Cancel and Escape return the focus to the trigger through
   `returnFocus`, also after a slow save; a person who moved on meanwhile keeps
   their focus. A trigger that the field replaces is focused after the app's

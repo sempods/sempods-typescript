@@ -6932,6 +6932,33 @@ async function rename({ browser, origin, engine }) {
       }),
     );
     results.push(
+      await attemptOn(errors, 'lost-read-access-keeps-the-guard', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        // The list may no longer be read: its items go, the draft stays.
+        await page.route('**/_system/contexts', async (route) => {
+          const body = await (await route.fetch()).json();
+          for (const key of [
+            'https://schema.sempods.org/readableContext',
+            'https://schema.sempods.org/writableContext',
+            'http://www.w3.org/ns/sparql-service-description#namedGraph',
+          ])
+            body[key] = [];
+          await route.fulfill({ json: body });
+        });
+        await page.getByRole('button', { name: 'Read access again' }).click();
+        const unread = await gone(trigger(page, BOOKS), 15000);
+        await page.getByRole('button', { name: 'Switch list' }).click();
+        const asked = await shown(page.getByRole('alertdialog'), 3000);
+        if (asked) await answerLeave(page, 'keep');
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
+        return { pass: unread && asked, unread, asked };
+      }),
+    );
+    results.push(
       await attemptOn(errors, 'empty-name-is-invalid', async () => {
         await open(page);
         const before = sent.length;

@@ -1166,20 +1166,25 @@ export function ShoppingList(props: {
   const { write } = useWorkflowAccess();
   const t = useMessages(texts);
   // The item being renamed, and the drafts by IRI: the open one and those
-  // a dismissal parked, until saved or cancelled.
+  // a dismissal parked, until saved or cancelled, each with the name it
+  // started from.
   const [open, setOpen] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(new Map());
+  const [drafts, setDrafts] = useState<
+    ReadonlyMap<string, { readonly text: string; readonly from: string }>
+  >(new Map());
   const triggers = useRef(new Map<string, HTMLButtonElement>());
   const items = list.data?.items ?? [];
   const names = new Map(
     items.map((item) => [item.iri, mutate.for(item).data.title]),
   );
-  // A changed name of a shown item is unsaved work: changing the list or
-  // Pod asks first. The draft of an item removed meanwhile has nothing left
-  // to rename.
+  // A changed name is unsaved work: changing the list or Pod asks first,
+  // also while the list cannot be read. Only a list read that no longer
+  // shows an item leaves its draft nothing to rename.
   useDraftGuard(
     [...drafts].some(
-      ([iri, draft]) => names.has(iri) && draft.trim() !== names.get(iri),
+      ([iri, { text, from }]) =>
+        (!list.data || names.has(iri)) &&
+        text.trim() !== (names.get(iri) ?? from),
     ),
     () => {
       setDrafts(new Map());
@@ -1189,8 +1194,9 @@ export function ShoppingList(props: {
   const setDraft = (iri: string, draft: string | null) =>
     setDrafts((all) => {
       const next = new Map(all);
+      const from = all.get(iri)?.from ?? names.get(iri) ?? '';
       if (draft === null) next.delete(iri);
-      else next.set(iri, draft);
+      else next.set(iri, { text: draft, from });
       return next;
     });
   return (
@@ -1205,14 +1211,14 @@ export function ShoppingList(props: {
               row={row}
               href={props.href(iri)}
               writable={write}
-              draft={drafts.get(iri)}
+              draft={drafts.get(iri)?.text}
               editing={open === iri}
               trigger={(button) => {
                 if (button) triggers.current.set(iri, button);
                 else triggers.current.delete(iri);
               }}
               onOpen={() => {
-                setDraft(iri, drafts.get(iri) ?? row.data.title);
+                setDraft(iri, drafts.get(iri)?.text ?? row.data.title);
                 setOpen(iri);
               }}
               onDraft={(draft) => setDraft(iri, draft)}

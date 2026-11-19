@@ -822,7 +822,8 @@ function RenameGate({ menu }: { readonly menu: boolean }) {
 }
 
 /**
- * A guarded change to the other list: the leave policy asks about drafts.
+ * A guarded change to the other list, where the leave policy asks about
+ * drafts, and a fresh read of what the app may access.
  */
 function SwitchList() {
   const actions = useApp();
@@ -830,16 +831,27 @@ function SwitchList() {
   const current = connections.find((c) => c.id === activeId)?.selectedContext;
   const base = location.origin + '/alice/_system/contexts/';
   return (
-    <button
-      type="button"
-      onClick={() =>
-        void actions.selectContext(
-          base + (current === base + 'work' ? 'personal' : 'work'),
-        )
-      }
-    >
-      Switch list
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          void actions.selectContext(
+            base + (current === base + 'work' ? 'personal' : 'work'),
+          )
+        }
+      >
+        Switch list
+      </button>
+      {/* Reads the catalogue again, as a change of access elsewhere would. */}
+      <button
+        type="button"
+        onClick={() =>
+          activeId && void actions.refreshContexts(activeId).catch(() => {})
+        }
+      >
+        Read access again
+      </button>
+    </>
   );
 }
 
