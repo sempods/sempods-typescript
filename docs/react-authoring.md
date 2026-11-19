@@ -478,6 +478,11 @@ supplies save, delete, discard and comparison controls around your inputs.
   `alertdialog`); only its **Delete** sends one conditional `DELETE` of the
   version shown. Cancel or Escape keeps draft and target; any newer editor state
   withdraws the question. Headless `editor.remove()` stays direct.
+- The actions follow the SDK's confirmations and the UI kit's `DialogFooter`
+  in DOM order, so keyboard and assistive technology read them the same way:
+  **Delete** first, set apart at the start of the row, **Check again** while
+  the editor is blocked, then **Cancel** (or **Discard changes**) and
+  **Save** last. Actions that do not fit wrap to further rows at the end.
 - In place (for example in a row) pass `onClose={() => select(null)}`: it shows
   **Cancel** instead of **Discard changes**, Cancel discards and closes, and a
   confirmed save or delete closes it; refusals, conflicts and unconfirmed

@@ -1159,7 +1159,15 @@ try {
     const save = editor.getByRole('button', { name: 'Save', exact: true });
     const field = editor.getByLabel('Task', { exact: true });
     await field.fill('Unfinished baseline');
-    await page.keyboard.press('Tab'); // Save.
+    // The keyboard follows the actions' DOM order: Delete, Cancel, Save (#401).
+    const reached = [];
+    for (let i = 0; i < 3; i++) {
+      await page.keyboard.press('Tab');
+      reached.push(
+        await page.evaluate(() => document.activeElement?.textContent),
+      );
+    }
+    assert.deepEqual(reached, ['Delete', 'Cancel', 'Save']);
     assert.equal(
       await save.evaluate((button) => button === document.activeElement),
       true,
@@ -1397,8 +1405,8 @@ try {
         '1px',
         'rgb(19, 20, 21)',
       ]);
-    await field.focus();
-    await page.keyboard.press('Tab'); // Save.
+    await cancel.focus();
+    await page.keyboard.press('Tab'); // Save, the last action.
     assert.equal(
       await save.evaluate((button) => getComputedStyle(button).outlineColor),
       'rgb(100, 110, 120)',

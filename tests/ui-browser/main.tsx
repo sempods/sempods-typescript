@@ -29,6 +29,8 @@
 // well, the same dialog parts hold `ActionButton` pills instead (#368).
 // With `?screen=menu-confirm`, a screen's menu has an action that asks
 // first with the README's confirmation (#391).
+// With `labels=long`, the SDK's editor actions carry long German labels, one
+// of them an unbroken word, as a translation can (#401).
 // With `?screen=ghost`, the page is the ghost variant's icon actions, a
 // Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
 // button; the checks swap the stylesheet for no-preflight.css, a host that
@@ -253,6 +255,18 @@ const tabs = settings.get('screen') === 'tabs';
 const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
+// Long translated editor actions, with `lang=de` (#401).
+const longLabels =
+  settings.get('labels') === 'long'
+    ? {
+        controls: {
+          remove: 'Diese Aufgabe endgültig aus dem Pod löschen',
+          refresh: 'Noch einmal beim Pod nachsehen',
+          cancel: 'Abbrechen und Bearbeitung schließen',
+          save: 'Aufgabenänderungsspeicherungsbestätigung',
+        },
+      }
+    : undefined;
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -365,6 +379,7 @@ function App() {
       contextSelection="on-demand"
       language={lang}
       locale={lang === 'de' ? 'de-DE' : 'en-GB'}
+      {...(longLabels ? { messages: longLabels } : {})}
     >
       {contextSwitch ? (
         <ContextSwitchGate />

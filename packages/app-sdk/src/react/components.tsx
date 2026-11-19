@@ -660,6 +660,8 @@ function ownKey(
  * Delete asks first in a modal dialog, like the leave confirmation: only its
  * Delete sends one conditional DELETE of the version shown. Any later editor state (an edit, a read, another
  * subject) withdraws the question; cancel or Escape keeps draft and target.
+ * The actions read Delete, Check again (while blocked), Cancel or Discard
+ * changes, then Save, in DOM order as the SDK's confirmations.
  * Success feedback retires with any later editor state and, for an editor from
  * `useResourceEditor`, when another write on the same target starts.
  * Inline scoped --sempods-* styles cover controls and comparisons without changing
@@ -861,14 +863,20 @@ export function ResourceEditor<D, U = D>({
           </button>
         </section>
       )}
+      {/* Reading order as the confirmations: the independent Remove first and
+          set apart, recovery next, then Cancel or Discard and Save last. */}
       <div className="sp-sdk-actions">
         <button
-          className="sp-sdk-primary"
-          disabled={!state.canSave}
-          onClick={save}
+          ref={removeButton}
+          className="sp-sdk-apart"
+          disabled={!state.canRemove}
+          onClick={() => setConfirming(state)}
         >
-          {m.save}
+          {m.remove}
         </button>
+        {state.phase === 'blocked' && (
+          <button onClick={() => void editor.refresh()}>{m.refresh}</button>
+        )}
         {onClose ? (
           <button onClick={cancel}>{m.cancel}</button>
         ) : (
@@ -876,16 +884,12 @@ export function ResourceEditor<D, U = D>({
             {m.discard}
           </button>
         )}
-        {state.phase === 'blocked' && (
-          <button onClick={() => void editor.refresh()}>{m.refresh}</button>
-        )}
         <button
-          ref={removeButton}
-          className="sp-sdk-end"
-          disabled={!state.canRemove}
-          onClick={() => setConfirming(state)}
+          className="sp-sdk-primary"
+          disabled={!state.canSave}
+          onClick={save}
         >
-          {m.remove}
+          {m.save}
         </button>
       </div>
       {/* Only the dialog's Delete sends one conditional DELETE. */}
