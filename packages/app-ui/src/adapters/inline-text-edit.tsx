@@ -13,6 +13,13 @@ import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Input } from '../components/input.js';
 
+/**
+ * A key that belongs to an input method's composition: `isComposing`, or
+ * keyCode 229, which some input methods report for their confirming key.
+ */
+const composing = (event: KeyboardEvent) =>
+  event.nativeEvent.isComposing || event.keyCode === 229;
+
 export interface InlineTextEditProps {
   /** The input's accessible name in the app's language, e.g. `Rename: Milk`. */
   readonly label: string;
@@ -209,7 +216,7 @@ export function InlineTextEdit({
   };
   const onKeyDown = (event: KeyboardEvent) => {
     // An input method's Escape ends its composition, not the edit.
-    if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+    if (event.key !== 'Escape' || composing(event)) return;
     // Escape ends this edit only, never an enclosing dialog, also while a
     // write is pending and the edit cannot end.
     event.stopPropagation();
@@ -238,7 +245,7 @@ export function InlineTextEdit({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+          if (event.key !== 'Enter' || composing(event)) return;
           event.preventDefault();
           save();
         }}

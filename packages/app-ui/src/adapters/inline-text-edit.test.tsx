@@ -134,15 +134,19 @@ it('keeps Escape from an enclosing dialog while pending', () => {
   expect(onEnclosingKey).not.toHaveBeenCalled();
 });
 
-it('leaves an input method its Escape', () => {
-  const onCancel = vi.fn();
-  render(<Field onCancel={onCancel} />);
-  fireEvent.keyDown(screen.getByRole('textbox'), {
-    key: 'Escape',
-    isComposing: true,
-  });
-  expect(onCancel).not.toHaveBeenCalled();
-});
+it.each([{ isComposing: true }, { keyCode: 229 }])(
+  'leaves an input method its Enter and Escape (%o)',
+  (composition) => {
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    render(<Field onSave={onSave} onCancel={onCancel} />);
+    const input = screen.getByRole('textbox');
+    fireEvent.keyDown(input, { key: 'Enter', ...composition });
+    fireEvent.keyDown(input, { key: 'Escape', ...composition });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  },
+);
 
 it('keeps the focus through replayed StrictMode effects', async () => {
   const returnFocus = vi.fn();
