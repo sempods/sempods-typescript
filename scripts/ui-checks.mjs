@@ -5574,10 +5574,10 @@ async function viewTabs({ browser, origin }) {
  * a focus outline apart from the bar. Throughout, both links rest and stay
  * chosen without a surface or a text underline, the labels cannot be
  * selected and draw no tap highlight, and only the current link has a bar on
- * the row's baseline, which forced colors keep. At 320 and 375px with long
- * counts, at a root font size of 100% and 125%, the strip and its trailing
- * Filter action stay inside the screen with every label and count whole and
- * targets of 2.75rem. WebKit matches forced colors without forcing the
+ * the row's baseline, which forced colors keep; Filter, reached by Tab, has
+ * its own outline. At 320 and 375px with long counts, at a root font size of
+ * 100% and 125%, the strip and its trailing Filter action stay inside the
+ * screen, every count on one line, with targets of 2.75rem. WebKit matches forced colors without forcing the
  * colours, so there the check shows the keyboard path only.
  */
 async function viewStrip({ browser, origin, engine }) {
@@ -5613,6 +5613,7 @@ async function viewStrip({ browser, origin, engine }) {
           name: a.textContent,
           current: a.getAttribute('aria-current'),
           focused: a === document.activeElement,
+          anchored: s.position === 'relative',
           color: s.color,
           background: s.backgroundColor,
           underline: s.textDecorationLine.includes('underline'),
@@ -5639,10 +5640,17 @@ async function viewStrip({ browser, origin, engine }) {
           parts,
         };
       });
-      const action = document
-        .querySelector('[aria-label="Filter"]')
-        .getBoundingClientRect()
-        .toJSON();
+      const button = document.querySelector('[aria-label="Filter"]');
+      const buttonStyle = getComputedStyle(button);
+      const action = {
+        ...button.getBoundingClientRect().toJSON(),
+        focused: button === document.activeElement,
+        outline:
+          buttonStyle.outlineStyle === 'none' ||
+          buttonStyle.outlineWidth === '0px'
+            ? null
+            : parseFloat(buttonStyle.outlineWidth),
+      };
       return {
         place: document.querySelector('#strip-place').textContent,
         filtered: document.querySelector('#strip-filtered').textContent,
@@ -5678,6 +5686,7 @@ async function viewStrip({ browser, origin, engine }) {
         Boolean(l.bar) === (l.current === 'page') &&
         (!l.bar ||
           (l.bar.edge &&
+            l.anchored &&
             l.bar.width >= 3 &&
             !clear(l.bar.color) &&
             l.bar.color !== state.page)) &&
@@ -5715,13 +5724,31 @@ async function viewStrip({ browser, origin, engine }) {
           await page.waitForURL((url) => url.pathname === '/');
           await settle(page);
           const zen = await read(page);
+          // The accessible names keep the space between label and count.
+          const names = await page
+            .getByRole('navigation', { name: 'Views' })
+            .getByRole('link')
+            .count();
+          const named = await Promise.all(
+            ['Zen 3', 'List 12'].map((name) =>
+              page.getByRole('link', { name, exact: true }).count(),
+            ),
+          );
           return {
             pass:
+              names === 2 &&
+              same(named, [1, 1]) &&
+              // No hover colour stays on List after the tap back to Zen.
+              same(
+                zen.links.map((l) => l.color),
+                start.links.map((l) => l.color),
+              ) &&
               drawn(start, 'Zen') &&
               list.place === 'list' &&
               drawn(list, 'List') &&
               zen.place === 'zen' &&
               drawn(zen, 'Zen'),
+            named,
             start,
             list,
             zen,
@@ -5850,6 +5877,8 @@ async function viewStrip({ browser, origin, engine }) {
             drawn(steps.listCurrent, 'List') &&
             ring(steps.listCurrent, 'List') &&
             steps.filtered.filtered === '1' &&
+            steps.filtered.action.focused &&
+            steps.filtered.action.outline >= 2 &&
             steps.filtered.links.every((l) => !l.focused && !l.outline) &&
             drawn(steps.zenAgain, 'List') &&
             ring(steps.zenAgain, 'Zen') &&
@@ -5894,15 +5923,15 @@ async function viewStrip({ browser, origin, engine }) {
                 pass:
                   !state.overflow &&
                   drawn(state, 'Zen') &&
-                  same(counts, ['1,234,567', '98,765,432']) &&
+                  same(counts, ['12,345', '1,234,567']) &&
                   state.links.every(
                     (l) =>
                       l.box.height >= target &&
                       inside(l.box, state.nav) &&
                       l.parts.length === 2 &&
                       l.parts.every((p) => inside(p.box, l.box)) &&
-                      // At the default size each count stays on one line.
-                      (font !== '100%' || l.parts[1].lines === 1),
+                      // A count never breaks inside the number.
+                      l.parts[1].lines === 1,
                   ) &&
                   inside(state.nav, screen) &&
                   inside(state.action, screen) &&

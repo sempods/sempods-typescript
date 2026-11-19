@@ -896,7 +896,7 @@ function StripGate({ long }: { readonly long: boolean }) {
     <main className="gate-main">
       <ViewStrip
         nav={nav}
-        counts={long ? { zen: 1234567, list: 98765432 } : { zen: 3, list: 12 }}
+        counts={long ? { zen: 12345, list: 1234567 } : { zen: 3, list: 12 }}
         onFilter={() => setFiltered((n) => n + 1)}
       />
       <p className="mt-4" id="strip-place">

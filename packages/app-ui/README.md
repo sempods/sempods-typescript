@@ -1703,13 +1703,14 @@ current link has `foreground` text and a 3px `primary` bar on the
 leaves. It is a border, which forced colours keep in the link's system
 colour, so the current view is a shape there too. The keyboard's focus
 outline is the kit's own, apart from the bar. A count is part of its link's
-name; the space between the spans keeps that name "Zen 3", not "Zen3". The
+name, which reads "Zen 3" with the space between the spans. The
 trailing action is a ghost `ActionButton` outside the `nav`, so the
 navigation holds only the views.
 
 Targets are `min-h-11` (2.75rem) links and a `round-sm` action, so they grow
 with the root font size. On a narrow screen a link's count wraps below its
-label, and `wrap-anywhere` breaks a long label rather than the strip.
+label as a whole, never inside the number: counts of up to seven digits
+fit beside the action at 320px, also with a root font size of 125%.
 `select-none` and a transparent `-webkit-tap-highlight-color` keep a press
 from selecting a label or flashing the browser's highlight, as a native tab
 does. The UI gate renders this file as written:
@@ -1722,7 +1723,7 @@ import { ActionButton, type Nav } from '@sempods/app-ui';
 import type { Place } from './places';
 
 const view =
-  'relative flex min-h-11 flex-wrap items-center justify-center gap-x-1.5 rounded-md bg-transparent px-3 py-2 text-center text-sm font-medium text-muted-foreground no-underline wrap-anywhere select-none [-webkit-tap-highlight-color:transparent] hover:text-foreground after:absolute after:inset-x-0 after:-bottom-px aria-[current=page]:text-foreground aria-[current=page]:after:border-b-3 aria-[current=page]:after:border-primary';
+  'relative flex min-h-11 flex-wrap items-center justify-center gap-x-1.5 rounded-md bg-transparent px-2 py-2 text-center text-sm font-medium text-muted-foreground no-underline select-none [-webkit-tap-highlight-color:transparent] hover:text-foreground after:absolute after:inset-x-0 after:-bottom-px aria-[current=page]:text-foreground aria-[current=page]:after:border-b-3 aria-[current=page]:after:border-primary';
 
 export function ViewStrip(props: {
   readonly nav: Nav<Place>;
@@ -1736,11 +1737,15 @@ export function ViewStrip(props: {
       <nav aria-label="Views" className="flex min-w-0 flex-1 gap-1">
         <a {...nav.link({ kind: 'zen' })} className={view}>
           <span>Zen</span>{' '}
-          <span className="tabular-nums">{count.format(counts.zen)}</span>
+          <span className="whitespace-nowrap tabular-nums">
+            {count.format(counts.zen)}
+          </span>
         </a>
         <a {...nav.link({ kind: 'list' })} className={view}>
           <span>List</span>{' '}
-          <span className="tabular-nums">{count.format(counts.list)}</span>
+          <span className="whitespace-nowrap tabular-nums">
+            {count.format(counts.list)}
+          </span>
         </a>
       </nav>
       <ActionButton

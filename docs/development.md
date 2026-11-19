@@ -234,14 +234,14 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   - views on one baseline (#384): a tap switches to List and back on a touch
     screen, a pointer click and leaving keep the bar on the current link, and
     in forced colors Tab and Enter switch the view and reach the Filter
-    action outside the `nav`, with a focus outline apart from the bar. Both
+    action outside the `nav`, each with a focus outline apart from the bar. Both
     links stay without a surface or a text underline, cannot be selected and
     draw no tap highlight, and only the current one has a bar of at least
     3px on the row's baseline. WebKit matches forced colors without forcing
     the colours, so there the check covers the keyboard path only. With long
-    counts at 320 and 375px and a root font size of 100% and 125%, every
-    label and count stays whole inside the screen beside the action, with
-    2.75rem targets;
+    counts at 320 and 375px and a root font size of 100% and 125%, the
+    strip stays inside the screen beside the action, each count on one line,
+    with 2.75rem targets;
   - ghost actions without Preflight (#392): a `Button`, an icon `LinkButton`,
     an `ActionButton` and `HeaderMenu`'s button rest without a surface under
     the app's stylesheet and under a host that imports only Tailwind's theme
