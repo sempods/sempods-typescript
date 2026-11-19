@@ -158,16 +158,32 @@ export function InlineTextEdit({
     };
   }, []);
 
+  // A press inside the field, until the focus change it causes has been
+  // decided: a plain button, as in the row's notice, takes no focus on a
+  // press in WebKit, which may leave the focus on the body.
+  const pressedInside = useRef(false);
   // A press beside the field. On touch devices a tap on text that takes no
   // focus does not move the focus, so the focus alone would not tell.
   useEffect(() => {
     const press = (event: PointerEvent) => {
       if (event.target === document.documentElement) return; // a scrollbar
-      if (!inside(event.target)) leave();
+      pressedInside.current = inside(event.target);
+      if (!pressedInside.current) leave();
     };
+    // Queued after the focus decision of the press's own blur.
+    const release = () =>
+      setTimeout(() => {
+        pressedInside.current = false;
+      });
     document.addEventListener('pointerdown', press, true);
+    document.addEventListener('pointerup', release, true);
+    document.addEventListener('pointercancel', release, true);
     // `leave` and `inside` read refs only, so the first ones stay current.
-    return () => document.removeEventListener('pointerdown', press, true);
+    return () => {
+      document.removeEventListener('pointerdown', press, true);
+      document.removeEventListener('pointerup', release, true);
+      document.removeEventListener('pointercancel', release, true);
+    };
   }, []);
 
   // A departure that came during the write is settled now.
@@ -189,10 +205,14 @@ export function InlineTextEdit({
     timer.current = setTimeout(() => {
       const active = document.activeElement;
       if (inside(active)) return;
-      if (
-        (!active || active === document.body) &&
-        (!from.isConnected || from.matches(':disabled'))
-      ) {
+      const dropped = !active || active === document.body;
+      // A press on the field's own text or plain buttons keeps it: the
+      // field takes the focus the press left on the body.
+      if (pressedInside.current) {
+        if (dropped) root.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (dropped && (!from.isConnected || from.matches(':disabled'))) {
         input.current?.focus({ preventScroll: true });
         return;
       }
@@ -201,6 +221,7 @@ export function InlineTextEdit({
   };
   const onFocus = () => {
     clearTimeout(timer.current);
+    pressedInside.current = false;
     dismissed.current = false;
     left.current = false;
   };
