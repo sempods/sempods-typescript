@@ -8,7 +8,7 @@
 // against its own Pod and browser instance.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs]
+//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs,ghost]
 //        [--lanes=<suites at once per browser, default 1>]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
@@ -229,6 +229,19 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
     ),
   );
   const dist = join(app, 'dist');
+  // A host without Preflight (#392): its stylesheet, built after the app
+  // into the same directory as /no-preflight.css, for the ghost checks.
+  await writeFile(
+    join(temp, 'vite.no-preflight.mjs'),
+    `import tailwindcss from '@tailwindcss/vite';
+export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist', emptyOutDir: false, copyPublicDir: false, rollupOptions: { input: ${JSON.stringify(join(app, 'no-preflight.css'))}, output: { assetFileNames: '[name][extname]' } } }, logLevel: 'error' };
+`,
+  );
+  await execute(
+    join(temp, 'node_modules/.bin/vite'),
+    ['build', '--config', 'vite.no-preflight.mjs'],
+    { cwd: temp },
+  );
   const css = (
     await Promise.all(
       (await readdir(join(dist, 'assets')))

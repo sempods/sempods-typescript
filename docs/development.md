@@ -229,7 +229,14 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     view marks neither view's link, and the current ghost link keeps the
     other link's text colour on a surface of its own with an underline, rest
     and hovered, apart from the other link hovered, on both palettes in all
-    six action combinations, light and dark.
+    six action combinations, light and dark;
+  - ghost actions without Preflight (#392): a `Button`, an icon `LinkButton`,
+    an `ActionButton` and `HeaderMenu`'s button rest without a surface under
+    the app's stylesheet and under a host that imports only Tailwind's theme
+    and utilities, where a native button keeps its face; at rest, hovered,
+    focused by keyboard and open they paint the same surface, outline and
+    ring under both, in light, dark and forced colors (there without the
+    outline's colour, which follows the text).
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay
@@ -275,8 +282,8 @@ against the installed kit; the React consumer of `test:consumers` installs the
 same packages for the shipped examples. The TODO's standard screen covers EN/DE sign-in,
 320px light/dark presentation, explicit context choice, creation and guarded
 management with a retained draft, and the full CRUD, conflict/unknown-outcome,
-guard, keyboard/mobile and second-tab checks, plus the shared Node domain/edit
-path.
+guard, keyboard/mobile and second-tab checks, the row checkbox's target at the
+default and a 112.5% root font size, plus the shared Node domain/edit path.
 It also enables native BFCache in full Chromium and checks repeated returns,
 sign-in afterwards, saved session/Context restoration and exactly one creation
 after return. The verbatim quickstart from the installed package is bundled and

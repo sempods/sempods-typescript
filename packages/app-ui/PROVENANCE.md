@@ -19,9 +19,10 @@ on 2026-11-16 from the same registry for ticking list rows
 Changes against the registry output:
 
 - `checkbox.tsx`: a 20px box (`size-5`, registry `size-4`) inside a 44px
-  target (`after:-inset-[13px]` from inside the 1px border, registry
+  target (`after:-inset-[0.8125rem]` from inside the 1px border, registry
   `after:-inset-x-3 after:-inset-y-2`),
-  so a row's tick meets the kit's touch target; the check mark is lucide's
+  so a row's tick meets the kit's touch target and the target grows with the
+  root font size like the box and a `size-11` control; the check mark is lucide's
   `CheckIcon` at 16px, hidden from assistive technology, and an
   indeterminate box shows `MinusIcon` on the primary surface (the registry
   shows the check mark for both); `cursor-pointer`. The registry's
@@ -37,6 +38,9 @@ Changes against the registry output:
   language: the `muted` surface with `foreground` text, also in dark mode
   and while hovered, and a 2px underline, so it does not rest on the surface
   alone (sempods/sempods-typescript#343).
+- `button.tsx`: the `ghost` variant rests on `bg-transparent`, so a host
+  without Tailwind's Preflight does not show the browser's button face behind
+  it (sempods/sempods-typescript#392).
 - `button.tsx`: a menu trigger (`aria-haspopup="true"`) gets no focus ring
   or border change of its own; its one keyboard indicator is the focus
   outline, drawn from React Aria's `data-focus-visible`

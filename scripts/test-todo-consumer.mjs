@@ -1627,21 +1627,52 @@ try {
     const created = page.getByRole('status').filter({ hasText: /^Created\.$/ });
     const saved = page.getByRole('status').filter({ hasText: /^Saved\.$/ });
     assert.equal(await created.count(), 0);
-    // The kit's box takes a press up to 22px from its centre (44px target).
-    const target = await page
-      .getByRole('checkbox', { name: /^Done: /, checked: false })
-      .evaluate((input) => {
-        const box = input.closest('[data-slot="checkbox"]');
-        const r = box.getBoundingClientRect();
-        const [cx, cy] = [r.x + r.width / 2, r.y + r.height / 2];
-        return [
-          [cx - 21, cy],
-          [cx + 21, cy],
-          [cx, cy - 21],
-          [cx, cy + 21],
-        ].every(([x, y]) => box.contains(document.elementFromPoint(x, y)));
-      });
-    assert.ok(target, 'the row checkbox keeps its 44px target');
+    // The kit's box takes a press across its whole target: 44px at the
+    // default root font size, and in step with the row's `size-11` slot when
+    // an app raises it (#382).
+    const target = (rootSize) =>
+      page
+        .getByRole('checkbox', { name: /^Done: /, checked: false })
+        .evaluate((input, rootSize) => {
+          const root = document.documentElement;
+          root.style.fontSize = rootSize;
+          try {
+            const box = input.closest('[data-slot="checkbox"]');
+            const r = box.getBoundingClientRect();
+            const after = getComputedStyle(box, '::after');
+            const size = [parseFloat(after.width), parseFloat(after.height)];
+            const reach = Math.min(...size) / 2 - 1;
+            const [cx, cy] = [r.x + r.width / 2, r.y + r.height / 2];
+            return {
+              size,
+              slot: box.parentElement.getBoundingClientRect().width,
+              pressable: [
+                [cx - reach, cy],
+                [cx + reach, cy],
+                [cx, cy - reach],
+                [cx, cy + reach],
+              ].every(([x, y]) =>
+                box.contains(document.elementFromPoint(x, y)),
+              ),
+            };
+          } finally {
+            root.style.fontSize = '';
+          }
+        }, rootSize);
+    const standard = await target('');
+    assert.deepEqual(
+      standard,
+      { size: [44, 44], slot: 44, pressable: true },
+      'the row checkbox keeps its 44px target',
+    );
+    const larger = await target('112.5%');
+    assert.ok(
+      larger.pressable &&
+        larger.slot === 49.5 &&
+        larger.size.every((side) => side >= larger.slot),
+      'the row checkbox target grows with a 112.5% root like its size-11 slot: ' +
+        JSON.stringify(larger),
+    );
     await page
       .getByRole('checkbox', { name: /^Done: /, checked: false })
       .locator(theBox)

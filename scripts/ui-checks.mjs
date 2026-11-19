@@ -5905,6 +5905,7 @@ export const suites = {
   confirmation,
   menuDialog,
   viewTabs,
+  ghost,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */
@@ -6348,5 +6349,155 @@ async function contexts({ browser, origin }) {
   }
   results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
   await context.close();
+  return results;
+}
+
+/**
+ * The ghost variant without a host reset (#392) on `?screen=ghost`: a
+ * Button, an icon LinkButton, an ActionButton and HeaderMenu's button rest
+ * without a surface under the reference screen's Tailwind and under a host
+ * without Preflight (no-preflight.css, where a native button keeps its
+ * face), in light and dark. At rest, hovered, focused by keyboard and, for
+ * the menu, open, they paint the same surface, outline and ring under both
+ * hosts, also in forced colors; hovered and open they take a surface.
+ */
+async function ghost({ browser, origin, engine }) {
+  const { context, page, errors } = await newPage(browser, {
+    reducedMotion: 'reduce',
+  });
+  const tab = tabKey(engine);
+  const names = ['Ghost button', 'Ghost link', 'Ghost action', 'Ghost menu'];
+  const target = (name) =>
+    page.getByRole(name === 'Ghost link' ? 'link' : 'button', {
+      name,
+      exact: true,
+    });
+  const clear = (color) =>
+    /^(rgba\(\d+, \d+, \d+, 0\)|transparent)$/.test(color);
+  const paint = (locator) =>
+    locator.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        background: s.backgroundColor,
+        outline:
+          s.outlineStyle === 'none'
+            ? 'none'
+            : `${s.outlineWidth} ${s.outlineStyle} ${s.outlineOffset}`,
+        outlineColor: s.outlineStyle === 'none' ? 'none' : s.outlineColor,
+        shadow: s.boxShadow,
+        color: s.color,
+      };
+    });
+  /** Loads the screen with the app's stylesheet or the host's without Preflight. */
+  const load = async (host) => {
+    await page.goto(origin + '/?screen=ghost');
+    await target('Ghost menu').waitFor();
+    if (host === 'none')
+      await page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const link = document.querySelector('link[rel=stylesheet]');
+            link.addEventListener('load', resolve, { once: true });
+            link.addEventListener('error', reject, { once: true });
+            link.setAttribute('href', '/no-preflight.css');
+          }),
+      );
+    await settle(page);
+  };
+  const modes = {
+    light: { colorScheme: 'light', forcedColors: 'none' },
+    dark: { colorScheme: 'dark', forcedColors: 'none' },
+    forced: { colorScheme: 'light', forcedColors: 'active' },
+  };
+  const seen = {};
+  const results = [];
+  try {
+    for (const [mode, media] of Object.entries(modes)) {
+      await page.emulateMedia(media);
+      for (const host of ['app', 'none']) {
+        await load(host);
+        const look = { native: await paint(page.locator('#native-button')) };
+        for (const name of names)
+          look[name] = { rest: await paint(target(name)) };
+        // Keyboard focus from the start of the page, in tab order.
+        for (const name of names) {
+          await page.keyboard.press(tab);
+          await settle(page);
+          look[name].focus = {
+            focused: await target(name).evaluate(
+              (el) => el === document.activeElement,
+            ),
+            ...(await paint(target(name))),
+          };
+        }
+        await page.keyboard.press('Enter');
+        await page.getByRole('menu').waitFor();
+        await settle(page);
+        look['Ghost menu'].open = await paint(target('Ghost menu'));
+        await page.keyboard.press('Escape');
+        await hidden(page.getByRole('menu'));
+        // The menu hands the focus back to its button after it closes; the
+        // blur waits for that, so no focus outline is left for the hover.
+        await focusUntil(page, /Ghost menu/);
+        await page.evaluate(() => document.activeElement?.blur());
+        await focusUntil(page, /^body$/);
+        for (const name of names) {
+          await target(name).hover();
+          await settle(page);
+          look[name].hover = await paint(target(name));
+        }
+        await page.mouse.move(1, 1);
+        seen[`${mode}-${host}`] = look;
+      }
+    }
+    await page.emulateMedia({ colorScheme: null, forcedColors: null });
+    const states = (name) =>
+      name === 'Ghost menu'
+        ? ['rest', 'focus', 'open', 'hover']
+        : ['rest', 'focus', 'hover'];
+    for (const [mode, media] of Object.entries(modes)) {
+      const forced = media.forcedColors === 'active';
+      // What a host's reset decides: the surface, the outline and the ring.
+      // In forced colors Firefox draws a link's outline in its text colour,
+      // which a host without Preflight leaves as the browser's link colour.
+      const drawn = ({ background, outline, outlineColor, shadow }) =>
+        JSON.stringify({
+          background,
+          outline,
+          shadow,
+          ...(forced ? {} : { outlineColor }),
+        });
+      const app = seen[`${mode}-app`];
+      const none = seen[`${mode}-none`];
+      results.push({
+        id: `ghost-without-preflight-${mode}`,
+        pass:
+          // Without Preflight a native button keeps its face.
+          (forced ||
+            (clear(app.native.background) && !clear(none.native.background))) &&
+          names.every(
+            (name) =>
+              states(name).every(
+                (state) => drawn(app[name][state]) === drawn(none[name][state]),
+              ) &&
+              [app, none].every(
+                (look) =>
+                  look[name].focus.focused &&
+                  look[name].focus.outline !== 'none' &&
+                  (forced ||
+                    (clear(look[name].rest.background) &&
+                      !clear(look[name].hover.background) &&
+                      (name !== 'Ghost menu' ||
+                        !clear(look[name].open.background)))),
+              ),
+          ),
+        app,
+        none,
+      });
+    }
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
   return results;
 }

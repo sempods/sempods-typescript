@@ -20,7 +20,7 @@ const buttonVariants = cva(
         secondary:
           'border-action-secondary-border bg-action-secondary text-action-secondary-foreground hover:bg-[color-mix(in_oklch,var(--action-secondary),var(--action-secondary-foreground)_8%)] aria-expanded:bg-action-secondary aria-expanded:text-action-secondary-foreground',
         ghost:
-          'hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground aria-[current=page]:bg-muted aria-[current=page]:text-foreground aria-[current=page]:underline aria-[current=page]:decoration-2 aria-[current=page]:underline-offset-6 dark:hover:bg-muted/50 dark:aria-[current=page]:bg-muted',
+          'bg-transparent hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground aria-[current=page]:bg-muted aria-[current=page]:text-foreground aria-[current=page]:underline aria-[current=page]:decoration-2 aria-[current=page]:underline-offset-6 dark:hover:bg-muted/50 dark:aria-[current=page]:bg-muted',
         destructive:
           'bg-destructive/10 text-destructive hover:bg-destructive/20 not-aria-[haspopup=true]:focus-visible:border-destructive/40 not-aria-[haspopup=true]:focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:not-aria-[haspopup=true]:focus-visible:ring-destructive/40',
         link: 'text-primary underline-offset-4 hover:underline',

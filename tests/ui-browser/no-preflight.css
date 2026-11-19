@@ -1,0 +1,10 @@
+/* A host without Tailwind's Preflight (#392), as an app that keeps native
+   defaults for older forms imports Tailwind: its theme and utilities, then
+   the kit and the app's theme. scripts/test-ui-consumer.mjs builds it beside
+   the app; the ghost checks swap index.css for it. */
+@layer theme, base, sempods, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import '@sempods/app-ui/styles.css';
+@import './theme.css';
+@import './screen.css';
