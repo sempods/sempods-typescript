@@ -362,7 +362,9 @@ the Pod without an answer or a failed answer never starts it again; `tabStorage`
 replaces that storage in tests, and without one nothing is tried. Coming back
 to the page that left (its history entry, also from the back/forward cache)
 forgets the attempt; a tab opened from the one at the Pod copies the note but
-leaves the attempt to that tab's answer. A preparation
+leaves the attempt to that tab's answer. A tab whose silent sign-in starts while
+another tab's sign-in to the default Pod is under way follows that sign-in
+instead of asking the Pod again. A preparation
 that fails (an unreachable Pod) leaves the person signed out without an error.
 A tab that started with something stored, or returned from a sign-in, never
 tries, also after a sign-out deletes the records. A new tab with nothing stored
@@ -800,8 +802,12 @@ re-authorization shows that connection `interrupted` as the open tabs do, and
 leaves the attempt to the tab that left for it: only that tab resumes the
 earlier session when it comes back to the page it left from without a
 callback, by a back navigation, also one that restores the page from the
-back/forward cache. The SDK notes the attempt in that page's history entry
-(`history.state`, keeping the state a router stored there); a tab opened from
+back/forward cache. The SDK notes the attempt for that page's history entry:
+with the entry's key in `tabStorage` where the browser names its entries
+(`navigation.currentEntry`), leaving `history.state` as it is, and otherwise
+in a plain-object `history.state` beside the router's fields. A router's own
+value there (a string, an array, a `Map`) is never changed; without named
+entries such an attempt waits for its expiry. A tab opened from
 it has a history of its own and leaves the attempt alone, and so does the tab
 that left when it opens the app anew instead of going back. An attempt nobody
 returns to (its tab closed at the Pod) resumes the earlier session in the

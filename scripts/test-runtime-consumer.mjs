@@ -1224,6 +1224,8 @@ try {
     await Promise.all([
       cached.waitForURL('**/authorize?**'),
       cached.evaluate(() => {
+        // A router's own state, which the note leaves as it is.
+        window.history.replaceState(new Map([['screen', 'tasks']]), '');
         const r = window.fixture.runtime;
         void r.beginAuthorization(r.getSnapshot()[0].id);
       }),
@@ -1239,12 +1241,19 @@ try {
       await cached.evaluate(() => window.fixture.report.interaction),
       'none',
     );
+    assert.deepEqual(
+      await cached.evaluate(() => [
+        window.history.state instanceof Map,
+        window.history.state?.get?.('screen'),
+      ]),
+      [true, 'tasks'],
+    );
     assert.deepEqual({ exchanges, refreshes }, beforeBack);
   } finally {
     await cachingBrowser.close();
   }
   console.log(
-    'Packed re-authorization in Chromium: a denied consent and a back navigation, also from the back/forward cache, keep the session without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
+    'Packed re-authorization in Chromium: a denied consent and a back navigation, also from the back/forward cache, keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');

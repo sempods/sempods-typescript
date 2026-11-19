@@ -273,36 +273,82 @@ export function createBrowserRuntime(
     }
   }
   /**
-   * The state of the re-authorization the page's history entry left for, so
-   * only the page that left treats it as abandoned when it comes back to
-   * that entry without a callback (back navigation, also from the
-   * back/forward cache); a tab opened from it has a history of its own.
+   * The state of the attempt the page's history entry left for, so only the
+   * page that left treats it as abandoned when it comes back to that entry
+   * without a callback (back navigation, also from the back/forward cache);
+   * a tab opened from it has a history of its own. Where the browser names
+   * its history entries (the Navigation API), the note is kept in
+   * `tabStorage` with that entry's key, and the app's own `history.state`
+   * stays as it is; otherwise a plain-object `history.state` carries it.
    * `undefined` without a history (outside a browser): then any start may,
    * as before 0.9.0.
    */
   const leavingKey = `sempods.leaving:${namespace}`;
+  function entryKey(): string | undefined {
+    try {
+      const key = (
+        globalThis as {
+          navigation?: { currentEntry?: { key?: unknown } | null };
+        }
+      ).navigation?.currentEntry?.key;
+      return typeof key === 'string' && key !== '' ? key : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  function plain(value: unknown): value is Record<string, unknown> | null {
+    if (value === null) return true;
+    if (typeof value !== 'object') return false;
+    const prototype: unknown = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  }
   function leftFrom(): string | null | undefined {
+    const key = entryKey();
+    if (key) {
+      try {
+        const note: unknown = JSON.parse(
+          tabMemory()?.getItem(leavingKey) ?? 'null',
+        );
+        if (
+          note !== null &&
+          typeof note === 'object' &&
+          (note as { entry?: unknown }).entry === key &&
+          typeof (note as { state?: unknown }).state === 'string'
+        )
+          return (note as { state: string }).state;
+      } catch {
+        // Unreadable: the history state may still carry it.
+      }
+    }
     try {
       const history = globalThis.history;
-      if (!history) return undefined;
-      const state: unknown = history.state;
-      const noted =
-        state !== null && typeof state === 'object'
-          ? (state as Record<string, unknown>)[leavingKey]
-          : undefined;
+      if (!history && !key) return undefined;
+      const state: unknown = history?.state;
+      const noted = plain(state) ? state?.[leavingKey] : undefined;
       return typeof noted === 'string' ? noted : null;
     } catch {
       return null;
     }
   }
-  /** Notes the attempt in the current history entry, keeping its state. */
+  /** Notes the attempt for the current history entry; see `leftFrom`. */
   function noteLeaving(state: string) {
+    const key = entryKey();
+    if (key) {
+      try {
+        const memory = tabMemory();
+        const note = JSON.stringify({ entry: key, state });
+        memory?.setItem(leavingKey, note);
+        if (memory?.getItem(leavingKey) === note) return;
+      } catch {
+        // Noted in the history state instead.
+      }
+    }
     try {
       const history = globalThis.history;
       const current: unknown = history?.state;
-      // Another value than an object cannot carry the note: unnoted, this
-      // tab's return waits as another tab's would.
-      if (current !== null && typeof current !== 'object') return;
+      // A router's own value (a string, an array, a class instance) is left
+      // as it is: unnoted, this tab's return waits as another tab's would.
+      if (!plain(current)) return;
       history?.replaceState({ ...current, [leavingKey]: state }, '');
     } catch {
       // Unnoted as well.
@@ -2135,12 +2181,18 @@ export function createBrowserRuntime(
           );
           current(e, before);
         }
+        // A silent first sign-in follows a sign-in another tab has under
+        // way for this Pod, rather than replacing its attempt.
+        const follows =
+          intent === 'silent' &&
+          saved?.value.kind === 'authorizing' &&
+          saved.value.attempt.expiresAt > Date.now();
         if (saved?.id === id) {
           // This connection's own record, which an announcement did not
           // bring yet (the default Pod's stable id): a session another tab
           // stored is this tab's too; otherwise the attempt replaces it, as
           // it replaces an interrupted code exchange.
-          if (holdsSession(saved.value)) {
+          if (follows || holdsSession(saved.value)) {
             await serial(e, async () => {
               adopt(e, saved);
             });
@@ -2152,13 +2204,15 @@ export function createBrowserRuntime(
           preparing.delete(id);
           admit(saved);
           const joined = entries.get(saved.id);
-          if (joined) return { joined, session: holdsSession(saved.value) };
+          if (joined)
+            return { joined, session: follows || holdsSession(saved.value) };
         }
         return { prepared: await store() };
       });
       if ('joined' in outcome) {
         // Another tab signed in to this Pod meanwhile (or is renewing that
-        // session): it is this tab's too, without leaving for the Pod.
+        // session, or signing in while this one would sign in silently): it
+        // is this tab's too, without leaving for the Pod.
         if (outcome.session) return;
         // A remembered address, or a sign-in under way or interrupted in
         // another tab: this sign-in continues on that connection, replacing

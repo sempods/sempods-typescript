@@ -11,6 +11,7 @@ import type { PodFetch } from '@sempods/client-sdk';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
+  callback,
   deferred,
   fixture,
   fixtureNamespace,
@@ -778,23 +779,71 @@ it('restores an earlier grant another tab resumed under its own client', async (
 
 describe('a re-authorization another tab is away for', () => {
   /** Tab a leaves for a re-authorization and is at the Pod; tab b is closed. */
-  async function away(options: Partial<BrowserRuntimeOptions> = {}) {
-    const t = await tabs(memoryChannels(), { options });
+  async function away(
+    options: Partial<BrowserRuntimeOptions> = {},
+    state: unknown = { route: 'tasks' },
+  ) {
+    const tabA = memoryStorage();
+    const t = await tabs(memoryChannels(), {
+      options: { ...options, tabStorage: tabA },
+    });
     t.b.dispose();
     // Tab a's history entry, with its router's state.
-    const historyA = memoryHistory({ route: 'tasks' });
+    const historyA = memoryHistory(state);
     vi.stubGlobal('history', historyA);
     await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
     t.a.dispose();
-    const start = async (history = memoryHistory()) => {
+    const start = async (
+      history = memoryHistory(),
+      tabStorage = memoryStorage(),
+    ) => {
       vi.stubGlobal('history', history);
-      const runtime = createBrowserRuntime(t.options);
+      const runtime = createBrowserRuntime({ ...t.options, tabStorage });
       runtimes.push(runtime);
       await runtime.initialize();
       return runtime;
     };
-    return { t, historyA, start };
+    return { t, tabA, historyA, start };
   }
+  /** The Navigation API's name for the current history entry. */
+  const onEntry = (key: string) =>
+    vi.stubGlobal('navigation', { currentEntry: { key } });
+  it.each([
+    ['a string', 'tasks'],
+    ['an array', ['tasks']],
+    ['a Map', new Map([['screen', 'tasks']])],
+  ])(
+    'resumes it under %s as router state where history entries are named, leaving that state as it is',
+    async (_, state) => {
+      onEntry('entry-a');
+      const { t, tabA, historyA, start } = await away({}, state);
+      expect(historyA.state).toBe(state);
+      // A tab opened from it copies its tab storage, on an entry of its own.
+      const copy = memoryStorage();
+      tabA.map.forEach((value, key) => copy.setItem(key, value));
+      onEntry('entry-b');
+      const opened = await start(memoryHistory(), copy);
+      expect(t.session(opened)).toMatchObject({
+        kind: 'ended',
+        problem: 'interrupted',
+      });
+      onEntry('entry-a');
+      const again = await start(historyA, tabA);
+      await vi.waitFor(() =>
+        expect(t.session(again)).toMatchObject({ kind: 'active' }),
+      );
+      expect(historyA.state).toBe(state);
+    },
+  );
+  it('leaves a router’s string state alone where history entries are not named; the attempt then waits', async () => {
+    const { t, historyA, start } = await away({}, 'tasks');
+    expect(historyA.state).toBe('tasks');
+    const again = await start(historyA);
+    expect(t.session(again)).toMatchObject({
+      kind: 'ended',
+      problem: 'interrupted',
+    });
+  });
   it('is left to that tab by a tab that starts meanwhile or is opened from it', async () => {
     const { t, start } = await away();
     const c = await start();
@@ -1181,6 +1230,74 @@ describe('one saved connection per Pod across tabs', () => {
     const saved = await records(factory);
     expect(saved).toHaveLength(1);
     expect(saved[0]?.value).toMatchObject({ kind: 'authorizing' });
+  });
+  it('lets a silent first sign-in follow the one another tab started at the same time', async () => {
+    const channels = memoryChannels();
+    const factory = new IDBFactory();
+    const identity = {
+      kind: 'did-web' as const,
+      clientId: 'did:web:app.example',
+      redirectUri: callback,
+    };
+    const f = fixture({
+      identity,
+      preset: { podUrl: pod },
+      firstSignIn: 'silent',
+      preferences: null,
+      locks: memoryLocks(),
+      openStore: (namespace) => openSessionStore(namespace, factory, channels),
+    });
+    f.setToken(async () =>
+      Response.json({
+        access_token: jwt({ client_id: identity.clientId }),
+        token_type: 'Bearer',
+        refresh_token: 'one',
+      }),
+    );
+    // Both fresh tabs start before either reaches the Pod.
+    const discovery = deferred<void>();
+    let discovering = 0;
+    const held: typeof f.fetch = vi.fn(async (url, init) => {
+      if (url.endsWith('/.well-known/oauth-protected-resource')) {
+        discovering++;
+        await discovery.promise;
+      }
+      return f.fetch(url, init);
+    });
+    const open = () => {
+      const runtime = createBrowserRuntime({
+        ...f.options,
+        fetch: held,
+        tabStorage: memoryStorage(),
+      });
+      runtimes.push(runtime);
+      return runtime;
+    };
+    const tabsStarted = [open(), open()];
+    const started = Promise.all(tabsStarted.map((r) => r.initialize()));
+    await vi.waitFor(() => expect(discovering).toBeGreaterThanOrEqual(2));
+    discovery.resolve();
+    await started;
+    const silentAttempts = f.navigate.mock.calls.filter(
+      ([url]) => new URL(url).searchParams.get('prompt') === 'none',
+    );
+    expect(silentAttempts).toHaveLength(1);
+    const left = tabsStarted.find(
+      (r) => r.getSnapshot()[0]?.session.kind === 'leaving',
+    )!;
+    const other = tabsStarted.find((r) => r !== left)!;
+    left.dispose();
+    await settleLease();
+    const back = f.returned();
+    runtimes.push(back);
+    expect(await back.initialize()).toMatchObject({
+      interaction: 'completed',
+    });
+    await vi.waitFor(() =>
+      expect(other.getSnapshot()).toMatchObject([
+        { session: { kind: 'active' } },
+      ]),
+    );
   });
   it('leaves the saved connections alone when a first sign-in cannot list them', async () => {
     const { channels, freeze } = freezable();
