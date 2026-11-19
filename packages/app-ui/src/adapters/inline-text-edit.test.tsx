@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   act,
@@ -122,5 +122,50 @@ it('dismisses a departure during a pending write once it has settled', async () 
   expect(onDismiss).not.toHaveBeenCalled();
   rerender(<Field onDismiss={onDismiss} />);
   await landed();
+  expect(onDismiss).toHaveBeenCalledOnce();
+});
+
+it('keeps Escape from an enclosing dialog while pending', () => {
+  const onCancel = vi.fn();
+  const onEnclosingKey = vi.fn();
+  render(<Field onCancel={onCancel} onEnclosingKey={onEnclosingKey} pending />);
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+  expect(onCancel).not.toHaveBeenCalled();
+  expect(onEnclosingKey).not.toHaveBeenCalled();
+});
+
+it('leaves an input method its Escape', () => {
+  const onCancel = vi.fn();
+  render(<Field onCancel={onCancel} />);
+  fireEvent.keyDown(screen.getByRole('textbox'), {
+    key: 'Escape',
+    isComposing: true,
+  });
+  expect(onCancel).not.toHaveBeenCalled();
+});
+
+it('keeps the focus through replayed StrictMode effects', async () => {
+  const returnFocus = vi.fn();
+  render(
+    <StrictMode>
+      <Field returnFocus={returnFocus} />
+    </StrictMode>,
+  );
+  await landed();
+  expect(returnFocus).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(screen.getByRole('textbox'));
+});
+
+it('dismisses on a press beside it that moves no focus', () => {
+  // A tap on text on a phone leaves the focus in the input.
+  const onDismiss = vi.fn();
+  render(
+    <>
+      <Field onDismiss={onDismiss} />
+      <p>Konsum</p>
+    </>,
+  );
+  fireEvent.pointerDown(screen.getByText('Konsum'));
+  expect(document.activeElement).toBe(screen.getByRole('textbox'));
   expect(onDismiss).toHaveBeenCalledOnce();
 });

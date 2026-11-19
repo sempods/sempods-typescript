@@ -6722,11 +6722,38 @@ async function rename({ browser, origin, engine }) {
         await page.getByRole('heading', { name: 'Konsum' }).click();
         await gone(field(page));
         // Changing the list asks about the parked name.
-        await page.getByRole('button', { name: 'Switch to personal' }).click();
+        await page.getByRole('button', { name: 'Switch list' }).click();
         const asked = await shown(page.getByRole('alertdialog'), 3000);
         if (asked) await answerLeave(page, 'keep');
         const kept = await page.getByText('Not saved', { exact: true }).count();
         return { pass: asked && kept === 1, asked, kept };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'removed-row-leaves-no-guard', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        // Ticking is a press beside the field: it parks the name.
+        await page
+          .getByRole('checkbox', { name: `Bought: ${BOOKS}` })
+          .locator('xpath=ancestor::label[1]')
+          .click();
+        await gone(field(page));
+        await page.getByRole('button', { name: `Delete: ${BOOKS}` }).click();
+        await page
+          .getByRole('alertdialog')
+          .getByRole('button', { name: 'Delete' })
+          .click();
+        await gone(page.getByRole('button', { name: `Delete: ${BOOKS}` }));
+        // Its parked name has nothing left to rename: no question.
+        await page.getByRole('button', { name: 'Switch list' }).click();
+        const asked = await shown(page.getByRole('alertdialog'), 2000);
+        if (asked) await answerLeave(page, 'keep');
+        // Back to the first list for the next checks.
+        await page.getByRole('button', { name: 'Switch list' }).click();
+        await trigger(page, NEWSLETTER).waitFor();
+        return { pass: !asked, asked };
       }),
     );
     results.push(
@@ -6960,8 +6987,7 @@ async function rename({ browser, origin, engine }) {
         await page.getByRole('menuitem', { name: 'Rename' }).click();
         await input(page).waitFor();
         await settle(page);
-        await page.waitForTimeout(600);
-        const afterMenu = await focused(page);
+        const afterMenu = await focusUntil(page, /^Rename: /, focused);
         const openAfterMenu = await field(page).isVisible();
         // This shape keeps a changed field open on a press beside it.
         await page.keyboard.type('Return the books');
@@ -7049,7 +7075,9 @@ async function rename({ browser, origin, engine }) {
           const overflow = await p.evaluate(
             () => document.documentElement.scrollWidth - innerWidth,
           );
-          // A tap on text beside it, which takes no focus on a phone.
+          // A tap on text beside it. Emulated touch moves the focus as a
+          // desktop press does; iOS, where it does not, is not covered here
+          // (the component's own test sends a press without a focus change).
           await p.getByRole('heading', { name: 'Konsum' }).tap();
           const closed = await gone(field(p));
           return {

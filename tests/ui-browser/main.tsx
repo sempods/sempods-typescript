@@ -806,19 +806,24 @@ function RenameGate({ menu }: { readonly menu: boolean }) {
   );
 }
 
-/** A guarded change of the list: the leave policy asks about drafts. */
+/**
+ * A guarded change to the other list: the leave policy asks about drafts.
+ */
 function SwitchList() {
   const actions = useApp();
+  const { connections, activeId } = useAppState();
+  const current = connections.find((c) => c.id === activeId)?.selectedContext;
+  const base = location.origin + '/alice/_system/contexts/';
   return (
     <button
       type="button"
       onClick={() =>
         void actions.selectContext(
-          location.origin + '/alice/_system/contexts/personal',
+          base + (current === base + 'work' ? 'personal' : 'work'),
         )
       }
     >
-      Switch to personal
+      Switch list
     </button>
   );
 }

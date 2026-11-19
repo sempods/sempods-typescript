@@ -1174,9 +1174,13 @@ export function ShoppingList(props: {
   const names = new Map(
     items.map((item) => [item.iri, mutate.for(item).data.title]),
   );
-  // A changed name is unsaved work: changing the list or Pod asks first.
+  // A changed name of a shown item is unsaved work: changing the list or
+  // Pod asks first. The draft of an item removed meanwhile has nothing left
+  // to rename.
   useDraftGuard(
-    [...drafts].some(([iri, draft]) => draft !== names.get(iri)),
+    [...drafts].some(
+      ([iri, draft]) => names.has(iri) && draft.trim() !== names.get(iri),
+    ),
     () => {
       setDrafts(new Map());
       setOpen(null);
@@ -1247,7 +1251,7 @@ function ItemRow(props: {
   const item = row.data;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
-  const parked = draft !== undefined && draft !== item.title && !saving;
+  const parked = draft !== undefined && draft.trim() !== item.title && !saving;
   const save = async () => {
     const title = (draft ?? '').trim();
     if (!title) return setError(t.required);

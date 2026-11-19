@@ -22,7 +22,8 @@ export function RenameMenuGate() {
     readonly iri: string;
     readonly draft: string;
   } | null>(null);
-  const [saving, setSaving] = useState(false);
+  // The item whose rename is being written.
+  const [saving, setSaving] = useState<string | null>(null);
   const menus = useRef(new Map<string, HTMLButtonElement>());
   const items = list.data?.items ?? [];
   const editing = items.find((item) => item.iri === open?.iri);
@@ -48,9 +49,9 @@ export function RenameMenuGate() {
                   onSave={async () => {
                     const name = open.draft.trim();
                     if (name === title) return close();
-                    setSaving(true);
+                    setSaving(item.iri);
                     const outcome = await row.update({ title: name });
-                    setSaving(false);
+                    setSaving(null);
                     if (outcome.kind === 'saved') close();
                   }}
                   onCancel={close}
@@ -58,7 +59,7 @@ export function RenameMenuGate() {
                     if (open.draft === title) close();
                   }}
                   returnFocus={() => menus.current.get(item.iri)?.focus()}
-                  pending={saving}
+                  pending={saving === item.iri}
                   readOnly={!row.canMutate}
                 >
                   <UpdateNotice {...row.notice} quiet />

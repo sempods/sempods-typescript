@@ -126,7 +126,8 @@ export function InlineTextEdit({
     const field = root.current;
     // Opened from a menu, the menu keeps the focus until it has closed and
     // then gives it back to its button: take it then, unless the person
-    // acts first. A focus that never comes back leaves it after a while.
+    // acts first. A focus that never comes back leaves it after 5s, room
+    // for an exit animation that a slow engine stretches.
     const late = !field?.contains(document.activeElement);
     const stop = () => {
       document.removeEventListener('focusin', takeOver, true);
@@ -139,7 +140,7 @@ export function InlineTextEdit({
       stop();
       claim();
     };
-    const expiry = late ? setTimeout(stop, 2000) : undefined;
+    const expiry = late ? setTimeout(stop, 5000) : undefined;
     if (late) {
       document.addEventListener('focusin', takeOver, true);
       document.addEventListener('pointerdown', stop, true);
@@ -148,8 +149,12 @@ export function InlineTextEdit({
     return () => {
       stop();
       // Still in place here: the field's nodes leave after this cleanup.
+      // A field still in the page was not closed (StrictMode replays its
+      // effects), so it keeps the focus.
       if (field?.contains(document.activeElement))
-        queueMicrotask(() => latest.current.returnFocus?.());
+        queueMicrotask(() => {
+          if (!field.isConnected) latest.current.returnFocus?.();
+        });
     };
   }, []);
 
@@ -204,11 +209,13 @@ export function InlineTextEdit({
     if (!pending && !readOnly) onSave();
   };
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape' || pending) return;
-    // Escape ends this edit only, not an enclosing dialog.
+    // An input method's Escape ends its composition, not the edit.
+    if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+    // Escape ends this edit only, never an enclosing dialog, also while a
+    // write is pending and the edit cannot end.
     event.stopPropagation();
     event.preventDefault();
-    onCancel();
+    if (!pending) onCancel();
   };
 
   return (
@@ -272,7 +279,7 @@ export function InlineTextEdit({
           {error}
         </p>
       )}
-      {children}
+      {children && <div className="min-w-0 basis-full">{children}</div>}
     </div>
   );
 }
