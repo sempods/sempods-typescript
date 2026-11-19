@@ -5799,10 +5799,51 @@ async function contexts({ browser, origin }) {
     await page
       .getByRole('button', { name: 'List: Einkaufsliste · Privat' })
       .waitFor();
+    const mark = trigger().getByText('K', { exact: true });
+    const markBox = await mark.locator('..').boundingBox();
+    const singleTitle = await trigger()
+      .getByText('Einkaufsliste', { exact: true })
+      .boundingBox();
+    const singleMark = await mark.boundingBox();
     await page.getByRole('button', { name: 'Connect second Pod' }).click();
     await page
       .getByRole('button', { name: 'List: Einkaufsliste · Familie/' })
       .waitFor();
+    const doubleMark = await mark.boundingBox();
+    const title = await trigger()
+      .getByText('Einkaufsliste', { exact: true })
+      .boundingBox();
+    const subtitle = await trigger()
+      .getByText('Familie/', { exact: true })
+      .boundingBox();
+    const singleCenterOffset =
+      singleMark.y +
+      singleMark.height / 2 -
+      (singleTitle.y + singleTitle.height / 2);
+    const lineGap = subtitle.y - (title.y + title.height);
+    const chevron = await trigger().locator('svg').boundingBox();
+    const titleCenter = title.y + title.height / 2;
+    const chevronCenter = chevron.y + chevron.height / 2;
+    const gap = chevron.x - (title.x + title.width);
+    results.push({
+      id: 'trigger-title-layout',
+      pass:
+        singleMark.height === doubleMark.height &&
+        markBox.height >= 40 &&
+        Math.abs(singleCenterOffset) <= 1 &&
+        Math.abs(lineGap) <= 0.5 &&
+        Math.abs(chevronCenter - titleCenter) <= 1 &&
+        gap >= 0 &&
+        gap <= 8,
+      markBox,
+      singleMark,
+      doubleMark,
+      singleCenterOffset,
+      lineGap,
+      gap,
+      titleCenter,
+      chevronCenter,
+    });
     for (const scheme of ['light', 'dark']) {
       step = `grouped-${scheme}`;
       await page.emulateMedia({ colorScheme: scheme });
@@ -5835,7 +5876,7 @@ async function contexts({ browser, origin }) {
             .getByRole('menuitemradio', { name: 'Einkaufsliste', exact: true })
             .count()) === 2 &&
           geometry.every(
-            (r) => r.height >= 52 && r.left >= 0 && r.right <= 375,
+            (r) => r.height >= 44 && r.left >= 0 && r.right <= 375,
           ) &&
           rect.height >= 64 &&
           marked.length === 2 &&
@@ -5870,6 +5911,89 @@ async function contexts({ browser, origin }) {
         pass: await trigger().evaluate((el) => el === document.activeElement),
       });
     }
+    // Contrast, keyboard navigation and selection are checked above. Verify
+    // the hierarchy as rendered by the packed CSS, including the portal.
+    for (const width of [375, 960]) {
+      await page.setViewportSize({ width, height: 812 });
+      for (const rootSize of [16, 18]) {
+        for (const dir of ['ltr', 'rtl']) {
+          await page.evaluate((size) => {
+            document.documentElement.style.fontSize = size + 'px';
+          }, rootSize);
+          await page
+            .getByRole('checkbox', { name: 'Right-to-left layout' })
+            .setChecked(dir === 'rtl');
+          await trigger().click();
+          const menu = page.getByRole('menu');
+          await menu.waitFor();
+          const measured = await menu.evaluate((el, dir) => {
+            const edge = dir === 'ltr' ? 'left' : 'right';
+            const sign = dir === 'ltr' ? 1 : -1;
+            return Array.from(el.querySelectorAll('[role=group]'), (group) => {
+              const heading = group.querySelector(
+                '[data-slot=dropdown-menu-label]',
+              );
+              const range = document.createRange();
+              range.selectNodeContents(heading);
+              const headingEdge = range.getBoundingClientRect()[edge];
+              return Array.from(
+                group.querySelectorAll('[role=menuitemradio]'),
+                (row) => {
+                  const label = row.querySelector('[slot=label]');
+                  const badge = row.querySelector('[data-slot=badge]');
+                  const indicator = row.querySelector(
+                    '[data-slot=dropdown-menu-radio-item-indicator]',
+                  );
+                  const preceding = (badge ?? label).getBoundingClientRect();
+                  const check = indicator.getBoundingClientRect();
+                  return {
+                    height: row.getBoundingClientRect().height,
+                    short: label.textContent === 'Einkaufsliste',
+                    indent:
+                      sign *
+                      (label.getBoundingClientRect()[edge] - headingEdge),
+                    trailingGap:
+                      dir === 'ltr'
+                        ? check.left - preceding.right
+                        : preceding.left - check.right,
+                  };
+                },
+              );
+            }).flat();
+          }, dir);
+          const groupGap = await menu
+            .getByRole('group')
+            .evaluateAll(
+              ([first, second]) =>
+                second.getBoundingClientRect().top -
+                first.getBoundingClientRect().bottom,
+            );
+          results.push({
+            id: `context-layout-${width}-${rootSize}-${dir}`,
+            groupGap,
+            pass:
+              groupGap >= rootSize / 2 - 1 &&
+              measured.length === 4 &&
+              measured.every(
+                (row) =>
+                  Math.abs(row.indent - rootSize / 2) < 1 &&
+                  row.trailingGap >= 0 &&
+                  (row.short
+                    ? Math.abs(row.height - rootSize * 2.75) < 1
+                    : row.height >= rootSize * 2.75),
+              ),
+            measured,
+          });
+          await page.keyboard.press('Escape');
+        }
+      }
+    }
+    await page
+      .getByRole('checkbox', { name: 'Right-to-left layout' })
+      .uncheck();
+    await page.evaluate(() =>
+      document.documentElement.style.removeProperty('font-size'),
+    );
     step = 'keyboard-reaches-last-row';
     // A short phone viewport: the long names wrap and the popup scrolls.
     await page.setViewportSize({ width: 375, height: 400 });
