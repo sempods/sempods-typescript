@@ -744,7 +744,10 @@ explicit Pod read (`BoundPod.sparql.select`/`construct` or `find`, also through
 ## Durable sessions and refresh
 
 IndexedDB stores versioned validated records with compare-and-swap revisions.
-Web Locks permit one active runtime per application configuration on an origin.
+Tabs of the same app share durable sessions when their store announces
+changes. A store without change notifications uses an exclusive lease, and a
+second tab reports `busy`; see [several tabs](#several-tabs) for refresh
+coordination and compatibility with older SDKs.
 The storage/lock namespace is the identity kind plus the did:web `clientId`, or
 for dynamic identities the `redirectUri`. Display name, object property order and
 scope policy do not affect it. Restored grants are evaluated against the current
