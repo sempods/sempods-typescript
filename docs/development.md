@@ -228,7 +228,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     the app's stylesheet and under a host that imports only Tailwind's theme
     and utilities, where a native button keeps its face; at rest, hovered,
     focused by keyboard and open they paint the same surface, outline and
-    ring under both, in light, dark and forced colors.
+    ring under both, in light, dark and forced colors (there without the
+    outline's colour, which follows the text).
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

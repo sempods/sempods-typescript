@@ -6226,7 +6226,8 @@ async function ghost({ browser, origin, engine }) {
         outline:
           s.outlineStyle === 'none'
             ? 'none'
-            : `${s.outlineWidth} ${s.outlineStyle} ${s.outlineColor} ${s.outlineOffset}`,
+            : `${s.outlineWidth} ${s.outlineStyle} ${s.outlineOffset}`,
+        outlineColor: s.outlineStyle === 'none' ? 'none' : s.outlineColor,
         shadow: s.boxShadow,
         color: s.color,
       };
@@ -6279,7 +6280,11 @@ async function ghost({ browser, origin, engine }) {
         look['Ghost menu'].open = await paint(target('Ghost menu'));
         await page.keyboard.press('Escape');
         await hidden(page.getByRole('menu'));
+        // The menu hands the focus back to its button after it closes; the
+        // blur waits for that, so no focus outline is left for the hover.
+        await focusUntil(page, /Ghost menu/);
         await page.evaluate(() => document.activeElement?.blur());
+        await focusUntil(page, /^body$/);
         for (const name of names) {
           await target(name).hover();
           await settle(page);
@@ -6294,11 +6299,18 @@ async function ghost({ browser, origin, engine }) {
       name === 'Ghost menu'
         ? ['rest', 'focus', 'open', 'hover']
         : ['rest', 'focus', 'hover'];
-    // What a host's reset decides: the surface, the outline and the ring.
-    const drawn = ({ background, outline, shadow }) =>
-      JSON.stringify({ background, outline, shadow });
     for (const [mode, media] of Object.entries(modes)) {
       const forced = media.forcedColors === 'active';
+      // What a host's reset decides: the surface, the outline and the ring.
+      // In forced colors Firefox draws a link's outline in its text colour,
+      // which a host without Preflight leaves as the browser's link colour.
+      const drawn = ({ background, outline, outlineColor, shadow }) =>
+        JSON.stringify({
+          background,
+          outline,
+          shadow,
+          ...(forced ? {} : { outlineColor }),
+        });
       const app = seen[`${mode}-app`];
       const none = seen[`${mode}-none`];
       results.push({
