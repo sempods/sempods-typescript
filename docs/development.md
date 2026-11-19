@@ -222,7 +222,14 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     view marks neither view's link, and the current ghost link keeps the
     other link's text colour on a surface of its own with an underline, rest
     and hovered, apart from the other link hovered, on both palettes in all
-    six action combinations, light and dark.
+    six action combinations, light and dark;
+  - ghost actions without Preflight (#392): a `Button`, an icon `LinkButton`,
+    an `ActionButton` and `HeaderMenu`'s button rest without a surface under
+    the app's stylesheet and under a host that imports only Tailwind's theme
+    and utilities, where a native button keeps its face; at rest, hovered,
+    focused by keyboard and open they paint the same surface, outline and
+    ring under both, in light, dark and forced colors (there without the
+    outline's colour, which follows the text).
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay
