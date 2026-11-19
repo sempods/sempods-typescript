@@ -29,6 +29,7 @@ it('exports the adapters, the router and the shadcn/ui components', async () => 
     'ComboboxTrigger',
     'ContextSwitch',
     'DateChooser',
+    'DeleteIcon',
     'Dialog',
     'DialogClose',
     'DialogDescription',

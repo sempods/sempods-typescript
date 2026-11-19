@@ -35,10 +35,14 @@
 // Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
 // button; the checks swap the stylesheet for no-preflight.css, a host that
 // imports only Tailwind's theme and utilities (#392).
+// With `?screen=delete`, the page is the README's delete actions, a row's
+// RemoveButton with its default icon beside the bulk action's DeleteIcon,
+// and a RemoveButton whose children replace the icon (#389).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
-// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, and the
+// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, the delete
+// actions, delete-actions.tsx, and the
 // address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
@@ -58,6 +62,7 @@ import {
   AppAccess,
   LoadNotice,
   PodChooser,
+  RemoveButton,
   SempodsProvider,
   TargetScreen,
   useAppState,
@@ -71,6 +76,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  DeleteIcon,
   ChipGroup,
   Dialog,
   DialogDescription,
@@ -94,6 +100,7 @@ import { QuickEdit } from './quick-edit';
 import { Workspace } from './workspace';
 import { ViewTabs } from './view-tabs';
 import { ConfirmDialog } from './confirm-dialog';
+import { DeleteActions } from './delete-actions';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
@@ -255,6 +262,7 @@ const tabs = settings.get('screen') === 'tabs';
 const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
+const deletes = settings.get('screen') === 'delete';
 // Long translated editor actions, with `lang=de` (#401).
 const longLabels =
   settings.get('labels') === 'long'
@@ -391,6 +399,8 @@ function App() {
         <TabsGate />
       ) : ghosts ? (
         <GhostGate />
+      ) : deletes ? (
+        <DeleteGate />
       ) : confirmation ? (
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : menuConfirm ? (
@@ -863,6 +873,29 @@ function GhostGate() {
           Native
         </button>
       </div>
+    </main>
+  );
+}
+
+/**
+ * The README's delete actions (`?screen=delete`, #389) and an existing
+ * caller whose children, a larger icon and a text, replace RemoveButton's
+ * icon. Nothing is removed here.
+ */
+function DeleteGate() {
+  return (
+    <main className="gate-main grid gap-4">
+      <DeleteActions
+        title="Milk"
+        canRemove
+        remove={() => {}}
+        done={2}
+        clearDone={() => {}}
+      />
+      <RemoveButton label="Remove: Bread" onRemove={() => {}}>
+        <DeleteIcon size="1.25rem" />
+        Remove
+      </RemoveButton>
     </main>
   );
 }

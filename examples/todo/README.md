@@ -29,9 +29,12 @@ existing provider instead.
 `recipes/pod-overview.tsx` (a Pod overview with on-demand Contexts, plus
 creating and editing in an explicit Context), `recipes/overview-toggle.tsx` (ticking tasks on overview rows in
 their own Contexts with one click, through `usePodList` and `useContextUpdate`), `recipes/task-with-note.tsx` (one input
-written into a shared and a personal Context) and `recipes/clear-done.tsx`
+written into a shared and a personal Context), `recipes/clear-done.tsx`
 (deleting all done tasks after one confirmation, stopping safely at the first
-conflict, uncertain answer or changed target) are further copyable screens,
+conflict, uncertain answer or changed target) and
+`recipes/clear-done-overview.tsx` (the same across the Contexts of a Pod,
+with the counts by area and the read-only rows kept; both share
+`recipes/remove-rows.tsx`) are further copyable screens,
 built from the same kit, with its `Checkbox` as the row tick.
 
 The default palette is the kit's sage in light and dark mode, shared by the app

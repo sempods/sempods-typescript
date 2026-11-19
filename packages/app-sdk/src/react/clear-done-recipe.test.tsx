@@ -105,7 +105,7 @@ async function setup(
 
 const clear = () =>
   fireEvent.click(screen.getByRole('button', { name: 'Clear done tasks' }));
-const question = () => screen.findByRole('alertdialog');
+const question = () => screen.findByRole('dialog');
 const confirm = async () =>
   fireEvent.click(
     within(await question()).getByRole('button', { name: 'Delete' }),
@@ -120,7 +120,7 @@ it('asks with the captured number and sends nothing on Cancel', async () => {
   fireEvent.click(
     within(await question()).getByRole('button', { name: 'Cancel' }),
   );
-  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
   expect(deletes).toEqual([]);
 });
 
@@ -132,8 +132,34 @@ it('removes every captured done row one after the other and keeps open ones', as
     (await screen.findByText('3 tasks deleted.')).getAttribute('role'),
   ).toBe('status');
   expect(deletes).toEqual(['urn:a', 'urn:b', 'urn:d']);
+  // Nothing is left to delete: the summary takes the focus.
+  await waitFor(() =>
+    expect(document.activeElement?.textContent).toBe('3 tasks deleted.'),
+  );
   await waitFor(() => expect(screen.queryByText(/Milk/)).toBeNull());
   expect(screen.getByText(/Eggs/)).toBeTruthy();
+});
+
+it('deletes one row with its plain RemoveButton, named for the task', async () => {
+  const { deletes } = await setup();
+  const row = screen.getByRole('button', { name: 'Delete: Bread' });
+  // The default trash icon, the same one the bulk action shows.
+  expect(row.textContent).toBe('');
+  expect(row.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+  expect(
+    screen
+      .getByRole('button', { name: 'Clear done tasks' })
+      .querySelector('svg')
+      ?.getAttribute('aria-hidden'),
+  ).toBe('true');
+  fireEvent.click(row);
+  fireEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Delete',
+    }),
+  );
+  await waitFor(() => expect(screen.queryByText(/Bread/)).toBeNull());
+  expect(deletes).toEqual(['urn:b']);
 });
 
 it('uses the singular for one row', async () => {

@@ -8,6 +8,8 @@
     "src/main.tsx",
     "src/style.d.ts",
     "recipes/clear-done.tsx",
+    "recipes/clear-done-overview.tsx",
+    "recipes/remove-rows.tsx",
     "recipes/overview-toggle.tsx",
     "recipes/pod-overview.tsx",
     "recipes/task-with-note.tsx"

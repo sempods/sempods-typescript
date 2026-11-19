@@ -949,8 +949,8 @@ export function ResourceEditor<D, U = D>({
  * `disabled={!row.canMutate}` and `onRemove={row.remove}` for `row = mutate.for(item)`;
  * the outcome shows where the hook's notice is. A button that becomes disabled
  * while asking withdraws the question. Without children it is a quiet trash
- * icon with a 44px target, named Delete or `label`; `className` overrides its
- * look.
+ * icon (the kit's `DeleteIcon`, 1rem) with a 44px target, named Delete or
+ * `label`; children replace the icon, `className` overrides its look.
  */
 export function RemoveButton({
   onRemove,
@@ -1012,8 +1012,14 @@ export function RemoveButton({
   );
 }
 
+// The kit's `DeleteIcon`, Lucide's `Trash2` (ISC; derived from Feather, MIT;
+// see NOTICE), copied so the SDK needs no icon package: the same outline and
+// 1rem, so it follows the root font size; an icon among children keeps its
+// own size. app-ui's tests keep the two equal.
 const trash = (
   <svg
+    width="1rem"
+    height="1rem"
     viewBox="0 0 24 24"
     aria-hidden="true"
     fill="none"
@@ -1022,6 +1028,10 @@ const trash = (
     strokeLinecap="round"
     strokeLinejoin="round"
   >
-    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M3 6h18" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
   </svg>
 );

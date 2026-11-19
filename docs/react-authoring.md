@@ -424,19 +424,15 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
 - `RemoveButton` asks with `ResourceEditor`'s delete dialog and calls
   `onRemove`, as it was when asked, only after confirmation (a row read again
   meanwhile shows as a conflict). A quiet trash icon with a 44px target, named
-  **Delete** or `label`; children replace the icon, `className` its look.
+  **Delete** or `label`; children replace the icon, `className` its look. The
+  icon is the UI kit's `DeleteIcon` (Lucide's `Trash2`, 1rem), so a bulk
+  action beside it shows the same glyph.
 - The hook returns only `{ for, unresolved }`, like `useContextUpdate`.
   Use `row.canMutate` for each row's availability and `row.notice` for its
   feedback. An IRI-only handle (`mutate.for(iri)`) exposes recovery and always
   has `canMutate: false`, because there is no snapshot to write from.
-- Several rows from one decision (**Clear done tasks**): capture the shown
-  rows' `row.remove` commands (typed `FieldUpdateRow<D>['remove']`), confirm
-  their number, then `await` one after the other and stop at the first result
-  that is not `removed`; never retry or resend the rest. Each command deletes
-  only the version its row showed, in its own target, and sends nothing once
-  that target or access changed. The
-  [clear-done recipe](../examples/todo/recipes/clear-done.tsx) reports partial
-  completion and leaves the stopped row's recovery to `UnresolvedNotices`.
+- Several rows from one decision (**Clear done tasks**): see
+  [several rows from one decision](#several-rows-from-one-decision).
 - Create with `useCreation`; pass `iri` instead of `collection` when its
   identity is already known. Portable raw JSON-LD creation stays in
   `client-sdk/edit.prepareCreation`; its caller owns the UI recovery lifecycle.
@@ -936,6 +932,42 @@ list.data?.items.map((item) => {
   ask first. Another active connection retires them.
 
 See the [one-click recipe](../examples/todo/recipes/overview-toggle.tsx).
+
+### Several rows from one decision
+
+One confirmation can delete a set of rows, such as **Clear done tasks**,
+in one list (`useFieldUpdate`) or across the readable Contexts of a Pod
+(`useContextUpdate`). Both use the rows' own commands:
+
+- When the question opens, capture the shown rows' `row.remove` commands
+  (typed `FieldUpdateRow<D>['remove']`; a `ContextUpdateRow` has the same).
+  A row completed or added later is not part of the decision. Each command
+  deletes only the version its row showed, in the Context where it was read,
+  so the same IRI in two Contexts is two rows, and a row reopened elsewhere is
+  not deleted.
+- Ask in the compact `Dialog` with the SDK's Cancel and Delete
+  (`controls.cancel`, `controls.remove`) and the total once in the question.
+  Across Contexts, list the areas below it with their counts, and say how many
+  read-only rows are kept when there are any. Add text only when it says
+  something about the scope the question and counts do not. Cancel sends
+  nothing.
+- Then `await` one command after the other with a progress line, and stop at
+  the first result that is not `removed`: a change on the Pod, an unconfirmed
+  answer such as a lost response, a refusal, or `not-sent` because the
+  Context, the Pod or access changed. Never retry or resend the rest. Report
+  the confirmed count, the row that stopped and the unsent remainder.
+- The stopped row keeps its SDK recovery. Render `UnresolvedNotices` with the
+  rows the screen shows, so its notice stays reachable when it leaves a
+  filtered view, for example a reopened row in a view of done tasks.
+- A single row is deleted with a plain `RemoveButton`; the bulk action shows
+  the kit's `DeleteIcon`, the same glyph. Each button's name says what it
+  deletes; the app decides which rows the bulk action includes, the areas'
+  names and the texts.
+
+The [clear-done recipe](../examples/todo/recipes/clear-done.tsx) covers one
+list, the [overview recipe](../examples/todo/recipes/clear-done-overview.tsx)
+the Contexts of a Pod; both share the run, its summary and the dialog in
+[`remove-rows.tsx`](../examples/todo/recipes/remove-rows.tsx).
 
 ### Editing an overview row
 

@@ -98,5 +98,4 @@ ${surfaces} :where(summary) { min-height:44px; padding-block:10px; cursor:pointe
 :where([data-sempods-ui="remove-button"]:hover:not(:disabled)) { color:var(--sp-text); background:color-mix(in srgb,var(--sp-accent) 8%,transparent); }
 :where([data-sempods-ui="remove-button"]:disabled) { opacity:.55; cursor:default; }
 :where([data-sempods-ui="remove-button"]:focus-visible) { outline:2px solid var(--sp-focus); outline-offset:3px; }
-:where([data-sempods-ui="remove-button"]) :where(svg) { width:20px; height:20px; }
 `;

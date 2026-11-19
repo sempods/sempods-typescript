@@ -61,3 +61,9 @@ real PKCE redirects. This establishes package composition and request behavior;
 scale evidence against a local reference server is in #40, and evidence on a
 deployed Pod and in a real browser remains separate in #52, with no new
 device-support claim.
+
+`RemoveButton`'s default glyph (#389) is the path data of Lucide's `trash-2`
+icon from lucide-react 1.72.0 (ISC; Lucide derives it from Feather, MIT; both
+notices are in NOTICE), the icon app-ui exports as `DeleteIcon`. It is copied
+rather than imported, so app-sdk keeps no icon dependency; app-ui's tests
+compare the two renderings.

@@ -773,6 +773,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   provider's locale; days and month buttons are 44px targets. Apply and Remove
   date stay in a bar at the chooser's bottom edge, visible on a phone as it
   opens.
+- **`DeleteIcon`**: the shared delete glyph, Lucide's `Trash2`, 1rem by
+  default (`size` changes it) and always decorative; see
+  [delete actions](#delete-actions).
 - **`ActionButton`**: an app's own action in the theme's variants: `variant`
   `primary` (default), `secondary`, `ghost` or `destructive`; `shape` `pill`
   (56px high), `round-sm` (44px, as `HeaderMenu`'s button, for icon actions
@@ -1075,6 +1078,52 @@ export function SourceRow(props: {
         ]}
       />
     </li>
+  );
+}
+```
+
+### Delete actions
+
+A row's own delete is the SDK's `RemoveButton` without children: a quiet
+trash icon with a 44px target that asks first. An action that deletes several
+rows at once, such as clearing the done tasks, shows the same glyph with
+**`DeleteIcon`**: Lucide's `Trash2`, 1rem by default so it follows the root
+font size, always decorative (`aria-hidden`). Both draw the same outline at
+the same size, without an icon import or size of the app's own. Each button's
+name says what it deletes, and the app decides which rows the bulk action
+includes; its confirmation follows the
+[clear-done recipes](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#several-rows-from-one-decision).
+`RemoveButton`'s children replace its icon, for example a text.
+
+```tsx
+// delete-actions.tsx
+import { RemoveButton } from '@sempods/app-sdk/react';
+import { ActionButton, DeleteIcon } from '@sempods/app-ui';
+
+export function DeleteActions(props: {
+  readonly title: string;
+  readonly canRemove: boolean;
+  readonly remove: () => unknown;
+  readonly done: number;
+  readonly clearDone: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="min-w-0 flex-1 wrap-anywhere">{props.title}</span>
+      <RemoveButton
+        label={`Delete: ${props.title}`}
+        disabled={!props.canRemove}
+        onRemove={props.remove}
+      />
+      <ActionButton
+        variant="secondary"
+        isDisabled={props.done === 0}
+        onPress={props.clearDone}
+      >
+        <DeleteIcon />
+        Clear done tasks
+      </ActionButton>
+    </div>
   );
 }
 ```
@@ -1712,7 +1761,9 @@ links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
 Context, plus fragment entries, a source address without a Context choice and
 a path with two leading slashes; and views as links, their current link
-marked by the router and drawn chosen in every action combination. It uses a loopback fixture Pod: it is not
+marked by the router and drawn chosen in every action combination; and the
+README's delete actions, where `RemoveButton`'s default icon and
+`DeleteIcon` draw the same outline at 1rem under two root font sizes. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
