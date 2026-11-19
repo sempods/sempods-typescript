@@ -1357,6 +1357,39 @@ async function interaction({ browser, origin, engine }) {
         after,
       };
     },
+    // Opening again while the dismissed popover still animates out starts
+    // from the draft, not from the dismissed typed day.
+    async 'calendar-reopen-during-exit'() {
+      await openTask(page);
+      const trigger = page.getByRole('button', { name: /^Start considering:/ });
+      const typed = page.getByRole('textbox', { name: 'Day (YYYY-MM-DD)' });
+      await trigger.click();
+      await typed.fill('2027-12-24');
+      await page.keyboard.press('Escape');
+      const exiting = await page.evaluate(() =>
+        Boolean(
+          document.querySelector('[data-slot=popover-content][data-exiting]'),
+        ),
+      );
+      await trigger.click();
+      await page.getByRole('grid').waitFor();
+      await settle(page);
+      const reopened = await typed.inputValue();
+      const label = await trigger.getAttribute('aria-label');
+      await page.getByRole('button', { name: 'Apply', exact: true }).click();
+      await hidden(page.getByRole('grid'));
+      const applied = await trigger.getAttribute('aria-label');
+      return {
+        pass:
+          reopened === '2026-10-28' &&
+          /28 Oct 2026/.test(label ?? '') &&
+          /28 Oct 2026/.test(applied ?? ''),
+        exiting,
+        reopened,
+        label,
+        applied,
+      };
+    },
     'calendar-targets-375x812': () => calendarTargets(page, origin, 812, tab),
     'calendar-targets-375x560': () => calendarTargets(page, origin, 560, tab),
     // German: month names and Monday first through the SDK locale; the
@@ -5884,6 +5917,322 @@ async function menuDialog({ browser, origin, engine }) {
   return results;
 }
 
+/**
+ * The README's "Not today" action (`?screen=date-choice`, #400): a
+ * DateChoice in a ScreenDialog, with today fixed at 19 November 2026 and a
+ * stored day of 25 November. A preset selects and closes at once; a typed or
+ * picked day waits for Apply; a day that does not exist or comes before the
+ * minimum is marked and disables Apply; Escape keeps the stored day and
+ * returns the focus; Tab stays in the dialog; on a phone every target is
+ * 44px without horizontal overflow.
+ */
+async function dateChoice({ browser, origin, engine }) {
+  const tab = tabKey(engine);
+  const { context, page, errors } = await newPage(browser);
+  const dialog = page.getByRole('dialog', { name: 'Not today' });
+  const trigger = page.getByRole('button', { name: 'Not today', exact: true });
+  const entry = dialog.getByRole('textbox', { name: 'Day (YYYY-MM-DD)' });
+  const apply = dialog.getByRole('button', { name: 'Apply', exact: true });
+  const stored = () =>
+    page.locator('output[data-until]').getAttribute('data-until');
+  /** Opens the action by keyboard, past useDialog's 500ms refocus. */
+  const open = async (viewport = { width: 1280, height: 800 }) => {
+    await page.setViewportSize(viewport);
+    await page.goto(origin + '/?screen=date-choice');
+    await trigger.focus();
+    const opened = Date.now();
+    await page.keyboard.press('Enter');
+    await entry.waitFor();
+    await settle(page);
+    await page.waitForTimeout(Math.max(0, 600 - (Date.now() - opened)));
+  };
+  /** Closed, with the focus back on the action. */
+  const closed = async () => {
+    const away = await gone(dialog);
+    const back = await focusUntil(page, /Not today/, focused);
+    return { away, back, ok: away && back === 'button "Not today"' };
+  };
+  const results = [];
+  try {
+    for (const [name, viewport] of [
+      ['phone', { width: 375, height: 667 }],
+      ['desktop', { width: 1280, height: 800 }],
+    ]) {
+      results.push(
+        await attemptOn(errors, `date-choice-preset-${name}`, async () => {
+          await open(viewport);
+          await dialog.getByRole('button', { name: 'Tomorrow' }).click();
+          const after = await closed();
+          const until = await stored();
+          return {
+            pass: after.ok && until === '2026-11-20',
+            ...after,
+            until,
+          };
+        }),
+      );
+      results.push(
+        await attemptOn(errors, `date-choice-typed-${name}`, async () => {
+          await open(viewport);
+          await entry.fill('2026-12-24');
+          await settle(page);
+          const beforeApply = await stored();
+          const invalid = await entry.getAttribute('aria-invalid');
+          // The calendar follows the typed day to its month.
+          const heading = await dialog.locator('h2').last().textContent();
+          await apply.click();
+          const after = await closed();
+          const until = await stored();
+          return {
+            pass:
+              beforeApply === '2026-11-25' &&
+              invalid === null &&
+              /December 2026/.test(heading ?? '') &&
+              after.ok &&
+              until === '2026-12-24',
+            beforeApply,
+            invalid,
+            heading,
+            ...after,
+            until,
+          };
+        }),
+      );
+    }
+    results.push(
+      await attemptOn(errors, 'date-choice-invalid-and-min', async () => {
+        await open();
+        const marked = async () => ({
+          invalid: await entry.getAttribute('aria-invalid'),
+          applyDisabled: await apply.isDisabled(),
+          message: await entry.evaluate((el) =>
+            (el.getAttribute('aria-describedby') ?? '')
+              .split(' ')
+              .map((id) => document.getElementById(id)?.textContent ?? '')
+              .join(' ')
+              .trim(),
+          ),
+          value: await entry.inputValue(),
+        });
+        await entry.fill('2026-02-30');
+        const impossible = await marked();
+        await entry.fill('2026-11-19');
+        const early = await marked();
+        // Today is before the minimum: shown, but out of reach.
+        const todayCell = await dialog
+          .locator('[role=gridcell] [aria-label*="19 November 2026"]')
+          .getAttribute('aria-disabled');
+        const tomorrowCell = await dialog
+          .locator('[role=gridcell] [aria-label*="20 November 2026"]')
+          .getAttribute('aria-disabled');
+        await page.keyboard.press('Escape');
+        const after = await closed();
+        const until = await stored();
+        return {
+          pass:
+            impossible.invalid === 'true' &&
+            impossible.applyDisabled &&
+            /YYYY-MM-DD/.test(impossible.message) &&
+            impossible.value === '2026-02-30' &&
+            early.invalid === 'true' &&
+            early.applyDisabled &&
+            /^Choose .*20.* or later\.$/.test(early.message) &&
+            early.value === '2026-11-19' &&
+            todayCell === 'true' &&
+            tomorrowCell === null &&
+            after.ok &&
+            until === '2026-11-25',
+          impossible,
+          early,
+          todayCell,
+          tomorrowCell,
+          ...after,
+          until,
+        };
+      }),
+    );
+    // A day picked by keyboard and then Escape: the stored day stays.
+    results.push(
+      await attemptOn(errors, 'date-choice-escape-keyboard', async () => {
+        await open();
+        let day = '';
+        for (let i = 0; i < 10 && !/November 2026/.test(day); i++) {
+          await page.keyboard.press(tab);
+          day = await focused(page);
+        }
+        await page.keyboard.press('ArrowRight');
+        await page.keyboard.press('Enter');
+        await settle(page);
+        const picked = await entry.inputValue();
+        const beforeEscape = await stored();
+        // Tab moves around the dialog and stays in it.
+        let inside = true;
+        const stops = [];
+        for (let i = 0; i < 12; i++) {
+          await page.keyboard.press(tab);
+          // As in focus-trapped-in-dialog: the wrap can take a moment.
+          await page.waitForTimeout(50);
+          stops.push(await focused(page));
+          inside &&= await dialog.evaluate((el) =>
+            el.contains(document.activeElement),
+          );
+        }
+        await page.keyboard.press('Escape');
+        const after = await closed();
+        const until = await stored();
+        return {
+          pass:
+            /25 November 2026/.test(day) &&
+            picked === '2026-11-26' &&
+            beforeEscape === '2026-11-25' &&
+            inside &&
+            after.ok &&
+            until === '2026-11-25',
+          day,
+          picked,
+          beforeEscape,
+          inside,
+          stops,
+          ...after,
+          until,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'date-choice-clear', async () => {
+        await open();
+        await dialog
+          .getByRole('button', { name: 'Remove date', exact: true })
+          .click();
+        const after = await closed();
+        const until = await stored();
+        // Without a stored day there is nothing to remove or apply yet.
+        await trigger.click();
+        await entry.waitFor();
+        const remove = await dialog
+          .getByRole('button', { name: 'Remove date', exact: true })
+          .count();
+        const applyDisabled = await apply.isDisabled();
+        const value = await entry.inputValue();
+        await page.keyboard.press('Escape');
+        await gone(dialog);
+        return {
+          pass:
+            after.ok &&
+            until === 'none' &&
+            remove === 0 &&
+            applyDisabled &&
+            value === '',
+          ...after,
+          until,
+          remove,
+          applyDisabled,
+          value,
+        };
+      }),
+    );
+    // Enter in a typed day submits no form around the choice and applies
+    // nothing; Apply does.
+    results.push(
+      await attemptOn(errors, 'date-choice-enter-in-form', async () => {
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.goto(origin + '/?screen=date-choice');
+        const choice = page.getByRole('group', { name: 'Start' });
+        const typed = choice.getByRole('textbox', { name: 'Day (YYYY-MM-DD)' });
+        const out = page.locator('output[data-start]');
+        await typed.fill('2026-12-24');
+        await typed.press('Enter');
+        await page.waitForTimeout(100);
+        const afterEnter = {
+          start: await out.getAttribute('data-start'),
+          submitted: await out.getAttribute('data-submitted'),
+          value: await typed.inputValue(),
+        };
+        await choice
+          .getByRole('button', { name: 'Apply', exact: true })
+          .click();
+        const afterApply = {
+          start: await out.getAttribute('data-start'),
+          submitted: await out.getAttribute('data-submitted'),
+        };
+        return {
+          pass:
+            afterEnter.start === '2026-11-25' &&
+            afterEnter.submitted === '0' &&
+            afterEnter.value === '2026-12-24' &&
+            afterApply.start === '2026-12-24' &&
+            afterApply.submitted === '0',
+          afterEnter,
+          afterApply,
+        };
+      }),
+    );
+    for (const [width, height] of [
+      [375, 667],
+      [360, 640],
+    ])
+      results.push(
+        await attemptOn(
+          errors,
+          `date-choice-targets-${width}x${height}`,
+          async () => {
+            await page.emulateMedia({ reducedMotion: 'reduce' });
+            await open({ width, height });
+            const boxes = await dialog.evaluate((el) => {
+              const min = (list) =>
+                Math.min(
+                  ...list
+                    .map((e) => e.getBoundingClientRect())
+                    .filter((r) => r.width > 0)
+                    .map((r) => Math.min(r.width, r.height)),
+                );
+              const scroller = el.querySelector('.overflow-y-auto') ?? el;
+              return {
+                buttons: min([...el.querySelectorAll('button')]),
+                days: min([...el.querySelectorAll('[role=gridcell] > *')]),
+                entry: min([...el.querySelectorAll('input')]),
+                fullScreen:
+                  Math.round(el.getBoundingClientRect().width) === innerWidth,
+                overflow:
+                  document.scrollingElement.scrollWidth > innerWidth ||
+                  scroller.scrollWidth > scroller.clientWidth ||
+                  [...el.querySelectorAll('*')].some(
+                    (e) => e.getBoundingClientRect().right > innerWidth + 0.5,
+                  ),
+              };
+            });
+            await apply.scrollIntoViewIfNeeded();
+            const box = await apply.boundingBox();
+            // Scrolled to its edge, a box can end a fraction past it.
+            const applyVisible =
+              !!box && box.y >= 0 && box.y + box.height <= height + 0.5;
+            await page.keyboard.press('Escape');
+            const after = await closed();
+            return {
+              pass:
+                boxes.buttons >= 44 &&
+                boxes.days >= 44 &&
+                boxes.entry >= 44 &&
+                boxes.fullScreen &&
+                !boxes.overflow &&
+                applyVisible &&
+                after.ok,
+              ...boxes,
+              applyVisible,
+              applyBox: box,
+              ...after,
+            };
+          },
+        ),
+      );
+  } finally {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
 export const suites = {
   contexts,
   contextQualifiers,
@@ -5906,6 +6255,7 @@ export const suites = {
   menuDialog,
   viewTabs,
   ghost,
+  dateChoice,
   editorFooter,
   rename,
 };

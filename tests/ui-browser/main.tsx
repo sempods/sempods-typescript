@@ -38,11 +38,13 @@
 // With `?screen=rename`, the page is the README's shopping list whose item
 // names are renamed in their rows (rename-row.tsx, #394); with `&shape=menu`
 // as well, the second shape, a list renamed from its rows' menus.
+// With `?screen=date-choice`, the page is a task with the README's "Not
+// today" action, a DateChoice in a ScreenDialog (#400).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
 // links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, the renamed
-// rows, rename-row.tsx, and the
+// rows, rename-row.tsx, the "Not today" action, not-today.tsx, and the
 // address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
@@ -104,6 +106,7 @@ import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
 import { ShoppingList } from './rename-row';
 import { RenameMenuGate } from './rename-menu';
+import { DateChoiceGate } from './date-choice';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -270,6 +273,7 @@ const renameSettings =
     ? new URLSearchParams(sessionStorage.getItem('rename-gate') ?? '')
     : settings;
 const renaming = renameSettings.get('screen') === 'rename';
+const dateChoice = settings.get('screen') === 'date-choice';
 // Long translated editor actions, with `lang=de` (#401).
 const longLabels =
   settings.get('labels') === 'long'
@@ -412,6 +416,8 @@ function App() {
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : menuConfirm ? (
         <MenuConfirmGate />
+      ) : dateChoice ? (
+        <DateChoiceGate />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (

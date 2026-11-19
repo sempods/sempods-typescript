@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { CalendarDate } from '@internationalized/date';
-import { Dialog as AriaDialog, I18nProvider } from 'react-aria-components';
+import { Dialog as AriaDialog } from 'react-aria-components';
 import { useSdkLocale } from '@sempods/app-sdk/react';
 import { classifyDate } from '@sempods/client-sdk/edit';
 import { cn } from 'cn';
 import { Button } from '../components/button.js';
-import { Calendar } from '../components/calendar.js';
 import { Popover, PopoverTrigger } from '../components/popover.js';
+import { calendarDay } from './calendar-day.js';
+import { DateChoiceBody, type DateChoicePreset } from './date-choice.js';
 import { useAdapterTexts } from './texts.js';
 
 export interface DateChooserProps {
@@ -23,20 +23,26 @@ export interface DateChooserProps {
   /** Offers "Remove date" for a value of an optional field. */
   readonly optional?: boolean;
   readonly isDisabled?: boolean;
-  /** Overrides the texts for no value, Apply and Remove date. */
+  /** Days that select and close in one activation (see `DateChoice`). */
+  readonly presets?: readonly DateChoicePreset[];
+  /** The earliest day as `YYYY-MM-DD` (see `DateChoice`). */
+  readonly min?: string;
+  /** Overrides the texts for no value, Apply, Remove date and typed entry. */
   readonly labels?: {
     readonly none?: string;
     readonly apply?: string;
     readonly remove?: string;
+    readonly typed?: string;
   };
   readonly className?: string;
 }
 
 /**
  * Picks a calendar day without a time or time zone (`CalendarDate`), so the
- * stored day does not depend on the device's zone. The calendar follows the
- * SDK provider's locale (month names, first weekday); days and month buttons
- * are 44px targets. A choice takes effect only with Apply; Escape or a press
+ * stored day does not depend on the device's zone, in a popover that holds
+ * a `DateChoice`. The calendar follows the SDK provider's locale (month
+ * names, first weekday); days and month buttons are 44px targets. A custom
+ * day takes effect only with Apply, a preset at once; Escape or a press
  * beside the chooser keeps the draft.
  */
 export function DateChooser({
@@ -45,16 +51,20 @@ export function DateChooser({
   onChange,
   optional = false,
   isDisabled,
+  presets,
+  min,
   labels,
   className,
 }: DateChooserProps) {
   const t = useAdapterTexts();
-  const { locale, format } = useSdkLocale();
+  const { format } = useSdkLocale();
   const [open, setOpen] = useState(false);
+  // Each opening starts a new choice from the draft, also one that
+  // interrupts the popover's exit, which keeps the old choice mounted.
+  const [opening, setOpening] = useState(0);
   // A stored zoned date-time starts the chooser at the day of its own offset;
   // it is replaced only when a day is applied.
   const day = calendarDay(value);
-  const [picked, setPicked] = useState<CalendarDate | null>(day);
   const shown = value === null ? (labels?.none ?? t.noDate) : show(value);
   // A value that names no real day, or a date-time without a zone, is shown
   // as stored: `Date` would roll 30 February over to 2 March or read the
@@ -80,8 +90,8 @@ export function DateChooser({
       <PopoverTrigger
         isOpen={open}
         onOpenChange={(next) => {
+          if (next) setOpening((n) => n + 1);
           setOpen(next);
-          if (next) setPicked(day);
         }}
       >
         <Button
@@ -98,54 +108,24 @@ export function DateChooser({
           className="w-auto overflow-y-auto p-2"
         >
           <AriaDialog aria-label={label} className="outline-none">
-            {/* React Aria reads the browser's locale unless told otherwise. */}
-            <I18nProvider locale={locale}>
-              <Calendar
-                aria-label={label}
-                autoFocus
-                value={picked}
-                onChange={setPicked}
-                className="[--cell-size:--spacing(11)]"
-              />
-            </I18nProvider>
-            {/* The actions stay at the popover's bottom edge while the
-                calendar scrolls on a short screen, above the days (z-10). */}
-            <div className="sticky -bottom-2 z-20 -mx-2 -mb-2 flex gap-2 border-t bg-popover p-2">
-              {optional && value !== null && (
-                <Button
-                  variant="ghost"
-                  className="h-11 flex-1"
-                  onPress={() => close(null)}
-                >
-                  {labels?.remove ?? t.removeDate}
-                </Button>
-              )}
-              <Button
-                className="h-11 flex-1"
-                isDisabled={!picked}
-                onPress={() => {
-                  if (picked) close(picked.toString());
-                }}
-              >
-                {labels?.apply ?? t.apply}
-              </Button>
-            </div>
+            {/* The actions stay at the popover's bottom edge while
+                the calendar scrolls on a short screen, above the days
+                (z-10). */}
+            <DateChoiceBody
+              key={opening}
+              label={label}
+              value={value}
+              onChange={close}
+              presets={presets}
+              min={min}
+              optional={optional}
+              autoFocus
+              labels={labels}
+              actionsClassName="sticky -bottom-2 z-20 -mx-2 -mb-2 border-t bg-popover p-2"
+            />
           </AriaDialog>
         </Popover>
       </PopoverTrigger>
     </div>
   );
-}
-
-/**
- * The calendar day a stored value names (a day, or the day a zoned date-time
- * names in its own offset), or `null` when it names none or one outside the
- * years 0001–9999 that `CalendarDate` holds.
- */
-export function calendarDay(value: string | null): CalendarDate | null {
-  if (value === null) return null;
-  const parts = classifyDate(value);
-  return parts.kind !== 'unsupported' && parts.year >= 1 && parts.year <= 9999
-    ? new CalendarDate(parts.year, parts.month, parts.day)
-    : null;
 }

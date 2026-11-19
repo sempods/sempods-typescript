@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { calendarDay } from './date-chooser.js';
+import { calendarDay } from './calendar-day.js';
 
 it.each([
   ['2026-10-29', '2026-10-29'],
