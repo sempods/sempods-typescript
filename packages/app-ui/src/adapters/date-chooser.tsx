@@ -59,6 +59,9 @@ export function DateChooser({
   const t = useAdapterTexts();
   const { format } = useSdkLocale();
   const [open, setOpen] = useState(false);
+  // Each opening starts a new choice from the draft, also one that
+  // interrupts the popover's exit, which keeps the old choice mounted.
+  const [opening, setOpening] = useState(0);
   // A stored zoned date-time starts the chooser at the day of its own offset;
   // it is replaced only when a day is applied.
   const day = calendarDay(value);
@@ -84,7 +87,13 @@ export function DateChooser({
   return (
     <div className={cn('grid gap-1.5', className)}>
       <span>{label}</span>
-      <PopoverTrigger isOpen={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        isOpen={open}
+        onOpenChange={(next) => {
+          if (next) setOpening((n) => n + 1);
+          setOpen(next);
+        }}
+      >
         <Button
           variant="outline"
           className="h-11 justify-between text-base font-normal"
@@ -99,11 +108,11 @@ export function DateChooser({
           className="w-auto overflow-y-auto p-2"
         >
           <AriaDialog aria-label={label} className="outline-none">
-            {/* The choice mounts with each opening, so it starts at the
-                draft. The actions stay at the popover's bottom edge while
+            {/* The actions stay at the popover's bottom edge while
                 the calendar scrolls on a short screen, above the days
                 (z-10). */}
             <DateChoiceBody
+              key={opening}
               label={label}
               value={value}
               onChange={close}

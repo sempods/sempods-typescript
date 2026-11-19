@@ -1357,6 +1357,39 @@ async function interaction({ browser, origin, engine }) {
         after,
       };
     },
+    // Opening again while the dismissed popover still animates out starts
+    // from the draft, not from the dismissed typed day.
+    async 'calendar-reopen-during-exit'() {
+      await openTask(page);
+      const trigger = page.getByRole('button', { name: /^Start considering:/ });
+      const typed = page.getByRole('textbox', { name: 'Day (YYYY-MM-DD)' });
+      await trigger.click();
+      await typed.fill('2027-12-24');
+      await page.keyboard.press('Escape');
+      const exiting = await page.evaluate(() =>
+        Boolean(
+          document.querySelector('[data-slot=popover-content][data-exiting]'),
+        ),
+      );
+      await trigger.click();
+      await page.getByRole('grid').waitFor();
+      await settle(page);
+      const reopened = await typed.inputValue();
+      const label = await trigger.getAttribute('aria-label');
+      await page.getByRole('button', { name: 'Apply', exact: true }).click();
+      await hidden(page.getByRole('grid'));
+      const applied = await trigger.getAttribute('aria-label');
+      return {
+        pass:
+          reopened === '2026-10-28' &&
+          /28 Oct 2026/.test(label ?? '') &&
+          /28 Oct 2026/.test(applied ?? ''),
+        exiting,
+        reopened,
+        label,
+        applied,
+      };
+    },
     'calendar-targets-375x812': () => calendarTargets(page, origin, 812, tab),
     'calendar-targets-375x560': () => calendarTargets(page, origin, 560, tab),
     // German: month names and Monday first through the SDK locale; the
@@ -5900,7 +5933,8 @@ async function dateChoice({ browser, origin, engine }) {
   const trigger = page.getByRole('button', { name: 'Not today', exact: true });
   const entry = dialog.getByRole('textbox', { name: 'Day (YYYY-MM-DD)' });
   const apply = dialog.getByRole('button', { name: 'Apply', exact: true });
-  const stored = () => page.locator('output').getAttribute('data-until');
+  const stored = () =>
+    page.locator('output[data-until]').getAttribute('data-until');
   /** Opens the action by keyboard, past useDialog's 500ms refocus. */
   const open = async (viewport = { width: 1280, height: 800 }) => {
     await page.setViewportSize(viewport);
@@ -6094,6 +6128,42 @@ async function dateChoice({ browser, origin, engine }) {
           remove,
           applyDisabled,
           value,
+        };
+      }),
+    );
+    // Enter in a typed day submits no form around the choice and applies
+    // nothing; Apply does.
+    results.push(
+      await attemptOn(errors, 'date-choice-enter-in-form', async () => {
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.goto(origin + '/?screen=date-choice');
+        const choice = page.getByRole('group', { name: 'Start' });
+        const typed = choice.getByRole('textbox', { name: 'Day (YYYY-MM-DD)' });
+        const out = page.locator('output[data-start]');
+        await typed.fill('2026-12-24');
+        await typed.press('Enter');
+        await page.waitForTimeout(100);
+        const afterEnter = {
+          start: await out.getAttribute('data-start'),
+          submitted: await out.getAttribute('data-submitted'),
+          value: await typed.inputValue(),
+        };
+        await choice
+          .getByRole('button', { name: 'Apply', exact: true })
+          .click();
+        const afterApply = {
+          start: await out.getAttribute('data-start'),
+          submitted: await out.getAttribute('data-submitted'),
+        };
+        return {
+          pass:
+            afterEnter.start === '2026-11-25' &&
+            afterEnter.submitted === '0' &&
+            afterEnter.value === '2026-12-24' &&
+            afterApply.start === '2026-12-24' &&
+            afterApply.submitted === '0',
+          afterEnter,
+          afterApply,
         };
       }),
     );

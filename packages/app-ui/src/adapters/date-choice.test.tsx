@@ -232,3 +232,64 @@ it('replaces the draft with a preset of the current day', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Übernehmen' }));
   expect(onChange).toHaveBeenLastCalledWith('2026-11-26');
 });
+
+it('keeps Enter in the entry from submitting or saving around it', () => {
+  const keys: string[] = [];
+  const submit = vi.fn();
+  const onChange = vi.fn();
+  render(
+    <SdkLocaleProvider locale="de-DE">
+      {/* A ResourceEditor's fieldset saves on an Enter it did not see handled. */}
+      <form
+        onSubmit={submit}
+        onKeyDown={(event) => {
+          if (!event.defaultPrevented) keys.push(event.key);
+        }}
+      >
+        <DateChoice label="Start" value="2026-11-25" onChange={onChange} />
+      </form>
+    </SdkLocaleProvider>,
+  );
+  type('2026-12-24');
+  expect(fireEvent.keyDown(typed(), { key: 'Enter' })).toBe(false);
+  // Composing text keeps its Enter for the input method.
+  expect(fireEvent.keyDown(typed(), { key: 'Enter', isComposing: true })).toBe(
+    true,
+  );
+  // Escape still reaches the dialog around the choice.
+  fireEvent.keyDown(typed(), { key: 'Escape' });
+  expect(keys).toEqual(['Enter', 'Escape']);
+  expect(submit).not.toHaveBeenCalled();
+  expect(onChange).not.toHaveBeenCalled();
+  expect((typed() as HTMLInputElement).value).toBe('2026-12-24');
+});
+
+it('stops the calendar at the days a value can name', () => {
+  const onChange = renderChoice({ value: '0001-01-01' });
+  const cell = () =>
+    screen
+      .getAllByRole('button')
+      .find((b) =>
+        /(^|\s)1\. Januar 1\b/.test(b.getAttribute('aria-label') ?? ''),
+      )!;
+  const day = cell();
+  fireEvent.focus(day);
+  fireEvent.keyDown(day, { key: 'ArrowLeft' });
+  fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
+  fireEvent.keyUp(document.activeElement!, { key: 'Enter' });
+  fireEvent.click(screen.getByRole('button', { name: 'Übernehmen' }));
+  expect(onChange).toHaveBeenCalledExactlyOnceWith('0001-01-01');
+  cleanup();
+  const later = renderChoice({ value: '9999-12-31' });
+  const end = screen
+    .getAllByRole('button')
+    .find((b) =>
+      /31\. Dezember 9999/.test(b.getAttribute('aria-label') ?? ''),
+    )!;
+  fireEvent.focus(end);
+  fireEvent.keyDown(end, { key: 'ArrowRight' });
+  fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
+  fireEvent.keyUp(document.activeElement!, { key: 'Enter' });
+  fireEvent.click(screen.getByRole('button', { name: 'Übernehmen' }));
+  expect(later).toHaveBeenCalledExactlyOnceWith('9999-12-31');
+});

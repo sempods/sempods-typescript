@@ -780,7 +780,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   localized `{ label, day }` choices with concrete days (`YYYY-MM-DD`); one
   activation calls `onChange` with its day. A custom day comes from the
   calendar or is typed as `YYYY-MM-DD`, and reaches `onChange` only with
-  Apply. `min` disables earlier calendar days and presets (they stay
+  Apply; Enter in the typed entry neither applies it nor submits a form or
+  saves a `ResourceEditor` around the choice. The calendar ends at
+  0001-01-01 and 9999-12-31, the days a stored value can name. `min` disables earlier calendar days and presets (they stay
   visible) and marks an earlier typed day invalid; a typed day that does not
   exist (`2026-02-30`) is marked invalid too, and so is a stored `value` before `min` as it opens. Neither is corrected, and Apply
   stays disabled. `optional` adds "Remove date" while there is a `value`,
@@ -1794,7 +1796,8 @@ Context, plus fragment entries, a source address without a Context choice and
 a path with two leading slashes; and views as links, their current link
 marked by the router and drawn chosen in every action combination; and the
 "Not today" `DateChoice` in a `ScreenDialog` with a preset, a typed day, an
-impossible and an early day, Remove date, Escape after a picked day, the
+impossible and an early day, Enter in a form, Remove date, Escape after a
+picked day, reopening the date chooser during its exit, the
 focus trap and 44px targets without horizontal overflow at 375 and 360px
 wide. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.

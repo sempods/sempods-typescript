@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { CalendarDate } from '@internationalized/date';
+import { CalendarDate } from '@internationalized/date';
 import {
   FieldError,
   I18nProvider,
@@ -82,6 +82,13 @@ interface Draft {
   readonly day: CalendarDate | null;
   readonly error?: TypedDayError;
 }
+
+/**
+ * The days a stored value can name (`calendarDay`): the calendar stops there
+ * too, so it never offers a day that the entry and a reopened choice refuse.
+ */
+const first = new CalendarDate(1, 1, 1);
+const last = new CalendarDate(9999, 12, 31);
 
 function draftOf(value: string | null, min: CalendarDate | null): Draft {
   const day = calendarDay(value);
@@ -184,7 +191,8 @@ export function DateChoiceBody({
           onChange={pick}
           focusedValue={focused}
           onFocusChange={setFocused}
-          minValue={minDay ?? undefined}
+          minValue={minDay ?? first}
+          maxValue={last}
           className="justify-self-center bg-transparent p-0 [--cell-size:--spacing(11)]"
         />
       </I18nProvider>
@@ -199,6 +207,13 @@ export function DateChoiceBody({
           className="h-11 text-base md:text-base"
           autoComplete="off"
           spellCheck={false}
+          // Enter keeps the typed day a draft until Apply: neither a
+          // surrounding form nor a ResourceEditor (which ignores a handled
+          // key) saves the value shown before it.
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing)
+              event.preventDefault();
+          }}
         />
         <FieldError className="text-sm text-destructive">{message}</FieldError>
       </TextField>
