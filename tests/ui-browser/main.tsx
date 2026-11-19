@@ -33,6 +33,9 @@
 // Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
 // button; the checks swap the stylesheet for no-preflight.css, a host that
 // imports only Tailwind's theme and utilities (#392).
+// With `?screen=notices`, the page is a shopping list with a composer at the
+// bottom and an app dialog beside the SDK's shared notification host (#385);
+// with `&gate` as well, the SDK's sign-in gate shows before sign-in.
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
@@ -95,6 +98,7 @@ import { ConfirmDialog } from './confirm-dialog';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
+import { NoticesGate } from './notices';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -253,6 +257,7 @@ const tabs = settings.get('screen') === 'tabs';
 const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
+const notices = settings.get('screen') === 'notices';
 document.documentElement.lang = language;
 for (const key of ['theme', 'actions', 'secondary']) {
   const value = settings.get(key);
@@ -380,6 +385,8 @@ function App() {
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : menuConfirm ? (
         <MenuConfirmGate />
+      ) : notices ? (
+        <NoticesGate gate={settings.has('gate')} />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (

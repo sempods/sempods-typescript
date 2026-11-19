@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
+import { act, cleanup, render } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NewVersionNotice } from '../../../../examples/todo/pwa/register.js';
+import { fixture } from '../runtime/fixture.test.js';
+// The recipe imports the built package, so the host comes from it too.
+import { Notices, SempodsProvider } from '@sempods/app-sdk/react';
 
 // Minimal registration and worker doubles: event targets with the states the
 // notice reads. Real browser behaviour is covered by the packed PWA flow.
@@ -32,22 +36,40 @@ class FakeRegistration extends EventTarget {
   }
 }
 const text = /A new version is ready/;
+/** The visible notice in the host's stack (its live region announces it apart). */
+const shown = () =>
+  document.querySelector('[data-sempods-ui="toast"]')?.textContent ?? '';
 function controlled(controller: object | null) {
   vi.stubGlobal('navigator', { ...navigator, serviceWorker: { controller } });
 }
+const runtimes: (() => void)[] = [];
+beforeEach(async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubGlobal(
+    'ArrayBuffer',
+    (await webcrypto.subtle.digest('SHA-256', new Uint8Array())).constructor,
+  );
+});
+/** The recipe beside the SDK's host, which shows what it publishes. */
 async function mount(registration: FakeRegistration) {
+  const f = fixture();
+  runtimes.push(() => f.runtime.dispose());
   const view = render(
-    <NewVersionNotice
-      registration={Promise.resolve(
-        registration as unknown as ServiceWorkerRegistration,
-      )}
-    />,
+    <SempodsProvider runtime={f.runtime}>
+      <Notices />
+      <NewVersionNotice
+        registration={Promise.resolve(
+          registration as unknown as ServiceWorkerRegistration,
+        )}
+      />
+    </SempodsProvider>,
   );
   await act(async () => {});
   return view;
 }
 afterEach(() => {
   cleanup();
+  runtimes.splice(0).forEach((dispose) => dispose());
   vi.unstubAllGlobals();
 });
 
@@ -57,9 +79,9 @@ it('announces an update that was already installing before the notice subscribed
   // updatefound fired before mount: only `installing` shows the download.
   registration.installing = new FakeWorker();
   await mount(registration);
-  expect(screen.queryByText(text)).toBeNull();
+  expect(shown()).toBe('');
   act(() => registration.finish());
-  expect(screen.getByText(text)).toBeTruthy();
+  expect(shown()).toMatch(text);
 });
 
 it('announces an update found after mounting', async () => {
@@ -69,7 +91,7 @@ it('announces an update found after mounting', async () => {
   registration.installing = new FakeWorker();
   registration.dispatchEvent(new Event('updatefound'));
   act(() => registration.finish());
-  expect(screen.getByText(text)).toBeTruthy();
+  expect(shown()).toMatch(text);
 });
 
 it('stays silent for a first installation on an uncontrolled page', async () => {
@@ -78,7 +100,7 @@ it('stays silent for a first installation on an uncontrolled page', async () => 
   registration.installing = new FakeWorker();
   await mount(registration);
   act(() => registration.finish());
-  expect(screen.queryByText(text)).toBeNull();
+  expect(shown()).toBe('');
 });
 
 it('announces a version that is already waiting and removes its listeners on unmount', async () => {
@@ -93,5 +115,5 @@ it('announces a version that is already waiting and removes its listeners on unm
   registration.installing = null;
   registration.waiting = worker;
   await mount(registration);
-  expect(screen.getByText(text)).toBeTruthy();
+  expect(shown()).toMatch(text);
 });

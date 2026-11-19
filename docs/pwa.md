@@ -132,20 +132,27 @@ createRoot(document.getElementById('root')!).render(
 
 Keep any existing CSS imports in `main.tsx` and use your HTML root element's ID.
 In `src/App.tsx`, keep the quickstart's existing imports, runtime, `AppContent` and `Tasks`
-component; add the type import and replace its `App` function with:
+component; add the two imports and replace its `App` function with:
 
 ```tsx
 import type { ReactNode } from 'react';
+import { Notices } from '@sempods/app-sdk/react';
 
 export default function App({ children }: { readonly children?: ReactNode }) {
   return (
     <SempodsProvider runtime={runtime}>
       {children}
       <AppContent />
+      <Notices />
     </SempodsProvider>
   );
 }
 ```
+
+`Notices` is the SDK's shared notification host: the update notice and the
+access prompts of `AppAccess` share one stack at the bottom of the viewport,
+outside the page's flow, so the notice never moves a control the person is
+about to press. Before sign-in, it shows inside the sign-in gate.
 
 Keep your existing language, locale and message props on `SempodsProvider`.
 `NewVersionNotice` must be beneath the same locale provider as the app, including
@@ -156,8 +163,9 @@ registration stays in the entry module, outside render. Importing `App.tsx`
 alone must not register a worker. Language changes update the notice without
 replacing the runtime, re-registering the worker or losing drafts.
 
-`NewVersionNotice` tells the person that a downloaded version is used once all
-windows of the app are closed. Do not call the plugin's `updateServiceWorker()`
+`NewVersionNotice` tells the person once, through `useNotice`, that a downloaded
+version is used once all windows of the app are closed; it stays until they
+dismiss it. Do not call the plugin's `updateServiceWorker()`
 or send it a `SKIP_WAITING` message: that reloads open pages (rule 4).
 
 Check it locally with the production build:

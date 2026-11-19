@@ -2433,14 +2433,34 @@ try {
     await page.evaluate(() =>
       navigator.serviceWorker.getRegistration().then((r) => r.update()),
     );
-    const germanUpdate = page.getByRole('status').filter({
+    // The SDK's notification host shows it outside the page's flow (#385)
+    // and announces it once; a language change is no second announcement.
+    const notice = page.locator('[data-sempods-ui="toast"]');
+    const germanUpdate = notice.filter({
       hasText: 'Eine neue Version ist bereit.',
     });
-    const englishUpdate = page.getByRole('status').filter({
+    const englishUpdate = notice.filter({
       hasText: 'A new version is ready.',
     });
+    const announcements = page.locator(
+      '[data-sempods-ui="notices"] [role="status"] p',
+    );
     await germanUpdate.waitFor();
     assert.equal(await englishUpdate.count(), 0);
+    assert.equal(
+      await page
+        .locator('[data-sempods-ui="notices"]')
+        .evaluate((element) => getComputedStyle(element).position),
+      'fixed',
+    );
+    // Earlier prompts, such as the offline one, may still be in the region.
+    const updates = async () =>
+      (await announcements.allTextContents()).filter((text) =>
+        /^(Eine neue Version|A new version)/.test(text),
+      );
+    assert.deepEqual(await updates(), [
+      'Eine neue Version ist bereit. Sie wird verwendet, sobald alle Fenster dieser App geschlossen sind.',
+    ]);
     assert.equal(
       await page.getByLabel('Neue Aufgabe', { exact: true }).inputValue(),
       'Unsaved draft',
@@ -2461,6 +2481,7 @@ try {
       await page.getByLabel('Neue Aufgabe', { exact: true }).inputValue(),
       'Unsaved draft',
     );
+    assert.ok((await updates()).length <= 1);
     assert.deepEqual(
       await cached(),
       [

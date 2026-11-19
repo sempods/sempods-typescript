@@ -20,7 +20,7 @@ export function layered(css: string): string {
   return `@layer base, sempods;\n@layer sempods {${css}}\n`;
 }
 const surfaces =
-  ':where([data-sempods-ui="access"], [data-sempods-ui="editor"], [data-sempods-ui="notice"], [data-sempods-ui="prompt"], .sp-sdk-dialog)';
+  ':where([data-sempods-ui="access"], [data-sempods-ui="editor"], [data-sempods-ui="notice"], [data-sempods-ui="prompt"], [data-sempods-ui="toast"], .sp-sdk-dialog)';
 const styles = `
 :where([data-sempods-ui]) {
   --sp-bg:var(--sempods-bg,light-dark(#f7f9f7,#131b18));

@@ -237,6 +237,18 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     focused by keyboard and open they paint the same surface, outline and
     ring under both, in light, dark and forced colors (there without the
     outline's colour, which follows the text).
+  - the shared notification host (#385) on `?screen=notices`, a shopping
+    list with a composer fixed at the bottom: the PWA pilot's update notice
+    at 375 and 1280px in light and dark stays outside the flow (no row moves,
+    no scroll height added), inside the screen and above the composer, takes
+    no focus, is announced once and passes rendered contrast; with the
+    keyboard open (375 × 420) it stays above the composer, which keeps the
+    focus and its draft; three failures of one Pod update one warning, which
+    retires once the Pod recovers; while the app's dialog is open the stack
+    shows nothing and covers none of its controls, then shows and announces
+    an error once it closes; Escape dismisses the focused notice and returns
+    the focus; reduced motion stops its entrance; before sign-in at 812 and
+    560px high it shows inside the SDK's gate, which keeps its Sign in clear.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

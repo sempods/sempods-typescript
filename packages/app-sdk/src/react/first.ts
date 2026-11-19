@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useController } from './app.js';
 
-type Kind = 'gate' | 'prompts';
+type Kind = 'gate' | 'prompts' | 'notices';
 interface Owners {
   readonly mounted: Record<Kind, symbol[]>;
   readonly listeners: Set<() => void>;
@@ -10,7 +10,10 @@ const registry = new WeakMap<object, Owners>();
 function ownersOf(app: object) {
   let owners = registry.get(app);
   if (!owners) {
-    owners = { mounted: { gate: [], prompts: [] }, listeners: new Set() };
+    owners = {
+      mounted: { gate: [], prompts: [], notices: [] },
+      listeners: new Set(),
+    };
     registry.set(app, owners);
   }
   return owners;
@@ -42,5 +45,20 @@ export function useFirst(kind: Kind): boolean {
     },
     first,
     first,
+  );
+}
+
+/** Internal: whether any instance of this kind is mounted under the provider. */
+export function useMounted(kind: Kind): boolean {
+  const app = useController();
+  const owners = ownersOf(app);
+  const mounted = () => owners.mounted[kind].length > 0;
+  return useSyncExternalStore(
+    (listener) => {
+      owners.listeners.add(listener);
+      return () => owners.listeners.delete(listener);
+    },
+    mounted,
+    mounted,
   );
 }

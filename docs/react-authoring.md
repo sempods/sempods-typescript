@@ -164,6 +164,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Bind the UI](#runtime-and-provider)                                    | `SempodsProvider`, `TargetScreen` (React)                                  | The runtime; your screen inside `TargetScreen`                               |
 | [Sign-in, Context choice, recovery](#appaccess-props)                   | `AppAccess` (React)                                                        | `appName`; a host button sets `open`                                         |
 | [Place access prompts yourself](#access-prompts-and-your-own-placement) | `AccessGate`, `ContextAccess`, `AccessPrompts`, `useAccessPrompts` (React) | `AppAccess only="management"` for management                                 |
+| [App-wide notices](#app-wide-notices)                                   | `Notices`, `useNotice`, `useNotices` (React)                               | A stable `key`, localized `text`; render `<Notices />` once                  |
 | [Startup screen and splash](#startup-screen-and-static-splash)          | `AppStartup`, `useAppState().starting` (React)                             | `appName`, `icon`; match the static HTML splash to it                        |
 | [App settings before sign-in](#app-settings-before-sign-in)             | `AppAccess`, `AccessGate` (React)                                          | `settings={{ label, content }}` with the app's own controls                  |
 | [Describe your data](#field-definitions)                                | `fields`, `text`, `flag`, `iri`, `dateTime`, `date` (edit)                 | Type and predicate IRIs, explicit text language, `trim: true` for text       |
@@ -1458,6 +1459,107 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
   memory, but it cannot be viewed or copied while the gate shows. Signing in
   navigates to the Pod; the leave confirmation asks first, and declining keeps
   the draft behind the gate for as long as the page stays open.
+
+### App-wide notices
+
+`<Notices />` is the shared notification host for the app's own notices and
+the access prompts. Render it once beneath `SempodsProvider`, beside
+`AppAccess`: while it is mounted, `AppAccess` shows no prompt stack of its own,
+and one stack holds both. Without it, `AppAccess` behaves as before.
+
+```tsx
+import { Notices, useNotice, useNotices } from '@sempods/app-sdk/react';
+
+function PodWarning({ pod, failed }: { pod: string; failed: boolean }) {
+  // Held while the problem lasts; `null` or unmounting retires it.
+  useNotice(
+    failed
+      ? {
+          key: `pod-unreachable:${pod}`,
+          severity: 'warning',
+          title: `${pod} cannot be reached`,
+          text: 'Your other Pods keep working.',
+        }
+      : null,
+  );
+  return null;
+}
+
+function BuyAll({ count }: { count: number }) {
+  const { show } = useNotices();
+  // One event: a brief summary once the batch is done.
+  return (
+    <button onClick={() => show({ key: 'bought', text: `${count} bought.` })}>
+      Buy all
+    </button>
+  );
+}
+
+export function Shell() {
+  return (
+    <>
+      <PodWarning pod="pod.example/alice" failed />
+      <BuyAll count={3} />
+      <Notices />
+    </>
+  );
+}
+```
+
+- **Key:** one stable `key` per message. Publishing it again updates the
+  notice in place, so repeats coalesce: a Pod that keeps failing has one
+  warning whose text changes, not a growing stack.
+- **Severity and acknowledgement are separate.** `severity` is `info`,
+  `warning` or `error`. `duration` decides whether the notice waits for the
+  person: an `info` without an action hides after about 6 seconds, warnings,
+  errors and notices with an action stay until dismissed or retired, and
+  either can be overridden (`duration: 'until-dismissed'` or milliseconds).
+  Hovering or focusing a notice pauses its timer.
+- **`useNotice(notice | null)`** holds a notice for a state that lasts: a
+  waiting update, an unreachable Pod. Passing `null` or unmounting retires it,
+  so a warning ends with its cause, also when the Pod or Context changes.
+  Changes update it in place without a new announcement (a language change
+  is no new event). Once dismissed it stays hidden until retired and passed
+  again.
+- **`useNotices()`** returns `show` and `dismiss` for events: each `show` is
+  announced once and shows again after a dismissal; an identical repeat of
+  a visible notice only restarts its timer.
+- **One action**, `action: { label, run }`, runs through the host's guards:
+  disabled while it runs and while a guarded change or its leave question is
+  open; a rejection shows its localized error in the notice. A shown notice
+  retires once its action resolves; a held one stays its holder's.
+- **The host** shows at most `limit` notices (3 by default); over the limit,
+  those waiting for the person go first, so a burst of brief information
+  never pushes a pending action out of reach. It is fixed at the bottom of the
+  viewport, outside the document flow, above the safe area and above every
+  element marked `data-sempods-notices-avoid`, such as a composer at the
+  bottom; `--sempods-notices-offset` adds a fixed distance. It never takes the
+  focus. Each event is announced once through its own live region (errors
+  assertively); the visible notices have no live role. Escape dismisses the
+  focused notice, and focus then returns to `focusTarget` or where it came
+  from. Its entrance motion stops under reduced motion. `--sempods-warning`
+  and `--sempods-danger` colour warnings and errors.
+- **Modals:** while a modal dialog covers the page (the app's own or an SDK
+  one), the stack waits and covers nothing; its notices show and are announced
+  once it closes. Before sign-in, app notices show inside the SDK's sign-in
+  gate, which keeps room for them at its end.
+- **Another renderer:** `components={{ Notice }}` receives a `NoticeView`
+  (`source`, `severity`, `title`, `text`, `actions`, `dismiss`, …) for an
+  app notice or an access prompt alike. The host still owns position,
+  timers, announcements, keyboard dismissal and the action guards; render
+  `actions` as buttons and `dismiss` as one more.
+
+Choose the place by what the person has to do:
+
+| The message                                                                                              | Where                                                                                                            |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| App-wide and incidental: a waiting update, a finished batch, another Pod unreachable while the rest work | A notice (`useNotice` for a lasting state, `show` for an event)                                                  |
+| About one field, row or record: validation, a conflict, an unconfirmed write, a stopped batch item       | Inline, beside it: `ResourceEditor`, `UnresolvedNotices`, the field's own error. A notice may only summarize     |
+| The app cannot work until the person acts: sign-in, missing sharing, a storage failure                   | A blocking prompt: the SDK's gate (`access.blocking`), or the app's own confirmation dialog for its own decision |
+
+Dismissing a notice is never a decision about data: it never acknowledges,
+discards or retries a write. Keep the recovery of an uncertain write at the
+affected row, where it stays until resolved.
 
 ### Sign-in and Pod addresses
 

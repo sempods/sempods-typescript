@@ -1,0 +1,522 @@
+// @vitest-environment jsdom
+/**
+ * The shared notification host (#385): app notices by key beside the access
+ * prompts, one announcement per event, bounded and coalesced, guarded
+ * actions, timers that pause, the gate before sign-in, a covering modal, and
+ * `AppAccess` unchanged without the host.
+ */
+import { webcrypto } from 'node:crypto';
+import { useState, type ReactNode } from 'react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { fixture, renewal, twoPods } from '../runtime/fixture.test.js';
+import type { BrowserRuntime } from '../runtime/types.js';
+import {
+  AppAccess,
+  Notices,
+  SempodsProvider,
+  useNotice,
+  useNotices,
+  type Notice,
+  type NoticeActions,
+  type NoticeProps,
+} from './index.js';
+
+const cleanups: (() => void)[] = [];
+beforeEach(async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubGlobal(
+    'ArrayBuffer',
+    (await webcrypto.subtle.digest('SHA-256', new Uint8Array())).constructor,
+  );
+});
+afterEach(() => {
+  cleanup();
+  cleanups.splice(0).forEach((fn) => fn());
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+const host = () =>
+  document.querySelector<HTMLElement>(
+    '[data-sempods-ui="notices"]:not([data-placement])',
+  )!;
+const items = (root: ParentNode = host()) => [
+  ...root.querySelectorAll<HTMLElement>('li'),
+];
+const texts = (root?: ParentNode) =>
+  items(root).map((item) => item.textContent);
+/** What the live regions of `root` announced, in order. */
+const announced = (root: ParentNode = host()) =>
+  [...root.querySelectorAll('.sp-notices-live p')].map((p) => p.textContent);
+
+async function signedIn() {
+  const f = fixture();
+  const { runtime } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  return runtime;
+}
+
+let actions!: NoticeActions;
+function Publisher() {
+  actions = useNotices();
+  return null;
+}
+function App({
+  runtime,
+  children,
+  limit,
+}: {
+  readonly runtime: BrowserRuntime;
+  readonly children?: ReactNode;
+  readonly limit?: number;
+}) {
+  return (
+    <SempodsProvider runtime={runtime}>
+      <Notices limit={limit} />
+      <Publisher />
+      {children}
+    </SempodsProvider>
+  );
+}
+
+/** Captures the 6 second notice timers; others run as usual. */
+function briefTimers() {
+  const timers: { fn: () => void; ms: number }[] = [];
+  const realSet = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+    fn: () => void,
+    ms?: number,
+  ) => {
+    if (ms === 6000 || ms === 1500) {
+      timers.push({ fn, ms });
+      return realSet(() => {}, 0);
+    }
+    return realSet(fn, ms);
+  }) as typeof setTimeout);
+  return timers;
+}
+
+it('shows, updates, coalesces and dismisses a notice by key, announcing each event once', async () => {
+  const runtime = await signedIn();
+  render(<App runtime={runtime} />);
+  act(() => actions.show({ key: 'batch', text: 'Three items bought.' }));
+  expect(texts()).toEqual(['Three items bought.OK']);
+  // The visible notice has no live role: the host announces it once.
+  expect(items()[0]!.querySelector('[role]')).toBeNull();
+  expect(announced()).toEqual(['Three items bought.']);
+  // An identical repeat coalesces: one entry, no second announcement.
+  act(() => actions.show({ key: 'batch', text: 'Three items bought.' }));
+  expect(items()).toHaveLength(1);
+  expect(announced()).toEqual(['Three items bought.']);
+  // A changed one updates in place and is announced.
+  act(() =>
+    actions.show({ key: 'batch', title: 'Done', text: 'Four items bought.' }),
+  );
+  expect(texts()).toEqual(['DoneFour items bought.OK']);
+  expect(announced()).toEqual([
+    'Three items bought.',
+    'Done. Four items bought.',
+  ]);
+  act(() => expect(actions.dismiss('batch')).toBe(true));
+  expect(items()).toEqual([]);
+  expect(actions.dismiss('batch')).toBe(false);
+  // A new event after dismissal shows it again.
+  act(() => actions.show({ key: 'batch', text: 'Four items bought.' }));
+  expect(items()).toHaveLength(1);
+});
+
+it('keeps severity apart from acknowledgement: brief info hides, warnings, errors and actions wait', async () => {
+  const runtime = await signedIn();
+  const timers = briefTimers();
+  render(<App runtime={runtime} />);
+  act(() => {
+    actions.show({ key: 'info', text: 'Saved list.' });
+    actions.show({ key: 'warning', text: 'Slow Pod.', severity: 'warning' });
+    actions.show({ key: 'error', text: 'Pod failed.', severity: 'error' });
+    actions.show({
+      key: 'undo',
+      text: 'Removed.',
+      action: { label: 'Undo', run: () => {} },
+    });
+    actions.show({
+      key: 'short-error',
+      text: 'Copied with errors.',
+      severity: 'error',
+      duration: 1500,
+    });
+  });
+  // Over the limit of 3, the waiting ones go first.
+  expect(items().map((item) => item.dataset.severity)).toEqual([
+    'warning',
+    'error',
+    'info',
+  ]);
+  act(() => actions.dismiss('warning'));
+  act(() => actions.dismiss('error'));
+  // Only the brief ones have timers: the info and the overridden error.
+  await waitFor(() =>
+    expect(timers.map((t) => t.ms).sort()).toEqual([1500, 6000]),
+  );
+  // An error announces assertively, the rest politely.
+  expect(
+    [...host().querySelectorAll('[role="alert"] p')].map((p) => p.textContent),
+  ).toEqual(['Pod failed.', 'Copied with errors.']);
+  act(() => timers.forEach((timer) => timer.fn()));
+  expect(texts()).toEqual(['Removed.UndoOK']);
+});
+
+it('pauses a brief notice while hovered or focused, restarts it on a repeat, and dismisses the focused one with Escape', async () => {
+  const runtime = await signedIn();
+  const timers = briefTimers();
+  render(
+    <App runtime={runtime}>
+      <button>Back</button>
+    </App>,
+  );
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  await waitFor(() => expect(timers).toHaveLength(1));
+  const item = items()[0]!;
+  fireEvent.pointerEnter(item);
+  fireEvent.pointerLeave(item);
+  await waitFor(() => expect(timers).toHaveLength(2));
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  await waitFor(() => expect(timers).toHaveLength(3));
+  // The earlier timers were cleared; only the latest one hides it.
+  const ok = within(item).getByRole('button', { name: 'OK' });
+  const back = screen.getByRole('button', { name: 'Back' });
+  act(() => back.focus());
+  act(() => ok.focus());
+  fireEvent.keyDown(ok, { key: 'Escape' });
+  expect(items()).toEqual([]);
+  // The focus returns where it came from; nothing took it on appearing.
+  await waitFor(() => expect(document.activeElement).toBe(back));
+});
+
+it('runs an action once under the guards, shows its failure, and dismissing never runs it', async () => {
+  const runtime = await signedIn();
+  let release!: () => void;
+  const run = vi.fn(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        release = () =>
+          run.mock.calls.length === 1 ? reject(new Error('nope')) : resolve();
+      }),
+  );
+  render(<App runtime={runtime} />);
+  act(() =>
+    actions.show({
+      key: 'retry',
+      text: 'Not copied.',
+      severity: 'error',
+      action: { label: 'Copy again', run },
+    }),
+  );
+  const button = () => screen.getByRole('button', { name: 'Copy again' });
+  await act(async () => button().click());
+  expect(button()).toHaveProperty('disabled', true);
+  await act(async () => button().click());
+  expect(run).toHaveBeenCalledTimes(1);
+  await act(async () => release());
+  expect(within(items()[0]!).getByRole('alert').textContent).toBeTruthy();
+  await act(async () => button().click());
+  await act(async () => release());
+  expect(run).toHaveBeenCalledTimes(2);
+  // A shown notice retires once its action resolves.
+  expect(items()).toEqual([]);
+  act(() =>
+    actions.show({
+      key: 'write',
+      text: 'Not confirmed.',
+      severity: 'warning',
+      action: { label: 'Check again', run },
+    }),
+  );
+  await act(async () => screen.getByRole('button', { name: 'OK' }).click());
+  expect(items()).toEqual([]);
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
+/** Repeated failures of one Pod, as an app reports them. */
+function PodWarning({
+  pod,
+  failures,
+}: {
+  readonly pod: string;
+  readonly failures: number;
+}) {
+  useNotice(
+    failures > 0
+      ? {
+          key: `pod-unreachable:${pod}`,
+          severity: 'warning',
+          text:
+            failures === 1
+              ? `${pod} cannot be reached.`
+              : `${pod} cannot be reached (${failures} attempts).`,
+        }
+      : null,
+  );
+  return null;
+}
+
+it('updates one warning for repeated Pod failures, keeps it dismissed while it lasts, and retires it when the Pod recovers', async () => {
+  const runtime = await signedIn();
+  const ui = (failures: number, mounted = true) => (
+    <App runtime={runtime}>
+      {mounted && <PodWarning pod="pod.example/alice" failures={failures} />}
+    </App>
+  );
+  const view = render(ui(1));
+  await waitFor(() =>
+    expect(texts()).toEqual(['pod.example/alice cannot be reached.OK']),
+  );
+  view.rerender(ui(2));
+  view.rerender(ui(3));
+  expect(texts()).toEqual([
+    'pod.example/alice cannot be reached (3 attempts).OK',
+  ]);
+  // One entry and one announcement for the whole burst.
+  expect(announced()).toEqual(['pod.example/alice cannot be reached.']);
+  // Dismissed, it stays hidden while the failures go on.
+  await act(async () => screen.getByRole('button', { name: 'OK' }).click());
+  view.rerender(ui(4));
+  expect(items()).toEqual([]);
+  // The Pod recovers: the warning retires; a new failure is a new warning.
+  view.rerender(ui(0));
+  view.rerender(ui(1));
+  await waitFor(() => expect(items()).toHaveLength(1));
+  expect(announced()).toHaveLength(2);
+  // Unmounting its holder retires it as well.
+  view.rerender(ui(1, false));
+  await waitFor(() => expect(items()).toEqual([]));
+});
+
+it('updates a held notice in place without a new announcement when its language changes', async () => {
+  const runtime = await signedIn();
+  function Update({ text }: { readonly text: string }) {
+    useNotice({ key: 'app-update', text });
+    return null;
+  }
+  const view = render(
+    <App runtime={runtime}>
+      <Update text="A new version is ready." />
+    </App>,
+  );
+  await waitFor(() => expect(texts()).toEqual(['A new version is ready.OK']));
+  view.rerender(
+    <App runtime={runtime}>
+      <Update text="Eine neue Version ist bereit." />
+    </App>,
+  );
+  expect(texts()).toEqual(['Eine neue Version ist bereit.OK']);
+  expect(announced()).toEqual(['A new version is ready.']);
+});
+
+it('shows an app notice inside the sign-in gate before sign-in, reserving room, and announces it once', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  function Update() {
+    useNotice({
+      key: 'app-update',
+      text: 'A new version is ready.',
+      duration: 'until-dismissed',
+    });
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Tasks" />
+      <Notices />
+      <Update />
+    </SempodsProvider>,
+  );
+  const gate = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(element?.dataset.reason).toBe('no-connection');
+    return element!;
+  });
+  const inGate = await waitFor(() => {
+    const element = gate.querySelector<HTMLElement>(
+      '[data-sempods-ui="notices"][data-placement="gate"]',
+    );
+    expect(texts(element!)).toEqual(['A new version is ready.OK']);
+    return element!;
+  });
+  // The stack outside waits below the modal gate.
+  expect(items()).toEqual([]);
+  expect(announced(inGate)).toEqual(['A new version is ready.']);
+  expect(announced()).toEqual([]);
+  // The gate's own sign-in stays the focus; the notice took nothing.
+  expect(inGate.contains(document.activeElement)).toBe(false);
+});
+
+it('waits while an app modal covers the page and shows the notice once it closes', async () => {
+  const runtime = await signedIn();
+  function Modal() {
+    const [open, setOpen] = useState(true);
+    return open ? (
+      <div role="dialog" aria-modal="true">
+        <button onClick={() => setOpen(false)}>Close</button>
+      </div>
+    ) : null;
+  }
+  render(
+    <App runtime={runtime}>
+      <Modal />
+    </App>,
+  );
+  act(() => actions.show({ key: 'info', text: 'Saved.', severity: 'error' }));
+  await waitFor(() => expect(host()).toBeTruthy());
+  expect(items()).toEqual([]);
+  expect(announced()).toEqual([]);
+  await act(async () => screen.getByRole('button', { name: 'Close' }).click());
+  await waitFor(() => expect(texts()).toEqual(['Saved.OK']));
+  expect(announced()).toEqual(['Saved.']);
+});
+
+it('places the stack above an avoided composer', async () => {
+  const runtime = await signedIn();
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
+  render(
+    <App runtime={runtime}>
+      <form data-sempods-notices-avoid="">
+        <input aria-label="New item" />
+      </form>
+    </App>,
+  );
+  const composer = document.querySelector('form')!;
+  vi.spyOn(composer, 'getBoundingClientRect').mockReturnValue({
+    top: 728,
+    bottom: 800,
+    height: 72,
+    left: 0,
+    right: 375,
+    width: 375,
+    x: 0,
+    y: 728,
+    toJSON: () => ({}),
+  });
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  act(() => window.dispatchEvent(new Event('resize')));
+  await waitFor(() =>
+    expect(host().style.getPropertyValue('--sp-notices-avoid')).toBe('72px'),
+  );
+});
+
+it('renders through a replacement renderer while the host keeps the guards and dismissal', async () => {
+  const runtime = await signedIn();
+  const run = vi.fn();
+  function Toast({ notice }: NoticeProps) {
+    return (
+      <div data-custom={notice.severity}>
+        <strong>{notice.title}</strong> {notice.text}
+        {notice.actions.map((action) => (
+          <button key={action.label} onClick={action.run}>
+            {action.label}
+          </button>
+        ))}
+        {notice.dismiss && (
+          <button onClick={notice.dismiss}>{notice.dismissLabel}</button>
+        )}
+      </div>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: Toast }} />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  const notice: Notice = {
+    key: 'custom',
+    title: 'Sync',
+    text: 'Paused.',
+    severity: 'warning',
+    action: { label: 'Resume', run },
+  };
+  act(() => actions.show(notice));
+  expect(document.querySelector('[data-custom="warning"]')).toBeTruthy();
+  await act(async () => screen.getByRole('button', { name: 'Resume' }).click());
+  expect(run).toHaveBeenCalledTimes(1);
+  act(() => actions.show(notice));
+  const ok = screen.getByRole('button', { name: 'OK' });
+  act(() => ok.focus());
+  fireEvent.keyDown(ok, { key: 'Escape' });
+  expect(document.querySelector('[data-custom]')).toBeNull();
+});
+
+/** Two Pods: Alice's session ends beside the active Bob. */
+async function endedBeside() {
+  const {
+    f,
+    runtime,
+    other: bob,
+  } = await twoPods((r) => cleanups.push(() => r.dispose()));
+  const other = runtime.getSnapshot().find((c) => c.id !== bob.id)!;
+  await renewal(f, runtime, other.id, 'refused');
+  await waitFor(() =>
+    expect(
+      runtime.getSnapshot().find((c) => c.id === other.id)?.session.kind,
+    ).toMatch(/ended|signed-out/),
+  );
+  return { runtime };
+}
+
+it('takes over the access prompts of AppAccess once mounted, showing each once beside app notices', async () => {
+  const { runtime } = await endedBeside();
+  const ui = (notices: boolean) => (
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" />
+      {notices && <Notices />}
+      <Publisher />
+    </SempodsProvider>
+  );
+  const view = render(ui(false));
+  // Without the host, AppAccess shows its own stack as before.
+  const stack = () =>
+    document.querySelector<HTMLElement>('[data-sempods-ui="prompts"]')!;
+  await waitFor(() =>
+    expect(stack().querySelectorAll('[data-sempods-ui="prompt"]')).toHaveLength(
+      1,
+    ),
+  );
+  expect(
+    stack().querySelector('[data-sempods-ui="prompt"]')!.getAttribute('role'),
+  ).toBe('alert');
+  view.rerender(ui(true));
+  await waitFor(() => expect(items()).toHaveLength(1));
+  expect(stack().hidden).toBe(true);
+  expect(document.querySelectorAll('[data-sempods-ui="prompt"]')).toHaveLength(
+    1,
+  );
+  const prompt = items()[0]!.querySelector<HTMLElement>(
+    '[data-sempods-ui="prompt"]',
+  )!;
+  expect(prompt.dataset.reason).toBe('signed-out');
+  expect(prompt.getAttribute('role')).toBeNull();
+  expect(
+    within(prompt)
+      .getAllByRole('button')
+      .map((b) => b.textContent),
+  ).toEqual(['Sign in', 'Forget', 'OK']);
+  expect(announced()).toHaveLength(1);
+  expect(announced()[0]).toContain('pod.example/alice');
+  // An app notice joins the same stack after it.
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  expect(items().map((item) => item.dataset.source)).toEqual(['access', 'app']);
+  await act(async () =>
+    within(prompt).getByRole('button', { name: 'OK' }).click(),
+  );
+  expect(items().map((item) => item.dataset.source)).toEqual(['app']);
+});

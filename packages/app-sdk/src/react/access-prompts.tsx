@@ -19,6 +19,7 @@ import { useSdkLocale } from './locale.js';
 import { podName } from './names.js';
 import { layered, SdkStyles } from './styles.js';
 import { useFirst } from './first.js';
+import { useNoticeHost } from './notice-store.js';
 import { useCommitted } from './hooks.js';
 import { returnFocusAfterCommit, useFocusHold } from './focus.js';
 
@@ -294,7 +295,8 @@ function TimedPrompt({
  * Info prompts hide after about 6 seconds unless focused or hovered, which
  * dismisses them; action prompts stay until dismissed or resolved. Each
  * prompt gets `focusTarget` (see `AccessPrompt`). Shows nothing while a
- * blocking prompt holds the gate or the app still starts.
+ * blocking prompt holds the gate or the app still starts, and nothing while
+ * a `Notices` host is mounted, which shows them instead.
  */
 export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const { blocking, prompts } = useAccessPrompts();
@@ -303,7 +305,9 @@ export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const first = useFirst('prompts');
   // Prompts about other Pods wait for the startup screen to end.
   const starting = useAppFacts((s) => s.starting);
-  const shown = blocking || !first || starting ? [] : prompts;
+  // A mounted `Notices` host shows them in the shared stack instead.
+  const host = useNoticeHost();
+  const shown = blocking || !first || starting || host ? [] : prompts;
   return (
     <div
       data-sempods-ui="prompts"

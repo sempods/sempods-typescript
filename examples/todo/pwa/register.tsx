@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useMessages } from '@sempods/app-sdk/react';
+import { useMessages, useNotice } from '@sempods/app-sdk/react';
 
 /**
  * Registers the app's service worker. Call it once from the app entry, never on
@@ -28,11 +28,13 @@ const text = {
 };
 
 /**
- * Render beneath the app's actual locale provider so notices follow its language.
- * Keep it outside target/access gates: updates also matter while signed out.
- * Announces a downloaded version. It applies once every window of the app is
- * closed, so an update never reloads a page over unsaved drafts or unconfirmed
- * writes. App-owned recipe, not an SDK export.
+ * Render beneath the app's actual locale provider so notices follow its language,
+ * and beside the SDK's `Notices` host, which shows it outside the page's flow.
+ * Keep it outside target/access gates: updates also matter while signed out,
+ * and the host shows it inside the sign-in gate then. Announces a downloaded
+ * version once. It applies once every window of the app is closed, so an
+ * update never reloads a page over unsaved drafts or unconfirmed writes.
+ * App-owned recipe, not an SDK export.
  */
 export function NewVersionNotice({
   registration,
@@ -74,6 +76,12 @@ export function NewVersionNotice({
       stop();
     };
   }, [registration]);
-  if (!ready) return null;
-  return <p role="status">{m.ready}</p>;
+  // It stays until dismissed: the person did not ask for it and should
+  // learn how the new version starts. A language change updates it in place.
+  useNotice(
+    ready
+      ? { key: 'app-update', text: m.ready, duration: 'until-dismissed' }
+      : null,
+  );
+  return null;
 }

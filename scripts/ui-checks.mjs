@@ -5906,6 +5906,7 @@ export const suites = {
   menuDialog,
   viewTabs,
   ghost,
+  notices,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */
@@ -6496,6 +6497,322 @@ async function ghost({ browser, origin, engine }) {
       });
     }
   } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
+/**
+ * The shared notification host (#385) on `?screen=notices`: a shopping list
+ * with a composer fixed at the bottom and an app dialog. The PWA pilot's
+ * update notice at 375 and 1280px in light and dark: outside the flow, no row
+ * moves, above the composer and inside the screen, no focus taken, announced
+ * once, contrast; with the phone keyboard open (a shrinking viewport) above
+ * the composer that holds the focus; repeated failures of one Pod as one
+ * warning that retires; while the app's dialog is open the stack waits and
+ * covers nothing, and shows and announces once it closes; Escape dismisses
+ * the focused notice; reduced motion; and before sign-in inside the SDK's
+ * gate, clear of its sign-in button.
+ */
+async function notices({ browser, origin, engine }) {
+  const { context, page, errors } = await newPage(browser);
+  const update =
+    'A new version is ready. It is used once every window of this app has been closed.';
+  const call = (name, ...args) =>
+    page.evaluate(
+      ([name, args]) => window.noticesGate[name](...args),
+      [name, args],
+    );
+  const toast = page.locator(
+    '[data-sempods-ui="notices"]:not([data-placement]) li',
+  );
+  /** What the page shows: rows, composer, stack and live regions. */
+  const measure = () =>
+    page.evaluate(() => {
+      const rect = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+      };
+      const host = document.querySelector(
+        '[data-sempods-ui="notices"]:not([data-placement])',
+      );
+      const items = [...(host?.querySelectorAll('li') ?? [])];
+      const live = (role) =>
+        [
+          ...document.querySelectorAll(
+            `[data-sempods-ui="notices"] [role="${role}"] p`,
+          ),
+        ].map((p) => p.textContent);
+      return {
+        rows: [...document.querySelectorAll('.notices-items li')].map(
+          (li) => rect(li).top,
+        ),
+        scroll: document.documentElement.scrollHeight,
+        composer: rect(
+          document.querySelector('form[data-sempods-notices-avoid]'),
+        ),
+        position: host ? getComputedStyle(host).position : null,
+        items: items.map((li) => ({
+          ...rect(li),
+          text: li.textContent,
+          severity: li.dataset.severity,
+          animation: getComputedStyle(li).animationName,
+        })),
+        width: innerWidth,
+        height: innerHeight,
+        focus:
+          document.activeElement?.getAttribute('aria-label') ??
+          document.activeElement?.textContent ??
+          null,
+        polite: live('status'),
+        assertive: live('alert'),
+      };
+    });
+  const inside = (m) =>
+    m.items.every(
+      (i) =>
+        i.left >= 0 && i.right <= m.width && i.top >= 0 && i.bottom <= m.height,
+    );
+  const aboveComposer = (m) =>
+    m.items.every((i) => i.bottom <= m.composer.top + 0.5);
+  const results = [];
+  try {
+    for (const scheme of ['light', 'dark'])
+      for (const width of [375, 1280])
+        results.push(
+          await attemptOn(
+            errors,
+            `notices-update-${width}-${scheme}`,
+            async () => {
+              await page.setViewportSize({ width, height: 812 });
+              await page.emulateMedia({ colorScheme: scheme });
+              await page.goto(origin + '/?screen=notices');
+              const input = page.getByLabel('New item', { exact: true });
+              await input.waitFor();
+              await input.focus();
+              const before = await measure();
+              await call('update', true);
+              await toast.first().waitFor();
+              await settle(page);
+              const after = await measure();
+              await page.addScriptTag({ content: contrastScript });
+              const failing = await page
+                .locator('[data-sempods-ui="notices"]:not([data-placement])')
+                .evaluate((el) => window.uiContrast(el).filter((r) => !r.pass));
+              return {
+                pass:
+                  after.position === 'fixed' &&
+                  after.items.length === 1 &&
+                  after.items[0].text.includes(update) &&
+                  JSON.stringify(after.rows) === JSON.stringify(before.rows) &&
+                  after.scroll === before.scroll &&
+                  inside(after) &&
+                  aboveComposer(after) &&
+                  after.focus === 'New item' &&
+                  after.polite.length === 1 &&
+                  after.polite[0] === update &&
+                  failing.length === 0,
+                after,
+                failing,
+              };
+            },
+          ),
+        );
+    results.push(
+      await attemptOn(errors, 'notices-keyboard-open', async () => {
+        await page.emulateMedia({ colorScheme: null });
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        const input = page.getByLabel('New item', { exact: true });
+        await input.fill('Oat milk');
+        await call('update', true);
+        await toast.first().waitFor();
+        // The keyboard opens over the composer, as a shrinking viewport.
+        await page.setViewportSize({ width: 375, height: 420 });
+        await settle(page);
+        await page.waitForTimeout(100);
+        const m = await measure();
+        return {
+          pass:
+            m.items.length === 1 &&
+            inside(m) &&
+            aboveComposer(m) &&
+            m.composer.bottom <= m.height + 0.5 &&
+            m.focus === 'New item' &&
+            (await input.inputValue()) === 'Oat milk',
+          m,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-repeated-pod-failure', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        for (let i = 0; i < 3; i++) await call('fail', 'pod.example/alice');
+        await toast.first().waitFor();
+        await settle(page);
+        const failing = await measure();
+        await call('recover', 'pod.example/alice');
+        const retired = await gone(toast);
+        return {
+          pass:
+            failing.items.length === 1 &&
+            failing.items[0].severity === 'warning' &&
+            failing.items[0].text.includes('3 attempts so far') &&
+            failing.polite.length === 1 &&
+            retired,
+          failing,
+          retired,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-open-dialog', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByRole('button', { name: 'Edit list' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Edit list' });
+        await dialog.waitFor();
+        await settle(page);
+        await call('show', {
+          key: 'sync',
+          severity: 'error',
+          text: 'The list could not be synchronised.',
+        });
+        await page.waitForTimeout(300);
+        const during = await measure();
+        // Nothing of the host lies above the dialog's own controls.
+        const done = dialog.getByRole('button', { name: 'Done' });
+        const box = await done.boundingBox();
+        const onTop = await page.evaluate(
+          ([x, y]) =>
+            document.elementFromPoint(x, y)?.closest('[role="dialog"]') !==
+            null,
+          [box.x + box.width / 2, box.y + box.height / 2],
+        );
+        await done.click();
+        await hidden(dialog);
+        await toast.first().waitFor();
+        await settle(page);
+        const after = await measure();
+        return {
+          pass:
+            during.items.length === 0 &&
+            during.assertive.length === 0 &&
+            onTop &&
+            after.items.length === 1 &&
+            after.items[0].severity === 'error' &&
+            after.assertive.length === 1,
+          during,
+          onTop,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-escape-and-motion', async () => {
+        await page.setViewportSize({ width: 1280, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        const input = page.getByLabel('New item', { exact: true });
+        await input.focus();
+        await call('update', true);
+        await toast.first().waitFor();
+        await settle(page);
+        const moving = (await measure()).items[0]?.animation;
+        await toast.getByRole('button', { name: 'OK' }).focus();
+        await page.keyboard.press('Escape');
+        const dismissed = await gone(toast);
+        const back = await focusUntil(page, /New item/, async () =>
+          page.evaluate(
+            () => document.activeElement?.getAttribute('aria-label') ?? '',
+          ),
+        );
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await call('show', { key: 'saved', text: 'Saved.' });
+        await toast.first().waitFor();
+        const still = (await measure()).items[0]?.animation;
+        await page.emulateMedia({ reducedMotion: null });
+        return {
+          pass:
+            moving === 'sp-notice-in' &&
+            dismissed &&
+            back === 'New item' &&
+            still === 'none',
+          moving,
+          dismissed,
+          back,
+          still,
+        };
+      }),
+    );
+    for (const height of [812, 560])
+      results.push(
+        await attemptOn(
+          errors,
+          `notices-before-sign-in-${height}`,
+          async () => {
+            await page.setViewportSize({ width: 375, height });
+            await fetch(origin + '/__reset');
+            await page.goto(origin + '/?screen=notices&gate');
+            const gate = page.locator('dialog[data-sempods-ui="gate"]');
+            const signIn = gate.getByRole('button', { name: 'Sign in' });
+            await signIn.waitFor();
+            const focusBefore = await page.evaluate(
+              () => document.activeElement?.outerHTML.slice(0, 80) ?? '',
+            );
+            await call('update', true);
+            const inGate = gate.locator('[data-placement="gate"] li');
+            await inGate.first().waitFor();
+            await settle(page);
+            await signIn.scrollIntoViewIfNeeded();
+            const box = await signIn.boundingBox();
+            const state = await page.evaluate(
+              ([x, y]) => {
+                const gate = document.querySelector(
+                  'dialog[data-sempods-ui="gate"]',
+                );
+                const list = gate.querySelector('[data-placement="gate"] li');
+                const r = list.getBoundingClientRect();
+                return {
+                  clear: Boolean(
+                    document.elementFromPoint(x, y)?.closest('button'),
+                  ),
+                  notice: { top: r.top, bottom: r.bottom },
+                  height: innerHeight,
+                  reserved: parseFloat(getComputedStyle(gate).paddingBottom),
+                  outside: document.querySelectorAll(
+                    '[data-sempods-ui="notices"]:not([data-placement]) li',
+                  ).length,
+                  announced: [
+                    ...gate.querySelectorAll(
+                      '[data-placement="gate"] [role="status"] p',
+                    ),
+                  ].map((p) => p.textContent),
+                  focus: document.activeElement?.outerHTML.slice(0, 80) ?? '',
+                };
+              },
+              [box.x + box.width / 2, box.y + box.height / 2],
+            );
+            return {
+              pass:
+                state.clear &&
+                state.notice.bottom <= state.height + 0.5 &&
+                state.reserved > 0 &&
+                state.outside === 0 &&
+                state.announced.length === 1 &&
+                state.announced[0] === update &&
+                state.focus === focusBefore,
+              state,
+              engine,
+            };
+          },
+        ),
+      );
+  } finally {
+    await page.emulateMedia({ colorScheme: null, reducedMotion: null });
     results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
     await context.close();
   }
