@@ -5568,6 +5568,360 @@ async function viewTabs({ browser, origin }) {
 }
 
 /**
+ * The README's views on one baseline on `?screen=strip` (#384). A tap on a
+ * touch screen switches to List and back, a pointer click and leaving keep
+ * the bar on the current link, and in forced colors Tab and Enter switch with
+ * a focus outline apart from the bar. Throughout, both links rest and stay
+ * chosen without a surface or a text underline, the labels cannot be
+ * selected and draw no tap highlight, and only the current link has a bar on
+ * the row's baseline, which forced colors keep. At 320 and 375px with long
+ * counts, at a root font size of 100% and 125%, the strip and its trailing
+ * Filter action stay inside the screen with every label and count whole and
+ * targets of 2.75rem. WebKit matches forced colors without forcing the
+ * colours, so there the check shows the keyboard path only.
+ */
+async function viewStrip({ browser, origin, engine }) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const clear = (color) =>
+    !color || /^(rgba\(\d+, \d+, \d+, 0\)|transparent)$/.test(color);
+  /** The strip as the browser draws it. */
+  const read = (page) =>
+    page.evaluate(() => {
+      const nav = document.querySelector('nav[aria-label="Views"]');
+      const row = nav.parentElement;
+      const rowBox = row.getBoundingClientRect();
+      const rowStyle = getComputedStyle(row);
+      const rem = parseFloat(
+        getComputedStyle(document.documentElement).fontSize,
+      );
+      const links = [...nav.querySelectorAll('a')].map((a) => {
+        const s = getComputedStyle(a);
+        const after = getComputedStyle(a, '::after');
+        const box = a.getBoundingClientRect();
+        const parts = [...a.children].map((part) => {
+          const range = document.createRange();
+          range.selectNodeContents(part);
+          return {
+            text: part.textContent,
+            box: part.getBoundingClientRect().toJSON(),
+            lines: new Set(
+              [...range.getClientRects()].map((r) => Math.round(r.top)),
+            ).size,
+          };
+        });
+        return {
+          name: a.textContent,
+          current: a.getAttribute('aria-current'),
+          focused: a === document.activeElement,
+          color: s.color,
+          background: s.backgroundColor,
+          underline: s.textDecorationLine.includes('underline'),
+          outline:
+            s.outlineStyle === 'none' || s.outlineWidth === '0px'
+              ? null
+              : { width: parseFloat(s.outlineWidth), color: s.outlineColor },
+          select: s.userSelect || s.webkitUserSelect,
+          tap: s.webkitTapHighlightColor ?? null,
+          bar:
+            after.borderBottomStyle === 'none' ||
+            after.borderBottomWidth === '0px'
+              ? null
+              : {
+                  width: parseFloat(after.borderBottomWidth),
+                  color: after.borderBottomColor,
+                  edge:
+                    after.position === 'absolute' &&
+                    after.left === '0px' &&
+                    after.right === '0px' &&
+                    after.bottom === '-1px',
+                },
+          box: box.toJSON(),
+          parts,
+        };
+      });
+      const action = document
+        .querySelector('[aria-label="Filter"]')
+        .getBoundingClientRect()
+        .toJSON();
+      return {
+        place: document.querySelector('#strip-place').textContent,
+        filtered: document.querySelector('#strip-filtered').textContent,
+        actionInNav: Boolean(nav.querySelector('[aria-label="Filter"]')),
+        selection: window.getSelection()?.toString() ?? '',
+        forced: window.matchMedia('(forced-colors: active)').matches,
+        page: getComputedStyle(document.body).backgroundColor,
+        rem,
+        width: innerWidth,
+        overflow: document.documentElement.scrollWidth > innerWidth,
+        baseline: {
+          width: parseFloat(rowStyle.borderBottomWidth),
+          style: rowStyle.borderBottomStyle,
+          bottom: rowBox.bottom,
+        },
+        nav: nav.getBoundingClientRect().toJSON(),
+        action,
+        links,
+      };
+    });
+  /**
+   * Only `current` is marked and has a bar on the baseline, which `page`
+   * shows apart from the page; no link has a surface or a text underline,
+   * a selectable label or a tap highlight.
+   */
+  const drawn = (state, current) =>
+    state.links.length === 2 &&
+    state.baseline.style === 'solid' &&
+    state.baseline.width >= 1 &&
+    state.links.every(
+      (l) =>
+        (l.current === 'page') === l.name.startsWith(current) &&
+        Boolean(l.bar) === (l.current === 'page') &&
+        (!l.bar ||
+          (l.bar.edge &&
+            l.bar.width >= 3 &&
+            !clear(l.bar.color) &&
+            l.bar.color !== state.page)) &&
+        Math.abs(
+          l.box.bottom - (state.baseline.bottom - state.baseline.width),
+        ) <= 0.5 &&
+        clear(l.background) &&
+        !l.underline &&
+        l.select === 'none' &&
+        (l.tap === null || clear(l.tap)),
+    ) &&
+    state.selection === '';
+  const results = [];
+
+  // A tap on a touch screen, from Zen to List and back.
+  {
+    const { context, page, errors } = await newPage(browser, {
+      viewport: { width: 375, height: 812 },
+      hasTouch: true,
+      reducedMotion: 'reduce',
+    });
+    try {
+      results.push(
+        await attemptOn(errors, 'strip-touch-switch', async () => {
+          await page.goto(origin + '/?screen=strip');
+          const link = (name) =>
+            page.getByRole('link', { name: new RegExp(`^${name} \\d`) });
+          await link('Zen').waitFor();
+          const start = await read(page);
+          await link('List').tap();
+          await page.waitForURL((url) => url.pathname === '/list');
+          await settle(page);
+          const list = await read(page);
+          await link('Zen').tap();
+          await page.waitForURL((url) => url.pathname === '/');
+          await settle(page);
+          const zen = await read(page);
+          return {
+            pass:
+              drawn(start, 'Zen') &&
+              list.place === 'list' &&
+              drawn(list, 'List') &&
+              zen.place === 'zen' &&
+              drawn(zen, 'Zen'),
+            start,
+            list,
+            zen,
+          };
+        }),
+      );
+    } finally {
+      results.push({
+        id: 'strip-touch-no-page-errors',
+        pass: errors.length === 0,
+        errors,
+      });
+      await context.close();
+    }
+  }
+
+  const { context, page, errors } = await newPage(browser, {
+    reducedMotion: 'reduce',
+  });
+  const link = (name) =>
+    page.getByRole('link', { name: new RegExp(`^${name} \\d`) });
+  const filter = page.getByRole('button', { name: 'Filter', exact: true });
+  try {
+    // A pointer: hovering List, clicking it and leaving; then Filter.
+    for (const scheme of ['light', 'dark'])
+      results.push(
+        await attemptOn(errors, `strip-pointer-switch ${scheme}`, async () => {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.goto(origin + '/?screen=strip');
+          await link('Zen').waitFor();
+          await page.mouse.move(1, 1);
+          await settle(page);
+          const rest = await read(page);
+          await link('List').hover();
+          await settle(page);
+          const hovered = await read(page);
+          await link('List').click();
+          await page.waitForURL((url) => url.pathname === '/list');
+          await settle(page);
+          const pressed = await read(page);
+          await page.mouse.move(1, 1);
+          await settle(page);
+          const left = await read(page);
+          await filter.click();
+          await page.locator('#strip-filtered', { hasText: '1' }).waitFor();
+          const filtered = await read(page);
+          const [zen, list] = rest.links;
+          return {
+            pass:
+              drawn(rest, 'Zen') &&
+              // Hovering a link lightens its text, without a bar.
+              drawn(hovered, 'Zen') &&
+              hovered.links[1].color === zen.color &&
+              list.color !== zen.color &&
+              pressed.place === 'list' &&
+              drawn(pressed, 'List') &&
+              drawn(left, 'List') &&
+              // A pointer leaves no focus outline on the links.
+              [rest, hovered, pressed, left].every((state) =>
+                state.links.every((l) => !l.outline),
+              ) &&
+              filtered.filtered === '1' &&
+              filtered.place === 'list' &&
+              !filtered.actionInNav &&
+              drawn(filtered, 'List'),
+            rest,
+            hovered,
+            pressed,
+            left,
+            filtered,
+          };
+        }),
+      );
+    // The keyboard in forced colors: Tab to each link, Enter on List, Tab to
+    // Filter, back with Shift+Tab and Enter on Zen.
+    results.push(
+      await attemptOn(errors, 'strip-keyboard-forced-colors', async () => {
+        const tab = tabKey(engine);
+        const back = tab.replace('Tab', 'Shift+Tab');
+        await page.emulateMedia({
+          colorScheme: 'light',
+          forcedColors: 'active',
+        });
+        await page.goto(origin + '/?screen=strip');
+        await link('Zen').waitFor();
+        const steps = {};
+        await page.keyboard.press(tab);
+        await settle(page);
+        steps.zen = await read(page);
+        await page.keyboard.press(tab);
+        await settle(page);
+        steps.list = await read(page);
+        await page.keyboard.press('Enter');
+        await page.waitForURL((url) => url.pathname === '/list');
+        await settle(page);
+        steps.listCurrent = await read(page);
+        await page.keyboard.press(tab);
+        await page.keyboard.press('Enter');
+        await page.locator('#strip-filtered', { hasText: '1' }).waitFor();
+        steps.filtered = await read(page);
+        await page.keyboard.press(back);
+        await page.keyboard.press(back);
+        await settle(page);
+        steps.zenAgain = await read(page);
+        await page.keyboard.press('Enter');
+        await page.waitForURL((url) => url.pathname === '/');
+        await settle(page);
+        steps.zenCurrent = await read(page);
+        /** `focused` alone has a focus outline of 2px or more. */
+        const ring = (state, focused) =>
+          state.links.every(
+            (l) =>
+              l.focused === l.name.startsWith(focused) &&
+              Boolean(l.outline) === l.focused &&
+              (!l.outline || l.outline.width >= 2),
+          );
+        return {
+          pass:
+            Object.values(steps).every((s) => s.forced) &&
+            drawn(steps.zen, 'Zen') &&
+            ring(steps.zen, 'Zen') &&
+            // The focus on List and the bar on Zen: two indicators apart.
+            drawn(steps.list, 'Zen') &&
+            ring(steps.list, 'List') &&
+            steps.listCurrent.place === 'list' &&
+            drawn(steps.listCurrent, 'List') &&
+            ring(steps.listCurrent, 'List') &&
+            steps.filtered.filtered === '1' &&
+            steps.filtered.links.every((l) => !l.focused && !l.outline) &&
+            drawn(steps.zenAgain, 'List') &&
+            ring(steps.zenAgain, 'Zen') &&
+            steps.zenCurrent.place === 'zen' &&
+            drawn(steps.zenCurrent, 'Zen') &&
+            ring(steps.zenCurrent, 'Zen'),
+          ...steps,
+        };
+      }),
+    );
+    await page.emulateMedia({ colorScheme: null, forcedColors: null });
+    // Long counts on narrow screens, also with a larger root font size.
+    for (const width of [320, 375])
+      for (const font of ['100%', '125%'])
+        results.push(
+          await attemptOn(
+            errors,
+            `strip-long-counts ${width}px ${font}`,
+            async () => {
+              await page.setViewportSize({ width, height: 800 });
+              await page.goto(origin + '/?screen=strip&counts=long');
+              await link('Zen').waitFor();
+              await page.evaluate((size) => {
+                document.documentElement.style.fontSize = size;
+              }, font);
+              await settle(page);
+              const state = await read(page);
+              const target = 2.75 * state.rem - 0.5;
+              const inside = (inner, outer) =>
+                inner.left >= outer.left - 0.5 &&
+                inner.right <= outer.right + 0.5 &&
+                inner.top >= outer.top - 0.5 &&
+                inner.bottom <= outer.bottom + 0.5;
+              const screen = {
+                left: 0,
+                top: 0,
+                right: state.width,
+                bottom: 800,
+              };
+              const counts = state.links.map((l) => l.parts[1]?.text);
+              return {
+                pass:
+                  !state.overflow &&
+                  drawn(state, 'Zen') &&
+                  same(counts, ['1,234,567', '98,765,432']) &&
+                  state.links.every(
+                    (l) =>
+                      l.box.height >= target &&
+                      inside(l.box, state.nav) &&
+                      l.parts.length === 2 &&
+                      l.parts.every((p) => inside(p.box, l.box)) &&
+                      // At the default size each count stays on one line.
+                      (font !== '100%' || l.parts[1].lines === 1),
+                  ) &&
+                  inside(state.nav, screen) &&
+                  inside(state.action, screen) &&
+                  state.action.left >= state.nav.right &&
+                  state.action.width >= target &&
+                  state.action.height >= target,
+                state,
+              };
+            },
+          ),
+        );
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
+/**
  * A short confirmation with long German labels and a long unbroken list name
  * (#368), on `?screen=confirm`: the README's `ConfirmDialog` and, with
  * `&footer=pill`, the same parts holding `ActionButton` pills. At 1280, 375
@@ -5905,6 +6259,7 @@ export const suites = {
   confirmation,
   menuDialog,
   viewTabs,
+  viewStrip,
   ghost,
 };
 

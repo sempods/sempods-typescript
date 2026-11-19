@@ -24,6 +24,9 @@
 // while signed in (#329). With `?screen=tabs`, the page is the README's
 // views as links: the two views as ghost links, the shown one marked by
 // `nav.link`, and a link to a task, a screen over a view (#342, #343).
+// With `?screen=strip`, the page is the README's views on one baseline,
+// with counts and the trailing Filter action; `&counts=long` gives both
+// views long counts (#384).
 // With `?screen=confirm`, the page is the README's confirmation, open, with
 // long German labels and a long unbroken list name; with `&footer=pill` as
 // well, the same dialog parts hold `ActionButton` pills instead (#368).
@@ -36,8 +39,8 @@
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
-// links, view-tabs.tsx, the confirmation, confirm-dialog.tsx, and the
-// address model, places.ts, are the package
+// links, view-tabs.tsx, the view strip, view-strip.tsx, the confirmation,
+// confirm-dialog.tsx, and the address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
 // router moves between the places.
@@ -91,6 +94,7 @@ import { TaskDialog, taskFields } from './task-dialog';
 import { QuickEdit } from './quick-edit';
 import { Workspace } from './workspace';
 import { ViewTabs } from './view-tabs';
+import { ViewStrip } from './view-strip';
 import { ConfirmDialog } from './confirm-dialog';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
@@ -250,6 +254,7 @@ const addPod =
     sessionStorage.getItem('add-pod-gate') === '1');
 const checkboxes = settings.get('screen') === 'checkbox';
 const tabs = settings.get('screen') === 'tabs';
+const strip = settings.get('screen') === 'strip';
 const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
@@ -374,6 +379,8 @@ function App() {
         <CheckboxGate />
       ) : tabs ? (
         <TabsGate />
+      ) : strip ? (
+        <StripGate long={settings.get('counts') === 'long'} />
       ) : ghosts ? (
         <GhostGate />
       ) : confirmation ? (
@@ -873,6 +880,30 @@ function TabsGate() {
       </p>
       <p className="mt-4" id="tabs-place">
         {nav.place.kind}
+      </p>
+    </main>
+  );
+}
+
+/**
+ * The README's views on one baseline (`?screen=strip`, #384), with the
+ * shown place and the number of Filter presses for the checks to read.
+ */
+function StripGate({ long }: { readonly long: boolean }) {
+  const nav = useNav(places);
+  const [filtered, setFiltered] = useState(0);
+  return (
+    <main className="gate-main">
+      <ViewStrip
+        nav={nav}
+        counts={long ? { zen: 1234567, list: 98765432 } : { zen: 3, list: 12 }}
+        onFilter={() => setFiltered((n) => n + 1)}
+      />
+      <p className="mt-4" id="strip-place">
+        {nav.place.kind}
+      </p>
+      <p className="mt-4" id="strip-filtered">
+        {filtered}
       </p>
     </main>
   );
