@@ -350,6 +350,21 @@ definition's modification instant, so an exact `toEqual({ kind: 'saved' })`
 in a test of a definition with `timestamps` expects it. See [before the list
 reads again](timestamps.md#before-the-list-reads-again).
 
+### Presets, a minimum and typed days in date choosers
+
+0.9.0's `@sempods/app-ui` adds `DateChoice`, the calendar-day choice of
+`DateChooser` without its trigger and popover, for an app's own dialog. It
+takes the app's localized presets with concrete days, an optional `min` and
+"Remove date" with `optional`; a custom day, from the calendar or typed as
+`YYYY-MM-DD`, takes effect only with Apply. `DateChooser` shows the same
+choice and gains `presets` and `min`. An app that composed `Calendar`, a
+typed field, validation and its own Apply inside a `ScreenDialog` can replace
+them with `DateChoice` and keep its own preset arithmetic and writes. Both
+choosers now hold a typed entry between the calendar and the actions:
+keyboard tests that Tab from a day to Apply pass it, and a test that counted
+the popover's text boxes counts one more. See
+[a date choice in a screen dialog](../packages/app-ui/README.md#a-date-choice-in-a-screen-dialog).
+
 ### ResourceEditor actions in confirmation order
 
 Up to 0.9.0-dev.3, `ResourceEditor` showed **Save**, **Cancel** (or

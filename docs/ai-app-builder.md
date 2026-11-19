@@ -154,7 +154,11 @@ needs them; preserve the minimal screen's recovery when adapting it.
   form, such as `2026-10-05Z`, `-0044-03-15`, `0000-01-01` or
   `2026-10-05T09:30:00`: show those as stored. Code that needs the parts uses
   `classifyDate` from `@sempods/client-sdk/edit`, which `date`, `dateTime`
-  and both formatters share. Keep original
+  and both formatters share. Let people choose a day with the UI kit's
+  `DateChooser`, or with `DateChoice` in the app's own dialog when it needs
+  presets such as "Tomorrow" or a minimum day
+  ([README](../packages/app-ui/README.md#a-date-choice-in-a-screen-dialog)).
+  Keep original
   list snapshots; never reconstruct them from plain values. Preserve unknown
   RDF and language variants. Record the mapping in the app's notes.
 - **SDK-owned access and writes.** Reuse guarded actions and recovery components;
