@@ -1036,8 +1036,8 @@ in one list (`useFieldUpdate`) or across the readable Contexts of a Pod
 - The question and the summary belong to the authorization they were made
   under: render them in a component keyed by `useAppState().pod?.key`, so
   another Pod, a sign-out or a new sign-in starts afresh, and close the
-  question when an area it names can no longer be read. The SDK keeps the
-  writes and their recovery across both.
+  question when an area it names can no longer be read. Switching Pods
+  retires the previous connection's recovery notices.
 - Then `await` one command after the other with a progress line, and stop at
   the first result that is not `removed`: a change on the Pod, an unconfirmed
   answer such as a lost response, a refusal, or `not-sent`. Its `reason` says
@@ -1046,9 +1046,10 @@ in one list (`useFieldUpdate`) or across the readable Contexts of a Pod
   Pod or access changed. Never retry or resend the rest. Report the confirmed
   count, why the run stopped and the unsent remainder. The summary names no
   row: the stopped row's notice does, as long as it may be read.
-- The stopped row keeps its SDK recovery. Render `UnresolvedNotices` with the
-  rows the screen shows, so its notice stays reachable when it leaves a
-  filtered view, for example a reopened row in a view of done tasks.
+- While the same Pod connection remains active, a stopped row keeps its
+  recovery notice even after it leaves a filtered view. Pass the rows the
+  screen shows to `UnresolvedNotices`, for example the done tasks in a
+  completed-tasks view.
 - A single row is deleted with a plain `RemoveButton`; the bulk action shows
   the kit's `DeleteIcon`, the same glyph. Each button's name says what it
   deletes. Where the same title can be in two areas, the row's `question`
