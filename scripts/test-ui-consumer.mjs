@@ -168,6 +168,7 @@ try {
     await ship('tsx', 'view-tabs.tsx'),
     await ship('tsx', 'view-strip.tsx'),
     await ship('tsx', 'confirm-dialog.tsx'),
+    await ship('tsx', 'rename-row.tsx'),
     await ship('tsx', 'not-today.tsx'),
   ];
   for (const [i, example] of blocks('tsx').entries())

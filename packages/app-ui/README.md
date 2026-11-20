@@ -1161,6 +1161,376 @@ export function SourceRow(props: {
 }
 ```
 
+### Renaming in a row
+
+`InlineTextEdit` edits one text value in place, such as a shopping item's
+name or a label, without the full `ResourceEditor`: an input with **Save** and
+**Cancel** (the SDK's texts in the provider's language, or `saveLabel` and
+`cancelLabel`). It is controlled and writes nothing itself. It focuses and
+selects the value when it mounts; opened from a menu (a row's `HeaderMenu`
+**Rename**), it takes the focus that the closing menu hands back to its
+button. Enter or Save calls `onSave`, Escape or Cancel `onCancel`. Escape
+stays inside it, so an enclosing dialog stays open.
+
+- Moving between its input, buttons and `children` (the row's
+  `UpdateNotice`, with its check and acknowledgement) keeps it open, also by
+  pointer in WebKit, where a press on a plain button does not focus it.
+- A press beside it, a tap on text beside it on a touch device, or Tab past
+  it calls `onDismiss`: close the field without saving and keep or drop the
+  draft as the app decides. The window losing the focus does not, nor a
+  focus that falls to the page, as when a focused control becomes disabled:
+  the input takes it back.
+- `pending` locks the value while the write runs: Save shows that it is
+  pending and keeps its focus, Cancel is unavailable, and leaving then
+  dismisses only once the write has settled. `readOnly` (for example
+  `!row.canMutate` after a conflict) keeps the input readable and Save
+  unavailable; `error` marks the input invalid and describes it.
+- `returnFocus` runs when the field unmounts while it holds the focus, after
+  the app's render: focus the trigger there. After Save, Cancel or Escape the
+  focus returns; after a slow save the person has left meanwhile, it stays
+  where they put it.
+- Its controls are 44px high; at a narrow width they wrap below the input.
+
+The app owns the trigger and any deep link, the field mapping and
+validation, which name Save may write over, what a dismissal keeps and its own
+list actions. Write with the row's `useFieldUpdate` command; the
+[authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#renaming-one-value-in-a-row)
+explains the recipe. Here a dismissal parks a changed name, marked in its
+row and guarded, and the next rename resumes it; `useRename` is the write
+rule that the app's other renames share:
+
+```tsx
+// rename-row.tsx
+import { useRef, useState, type ReactNode } from 'react';
+import {
+  LoadNotice,
+  RemoveButton,
+  UnresolvedNotices,
+  UpdateNotice,
+  useDraftGuard,
+  useFieldUpdate,
+  useList,
+  useMessages,
+  useWorkflowAccess,
+  type FieldUpdateRow,
+} from '@sempods/app-sdk/react';
+import type { DraftOf } from '@sempods/client-sdk/edit';
+import { Badge, Button, Checkbox, InlineTextEdit } from '@sempods/app-ui';
+import { taskFields } from './task-dialog';
+
+type Item = DraftOf<typeof taskFields>;
+
+const texts = {
+  en: {
+    list: 'Shopping list',
+    rename: 'Rename',
+    bought: 'Bought',
+    details: 'Details',
+    remove: 'Delete',
+    required: 'Enter a name.',
+    unsaved: 'Not saved',
+    renamed: (name: string) => `Renamed elsewhere to “${name}”.`,
+    continue: 'Continue with my name',
+  },
+  de: {
+    list: 'Einkaufsliste',
+    rename: 'Umbenennen',
+    bought: 'Gekauft',
+    details: 'Details',
+    remove: 'Löschen',
+    required: 'Gib einen Namen ein.',
+    unsaved: 'Nicht gespeichert',
+    renamed: (name: string) => `Anderswo umbenannt in „${name}“.`,
+    continue: 'Mit meinem Namen weiter',
+  },
+};
+
+/** A rename in progress, open or parked by a dismissal. */
+export interface Rename {
+  readonly text: string;
+  /**
+   * The name it continues from: the one the person opened, or the one they
+   * last reviewed. Save writes only over this name.
+   */
+  readonly seen: string;
+}
+
+/** A rename of the name the row shows now, also one just saved. */
+export const startRename = (row: FieldUpdateRow<Item>): Rename => ({
+  text: row.data.title,
+  seen: row.data.title,
+});
+
+/**
+ * Whether the text changes the name as Save writes it, trimmed: a stored
+ * name with spaces around it, opened and left, is no change.
+ */
+export const edited = (rename: Rename) =>
+  rename.text.trim() !== rename.seen.trim();
+
+/**
+ * What every rename of this app shares: whether Save may write, the row's
+ * notices and the write. Save writes from the row's current snapshot, and
+ * only while it shows the name the rename continues from; the SDK then
+ * guards that name up to the write and reports a later change as
+ * `changed-on-pod`. A name that the list reads changed elsewhere locks Save
+ * until the person has seen it and continues from it; acknowledging a
+ * checked change continues from the version the check compared.
+ */
+export function useRename(
+  row: FieldUpdateRow<Item>,
+  /** The row's rename; without one, only the row's notice. */
+  rename: Rename | undefined,
+  onChange: (rename: Rename) => void,
+  /**
+   * The list is reading again (`list.state.kind === 'loading'`): a newer
+   * name is shown once the read has answered, also when it failed.
+   */
+  reading: boolean,
+) {
+  const t = useMessages(texts);
+  const { outcome, checked, current } = row.notice;
+  const unresolved =
+    outcome?.kind === 'changed-on-pod' || outcome?.kind === 'unconfirmed';
+  const differs = rename !== undefined && row.data.title !== rename.seen;
+  const notices: ReactNode = (
+    <>
+      <UpdateNotice
+        {...row.notice}
+        onAcknowledge={() => {
+          if (rename && checked && current)
+            onChange({ ...rename, seen: current.title });
+          row.notice.onAcknowledge();
+        }}
+        quiet
+      />
+      {/* Told once the read has answered; until then Save only waits. */}
+      {rename && differs && !reading && !unresolved && (
+        <p role="alert" className="flex flex-wrap items-center gap-2">
+          {t.renamed(row.data.title)}
+          <Button
+            variant="outline"
+            className="h-11 px-4"
+            onPress={() => onChange({ ...rename, seen: row.data.title })}
+          >
+            {t.continue}
+          </Button>
+        </p>
+      )}
+    </>
+  );
+  return {
+    /** Save is unavailable: no write now, or a newer name to review first. */
+    readOnly: !row.canMutate || differs,
+    notices,
+    /** The validation message for the current text, if any. */
+    invalid: rename && !rename.text.trim() ? t.required : undefined,
+    /**
+     * Writes the trimmed text: `done` once saved or with nothing to save,
+     * `kept` when the draft stays with the row's notice. Nothing is resent.
+     */
+    async save(): Promise<'done' | 'kept'> {
+      const title = rename?.text.trim();
+      if (!rename || !title || differs) return 'kept';
+      if (!edited(rename)) return 'done';
+      const outcome = await row.update({ title });
+      return outcome.kind === 'saved' ? 'done' : 'kept';
+    },
+  };
+}
+
+/** A list whose item names are renamed in their rows. */
+export function ShoppingList(props: {
+  /** The app's own address of an item's screen. */
+  readonly href: (iri: string) => string;
+}) {
+  const list = useList(taskFields);
+  const mutate = useFieldUpdate(taskFields);
+  const { write } = useWorkflowAccess();
+  const t = useMessages(texts);
+  // The item being renamed, and the renames by IRI until saved or cancelled.
+  const [open, setOpen] = useState<string | null>(null);
+  const [renames, setRenames] = useState<ReadonlyMap<string, Rename>>(
+    new Map(),
+  );
+  const triggers = useRef(new Map<string, HTMLButtonElement>());
+  const items = list.data?.items ?? [];
+  // Gone only when a complete read lists it neither as an item nor as an
+  // entry it skipped (for example after its name was cleared elsewhere).
+  const shown = new Set(items.map((item) => item.iri));
+  const skipped = new Set(list.data?.skippedRecords.map((r) => r.iri));
+  const complete =
+    list.data && list.data.skippedRecords.length === list.data.skipped;
+  const gone = (iri: string) =>
+    Boolean(complete && !shown.has(iri) && !skipped.has(iri));
+  // A changed name is unsaved work: changing the list or Pod asks first,
+  // also while the list cannot be read.
+  useDraftGuard(
+    [...renames].some(([iri, rename]) => !gone(iri) && edited(rename)),
+    () => {
+      setRenames(new Map());
+      setOpen(null);
+    },
+  );
+  const update = (
+    iri: string,
+    change: (rename?: Rename) => Rename | null | undefined,
+  ) =>
+    setRenames((all) => {
+      const next = new Map(all);
+      const rename = change(all.get(iri));
+      if (rename) next.set(iri, rename);
+      else next.delete(iri);
+      return next;
+    });
+  return (
+    <>
+      {/* A failed read keeps the rows, says so and offers to read again. */}
+      <LoadNotice state={list.state} reload={list.reload} />
+      <ul aria-label={t.list}>
+        {items.map((item) => {
+          const { iri } = item;
+          const row = mutate.for(item);
+          return (
+            <ItemRow
+              key={iri}
+              row={row}
+              href={props.href(iri)}
+              writable={write}
+              rename={renames.get(iri)}
+              reading={list.state.kind === 'loading'}
+              editing={open === iri}
+              trigger={(button) => {
+                if (button) triggers.current.set(iri, button);
+                else triggers.current.delete(iri);
+              }}
+              onOpen={() => {
+                update(iri, (r) => r ?? startRename(row));
+                setOpen(iri);
+              }}
+              onRename={(rename) => update(iri, (r) => r && rename)}
+              onClose={(park) => {
+                // Only a changed name is parked.
+                update(iri, (r) => (park && r && edited(r) ? r : null));
+                // Another item may be open by now, after a slow save.
+                setOpen((current) => (current === iri ? null : current));
+              }}
+              returnFocus={() => triggers.current.get(iri)?.focus()}
+            />
+          );
+        })}
+      </ul>
+      <UnresolvedNotices of={mutate} shown={list.data?.items} />
+    </>
+  );
+}
+
+function ItemRow(props: {
+  readonly row: FieldUpdateRow<Item>;
+  readonly href: string;
+  /** Whether the list may be written; without it, names are plain text. */
+  readonly writable: boolean;
+  /** The open or parked rename of this item's name. */
+  readonly rename: Rename | undefined;
+  readonly reading: boolean;
+  readonly editing: boolean;
+  readonly trigger: (button: HTMLButtonElement | null) => void;
+  readonly onOpen: () => void;
+  readonly onRename: (rename: Rename) => void;
+  /** Ends the rename; `park` keeps a changed one for the next. */
+  readonly onClose: (park: boolean) => void;
+  readonly returnFocus: () => void;
+}) {
+  const t = useMessages(texts);
+  const { row, rename } = props;
+  const item = row.data;
+  const edit = useRename(row, rename, props.onRename, props.reading);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  const parked = rename !== undefined && !props.editing && !saving;
+  const save = async () => {
+    if (edit.invalid) return setError(edit.invalid);
+    setSaving(true);
+    const result = await edit.save();
+    setSaving(false);
+    // Saved: the row shows the new name. Otherwise the rename stays with
+    // the row's notice.
+    if (result === 'done') props.onClose(false);
+  };
+  return (
+    <li className="flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 border-b py-1 *:data-[sempods-ui=notice]:basis-full">
+      <Checkbox
+        aria-label={`${t.bought}: ${item.title}`}
+        isSelected={item.done}
+        isDisabled={!row.canMutate}
+        onChange={(done) => void row.update({ done })}
+      />
+      {props.editing && rename ? (
+        <InlineTextEdit
+          className="min-w-0 flex-1"
+          label={`${t.rename}: ${item.title}`}
+          value={rename.text}
+          onChange={(text) => {
+            setError(undefined);
+            props.onRename({ ...rename, text });
+          }}
+          onSave={() => void save()}
+          onCancel={() => {
+            setError(undefined);
+            props.onClose(false);
+          }}
+          onDismiss={() => {
+            setError(undefined);
+            props.onClose(true);
+          }}
+          returnFocus={props.returnFocus}
+          pending={saving}
+          readOnly={edit.readOnly}
+          error={error}
+        >
+          {edit.notices}
+        </InlineTextEdit>
+      ) : (
+        <>
+          {props.writable ? (
+            <button
+              ref={props.trigger}
+              className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-1 text-start wrap-anywhere hover:bg-muted"
+              aria-label={
+                `${t.rename}: ${item.title}` + (parked ? ` (${t.unsaved})` : '')
+              }
+              onClick={props.onOpen}
+            >
+              {item.title}
+              {parked && <Badge variant="outline">{t.unsaved}</Badge>}
+            </button>
+          ) : (
+            <span className="min-w-0 flex-1 px-1 wrap-anywhere">
+              {item.title}
+            </span>
+          )}
+          <a
+            className="inline-flex min-h-11 items-center px-2 underline"
+            href={props.href}
+            aria-label={`${t.details}: ${item.title}`}
+          >
+            {t.details}
+          </a>
+          {item.done && (
+            <RemoveButton
+              label={`${t.remove}: ${item.title}`}
+              disabled={!row.canMutate}
+              onRemove={row.remove}
+            />
+          )}
+          {edit.notices}
+        </>
+      )}
+    </li>
+  );
+}
+```
+
 ### A list menu with unavailable choices
 
 A switch between lists, labelled with the current one, shows every list the
@@ -1865,14 +2235,19 @@ combinations in light and dark; rendered screen contrast in four combinations; a
 links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
 Context, plus fragment entries, a source address without a Context choice and
-a path with two leading slashes; and views as links, their current link
+a path with two leading slashes; views as links, their current link
 marked by the router and drawn chosen in every action combination; views on
 one baseline, switched by touch both ways, by pointer and by keyboard in
-forced colours, with long counts at 320px; and the "Not today" `DateChoice` in
-a `ScreenDialog` with a preset, a typed day, an impossible and an early day,
-Enter in a form, Remove date, Escape after a picked day, reopening the date
-chooser during its exit, the focus trap and 44px targets without horizontal
-overflow at 375 and 360px wide. It uses a loopback fixture Pod: it is not
+forced colours, with long counts at 320px;
+`rename-row.tsx` with a renaming row menu: keyboard, taps at 320 and 375px,
+dismissal and resumption, an invalid name, a denied write, a change on the
+Pod, a slow save and the focus after it, read-only access and German names;
+and the
+"Not today" `DateChoice` in a `ScreenDialog` with a preset, a typed day, an
+impossible and an early day, Enter in a form, Remove date, Escape after a
+picked day, reopening the date chooser during its exit, the
+focus trap and 44px targets without horizontal overflow at 375 and 360px
+wide. It uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits
