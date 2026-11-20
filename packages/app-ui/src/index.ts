@@ -8,6 +8,7 @@ export {
 } from './adapters/date-choice.js';
 export { DateChooser, type DateChooserProps } from './adapters/date-chooser.js';
 export * from './adapters/header-menu.js';
+export * from './adapters/inline-text-edit.js';
 export * from './adapters/context-switch.js';
 export * from './adapters/screen-dialog.js';
 export * from './adapters/suggest-field.js';

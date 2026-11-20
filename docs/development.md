@@ -244,7 +244,29 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     and utilities, where a native button keeps its face; at rest, hovered,
     focused by keyboard and open they paint the same surface, outline and
     ring under both, in light, dark and forced colors (there without the
-    outline's colour, which follows the text).
+    outline's colour, which follows the text);
+  - rows renamed in place (#394): the README's shopping list (`rename-row.tsx`)
+    with `InlineTextEdit` and the row's `useFieldUpdate` command, renamed by
+    keyboard with the focus back on the name; Escape and Cancel write
+    nothing; a press beside the field and Tab past it park the draft, which
+    the next rename resumes and a list change guards, also while the list
+    cannot be read or skips the item, while an untouched one is dropped; a
+    name the list reads changed elsewhere, also after the row's own tick or
+    while the field is open, locks Save until the person continues from it,
+    so it is never overwritten unseen, also after a failed read, which
+    offers to read again; a stored name with spaces around it, opened and
+    left or saved untouched, is no change; a rename reopened right after its
+    save starts from the saved name; an empty name is invalid; a denied
+    write keeps the field and the draft; a change on the Pod locks the row
+    until it is checked and acknowledged, and a later rename after the check
+    is shown before Save; during a slow save the field stays
+    locked and the focus returns to the name, or stays where the person moved
+    it; read-only access shows names as text; German names; taps beside the
+    field and 44px targets within 320 and 375px; and a second shape, renamed
+    from a row's menu, where the field takes the focus the closing menu
+    hands back and its own draft policy keeps a changed field open, also
+    while another row is renamed, with the same rule for what Save may write
+    over;
   - the shared notification host (#385) on `?screen=notices`, a shopping
     list with a composer fixed at the bottom: the PWA pilot's update notice
     at 375 and 1280px in light and dark stays outside the flow (no row moves,
