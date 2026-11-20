@@ -31,8 +31,8 @@ import {
  *   sends nothing.
  * - **run** (`useRemoveRows`): one row command after the other, stopping at
  *   the first answer other than `removed`; nothing is retried.
- * - **summary**: how many were removed, which one stopped the run and how
- *   many were not sent. The stopped row keeps its SDK recovery through
+ * - **summary**: how many were removed, why the run stopped and how many
+ *   were not sent. The stopped row keeps its SDK recovery through
  *   `UnresolvedNotices`, also when it leaves this filtered view. The summary
  *   belongs to this screen: after another Context is chosen, the screen shows
  *   that list, and the old one keeps its unsent rows untouched.

@@ -85,12 +85,13 @@ export const doneTasks = (n: number) => count(n, 'done task', 'done tasks');
 
 /**
  * Progress, then the confirmed count, why it stopped and the unsent rest.
- * `stopped` names the row that stopped the run; `ended` says what changed
- * when a command sent nothing because the list, the Pod or access changed.
+ * It names no row: the stopped row's notice does, while the row may be read.
+ * `ended` says what changed when a command sent nothing because the list, the
+ * Pod or access changed.
  */
 export function summary(
   removal: Removal,
-  { stopped = 'One task', ended = 'The list or its access changed.' } = {},
+  { ended = 'The list or its access changed.' } = {},
 ) {
   if (removal.phase === 'running')
     return `Deleting… ${removal.removed} of ${removal.total}.`;
@@ -103,11 +104,12 @@ export function summary(
   const rest = unsent
     ? ' ' + count(unsent, 'task was', 'tasks were') + ' not sent.'
     : '';
-  return `${removed} ${why(outcome, stopped, ended)}${rest}`;
+  return `${removed} ${why(outcome, ended)}${rest}`;
 }
 
-/** Why the run stopped at `row`: its answer, or why its command sent nothing. */
-function why(outcome: Stop, row: string, ended: string) {
+/** Why the run stopped at a row: its answer, or why its command sent nothing. */
+function why(outcome: Stop, ended: string) {
+  const row = 'One task';
   if (outcome.kind !== 'not-sent')
     return `${row} needs your attention; see its notice.`;
   switch (outcome.reason) {

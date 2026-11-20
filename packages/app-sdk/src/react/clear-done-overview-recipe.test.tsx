@@ -11,14 +11,19 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ClearDoneOverviewExample } from '../../../../examples/todo/recipes/clear-done-overview.js';
+import {
+  ClearDoneOverview,
+  ClearDoneOverviewExample,
+} from '../../../../examples/todo/recipes/clear-done-overview.js';
 import type { BrowserRuntime } from '../runtime/types.js';
+import { SempodsProvider, useApp } from '@sempods/app-sdk/react';
 import {
   catalogue,
   deferred,
   personal,
   resourceIri,
   returnedSession,
+  twoPods,
   work,
 } from '../runtime/fixture.test.js';
 
@@ -42,14 +47,33 @@ const done = schema + 'CompletedActionStatus';
 const open = schema + 'PotentialActionStatus';
 type Task = { title: string; status: string; version: number };
 
+/** Switches to another signed-in Pod. */
+function Switch({ id }: { readonly id: string }) {
+  const app = useApp();
+  return (
+    <button onClick={() => void app.selectConnection(id)}>
+      Switch to {id}
+    </button>
+  );
+}
+
 /**
  * work: Milk and Shared done, Eggs open; personal: the same Shared IRI and
- * Call Ann, both done. personal is writable unless `readOnly`.
+ * Call Ann, both done. personal is writable unless `readOnly`. With `bob`, a
+ * second signed-in Pod without tasks, and switches between the two.
  */
-async function overview({ readOnly = false } = {}) {
-  const f = await returnedSession((r) => void runtimes.push(r));
-  f.setCatalogue(async () =>
-    catalogue([work, personal], readOnly ? [work] : [work, personal]),
+async function overview({ readOnly = false, bob = false } = {}) {
+  const keep = (r: BrowserRuntime) => void runtimes.push(r);
+  const two = bob ? await twoPods(keep) : null;
+  const f = two
+    ? { ...two.f, runtime: two.runtime }
+    : await returnedSession(keep);
+  const other = two?.otherUrl;
+  const own = (url: string) => !other || !url.startsWith(other);
+  f.setCatalogue(async (url) =>
+    own(url)
+      ? catalogue([work, personal], readOnly ? [work] : [work, personal])
+      : catalogue([], [], other),
   );
   const task = (title: string, isDone: boolean): Task => ({
     title,
@@ -87,6 +111,14 @@ async function overview({ readOnly = false } = {}) {
   };
   f.setQuery(async (url) => {
     const context = new URL(url).searchParams.get('default-graph-uri');
+    if (!own(url))
+      return new Response(
+        JSON.stringify({
+          head: { vars: ['graph'] },
+          results: { bindings: [] },
+        }),
+        { headers: { 'content-type': 'application/sparql-results+json' } },
+      );
     if (!context)
       // The Pod-wide discovery of Contexts that hold the type.
       return new Response(
@@ -123,10 +155,20 @@ async function overview({ readOnly = false } = {}) {
     if (control.lose === key) throw new TypeError('Failed to fetch');
     return new Response(null, { status: 204 });
   });
-  render(<ClearDoneOverviewExample runtime={f.runtime} />);
+  if (two) {
+    render(
+      <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+        <Switch id={f.id} />
+        <Switch id={two.other.id} />
+        <ClearDoneOverview />
+      </SempodsProvider>,
+    );
+    // Bob is active after his sign-in; the tasks are on the first Pod.
+    fireEvent.click(await screen.findByText(`Switch to ${f.id}`));
+  } else render(<ClearDoneOverviewExample runtime={f.runtime} />);
   await screen.findByText('Call Ann · personal');
   await waitFor(() => expect(bulk().hasAttribute('disabled')).toBe(false));
-  return { ...f, tasks, deletes, control };
+  return { ...f, tasks, deletes, control, other: two?.other.id };
 }
 
 const bulk = () => screen.getByRole('button', { name: 'Clear done tasks' });
@@ -239,7 +281,7 @@ it('stops at a reopened row and keeps its recovery once it leaves the overview',
   const summary = await screen.findByText(/^2 tasks deleted\./);
   expect(summary.getAttribute('role')).toBe('alert');
   expect(summary.textContent).toBe(
-    '2 tasks deleted. “Milk” in work needs your attention; see its notice. 1 task was not sent.',
+    '2 tasks deleted. One task needs your attention; see its notice. 1 task was not sent.',
   );
   expect(f.deletes).not.toContain('work urn:s');
   expect([...f.tasks.get(work)!.keys()]).toEqual(['urn:a', 'urn:s', 'urn:e']);
@@ -258,7 +300,7 @@ it('stops at a lost response and keeps its check once the row is gone', async ()
   await press('Delete');
   const summary = await screen.findByText(/^1 task deleted\./);
   expect(summary.textContent).toBe(
-    '1 task deleted. “Call Ann” in personal needs your attention; see its notice. 2 tasks were not sent.',
+    '1 task deleted. One task needs your attention; see its notice. 2 tasks were not sent.',
   );
   expect(f.deletes).toEqual(['personal urn:s', 'personal urn:b']);
   await reread();
@@ -296,7 +338,7 @@ it('sends nothing more once an area lost write access', async () => {
   expect(f.tasks.get(work)!.size).toBe(3);
 });
 
-it('stops at a row whose own delete has no answer yet, and names it', async () => {
+it('stops at a row whose own delete has no answer yet, and says so', async () => {
   const f = await overview();
   const first = deferred<void>();
   const own = deferred<void>();
@@ -321,7 +363,7 @@ it('stops at a row whose own delete has no answer yet, and names it', async () =
   expect(
     (
       await screen.findByText(
-        '1 task deleted. “Call Ann” in personal had another change in progress. 3 tasks were not sent.',
+        '1 task deleted. One task had another change in progress. 3 tasks were not sent.',
       )
     ).getAttribute('role'),
   ).toBe('alert');
@@ -329,22 +371,30 @@ it('stops at a row whose own delete has no answer yet, and names it', async () =
   expect(f.deletes).toEqual(['personal urn:s', 'personal urn:b']);
 });
 
-it('stops naming a row once its area can no longer be read', async () => {
+it('names no deleted task, also once read access returns', async () => {
   const f = await overview();
   f.control.lose = 'personal urn:b';
   fireEvent.click(bulk());
   await press('Delete');
-  await screen.findByText(/^1 task deleted\. “Call Ann” in personal/);
-  // Read access to personal ends.
+  const summary = await screen.findByText(/^1 task deleted\./);
+  // Read access to personal ends, then returns: the Pod applied the delete.
   f.setCatalogue(async () => catalogue([work], [work]));
   await act(() => f.runtime.loadContexts(f.id));
   await waitFor(() =>
     expect(screen.queryByText('Call Ann · personal')).toBeNull(),
   );
-  const summary = screen.getByText(/^1 task deleted\./);
+  f.setCatalogue(async () => catalogue([work, personal], [work, personal]));
+  await act(() => f.runtime.loadContexts(f.id));
+  await reread();
   expect(summary.textContent).toBe(
     '1 task deleted. One task needs your attention; see its notice. 2 tasks were not sent.',
   );
+  expect(document.body.textContent).not.toContain('Call Ann');
+  // Its check stays, and nothing was sent again.
+  expect(
+    screen.getByRole('button', { name: 'Check current version' }),
+  ).toBeTruthy();
+  expect(f.deletes).toEqual(['personal urn:s', 'personal urn:b']);
 });
 
 it('closes the question when the authorization ends', async () => {
@@ -363,4 +413,17 @@ it('closes the question when the authorization ends', async () => {
   );
   expect(screen.queryByText(/personal/)).toBeNull();
   expect(f.deletes).toEqual([]);
+});
+
+it("shows no other Pod's result after switching Pods", async () => {
+  const f = await overview({ bob: true });
+  fireEvent.click(bulk());
+  await press('Delete');
+  await screen.findByText('4 tasks deleted.');
+  fireEvent.click(screen.getByText(`Switch to ${f.other}`));
+  await waitFor(() =>
+    expect(screen.queryByText('Call Ann · personal')).toBeNull(),
+  );
+  expect(screen.queryByText(/tasks deleted/)).toBeNull();
+  expect(f.deletes).toHaveLength(4);
 });

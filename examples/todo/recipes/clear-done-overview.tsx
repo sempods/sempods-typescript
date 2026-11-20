@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { BoundPod, BrowserRuntime } from '@sempods/app-sdk';
+import type { BrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
   LoadNotice,
@@ -23,18 +23,9 @@ import {
   type Remove,
 } from './remove-rows.js';
 
-/** One captured row: its command, and what names it in the summary. */
-interface Captured {
-  readonly remove: Remove;
-  readonly title: string;
-  readonly context: string;
-  readonly area: string;
-}
-/** What the question shows: the counts by area and the read-only rows kept. */
+/** The captured row commands, the counts by area and the read-only rows kept. */
 interface Capture {
-  /** The authorization it was read under: its details are shown under it only. */
-  readonly pod: BoundPod | null;
-  readonly rows: readonly Captured[];
+  readonly rows: readonly Remove[];
   readonly areas: readonly {
     readonly context: string;
     readonly name: string;
@@ -54,30 +45,34 @@ interface Capture {
  *   is pending or awaits its recovery is left out; its notice shows.
  * - **confirm**: the total once in the question, the areas below it with
  *   their counts, and how many read-only rows are kept.
- * - **run** and **summary**: shared with the single list (`useRemoveRows`).
- *   The overview shows only done tasks, so a row that stopped the run
+ *   The question closes when one of its areas can no longer be read.
+ * - **run** and **summary**: shared with the single list (`useRemoveRows`):
+ *   the confirmed count, why the run stopped and the unsent rest, without
+ *   titles. The overview shows only done tasks, so a row that stopped the run
  *   (reopened elsewhere, a lost response) can leave it; `UnresolvedNotices`
  *   with the rows shown keeps its recovery reachable.
- * - **scope**: titles and area names are shown only under the authorization
- *   they were read with, and only while their area is still readable. The
- *   question closes when either ends; the summary then keeps its counts but
- *   no longer names the row.
+ * - **scope**: the question and the summary belong to the authorization they
+ *   were made under. Another Pod, a sign-out or a new sign-in starts the
+ *   overview afresh (`key={pod?.key}`); the SDK keeps the writes' recovery.
  *
  * The app decides the areas' names, which rows are included and the texts;
  * here `useContexts` names the areas and says which may be written. Place
  * inside a `SempodsProvider`, for example with `contextSelection="on-demand"`.
  */
 export function ClearDoneOverview() {
+  // The active authorization: another Pod, a sign-out or a new sign-in
+  // replaces it, and with it the question and the summary below.
+  const { pod } = useAppState();
+  return <PodOverview key={pod?.key} />;
+}
+
+function PodOverview() {
   const list = usePodList(taskFields);
   const overview = useContextUpdate(taskFields);
   const { contexts } = useContexts();
-  // The active authorization: a sign-out or another sign-in replaces it.
-  const { pod } = useAppState();
   const { messages: m, format } = useSdkLocale();
   const { removal, running, run, result } = useRemoveRows();
   const [asking, setAsking] = useState<Capture | null>(null);
-  // The capture the last run sent, to name the row that stopped it.
-  const [sent, setSent] = useState<Capture | null>(null);
   const areas = new Map(contexts.map((c) => [c.iri, c]));
   const name = (context: string) => areas.get(context)?.name ?? context;
   // Like a Completed view: only done rows are shown.
@@ -94,16 +89,7 @@ export function ClearDoneOverview() {
     for (const item of deletable)
       counts.set(item.context, (counts.get(item.context) ?? 0) + 1);
     return {
-      pod,
-      rows: deletable.map((item) => {
-        const row = overview.for(item);
-        return {
-          remove: row.remove,
-          title: row.data.title,
-          context: item.context,
-          area: name(item.context),
-        };
-      }),
+      rows: deletable.map((item) => overview.for(item).remove),
       areas: [...counts].map(([context, count]) => ({
         context,
         name: name(context),
@@ -112,15 +98,9 @@ export function ClearDoneOverview() {
       readOnly: shown.length - writable.length,
     };
   };
-  // Read under this authorization, from an area still readable.
-  const readable = (capture: Capture, context: string) =>
-    capture.pod === pod && areas.has(context);
-  // The question goes once what it names may no longer be read.
-  if (asking && !asking.areas.every((area) => readable(asking, area.context)))
+  // The question goes once an area it names can no longer be read.
+  if (asking && !asking.areas.every((area) => areas.has(area.context)))
     setAsking(null);
-  const at = removal?.stop?.at;
-  const stopped = at === undefined ? undefined : sent?.rows[at];
-  const named = stopped && sent && readable(sent, stopped.context);
 
   return (
     <section aria-label="Done tasks across my Pod">
@@ -167,8 +147,7 @@ export function ClearDoneOverview() {
           question={`Delete ${doneTasks(asking.rows.length)} from the Pod?`}
           onClose={() => setAsking(null)}
           onDelete={() => {
-            setSent(asking);
-            void run(asking.rows.map((row) => row.remove));
+            void run(asking.rows);
           }}
         >
           {/* Many areas scroll here, so Cancel and Delete stay on screen. */}
@@ -203,12 +182,7 @@ export function ClearDoneOverview() {
           tabIndex={-1}
           role={removal.phase === 'stopped' ? 'alert' : 'status'}
         >
-          {summary(removal, {
-            ...(named && {
-              stopped: `“${stopped.title}” in ${stopped.area}`,
-            }),
-            ended: 'An area or its access changed.',
-          })}
+          {summary(removal, { ended: 'An area or its access changed.' })}
         </p>
       )}
     </section>

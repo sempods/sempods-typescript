@@ -1033,16 +1033,19 @@ in one list (`useFieldUpdate`) or across the readable Contexts of a Pod
   read-only rows are kept when there are any; a long list of areas scrolls
   so Cancel and Delete stay on screen. Add text only when it says something
   about the scope the question and counts do not. Cancel sends nothing.
-- Show the captured titles and area names only under the authorization they
-  were read with (`useAppState().pod`) and while their area is still readable:
-  close the question when either ends, and stop naming the row in the summary.
+- The question and the summary belong to the authorization they were made
+  under: render them in a component keyed by `useAppState().pod?.key`, so
+  another Pod, a sign-out or a new sign-in starts afresh, and close the
+  question when an area it names can no longer be read. The SDK keeps the
+  writes and their recovery across both.
 - Then `await` one command after the other with a progress line, and stop at
   the first result that is not `removed`: a change on the Pod, an unconfirmed
   answer such as a lost response, a refusal, or `not-sent`. Its `reason` says
   why nothing was sent: `busy` when the row's own delete or change started
   meanwhile has no answer yet, `ended` or `unavailable` when the Context, the
   Pod or access changed. Never retry or resend the rest. Report the confirmed
-  count, the row that stopped and why, and the unsent remainder.
+  count, why the run stopped and the unsent remainder. The summary names no
+  row: the stopped row's notice does, as long as it may be read.
 - The stopped row keeps its SDK recovery. Render `UnresolvedNotices` with the
   rows the screen shows, so its notice stays reachable when it leaves a
   filtered view, for example a reopened row in a view of done tasks.
