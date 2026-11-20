@@ -35,7 +35,8 @@ export interface Removal {
  * showed, in the row's own target. The first answer other than `removed`
  * stops the run: a row changed or reopened elsewhere (`changed-on-pod`), an
  * unconfirmed answer such as a lost response, a refusal, or a command that
- * sends nothing because the Context, the Pod or access changed (`not-sent`).
+ * sends nothing (`not-sent`): the Context, the Pod or access changed, or the
+ * row's own delete or change started meanwhile has no answer yet.
  * Nothing is retried and the rest stays unsent. The stopped row keeps its
  * SDK recovery: render `UnresolvedNotices` with the rows the screen shows.
  * Render the summary with `ref={result}` and `tabIndex={-1}`: when the run
@@ -85,7 +86,7 @@ export const doneTasks = (n: number) => count(n, 'done task', 'done tasks');
 /**
  * Progress, then the confirmed count, why it stopped and the unsent rest.
  * `stopped` names the row that stopped the run; `ended` says what changed
- * when a command sent nothing.
+ * when a command sent nothing because the list, the Pod or access changed.
  */
 export function summary(
   removal: Removal,
@@ -95,16 +96,32 @@ export function summary(
     return `Deleting… ${removal.removed} of ${removal.total}.`;
   const removed = count(removal.removed, 'task deleted', 'tasks deleted') + '.';
   if (removal.phase === 'done' || !removal.stop) return removed;
+  const { outcome } = removal.stop;
   // The stopping row was sent unless its command sent nothing.
-  const sent = removal.stop.outcome.kind === 'not-sent' ? 0 : 1;
+  const sent = outcome.kind === 'not-sent' ? 0 : 1;
   const unsent = removal.total - removal.removed - sent;
-  const why = sent
-    ? ` ${stopped} needs your attention; see its notice.`
-    : ` ${ended}`;
   const rest = unsent
     ? ' ' + count(unsent, 'task was', 'tasks were') + ' not sent.'
     : '';
-  return removed + why + rest;
+  return `${removed} ${why(outcome, stopped, ended)}${rest}`;
+}
+
+/** Why the run stopped at `row`: its answer, or why its command sent nothing. */
+function why(outcome: Stop, row: string, ended: string) {
+  if (outcome.kind !== 'not-sent')
+    return `${row} needs your attention; see its notice.`;
+  switch (outcome.reason) {
+    // Its own delete or change, started meanwhile, had no answer yet.
+    case 'busy':
+      return `${row} had another change in progress.`;
+    case 'unresolved':
+      return `${row} needs your attention; see its notice.`;
+    // Changed by this app after the question: it shows a newer version.
+    case 'stale':
+      return `${row} changed after the question.`;
+    default:
+      return ended;
+  }
 }
 
 /**

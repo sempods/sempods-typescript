@@ -80,10 +80,10 @@ async function overview({ readOnly = false } = {}) {
     [schema + 'actionStatus']: [{ '@id': t.status }],
   });
   const deletes: string[] = [];
-  // A DELETE whose response is lost after the Pod applied it, or one held.
+  // A DELETE whose response is lost after the Pod applied it, or ones held.
   const control = {
     lose: null as string | null,
-    held: null as Promise<void> | null,
+    hold: new Map<string, Promise<void>>(),
   };
   f.setQuery(async (url) => {
     const context = new URL(url).searchParams.get('default-graph-uri');
@@ -114,7 +114,7 @@ async function overview({ readOnly = false } = {}) {
         : new Response(null, { status: 404 });
     const key = `${context.split('/').pop()} ${iri}`;
     deletes.push(key);
-    await control.held;
+    await control.hold.get(key);
     if (!t) return new Response(null, { status: 404 });
     // Only the version the row showed is deleted.
     if (new Headers(init?.headers).get('if-match') !== `"t${t.version}"`)
@@ -165,6 +165,20 @@ it('asks with the total once and the counts by area; Cancel sends nothing', asyn
   await press('Cancel');
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(f.deletes).toEqual([]);
+});
+
+it("asks a row's own delete with its title and area", async () => {
+  const f = await overview();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Delete: Shared in work' }),
+  );
+  const dialog = screen.getByRole('alertdialog');
+  expect(dialog.textContent).toContain(
+    'Delete “Shared” from work? This cannot be undone.',
+  );
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(f.deletes).toEqual(['work urn:s']));
+  expect(f.tasks.get(personal)!.has('urn:s')).toBe(true);
 });
 
 it('deletes the same IRI in each Context where it was read', async () => {
@@ -264,7 +278,7 @@ it('stops at a lost response and keeps its check once the row is gone', async ()
 it('sends nothing more once an area lost write access', async () => {
   const f = await overview();
   const first = deferred<void>();
-  f.control.held = first.promise;
+  f.control.hold.set('personal urn:s', first.promise);
   fireEvent.click(bulk());
   await press('Delete');
   await waitFor(() => expect(f.deletes).toEqual(['personal urn:s']));
@@ -280,4 +294,73 @@ it('sends nothing more once an area lost write access', async () => {
   );
   expect(f.deletes).toEqual(['personal urn:s']);
   expect(f.tasks.get(work)!.size).toBe(3);
+});
+
+it('stops at a row whose own delete has no answer yet, and names it', async () => {
+  const f = await overview();
+  const first = deferred<void>();
+  const own = deferred<void>();
+  f.control.hold.set('personal urn:s', first.promise);
+  f.control.hold.set('personal urn:b', own.promise);
+  fireEvent.click(bulk());
+  await press('Delete');
+  await waitFor(() => expect(f.deletes).toEqual(['personal urn:s']));
+  // The next row's own delete starts while the run waits.
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Delete: Call Ann in personal' }),
+  );
+  fireEvent.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Delete',
+    }),
+  );
+  await waitFor(() =>
+    expect(f.deletes).toEqual(['personal urn:s', 'personal urn:b']),
+  );
+  first.resolve();
+  expect(
+    (
+      await screen.findByText(
+        '1 task deleted. “Call Ann” in personal had another change in progress. 3 tasks were not sent.',
+      )
+    ).getAttribute('role'),
+  ).toBe('alert');
+  own.resolve();
+  expect(f.deletes).toEqual(['personal urn:s', 'personal urn:b']);
+});
+
+it('stops naming a row once its area can no longer be read', async () => {
+  const f = await overview();
+  f.control.lose = 'personal urn:b';
+  fireEvent.click(bulk());
+  await press('Delete');
+  await screen.findByText(/^1 task deleted\. “Call Ann” in personal/);
+  // Read access to personal ends.
+  f.setCatalogue(async () => catalogue([work], [work]));
+  await act(() => f.runtime.loadContexts(f.id));
+  await waitFor(() =>
+    expect(screen.queryByText('Call Ann · personal')).toBeNull(),
+  );
+  const summary = screen.getByText(/^1 task deleted\./);
+  expect(summary.textContent).toBe(
+    '1 task deleted. One task needs your attention; see its notice. 2 tasks were not sent.',
+  );
+});
+
+it('closes the question when the authorization ends', async () => {
+  const f = await overview();
+  fireEvent.click(bulk());
+  expect(areas(await question())).toEqual([
+    ['personal', '2'],
+    ['work', '2'],
+  ]);
+  await act(async () => {
+    await f.runtime.disconnect(f.id);
+  });
+  // The SDK asks to sign in again; the question is gone with its areas.
+  await waitFor(() =>
+    expect(screen.queryByText('Delete 4 done tasks from the Pod?')).toBeNull(),
+  );
+  expect(screen.queryByText(/personal/)).toBeNull();
+  expect(f.deletes).toEqual([]);
 });

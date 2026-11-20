@@ -951,11 +951,14 @@ export function ResourceEditor<D, U = D>({
  * while asking withdraws the question. Without children it is a quiet trash
  * icon (the kit's `DeleteIcon`, 1rem) with a 44px target, named Delete or
  * `label`; children replace the icon, `className` overrides its look.
+ * `question` says what is deleted where the name alone does not, for example
+ * the same title in two Contexts; it is captured with `onRemove`.
  */
 export function RemoveButton({
   onRemove,
   disabled = false,
   label,
+  question,
   className,
   children,
 }: {
@@ -963,6 +966,11 @@ export function RemoveButton({
   readonly disabled?: boolean;
   /** Accessible name and tooltip, for example `Delete: ${title}`; the icon defaults to Delete. */
   readonly label?: string;
+  /**
+   * The dialog's question instead of the SDK's `confirmRemove`, for example
+   * `Delete “${title}” from ${area}? This cannot be undone.`
+   */
+  readonly question?: string;
   readonly className?: string;
   /** The button's content instead of the trash icon, for example a text. */
   readonly children?: ReactNode;
@@ -971,6 +979,7 @@ export function RemoveButton({
   // The action asked about, captured when the question opens.
   const [asking, setAsking] = useState<{
     readonly remove: () => unknown;
+    readonly question: string | undefined;
   } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   // Withdrawn for good: enabled again later, it does not reopen.
@@ -989,7 +998,7 @@ export function RemoveButton({
         aria-label={name}
         title={name}
         disabled={disabled}
-        onClick={() => setAsking({ remove: onRemove })}
+        onClick={() => setAsking({ remove: onRemove, question })}
       >
         {content ?? trash}
       </button>
@@ -1006,7 +1015,7 @@ export function RemoveButton({
           if (asking) void asking.remove();
         }}
       >
-        <p>{m.confirmRemove ?? m.remove}</p>
+        <p>{asking?.question ?? m.confirmRemove ?? m.remove}</p>
       </ConfirmDialog>
     </>
   );

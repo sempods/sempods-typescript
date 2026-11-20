@@ -427,7 +427,9 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
   meanwhile shows as a conflict). A quiet trash icon with a 44px target, named
   **Delete** or `label`; children replace the icon, `className` its look. The
   icon is the UI kit's `DeleteIcon` (Lucide's `Trash2`, 1rem), so a bulk
-  action beside it shows the same glyph.
+  action beside it shows the same glyph. `question` replaces the dialog's
+  text where the name alone does not say which row it deletes; it is captured
+  with `onRemove`.
 - The hook returns only `{ for, unresolved }`, like `useContextUpdate`.
   Use `row.canMutate` for each row's availability and `row.notice` for its
   feedback. An IRI-only handle (`mutate.for(iri)`) exposes recovery and always
@@ -1028,20 +1030,27 @@ in one list (`useFieldUpdate`) or across the readable Contexts of a Pod
 - Ask in the compact `Dialog` with the SDK's Cancel and Delete
   (`controls.cancel`, `controls.remove`) and the total once in the question.
   Across Contexts, list the areas below it with their counts, and say how many
-  read-only rows are kept when there are any. Add text only when it says
-  something about the scope the question and counts do not. Cancel sends
-  nothing.
+  read-only rows are kept when there are any; a long list of areas scrolls
+  so Cancel and Delete stay on screen. Add text only when it says something
+  about the scope the question and counts do not. Cancel sends nothing.
+- Show the captured titles and area names only under the authorization they
+  were read with (`useAppState().pod`) and while their area is still readable:
+  close the question when either ends, and stop naming the row in the summary.
 - Then `await` one command after the other with a progress line, and stop at
   the first result that is not `removed`: a change on the Pod, an unconfirmed
-  answer such as a lost response, a refusal, or `not-sent` because the
-  Context, the Pod or access changed. Never retry or resend the rest. Report
-  the confirmed count, the row that stopped and the unsent remainder.
+  answer such as a lost response, a refusal, or `not-sent`. Its `reason` says
+  why nothing was sent: `busy` when the row's own delete or change started
+  meanwhile has no answer yet, `ended` or `unavailable` when the Context, the
+  Pod or access changed. Never retry or resend the rest. Report the confirmed
+  count, the row that stopped and why, and the unsent remainder.
 - The stopped row keeps its SDK recovery. Render `UnresolvedNotices` with the
   rows the screen shows, so its notice stays reachable when it leaves a
   filtered view, for example a reopened row in a view of done tasks.
 - A single row is deleted with a plain `RemoveButton`; the bulk action shows
   the kit's `DeleteIcon`, the same glyph. Each button's name says what it
-  deletes; the app decides which rows the bulk action includes, the areas'
+  deletes. Where the same title can be in two areas, the row's `question`
+  names its area too, for example `Delete “Shared” from work? This cannot be
+undone.`; the app decides which rows the bulk action includes, the areas'
   names and the texts.
 
 The [clear-done recipe](../examples/todo/recipes/clear-done.tsx) covers one

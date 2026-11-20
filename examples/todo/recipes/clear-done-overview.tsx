@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { BrowserRuntime } from '@sempods/app-sdk';
+import type { BoundPod, BrowserRuntime } from '@sempods/app-sdk';
 import {
   AppAccess,
   LoadNotice,
@@ -7,6 +7,7 @@ import {
   SempodsProvider,
   UnresolvedNotices,
   UpdateNotice,
+  useAppState,
   useContexts,
   useContextUpdate,
   usePodList,
@@ -26,10 +27,13 @@ import {
 interface Captured {
   readonly remove: Remove;
   readonly title: string;
+  readonly context: string;
   readonly area: string;
 }
 /** What the question shows: the counts by area and the read-only rows kept. */
 interface Capture {
+  /** The authorization it was read under: its details are shown under it only. */
+  readonly pod: BoundPod | null;
   readonly rows: readonly Captured[];
   readonly areas: readonly {
     readonly context: string;
@@ -54,6 +58,10 @@ interface Capture {
  *   The overview shows only done tasks, so a row that stopped the run
  *   (reopened elsewhere, a lost response) can leave it; `UnresolvedNotices`
  *   with the rows shown keeps its recovery reachable.
+ * - **scope**: titles and area names are shown only under the authorization
+ *   they were read with, and only while their area is still readable. The
+ *   question closes when either ends; the summary then keeps its counts but
+ *   no longer names the row.
  *
  * The app decides the areas' names, which rows are included and the texts;
  * here `useContexts` names the areas and says which may be written. Place
@@ -63,6 +71,8 @@ export function ClearDoneOverview() {
   const list = usePodList(taskFields);
   const overview = useContextUpdate(taskFields);
   const { contexts } = useContexts();
+  // The active authorization: a sign-out or another sign-in replaces it.
+  const { pod } = useAppState();
   const { messages: m, format } = useSdkLocale();
   const { removal, running, run, result } = useRemoveRows();
   const [asking, setAsking] = useState<Capture | null>(null);
@@ -84,11 +94,13 @@ export function ClearDoneOverview() {
     for (const item of deletable)
       counts.set(item.context, (counts.get(item.context) ?? 0) + 1);
     return {
+      pod,
       rows: deletable.map((item) => {
         const row = overview.for(item);
         return {
           remove: row.remove,
           title: row.data.title,
+          context: item.context,
           area: name(item.context),
         };
       }),
@@ -100,7 +112,15 @@ export function ClearDoneOverview() {
       readOnly: shown.length - writable.length,
     };
   };
-  const stopped = removal?.stop && sent?.rows[removal.stop.at];
+  // Read under this authorization, from an area still readable.
+  const readable = (capture: Capture, context: string) =>
+    capture.pod === pod && areas.has(context);
+  // The question goes once what it names may no longer be read.
+  if (asking && !asking.areas.every((area) => readable(asking, area.context)))
+    setAsking(null);
+  const at = removal?.stop?.at;
+  const stopped = at === undefined ? undefined : sent?.rows[at];
+  const named = stopped && sent && readable(sent, stopped.context);
 
   return (
     <section aria-label="Done tasks across my Pod">
@@ -118,6 +138,7 @@ export function ClearDoneOverview() {
                 {/* The same task can be in two areas: the name says which. */}
                 <RemoveButton
                   label={`Delete: ${row.data.title} in ${name(item.context)}`}
+                  question={`Delete “${row.data.title}” from ${name(item.context)}? This cannot be undone.`}
                   disabled={!row.canMutate}
                   onRemove={row.remove}
                 />
@@ -150,7 +171,11 @@ export function ClearDoneOverview() {
             void run(asking.rows.map((row) => row.remove));
           }}
         >
-          <dl className="m-0 grid gap-1">
+          {/* Many areas scroll here, so Cancel and Delete stay on screen. */}
+          <dl
+            className="m-0 grid max-h-[40dvh] gap-1 overflow-y-auto rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            tabIndex={0}
+          >
             {asking.areas.map((area) => (
               <div
                 key={area.context}
@@ -179,7 +204,7 @@ export function ClearDoneOverview() {
           role={removal.phase === 'stopped' ? 'alert' : 'status'}
         >
           {summary(removal, {
-            ...(stopped && {
+            ...(named && {
               stopped: `“${stopped.title}” in ${stopped.area}`,
             }),
             ended: 'An area or its access changed.',
