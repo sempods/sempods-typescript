@@ -170,6 +170,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [Show a list](#lists-uselist-and-loadnotice)                            | `useList`, `LoadNotice` (React)                                            | The definition; render `list.data?.items` and `<LoadNotice {...list} />`     |
 | [Add an item](#creating-usecreation)                                    | `useCreation` (React)                                                      | `{ initial, collection }`; inputs to `canEdit`, submit to `canCreate`        |
 | [Update or delete a row](#updating-and-deleting-rows-usefieldupdate)    | `useFieldUpdate`, `RemoveButton`, `UnresolvedNotices` (React)              | One hook per list; `const row = mutate.for(item)` per row                    |
+| [Rename one value in a row](#renaming-one-value-in-a-row)               | `useFieldUpdate` (React), `InlineTextEdit` (app-ui)                        | `row.update(change)`, the app's draft, `pending` and `readOnly`              |
 | [Edit one item in a form](#editing-a-form-useresourceeditor)            | `useResourceEditor`, `ResourceEditor` (React)                              | Selected IRI and definition; inputs calling `change`; `onClose` in place     |
 | [Explain an outcome](#notices-updatenotice)                             | `UpdateNotice` (React)                                                     | `{...creation.notice}` or `{...row.notice}`; `quiet` when the row confirms   |
 | [Open another item](#selection-useselection)                            | `useSelection` (React)                                                     | Guarded `select(iri)`; `select(null)` closes                                 |
@@ -460,6 +461,85 @@ snapshot and sends nothing once that target or hook lifetime has ended.
 `useCreation`'s `change` and `create`, `useList`'s `reload` and `cancel`, and
 `useSelection().select` retain their identities for their target and definition
 (and creation address/form ID, where applicable).
+
+### Renaming one value in a row
+
+To rename one text value in its row, such as a shopping item, compose the
+row's `useFieldUpdate` command with the UI kit's `InlineTextEdit`, the
+leave guard and the row's notice instead of opening a `ResourceEditor`. The
+[app-ui README's `rename-row.tsx`](../packages/app-ui/README.md#renaming-in-a-row)
+is the complete, tested shopping list; its `useRename` holds the rule every
+rename of the app shares, and the core is:
+
+```tsx
+const edit = useRename(row, rename, setRename, list.state.kind === 'loading');
+
+<InlineTextEdit
+  label={`${t.rename}: ${row.data.title}`}
+  value={rename.text}
+  onChange={(text) => setRename({ ...rename, text })}
+  onSave={async () => {
+    if (edit.invalid) return setError(edit.invalid); // the app validates
+    setSaving(true);
+    const result = await edit.save(); // from the row's current snapshot
+    setSaving(false);
+    if (result === 'done') close(); // otherwise the draft stays
+  }}
+  onCancel={close}
+  onDismiss={park} // or close, or keep it open: the app's policy
+  returnFocus={() => trigger.current?.focus()}
+  pending={saving}
+  readOnly={edit.readOnly}
+  error={error}
+>
+  {edit.notices}
+</InlineTextEdit>;
+```
+
+- **The app keeps** the trigger (the name as a button, a menu item, a deep
+  link beside it), the field it writes and its validation, the draft and its
+  policy, and its own list actions. Offer the trigger only with
+  `useWorkflowAccess().write`; without it the name is text.
+- **Save writes only over the name the person saw.** Keep with the draft
+  the name it continues from (`seen`): the one the row showed when the
+  rename opened (`row.data.title`, which already shows a name just saved),
+  or the one the person last reviewed. Save writes from the row's current
+  snapshot, and only while that shows `seen`; the SDK then guards the name
+  up to the write, and a change on the Pod meanwhile is `changed-on-pod`.
+  Never write from a snapshot that shows another name: its write would take
+  the other writer's name as what the person saw and overwrite it without a
+  question. A newer name that the list reads, after a refresh, the row's own
+  tick or another client's rename, keeps Save unavailable and is shown in
+  the field until the person continues from it. Acknowledging a checked
+  `changed-on-pod` continues from the version the check compared, not from
+  whatever the list shows by then: a rename after the check is shown as
+  well. A failed list read keeps the newer name and its way out; show it
+  with `<LoadNotice state={list.state} reload={list.reload} />`. Keep `seen`
+  exactly as read for this comparison, but tell a change by comparing the
+  trimmed text with the trimmed `seen` (`edited`): a stored name with spaces
+  around it, opened and left, is no change and is never rewritten. Keep
+  this rule in one place, as `useRename` does, for every rename of the app. A refusal keeps the draft and the field open with the notice;
+  the person may save again. Never resend on any other result.
+- **Leaving is a dismissal, not a save.** A press beside the field or Tab
+  past it calls `onDismiss`. Park a changed draft, as the README example does
+  with a "Not saved" mark and the next rename resuming it, and drop one whose
+  trimmed text still equals the trimmed `seen`: a parked copy of the old name would
+  later show as unsaved after a rename elsewhere. Guard every changed draft,
+  open or parked, with `useDraftGuard(dirty, discard)`, comparing it with
+  `seen`, so changing the list or the Pod asks first, also while the list
+  cannot be read (`list.data` is undefined after lost read access). An item
+  is gone only when a complete read (`skippedRecords.length === skipped`)
+  neither lists it nor skips it: an item whose name was cleared elsewhere is
+  skipped, not removed.
+- **Focus.** Save, Cancel and Escape return the focus to the trigger through
+  `returnFocus`, also after a slow save; a person who moved on meanwhile keeps
+  their focus. A trigger that the field replaces is focused after the app's
+  render, so keep its element by ref.
+- Pass the notices (the row's, and the newer name to review) as `children`
+  while the field is open and keep them in the row while it is closed, so
+  their controls are part of the field. Name the
+  input, the trigger and the row's other controls with the item's name in the
+  app's language; Save and Cancel take the SDK's texts.
 
 ### Editing a form: useResourceEditor
 

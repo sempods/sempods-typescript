@@ -51,6 +51,7 @@ it('exports the adapters, the router and the shadcn/ui components', async () => 
     'DropdownMenuTrigger',
     'HeaderMenu',
     'I18nProvider',
+    'InlineTextEdit',
     'Input',
     'InputGroup',
     'InputGroupAddon',

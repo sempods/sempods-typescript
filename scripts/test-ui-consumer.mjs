@@ -8,7 +8,7 @@
 // against its own Pod and browser instance.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs,ghost,editorFooter,dateChoice,deleteIcon]
+//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs,ghost,editorFooter,dateChoice,rename,deleteIcon]
 //        [--lanes=<suites at once per browser, default 1>]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
@@ -167,6 +167,7 @@ try {
     await ship('tsx', 'workspace.tsx'),
     await ship('tsx', 'view-tabs.tsx'),
     await ship('tsx', 'confirm-dialog.tsx'),
+    await ship('tsx', 'rename-row.tsx'),
     await ship('tsx', 'not-today.tsx'),
     await ship('tsx', 'delete-actions.tsx'),
   ];
