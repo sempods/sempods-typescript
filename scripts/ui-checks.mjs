@@ -6866,7 +6866,9 @@ async function ghost({ browser, origin, engine }) {
  * covers nothing, and shows and announces once it closes; Escape dismisses
  * the focused notice; reduced motion; beside AppAccess's own prompt stack
  * (`accessPrompts={false}`) above it, so Sign in takes the press; inside a
- * zoomed visual viewport (Chromium); and before sign-in inside the SDK's
+ * zoomed visual viewport, also its sides and above a composer kept at its
+ * bottom (Chromium); after an app dialog closed through its styles; and
+ * before sign-in inside the SDK's
  * gate, clear of its sign-in button.
  */
 async function notices({ browser, origin, engine }) {
@@ -7192,43 +7194,88 @@ async function notices({ browser, origin, engine }) {
         await toast.first().waitFor();
         const read = () =>
           page.evaluate(() => {
-            const notice = document
-              .querySelector(
-                '[data-sempods-ui="notices"]:not([data-placement]) li',
-              )
-              .getBoundingClientRect();
+            const box = (element) => {
+              const r = element.getBoundingClientRect();
+              return {
+                top: r.top,
+                bottom: r.bottom,
+                left: r.left,
+                right: r.right,
+              };
+            };
+            const item = document.querySelector(
+              '[data-sempods-ui="notices"]:not([data-placement]) li',
+            );
+            const stack = item.parentElement;
+            const v = window.visualViewport;
             return {
               layout: innerHeight,
-              top: window.visualViewport.offsetTop,
-              visible: window.visualViewport.height,
-              notice: { top: notice.top, bottom: notice.bottom },
+              seen: {
+                top: v.offsetTop,
+                bottom: v.offsetTop + v.height,
+                left: v.offsetLeft,
+                right: v.offsetLeft + v.width,
+              },
+              notice: box(item),
+              stack: box(stack),
+              scrolls:
+                stack.scrollHeight > stack.clientHeight &&
+                getComputedStyle(stack).overflowY === 'auto',
+              buttons: [...item.querySelectorAll('button')].map(box),
+              composer: box(
+                document.querySelector('form[data-sempods-notices-avoid]'),
+              ),
             };
           });
-        const within = (m) =>
-          m.notice.top >= m.top - 0.5 &&
-          m.notice.bottom <= m.top + m.visible + 0.5;
+        // The notice and its buttons, inside what the person sees; beyond
+        // the room there, the stack's box, which scrolls to the rest.
+        const inside = (m, boxes) =>
+          boxes.every(
+            (r) =>
+              r.top >= m.seen.top - 0.5 &&
+              r.bottom <= m.seen.bottom + 0.5 &&
+              r.left >= m.seen.left - 0.5 &&
+              r.right <= m.seen.right + 0.5,
+          );
+        const within = (m) => inside(m, [m.notice, ...m.buttons]);
+        const zoom = async (pageScaleFactor) => {
+          await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor });
+          await page.waitForTimeout(150);
+          await settle(page);
+          return read();
+        };
         try {
-          await cdp.send('Emulation.setPageScaleFactor', {
-            pageScaleFactor: 2,
+          const zoomed = await zoom(2);
+          // Zoomed further, the app keeps its composer at the visible
+          // bottom, as one that follows the visual viewport does.
+          await page.evaluate(() => {
+            const form = document.querySelector(
+              'form[data-sempods-notices-avoid]',
+            );
+            const v = window.visualViewport;
+            const place = () =>
+              (form.style.bottom = `${innerHeight - v.offsetTop - v.height}px`);
+            v.addEventListener('resize', place);
+            v.addEventListener('scroll', place);
           });
-          await page.waitForTimeout(150);
-          await settle(page);
-          const zoomed = await read();
-          await cdp.send('Emulation.setPageScaleFactor', {
-            pageScaleFactor: 1,
-          });
-          await page.waitForTimeout(150);
-          await settle(page);
-          const back = await read();
+          const further = await zoom(2.5);
+          const back = await zoom(1);
           return {
             pass:
               zoomed.layout === 812 &&
-              zoomed.visible < 500 &&
+              zoomed.seen.bottom < 500 &&
+              zoomed.seen.right < 200 &&
               within(zoomed) &&
-              back.visible === 812 &&
+              further.seen.bottom < 406 &&
+              Math.abs(further.composer.bottom - further.seen.bottom) < 1 &&
+              further.stack.bottom <= further.composer.top + 0.5 &&
+              inside(further, [further.stack]) &&
+              (within(further) || further.scrolls) &&
+              back.seen.bottom === 812 &&
               within(back) &&
               back.notice.bottom > zoomed.notice.bottom,
             zoomed,
+            further,
             back,
           };
         } finally {
@@ -7237,6 +7284,56 @@ async function notices({ browser, origin, engine }) {
             .catch(() => {});
           await cdp.detach().catch(() => {});
         }
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-dialog-closed-by-css', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        const runs = {};
+        for (const [property, value] of [
+          ['display', 'none'],
+          ['visibility', 'hidden'],
+        ]) {
+          // The app's own dialog, kept mounted and closed through a style.
+          await page.evaluate(() => {
+            const dialog = document.createElement('div');
+            dialog.id = 'css-dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
+            dialog.textContent = 'Edit';
+            document.body.append(dialog);
+          });
+          const text = `Not synchronised (${property}).`;
+          await call('show', { key: property, severity: 'error', text });
+          await page.waitForTimeout(300);
+          const during = await measure();
+          await page.evaluate(
+            ([property, value]) =>
+              (document.getElementById('css-dialog').style[property] = value),
+            [property, value],
+          );
+          // No resize and no observed attribute: the host looks again.
+          await toast.filter({ hasText: text }).waitFor({ timeout: 2000 });
+          await settle(page);
+          const after = await measure();
+          runs[property] = {
+            during: during.items.length,
+            after: after.items.length,
+            announced: after.assertive.filter((t) => t === text).length,
+          };
+          await call('dismiss', property);
+          await page.evaluate(() =>
+            document.getElementById('css-dialog').remove(),
+          );
+        }
+        return {
+          pass: Object.values(runs).every(
+            (run) => run.during === 0 && run.after === 1 && run.announced === 1,
+          ),
+          runs,
+        };
       }),
     );
     for (const height of [812, 560])

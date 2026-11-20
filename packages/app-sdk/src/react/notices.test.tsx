@@ -976,13 +976,16 @@ it('ignores a dialog kept mounted while hidden, and shows a waiting notice once 
   await waitFor(() => expect(announced()).toEqual(['Saved.', 'Not synced.']));
 });
 
-it('keeps the stack within a visual viewport smaller than the layout viewport', async () => {
+it('keeps the stack and its avoided zones within a visual viewport smaller than the layout viewport', async () => {
   const runtime = await signedIn();
   vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(812);
-  // A pinch zoom or a keyboard that resizes only the visual viewport.
+  vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(375);
+  // A pinch zoom to 2×, or a keyboard that resizes only the visual viewport.
   const visual = Object.assign(new EventTarget(), {
     height: 406,
+    width: 187.5,
     offsetTop: 0,
+    offsetLeft: 0,
   });
   Object.defineProperty(window, 'visualViewport', {
     configurable: true,
@@ -991,20 +994,68 @@ it('keeps the stack within a visual viewport smaller than the layout viewport', 
   cleanups.push(() => {
     delete (window as { visualViewport?: unknown }).visualViewport;
   });
-  render(<App runtime={runtime} />);
+  render(
+    <App runtime={runtime}>
+      <form data-sempods-notices-avoid="">
+        <input aria-label="New item" />
+      </form>
+    </App>,
+  );
+  // The app keeps its composer at the visible bottom.
+  const composer = document.querySelector('form')!;
+  const at = (top: number) => ({
+    top,
+    bottom: top + 60,
+    height: 60,
+    left: 0,
+    right: 375,
+    width: 375,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  });
+  const box = vi
+    .spyOn(composer, 'getBoundingClientRect')
+    .mockReturnValue(at(346));
   act(() => actions.show({ key: 'info', text: 'Saved.' }));
-  const vars = () => [
-    host().style.getPropertyValue('--sp-notices-below'),
-    host().style.getPropertyValue('--sp-notices-room'),
-  ];
-  await waitFor(() => expect(vars()).toEqual(['406px', '243px']));
-  // Scrolled down within the layout viewport, less of it is hidden.
-  visual.offsetTop = 300;
-  act(() => visual.dispatchEvent(new Event('scroll')));
-  await waitFor(() => expect(vars()).toEqual(['106px', '243px']));
-  Object.assign(visual, { height: 812, offsetTop: 0 });
+  // The app moved its composer when the visual viewport changed.
   act(() => visual.dispatchEvent(new Event('resize')));
-  await waitFor(() => expect(vars()).toEqual(['', '']));
+  const vars = () =>
+    [
+      '--sp-notices-below',
+      '--sp-notices-room',
+      '--sp-notices-left',
+      '--sp-notices-right',
+      '--sp-notices-avoid',
+    ].map((name) => host().style.getPropertyValue(name));
+  await waitFor(() =>
+    expect(vars()).toEqual(['406px', '243px', '', '187px', '466px']),
+  );
+  // Panned right and down within the layout viewport, less of it is hidden
+  // below and on the right, more on the left.
+  Object.assign(visual, { offsetTop: 300, offsetLeft: 100 });
+  box.mockReturnValue(at(646));
+  act(() => visual.dispatchEvent(new Event('scroll')));
+  await waitFor(() =>
+    expect(vars()).toEqual(['106px', '243px', '100px', '87px', '166px']),
+  );
+  // Zoomed further (2.5×), below half of the layout viewport: the composer
+  // at the visible bottom is still avoided.
+  Object.assign(visual, {
+    height: 325,
+    width: 150,
+    offsetTop: 0,
+    offsetLeft: 0,
+  });
+  box.mockReturnValue(at(265));
+  act(() => visual.dispatchEvent(new Event('resize')));
+  await waitFor(() =>
+    expect(vars()).toEqual(['487px', '195px', '', '225px', '547px']),
+  );
+  Object.assign(visual, { height: 812, width: 375 });
+  box.mockReturnValue(at(752));
+  act(() => visual.dispatchEvent(new Event('resize')));
+  await waitFor(() => expect(vars()).toEqual(['', '', '', '', '60px']));
 });
 
 it('checks the guards again when a renderer calls an action it kept from an earlier render', async () => {
@@ -1100,4 +1151,79 @@ it('keeps a late failure of a replaced event off its replacement, also across a 
   // A changed `show` is a new notice: the earlier failure no longer applies.
   act(() => actions.show({ ...failing, text: 'Still not synchronised.' }));
   expect(within(items()[0]!).queryByRole('alert')).toBeNull();
+});
+
+it('never runs the action of a notice that replaced the one a renderer asked about', async () => {
+  const runtime = await signedIn();
+  const restoreA = vi.fn();
+  const restoreB = vi.fn();
+  let kept: (() => void) | undefined;
+  function Confirming({ notice }: NoticeProps) {
+    // Keeps the callback while it asks the person to confirm.
+    kept ??= notice.actions[0]?.run;
+    return <p>{notice.text}</p>;
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: Confirming }} />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  const undo = (text: string, run: () => void): Notice => ({
+    key: 'undo',
+    text,
+    action: { label: 'Restore', run },
+  });
+  act(() => actions.show(undo('A deleted.', restoreA)));
+  await waitFor(() => expect(kept).toBeTypeOf('function'));
+  // The same event with a new closure: the latest one runs.
+  const latestA = vi.fn();
+  act(() => actions.show(undo('A deleted.', latestA)));
+  // Replaced before the person answers: confirming A runs nothing.
+  act(() => actions.show(undo('B deleted.', restoreB)));
+  await act(async () => kept!());
+  expect(restoreA).not.toHaveBeenCalled();
+  expect(latestA).not.toHaveBeenCalled();
+  expect(restoreB).not.toHaveBeenCalled();
+  expect(texts()).toEqual(['B deleted.']);
+  // Within the event it was kept for, the latest closure runs.
+  kept = undefined;
+  act(() => actions.dismiss('undo'));
+  act(() => actions.show(undo('A deleted.', restoreA)));
+  await waitFor(() => expect(kept).toBeTypeOf('function'));
+  act(() => actions.show(undo('A deleted.', latestA)));
+  await act(async () => kept!());
+  expect(restoreA).not.toHaveBeenCalled();
+  expect(latestA).toHaveBeenCalledTimes(1);
+  expect(restoreB).not.toHaveBeenCalled();
+});
+
+it('shows a waiting notice once a covering dialog closes through its styles', async () => {
+  const runtime = await signedIn();
+  render(<App runtime={runtime} />);
+  const closes = {
+    display: (dialog: HTMLElement) => (dialog.style.display = 'none'),
+    visibility: (dialog: HTMLElement) => (dialog.style.visibility = 'hidden'),
+  };
+  for (const [key, close] of Object.entries(closes)) {
+    // The app's own dialog, kept mounted and closed through a style.
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    act(() => document.body.append(dialog));
+    act(() => actions.show({ key, text: `Not synced (${key}).` }));
+    await act(async () => new Promise((done) => setTimeout(done, 50)));
+    expect(items()).toEqual([]);
+    expect(announced()).not.toContain(`Not synced (${key}).`);
+    act(() => void close(dialog));
+    // No resize or observed mutation: the host looks again by itself.
+    await waitFor(() => expect(texts()).toEqual([`Not synced (${key}).OK`]));
+    await waitFor(() =>
+      expect(
+        announced().filter((text) => text === `Not synced (${key}).`),
+      ).toHaveLength(1),
+    );
+    act(() => void actions.dismiss(key));
+    dialog.remove();
+  }
 });
