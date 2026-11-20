@@ -313,6 +313,8 @@ export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   return (
     <div
       data-sempods-ui="prompts"
+      // A `Notices` host beside it (`accessPrompts={false}`) stays above it.
+      data-sempods-notices-avoid=""
       aria-live="polite"
       dir={direction}
       hidden={shown.length === 0}

@@ -300,7 +300,18 @@ function useAnnouncer() {
   return { announce, regions };
 }
 
-/** Whether a modal outside `own` covers the page, and the avoided bottom zone. */
+interface Cover {
+  /** A modal covers the stack's layer. */
+  readonly modal: boolean;
+  /** The height of the avoided zone at the bottom. */
+  readonly avoid: number;
+  /** The layout viewport's height hidden below the visual viewport. */
+  readonly below: number;
+  /** The stack's height in a reduced visual viewport, or 0. */
+  readonly room: number;
+}
+const uncovered: Cover = { modal: false, avoid: 0, below: 0, room: 0 };
+
 /**
  * Inside the gate only these cover the stack: a dialog of the gate itself
  * (its settings), and management or a leave question, which the gate raises
@@ -338,12 +349,16 @@ function trackOpened(document: Document, last?: Element) {
   return order.of;
 }
 
+/**
+ * Whether a modal above the stack's layer covers it, the avoided zone at the
+ * bottom and the part of the layout viewport the visual viewport hides.
+ */
 function usePageCover(
   own: RefObject<HTMLElement | null>,
   enabled = true,
   layer: 'page' | 'gate' = 'page',
 ) {
-  const [cover, setCover] = useState({ modal: false, avoid: 0 });
+  const [cover, setCover] = useState<Cover>(uncovered);
   useEffect(() => {
     if (!enabled) return;
     const document = own.current?.ownerDocument;
@@ -358,6 +373,15 @@ function usePageCover(
       trackOpened(document);
       const modal = isCovered(element, layer);
       const height = view.innerHeight;
+      // A pinch zoom, or a keyboard that resizes only the visual viewport
+      // (Chrome on Android by default, iOS), hides the layout viewport's end.
+      const visual = view.visualViewport;
+      const seen = visual
+        ? Math.min(height, visual.offsetTop + visual.height)
+        : height;
+      const below = Math.max(0, Math.floor(height - seen));
+      const room =
+        visual && visual.height < height ? Math.floor(visual.height * 0.6) : 0;
       let avoid = 0;
       for (const zone of document.querySelectorAll<HTMLElement>(
         '[data-sempods-notices-avoid]',
@@ -368,9 +392,12 @@ function usePageCover(
         avoid = Math.max(avoid, Math.ceil(height - rect.top));
       }
       setCover((current) =>
-        current.modal === modal && current.avoid === avoid
+        current.modal === modal &&
+        current.avoid === avoid &&
+        current.below === below &&
+        current.room === room
           ? current
-          : { modal, avoid },
+          : { modal, avoid, below, room },
       );
     };
     const schedule = () => {
@@ -411,6 +438,7 @@ function usePageCover(
       attributes: true,
       attributeFilter: [
         'open',
+        'hidden',
         'inert',
         'aria-hidden',
         'aria-modal',
@@ -433,6 +461,15 @@ function usePageCover(
   }, [own, enabled, layer]);
   return cover;
 }
+/** How the host places itself, from `usePageCover`. */
+function placement(cover: Cover, avoid: boolean): CSSProperties | undefined {
+  const style: Record<string, string> = {};
+  if (avoid && cover.avoid) style['--sp-notices-avoid'] = `${cover.avoid}px`;
+  if (cover.below) style['--sp-notices-below'] = `${cover.below}px`;
+  if (cover.room) style['--sp-notices-room'] = `${cover.room}px`;
+  return Object.keys(style).length ? (style as CSSProperties) : undefined;
+}
+
 /** Whether a modal above `element`'s layer covers it, right now. */
 function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
   const document = element.ownerDocument;
@@ -466,6 +503,8 @@ function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
 }
 
 function isModal(element: Element) {
+  // A dialog kept mounted while hidden covers nothing.
+  if (!rendered(element)) return false;
   if (element.localName !== 'dialog') return true;
   // Without a top layer (jsdom), an SDK dialog opens with the attribute.
   if (typeof (element as HTMLDialogElement).showModal !== 'function')
@@ -475,6 +514,13 @@ function isModal(element: Element) {
   } catch {
     return true;
   }
+}
+
+function rendered(element: Element) {
+  if (element.closest('[hidden]')) return false;
+  return typeof element.checkVisibility === 'function'
+    ? element.checkVisibility()
+    : true;
 }
 
 /**
@@ -554,11 +600,7 @@ export function Notices(props: NoticesProps) {
       ref={root}
       data-sempods-ui="notices"
       dir={direction}
-      style={
-        cover.avoid
-          ? ({ '--sp-notices-avoid': `${cover.avoid}px` } as CSSProperties)
-          : undefined
-      }
+      style={placement(cover, true)}
     >
       <SdkStyles />
       <style href="sempods-notices" precedence="sempods">
@@ -634,6 +676,8 @@ export function GateNotices() {
       data-sempods-ui="notices"
       data-placement="gate"
       dir={direction}
+      // The page's avoided zones lie behind the gate.
+      style={placement(cover, false)}
     >
       <style href="sempods-notices" precedence="sempods">
         {layered(styles)}
@@ -789,11 +833,15 @@ function useNoticeView(entry: Entry): NoticeView {
   );
   const disabled = busy || changing || confirmingLeave;
   const guarded = (run: () => Promise<unknown>) => () => {
-    const life = disabled ? null : store.begin(entry.id);
-    if (life === null) return;
+    // Read again when it runs: a renderer may call a callback it kept from
+    // an earlier render, while a guarded change has started since.
+    const now = app.getSnapshot();
+    const token =
+      now.changing || now.confirmingLeave ? null : store.begin(entry.id);
+    if (token === null) return;
     void run().then(
-      () => store.end(entry.id, life),
-      (cause: unknown) => store.end(entry.id, life, { cause }),
+      () => store.end(entry.id, token),
+      (cause: unknown) => store.end(entry.id, token, { cause }),
     );
   };
   const dismissLabel = m.controls.dismiss ?? m.controls.close ?? 'OK';
@@ -963,10 +1011,10 @@ const styles = `
   --sp-notice-error:var(--sempods-danger,light-dark(#a31e15,#ffb4ab));
   position:fixed; z-index:1000; pointer-events:none;
   inset-inline:max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
-  inset-block-end:calc(max(16px + env(safe-area-inset-bottom, 0px), var(--sp-notices-avoid, 0px) + 8px) + var(--sempods-notices-offset, 0px));
+  inset-block-end:calc(max(16px + env(safe-area-inset-bottom, 0px), var(--sp-notices-avoid, 0px) + 8px, var(--sp-notices-below, 0px) + 16px) + var(--sempods-notices-offset, 0px));
 }
 [data-sempods-ui="notices"] .sp-notices-live { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
-[data-sempods-ui="notices"] ul { list-style:none; margin:0 auto; padding:0; display:grid; gap:8px; max-width:28rem; max-block-size:60vh; overflow-y:auto; pointer-events:auto; }
+[data-sempods-ui="notices"] ul { list-style:none; margin:0 auto; padding:0; display:grid; gap:8px; max-width:28rem; max-block-size:min(60vh, var(--sp-notices-room, 60vh)); overflow-y:auto; pointer-events:auto; }
 [data-sempods-ui="notices"] ul[hidden] { display:none; }
 [data-sempods-ui="notices"] li { animation:sp-notice-in .16s ease-out; }
 [data-sempods-ui="notices"] .sp-notice { display:flex; gap:12px; align-items:flex-start; background:var(--sp-bg); border:1px solid var(--sp-line); border-radius:calc(var(--sp-radius) * 1.5); padding:4px 16px 12px; box-shadow:0 8px 24px rgb(0 0 0 / .16); }

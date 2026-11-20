@@ -23,6 +23,7 @@ import {
   AppAccess,
   Notices,
   SempodsProvider,
+  useApp,
   useNotice,
   useNotices,
   type Notice,
@@ -670,6 +671,23 @@ it('leaves the access prompts to AppAccess with accessPrompts={false}', async ()
   expect(document.querySelectorAll('[data-sempods-ui="prompt"]')).toHaveLength(
     1,
   );
+  // Both stacks sit at the bottom: the host keeps above the prompts.
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
+  vi.spyOn(stack(), 'getBoundingClientRect').mockReturnValue({
+    top: 640,
+    bottom: 784,
+    height: 144,
+    left: 16,
+    right: 359,
+    width: 343,
+    x: 16,
+    y: 640,
+    toJSON: () => ({}),
+  });
+  act(() => window.dispatchEvent(new Event('resize')));
+  await waitFor(() =>
+    expect(host().style.getPropertyValue('--sp-notices-avoid')).toBe('160px'),
+  );
 });
 
 it('restarts the timer for a changed event, but not for an update in place', async () => {
@@ -928,4 +946,158 @@ it('waits inside the gate while an app dialog opened after the gate is open', as
   act(() => setOpen(false));
   await waitFor(() => expect(texts(inGate())).toEqual(['Saved.OK']));
   await waitFor(() => expect(announced(inGate())).toEqual(['Saved.']));
+});
+
+it('ignores a dialog kept mounted while hidden, and shows a waiting notice once one is hidden', async () => {
+  const runtime = await signedIn();
+  let setHidden!: (hidden: boolean) => void;
+  function Kept() {
+    const [hidden, set] = useState(false);
+    setHidden = set;
+    return <div role="dialog" aria-modal="true" hidden={hidden} />;
+  }
+  render(
+    <App runtime={runtime}>
+      <Kept />
+    </App>,
+  );
+  act(() =>
+    actions.show({ key: 'sync', text: 'Not synced.', severity: 'error' }),
+  );
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(items()).toEqual([]);
+  expect(announced()).toEqual([]);
+  // Closed by `hidden`, still mounted: the notice shows and is announced once.
+  act(() => setHidden(true));
+  await waitFor(() => expect(texts()).toEqual(['Not synced.OK']));
+  await waitFor(() => expect(announced()).toEqual(['Not synced.']));
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  // The polite region comes first; the error is not read again.
+  await waitFor(() => expect(announced()).toEqual(['Saved.', 'Not synced.']));
+});
+
+it('keeps the stack within a visual viewport smaller than the layout viewport', async () => {
+  const runtime = await signedIn();
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(812);
+  // A pinch zoom or a keyboard that resizes only the visual viewport.
+  const visual = Object.assign(new EventTarget(), {
+    height: 406,
+    offsetTop: 0,
+  });
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    value: visual,
+  });
+  cleanups.push(() => {
+    delete (window as { visualViewport?: unknown }).visualViewport;
+  });
+  render(<App runtime={runtime} />);
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  const vars = () => [
+    host().style.getPropertyValue('--sp-notices-below'),
+    host().style.getPropertyValue('--sp-notices-room'),
+  ];
+  await waitFor(() => expect(vars()).toEqual(['406px', '243px']));
+  // Scrolled down within the layout viewport, less of it is hidden.
+  visual.offsetTop = 300;
+  act(() => visual.dispatchEvent(new Event('scroll')));
+  await waitFor(() => expect(vars()).toEqual(['106px', '243px']));
+  Object.assign(visual, { height: 812, offsetTop: 0 });
+  act(() => visual.dispatchEvent(new Event('resize')));
+  await waitFor(() => expect(vars()).toEqual(['', '']));
+});
+
+it('checks the guards again when a renderer calls an action it kept from an earlier render', async () => {
+  const runtime = await signedIn();
+  const run = vi.fn();
+  let kept: (() => void) | undefined;
+  let app!: ReturnType<typeof useApp>;
+  function Keeper({ notice }: NoticeProps) {
+    // Keeps the first callback, as a renderer awaiting its own confirmation.
+    kept ??= notice.actions[0]?.run;
+    return null;
+  }
+  function Controls() {
+    app = useApp();
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: Keeper }} />
+      <Publisher />
+      <Controls />
+    </SempodsProvider>,
+  );
+  act(() =>
+    actions.show({
+      key: 'sync',
+      text: 'Not synchronised.',
+      severity: 'error',
+      action: { label: 'Synchronise', run },
+    }),
+  );
+  await waitFor(() => expect(kept).toBeTypeOf('function'));
+  let finish!: () => void;
+  let navigation!: Promise<boolean>;
+  act(() => {
+    navigation = app.navigate(
+      () => new Promise<void>((done) => (finish = done)),
+    );
+  });
+  await act(async () => kept!());
+  expect(run).not.toHaveBeenCalled();
+  await act(async () => {
+    finish();
+    await navigation;
+  });
+  await act(async () => kept!());
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a late failure of a replaced event off its replacement, also across a remount', async () => {
+  const runtime = await signedIn();
+  const fails: ((cause: unknown) => void)[] = [];
+  const run = () =>
+    new Promise<void>((_, reject) => {
+      fails.push(reject);
+    });
+  function Modal({ open }: { readonly open: boolean }) {
+    return open ? <div role="dialog" aria-modal="true" /> : null;
+  }
+  const ui = (open: boolean) => (
+    <App runtime={runtime}>
+      <Modal open={open} />
+    </App>
+  );
+  const view = render(ui(false));
+  const failing: Notice = {
+    key: 'sync',
+    text: 'Not synchronised.',
+    severity: 'error',
+    action: { label: 'Synchronise', run },
+  };
+  act(() => actions.show(failing));
+  await act(async () =>
+    screen.getByRole('button', { name: 'Synchronise' }).click(),
+  );
+  // Replaced while its retry runs: the old rejection stays off it.
+  act(() => actions.show({ key: 'sync', text: 'Synchronised.' }));
+  await act(async () => fails[0]!(new Error('offline')));
+  expect(texts()).toEqual(['Synchronised.OK']);
+  expect(within(items()[0]!).queryByRole('alert')).toBeNull();
+  // A failure of the event that shows stays with it across a remount.
+  act(() => actions.show(failing));
+  await act(async () =>
+    screen.getByRole('button', { name: 'Synchronise' }).click(),
+  );
+  await act(async () => fails[1]!(new Error('offline')));
+  expect(within(items()[0]!).getByRole('alert').textContent).toBeTruthy();
+  view.rerender(ui(true));
+  await waitFor(() => expect(items()).toEqual([]));
+  view.rerender(ui(false));
+  await waitFor(() => expect(items()).toHaveLength(1));
+  expect(within(items()[0]!).getByRole('alert').textContent).toBeTruthy();
+  // A changed `show` is a new notice: the earlier failure no longer applies.
+  act(() => actions.show({ ...failing, text: 'Still not synchronised.' }));
+  expect(within(items()[0]!).queryByRole('alert')).toBeNull();
 });

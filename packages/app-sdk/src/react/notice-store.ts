@@ -21,6 +21,14 @@ export interface NoticeRecord {
   readonly renewed: number;
   readonly dismissed: boolean;
 }
+interface Run {
+  readonly token: symbol;
+  readonly event: number;
+}
+interface Failure {
+  readonly cause: unknown;
+  readonly event: number;
+}
 /** A mounted `Notices` host and its current options. */
 export interface Host {
   readonly token: symbol;
@@ -37,15 +45,14 @@ class NoticeStore {
   private holders = new Map<string, number>();
   private orders = new Map<string, number>();
   private announced = new Map<string, number>();
-  /** Notices and prompts whose action runs, across remounts and hosts. */
-  private running = new Set<string>();
-  /** The last failed action of each, also for a notice that remounted. */
-  private failures = new Map<string, { readonly cause: unknown }>();
   /**
-   * Each notice or prompt id starts a new life when it retires, so a late
-   * answer of an action never reaches a later notice with the same key.
+   * The action that runs for a notice or prompt, across remounts and hosts:
+   * its token and the event it started in. Retiring a notice drops it, so a
+   * late answer never reaches a later notice with the same key.
    */
-  private lives = new Map<string, number>();
+  private running = new Map<string, Run>();
+  /** The last failed action of each, for the event it started in. */
+  private failures = new Map<string, Failure>();
   private sequence = 0;
   private events = 0;
   private listeners = new Set<() => void>();
@@ -125,7 +132,7 @@ class NoticeStore {
     this.runs.delete(key);
     this.orders.delete('app\n' + key);
     this.announced.delete('app\n' + key);
-    this.endLife('app\n' + key);
+    this.forgetRun('app\n' + key);
     this.emit();
   }
   dismiss = (key: string) => {
@@ -153,34 +160,45 @@ class NoticeStore {
   run(key: string) {
     return this.runs.get(key);
   }
-  private endLife(id: string) {
+  private forgetRun(id: string) {
     this.running.delete(id);
     this.failures.delete(id);
-    this.lives.set(id, (this.lives.get(id) ?? 0) + 1);
+  }
+  /** The event an app notice shows now; an access prompt has one. */
+  private eventOf(id: string) {
+    return id.startsWith('app\n')
+      ? (this.records.get(id.slice(4))?.event ?? 0)
+      : 0;
   }
   /**
-   * Marks an action of `id` as running and returns its notice's life, or
-   * `null` while one already runs.
+   * Marks an action of `id` as running and returns its token, or `null`
+   * while one already runs, also one a changed `show` left running.
    */
   begin(id: string) {
     if (this.running.has(id)) return null;
-    this.running.add(id);
+    const run: Run = { token: Symbol(id), event: this.eventOf(id) };
+    this.running.set(id, run);
     this.failures.delete(id);
     this.listeners.forEach((listener) => listener());
-    return this.lives.get(id) ?? 0;
+    return run.token;
   }
   /**
-   * Ends the action begun in `life`, keeping its failure for whoever shows
-   * the notice; nothing once that notice has retired.
+   * Ends the run of `token`, keeping its failure for whoever shows the same
+   * event; nothing once its notice has retired, and no failure once a
+   * changed `show` replaced the event it started in.
    */
-  end(id: string, life: number, failure?: { readonly cause: unknown }) {
-    if ((this.lives.get(id) ?? 0) !== life) return;
+  end(id: string, token: symbol, failure?: { readonly cause: unknown }) {
+    const run = this.running.get(id);
+    if (run?.token !== token) return;
     this.running.delete(id);
-    if (failure) this.failures.set(id, failure);
+    if (failure && run.event === this.eventOf(id))
+      this.failures.set(id, { cause: failure.cause, event: run.event });
     this.listeners.forEach((listener) => listener());
   }
   failureOf(id: string) {
-    return this.failures.get(id);
+    const failure = this.failures.get(id);
+    // A changed `show` is a new notice: an earlier failure no longer applies.
+    return failure?.event === this.eventOf(id) ? failure : undefined;
   }
   isRunning(id: string) {
     return this.running.has(id);
@@ -194,7 +212,7 @@ class NoticeStore {
   forgetPrompt(id: string) {
     this.orders.delete(id);
     this.announced.delete(id);
-    this.endLife(id);
+    this.forgetRun(id);
   }
   /** Adds a host or replaces its options in place, keeping its position. */
   register(host: Host) {

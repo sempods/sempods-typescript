@@ -1553,7 +1553,7 @@ the access prompts. Render it once beneath `SempodsProvider`, beside
 and one stack holds both. Without it, `AppAccess` behaves as before. An app
 that presents the access prompts itself (`AccessPrompt`, `useAccessPrompts`)
 or keeps `AppAccess`'s stack passes `accessPrompts={false}`, so no prompt
-shows twice.
+shows twice; the host then stays above `AppAccess`'s stack.
 
 ```tsx
 import { Notices, useNotice, useNotices } from '@sempods/app-sdk/react';
@@ -1615,28 +1615,31 @@ export function Shell() {
   timer.
 - **One action**, `action: { label, run }`, runs through the host's guards:
   disabled while it runs and while a guarded change or its leave question is
-  open, also when the notice remounts or moves into the gate; a rejection
-  shows its localized error in the notice, also after a remount. A shown
-  notice retires once its
-  action resolves, unless the action showed it again; a held one stays its
-  holder's.
+  open, also when the notice remounts or moves into the gate, and checked
+  again when it runs, so a renderer that keeps an earlier callback is guarded
+  too. A rejection shows its localized error in the notice, also after a
+  remount, but not on a notice a changed `show` replaced meanwhile. A shown
+  notice retires once its action resolves, unless the action showed it again;
+  a held one stays its holder's.
 - **The host** shows at most `limit` notices (3 by default); over the limit,
-  those waiting for the person go first, so a burst of brief information
-  never pushes a pending action out of reach. It is fixed at the bottom of the
+  those waiting for the person go first, so a burst of brief information never
+  pushes a pending action out of reach. It is fixed at the bottom of the
   viewport, outside the document flow, above the safe area and above every
   element marked `data-sempods-notices-avoid`, such as a composer at the
-  bottom; `--sempods-notices-offset` adds a fixed distance. It never takes the
-  focus. Each event is announced once through its own live region (errors
-  assertively); the visible notices have no live role. Escape dismisses the
-  focused notice, and focus then returns to `focusTarget` or where it came
-  from. Its entrance motion stops under reduced motion. `--sempods-warning`
-  and `--sempods-danger` colour warnings and errors.
+  bottom. It stays inside the visual viewport when a pinch zoom or a keyboard
+  shrinks only that one. `--sempods-notices-offset` adds a fixed distance. It
+  never takes the focus. Each event is announced once through its own live
+  region (errors assertively); the visible notices have no live role. Escape
+  dismisses the focused notice, and focus then returns to `focusTarget` or
+  where it came from. Its entrance motion stops under reduced motion.
+  `--sempods-warning` and `--sempods-danger` colour warnings and errors.
 - **Modals:** while a modal dialog covers the page (the app's own or an SDK
-  one), the stack waits and covers nothing; its notices show and are announced
-  once it closes, an error too, so keep an error that concerns the dialog
-  inside it. Beside `AppAccess` the stack also waits while the app starts.
-  Before sign-in, app notices show inside the SDK's sign-in gate, which keeps
-  room for them at its end; they wait there too while the gate's settings or
+  one), the stack waits and covers nothing; a dialog kept mounted but hidden
+  (`hidden`) covers nothing. The waiting notices show and are announced once
+  it closes, an error too, so keep an error that concerns the dialog inside
+  it. Beside `AppAccess` the stack also waits while the app starts. Before
+  sign-in, app notices show inside the SDK's sign-in gate, which keeps room
+  for them at its end; they wait there too while the gate's settings or
   another dialog above it are open.
 - **Another renderer:** `components={{ Notice }}` receives a `NoticeView`
   (`source`, `severity`, `title`, `text`, `actions`, `dismiss`, …) for an

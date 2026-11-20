@@ -70,10 +70,17 @@ const items = [
 /**
  * The shared notification host (#385) on a shopping list with a composer
  * fixed at the bottom (`data-sempods-notices-avoid`) and an app dialog. With
- * `gate`, `AppAccess` shows its sign-in gate, before sign-in. The checks
+ * `gate`, `AppAccess` shows its sign-in gate, before sign-in; with `beside`,
+ * `AppAccess` keeps its own prompt stack beside the host. The checks
  * publish through `window.noticesGate`, as the app's own code would.
  */
-export function NoticesGate({ gate }: { readonly gate: boolean }) {
+export function NoticesGate({
+  gate,
+  beside,
+}: {
+  readonly gate: boolean;
+  readonly beside: boolean;
+}) {
   const { show, dismiss } = useNotices();
   const [ready, setReady] = useState(false);
   const [failures, setFailures] = useState<Record<string, number>>({});
@@ -94,8 +101,8 @@ export function NoticesGate({ gate }: { readonly gate: boolean }) {
   }, [show, dismiss]);
   return (
     <>
-      {gate && <AppAccess appName="Konsum" />}
-      <Notices focusTarget={edit} />
+      {(gate || beside) && <AppAccess appName="Konsum" />}
+      <Notices focusTarget={edit} accessPrompts={!beside} />
       <UpdateNotice ready={ready} />
       {Object.entries(failures).map(([pod, count]) => (
         <PodWarning key={pod} pod={pod} failures={count} />

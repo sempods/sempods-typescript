@@ -6864,7 +6864,9 @@ async function ghost({ browser, origin, engine }) {
  * the composer that holds the focus; repeated failures of one Pod as one
  * warning that retires; while the app's dialog is open the stack waits and
  * covers nothing, and shows and announces once it closes; Escape dismisses
- * the focused notice; reduced motion; and before sign-in inside the SDK's
+ * the focused notice; reduced motion; beside AppAccess's own prompt stack
+ * (`accessPrompts={false}`) above it, so Sign in takes the press; inside a
+ * zoomed visual viewport (Chromium); and before sign-in inside the SDK's
  * gate, clear of its sign-in button.
  */
 async function notices({ browser, origin, engine }) {
@@ -7107,6 +7109,134 @@ async function notices({ browser, origin, engine }) {
           back,
           still,
         };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-beside-access-prompts', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await fetch(origin + '/__reset');
+        await page.goto(origin + '/?screen=notices&beside');
+        const gate = page.locator('dialog[data-sempods-ui="gate"]');
+        await gate.waitFor();
+        // Reading a Pod without a token: AppAccess offers to sign in from
+        // its own stack, beside the host (`accessPrompts={false}`).
+        await page.evaluate(
+          (pod) => window.gateRuntime.connect(pod),
+          origin + '/alice',
+        );
+        await gone(gate);
+        const prompts = page.locator('[data-sempods-ui="prompts"]');
+        const signIn = prompts.getByRole('button', {
+          name: 'Sign in',
+          exact: true,
+        });
+        await signIn.waitFor();
+        await call('update', true);
+        await toast.first().waitFor();
+        await settle(page);
+        const box = await signIn.boundingBox();
+        const center = [box.x + box.width / 2, box.y + box.height / 2];
+        const state = await page.evaluate(([x, y]) => {
+          const stack = document
+            .querySelector('[data-sempods-ui="prompts"] ul')
+            .getBoundingClientRect();
+          const notice = document
+            .querySelector(
+              '[data-sempods-ui="notices"]:not([data-placement]) li',
+            )
+            .getBoundingClientRect();
+          return {
+            hit: document.elementFromPoint(x, y)?.closest('button')
+              ?.textContent,
+            stack: { top: stack.top, bottom: stack.bottom },
+            notice: { top: notice.top, bottom: notice.bottom },
+            height: innerHeight,
+          };
+        }, center);
+        // The press reaches Sign in; held before it leaves for the provider.
+        await page.evaluate(() =>
+          window.addEventListener(
+            'click',
+            (event) => {
+              window.pressed = event.target.closest?.('button')?.textContent;
+              event.stopPropagation();
+              event.preventDefault();
+            },
+            { capture: true, once: true },
+          ),
+        );
+        await page.mouse.click(...center);
+        const pressed = await page.evaluate(() => window.pressed);
+        return {
+          pass:
+            state.hit === 'Sign in' &&
+            pressed === 'Sign in' &&
+            state.notice.bottom <= state.stack.top + 0.5 &&
+            state.notice.top >= 0,
+          state,
+          pressed,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-visual-viewport', async () => {
+        // Only Chromium can shrink the visual viewport alone (DevTools
+        // protocol), as a pinch zoom or Chrome's default keyboard does.
+        if (engine !== 'chromium')
+          return { pass: false, skip: 'no visual viewport emulation' };
+        const cdp = await context.newCDPSession(page);
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        await call('update', true);
+        await toast.first().waitFor();
+        const read = () =>
+          page.evaluate(() => {
+            const notice = document
+              .querySelector(
+                '[data-sempods-ui="notices"]:not([data-placement]) li',
+              )
+              .getBoundingClientRect();
+            return {
+              layout: innerHeight,
+              top: window.visualViewport.offsetTop,
+              visible: window.visualViewport.height,
+              notice: { top: notice.top, bottom: notice.bottom },
+            };
+          });
+        const within = (m) =>
+          m.notice.top >= m.top - 0.5 &&
+          m.notice.bottom <= m.top + m.visible + 0.5;
+        try {
+          await cdp.send('Emulation.setPageScaleFactor', {
+            pageScaleFactor: 2,
+          });
+          await page.waitForTimeout(150);
+          await settle(page);
+          const zoomed = await read();
+          await cdp.send('Emulation.setPageScaleFactor', {
+            pageScaleFactor: 1,
+          });
+          await page.waitForTimeout(150);
+          await settle(page);
+          const back = await read();
+          return {
+            pass:
+              zoomed.layout === 812 &&
+              zoomed.visible < 500 &&
+              within(zoomed) &&
+              back.visible === 812 &&
+              within(back) &&
+              back.notice.bottom > zoomed.notice.bottom,
+            zoomed,
+            back,
+          };
+        } finally {
+          await cdp
+            .send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
+            .catch(() => {});
+          await cdp.detach().catch(() => {});
+        }
       }),
     );
     for (const height of [812, 560])
