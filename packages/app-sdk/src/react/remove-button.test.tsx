@@ -90,6 +90,28 @@ it('confirms the action it asked about, not a newer one', () => {
   expect(newer).not.toHaveBeenCalled();
 });
 
+it('asks its own question, as it was when the question opened', () => {
+  const onRemove = vi.fn();
+  const own = 'Delete “Shared” from personal? This cannot be undone.';
+  const view = render(
+    <RemoveButton
+      label="Delete: Shared in personal"
+      question={own}
+      onRemove={onRemove}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^Delete: Shared/ }));
+  view.rerender(
+    <RemoveButton
+      label="Delete: Shared in personal"
+      question="Delete “Shared, renamed”?"
+      onRemove={onRemove}
+    />,
+  );
+  expect(screen.getByRole('alertdialog', { name: own })).toBeTruthy();
+  expect(screen.queryByText(question)).toBeNull();
+});
+
 it('is a named trash icon by default; children replace it', () => {
   const view = render(<RemoveButton onRemove={() => {}} />);
   const icon = screen.getByRole('button', { name: 'Delete' });

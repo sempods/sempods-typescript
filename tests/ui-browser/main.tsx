@@ -43,12 +43,15 @@
 // as well, the second shape, a list renamed from its rows' menus.
 // With `?screen=date-choice`, the page is a task with the README's "Not
 // today" action, a DateChoice in a ScreenDialog (#400).
+// With `?screen=delete`, the page is the README's delete actions, a row's
+// RemoveButton with its default icon beside the bulk action's DeleteIcon,
+// and a RemoveButton whose children replace the icon (#389).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
 // links, view-tabs.tsx, the view strip, view-strip.tsx, the confirmation,
 // confirm-dialog.tsx, the renamed rows, rename-row.tsx, the "Not today"
-// action, not-today.tsx, and the
+// action, not-today.tsx, the delete actions, delete-actions.tsx, and the
 // address model, places.ts, are the package
 // README's examples, which
 // the test writes next to this file as they are shipped; the package's
@@ -68,6 +71,7 @@ import {
   AppAccess,
   LoadNotice,
   PodChooser,
+  RemoveButton,
   SempodsProvider,
   TargetScreen,
   useApp,
@@ -82,6 +86,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  DeleteIcon,
   ChipGroup,
   Dialog,
   DialogDescription,
@@ -106,6 +111,7 @@ import { Workspace } from './workspace';
 import { ViewTabs } from './view-tabs';
 import { ViewStrip } from './view-strip';
 import { ConfirmDialog } from './confirm-dialog';
+import { DeleteActions } from './delete-actions';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
@@ -280,6 +286,7 @@ const renameSettings =
     : settings;
 const renaming = renameSettings.get('screen') === 'rename';
 const dateChoice = settings.get('screen') === 'date-choice';
+const deletes = settings.get('screen') === 'delete';
 // Long translated editor actions, with `lang=de` (#401).
 const longLabels =
   settings.get('labels') === 'long'
@@ -418,6 +425,8 @@ function App() {
         <StripGate long={settings.get('counts') === 'long'} />
       ) : ghosts ? (
         <GhostGate />
+      ) : deletes ? (
+        <DeleteGate />
       ) : renaming ? (
         <RenameGate menu={renameSettings.get('shape') === 'menu'} />
       ) : confirmation ? (
@@ -953,6 +962,29 @@ function GhostGate() {
           Native
         </button>
       </div>
+    </main>
+  );
+}
+
+/**
+ * The README's delete actions (`?screen=delete`, #389) and an existing
+ * caller whose children, a larger icon and a text, replace RemoveButton's
+ * icon. Nothing is removed here.
+ */
+function DeleteGate() {
+  return (
+    <main className="gate-main grid gap-4">
+      <DeleteActions
+        title="Milk"
+        canRemove
+        remove={() => {}}
+        done={2}
+        clearDone={() => {}}
+      />
+      <RemoveButton label="Remove: Bread" onRemove={() => {}}>
+        <DeleteIcon size="1.25rem" />
+        Remove
+      </RemoveButton>
     </main>
   );
 }

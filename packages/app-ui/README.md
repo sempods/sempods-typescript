@@ -792,6 +792,9 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   the dialog without a call keeps it. Texts follow the SDK provider's
   language, `labels` overrides Apply, Remove date and the typed entry's label.
   The calendar needs 308px of width for its 44px days.
+- **`DeleteIcon`**: the shared delete glyph, Lucide's `Trash2`, 1rem by
+  default (`size` changes it) and always decorative; see
+  [delete actions](#delete-actions).
 - **`ActionButton`**: an app's own action in the theme's variants: `variant`
   `primary` (default), `secondary`, `ghost` or `destructive`; `shape` `pill`
   (56px high), `round-sm` (44px, as `HeaderMenu`'s button, for icon actions
@@ -1157,6 +1160,52 @@ export function SourceRow(props: {
         ]}
       />
     </li>
+  );
+}
+```
+
+### Delete actions
+
+A row's own delete is the SDK's `RemoveButton` without children: a quiet
+trash icon with a 44px target that asks first. An action that deletes several
+rows at once, such as clearing the done tasks, shows the same glyph with
+**`DeleteIcon`**: Lucide's `Trash2`, 1rem by default so it follows the root
+font size, always decorative (`aria-hidden`). Both draw the same outline at
+the same size, without an icon import or size of the app's own. Each button's
+name says what it deletes, and the app decides which rows the bulk action
+includes; its confirmation follows the
+[clear-done recipes](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#several-rows-from-one-decision).
+`RemoveButton`'s children replace its icon, for example a text.
+
+```tsx
+// delete-actions.tsx
+import { RemoveButton } from '@sempods/app-sdk/react';
+import { ActionButton, DeleteIcon } from '@sempods/app-ui';
+
+export function DeleteActions(props: {
+  readonly title: string;
+  readonly canRemove: boolean;
+  readonly remove: () => unknown;
+  readonly done: number;
+  readonly clearDone: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="min-w-0 flex-1 wrap-anywhere">{props.title}</span>
+      <RemoveButton
+        label={`Delete: ${props.title}`}
+        disabled={!props.canRemove}
+        onRemove={props.remove}
+      />
+      <ActionButton
+        variant="secondary"
+        isDisabled={props.done === 0}
+        onPress={props.clearDone}
+      >
+        <DeleteIcon />
+        Clear done tasks
+      </ActionButton>
+    </div>
   );
 }
 ```
@@ -2245,12 +2294,13 @@ forced colours, with long counts at 320px;
 `rename-row.tsx` with a renaming row menu: keyboard, taps at 320 and 375px,
 dismissal and resumption, an invalid name, a denied write, a change on the
 Pod, a slow save and the focus after it, read-only access and German names;
-and the
-"Not today" `DateChoice` in a `ScreenDialog` with a preset, a typed day, an
+the "Not today" `DateChoice` in a `ScreenDialog` with a preset, a typed day, an
 impossible and an early day, Enter in a form, Remove date, Escape after a
 picked day, reopening the date chooser during its exit, the
 focus trap and 44px targets without horizontal overflow at 375 and 360px
-wide. It uses a loopback fixture Pod: it is not
+wide; and the README's delete actions, where `RemoveButton`'s default icon
+and `DeleteIcon` draw the same outline at 1rem under two root font sizes. It
+uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
 ## Limits

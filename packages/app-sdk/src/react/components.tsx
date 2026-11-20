@@ -949,13 +949,16 @@ export function ResourceEditor<D, U = D>({
  * `disabled={!row.canMutate}` and `onRemove={row.remove}` for `row = mutate.for(item)`;
  * the outcome shows where the hook's notice is. A button that becomes disabled
  * while asking withdraws the question. Without children it is a quiet trash
- * icon with a 44px target, named Delete or `label`; `className` overrides its
- * look.
+ * icon (the kit's `DeleteIcon`, 1rem) with a 44px target, named Delete or
+ * `label`; children replace the icon, `className` overrides its look.
+ * `question` says what is deleted where the name alone does not, for example
+ * the same title in two Contexts; it is captured with `onRemove`.
  */
 export function RemoveButton({
   onRemove,
   disabled = false,
   label,
+  question,
   className,
   children,
 }: {
@@ -963,6 +966,11 @@ export function RemoveButton({
   readonly disabled?: boolean;
   /** Accessible name and tooltip, for example `Delete: ${title}`; the icon defaults to Delete. */
   readonly label?: string;
+  /**
+   * The dialog's question instead of the SDK's `confirmRemove`, for example
+   * `Delete “${title}” from ${area}? This cannot be undone.`
+   */
+  readonly question?: string;
   readonly className?: string;
   /** The button's content instead of the trash icon, for example a text. */
   readonly children?: ReactNode;
@@ -971,6 +979,7 @@ export function RemoveButton({
   // The action asked about, captured when the question opens.
   const [asking, setAsking] = useState<{
     readonly remove: () => unknown;
+    readonly question: string | undefined;
   } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   // Withdrawn for good: enabled again later, it does not reopen.
@@ -989,7 +998,7 @@ export function RemoveButton({
         aria-label={name}
         title={name}
         disabled={disabled}
-        onClick={() => setAsking({ remove: onRemove })}
+        onClick={() => setAsking({ remove: onRemove, question })}
       >
         {content ?? trash}
       </button>
@@ -1006,14 +1015,20 @@ export function RemoveButton({
           if (asking) void asking.remove();
         }}
       >
-        <p>{m.confirmRemove ?? m.remove}</p>
+        <p>{asking?.question ?? m.confirmRemove ?? m.remove}</p>
       </ConfirmDialog>
     </>
   );
 }
 
+// The kit's `DeleteIcon`, Lucide's `Trash2` (ISC; derived from Feather, MIT;
+// see NOTICE), copied so the SDK needs no icon package: the same outline and
+// 1rem, so it follows the root font size; an icon among children keeps its
+// own size. app-ui's tests keep the two equal.
 const trash = (
   <svg
+    width="1rem"
+    height="1rem"
     viewBox="0 0 24 24"
     aria-hidden="true"
     fill="none"
@@ -1022,6 +1037,10 @@ const trash = (
     strokeLinecap="round"
     strokeLinejoin="round"
   >
-    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M3 6h18" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
   </svg>
 );

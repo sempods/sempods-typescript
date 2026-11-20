@@ -377,6 +377,19 @@ editor's actions in tests by name instead of position (`getByRole('button',
 them by position or by the internal class `sp-sdk-end`, which is gone. See
 [editing a form](react-authoring.md#editing-a-form-useresourceeditor).
 
+### The shared delete icon
+
+`RemoveButton` without children now shows Lucide's `Trash2` at 1rem instead
+of its own 20px trash glyph, so it grows with the root font size and matches
+the UI kit's new `DeleteIcon`. A screenshot or a test that measured the old
+icon changes; the button keeps its 44px target and its name. An app that
+passed `<Trash2 />` as `RemoveButton`'s children only to get that glyph drops
+them, and a bulk delete action uses `<DeleteIcon />` from `@sempods/app-ui`
+instead of importing `Trash2` and sizing it. Other children still replace the
+icon; an `svg` among them is no longer set to 20px by the SDK's styles, so give
+it a size of its own (`<DeleteIcon />` is 1rem). See [several rows from one
+decision](react-authoring.md#several-rows-from-one-decision).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

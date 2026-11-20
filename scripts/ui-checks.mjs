@@ -6645,6 +6645,7 @@ export const suites = {
   dateChoice,
   editorFooter,
   rename,
+  deleteIcon,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */
@@ -8518,6 +8519,88 @@ async function rename({ browser, origin, engine }) {
       errors: reader.errors,
     });
     await reader.context.close();
+  }
+  return results;
+}
+
+/**
+ * The shared delete glyph (#389) on `?screen=delete`, the README's delete
+ * actions: a row's RemoveButton without children and the bulk action's
+ * DeleteIcon draw the same outline in the button's text colour, 1rem at the
+ * default and at a larger root font size, hidden from assistive technology,
+ * so each button's name is its own label; the row keeps a 44px target, and
+ * a RemoveButton with children shows them instead of the icon, its own icon
+ * at its own size (1.25rem).
+ */
+async function deleteIcon({ browser, origin }) {
+  const { context, page, errors } = await newPage(browser);
+  const button = (name) => page.getByRole('button', { name, exact: true });
+  const look = (name) =>
+    button(name).evaluate((el) => {
+      const icons = [...el.querySelectorAll('svg')];
+      const svg = icons[0];
+      const box = svg?.getBoundingClientRect();
+      const own = el.getBoundingClientRect();
+      return {
+        icons: icons.length,
+        size: box ? [box.width, box.height] : null,
+        hidden: svg?.getAttribute('aria-hidden') ?? null,
+        viewBox: svg?.getAttribute('viewBox') ?? null,
+        paths: svg
+          ? [...svg.querySelectorAll('path')].map((p) => p.getAttribute('d'))
+          : [],
+        strokeWidth: svg ? getComputedStyle(svg).strokeWidth : null,
+        stroke: svg ? getComputedStyle(svg).stroke : null,
+        color: getComputedStyle(el).color,
+        text: el.textContent,
+        target: [own.width, own.height],
+      };
+    });
+  const results = [];
+  try {
+    await page.goto(origin + '/?screen=delete');
+    await button('Delete: Milk').waitFor();
+    for (const root of [16, 20])
+      results.push(
+        await attempt(`delete-glyph-at-${root}px`, async () => {
+          await page.evaluate((px) => {
+            document.documentElement.style.fontSize = `${px}px`;
+          }, root);
+          await settle(page);
+          const row = await look('Delete: Milk');
+          const bulk = await look('Clear done tasks');
+          const custom = await look('Remove: Bread');
+          const outline = (l) =>
+            JSON.stringify([l.viewBox, l.paths, l.strokeWidth]);
+          return {
+            pass:
+              row.icons === 1 &&
+              bulk.icons === 1 &&
+              row.paths.length === 5 &&
+              outline(row) === outline(bulk) &&
+              [row, bulk].every(
+                (l) =>
+                  l.hidden === 'true' &&
+                  l.size?.every((side) => Math.abs(side - root) < 0.5) &&
+                  l.stroke === l.color,
+              ) &&
+              row.text === '' &&
+              row.target.every((side) => side >= 44) &&
+              bulk.text === 'Clear done tasks' &&
+              custom.icons === 1 &&
+              custom.size?.every(
+                (side) => Math.abs(side - root * 1.25) < 0.5,
+              ) &&
+              custom.text === 'Remove',
+            row,
+            bulk,
+            custom,
+          };
+        }),
+      );
+  } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
   }
   return results;
 }

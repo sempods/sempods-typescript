@@ -425,19 +425,17 @@ function TaskRow({ row }: { row: FieldUpdateRow<Task> }) {
 - `RemoveButton` asks with `ResourceEditor`'s delete dialog and calls
   `onRemove`, as it was when asked, only after confirmation (a row read again
   meanwhile shows as a conflict). A quiet trash icon with a 44px target, named
-  **Delete** or `label`; children replace the icon, `className` its look.
+  **Delete** or `label`; children replace the icon, `className` its look. The
+  icon is the UI kit's `DeleteIcon` (Lucide's `Trash2`, 1rem), so a bulk
+  action beside it shows the same glyph. `question` replaces the dialog's
+  text where the name alone does not say which row it deletes; it is captured
+  with `onRemove`.
 - The hook returns only `{ for, unresolved }`, like `useContextUpdate`.
   Use `row.canMutate` for each row's availability and `row.notice` for its
   feedback. An IRI-only handle (`mutate.for(iri)`) exposes recovery and always
   has `canMutate: false`, because there is no snapshot to write from.
-- Several rows from one decision (**Clear done tasks**): capture the shown
-  rows' `row.remove` commands (typed `FieldUpdateRow<D>['remove']`), confirm
-  their number, then `await` one after the other and stop at the first result
-  that is not `removed`; never retry or resend the rest. Each command deletes
-  only the version its row showed, in its own target, and sends nothing once
-  that target or access changed. The
-  [clear-done recipe](../examples/todo/recipes/clear-done.tsx) reports partial
-  completion and leaves the stopped row's recovery to `UnresolvedNotices`.
+- Several rows from one decision (**Clear done tasks**): see
+  [several rows from one decision](#several-rows-from-one-decision).
 - Create with `useCreation`; pass `iri` instead of `collection` when its
   identity is already known. Portable raw JSON-LD creation stays in
   `client-sdk/edit.prepareCreation`; its caller owns the UI recovery lifecycle.
@@ -1016,6 +1014,53 @@ list.data?.items.map((item) => {
   ask first. Another active connection retires them.
 
 See the [one-click recipe](../examples/todo/recipes/overview-toggle.tsx).
+
+### Several rows from one decision
+
+One confirmation can delete a set of rows, such as **Clear done tasks**,
+in one list (`useFieldUpdate`) or across the readable Contexts of a Pod
+(`useContextUpdate`). Both use the rows' own commands:
+
+- When the question opens, capture the shown rows' `row.remove` commands
+  (typed `FieldUpdateRow<D>['remove']`; a `ContextUpdateRow` has the same).
+  A row completed or added later is not part of the decision. Each command
+  deletes only the version its row showed, in the Context where it was read,
+  so the same IRI in two Contexts is two rows, and a row reopened elsewhere is
+  not deleted.
+- Ask in the compact `Dialog` with the SDK's Cancel and Delete
+  (`controls.cancel`, `controls.remove`) and the total once in the question.
+  Across Contexts, list the areas below it with their counts, and say how many
+  read-only rows are kept when there are any; a long list of areas scrolls
+  so Cancel and Delete stay on screen. Add text only when it says something
+  about the scope the question and counts do not. Cancel sends nothing.
+- The question and the summary belong to the authorization they were made
+  under: render them in a component keyed by `useAppState().pod?.key`, so
+  another Pod, a sign-out or a new sign-in starts afresh, and close the
+  question when an area it names can no longer be read. Switching Pods
+  retires the previous connection's recovery notices.
+- Then `await` one command after the other with a progress line, and stop at
+  the first result that is not `removed`: a change on the Pod, an unconfirmed
+  answer such as a lost response, a refusal, or `not-sent`. Its `reason` says
+  why nothing was sent: `busy` when the row's own delete or change started
+  meanwhile has no answer yet, `ended` or `unavailable` when the Context, the
+  Pod or access changed. Never retry or resend the rest. Report the confirmed
+  count, why the run stopped and the unsent remainder. The summary names no
+  row: the stopped row's notice does, as long as it may be read.
+- While the same Pod connection remains active, a stopped row keeps its
+  recovery notice even after it leaves a filtered view. Pass the rows the
+  screen shows to `UnresolvedNotices`, for example the done tasks in a
+  completed-tasks view.
+- A single row is deleted with a plain `RemoveButton`; the bulk action shows
+  the kit's `DeleteIcon`, the same glyph. Each button's name says what it
+  deletes. Where the same title can be in two areas, the row's `question`
+  names its area too, for example `Delete “Shared” from work? This cannot be
+undone.`; the app decides which rows the bulk action includes, the areas'
+  names and the texts.
+
+The [clear-done recipe](../examples/todo/recipes/clear-done.tsx) covers one
+list, the [overview recipe](../examples/todo/recipes/clear-done-overview.tsx)
+the Contexts of a Pod; both share the run, its summary and the dialog in
+[`remove-rows.tsx`](../examples/todo/recipes/remove-rows.tsx).
 
 ### Editing an overview row
 
