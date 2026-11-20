@@ -7533,6 +7533,90 @@ async function rename({ browser, origin, engine }) {
       }),
     );
     results.push(
+      await attemptOn(errors, 'failed-read-keeps-the-way-out', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        await renameOnPod(4, TODAY);
+        await tick(NEWSLETTER);
+        await trigger(page, TODAY).waitFor({ timeout: 15000 });
+        await trigger(page, TODAY).click();
+        await shown(renamed(page, TODAY), 15000);
+        // The next read fails: the rows stay, and so does the way out.
+        await page.route('**/sparql/query**', (route) =>
+          route.fulfill({ status: 500, body: '' }),
+        );
+        await visible(page);
+        const retry = await shown(
+          page.getByRole('button', { name: 'Try again' }),
+          15000,
+        );
+        const told = await shown(renamed(page, TODAY), 3000);
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
+        const saved = await continueAndSave(page);
+        const after = await title(4);
+        return {
+          pass: retry && told && saved && after === 'Return the books',
+          retry,
+          told,
+          saved,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'padded-name-is-unchanged', async () => {
+        const PADDED = ` ${BOOKS} `;
+        await open(page);
+        await renameOnPod(4, PADDED);
+        await tick(NEWSLETTER);
+        // Names match without their spaces: wait for the padded text.
+        const name = trigger(page, BOOKS);
+        const read = await until(
+          page,
+          async () =>
+            (await name.evaluate((b) => b.firstChild?.textContent)) === PADDED,
+        );
+        const before = sent.length;
+        // Opened and saved untouched: nothing is written.
+        await name.click();
+        await input(page).press('Enter');
+        const closed = await gone(field(page), 15000);
+        const written = sent.length - before;
+        // Opened and left untouched: nothing is parked or guarded.
+        await name.click();
+        await input(page).waitFor();
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        const label = await name.getAttribute('aria-label');
+        await page.getByRole('button', { name: 'Switch list' }).click();
+        const asked = await shown(page.getByRole('alertdialog'), 2000);
+        if (asked) await answerLeave(page, 'keep');
+        else {
+          await page.getByRole('button', { name: 'Switch list' }).click();
+          await name.waitFor();
+        }
+        const stored = await title(4);
+        return {
+          pass:
+            read &&
+            closed &&
+            written === 0 &&
+            !label?.includes('Not saved') &&
+            !asked &&
+            stored === PADDED,
+          read,
+          closed,
+          written,
+          label,
+          asked,
+          stored,
+        };
+      }),
+    );
+    results.push(
       await attemptOn(errors, 'skipped-row-keeps-the-guard', async () => {
         await open(page);
         await trigger(page, BOOKS).click();
@@ -7879,6 +7963,36 @@ async function rename({ browser, origin, engine }) {
           kept,
           saved,
           after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'menu-shape-keeps-each-draft', async () => {
+        await open(page, '/?screen=rename&shape=menu', / more$/);
+        await page.getByRole('button', { name: `${BOOKS}: more` }).click();
+        await page.getByRole('menuitem', { name: 'Rename' }).click();
+        await input(page).waitFor();
+        await focusUntil(page, /^Rename: /, focused);
+        await page.keyboard.type('Return the books');
+        // Another row's rename opens beside the changed one.
+        await page.getByRole('button', { name: `${NEWSLETTER}: more` }).click();
+        await page.getByRole('menuitem', { name: 'Rename' }).click();
+        const second = page.getByRole('textbox', {
+          name: `Rename: ${NEWSLETTER}`,
+        });
+        await second.waitFor();
+        const fields = await field(page).count();
+        const first = await page
+          .getByRole('textbox', { name: `Rename: ${BOOKS}` })
+          .inputValue();
+        await second.press('Escape');
+        await page
+          .getByRole('textbox', { name: `Rename: ${BOOKS}` })
+          .press('Escape');
+        return {
+          pass: fields === 2 && first === 'Return the books',
+          fields,
+          first,
         };
       }),
     );

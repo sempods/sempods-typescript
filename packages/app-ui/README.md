@@ -1203,6 +1203,7 @@ rule that the app's other renames share:
 // rename-row.tsx
 import { useRef, useState, type ReactNode } from 'react';
 import {
+  LoadNotice,
   RemoveButton,
   UnresolvedNotices,
   UpdateNotice,
@@ -1261,6 +1262,13 @@ export const startRename = (row: FieldUpdateRow<Item>): Rename => ({
 });
 
 /**
+ * Whether the text changes the name as Save writes it, trimmed: a stored
+ * name with spaces around it, opened and left, is no change.
+ */
+export const edited = (rename: Rename) =>
+  rename.text.trim() !== rename.seen.trim();
+
+/**
  * What every rename of this app shares: whether Save may write, the row's
  * notices and the write. Save writes from the row's current snapshot, and
  * only while it shows the name the rename continues from; the SDK then
@@ -1274,8 +1282,11 @@ export function useRename(
   /** The row's rename; without one, only the row's notice. */
   rename: Rename | undefined,
   onChange: (rename: Rename) => void,
-  /** The list's latest read is in: `list.state.kind === 'ready'`. */
-  settled: boolean,
+  /**
+   * The list is reading again (`list.state.kind === 'loading'`): a newer
+   * name is shown once the read has answered, also when it failed.
+   */
+  reading: boolean,
 ) {
   const t = useMessages(texts);
   const { outcome, checked, current } = row.notice;
@@ -1293,8 +1304,8 @@ export function useRename(
         }}
         quiet
       />
-      {/* Told once the read is in; until then Save only waits. */}
-      {rename && differs && settled && !unresolved && (
+      {/* Told once the read has answered; until then Save only waits. */}
+      {rename && differs && !reading && !unresolved && (
         <p role="alert" className="flex flex-wrap items-center gap-2">
           {t.renamed(row.data.title)}
           <Button
@@ -1321,7 +1332,7 @@ export function useRename(
     async save(): Promise<'done' | 'kept'> {
       const title = rename?.text.trim();
       if (!rename || !title || differs) return 'kept';
-      if (title === rename.seen) return 'done';
+      if (!edited(rename)) return 'done';
       const outcome = await row.update({ title });
       return outcome.kind === 'saved' ? 'done' : 'kept';
     },
@@ -1352,11 +1363,10 @@ export function ShoppingList(props: {
     list.data && list.data.skippedRecords.length === list.data.skipped;
   const gone = (iri: string) =>
     Boolean(complete && !shown.has(iri) && !skipped.has(iri));
-  const changed = (rename: Rename) => rename.text.trim() !== rename.seen;
   // A changed name is unsaved work: changing the list or Pod asks first,
   // also while the list cannot be read.
   useDraftGuard(
-    [...renames].some(([iri, rename]) => !gone(iri) && changed(rename)),
+    [...renames].some(([iri, rename]) => !gone(iri) && edited(rename)),
     () => {
       setRenames(new Map());
       setOpen(null);
@@ -1375,6 +1385,8 @@ export function ShoppingList(props: {
     });
   return (
     <>
+      {/* A failed read keeps the rows, says so and offers to read again. */}
+      <LoadNotice state={list.state} reload={list.reload} />
       <ul aria-label={t.list}>
         {items.map((item) => {
           const { iri } = item;
@@ -1386,7 +1398,7 @@ export function ShoppingList(props: {
               href={props.href(iri)}
               writable={write}
               rename={renames.get(iri)}
-              settled={list.state.kind === 'ready'}
+              reading={list.state.kind === 'loading'}
               editing={open === iri}
               trigger={(button) => {
                 if (button) triggers.current.set(iri, button);
@@ -1399,7 +1411,7 @@ export function ShoppingList(props: {
               onRename={(rename) => update(iri, (r) => r && rename)}
               onClose={(park) => {
                 // Only a changed name is parked.
-                update(iri, (r) => (park && r && changed(r) ? r : null));
+                update(iri, (r) => (park && r && edited(r) ? r : null));
                 // Another item may be open by now, after a slow save.
                 setOpen((current) => (current === iri ? null : current));
               }}
@@ -1420,7 +1432,7 @@ function ItemRow(props: {
   readonly writable: boolean;
   /** The open or parked rename of this item's name. */
   readonly rename: Rename | undefined;
-  readonly settled: boolean;
+  readonly reading: boolean;
   readonly editing: boolean;
   readonly trigger: (button: HTMLButtonElement | null) => void;
   readonly onOpen: () => void;
@@ -1432,7 +1444,7 @@ function ItemRow(props: {
   const t = useMessages(texts);
   const { row, rename } = props;
   const item = row.data;
-  const edit = useRename(row, rename, props.onRename, props.settled);
+  const edit = useRename(row, rename, props.onRename, props.reading);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const parked = rename !== undefined && !props.editing && !saving;

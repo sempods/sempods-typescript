@@ -476,7 +476,7 @@ is the complete, tested shopping list; its `useRename` holds the rule every
 rename of the app shares, and the core is:
 
 ```tsx
-const edit = useRename(row, rename, setRename, list.state.kind === 'ready');
+const edit = useRename(row, rename, setRename, list.state.kind === 'loading');
 
 <InlineTextEdit
   label={`${t.rename}: ${row.data.title}`}
@@ -517,13 +517,17 @@ const edit = useRename(row, rename, setRename, list.state.kind === 'ready');
   the field until the person continues from it. Acknowledging a checked
   `changed-on-pod` continues from the version the check compared, not from
   whatever the list shows by then: a rename after the check is shown as
-  well. Keep this rule in one place, as `useRename` does, for every rename
-  of the app. A refusal keeps the draft and the field open with the notice;
+  well. A failed list read keeps the newer name and its way out; show it
+  with `<LoadNotice state={list.state} reload={list.reload} />`. Keep `seen`
+  exactly as read for this comparison, but tell a change by comparing the
+  trimmed text with the trimmed `seen` (`edited`): a stored name with spaces
+  around it, opened and left, is no change and is never rewritten. Keep
+  this rule in one place, as `useRename` does, for every rename of the app. A refusal keeps the draft and the field open with the notice;
   the person may save again. Never resend on any other result.
 - **Leaving is a dismissal, not a save.** A press beside the field or Tab
   past it calls `onDismiss`. Park a changed draft, as the README example does
   with a "Not saved" mark and the next rename resuming it, and drop one whose
-  trimmed text still equals `seen`: a parked copy of the old name would
+  trimmed text still equals the trimmed `seen`: a parked copy of the old name would
   later show as unsaved after a rename elsewhere. Guard every changed draft,
   open or parked, with `useDraftGuard(dirty, discard)`, comparing it with
   `seen`, so changing the list or the Pod asks first, also while the list
