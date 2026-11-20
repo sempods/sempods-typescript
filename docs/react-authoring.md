@@ -472,57 +472,61 @@ To rename one text value in its row, such as a shopping item, compose the
 row's `useFieldUpdate` command with the UI kit's `InlineTextEdit`, the
 leave guard and the row's notice instead of opening a `ResourceEditor`. The
 [app-ui README's `rename-row.tsx`](../packages/app-ui/README.md#renaming-in-a-row)
-is the complete, tested shopping list; the core is:
+is the complete, tested shopping list; its `useRename` holds the rule every
+rename of the app shares, and the core is:
 
 ```tsx
+const edit = useRename(row, rename, setRename, list.state.kind === 'ready');
+
 <InlineTextEdit
-  label={`${t.rename}: ${item.title}`}
-  value={draft.text}
-  onChange={setText}
+  label={`${t.rename}: ${row.data.title}`}
+  value={rename.text}
+  onChange={(text) => setRename({ ...rename, text })}
   onSave={async () => {
-    const title = draft.text.trim();
-    if (!title) return setError(t.required); // the app validates
+    if (edit.invalid) return setError(edit.invalid); // the app validates
     setSaving(true);
-    // From the snapshot the rename started from, kept with the draft.
-    const outcome = await mutate.for(draft.base).update({ title });
+    const result = await edit.save(); // from the row's current snapshot
     setSaving(false);
-    if (outcome.kind === 'saved') close(); // otherwise the draft stays
+    if (result === 'done') close(); // otherwise the draft stays
   }}
   onCancel={close}
   onDismiss={park} // or close, or keep it open: the app's policy
   returnFocus={() => trigger.current?.focus()}
   pending={saving}
-  readOnly={!mutate.for(draft.base).canMutate}
+  readOnly={edit.readOnly}
   error={error}
 >
-  <UpdateNotice {...row.notice} onAcknowledge={acknowledgeAndRebase} quiet />
-</InlineTextEdit>
+  {edit.notices}
+</InlineTextEdit>;
 ```
 
 - **The app keeps** the trigger (the name as a button, a menu item, a deep
-  link beside it), the field it writes and its validation, the list snapshot
-  the rename started from, the draft and its policy, and its own list
-  actions. Offer the trigger only with `useWorkflowAccess().write`; without
-  it the name is text.
-- **Write from the snapshot the rename started from.** Keep the list
-  snapshot with the draft when the field opens, also while it is parked, and
-  save with `mutate.for(base).update({ title })`. A list read meanwhile
-  gives the row a newer snapshot; writing from that one would take the other
-  writer's name as what the person saw and overwrite it without a question.
-  From the base, a change on the Pod is `changed-on-pod`: it locks the row
-  (`readOnly` follows the base's `canMutate`), the notice's check reads the
-  current version and the list reads again. A newer read becomes the base
-  only when its name still reads as the rename started from it, for example
-  after the row's own tick, which spends the old snapshot, or after the
-  person acknowledged the change; then the kept draft can be saved onto it. A refusal keeps the draft and the field open with the
-  notice; the person may save again. Never resend on any other result.
+  link beside it), the field it writes and its validation, the draft and its
+  policy, and its own list actions. Offer the trigger only with
+  `useWorkflowAccess().write`; without it the name is text.
+- **Save writes only over the name the person saw.** Keep with the draft
+  the name it continues from (`seen`): the one the row showed when the
+  rename opened (`row.data.title`, which already shows a name just saved),
+  or the one the person last reviewed. Save writes from the row's current
+  snapshot, and only while that shows `seen`; the SDK then guards the name
+  up to the write, and a change on the Pod meanwhile is `changed-on-pod`.
+  Never write from a snapshot that shows another name: its write would take
+  the other writer's name as what the person saw and overwrite it without a
+  question. A newer name that the list reads, after a refresh, the row's own
+  tick or another client's rename, keeps Save unavailable and is shown in
+  the field until the person continues from it. Acknowledging a checked
+  `changed-on-pod` continues from the version the check compared, not from
+  whatever the list shows by then: a rename after the check is shown as
+  well. Keep this rule in one place, as `useRename` does, for every rename
+  of the app. A refusal keeps the draft and the field open with the notice;
+  the person may save again. Never resend on any other result.
 - **Leaving is a dismissal, not a save.** A press beside the field or Tab
   past it calls `onDismiss`. Park a changed draft, as the README example does
   with a "Not saved" mark and the next rename resuming it, and drop one whose
-  trimmed text still equals its base: a parked copy of the old name would
+  trimmed text still equals `seen`: a parked copy of the old name would
   later show as unsaved after a rename elsewhere. Guard every changed draft,
   open or parked, with `useDraftGuard(dirty, discard)`, comparing it with
-  its base, so changing the list or the Pod asks first, also while the list
+  `seen`, so changing the list or the Pod asks first, also while the list
   cannot be read (`list.data` is undefined after lost read access). An item
   is gone only when a complete read (`skippedRecords.length === skipped`)
   neither lists it nor skips it: an item whose name was cleared elsewhere is
@@ -531,8 +535,9 @@ is the complete, tested shopping list; the core is:
   `returnFocus`, also after a slow save; a person who moved on meanwhile keeps
   their focus. A trigger that the field replaces is focused after the app's
   render, so keep its element by ref.
-- Pass the notice as `children` while the field is open and keep it in the
-  row while it is closed, so its controls are part of the field. Name the
+- Pass the notices (the row's, and the newer name to review) as `children`
+  while the field is open and keep them in the row while it is closed, so
+  their controls are part of the field. Name the
   input, the trigger and the row's other controls with the item's name in the
   app's language; Save and Cancel take the SDK's texts.
 

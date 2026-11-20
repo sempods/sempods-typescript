@@ -7103,6 +7103,40 @@ async function rename({ browser, origin, engine }) {
         document.activeElement?.tagName,
     );
 
+  /** Polls until `ready` (at most 15s): slow engines settle late. */
+  const until = async (page, ready) => {
+    for (let end = Date.now() + 15000; Date.now() < end;) {
+      if (await ready()) return true;
+      await page.waitForTimeout(50);
+    }
+    return false;
+  };
+  /** Back in the tab: the list reads again. */
+  const visible = (page) =>
+    page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  const TODAY = 'Return the library books today';
+  const TONIGHT = 'Return the library books tonight';
+  /** The notice of a name the list reads changed elsewhere, in the field. */
+  const renamed = (page, name) =>
+    field(page).getByText(`Renamed elsewhere to “${name}”.`);
+  /**
+   * Continues a rename from the newer name, then saves it: false when there
+   * is no newer name to continue from or the field stays open.
+   */
+  const continueAndSave = async (page) => {
+    const offered = await field(page)
+      .getByRole('button', { name: 'Continue with my name' })
+      .click({ timeout: 5000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!offered) return false;
+    const editable = await until(page, () => input(page).isEditable());
+    await input(page).press('Enter');
+    return editable && (await gone(field(page), 15000));
+  };
+
   const { context, page, errors } = await newPage(browser);
   const sent = patches(page);
   try {
@@ -7315,35 +7349,38 @@ async function rename({ browser, origin, engine }) {
         .locator('xpath=ancestor::label[1]')
         .click();
     results.push(
-      await attemptOn(errors, 'rename-keeps-its-snapshot', async () => {
+      await attemptOn(errors, 'newer-name-is-reviewed-first', async () => {
         await open(page);
         await trigger(page, BOOKS).click();
         await page.keyboard.type('Return the books');
         // Another client renames it; the list reads it again meanwhile.
-        await renameOnPod(4, 'Return the library books today');
+        await renameOnPod(4, TODAY);
         await tick(NEWSLETTER);
-        await trigger(page, 'Return the library books today').waitFor({
-          timeout: 15000,
-        });
-        // The parked rename still writes over the version it started from.
-        await trigger(page, 'Return the library books today').click();
+        await trigger(page, TODAY).waitFor({ timeout: 15000 });
+        // The parked rename shows the newer name before anything is saved.
+        await trigger(page, TODAY).click();
         const draft = await input(page).inputValue();
-        await page.keyboard.press('Enter');
-        const told = await shown(
-          field(page).getByText(
-            'The pod has changed. Compare before continuing.',
-          ),
-          15000,
-        );
-        const stored = await title(4);
+        const told = await shown(renamed(page, TODAY), 15000);
+        const locked = !(await input(page).isEditable());
+        await input(page).press('Enter');
+        await page.waitForTimeout(300);
+        const kept = await title(4);
+        const saved = await continueAndSave(page);
+        const after = await title(4);
         return {
           pass:
             draft === 'Return the books' &&
             told &&
-            stored === 'Return the library books today',
+            locked &&
+            kept === TODAY &&
+            saved &&
+            after === 'Return the books',
           draft,
           told,
-          stored,
+          locked,
+          kept,
+          saved,
+          after,
         };
       }),
     );
@@ -7376,6 +7413,122 @@ async function rename({ browser, origin, engine }) {
           draft,
           closed,
           stored,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'tick-after-a-rename-elsewhere', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        await page.getByRole('heading', { name: 'Konsum' }).click();
+        await gone(field(page));
+        // Renamed elsewhere, then this row's tick: it compares only `done`.
+        await renameOnPod(4, TODAY);
+        await tick(BOOKS);
+        await trigger(page, TODAY).waitFor({ timeout: 15000 });
+        await trigger(page, TODAY).click();
+        const draft = await input(page).inputValue();
+        const told = await shown(renamed(page, TODAY), 15000);
+        const saved = await continueAndSave(page);
+        const after = await title(4);
+        return {
+          pass:
+            draft === 'Return the books' &&
+            told &&
+            saved &&
+            after === 'Return the books',
+          draft,
+          told,
+          saved,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'checked-version-binds-the-save', async () => {
+        let step = 'conflict';
+        try {
+          await open(page);
+          await trigger(page, BOOKS).click();
+          await page.keyboard.type('Return the books');
+          await renameOnPod(4, TODAY);
+          await page.keyboard.press('Enter');
+          step = 'check';
+          const check = field(page).getByRole('button', {
+            name: 'Check current version',
+          });
+          await until(page, () => check.isEnabled());
+          await check.click({ timeout: 15000 });
+          const acknowledge = field(page).getByRole('button', {
+            name: 'I have checked the pod',
+          });
+          await until(page, () => acknowledge.isEnabled());
+          // Renamed again after the check, and the list reads that.
+          step = 'renamed again';
+          await renameOnPod(4, TONIGHT);
+          const read = await until(page, async () => {
+            await visible(page);
+            return (
+              (await input(page).getAttribute('aria-label')) ===
+              `Rename: ${TONIGHT}`
+            );
+          });
+          step = 'acknowledge';
+          await acknowledge.click({ timeout: 15000 });
+          // The check compared the first rename: the second is shown too.
+          const told = await shown(renamed(page, TONIGHT), 15000);
+          const locked = !(await input(page).isEditable());
+          await input(page).press('Enter');
+          await page.waitForTimeout(300);
+          const kept = await title(4);
+          step = 'continue';
+          const saved = await continueAndSave(page);
+          const after = await title(4);
+          return {
+            pass:
+              read &&
+              told &&
+              locked &&
+              kept === TONIGHT &&
+              saved &&
+              after === 'Return the books',
+            read,
+            told,
+            locked,
+            kept,
+            saved,
+            after,
+          };
+        } catch (error) {
+          throw new Error(`${step}: ${error.message}`, { cause: error });
+        }
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'reopened-after-a-save', async () => {
+        await open(page);
+        await trigger(page, BOOKS).click();
+        await page.keyboard.type('Return the books');
+        // The list's read after the save is held.
+        let release;
+        const held = new Promise((resolve) => (release = resolve));
+        await page.route('**/sparql/query**', async (route) => {
+          await held;
+          await route.fallback().catch(() => {});
+        });
+        await page.keyboard.press('Enter');
+        await gone(field(page), 15000);
+        await trigger(page, 'Return the books').click();
+        const value = await input(page).inputValue();
+        release();
+        const editable = await until(page, () => input(page).isEditable());
+        await input(page).press('Escape');
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
+        return {
+          pass: value === 'Return the books' && editable,
+          value,
+          editable,
         };
       }),
     );
@@ -7508,14 +7661,6 @@ async function rename({ browser, origin, engine }) {
         async () => {
           // The step that runs, so that a timeout names its wait.
           let step = 'open';
-          /** Polls until `ready` (at most 15s): slow engines settle late. */
-          const until = async (ready) => {
-            for (let end = Date.now() + 15000; Date.now() < end;) {
-              if (await ready()) return true;
-              await page.waitForTimeout(50);
-            }
-            return false;
-          };
           try {
             await open(page);
             await trigger(page, BOOKS).click();
@@ -7538,19 +7683,19 @@ async function rename({ browser, origin, engine }) {
             const check = field(page).getByRole('button', {
               name: 'Check current version',
             });
-            await until(() => check.isEnabled());
+            await until(page, () => check.isEnabled());
             await check.click({ timeout: 15000 });
             step = 'acknowledge';
             const acknowledge = field(page).getByRole('button', {
               name: 'I have checked the pod',
             });
-            await until(() => acknowledge.isEnabled());
+            await until(page, () => acknowledge.isEnabled());
             await acknowledge.click({ timeout: 15000 });
             const openAfterCheck = await field(page).isVisible();
             // The current name is read again; the draft stays and is saved
             // on it.
             step = 'editable again';
-            await until(() => input(page).isEditable());
+            await until(page, () => input(page).isEditable());
             const label = await input(page).getAttribute('aria-label');
             const draft = await input(page).inputValue();
             step = 'save';
@@ -7696,6 +7841,44 @@ async function rename({ browser, origin, engine }) {
           openAfterMenu,
           keptOpen,
           focus,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'menu-shape-keeps-a-newer-name', async () => {
+        await open(page, '/?screen=rename&shape=menu', / more$/);
+        await page.getByRole('button', { name: `${BOOKS}: more` }).click();
+        await page.getByRole('menuitem', { name: 'Rename' }).click();
+        await input(page).waitFor();
+        await focusUntil(page, /^Rename: /, focused);
+        await page.keyboard.type('Return the books');
+        // Renamed elsewhere, and the list reads it while the field is open.
+        await renameOnPod(4, TODAY);
+        const read = await until(page, async () => {
+          await visible(page);
+          return (
+            (await input(page).getAttribute('aria-label')) ===
+            `Rename: ${TODAY}`
+          );
+        });
+        const told = await shown(renamed(page, TODAY), 15000);
+        await input(page).press('Enter');
+        await page.waitForTimeout(300);
+        const kept = await title(4);
+        const saved = await continueAndSave(page);
+        const after = await title(4);
+        return {
+          pass:
+            read &&
+            told &&
+            kept === TODAY &&
+            saved &&
+            after === 'Return the books',
+          read,
+          told,
+          kept,
+          saved,
+          after,
         };
       }),
     );

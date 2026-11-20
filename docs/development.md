@@ -251,16 +251,19 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     nothing; a press beside the field and Tab past it park the draft, which
     the next rename resumes and a list change guards, also while the list
     cannot be read or skips the item, while an untouched one is dropped; a
-    parked rename still writes over the version it started from, so a rename
-    elsewhere meanwhile is a conflict, not overwritten; an empty name is
-    invalid; a denied write keeps the field and the draft; a change on the
-    Pod locks the row until it is checked and acknowledged, then the draft is
-    saved onto the version read again; during a slow save the field stays
+    name the list reads changed elsewhere, also after the row's own tick or
+    while the field is open, locks Save until the person continues from it,
+    so it is never overwritten unseen; a rename reopened right after its
+    save starts from the saved name; an empty name is invalid; a denied
+    write keeps the field and the draft; a change on the Pod locks the row
+    until it is checked and acknowledged, and a later rename after the check
+    is shown before Save; during a slow save the field stays
     locked and the focus returns to the name, or stays where the person moved
     it; read-only access shows names as text; German names; taps beside the
     field and 44px targets within 320 and 375px; and a second shape, renamed
     from a row's menu, where the field takes the focus the closing menu
-    hands back and its own draft policy keeps a changed field open.
+    hands back and its own draft policy keeps a changed field open, with the
+    same rule for what Save may write over.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

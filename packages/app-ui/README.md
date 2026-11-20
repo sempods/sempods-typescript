@@ -1192,15 +1192,16 @@ stays inside it, so an enclosing dialog stays open.
 - Its controls are 44px high; at a narrow width they wrap below the input.
 
 The app owns the trigger and any deep link, the field mapping and
-validation, the snapshot it writes from, what a dismissal keeps and its own
+validation, which name Save may write over, what a dismissal keeps and its own
 list actions. Write with the row's `useFieldUpdate` command; the
 [authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#renaming-one-value-in-a-row)
 explains the recipe. Here a dismissal parks a changed name, marked in its
-row and guarded, and the next rename resumes it:
+row and guarded, and the next rename resumes it; `useRename` is the write
+rule that the app's other renames share:
 
 ```tsx
 // rename-row.tsx
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   RemoveButton,
   UnresolvedNotices,
@@ -1212,8 +1213,8 @@ import {
   useWorkflowAccess,
   type FieldUpdateRow,
 } from '@sempods/app-sdk/react';
-import type { DraftOf, Snapshot } from '@sempods/client-sdk/edit';
-import { Badge, Checkbox, InlineTextEdit } from '@sempods/app-ui';
+import type { DraftOf } from '@sempods/client-sdk/edit';
+import { Badge, Button, Checkbox, InlineTextEdit } from '@sempods/app-ui';
 import { taskFields } from './task-dialog';
 
 type Item = DraftOf<typeof taskFields>;
@@ -1227,6 +1228,8 @@ const texts = {
     remove: 'Delete',
     required: 'Enter a name.',
     unsaved: 'Not saved',
+    renamed: (name: string) => `Renamed elsewhere to “${name}”.`,
+    continue: 'Continue with my name',
   },
   de: {
     list: 'Einkaufsliste',
@@ -1236,18 +1239,93 @@ const texts = {
     remove: 'Löschen',
     required: 'Gib einen Namen ein.',
     unsaved: 'Nicht gespeichert',
+    renamed: (name: string) => `Anderswo umbenannt in „${name}“.`,
+    continue: 'Mit meinem Namen weiter',
   },
 };
 
-/**
- * A rename in progress, open or parked by a dismissal: its text and the
- * list snapshot it started from, the version it writes over.
- */
-interface Draft {
+/** A rename in progress, open or parked by a dismissal. */
+export interface Rename {
   readonly text: string;
-  readonly base: Snapshot<Item>;
-  /** A change on the Pod was checked and acknowledged: rebase on the next read. */
-  readonly rebase?: boolean;
+  /**
+   * The name it continues from: the one the person opened, or the one they
+   * last reviewed. Save writes only over this name.
+   */
+  readonly seen: string;
+}
+
+/** A rename of the name the row shows now, also one just saved. */
+export const startRename = (row: FieldUpdateRow<Item>): Rename => ({
+  text: row.data.title,
+  seen: row.data.title,
+});
+
+/**
+ * What every rename of this app shares: whether Save may write, the row's
+ * notices and the write. Save writes from the row's current snapshot, and
+ * only while it shows the name the rename continues from; the SDK then
+ * guards that name up to the write and reports a later change as
+ * `changed-on-pod`. A name that the list reads changed elsewhere locks Save
+ * until the person has seen it and continues from it; acknowledging a
+ * checked change continues from the version the check compared.
+ */
+export function useRename(
+  row: FieldUpdateRow<Item>,
+  /** The row's rename; without one, only the row's notice. */
+  rename: Rename | undefined,
+  onChange: (rename: Rename) => void,
+  /** The list's latest read is in: `list.state.kind === 'ready'`. */
+  settled: boolean,
+) {
+  const t = useMessages(texts);
+  const { outcome, checked, current } = row.notice;
+  const unresolved =
+    outcome?.kind === 'changed-on-pod' || outcome?.kind === 'unconfirmed';
+  const differs = rename !== undefined && row.data.title !== rename.seen;
+  const notices: ReactNode = (
+    <>
+      <UpdateNotice
+        {...row.notice}
+        onAcknowledge={() => {
+          if (rename && checked && current)
+            onChange({ ...rename, seen: current.title });
+          row.notice.onAcknowledge();
+        }}
+        quiet
+      />
+      {/* Told once the read is in; until then Save only waits. */}
+      {rename && differs && settled && !unresolved && (
+        <p role="alert" className="flex flex-wrap items-center gap-2">
+          {t.renamed(row.data.title)}
+          <Button
+            variant="outline"
+            className="h-11 px-4"
+            onPress={() => onChange({ ...rename, seen: row.data.title })}
+          >
+            {t.continue}
+          </Button>
+        </p>
+      )}
+    </>
+  );
+  return {
+    /** Save is unavailable: no write now, or a newer name to review first. */
+    readOnly: !row.canMutate || differs,
+    notices,
+    /** The validation message for the current text, if any. */
+    invalid: rename && !rename.text.trim() ? t.required : undefined,
+    /**
+     * Writes the trimmed text: `done` once saved or with nothing to save,
+     * `kept` when the draft stays with the row's notice. Nothing is resent.
+     */
+    async save(): Promise<'done' | 'kept'> {
+      const title = rename?.text.trim();
+      if (!rename || !title || differs) return 'kept';
+      if (title === rename.seen) return 'done';
+      const outcome = await row.update({ title });
+      return outcome.kind === 'saved' ? 'done' : 'kept';
+    },
+  };
 }
 
 /** A list whose item names are renamed in their rows. */
@@ -1259,86 +1337,69 @@ export function ShoppingList(props: {
   const mutate = useFieldUpdate(taskFields);
   const { write } = useWorkflowAccess();
   const t = useMessages(texts);
-  // The item being renamed, and the drafts by IRI until saved or cancelled.
+  // The item being renamed, and the renames by IRI until saved or cancelled.
   const [open, setOpen] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<ReadonlyMap<string, Draft>>(new Map());
+  const [renames, setRenames] = useState<ReadonlyMap<string, Rename>>(
+    new Map(),
+  );
   const triggers = useRef(new Map<string, HTMLButtonElement>());
   const items = list.data?.items ?? [];
-  const shown = new Map(items.map((item) => [item.iri, item]));
   // Gone only when a complete read lists it neither as an item nor as an
   // entry it skipped (for example after its name was cleared elsewhere).
+  const shown = new Set(items.map((item) => item.iri));
   const skipped = new Set(list.data?.skippedRecords.map((r) => r.iri));
   const complete =
     list.data && list.data.skippedRecords.length === list.data.skipped;
   const gone = (iri: string) =>
     Boolean(complete && !shown.has(iri) && !skipped.has(iri));
+  const changed = (rename: Rename) => rename.text.trim() !== rename.seen;
   // A changed name is unsaved work: changing the list or Pod asks first,
   // also while the list cannot be read.
   useDraftGuard(
-    [...drafts].some(
-      ([iri, draft]) =>
-        !gone(iri) && draft.text.trim() !== draft.base.data.title,
-    ),
+    [...renames].some(([iri, rename]) => !gone(iri) && changed(rename)),
     () => {
-      setDrafts(new Map());
+      setRenames(new Map());
       setOpen(null);
     },
   );
   const update = (
     iri: string,
-    change: (draft?: Draft) => Draft | null | undefined,
+    change: (rename?: Rename) => Rename | null | undefined,
   ) =>
-    setDrafts((all) => {
+    setRenames((all) => {
       const next = new Map(all);
-      const draft = change(all.get(iri));
-      if (draft) next.set(iri, draft);
+      const rename = change(all.get(iri));
+      if (rename) next.set(iri, rename);
       else next.delete(iri);
       return next;
     });
-  // A newer read becomes the base when the name still reads as the rename
-  // started from it, for example after this row's own tick wrote from the
-  // base, or after the person acknowledged a change on the Pod. A name
-  // changed elsewhere keeps the old base, so Save reports the change.
-  useEffect(() => {
-    for (const [iri, draft] of drafts) {
-      const now = shown.get(iri);
-      if (!now || now === draft.base) continue;
-      if (draft.rebase || now.data.title === draft.base.data.title)
-        update(iri, (d) => d && { text: d.text, base: now });
-    }
-  });
   return (
     <>
       <ul aria-label={t.list}>
         {items.map((item) => {
           const { iri } = item;
-          const draft = drafts.get(iri);
+          const row = mutate.for(item);
           return (
             <ItemRow
               key={iri}
-              row={mutate.for(item)}
-              base={draft && mutate.for(draft.base)}
+              row={row}
               href={props.href(iri)}
               writable={write}
-              draft={draft?.text}
+              rename={renames.get(iri)}
+              settled={list.state.kind === 'ready'}
               editing={open === iri}
               trigger={(button) => {
                 if (button) triggers.current.set(iri, button);
                 else triggers.current.delete(iri);
               }}
               onOpen={() => {
-                update(iri, (d) => d ?? { text: item.data.title, base: item });
+                update(iri, (r) => r ?? startRename(row));
                 setOpen(iri);
               }}
-              onDraft={(text) => update(iri, (d) => d && { ...d, text })}
-              onAcknowledged={() =>
-                update(iri, (d) => d && { ...d, rebase: true })
-              }
+              onRename={(rename) => update(iri, (r) => r && rename)}
               onClose={(park) => {
                 // Only a changed name is parked.
-                update(iri, (d) =>
-                  park && d && d.text.trim() !== d.base.data.title ? d : null,
-                );
+                update(iri, (r) => (park && r && changed(r) ? r : null));
                 // Another item may be open by now, after a slow save.
                 setOpen((current) => (current === iri ? null : current));
               }}
@@ -1353,55 +1414,37 @@ export function ShoppingList(props: {
 }
 
 function ItemRow(props: {
-  /** The item as the list shows it now. */
   readonly row: FieldUpdateRow<Item>;
-  /** The item as the rename started from it: what Save writes over. */
-  readonly base: FieldUpdateRow<Item> | undefined;
   readonly href: string;
   /** Whether the list may be written; without it, names are plain text. */
   readonly writable: boolean;
-  /** The open or parked draft of this item's name. */
-  readonly draft: string | undefined;
+  /** The open or parked rename of this item's name. */
+  readonly rename: Rename | undefined;
+  readonly settled: boolean;
   readonly editing: boolean;
   readonly trigger: (button: HTMLButtonElement | null) => void;
   readonly onOpen: () => void;
-  readonly onDraft: (draft: string) => void;
-  /** The person checked and acknowledged the Pod's current version. */
-  readonly onAcknowledged: () => void;
-  /** Ends the rename; `park` keeps a changed draft for the next one. */
+  readonly onRename: (rename: Rename) => void;
+  /** Ends the rename; `park` keeps a changed one for the next. */
   readonly onClose: (park: boolean) => void;
   readonly returnFocus: () => void;
 }) {
   const t = useMessages(texts);
-  const { row, draft } = props;
-  const writer = props.base ?? row;
+  const { row, rename } = props;
   const item = row.data;
+  const edit = useRename(row, rename, props.onRename, props.settled);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
-  const parked = draft !== undefined && !props.editing && !saving;
+  const parked = rename !== undefined && !props.editing && !saving;
   const save = async () => {
-    const title = (draft ?? '').trim();
-    if (!title) return setError(t.required);
-    if (title === writer.data.title) return props.onClose(false);
+    if (edit.invalid) return setError(edit.invalid);
     setSaving(true);
-    // From the snapshot the rename started from: a change on the Pod since
-    // then is reported as changed-on-pod, never written over.
-    const outcome = await writer.update({ title });
+    const result = await edit.save();
     setSaving(false);
-    // Saved: the row shows the new name. Otherwise the draft stays with the
-    // row's notice; nothing is sent again.
-    if (outcome.kind === 'saved') props.onClose(false);
+    // Saved: the row shows the new name. Otherwise the rename stays with
+    // the row's notice.
+    if (result === 'done') props.onClose(false);
   };
-  const notice = (
-    <UpdateNotice
-      {...row.notice}
-      onAcknowledge={() => {
-        row.notice.onAcknowledge();
-        props.onAcknowledged();
-      }}
-      quiet
-    />
-  );
   return (
     <li className="flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 border-b py-1 *:data-[sempods-ui=notice]:basis-full">
       <Checkbox
@@ -1410,14 +1453,14 @@ function ItemRow(props: {
         isDisabled={!row.canMutate}
         onChange={(done) => void row.update({ done })}
       />
-      {props.editing ? (
+      {props.editing && rename ? (
         <InlineTextEdit
           className="min-w-0 flex-1"
           label={`${t.rename}: ${item.title}`}
-          value={draft ?? ''}
-          onChange={(value) => {
+          value={rename.text}
+          onChange={(text) => {
             setError(undefined);
-            props.onDraft(value);
+            props.onRename({ ...rename, text });
           }}
           onSave={() => void save()}
           onCancel={() => {
@@ -1430,10 +1473,10 @@ function ItemRow(props: {
           }}
           returnFocus={props.returnFocus}
           pending={saving}
-          readOnly={!writer.canMutate}
+          readOnly={edit.readOnly}
           error={error}
         >
-          {notice}
+          {edit.notices}
         </InlineTextEdit>
       ) : (
         <>
@@ -1468,7 +1511,7 @@ function ItemRow(props: {
               onRemove={row.remove}
             />
           )}
-          {notice}
+          {edit.notices}
         </>
       )}
     </li>
