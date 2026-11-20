@@ -2161,11 +2161,14 @@ navigation holds only the views.
 
 Targets are `min-h-11` (2.75rem) links and a `round-sm` action, so they grow
 with the root font size. On a narrow screen a link's count wraps below its
-label as a whole, never inside the number: counts of up to seven digits
-fit beside the action at 320px, also with a root font size of 125%.
+label as a whole, never inside the number: two counts of up to seven Latin
+digits fit beside the action at 320px, also with a root font size of 125%.
+Wider numerals, such as full-width digits, fit fewer.
 `select-none` and a transparent `-webkit-tap-highlight-color` keep a press
 from selecting a label or flashing the browser's highlight, as a native tab
-does. The UI gate renders this file as written:
+does. The icon comes from `lucide-react`, which the kit installs for itself;
+an app that imports it adds it with `npm install lucide-react`. The UI gate
+renders this file as written:
 
 ```tsx
 // view-strip.tsx
@@ -2175,7 +2178,7 @@ import { ActionButton, type Nav } from '@sempods/app-ui';
 import type { Place } from './places';
 
 const view =
-  'relative flex min-h-11 flex-wrap items-center justify-center gap-x-1.5 rounded-md bg-transparent px-2 py-2 text-center text-sm font-medium text-muted-foreground no-underline select-none [-webkit-tap-highlight-color:transparent] hover:text-foreground after:absolute after:inset-x-0 after:-bottom-px aria-[current=page]:text-foreground aria-[current=page]:after:border-b-3 aria-[current=page]:after:border-primary';
+  'relative flex min-h-11 flex-wrap items-center justify-center gap-x-1.5 rounded-md bg-transparent px-1 py-2 text-center text-sm font-medium text-muted-foreground no-underline select-none [-webkit-tap-highlight-color:transparent] hover:text-foreground after:absolute after:inset-x-0 after:-bottom-px aria-[current=page]:text-foreground aria-[current=page]:after:border-b-3 aria-[current=page]:after:border-primary';
 
 export function ViewStrip(props: {
   readonly nav: Nav<Place>;
