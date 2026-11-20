@@ -456,14 +456,23 @@ function usePageCover(
         }
     };
     const changed = (records: readonly MutationRecord[] = []) => {
-      // The stack's own changes cover nothing and move no zone.
       const element = own.current;
-      if (
-        element &&
-        records.length > 0 &&
-        records.every((record) => element.contains(record.target))
-      )
-        return;
+      // A style or class matters only on a modal or around one: it may open
+      // a modal kept mounted but hidden through CSS, or close it.
+      const styled = (record: MutationRecord) =>
+        record.attributeName === 'style' || record.attributeName === 'class';
+      const modals = records.some(styled)
+        ? document.querySelector(modalCandidates) !== null
+        : false;
+      const counts = (record: MutationRecord) =>
+        // The stack's own changes cover nothing and move no zone.
+        !element?.contains(record.target) &&
+        (!styled(record) ||
+          (modals &&
+            record.target instanceof Element &&
+            (record.target.matches(modalCandidates) ||
+              record.target.querySelector(modalCandidates) !== null)));
+      if (records.length > 0 && !records.some(counts)) return;
       watchZones();
       schedule();
     };
@@ -481,6 +490,8 @@ function usePageCover(
         'aria-hidden',
         'aria-modal',
         'data-sempods-notices-avoid',
+        'style',
+        'class',
       ],
     });
     view.addEventListener('resize', schedule);
@@ -535,12 +546,15 @@ function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
   return (
     // An overlay library hides the page around its modal.
     Boolean(element.closest('[inert], [aria-hidden="true"]')) ||
-    [...document.querySelectorAll('dialog[open], [aria-modal="true"]')].some(
+    [...document.querySelectorAll(modalCandidates)].some(
       (other) =>
         !other.contains(element) && !element.contains(other) && isModal(other),
     )
   );
 }
+
+/** What may cover the stack: `isCovered` looks at these. */
+const modalCandidates = 'dialog[open], [aria-modal="true"]';
 
 function isModal(element: Element) {
   // A dialog kept mounted while hidden covers nothing.

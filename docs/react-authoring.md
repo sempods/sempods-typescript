@@ -1637,7 +1637,8 @@ export function Shell() {
   `--sempods-warning` and `--sempods-danger` colour warnings and errors.
 - **Modals:** while a modal dialog covers the page (the app's own or an SDK
   one), the stack waits and covers nothing; a dialog kept mounted but hidden
-  (`hidden`, `display: none`, `visibility: hidden`) covers nothing. The
+  (`hidden`, `display: none`, `visibility: hidden`) covers nothing, and one
+  that opens or closes through its styles or a class is seen at once. The
   waiting notices show and are announced once it closes, an error too, so keep
   an error that concerns the dialog inside it. Beside `AppAccess` the stack
   also waits while the app starts. Before sign-in, app notices show inside the

@@ -6867,7 +6867,8 @@ async function ghost({ browser, origin, engine }) {
  * the focused notice; reduced motion; beside AppAccess's own prompt stack
  * (`accessPrompts={false}`) above it, so Sign in takes the press; inside a
  * zoomed visual viewport, also its sides and above a composer kept at its
- * bottom (Chromium); after an app dialog closed through its styles; and
+ * bottom (Chromium); while an app dialog opens and closes through its
+ * styles or a class; and
  * before sign-in inside the SDK's
  * gate, clear of its sign-in button.
  */
@@ -7328,11 +7329,59 @@ async function notices({ browser, origin, engine }) {
             document.getElementById('css-dialog').remove(),
           );
         }
+        // Opened and closed again through a class on a wrapper, as an
+        // overlay library does: the stack waits while it is open.
+        await page.evaluate(() => {
+          const style = document.createElement('style');
+          style.textContent = '.css-overlay-closed { display: none; }';
+          const wrapper = document.createElement('div');
+          wrapper.id = 'css-overlay';
+          wrapper.className = 'css-overlay-closed';
+          wrapper.innerHTML =
+            '<div role="dialog" aria-modal="true">Filter</div>';
+          document.head.append(style);
+          document.body.append(wrapper);
+        });
+        const brief = 'Filters saved.';
+        await call('show', { key: 'filters', text: brief });
+        const item = toast.filter({ hasText: brief });
+        await item.waitFor();
+        await page.waitForTimeout(100);
+        await page.evaluate(() =>
+          document
+            .getElementById('css-overlay')
+            .classList.remove('css-overlay-closed'),
+        );
+        // Well before its 6 second timer could hide it.
+        const waited = await item
+          .waitFor({ state: 'detached', timeout: 1000 })
+          .then(
+            () => true,
+            () => false,
+          );
+        await page.evaluate(() =>
+          document
+            .getElementById('css-overlay')
+            .classList.add('css-overlay-closed'),
+        );
+        const back = await item.waitFor({ timeout: 2000 }).then(
+          () => true,
+          () => false,
+        );
+        await page.evaluate(() =>
+          document.getElementById('css-overlay').remove(),
+        );
         return {
-          pass: Object.values(runs).every(
-            (run) => run.during === 0 && run.after === 1 && run.announced === 1,
-          ),
+          pass:
+            Object.values(runs).every(
+              (run) =>
+                run.during === 0 && run.after === 1 && run.announced === 1,
+            ) &&
+            waited &&
+            back,
           runs,
+          waited,
+          back,
         };
       }),
     );

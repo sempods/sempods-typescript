@@ -267,7 +267,7 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     hands back and its own draft policy keeps a changed field open, also
     while another row is renamed, with the same rule for what Save may write
     over;
-  - e shared notification host (#385) on `?screen=notices`, a shopping list
+  - the shared notification host (#385) on `?screen=notices`, a shopping list
     with a composer fixed at the bottom: the PWA pilot's update notice at 375
     and 1280px in light and dark stays outside the flow (no row moves, no
     scroll height added), inside the screen and above the composer, takes no
@@ -282,7 +282,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     (`accessPrompts={false}`, `&beside`) it stays above that stack, so a press
     on Sign in reaches it; after an app dialog kept mounted closes through
     `display` or `visibility`, the queued error shows and is announced once
-    without a resize; in Chromium, with the page zoomed to 2×, the notice and
+    without a resize, and while an overlay opened by removing a class covers
+    it, a brief notice waits instead of expiring, then returns once the class
+    closes it again; in Chromium, with the page zoomed to 2×, the notice and
     its button stay inside the visual viewport, its sides included, and at
     2.5× above a composer the app keeps at the visible bottom; before sign-in
     at 812 and 560px high it shows inside the SDK's gate, which keeps its Sign

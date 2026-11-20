@@ -1227,3 +1227,25 @@ it('shows a waiting notice once a covering dialog closes through its styles', as
     dialog.remove();
   }
 });
+
+it('waits once a dialog kept hidden through its styles opens, before a brief notice can expire unseen', async () => {
+  const runtime = await signedIn();
+  const timers = briefTimers();
+  render(<App runtime={runtime} />);
+  // The app's own dialog, kept mounted and hidden through a style.
+  const dialog = document.createElement('div');
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.style.display = 'none';
+  act(() => document.body.append(dialog));
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  await waitFor(() => expect(texts()).toEqual(['Saved.OK']));
+  await waitFor(() => expect(announced()).toEqual(['Saved.']));
+  // Every measurement the append scheduled has run.
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  // Opened through its style alone: the stack waits and its timer stops.
+  act(() => void (dialog.style.display = ''));
+  await waitFor(() => expect(items()).toEqual([]));
+  expect(running(timers)).toEqual([]);
+  dialog.remove();
+});
