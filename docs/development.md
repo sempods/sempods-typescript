@@ -120,7 +120,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   installed README's `task-dialog.tsx` and `places.ts` examples as shipped, so
   every check below runs the documented recipe; its compact quick edit is the
   README's `quick-edit.tsx`, its view links on `?screen=tabs` the README's
-  `view-tabs.tsx`, its confirmation on `?screen=confirm` and
+  `view-tabs.tsx`, its view strip on `?screen=strip` the README's
+  `view-strip.tsx`, its confirmation on `?screen=confirm` and
   `?screen=menu-confirm` the README's `confirm-dialog.tsx`; the screen routes with the
   package's `useNav` and uses the README's stylesheet setup. The README's other
   TSX examples are compiled. It is
@@ -230,6 +231,17 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     other link's text colour on a surface of its own with an underline, rest
     and hovered, apart from the other link hovered, on both palettes in all
     six action combinations, light and dark;
+  - views on one baseline (#384): a tap switches to List and back on a touch
+    screen, a pointer click and leaving keep the bar on the current link, and
+    in forced colors Tab and Enter switch the view and reach the Filter
+    action outside the `nav`, each with a focus outline apart from the bar. Both
+    links stay without a surface or a text underline, cannot be selected and
+    draw no tap highlight, and only the current one has a bar of at least
+    3px on the row's baseline. WebKit matches forced colors without forcing
+    the colours, so there the check covers the keyboard path only. With long
+    counts at 320 and 375px and a root font size of 100% and 125%, the
+    strip stays inside the screen beside the action, each count on one line,
+    with 2.75rem targets;
   - the SDK editor's actions (#401) in the README's task dialog and quick
     edit, in German with long labels (one an unbroken word) at 1280, 375 and
     320px and with the default labels at 1280 and 320px, for a task and for a

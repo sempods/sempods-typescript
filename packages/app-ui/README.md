@@ -2168,7 +2168,9 @@ Drawn with `buttonVariants({ variant: 'ghost' })`, that link is chosen: the
 `muted` surface with `foreground` text, and underlined, so the choice does
 not rest on the surface alone and stays apart from a hovered link. The look
 is the same under every `data-actions` and `data-secondary` value; `min-h-11`
-keeps a 44px target. The UI gate renders this file as written:
+keeps a 44px target. For a strip of views on one baseline, with counts and
+an action beside them, see [views on one baseline](#views-on-one-baseline).
+The UI gate renders this file as written:
 
 ```tsx
 // view-tabs.tsx
@@ -2187,6 +2189,79 @@ export function ViewTabs({ nav }: { readonly nav: Nav<Place> }) {
         List
       </a>
     </nav>
+  );
+}
+```
+
+### Views on one baseline
+
+The same links can also sit on one line, with the current one marked on
+that edge instead of on a surface. The strip below draws them with plain
+utilities and theme roles: no surface at rest, hovered or chosen; the
+current link has `foreground` text and a 3px `primary` bar on the
+`border` baseline, the others `muted-foreground` text. The bar follows
+`aria-current="page"`, not the pointer, so it stays when the pointer
+leaves. It is a border, which forced colours keep in the link's system
+colour, so the current view is a shape there too. The keyboard's focus
+outline is the kit's own, apart from the bar. A count is part of its link's
+name, which reads "Zen 3" with the space between the spans. The
+trailing action is a ghost `ActionButton` outside the `nav`, so the
+navigation holds only the views.
+
+Targets are `min-h-11` (2.75rem) links and a `round-sm` action, so they grow
+with the root font size. On a narrow screen a link's count wraps below its
+label as a whole, never inside the number: two counts of up to seven Latin
+digits fit beside the action at 320px, also with a root font size of 125%.
+Wider numerals, such as full-width digits, fit fewer.
+`select-none` and a transparent `-webkit-tap-highlight-color` keep a press
+from selecting a label or flashing the browser's highlight, as a native tab
+does. The icon comes from `lucide-react`, which the kit installs for itself;
+an app that imports it adds it with `npm install lucide-react`. The UI gate
+renders this file as written:
+
+```tsx
+// view-strip.tsx
+import { SlidersHorizontalIcon } from 'lucide-react';
+import { useSdkLocale } from '@sempods/app-sdk/react';
+import { ActionButton, type Nav } from '@sempods/app-ui';
+import type { Place } from './places';
+
+const view =
+  'relative flex min-h-11 flex-wrap items-center justify-center gap-x-1.5 rounded-md bg-transparent px-1 py-2 text-center text-sm font-medium text-muted-foreground no-underline select-none [-webkit-tap-highlight-color:transparent] hover:text-foreground after:absolute after:inset-x-0 after:-bottom-px aria-[current=page]:text-foreground aria-[current=page]:after:border-b-3 aria-[current=page]:after:border-primary';
+
+export function ViewStrip(props: {
+  readonly nav: Nav<Place>;
+  readonly counts: { readonly zen: number; readonly list: number };
+  readonly onFilter: () => void;
+}) {
+  const { nav, counts } = props;
+  const count = new Intl.NumberFormat(useSdkLocale().locale);
+  return (
+    <div className="flex items-stretch gap-2 border-b border-border">
+      <nav aria-label="Views" className="flex min-w-0 flex-1 gap-1">
+        <a {...nav.link({ kind: 'zen' })} className={view}>
+          <span>Zen</span>{' '}
+          <span className="whitespace-nowrap tabular-nums">
+            {count.format(counts.zen)}
+          </span>
+        </a>
+        <a {...nav.link({ kind: 'list' })} className={view}>
+          <span>List</span>{' '}
+          <span className="whitespace-nowrap tabular-nums">
+            {count.format(counts.list)}
+          </span>
+        </a>
+      </nav>
+      <ActionButton
+        variant="ghost"
+        shape="round-sm"
+        label="Filter"
+        className="self-center"
+        onPress={props.onFilter}
+      >
+        <SlidersHorizontalIcon />
+      </ActionButton>
+    </div>
   );
 }
 ```
@@ -2213,7 +2288,9 @@ links, direct and signed-out entry, Close, Back and Forward with a dirty
 draft, history moves while the SDK asks, reload, legacy links and the source
 Context, plus fragment entries, a source address without a Context choice and
 a path with two leading slashes; views as links, their current link
-marked by the router and drawn chosen in every action combination;
+marked by the router and drawn chosen in every action combination; views on
+one baseline, switched by touch both ways, by pointer and by keyboard in
+forced colours, with long counts at 320px;
 `rename-row.tsx` with a renaming row menu: keyboard, taps at 320 and 375px,
 dismissal and resumption, an invalid name, a denied write, a change on the
 Pod, a slow save and the focus after it, read-only access and German names;
