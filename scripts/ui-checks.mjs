@@ -6858,20 +6858,20 @@ async function ghost({ browser, origin, engine }) {
 /**
  * The shared notification host (#385) on `?screen=notices`: a shopping list
  * with a composer fixed at the bottom and an app dialog. The PWA pilot's
- * update notice at 375 and 1280px in light and dark: outside the flow, no row
- * moves, above the composer and inside the screen, no focus taken, announced
- * once, contrast; with the phone keyboard open (a shrinking viewport) above
- * the composer that holds the focus; repeated failures of one Pod as one
- * warning that retires; while the app's dialog is open the stack waits and
- * covers nothing, and shows and announces once it closes; Escape dismisses
- * the focused notice; reduced motion; beside AppAccess's own prompt stack
- * (`accessPrompts={false}`) above it, so Sign in takes the press; inside a
- * zoomed visual viewport, also its sides and above a composer kept at its
- * bottom (Chromium); while an app dialog opens and closes through its
- * styles or a class; above a composer moved through its style; and
- * before sign-in inside the SDK's
- * gate, clear of its sign-in button, its height free of the page's avoided
- * zones, and without polling while nothing waits.
+ * update notice at 375 and 1280px in light and dark: outside the flow, no
+ * row moves, above the composer and inside the screen, no focus taken,
+ * announced once, contrast; with the phone keyboard open (a shrinking
+ * viewport) above the composer that holds the focus; repeated failures of
+ * one Pod as one warning that retires; while the app's dialog is open the
+ * stack waits and covers nothing, and shows and announces once it closes;
+ * Escape dismisses the focused notice; reduced motion; beside AppAccess's
+ * own prompt stack (`accessPrompts={false}`) above it, so Sign in takes the
+ * press; inside a zoomed visual viewport, also its sides and above a
+ * composer kept at its bottom (Chromium); while an app dialog opens and
+ * closes through its styles or a class, also one with `display: contents`;
+ * above a composer moved through its style; and before sign-in inside the
+ * SDK's gate, clear of its sign-in button, its height free of the page's
+ * avoided zones, and without polling while nothing waits.
  */
 async function notices({ browser, origin, engine }) {
   const { context, page, errors } = await newPage(browser);
@@ -7372,6 +7372,33 @@ async function notices({ browser, origin, engine }) {
         await page.evaluate(() =>
           document.getElementById('css-overlay').remove(),
         );
+        // A modal without a box of its own (`display: contents`) around its
+        // visible panel covers the page as well.
+        await call('dismiss', 'filters');
+        await page.evaluate(() => {
+          const contents = document.createElement('div');
+          contents.id = 'contents-dialog';
+          contents.setAttribute('role', 'dialog');
+          contents.setAttribute('aria-modal', 'true');
+          contents.style.display = 'contents';
+          contents.innerHTML =
+            '<div style="position:fixed;inset:20%;background:Canvas">Sort</div>';
+          document.body.append(contents);
+        });
+        const sorted = 'Sorted by name.';
+        await call('show', { key: 'sorted', text: sorted });
+        await page.waitForTimeout(300);
+        const behind = await toast.filter({ hasText: sorted }).count();
+        await page.evaluate(() =>
+          document.getElementById('contents-dialog').remove(),
+        );
+        const shownAfter = await toast
+          .filter({ hasText: sorted })
+          .waitFor({ timeout: 2000 })
+          .then(
+            () => true,
+            () => false,
+          );
         return {
           pass:
             Object.values(runs).every(
@@ -7379,10 +7406,14 @@ async function notices({ browser, origin, engine }) {
                 run.during === 0 && run.after === 1 && run.announced === 1,
             ) &&
             waited &&
-            back,
+            back &&
+            behind === 0 &&
+            shownAfter,
           runs,
           waited,
           back,
+          behind,
+          shownAfter,
         };
       }),
     );

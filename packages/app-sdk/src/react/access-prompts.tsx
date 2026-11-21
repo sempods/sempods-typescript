@@ -19,7 +19,7 @@ import { useSdkLocale } from './locale.js';
 import { podName } from './names.js';
 import { layered, SdkStyles } from './styles.js';
 import { useFirst } from './first.js';
-import { useNoticeHost } from './notice-store.js';
+import { useNoticeHost, useNoticeStore } from './notice-store.js';
 import { useCommitted } from './hooks.js';
 import { returnFocusAfterCommit, useFocusHold } from './focus.js';
 
@@ -325,8 +325,15 @@ export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const first = useFirst('prompts');
   // Prompts about other Pods wait for the startup screen to end.
   const starting = useAppFacts((s) => s.starting);
-  // A mounted `Notices` host shows them in the shared stack instead.
+  // A mounted `Notices` host shows them in the shared stack instead, and
+  // returns focus from them to this `focusTarget` unless it has its own.
   const host = useNoticeHost();
+  const store = useNoticeStore();
+  useLayoutEffect(() => {
+    if (!first) return;
+    store.setAccessFocus(focusTarget);
+    return () => store.setAccessFocus(undefined);
+  }, [store, first, focusTarget]);
   const taken = Boolean(host?.accessPrompts);
   const shown = blocking || !first || starting || taken ? [] : prompts;
   return (

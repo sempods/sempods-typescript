@@ -62,6 +62,10 @@ class NoticeStore {
   private listeners = new Set<() => void>();
   private list: readonly NoticeRecord[] = [];
   private hosts: readonly Host[] = [];
+  /** `AppAccess`'s focus target, for access prompts this store's host shows. */
+  private accessFocus: RefObject<HTMLElement | null> | undefined;
+  private warned = false;
+  private warning: ReturnType<typeof setTimeout> | undefined;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -78,6 +82,30 @@ class NoticeStore {
       [...this.records.values()].sort((a, b) => a.order - b.order),
     );
     this.notify();
+    this.checkHost();
+  }
+  /**
+   * Notices with no mounted `Notices` host show nowhere: reported once in
+   * the console, after a moment, so a host that mounts a little later
+   * (a lazy shell) is no false report.
+   */
+  private checkHost() {
+    if (this.warned || this.warning || this.hosts.length || !this.records.size)
+      return;
+    this.warning = setTimeout(() => {
+      this.warning = undefined;
+      if (this.warned || this.hosts.length || !this.records.size) return;
+      this.warned = true;
+      console.warn(
+        '[@sempods/app-sdk] A notice was published, but no <Notices /> host is mounted: render one beneath SempodsProvider to show it.',
+      );
+    }, 2000);
+  }
+  setAccessFocus(target: RefObject<HTMLElement | null> | undefined) {
+    this.accessFocus = target;
+  }
+  accessFocusTarget() {
+    return this.accessFocus;
   }
   /** The stack position of an access prompt id. */
   orderOf(id: string) {

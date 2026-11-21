@@ -6,7 +6,7 @@
  * `AppAccess` unchanged without the host.
  */
 import { webcrypto } from 'node:crypto';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   act,
   cleanup,
@@ -1475,4 +1475,66 @@ it('waits inside the gate while an overlay inside it, native or not, covers its 
   await waitFor(() => expect(items(inGate())).toEqual([]));
   act(() => inGate().removeAttribute('aria-hidden'));
   await waitFor(() => expect(texts(inGate())).toEqual(['Saved.OK']));
+});
+
+it("returns focus from an access prompt to AppAccess's focusTarget when the host has none", async () => {
+  const { runtime } = await endedBeside();
+  function Shell() {
+    const main = useRef<HTMLButtonElement>(null);
+    return (
+      <>
+        <button ref={main}>Main</button>
+        <AppAccess appName="Tasks" focusTarget={main} />
+        <Notices />
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Shell />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(items()).toHaveLength(1));
+  const ok = within(items()[0]!).getByRole('button', { name: 'OK' });
+  act(() => ok.focus());
+  await act(async () => fireEvent.keyDown(ok, { key: 'Escape' }));
+  await waitFor(() => expect(items()).toEqual([]));
+  await waitFor(() => expect(document.activeElement?.textContent).toBe('Main'));
+});
+
+it('keeps at least one notice for a limit below one, and the default for no number', async () => {
+  const runtime = await signedIn();
+  const view = render(<App runtime={runtime} limit={-2} />);
+  for (const key of ['a', 'b', 'c'])
+    act(() => actions.show({ key, text: key, severity: 'error' }));
+  expect(items()).toHaveLength(1);
+  view.rerender(<App runtime={runtime} limit={Number.NaN} />);
+  expect(items()).toHaveLength(3);
+});
+
+it('reports in the console once when notices are published without a host', async () => {
+  const runtime = await signedIn();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  function Update() {
+    useNotice({ key: 'app-update', text: 'A new version is ready.' });
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Update />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  const reports = () =>
+    warn.mock.calls.filter(([message]) =>
+      String(message).includes('<Notices />'),
+    ).length;
+  const before = reports();
+  await act(async () => new Promise((done) => setTimeout(done, 2100)));
+  expect(reports()).toBeGreaterThan(before);
+  // Once per provider: more notices report nothing more.
+  const once = reports();
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  await act(async () => new Promise((done) => setTimeout(done, 2100)));
+  expect(reports()).toBe(once);
 });

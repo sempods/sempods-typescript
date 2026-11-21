@@ -22,7 +22,7 @@ import {
   useAccessPrompts,
   usePromptText,
 } from './access-prompts.js';
-import { useFirst, useMounted } from './first.js';
+import { useMounted } from './first.js';
 import {
   appId,
   useNoticeHost,
@@ -134,10 +134,14 @@ export interface NoticeProps {
 export interface NoticesProps {
   /**
    * Focus after a notice goes while it holds focus, as `focusTarget` of
-   * `AppAccess`; without it, focus returns to where it came from.
+   * `AppAccess`; without it, focus returns to `AppAccess`'s `focusTarget`
+   * for an access prompt and to where it came from otherwise.
    */
   readonly focusTarget?: RefObject<HTMLElement | null> | undefined;
-  /** At most this many notices show at once; the rest wait. Default 3. */
+  /**
+   * At most this many notices show at once, at least one; the rest wait.
+   * Default 3.
+   */
   readonly limit?: number | undefined;
   /**
    * `false` leaves the access prompts out of this stack, for an app that
@@ -191,6 +195,12 @@ export function useNotice(notice: Notice | null): void {
 /** As for brief access information. */
 const briefDuration = infoTimeout;
 const defaultLimit = 3;
+/** At least one; a value that is no number keeps the default. */
+function limitOf(limit: number | undefined) {
+  return limit !== undefined && Number.isFinite(limit)
+    ? Math.max(1, Math.floor(limit))
+    : defaultLimit;
+}
 
 interface Entry {
   readonly id: string;
@@ -604,13 +614,24 @@ function topLayerModal(element: Element) {
 }
 
 /** Whether `element` is drawn: not hidden, `display: none` or invisible. */
-function rendered(element: Element) {
+function rendered(element: Element): boolean {
   if (element.closest('[hidden]')) return false;
-  if (typeof element.checkVisibility === 'function')
-    return element.checkVisibility({
-      visibilityProperty: true,
-      checkVisibilityCSS: true,
-    });
+  if (typeof element.checkVisibility === 'function') {
+    if (
+      element.checkVisibility({
+        visibilityProperty: true,
+        checkVisibilityCSS: true,
+      })
+    )
+      return true;
+    // Without a box of its own (`display: contents`), it is drawn when what
+    // it contains is.
+    const view = element.ownerDocument.defaultView;
+    return (
+      view?.getComputedStyle(element).display === 'contents' &&
+      [...element.children].some(rendered)
+    );
+  }
   // Without it (jsdom), from the computed styles.
   const view = element.ownerDocument.defaultView;
   if (!view) return true;
@@ -640,17 +661,19 @@ function rendered(element: Element) {
 export function Notices(props: NoticesProps) {
   const store = useNoticeStore();
   const [token] = useState(() => Symbol('notices'));
-  const limit = props.limit ?? defaultLimit;
+  const limit = limitOf(props.limit);
   const Notice = props.components?.Notice;
   const accessPrompts = props.accessPrompts ?? true;
   const { focusTarget } = props;
-  useEffect(() => () => store.unregister(token), [store, token]);
-  useEffect(
+  // Before the first paint, so `AppAccess` never shows the access prompts
+  // for a frame before this stack takes them.
+  useLayoutEffect(() => () => store.unregister(token), [store, token]);
+  useLayoutEffect(
     () => store.register({ token, limit, Notice, accessPrompts, focusTarget }),
     [store, token, limit, Notice, accessPrompts, focusTarget],
   );
-  // One stack per provider, also with several hosts.
-  const first = useFirst('notices');
+  // One stack per provider, also with several hosts: the first registered.
+  const first = useNoticeHost()?.token === token;
   const records = useNoticeRecords();
   const { blocking, prompts } = useAccessPrompts();
   const starting = useAppFacts((s) => s.starting);
@@ -799,6 +822,7 @@ function NoticeList({
   readonly focusTarget: RefObject<HTMLElement | null> | undefined;
   readonly Notice: ComponentType<NoticeProps> | undefined;
 }) {
+  const store = useNoticeStore();
   const value = useMemo(() => ({ announce, layer }), [announce, layer]);
   return (
     <Announce.Provider value={value}>
@@ -809,7 +833,9 @@ function NoticeList({
               key={entry.id}
               entry={entry}
               prompt={entry.prompt}
-              focusTarget={focusTarget}
+              // Without one of its own, the host returns focus from an
+              // access prompt as `AppAccess` would.
+              focusTarget={focusTarget ?? store.accessFocusTarget()}
               Notice={Notice}
             />
           ) : (

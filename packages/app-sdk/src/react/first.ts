@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useController } from './app.js';
 
-type Kind = 'gate' | 'prompts' | 'notices';
+type Kind = 'gate' | 'prompts';
 interface Owners {
   readonly mounted: Record<Kind, symbol[]>;
   readonly listeners: Set<() => void>;
@@ -14,7 +14,7 @@ function ownersOf(app: object) {
   if (!owners) {
     const listeners = new Set<() => void>();
     owners = {
-      mounted: { gate: [], prompts: [], notices: [] },
+      mounted: { gate: [], prompts: [] },
       listeners,
       subscribe: (listener) => {
         listeners.add(listener);

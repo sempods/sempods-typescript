@@ -29,7 +29,9 @@ const text = {
 
 /**
  * Render beneath the app's actual locale provider so notices follow its language,
- * and beside the SDK's `Notices` host, which shows it outside the page's flow.
+ * and beside the SDK's `Notices` host, which shows it outside the page's flow:
+ * without a mounted `<Notices />` it shows nowhere (the SDK warns in the
+ * console).
  * Keep it outside target/access gates: updates also matter while signed out,
  * and the host shows it inside the sign-in gate then. Announces a downloaded
  * version once. It applies once every window of the app is closed, so an

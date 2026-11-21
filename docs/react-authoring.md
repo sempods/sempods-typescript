@@ -1623,20 +1623,23 @@ export function Shell() {
   not on a notice a changed `show` replaced meanwhile. A shown notice retires
   once its action resolves, unless the action showed it again; a held one
   stays its holder's.
-- **The host** shows at most `limit` notices (3 by default); over the limit,
-  those waiting for the person go first, so a burst of brief information never
-  pushes a pending action out of reach. It is fixed at the bottom of the
-  viewport, outside the document flow, above the safe area and above every
-  element marked `data-sempods-notices-avoid`, such as a composer at the
-  bottom. It stays inside the visual viewport, its sides included, when a
-  pinch zoom or a keyboard shrinks only that one, and above avoided elements
+- **The host** shows at most `limit` notices (3 by default, at least 1); over
+  the limit, those waiting for the person go first, so a burst of brief
+  information never pushes a pending action out of reach. It is fixed at the
+  bottom of the viewport, outside the document flow, above the safe area and
+  above every element marked `data-sempods-notices-avoid`, such as a composer
+  at the bottom. It stays inside the visual viewport, its sides included, when
+  a pinch zoom or a keyboard shrinks only that one, and above avoided elements
   the app keeps at its visible bottom, also when one moves through its style
   or a class. `--sempods-notices-offset` adds a fixed distance. It never takes
   the focus. Each event is announced once through its own live region (errors
   assertively); the visible notices have no live role. Escape dismisses the
-  focused notice, and focus then returns to `focusTarget` or where it came
-  from. Its entrance motion stops under reduced motion. `--sempods-warning`
-  and `--sempods-danger` colour warnings and errors.
+  focused notice, and focus then returns to `focusTarget`, for an access
+  prompt to `AppAccess`'s `focusTarget` when the host has none, or else to
+  where it came from. Its entrance motion stops under reduced motion.
+  `--sempods-warning` and `--sempods-danger` colour warnings and errors.
+  Without a mounted host, notices show nowhere; the SDK reports that once in
+  the console.
 - **Modals:** while a modal dialog covers the page (the app's own or an SDK
   one), the stack waits and covers nothing; a dialog kept mounted but hidden
   (`hidden`, `display: none`, `visibility: hidden`) covers nothing, and one
