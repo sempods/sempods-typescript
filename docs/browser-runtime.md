@@ -1060,8 +1060,9 @@ connection signs out it gives way to such a connection, as a removed one did.
 A remembered Pod the person selects stays active, ready to sign in.
 `AppAccess` offers remembered Pods in an editable address chooser with one
 main action. **Manage saved Pods**, in its dropdown, separates removal from sign-in,
-and `controls.sessionEnded` notes an ended session. Connected management also
-lists other Pods under **Connect another Pod**. Failed retirement offers its
+and `controls.sessionEnded` notes an ended session. Connected management
+lists every Pod in its own row, a remembered one as **Signed out** with
+**Sign in** and **Remove from this device**. Failed retirement offers its
 failure and retry, never sign-in to that connection, even when it is not the
 active Pod. Controller `connect` and `authorize` reject with
 `RuntimeError('storage')` while that connection has `ended.saved === false`;

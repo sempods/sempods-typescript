@@ -18,6 +18,7 @@ export function enteredPod(value: string) {
  * `adding` is `PodChooser`: another Pod beside the connected ones, so it
  * ignores `mode`, starts on a new address rather than on the active Pod, and
  * signs in again to a Pod that is already readable instead of only selecting it.
+ * `onAdded` follows an adding action that ran, such as a Pod opened in place.
  */
 export function SignInConnections({
   mode = 'multiple',
@@ -26,7 +27,11 @@ export function SignInConnections({
   surface = 'sign-in',
   podAddressPrefix = 'https://sempods.org/',
   adding = false,
-}: ConnectionsProps & { readonly adding?: boolean }) {
+  onAdded,
+}: ConnectionsProps & {
+  readonly adding?: boolean;
+  readonly onAdded?: () => void;
+}) {
   const app = useApp();
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
@@ -210,7 +215,10 @@ export function SignInConnections({
         ran = await app.selectConnection(targetConnection.id);
       else ran = await app.authorize(targetConnection.id);
       // A declined leave confirmation ran nothing: stay on the same Pod.
-      if (adding && ran) setPinned(null);
+      if (adding && ran) {
+        setPinned(null);
+        onAdded?.();
+      }
     } else {
       // A failed preparation stays on the submitted Pod, so the error and a
       // retry belong to it.
@@ -225,6 +233,7 @@ export function SignInConnections({
           setUrl(null);
           setChosen('');
           setPinned(null);
+          onAdded?.();
         }
       }
     }

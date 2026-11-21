@@ -390,6 +390,29 @@ icon; an `svg` among them is no longer set to 20px by the SDK's styles, so give
 it a size of its own (`<DeleteIcon />` is 1rem). See [several rows from one
 decision](react-authoring.md#several-rows-from-one-decision).
 
+### Pods & sharing grouped by Pod
+
+Up to 0.9.0-dev.3, management showed an **Active pod** select, the selected
+Pod's Context and access, **Change sharing** and **Sign out** with a note,
+and a collapsed **Connect another Pod** with the remembered Pods. 0.9.0 lists
+each Pod in a row (`role="group"` named by the Pod) with a **⋯** button named
+"Actions for" the Pod, which holds **Change sharing**, **Use this Pod** and
+**Sign out on this device** (`controls.disconnectHere`), or **Sign in** and
+**Remove from this device** for a remembered Pod. **Connect another Pod** is
+a button after the list that opens the sign-in's chooser as a step.
+
+After upgrading, end-to-end tests open a Pod's actions before choosing one
+(`getByRole('button', { name: /^Actions for / })`), switch Pods with **Use
+this Pod** instead of the select, and click **Connect another Pod** before
+looking for the **Pod address** field. A test that looked for **Read and
+write** reads **Can edit** (`controls.canChange`), also in `ContextSwitch`.
+Management no longer shows `controls.disconnectHint`. An app that shows
+several Pods at once passes `podView="combined"` so that no Pod is marked
+**Selected**. An app that translates the controls into another language adds
+`selected`, `signedOut`, `unavailable`, `ended`, `usePod`, `disconnectHere`,
+`signInToSee` and `back`, and the top-level `podActions(pod)`. See
+[Pods & sharing management](react-authoring.md#pods--sharing-management).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to
