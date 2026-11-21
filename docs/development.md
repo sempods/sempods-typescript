@@ -278,9 +278,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     is open the stack shows nothing and covers none of its controls, then
     shows and announces an error once it closes; a replacement renderer's own
     confirmation dialog in a portal (`&confirm`) stays open while the stack
-    waits under it, and Confirm runs the action once; Escape dismisses the
-    focused notice and returns the focus to the host's `focusTarget`; reduced
-    motion stops its entrance; beside `AppAccess`'s own prompt stack
+    waits under it, and Confirm runs the action once; with a native dialog
+    inside the notice (`&confirm=inline`), a brief notice published under it
+    waits instead of expiring; Escape dismisses the focused notice and
+    returns the focus to the host's `focusTarget`; reduced motion stops its
+    entrance; beside `AppAccess`'s own prompt stack
     (`accessPrompts={false}`, `&beside`) it stays above that stack, so a press
     on Sign in reaches it; after an app dialog kept mounted closes through
     `display` or `visibility`, the queued error shows and is announced once

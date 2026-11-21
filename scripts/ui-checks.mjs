@@ -6865,7 +6865,9 @@ async function ghost({ browser, origin, engine }) {
  * one Pod as one warning that retires; while the app's dialog is open the
  * stack waits and covers nothing, and shows and announces once it closes;
  * a replacement renderer's own confirmation in a portal stays open while
- * the stack waits under it, and confirming runs the action once;
+ * the stack waits under it, and confirming runs the action once; one in a
+ * native dialog inside the notice keeps that notice drawn while a brief
+ * notice published under it waits instead of expiring;
  * Escape dismisses the focused notice; reduced motion; beside AppAccess's
  * own prompt stack (`accessPrompts={false}`) above it, so Sign in takes the
  * press; inside a zoomed visual viewport, also its sides and above a
@@ -7114,6 +7116,42 @@ async function notices({ browser, origin, engine }) {
           during,
           closed,
           settled,
+          restored,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-renderer-inline-dialog', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices&confirm=inline');
+        await page.waitForFunction(() => window.noticesGate);
+        await call('undo');
+        await toast.first().waitFor();
+        await toast.getByRole('button', { name: 'Restore' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Restore?' });
+        await dialog.waitFor();
+        // A brief notice published under it: its 1 second passes unseen.
+        const brief = 'Saved.';
+        await call('show', { key: 'saved', text: brief, duration: 1000 });
+        await page.waitForTimeout(1500);
+        const during = await measure();
+        const open = await dialog.isVisible();
+        await dialog.getByRole('button', { name: 'Confirm' }).click();
+        const closed = await hidden(dialog);
+        const back = await shown(toast.filter({ hasText: brief }), 2000);
+        const restored = await page.evaluate(() => window.restored ?? 0);
+        return {
+          pass:
+            open &&
+            during.items.length === 1 &&
+            !during.items[0].text.includes(brief) &&
+            closed &&
+            back &&
+            restored === 1,
+          open,
+          during: during.items.map((i) => i.text),
+          closed,
+          back,
           restored,
         };
       }),

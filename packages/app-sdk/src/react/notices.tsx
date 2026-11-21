@@ -261,7 +261,9 @@ const Announce = createContext<{
   readonly layer: 'page' | 'gate';
   /** A modal covers the stack: its notices wait, hidden but mounted. */
   readonly suspended: boolean;
-}>({ announce: () => {}, layer: 'page', suspended: false });
+  /** The notice whose renderer opened the covering modal: it stays drawn. */
+  readonly owner: Element | null;
+}>({ announce: () => {}, layer: 'page', suspended: false, owner: null });
 
 /**
  * One polite and one assertive live region. Each event is added once and
@@ -323,8 +325,13 @@ function LiveRegion({
 }
 
 interface Cover {
-  /** A modal covers the stack's layer. */
+  /** A modal covers the stack's layer, or one a renderer opened inside it. */
   readonly modal: boolean;
+  /**
+   * The notice holding a modal its renderer opened, such as its own
+   * confirmation: it stays drawn, so its modal does.
+   */
+  readonly owner: Element | null;
   /** The height of the avoided zone at the bottom. */
   readonly avoid: number;
   /** The layout viewport's height hidden below the visual viewport. */
@@ -337,6 +344,7 @@ interface Cover {
 }
 const uncovered: Cover = {
   modal: false,
+  owner: null,
   avoid: 0,
   below: 0,
   room: 0,
@@ -410,7 +418,13 @@ function usePageCover(
       if (!element) return;
       // Every host keeps the opening order, from its first measure on.
       trackOpened(document);
-      const modal = isCovered(element, layer);
+      // A renderer's own modal inside the stack, such as an inline
+      // `<dialog>` opened with `showModal()`, covers the other notices.
+      const inner = [...element.querySelectorAll(modalCandidates)].find(
+        isModal,
+      );
+      const owner = inner?.closest('li') ?? null;
+      const modal = Boolean(inner) || isCovered(element, layer);
       const height = view.innerHeight;
       // A pinch zoom, or a keyboard that resizes only the visual viewport
       // (Chrome on Android by default, iOS), hides the layout viewport's end.
@@ -447,7 +461,7 @@ function usePageCover(
       const end = height - Math.max(16, avoid + 8, below + 16);
       const fits = Math.floor(Math.min((seen - top) * 0.6, end - top - 16));
       const room = fits < Math.floor(height * 0.6) ? Math.max(0, fits) : 0;
-      const next: Cover = { modal, avoid, below, room, left, right };
+      const next: Cover = { modal, owner, avoid, below, room, left, right };
       setCover((current) =>
         (Object.keys(next) as (keyof Cover)[]).every(
           (name) => current[name] === next[name],
@@ -502,13 +516,16 @@ function usePageCover(
         ? [...document.querySelectorAll(watched)]
         : [];
       const counts = (record: MutationRecord) =>
-        // Changes inside the stack cover nothing and move no zone; one on
-        // its root, such as `aria-hidden` from an overlay library, does.
-        !(
-          element &&
-          element !== record.target &&
-          element.contains(record.target)
-        ) &&
+        // Changes inside the stack cover nothing and move no zone, except a
+        // renderer's own modal that opens or closes there; one on its root,
+        // such as `aria-hidden` from an overlay library, does.
+        (record.attributeName === 'open' ||
+          record.attributeName === 'aria-modal' ||
+          !(
+            element &&
+            element !== record.target &&
+            element.contains(record.target)
+          )) &&
         (!styled(record) ||
           candidates.some((candidate) => record.target.contains(candidate)));
       if (records.length > 0 && !records.some(counts)) return;
@@ -574,7 +591,10 @@ function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
     return (
       Boolean(hiddenBy && gate.contains(hiddenBy)) ||
       [...gate.querySelectorAll(modalCandidates)].some(
-        (other) => !other.contains(element) && isModal(other),
+        (other) =>
+          !other.contains(element) &&
+          !element.contains(other) &&
+          isModal(other),
       ) ||
       [...document.querySelectorAll(aboveGate)].some(
         (other) => !gate.contains(other) && isModal(other),
@@ -732,6 +752,7 @@ export function Notices(props: NoticesProps) {
         entries={shown}
         layer="page"
         suspended={cover.modal}
+        owner={cover.owner}
         announce={announce}
         focusTarget={focusTarget}
         Notice={Notice}
@@ -797,6 +818,7 @@ function GateStack({ host }: { readonly host: Host }) {
         entries={shown}
         layer="gate"
         suspended={cover.modal}
+        owner={cover.owner}
         announce={announce}
         // The app's focus target is inert behind the gate: focus returns to
         // where it came from inside the gate.
@@ -826,6 +848,7 @@ function NoticeList({
   entries,
   layer,
   suspended,
+  owner,
   announce,
   focusTarget,
   Notice = DefaultNotice,
@@ -833,14 +856,15 @@ function NoticeList({
   readonly entries: readonly Entry[];
   readonly layer: 'page' | 'gate';
   readonly suspended: boolean;
+  readonly owner: Element | null;
   readonly announce: (text: string, assertive: boolean) => void;
   readonly focusTarget: RefObject<HTMLElement | null> | undefined;
   readonly Notice: ComponentType<NoticeProps> | undefined;
 }) {
   const store = useNoticeStore();
   const value = useMemo(
-    () => ({ announce, layer, suspended }),
-    [announce, layer, suspended],
+    () => ({ announce, layer, suspended, owner }),
+    [announce, layer, suspended, owner],
   );
   // Without a focus target of its own, the host returns focus from an
   // access prompt as `AppAccess` would: to its current `focusTarget`, read
@@ -855,7 +879,7 @@ function NoticeList({
   );
   return (
     <Announce.Provider value={value}>
-      <ul hidden={entries.length === 0 || suspended}>
+      <ul hidden={entries.length === 0 || (suspended && !owner)}>
         {entries.map((entry) =>
           entry.prompt ? (
             <AccessNoticeItem
@@ -893,10 +917,16 @@ function NoticeItem({
   Notice,
 }: ItemProps & { readonly view: NoticeView }) {
   const store = useNoticeStore();
-  const { announce, layer, suspended } = useContext(Announce);
+  const { announce, layer, suspended, owner } = useContext(Announce);
   const event = entry.app?.event ?? 0;
   const message = [view.pod, view.title, view.text].filter(Boolean).join('. ');
   const element = useRef<HTMLLIElement>(null);
+  // Also as state, to keep the notice that holds the covering modal drawn.
+  const [drawn, setDrawn] = useState<HTMLLIElement | null>(null);
+  const attach = useCallback((node: HTMLLIElement | null) => {
+    element.current = node;
+    setDrawn(node);
+  }, []);
   // Once per event, when it first shows uncovered: here, in the gate or
   // after a modal. A modal that opened in the same event as the notice is
   // seen at once, before the host measures it: the event waits for it.
@@ -945,7 +975,8 @@ function NoticeItem({
   }, [focus.held, target]);
   return (
     <li
-      ref={element}
+      ref={attach}
+      hidden={suspended && owner !== drawn}
       data-source={view.source}
       data-severity={view.severity}
       onPointerEnter={() => setHeld((h) => ({ ...h, hover: true }))}

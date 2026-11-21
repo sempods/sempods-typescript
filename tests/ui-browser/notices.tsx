@@ -99,6 +99,37 @@ function ConfirmingNotice({ notice }: NoticeProps) {
   );
 }
 
+/**
+ * The same question in a native `<dialog>` inside the notice, opened with
+ * `showModal()`: the stack keeps this notice drawn, so the dialog stays.
+ */
+function InlineConfirmingNotice({ notice }: NoticeProps) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const action = notice.actions[0];
+  return (
+    <div className="notices-confirming">
+      <p>{notice.text}</p>
+      {action && (
+        <>
+          <Button variant="outline" onPress={() => dialog.current?.showModal()}>
+            {action.label}
+          </Button>
+          <dialog ref={dialog} aria-label={`${action.label}?`}>
+            <Button
+              onPress={() => {
+                dialog.current?.close();
+                action.run();
+              }}
+            >
+              Confirm
+            </Button>
+          </dialog>
+        </>
+      )}
+    </div>
+  );
+}
+
 const items = [
   'Milk',
   'Bread',
@@ -119,7 +150,8 @@ const items = [
  * fixed at the bottom (`data-sempods-notices-avoid`) and an app dialog. With
  * `gate`, `AppAccess` shows its sign-in gate, before sign-in; with `beside`,
  * `AppAccess` keeps its own prompt stack beside the host; with `confirm`, a
- * replacement renderer confirms an action in its own portal dialog. The
+ * replacement renderer confirms an action in its own portal dialog, with
+ * `confirm=inline` in a native dialog inside the notice. The
  * checks publish through `window.noticesGate`, as the app's own code would.
  */
 export function NoticesGate({
@@ -129,7 +161,7 @@ export function NoticesGate({
 }: {
   readonly gate: boolean;
   readonly beside: boolean;
-  readonly confirm: boolean;
+  readonly confirm: 'portal' | 'inline' | null;
 }) {
   const { show, dismiss } = useNotices();
   const [ready, setReady] = useState(false);
@@ -168,7 +200,16 @@ export function NoticesGate({
       <Notices
         focusTarget={edit}
         accessPrompts={!beside}
-        components={confirm ? { Notice: ConfirmingNotice } : undefined}
+        components={
+          confirm
+            ? {
+                Notice:
+                  confirm === 'inline'
+                    ? InlineConfirmingNotice
+                    : ConfirmingNotice,
+              }
+            : undefined
+        }
       />
       <UpdateNotice ready={ready} />
       {Object.entries(failures).map(([pod, count]) => (

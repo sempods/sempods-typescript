@@ -1783,6 +1783,58 @@ it('keeps a confirmation its renderer opened in a portal while the stack waits',
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
+it('waits under a modal a renderer opened inline, keeping that notice drawn', async () => {
+  const runtime = await signedIn();
+  const timers = briefTimers();
+  const undo = vi.fn(async () => {});
+  function Confirming({ notice }: NoticeProps) {
+    const [asking, setAsking] = useState(false);
+    const action = notice.actions[0];
+    return (
+      <>
+        <p>{notice.text}</p>
+        {action && (
+          <button onClick={() => setAsking(true)}>{action.label}</button>
+        )}
+        {action && asking && (
+          <dialog open aria-label="Restore?">
+            <button onClick={() => action.run()}>Confirm</button>
+          </dialog>
+        )}
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: Confirming }} />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  act(() =>
+    actions.show({
+      key: 'undo',
+      text: 'Deleted.',
+      action: { label: 'Restore', run: undo },
+    }),
+  );
+  act(() => screen.getByRole('button', { name: 'Restore' }).click());
+  // A brief notice published under it waits: hidden, its timer paused.
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  await waitFor(() => expect(texts()).toEqual(['Deleted.RestoreConfirm']));
+  expect(running(timers)).toEqual([]);
+  expect(announced()).toEqual(['Deleted.']);
+  await act(async () =>
+    within(screen.getByRole('dialog', { name: 'Restore?' }))
+      .getByRole('button')
+      .click(),
+  );
+  expect(undo).toHaveBeenCalledTimes(1);
+  // The undo notice settles with its dialog; the brief one shows, timed.
+  await waitFor(() => expect(texts()).toEqual(['Saved.']));
+  expect(running(timers)).toHaveLength(1);
+  await waitFor(() => expect(announced()).toEqual(['Deleted.', 'Saved.']));
+});
+
 it('keeps no announcement history of superseded events under a long-lived key', async () => {
   const runtime = await signedIn();
   let store!: ReturnType<typeof useNoticeStore>;

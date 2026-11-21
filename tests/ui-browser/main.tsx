@@ -430,7 +430,13 @@ function App() {
         <NoticesGate
           gate={settings.has('gate')}
           beside={noticesBeside}
-          confirm={settings.has('confirm')}
+          confirm={
+            settings.has('confirm')
+              ? settings.get('confirm') === 'inline'
+                ? 'inline'
+                : 'portal'
+              : null
+          }
         />
       ) : dateChoice ? (
         <DateChoiceGate />
