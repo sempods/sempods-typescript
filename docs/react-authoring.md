@@ -1645,7 +1645,8 @@ export function Shell() {
   an error that concerns the dialog inside it. Beside `AppAccess` the stack
   also waits while the app starts. Before sign-in, app notices show inside the
   SDK's sign-in gate, which keeps room for them at its end; they wait there
-  too while the gate's settings or another dialog above it are open.
+  too while the gate's settings, another dialog above it or an overlay inside
+  it, such as one of a custom `Connections` renderer, are open.
 - **Another renderer:** `components={{ Notice }}` receives a `NoticeView`
   (`source`, `severity`, `title`, `text`, `actions`, `dismiss`, …) for an
   app notice or an access prompt alike. The host still owns position,

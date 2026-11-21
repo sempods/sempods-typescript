@@ -323,9 +323,10 @@ const uncovered: Cover = {
 };
 
 /**
- * Inside the gate only these cover the stack: a dialog of the gate itself
- * (its settings), and management or a leave question, which the gate raises
- * above itself. An app modal that was open before the gate lies below it.
+ * Inside the gate only these cover the stack: a modal inside the gate itself
+ * (its settings, an overlay of a custom renderer), and management or a leave
+ * question, which the gate raises above itself. An app modal that was open
+ * before the gate lies below it.
  */
 const aboveGate =
   'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]';
@@ -480,8 +481,13 @@ function usePageCover(
         ? document.querySelector(watched) !== null
         : false;
       const counts = (record: MutationRecord) =>
-        // The stack's own changes cover nothing and move no zone.
-        !element?.contains(record.target) &&
+        // Changes inside the stack cover nothing and move no zone; one on
+        // its root, such as `aria-hidden` from an overlay library, does.
+        !(
+          element &&
+          element !== record.target &&
+          element.contains(record.target)
+        ) &&
         (!styled(record) ||
           (any &&
             record.target instanceof Element &&
@@ -544,8 +550,14 @@ function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
   if (gate) {
     const order = trackOpened(document, gate);
     const gateOpened = order.get(gate) ?? 0;
+    // An overlay inside the gate, such as one of a custom Connections
+    // renderer, hides the gate's other content around it.
+    const hiddenBy = element.closest('[inert], [aria-hidden="true"]');
     return (
-      [...gate.querySelectorAll('dialog[open]')].some(isModal) ||
+      Boolean(hiddenBy && gate.contains(hiddenBy)) ||
+      [...gate.querySelectorAll(modalCandidates)].some(
+        (other) => !other.contains(element) && isModal(other),
+      ) ||
       [...document.querySelectorAll(aboveGate)].some(
         (other) => !gate.contains(other) && isModal(other),
       ) ||

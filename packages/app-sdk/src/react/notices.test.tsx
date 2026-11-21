@@ -1434,3 +1434,45 @@ it('looks again each frame while a notice waits under a modal, also for one that
   dialog.remove();
   sheet.remove();
 });
+
+it('waits inside the gate while an overlay inside it, native or not, covers its notices', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Tasks" />
+      <Notices />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  const gate = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(element?.dataset.reason).toBe('no-connection');
+    return element!;
+  });
+  const inGate = () =>
+    gate.querySelector<HTMLElement>(
+      '[data-sempods-ui="notices"][data-placement="gate"]',
+    )!;
+  await waitFor(() => expect(inGate()).not.toBeNull());
+  // A custom Connections renderer opens its own overlay in the gate.
+  const overlay = document.createElement('div');
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  act(() => gate.append(overlay));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(items(inGate())).toEqual([]);
+  expect(announced(inGate())).toEqual([]);
+  act(() => overlay.remove());
+  await waitFor(() => expect(texts(inGate())).toEqual(['Saved.OK']));
+  await waitFor(() => expect(announced(inGate())).toEqual(['Saved.']));
+  // An overlay library hides the gate's other content instead.
+  act(() => inGate().setAttribute('aria-hidden', 'true'));
+  await waitFor(() => expect(items(inGate())).toEqual([]));
+  act(() => inGate().removeAttribute('aria-hidden'));
+  await waitFor(() => expect(texts(inGate())).toEqual(['Saved.OK']));
+});
