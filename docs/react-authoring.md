@@ -1617,7 +1617,8 @@ export function Shell() {
   disabled while it runs and while a guarded change or its leave question is
   open, also when the notice remounts or moves into the gate, and checked
   again when it runs, so a renderer that keeps an earlier callback is guarded
-  too; one kept from a notice a changed `show` replaced runs nothing. A
+  too; one kept from a notice a changed `show` replaced or that was dismissed
+  runs nothing, and a kept `dismiss` hides only the notice it was shown for. A
   rejection shows its localized error in the notice, also after a remount, but
   not on a notice a changed `show` replaced meanwhile. A shown notice retires
   once its action resolves, unless the action showed it again; a held one
@@ -1629,12 +1630,13 @@ export function Shell() {
   element marked `data-sempods-notices-avoid`, such as a composer at the
   bottom. It stays inside the visual viewport, its sides included, when a
   pinch zoom or a keyboard shrinks only that one, and above avoided elements
-  the app keeps at its visible bottom. `--sempods-notices-offset` adds a fixed
-  distance. It never takes the focus. Each event is announced once through its
-  own live region (errors assertively); the visible notices have no live role.
-  Escape dismisses the focused notice, and focus then returns to `focusTarget`
-  or where it came from. Its entrance motion stops under reduced motion.
-  `--sempods-warning` and `--sempods-danger` colour warnings and errors.
+  the app keeps at its visible bottom, also when one moves through its style
+  or a class. `--sempods-notices-offset` adds a fixed distance. It never takes
+  the focus. Each event is announced once through its own live region (errors
+  assertively); the visible notices have no live role. Escape dismisses the
+  focused notice, and focus then returns to `focusTarget` or where it came
+  from. Its entrance motion stops under reduced motion. `--sempods-warning`
+  and `--sempods-danger` colour warnings and errors.
 - **Modals:** while a modal dialog covers the page (the app's own or an SDK
   one), the stack waits and covers nothing; a dialog kept mounted but hidden
   (`hidden`, `display: none`, `visibility: hidden`) covers nothing, and one

@@ -6868,9 +6868,10 @@ async function ghost({ browser, origin, engine }) {
  * (`accessPrompts={false}`) above it, so Sign in takes the press; inside a
  * zoomed visual viewport, also its sides and above a composer kept at its
  * bottom (Chromium); while an app dialog opens and closes through its
- * styles or a class; and
+ * styles or a class; above a composer moved through its style; and
  * before sign-in inside the SDK's
- * gate, clear of its sign-in button.
+ * gate, clear of its sign-in button, its height free of the page's avoided
+ * zones, and without polling while nothing waits.
  */
 async function notices({ browser, origin, engine }) {
   const { context, page, errors } = await newPage(browser);
@@ -7382,6 +7383,81 @@ async function notices({ browser, origin, engine }) {
           runs,
           waited,
           back,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-composer-moves', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        await call('update', true);
+        await toast.first().waitFor();
+        await settle(page);
+        const before = await measure();
+        // Moved up through its style alone, without resizing.
+        await page
+          .locator('form[data-sempods-notices-avoid]')
+          .evaluate((form) => (form.style.bottom = '80px'));
+        await page.waitForTimeout(150);
+        await settle(page);
+        const after = await measure();
+        return {
+          pass:
+            aboveComposer(before) &&
+            after.composer.top < before.composer.top - 70 &&
+            aboveComposer(after) &&
+            inside(after),
+          before,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-gate-ignores-page-zones', async () => {
+        await page.setViewportSize({ width: 667, height: 375 });
+        await fetch(origin + '/__reset');
+        await page.goto(origin + '/?screen=notices&gate');
+        const gate = page.locator('dialog[data-sempods-ui="gate"]');
+        await gate.getByRole('button', { name: 'Sign in' }).waitFor();
+        // A tall composer behind the gate, marked for the page's stack.
+        await page
+          .locator('form[data-sempods-notices-avoid]')
+          .evaluate((form) => (form.style.paddingTop = '274px'));
+        await settle(page);
+        // The gate is open and nothing waits: no host looks each frame.
+        const queries = await page.evaluate(async () => {
+          let count = 0;
+          const original = window.Document.prototype.querySelectorAll;
+          window.Document.prototype.querySelectorAll = function (...args) {
+            count++;
+            return original.apply(this, args);
+          };
+          await new Promise((done) => setTimeout(done, 1000));
+          window.Document.prototype.querySelectorAll = original;
+          return count;
+        });
+        await call('update', true);
+        const inGate = gate.locator('[data-placement="gate"] li');
+        await inGate.first().waitFor();
+        await settle(page);
+        const list = await gate
+          .locator('[data-placement="gate"] ul')
+          .evaluate((ul) => ({
+            height: ul.clientHeight,
+            content: ul.scrollHeight,
+            composer: document
+              .querySelector('form[data-sempods-notices-avoid]')
+              .getBoundingClientRect().height,
+          }));
+        return {
+          pass:
+            queries < 10 &&
+            list.composer > 300 &&
+            list.height > 60 &&
+            list.content <= list.height + 1,
+          queries,
+          list,
         };
       }),
     );

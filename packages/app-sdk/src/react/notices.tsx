@@ -365,10 +365,18 @@ function trackOpened(document: Document, last?: Element) {
  */
 function usePageCover(
   own: RefObject<HTMLElement | null>,
-  enabled = true,
-  layer: 'page' | 'gate' = 'page',
+  enabled: boolean,
+  layer: 'page' | 'gate',
+  waiting: boolean,
 ) {
   const [cover, setCover] = useState<Cover>(uncovered);
+  const waits = useRef(waiting);
+  const kick = useRef<(() => void) | null>(null);
+  // A notice that arrives under a modal starts the per-frame look.
+  useEffect(() => {
+    waits.current = waiting;
+    if (waiting) kick.current?.();
+  }, [waiting]);
   useEffect(() => {
     if (!enabled) return;
     const document = own.current?.ownerDocument;
@@ -398,11 +406,12 @@ function usePageCover(
         ? Math.max(0, Math.floor(width - visual.offsetLeft - visual.width))
         : 0;
       // A zone in the lower half of what the person sees, such as a
-      // composer kept at the visible bottom.
+      // composer kept at the visible bottom; the page's zones lie behind
+      // the gate.
       let avoid = 0;
-      for (const zone of document.querySelectorAll<HTMLElement>(
-        '[data-sempods-notices-avoid]',
-      )) {
+      for (const zone of layer === 'page'
+        ? document.querySelectorAll<HTMLElement>('[data-sempods-notices-avoid]')
+        : []) {
         const rect = zone.getBoundingClientRect();
         if (
           rect.height === 0 ||
@@ -425,14 +434,15 @@ function usePageCover(
           ? current
           : next,
       );
-      // A covering modal may also close through its styles (`display`,
-      // `visibility`, a class), which no observer reports: look again each
-      // frame while one covers the stack.
-      if (modal) schedule();
+      // A covering modal may also close through a stylesheet or media
+      // query, which no observer reports: while one covers notices that
+      // wait, look again each frame; with nothing waiting, never.
+      if (modal && waits.current) schedule();
     };
     const schedule = () => {
       if (!frame) frame = view.requestAnimationFrame(measure);
     };
+    kick.current = schedule;
     // An avoided zone that grows (an auto-growing composer) moves the stack.
     const sizes =
       typeof ResizeObserver === 'function'
@@ -457,21 +467,26 @@ function usePageCover(
     };
     const changed = (records: readonly MutationRecord[] = []) => {
       const element = own.current;
-      // A style or class matters only on a modal or around one: it may open
-      // a modal kept mounted but hidden through CSS, or close it.
+      // A style or class matters only on a modal or an avoided zone or
+      // around one: it may open or close a modal kept mounted but hidden
+      // through CSS, or move a zone without resizing it.
       const styled = (record: MutationRecord) =>
         record.attributeName === 'style' || record.attributeName === 'class';
-      const modals = records.some(styled)
-        ? document.querySelector(modalCandidates) !== null
+      const watched =
+        layer === 'page'
+          ? `${modalCandidates}, [data-sempods-notices-avoid]`
+          : modalCandidates;
+      const any = records.some(styled)
+        ? document.querySelector(watched) !== null
         : false;
       const counts = (record: MutationRecord) =>
         // The stack's own changes cover nothing and move no zone.
         !element?.contains(record.target) &&
         (!styled(record) ||
-          (modals &&
+          (any &&
             record.target instanceof Element &&
-            (record.target.matches(modalCandidates) ||
-              record.target.querySelector(modalCandidates) !== null)));
+            (record.target.matches(watched) ||
+              record.target.querySelector(watched) !== null)));
       if (records.length > 0 && !records.some(counts)) return;
       watchZones();
       schedule();
@@ -506,6 +521,7 @@ function usePageCover(
       view.visualViewport?.removeEventListener('resize', schedule);
       view.visualViewport?.removeEventListener('scroll', schedule);
       if (frame) view.cancelAnimationFrame(frame);
+      kick.current = null;
     };
   }, [own, enabled, layer]);
   return cover;
@@ -628,7 +644,6 @@ export function Notices(props: NoticesProps) {
   const gateMounted = useMounted('gate');
   const { direction } = useSdkLocale();
   const root = useRef<HTMLDivElement>(null);
-  const cover = usePageCover(root);
   const { announce, regions } = useAnnouncer();
   const pageAnnounce = useMemo(
     () => ({ announce, layer: 'page' as const }),
@@ -658,6 +673,12 @@ export function Notices(props: NoticesProps) {
   // The SDK gate covers the page from its first render on; during startup
   // it may still open, and its notices then show inside it.
   const gated = (Boolean(blocking) || starting) && gateMounted;
+  const cover = usePageCover(
+    root,
+    true,
+    'page',
+    first && !gated && entries.length > 0,
+  );
   const shown = !first || cover.modal || gated ? [] : visible(entries, limit);
   return (
     <div
@@ -705,7 +726,8 @@ export function GateNotices() {
   const root = useRef<HTMLDivElement>(null);
   // A dialog above the gate, such as the app's settings, makes the stack
   // wait: its notices time out and are announced once it closes.
-  const cover = usePageCover(root, Boolean(host), 'gate');
+  const waiting = appEntries(records).length > 0;
+  const cover = usePageCover(root, Boolean(host), 'gate', waiting);
   const gateAnnounce = useMemo(
     () => ({ announce, layer: 'gate' as const }),
     [announce],
@@ -961,6 +983,13 @@ function useNoticeView(entry: Entry): NoticeView {
   }
   const record = entry.app!;
   const notice = record.notice;
+  // A renderer may keep a callback, for an exit animation or its own
+  // confirmation: it acts only on the event it was shown for, while that
+  // shows and has not been dismissed. `useNotices().dismiss` stays by key.
+  const current = () => {
+    const now = store.recordOf(record.key);
+    return now?.event === record.event && !now.dismissed;
+  };
   return {
     key: record.key,
     source: 'app',
@@ -987,13 +1016,15 @@ function useNoticeView(entry: Entry): NoticeView {
               },
               // The latest closure of the same event runs; a changed `show`
               // replaced it with another action the person has not seen.
-              () => store.recordOf(record.key)?.event === record.event,
+              current,
             ),
           },
         ]
       : [],
     failure: failed,
-    dismiss: () => void store.dismiss(record.key),
+    dismiss: () => {
+      if (current()) store.dismiss(record.key);
+    },
     dismissLabel,
   };
 }

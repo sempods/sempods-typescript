@@ -284,14 +284,17 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     `display` or `visibility`, the queued error shows and is announced once
     without a resize, and while an overlay opened by removing a class covers
     it, a brief notice waits instead of expiring, then returns once the class
-    closes it again; in Chromium, with the page zoomed to 2×, the notice and
-    its button stay inside the visual viewport, its sides included, and at
-    2.5× above a composer the app keeps at the visible bottom; before sign-in
-    at 812 and 560px high it shows inside the SDK's gate, which keeps its Sign
-    in clear, and Escape on it keeps the focus inside the gate. The keyboard
-    check shrinks the layout viewport; a visual viewport shrunk alone, as
-    Chrome on Android and iOS do for the keyboard by default, is covered only
-    by the Chromium zoom.
+    closes it again; a composer moved up through its style alone keeps the
+    notice above it; with a 330px composer behind the gate at 667 × 375, the
+    gate's notice keeps its full height, and while nothing waits no host
+    queries the page each frame; in Chromium, with the page zoomed to 2×, the
+    notice and its button stay inside the visual viewport, its sides included,
+    and at 2.5× above a composer the app keeps at the visible bottom; before
+    sign-in at 812 and 560px high it shows inside the SDK's gate, which keeps
+    its Sign in clear, and Escape on it keeps the focus inside the gate. The
+    keyboard check shrinks the layout viewport; a visual viewport shrunk
+    alone, as Chrome on Android and iOS do for the keyboard by default, is
+    covered only by the Chromium zoom.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

@@ -29,6 +29,7 @@ import {
   type Notice,
   type NoticeActions,
   type NoticeProps,
+  type NoticeView,
 } from './index.js';
 
 const cleanups: (() => void)[] = [];
@@ -1248,4 +1249,188 @@ it('waits once a dialog kept hidden through its styles opens, before a brief not
   await waitFor(() => expect(items()).toEqual([]));
   expect(running(timers)).toEqual([]);
   dialog.remove();
+});
+
+it('binds a kept dismiss and action to the event they were shown for, while it shows undismissed', async () => {
+  const runtime = await signedIn();
+  const retry = vi.fn();
+  let kept: NoticeView | undefined;
+  function Keeper({ notice }: NoticeProps) {
+    // Keeps its first view, as for an exit animation or a confirmation.
+    kept ??= notice;
+    return <p>{notice.text}</p>;
+  }
+  let setHeld!: (held: boolean) => void;
+  function Held() {
+    const [held, set] = useState(false);
+    setHeld = set;
+    useNotice(
+      held
+        ? {
+            key: 'pod',
+            text: 'Pod unreachable.',
+            severity: 'warning',
+            action: { label: 'Retry', run: retry },
+          }
+        : null,
+    );
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: Keeper }} />
+      <Publisher />
+      <Held />
+    </SempodsProvider>,
+  );
+  act(() =>
+    actions.show({ key: 'sync', text: 'A failed.', severity: 'error' }),
+  );
+  await waitFor(() => expect(kept?.text).toBe('A failed.'));
+  // Replaced under the same key: A's dismiss leaves B.
+  act(() =>
+    actions.show({ key: 'sync', text: 'B failed.', severity: 'error' }),
+  );
+  act(() => kept!.dismiss!());
+  expect(texts()).toEqual(['B failed.']);
+  act(() => void actions.dismiss('sync'));
+  // A held notice, dismissed: its kept action no longer runs.
+  kept = undefined;
+  act(() => setHeld(true));
+  await waitFor(() => expect(kept?.text).toBe('Pod unreachable.'));
+  act(() => kept!.dismiss!());
+  expect(items()).toEqual([]);
+  await act(async () => kept!.actions[0]!.run());
+  expect(retry).not.toHaveBeenCalled();
+});
+
+it('moves the stack when an avoided zone moves through its styles', async () => {
+  const runtime = await signedIn();
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(812);
+  render(
+    <App runtime={runtime}>
+      <form data-sempods-notices-avoid="" style={{ bottom: 0 }}>
+        <input aria-label="New item" />
+      </form>
+    </App>,
+  );
+  const composer = document.querySelector('form')!;
+  const at = (top: number) => ({
+    top,
+    bottom: top + 64,
+    height: 64,
+    left: 0,
+    right: 375,
+    width: 375,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  });
+  const box = vi
+    .spyOn(composer, 'getBoundingClientRect')
+    .mockReturnValue(at(748));
+  act(() => actions.show({ key: 'info', text: 'Saved.' }));
+  act(() => window.dispatchEvent(new Event('resize')));
+  const avoid = () => host().style.getPropertyValue('--sp-notices-avoid');
+  await waitFor(() => expect(avoid()).toBe('64px'));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  // Moved up without resizing, by its style alone.
+  box.mockReturnValue(at(668));
+  act(() => void (composer.style.bottom = '80px'));
+  await waitFor(() => expect(avoid()).toBe('144px'));
+});
+
+it('keeps the page avoided zones out of the gate stack, and polls nothing while nothing waits', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(375);
+  let setReady!: (ready: boolean) => void;
+  function Update() {
+    const [ready, set] = useState(false);
+    setReady = set;
+    useNotice(
+      ready
+        ? {
+            key: 'app-update',
+            text: 'A new version is ready.',
+            duration: 'until-dismissed',
+          }
+        : null,
+    );
+    return null;
+  }
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Tasks" />
+      <Notices />
+      <Update />
+      <form data-sempods-notices-avoid="">
+        <input aria-label="New item" />
+      </form>
+    </SempodsProvider>,
+  );
+  // A tall composer behind the gate.
+  vi.spyOn(
+    document.querySelector('form')!,
+    'getBoundingClientRect',
+  ).mockReturnValue({
+    top: 45,
+    bottom: 375,
+    height: 330,
+    left: 0,
+    right: 667,
+    width: 667,
+    x: 0,
+    y: 45,
+    toJSON: () => ({}),
+  });
+  const gate = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(
+      '[data-sempods-ui="gate"]',
+    );
+    expect(element?.dataset.reason).toBe('no-connection');
+    return element!;
+  });
+  await act(async () => new Promise((done) => setTimeout(done, 100)));
+  // The gate is open and nothing waits: no host looks each frame.
+  const queries = vi.spyOn(document, 'querySelectorAll');
+  await act(async () => new Promise((done) => setTimeout(done, 200)));
+  expect(queries.mock.calls.length).toBeLessThan(4);
+  queries.mockRestore();
+  act(() => setReady(true));
+  const inGate = await waitFor(() => {
+    const element = gate.querySelector<HTMLElement>(
+      '[data-sempods-ui="notices"][data-placement="gate"]',
+    );
+    expect(texts(element!)).toEqual(['A new version is ready.OK']);
+    return element!;
+  });
+  act(() => window.dispatchEvent(new Event('resize')));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(inGate.style.getPropertyValue('--sp-notices-room')).toBe('');
+  expect(inGate.style.getPropertyValue('--sp-notices-avoid')).toBe('');
+});
+
+it('looks again each frame while a notice waits under a modal, also for one that arrived after it', async () => {
+  const runtime = await signedIn();
+  render(<App runtime={runtime} />);
+  const sheet = document.createElement('style');
+  const dialog = document.createElement('div');
+  dialog.id = 'filters';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  act(() => {
+    document.head.append(sheet);
+    document.body.append(dialog);
+  });
+  // The modal covers the page while nothing waits: no host polls.
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(items()).toEqual([]);
+  // Closed by a stylesheet rule, which no observer reports.
+  act(() => sheet.sheet!.insertRule('#filters { display: none; }'));
+  await waitFor(() => expect(texts()).toEqual(['Saved.OK']));
+  dialog.remove();
+  sheet.remove();
 });
