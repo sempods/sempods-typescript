@@ -599,6 +599,49 @@ it('keeps an explicit-scoped draft through row navigation and Context selection,
   expect(await switching).toBe(false);
   expect(discard).not.toHaveBeenCalled();
 });
+it('signs out of another connection keeping the selected view, but asks about an explicit draft', async () => {
+  const f = await connected();
+  const other = await f.runtime.connect('https://pod.example/bob');
+  const third = await f.runtime.connect('https://pod.example/carol');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const active = app.getSnapshot().activeId;
+  const selected = vi.fn();
+  app.register({
+    dirty: () => true,
+    blocked: () => false,
+    discard: selected,
+  });
+  expect(await app.disconnect(other.id)).toBe(true);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: active,
+    confirmingLeave: false,
+  });
+  expect(selected).not.toHaveBeenCalled();
+  // A draft in an explicit Context may be bound to that Pod: it asks.
+  const explicit = vi.fn();
+  app.register({
+    scope: 'explicit',
+    dirty: () => true,
+    blocked: () => false,
+    discard: explicit,
+  });
+  const forgetting = app.forget(third.id);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  await app.confirmLeave();
+  expect(await forgetting).toBe(true);
+  expect(explicit).toHaveBeenCalledOnce();
+  expect(selected).not.toHaveBeenCalled();
+  expect(app.getSnapshot().activeId).toBe(active);
+  // Signing out of the active connection still asks about the selected view.
+  const leaving = app.disconnect(active!);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  app.cancelLeave();
+  expect(await leaving).toBe(false);
+  expect(selected).not.toHaveBeenCalled();
+});
 it('lets a Context selection pass a pending explicit-scoped creation, which still blocks row navigation', async () => {
   const f = await connected();
   const app = createAppController(f.runtime);

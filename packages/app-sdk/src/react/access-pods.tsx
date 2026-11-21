@@ -15,16 +15,20 @@ import type { Connection } from '../runtime/types.js';
 
 /**
  * One access action at a time, its failure and whether the controls are
- * unavailable (a guarded change, its prompt, startup or storage). The control
- * that started an action gets the focus back once it is enabled again: a
- * disabled control loses the focus in WebKit (the focus fixup rule), which
- * stays on the body otherwise (#332).
+ * unavailable (a guarded change, its prompt, startup or storage). An
+ * unguarded action for one connection (a retry, a catalogue check) passes
+ * that connection as `scope`: it holds only that connection's controls
+ * (`busy`). The control that started an action gets the focus back once it
+ * is enabled again: a disabled control loses the focus in WebKit (the focus
+ * fixup rule), which stays on the body otherwise (#332).
  */
 export function useAccessAction() {
   const state = useAppState();
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
+  const scopedFlight = useRef(new Set<string>());
+  const [scoped, setScoped] = useState<ReadonlySet<string>>(() => new Set());
   const unavailable =
     busy ||
     state.changing ||
@@ -36,20 +40,39 @@ export function useAccessAction() {
   const actionFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const target = actionFocus.current;
-    if (unavailable || !target) return;
+    if (unavailable || !target || target.matches(':disabled')) return;
     actionFocus.current = null;
     // Only a lost focus returns: one the action moved elsewhere stays there.
     const active = target.ownerDocument.activeElement;
     if (target.isConnected && (!active || active === target.ownerDocument.body))
       target.focus();
-  }, [unavailable]);
-  async function act(task: () => Promise<unknown>) {
-    if (inFlight.current || unavailable) return;
+  }, [unavailable, scoped]);
+  async function act(task: () => Promise<unknown>, scope?: string) {
+    if (unavailable) return;
+    if (
+      scope === undefined ? inFlight.current : scopedFlight.current.has(scope)
+    )
+      return;
     const focused = document.activeElement;
     actionFocus.current =
       focused instanceof HTMLElement && focused !== document.body
         ? focused
         : null;
+    if (scope !== undefined) {
+      const running = scopedFlight.current;
+      running.add(scope);
+      setScoped(new Set(running));
+      setFailure(null);
+      try {
+        await task();
+      } catch (cause) {
+        setFailure({ cause });
+      } finally {
+        running.delete(scope);
+        setScoped(new Set(running));
+      }
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     setFailure(null);
@@ -62,7 +85,8 @@ export function useAccessAction() {
       setBusy(false);
     }
   }
-  return { act, unavailable, failure };
+  const holds = (scope: string) => scoped.has(scope);
+  return { act, unavailable, busy: holds, failure };
 }
 
 /** How the app's view uses its Pods; see `AppAccessProps.podView`. */
@@ -72,6 +96,8 @@ interface PodAction {
   readonly key: string;
   readonly label: string;
   readonly run: () => Promise<unknown>;
+  /** Unguarded and for this Pod alone: it holds only this Pod's actions. */
+  readonly own?: boolean;
 }
 
 /**
@@ -112,7 +138,7 @@ export function PodManagement({
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
   const id = useId();
-  const { act, unavailable, failure } = useAccessAction();
+  const { act, unavailable, busy, failure } = useAccessAction();
   const combined = podView === 'combined';
   const connections = state.connections;
   const activeId = state.activeId;
@@ -127,13 +153,21 @@ export function PodManagement({
       (!combined && entry.id === activeId && reads(entry)));
   const [menu, setMenu] = useState<string | null>(null);
   const triggers = useRef(new Map<string, HTMLButtonElement>());
+  const toggles = useRef(new Map<string, HTMLButtonElement>());
   const list = useRef<HTMLDivElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   // A removed Pod's row goes: its focus moves to the list.
   const removing = useRef<string | null>(null);
 
   useLayoutEffect(() => {
-    if (focusAdd) addButton.current?.focus();
+    // Once the last permitted Pod is connected, the button is gone: the Pod
+    // just connected, now selected, takes the focus.
+    if (focusAdd)
+      (
+        addButton.current ??
+        (activeId ? toggles.current.get(activeId) : undefined) ??
+        list.current?.querySelector<HTMLElement>('.sp-pod-toggle')
+      )?.focus();
     // Only on mounting, coming back from connecting another Pod.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -293,6 +327,7 @@ export function PodManagement({
               key: 'retry',
               label: m.controls.retry,
               run: () => app.retryRestore(entry.id),
+              own: true,
             },
             ...use,
             signOut,
@@ -371,6 +406,14 @@ export function PodManagement({
                 onPointerDownCapture={() => {
                   pressing.current = true;
                 }}
+                onKeyDown={(event) => {
+                  // Escape closes open actions, also from their ⋯ button
+                  // (Shift+Tab), not the dialog around them.
+                  if (event.key !== 'Escape' || menu !== entry.id) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeMenu(true);
+                }}
                 onBlur={(event) => {
                   // The keyboard leaves the actions. A press on one moves
                   // the focus away in WebKit (to the dialog), which is not
@@ -387,6 +430,10 @@ export function PodManagement({
               >
                 <button
                   type="button"
+                  ref={(element) => {
+                    if (element) toggles.current.set(entry.id, element);
+                    else toggles.current.delete(entry.id);
+                  }}
                   className="sp-pod-toggle"
                   aria-expanded={open}
                   aria-controls={`${rowId}-details`}
@@ -426,12 +473,11 @@ export function PodManagement({
                     id={`${rowId}-actions`}
                     label={m.podActions?.(name) ?? name}
                     actions={actions}
-                    disabled={unavailable}
-                    onClose={() => closeMenu(true)}
+                    disabled={unavailable || busy(entry.id)}
                     onRun={(action) => {
                       closeMenu(true);
                       if (action.key === 'remove') removing.current = entry.id;
-                      void act(action.run);
+                      void act(action.run, action.own ? entry.id : undefined);
                     }}
                   />
                 )}
@@ -458,7 +504,7 @@ export function PodManagement({
                     podNames={podNames}
                     contextRequired={contextRequired}
                     switching={switching}
-                    unavailable={unavailable}
+                    unavailable={unavailable || busy(entry.id)}
                     act={act}
                   />
                 )}
@@ -485,20 +531,18 @@ export function PodManagement({
   );
 }
 
-/** The actions for one Pod, below its ⋯ button. Escape closes them. */
+/** The actions for one Pod, below its ⋯ button; its row closes them on Escape. */
 function PodMenu({
   id,
   label,
   actions,
   disabled,
-  onClose,
   onRun,
 }: {
   readonly id: string;
   readonly label: string;
   readonly actions: readonly PodAction[];
   readonly disabled: boolean;
-  readonly onClose: () => void;
   readonly onRun: (action: PodAction) => void;
 }) {
   const group = useRef<HTMLDivElement>(null);
@@ -512,13 +556,6 @@ function PodMenu({
       role="group"
       aria-label={label}
       className="sp-pod-menu"
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        // Closes these actions, not the dialog around them.
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }}
     >
       {actions.map((action) => (
         <button
@@ -559,7 +596,7 @@ function PodDetails({
   readonly contextRequired: boolean;
   readonly switching: boolean;
   readonly unavailable: boolean;
-  readonly act: (task: () => Promise<unknown>) => Promise<void>;
+  readonly act: (task: () => Promise<unknown>, scope?: string) => Promise<void>;
 }) {
   const app = useApp();
   const state = useAppState();
@@ -616,6 +653,10 @@ function PodDetails({
   const selectedEntry = active
     ? readable.find((entry) => entry.iri === c.selectedContext)
     : undefined;
+  // A preset's Context is the only one this app uses in its Pod.
+  const fixedEntry = fixedContext
+    ? readable.find((entry) => entry.iri === fixedContext)
+    : undefined;
   // The active Pod's selection, while a Context flow needs one.
   const selecting = active && contextRequired && !fixedContext;
   const named =
@@ -634,9 +675,15 @@ function PodDetails({
       {notice && (c.missingRequiredScopes.length > 0 || !ownStatus) && (
         <AccessNotice />
       )}
-      {active && contextRequired && fixedContext && (
-        <p>
+      {fixedContext && (
+        <p className="sp-access-context">
           {m.dataContext}: {contextLabel(fixedContext)}
+          {fixedEntry && (
+            <>
+              {' · '}
+              {fact(fixedEntry)}
+            </>
+          )}
         </p>
       )}
       {selecting && named ? (
@@ -696,8 +743,8 @@ function PodDetails({
         <p role="status">{m.cataloguePending}</p>
       )}
       {c.catalogue.kind === 'ready' &&
-        !fixedContext &&
-        readable.length === 0 && (
+        // An unreadable preset Context is named by the notice, if shown.
+        (fixedContext ? !fixedEntry && !notice : readable.length === 0) && (
           <p role="status">
             {anonymous && state.signIn !== 'none'
               ? (m.controls.noPublicData ?? m.noContexts)
@@ -710,7 +757,7 @@ function PodDetails({
           <button
             type="button"
             disabled={unavailable}
-            onClick={() => void act(() => app.refreshContexts(c.id))}
+            onClick={() => void act(() => app.refreshContexts(c.id), c.id)}
           >
             {m.controls.checkAccess}
           </button>

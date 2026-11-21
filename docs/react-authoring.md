@@ -1389,7 +1389,10 @@ function AppContent() {
   device**; a signed-out Pod offers **Sign in** and **Remove from this
   device**, an unreachable one **Try again**. Sign-out and removal stay on
   this device; revoking access is the Pod's consent behind **Change
-  sharing**. After a sign-out that could not be saved, **Try again** repeats
+  sharing**. Signing out of or removing a Pod that is not the selected one
+  keeps the selected view's drafts: it asks only about drafts in explicit
+  Contexts (`useApp().disconnect`), and its **Try again** holds only that
+  Pod's row. After a sign-out that could not be saved, **Try again** repeats
   it, and its failure shows in the row.
 - Open, a row shows the Pod's address beside a display name, then its
   readable Contexts with **Read only** or **Can edit**, or that they are

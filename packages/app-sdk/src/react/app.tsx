@@ -83,7 +83,9 @@ export interface AppActions {
    * Pod stays listed as `signed-out` with its address unless the runtime has
    * `rememberPods: false`. `true` means the guarded action ran. If durable
    * sign-out failed, the connection retains an ended session with
-   * `saved: false`; offer a retry.
+   * `saved: false`; offer a retry. Signing out of a connection that is not
+   * the active one asks only about drafts that may be bound to it, not about
+   * the selected view's.
    */
   disconnect(id: string): Promise<boolean>;
   /**

@@ -15,7 +15,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
-import { podAction, podActionNames } from './access-pods.test.js';
+import { podAction, podActionNames } from './pod-actions.test.js';
 import { AppAccess, SempodsProvider } from './index.js';
 import {
   fixture,

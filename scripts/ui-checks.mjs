@@ -1081,6 +1081,21 @@ async function interaction({ browser, origin, engine }) {
         const backOnMore = await more.evaluate(
           (el) => el === document.activeElement,
         );
+        // Back on ⋯ (Shift+Tab where Tab reaches buttons; WebKit on macOS
+        // skips them) the actions stay open; Escape there closes them, not
+        // the dialog.
+        stage = 'escape on more';
+        await page.keyboard.press('Enter');
+        await actions.waitFor();
+        await more.focus();
+        const onMoreOpen = await more.evaluate(
+          (el) =>
+            el === document.activeElement &&
+            el.getAttribute('aria-expanded') === 'true',
+        );
+        await page.keyboard.press('Escape');
+        const closedFromMore = await gone(actions);
+        await settle(page);
         const stillOpen = await sheet.isVisible();
         const add = sheet.getByRole('button', { name: 'Connect another Pod' });
         const offered = (await add.count()) > 0;
@@ -1129,6 +1144,8 @@ async function interaction({ browser, origin, engine }) {
             firstFocused &&
             actionsGone &&
             backOnMore &&
+            onMoreOpen &&
+            closedFromMore &&
             stillOpen &&
             (!step ||
               (step.headingFocused &&
@@ -1143,6 +1160,8 @@ async function interaction({ browser, origin, engine }) {
           names,
           firstFocused,
           backOnMore,
+          onMoreOpen,
+          closedFromMore,
           offered,
           step,
         };

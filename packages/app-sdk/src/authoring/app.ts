@@ -27,6 +27,10 @@ export interface LeaveGuard {
    *   explicit Context that row navigation does not touch; left by connection
    *   actions.
    *
+   * `disconnect` and `forget` of a connection other than the active one keep
+   * the selected view: they leave only `connection` and `explicit` guards,
+   * which may be bound to that Pod.
+   *
    * A pending write (`blocked()`) blocks every change, except that a
    * `connection` or `explicit` guard does not block `selectContext`, which
    * leaves it alone.
@@ -132,10 +136,16 @@ function cannotWork(c: Connection) {
     c.missingRequiredScopes.length > 0
   );
 }
-/** A guarded change: row navigation, a Context selection, or a connection action. */
-type Change = 'navigate' | 'context' | 'connection';
+/**
+ * A guarded change: row navigation, a Context selection, a connection action,
+ * or signing out of (or forgetting) a connection that is not the active one.
+ */
+type Change = 'navigate' | 'context' | 'connection' | 'elsewhere';
 /** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
 function leaves(change: Change, guard: LeaveGuard) {
+  // The selected view stays; an explicit Context may be bound to that Pod.
+  if (change === 'elsewhere')
+    return guard.scope === 'connection' || guard.scope === 'explicit';
   if (change === 'navigate')
     return guard.scope !== 'target' && guard.scope !== 'explicit';
   if (change === 'context')
@@ -926,14 +936,16 @@ export function createAppController(
      * Guarded like `selectConnection`. `true` means the action ran, not that
      * sign-out was saved. On failure the connection's ended session retains
      * `saved: false`; offer a retry. A signed-out active connection gives way
-     * to another one with a session, as a removed one does.
+     * to another one with a session, as a removed one does. Signing out of
+     * another connection keeps the selected view's drafts
+     * (`LeaveGuard.scope`).
      */
     disconnect(id: string) {
-      return guard(disconnecting(id));
+      return guard(disconnecting(id), retiring(id));
     },
     /** Signs out if needed and forgets the Pod; guarded and reported like `disconnect`. */
     forget(id: string) {
-      return guard(forgetting(id));
+      return guard(forgetting(id), retiring(id));
     },
     /**
      * Retires a prompt of `access.prompts` that offers `dismiss`, for this
@@ -985,6 +997,10 @@ export function createAppController(
         ? runtime.beginAuthorization(id)
         : runtime.beginAuthorization(id, { intent });
     };
+  }
+  /** Retiring another connection keeps the selected view (`LeaveGuard.scope`). */
+  function retiring(id: string): Change {
+    return activeId !== null && id !== activeId ? 'elsewhere' : 'connection';
   }
   function disconnecting(id: string) {
     return async () => {

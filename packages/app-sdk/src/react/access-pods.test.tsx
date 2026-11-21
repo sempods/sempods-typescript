@@ -16,51 +16,11 @@ import {
   fixture,
   pod,
   restart,
+  returnedSession,
   twoPods,
+  work,
 } from '../runtime/fixture.test.js';
-
-const actionsName = /^(Actions for|Aktionen für) /;
-
-/**
- * The ⋯ button of a Pod row in management: of the Pod named `pod`, else of
- * the only row that has one.
- */
-export async function podActions(pod?: string) {
-  return waitFor(() => {
-    const all = screen
-      .getAllByRole('button', { name: actionsName })
-      .filter(
-        (button) =>
-          pod === undefined ||
-          button.getAttribute('aria-label')!.replace(actionsName, '') === pod,
-      );
-    expect(all).toHaveLength(1);
-    return all[0]!;
-  });
-}
-
-/**
- * Opens a Pod row's actions (unless open) and returns the one named
- * `action`, for example "Sign out on this device".
- */
-export async function podAction(action: string | RegExp, pod?: string) {
-  const trigger = await podActions(pod);
-  if (trigger.getAttribute('aria-expanded') !== 'true')
-    fireEvent.click(trigger);
-  const menu = document.getElementById(trigger.getAttribute('aria-controls')!)!;
-  return within(menu).getByRole('button', { name: action });
-}
-
-/** The names of a Pod row's actions, opening them. */
-export async function podActionNames(pod?: string) {
-  const trigger = await podActions(pod);
-  if (trigger.getAttribute('aria-expanded') !== 'true')
-    fireEvent.click(trigger);
-  const menu = document.getElementById(trigger.getAttribute('aria-controls')!)!;
-  return within(menu)
-    .getAllByRole('button')
-    .map((button) => button.textContent);
-}
+import { podAction, podActionNames, podActions } from './pod-actions.test.js';
 
 // Pods & sharing management grouped by Pod (#386): one row per Pod, its
 // actions behind its own button, and connecting another Pod as a step.
@@ -219,6 +179,17 @@ it('closes a Pod’s actions with Escape, not the dialog, and returns the focus'
   ).toBeNull();
   expect(trigger.getAttribute('aria-expanded')).toBe('false');
   expect(document.activeElement).toBe(trigger);
+  // Shift+Tab back to ⋯ keeps them open; Escape there closes only them.
+  fireEvent.click(trigger);
+  const first = within(
+    screen.getByRole('group', { name: 'Actions for pod.example/alice' }),
+  ).getAllByRole('button')[0]!;
+  fireEvent.blur(first, { relatedTarget: trigger });
+  trigger.focus();
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(fireEvent.keyDown(trigger, { key: 'Escape' })).toBe(false);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(trigger);
   expect(onClose).not.toHaveBeenCalled();
 });
 
@@ -300,6 +271,56 @@ it.each(['en', 'de'] as const)(
   },
 );
 
+it.each(['required', 'on-demand'] as const)(
+  'shows a preset’s fixed Context with what the app may do there (%s)',
+  async (contextSelection) => {
+    const f = await returnedSession(
+      (r) => cleanups.push(() => r.dispose()),
+      fixture({ preferences: null, preset: { podUrl: pod, contextIri: work } }),
+    );
+    render(
+      <SempodsProvider runtime={f.runtime} contextSelection={contextSelection}>
+        <AppAccess appName="Tasks" open onClose={() => {}} />
+      </SempodsProvider>,
+    );
+    await screen.findByRole('dialog', { name: 'Pods & sharing' });
+    const alice = await screen.findByRole('group', {
+      name: 'pod.example/alice',
+    });
+    const fixed = await within(alice).findByText(/^Data context: /);
+    await waitFor(() =>
+      expect(fixed.textContent).toBe('Data context: work · Can edit'),
+    );
+    expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
+  },
+);
+
+it('focuses the Pod just opened once no other permitted Pod is left to connect', async () => {
+  const f = fixture({ signIn: 'optional', allowedPods: [pod, bob] });
+  const { runtime } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  const dialog = await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  fireEvent.click(
+    within(dialog).getByRole('button', { name: 'Connect another Pod' }),
+  );
+  // Bob's Pod opens without a redirect: back in the list, nothing to add.
+  await act(async () =>
+    within(dialog).getByRole('button', { name: 'Open' }).click(),
+  );
+  const bobs = await within(dialog).findByRole('group', {
+    name: 'pod.example/bob',
+  });
+  expect(
+    within(dialog).queryByRole('button', { name: 'Connect another Pod' }),
+  ).toBeNull();
+  expect(document.activeElement).toBe(toggle(bobs));
+});
+
 it('tells Pods with the same name apart and names each one’s actions', async () => {
   const { runtime } = await alicesAndBobs();
   render(
@@ -357,9 +378,26 @@ it('marks an unreachable Pod and offers its retry while the other Pod stays usab
   expect(await podActionNames('pod.example/alice')).toContain(
     'Sign out on this device',
   );
-  f.fetch.mockImplementation(original);
+  // While Bob's Pod is asked again, only Bob's actions wait.
+  let answer = () => {};
+  const reached = new Promise<void>((resolve) => (answer = resolve));
+  f.fetch.mockImplementation(async (url, init) => {
+    if (url.startsWith(bob + '/.well-known')) await reached;
+    return original(url, init);
+  });
   const retry = await podAction('Try again', 'pod.example/bob');
   await act(async () => retry.click());
+  expect(
+    (
+      await podAction('Sign out on this device', 'pod.example/bob')
+    ).hasAttribute('disabled'),
+  ).toBe(true);
+  expect(
+    (await podAction('Change sharing', 'pod.example/alice')).hasAttribute(
+      'disabled',
+    ),
+  ).toBe(false);
+  await act(async () => answer());
   await waitFor(() =>
     expect(
       next.getSnapshot().find((entry) => entry.podUrl === bob)?.session.kind,
