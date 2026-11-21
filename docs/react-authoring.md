@@ -1670,7 +1670,10 @@ export function Shell() {
   shown through `hidden`, its styles or a class: the stack waits under it
   and keeps the renderer mounted, and that notice drawn, so the dialog stays
   open, also when another notice would take its place. Escape in the dialog
-  belongs to it and never dismisses the notice.
+  belongs to it and never dismisses the notice. A new event under the same
+  key mounts the renderer anew, so a question still open about the event
+  before closes instead of answering the new one; focus inside it returns as
+  when the notice goes.
 
 Choose the place by what the person has to do:
 

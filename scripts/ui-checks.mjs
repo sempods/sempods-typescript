@@ -6870,8 +6870,9 @@ async function ghost({ browser, origin, engine }) {
  * notice published under it waits instead of expiring, and so does an ARIA
  * dialog mounted there already modal or kept mounted in a list of the
  * renderer's own and shown through `hidden`; Escape in any of them closes it, not
- * its notice; with `limit={1}` a warning that takes the slot waits for the
- * open confirmation;
+ * its notice, and a new event under the same key closes it, so Confirm
+ * answers only the event it was opened for; with `limit={1}` a warning that
+ * takes the slot waits for the open confirmation;
  * Escape dismisses the focused notice; reduced motion; beside AppAccess's
  * own prompt stack (`accessPrompts={false}`) above it, so Sign in takes the
  * press; inside a zoomed visual viewport, also its sides and above a
@@ -7184,6 +7185,50 @@ async function notices({ browser, origin, engine }) {
         return {
           pass: Object.values(runs).every(
             (run) => run.closed && run.kept && run.restored === 0,
+          ),
+          runs,
+        };
+      }),
+    );
+    // A confirmation answers the event it asked about: a new event under the
+    // same key closes it, and Confirm then answers the new one.
+    results.push(
+      await attemptOn(errors, 'notices-renderer-new-event', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        const runs = {};
+        for (const confirm of ['portal', 'inline', 'kept']) {
+          await page.goto(origin + `/?screen=notices&confirm=${confirm}`);
+          await page.waitForFunction(() => window.noticesGate);
+          await call('undo');
+          const restore = toast.getByRole('button', { name: 'Restore' });
+          await restore.click();
+          const dialog = page.getByRole('dialog', { name: 'Restore?' });
+          await dialog.waitFor();
+          await call('undo', undefined, 'Bread');
+          const closed = await hidden(dialog);
+          const replaced = await shown(
+            toast.filter({ hasText: 'Bread deleted.' }),
+            2000,
+          );
+          // A question still open about Milk would answer Bread.
+          if (!closed) {
+            runs[confirm] = { closed, replaced };
+            continue;
+          }
+          const before = await page.evaluate(() => window.restoredItems ?? []);
+          await restore.click();
+          await dialog.getByRole('button', { name: 'Confirm' }).click();
+          await hidden(dialog);
+          const after = await page.evaluate(() => window.restoredItems ?? []);
+          runs[confirm] = { closed, replaced, before, after };
+        }
+        return {
+          pass: Object.values(runs).every(
+            (run) =>
+              run.closed &&
+              run.replaced &&
+              run.before.length === 0 &&
+              run.after.join() === 'Bread',
           ),
           runs,
         };

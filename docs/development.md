@@ -283,8 +283,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     (`&confirm=aria`) or one kept mounted in the renderer's own list and shown
     through `hidden` (`&confirm=kept`), a brief notice published under it
     waits instead of expiring; Escape in any of these confirmations closes
-    it, not its notice; with `&limit=1` a warning that takes the slot waits
-    for the open confirmation; Escape dismisses the focused notice and
+    it, not its notice, and a new event under the same key closes it, so
+    only a question asked anew answers that event; with `&limit=1` a warning
+    that takes the slot waits for the open confirmation; Escape dismisses the focused notice and
     returns the focus to the host's `focusTarget`; reduced motion stops its
     entrance; beside `AppAccess`'s own prompt stack
     (`accessPrompts={false}`, `&beside`) it stays above that stack, so a press

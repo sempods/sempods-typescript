@@ -997,7 +997,8 @@ function NoticeItem({
     const timer = setTimeout(() => expire.current?.(), duration);
     return () => clearTimeout(timer);
   }, [suspended, duration, held.hover, held.focus, renewed, event, expire]);
-  // Focus returns from a notice that goes while it holds focus.
+  // Focus returns from a notice that goes while it holds focus, and from
+  // its renderer that a new event replaces.
   const focus = useFocusHold();
   const previous = useRef<HTMLElement | null>(null);
   const target = useCommitted(focusTarget);
@@ -1006,9 +1007,11 @@ function NoticeItem({
       focus.held.current ? (target.current?.current ?? previous.current) : null;
     return () => {
       const next = returnTo();
+      focus.held.current = false;
+      setHeld((h) => (h.focus ? { ...h, focus: false } : h));
       if (next?.isConnected) returnFocusAfterCommit(next);
     };
-  }, [focus.held, target]);
+  }, [focus.held, target, event]);
   return (
     <li
       ref={attach}
@@ -1043,7 +1046,10 @@ function NoticeItem({
         }
       }}
     >
-      <Notice notice={view} />
+      {/* Each event mounts its renderer anew: a question it still asks
+          about the event before, such as an open confirmation, closes
+          instead of answering this one. */}
+      <Notice key={event} notice={view} />
     </li>
   );
 }

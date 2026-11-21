@@ -1831,7 +1831,7 @@ it('waits under a modal a renderer opened inline, keeping that notice drawn', as
   expect(undo).toHaveBeenCalledTimes(1);
   // The undo notice settles with its dialog; the brief one shows, timed.
   await waitFor(() => expect(texts()).toEqual(['Saved.']));
-  expect(running(timers)).toHaveLength(1);
+  await waitFor(() => expect(running(timers)).toHaveLength(1));
   await waitFor(() => expect(announced()).toEqual(['Deleted.', 'Saved.']));
 });
 
@@ -1994,7 +1994,7 @@ it('waits under an inline dialog its renderer mounts already modal', async () =>
   );
   expect(undo).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(texts()).toEqual(['Saved.']));
-  expect(running(timers)).toHaveLength(1);
+  await waitFor(() => expect(running(timers)).toHaveLength(1));
 });
 
 it.each([
@@ -2032,9 +2032,69 @@ it.each([
     await act(async () => within(dialog).getByRole('button').click());
     expect(undo).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(saved()).toHaveLength(1));
-    expect(running(timers)).toHaveLength(1);
+    await waitFor(() => expect(running(timers)).toHaveLength(1));
   },
 );
+
+it.each(['portal', 'inline', 'kept'] as const)(
+  'closes a %s confirmation when a new event replaces its notice, so it answers neither',
+  async (where) => {
+    const runtime = await signedIn();
+    const milk = vi.fn(async () => {});
+    const bread = vi.fn(async () => {});
+    render(
+      <SempodsProvider runtime={runtime}>
+        <Notices components={{ Notice: confirming(where) }} />
+        <Publisher />
+      </SempodsProvider>,
+    );
+    const deleted = (text: string, run: () => Promise<void>) =>
+      act(() =>
+        actions.show({
+          key: 'undo-last-delete',
+          text,
+          action: { label: 'Restore', run },
+        }),
+      );
+    deleted('Milk deleted.', milk);
+    act(() => screen.getByRole('button', { name: 'Restore' }).click());
+    expect(screen.getByRole('dialog', { name: 'Restore?' })).toBeTruthy();
+    deleted('Bread deleted.', bread);
+    // The question was about Milk: it closes, the notice stays in place.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(host().querySelectorAll(':scope > ul > li')).toHaveLength(1);
+    expect(milk).not.toHaveBeenCalled();
+    expect(bread).not.toHaveBeenCalled();
+    // Asked again, it answers Bread.
+    act(() => screen.getByRole('button', { name: 'Restore' }).click());
+    await act(async () =>
+      within(screen.getByRole('dialog', { name: 'Restore?' }))
+        .getByRole('button')
+        .click(),
+    );
+    expect(milk).not.toHaveBeenCalled();
+    expect(bread).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('returns the focus from a renderer that a new event replaces, and resumes its timer', async () => {
+  const runtime = await signedIn();
+  const timers = briefTimers();
+  render(
+    <App runtime={runtime}>
+      <button>Back</button>
+    </App>,
+  );
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  const back = screen.getByRole('button', { name: 'Back' });
+  act(() => back.focus());
+  act(() => screen.getByRole('button', { name: 'OK' }).focus());
+  expect(running(timers)).toEqual([]);
+  act(() => actions.show({ key: 'saved', text: 'Saved again.' }));
+  expect(texts()).toEqual(['Saved again.OK']);
+  await waitFor(() => expect(document.activeElement).toBe(back));
+  await waitFor(() => expect(running(timers)).toHaveLength(1));
+});
 
 it('keeps no announcement history of superseded events under a long-lived key', async () => {
   const runtime = await signedIn();

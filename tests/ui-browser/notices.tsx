@@ -216,17 +216,24 @@ export function NoticesGate({
         fail: (pod: string) =>
           setFailures((f) => ({ ...f, [pod]: (f[pod] ?? 0) + 1 })),
         recover: (pod: string) => setFailures((f) => ({ ...f, [pod]: 0 })),
-        /** An undo notice whose action counts its runs in `restored`. */
-        undo: (duration?: number) =>
+        /**
+         * An undo notice for `item` whose action counts its runs in
+         * `restored` and lists what it restored in `restoredItems`.
+         */
+        undo: (duration?: number, item = 'Milk') =>
           show({
             key: 'undo',
-            text: 'Milk deleted.',
+            text: `${item} deleted.`,
             ...(duration ? { duration } : {}),
             action: {
               label: 'Restore',
               run: () => {
-                const w = window as unknown as { restored?: number };
+                const w = window as unknown as {
+                  restored?: number;
+                  restoredItems?: string[];
+                };
                 w.restored = (w.restored ?? 0) + 1;
+                w.restoredItems = [...(w.restoredItems ?? []), item];
               },
             },
           }),
