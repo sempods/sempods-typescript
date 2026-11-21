@@ -1835,6 +1835,149 @@ it('waits under a modal a renderer opened inline, keeping that notice drawn', as
   await waitFor(() => expect(announced()).toEqual(['Deleted.', 'Saved.']));
 });
 
+/** A renderer that confirms its action in a dialog: a portal or inline. */
+function confirming(where: 'portal' | 'inline' | 'aria') {
+  return function Confirming({ notice }: NoticeProps) {
+    const [asking, setAsking] = useState(false);
+    const action = notice.actions[0];
+    const confirm = (
+      <button
+        onClick={() => {
+          setAsking(false);
+          action?.run();
+        }}
+      >
+        Confirm
+      </button>
+    );
+    const dialog =
+      where === 'inline' ? (
+        <dialog open aria-label="Restore?">
+          {confirm}
+        </dialog>
+      ) : (
+        <div role="dialog" aria-modal="true" aria-label="Restore?">
+          {confirm}
+        </div>
+      );
+    return (
+      <>
+        <p>{notice.text}</p>
+        {action && (
+          <button onClick={() => setAsking(true)}>{action.label}</button>
+        )}
+        {action &&
+          asking &&
+          (where === 'portal' ? createPortal(dialog, document.body) : dialog)}
+      </>
+    );
+  };
+}
+
+it.each(['portal', 'inline'] as const)(
+  'lets Escape in a %s confirmation close it, not the notice',
+  async (where) => {
+    const runtime = await signedIn();
+    const undo = vi.fn(async () => {});
+    render(
+      <SempodsProvider runtime={runtime}>
+        <Notices components={{ Notice: confirming(where) }} />
+        <Publisher />
+      </SempodsProvider>,
+    );
+    act(() =>
+      actions.show({
+        key: 'undo',
+        text: 'Deleted.',
+        action: { label: 'Restore', run: undo },
+      }),
+    );
+    act(() => screen.getByRole('button', { name: 'Restore' }).click());
+    const confirm = within(
+      screen.getByRole('dialog', { name: 'Restore?' }),
+    ).getByRole('button');
+    await act(async () => fireEvent.keyDown(confirm, { key: 'Escape' }));
+    expect(host().querySelectorAll('li')).toHaveLength(1);
+    expect(undo).not.toHaveBeenCalled();
+    // Escape on the notice itself still dismisses it.
+    const restore = screen.getByRole('button', { name: 'Restore' });
+    await act(async () => fireEvent.keyDown(restore, { key: 'Escape' }));
+    expect(host().querySelectorAll('li')).toHaveLength(0);
+    expect(undo).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['portal', 'inline'] as const)(
+  'keeps a %s confirmation mounted when another notice takes its slot',
+  async (where) => {
+    const runtime = await signedIn();
+    const undo = vi.fn(async () => {});
+    render(
+      <SempodsProvider runtime={runtime}>
+        <Notices limit={1} components={{ Notice: confirming(where) }} />
+        <Publisher />
+      </SempodsProvider>,
+    );
+    act(() =>
+      actions.show({
+        key: 'undo',
+        text: 'Deleted.',
+        duration: 60000,
+        action: { label: 'Restore', run: undo },
+      }),
+    );
+    act(() => screen.getByRole('button', { name: 'Restore' }).click());
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: 'Restore?' })).toBeTruthy(),
+    );
+    await act(async () => new Promise((done) => setTimeout(done, 50)));
+    // A sticky warning outranks the timed notice, yet waits for its dialog.
+    act(() =>
+      actions.show({ key: 'offline', severity: 'warning', text: 'Offline.' }),
+    );
+    await act(async () => new Promise((done) => setTimeout(done, 50)));
+    const dialog = screen.getByRole('dialog', { name: 'Restore?' });
+    await act(async () => within(dialog).getByRole('button').click());
+    expect(undo).toHaveBeenCalledTimes(1);
+    // The order applies once the dialog closes: the warning takes the slot.
+    await waitFor(() => expect(texts()).toEqual(['Offline.']));
+  },
+);
+
+it('waits under an inline dialog its renderer mounts already modal', async () => {
+  const runtime = await signedIn();
+  const timers = briefTimers();
+  const undo = vi.fn(async () => {});
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: confirming('aria') }} />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  act(() =>
+    actions.show({
+      key: 'undo',
+      text: 'Deleted.',
+      action: { label: 'Restore', run: undo },
+    }),
+  );
+  act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+  // The brief notice counts down before the dialog mounts.
+  await waitFor(() => expect(running(timers)).toHaveLength(1));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  act(() => screen.getByRole('button', { name: 'Restore' }).click());
+  await waitFor(() => expect(texts()).toEqual(['Deleted.RestoreConfirm']));
+  expect(running(timers)).toEqual([]);
+  await act(async () =>
+    within(screen.getByRole('dialog', { name: 'Restore?' }))
+      .getByRole('button')
+      .click(),
+  );
+  expect(undo).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(texts()).toEqual(['Saved.']));
+  expect(running(timers)).toHaveLength(1);
+});
+
 it('keeps no announcement history of superseded events under a long-lived key', async () => {
   const runtime = await signedIn();
   let store!: ReturnType<typeof useNoticeStore>;

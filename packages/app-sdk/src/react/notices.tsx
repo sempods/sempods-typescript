@@ -241,6 +241,29 @@ function visible(entries: readonly Entry[], limit: number) {
   return entries.filter((entry) => shown.has(entry));
 }
 
+const none: readonly Entry[] = [];
+
+/**
+ * The notices a host draws, up to its limit. While a modal covers them,
+ * those drawn when it opened stay mounted beside the new ones, so a notice
+ * that takes a slot never unmounts a renderer's open confirmation; the order
+ * applies once the modal closes.
+ */
+function useDrawn(
+  entries: readonly Entry[],
+  limit: number,
+  suspended: boolean,
+) {
+  const shown = useMemo(() => visible(entries, limit), [entries, limit]);
+  const [held, setHeld] = useState(shown);
+  if (!suspended && held !== shown) setHeld(shown);
+  return useMemo(() => {
+    if (!suspended || held === shown) return shown;
+    const kept = new Set([...held, ...shown].map((entry) => entry.id));
+    return entries.filter((entry) => kept.has(entry.id));
+  }, [suspended, held, shown, entries]);
+}
+
 function appEntries(records: readonly NoticeRecord[]): Entry[] {
   return records
     .filter((record) => !record.dismissed)
@@ -515,12 +538,19 @@ function usePageCover(
       const candidates = records.some(styled)
         ? [...document.querySelectorAll(watched)]
         : [];
+      // A modal a renderer mounts or unmounts, already marked modal.
+      const holdsModal = (node: Node) =>
+        node.nodeType === Node.ELEMENT_NODE &&
+        ((node as Element).matches(modalCandidates) ||
+          (node as Element).querySelector(modalCandidates) !== null);
       const counts = (record: MutationRecord) =>
         // Changes inside the stack cover nothing and move no zone, except a
-        // renderer's own modal that opens or closes there; one on its root,
-        // such as `aria-hidden` from an overlay library, does.
+        // renderer's own modal that opens, closes, mounts or unmounts there;
+        // one on its root, such as `aria-hidden` from an overlay library,
+        // does.
         (record.attributeName === 'open' ||
           record.attributeName === 'aria-modal' ||
+          [...record.addedNodes, ...record.removedNodes].some(holdsModal) ||
           !(
             element &&
             element !== record.target &&
@@ -735,7 +765,7 @@ export function Notices(props: NoticesProps) {
     'page',
     first && !gated && entries.length > 0,
   );
-  const shown = !first || gated ? [] : visible(entries, limit);
+  const shown = useDrawn(!first || gated ? none : entries, limit, cover.modal);
   return (
     <div
       ref={root}
@@ -780,7 +810,7 @@ function GateStack({ host }: { readonly host: Host }) {
   // A dialog above the gate, such as the app's settings, makes the stack
   // wait: its notices time out and are announced once it closes.
   const cover = usePageCover(root, 'gate', entries.length > 0);
-  const shown = visible(entries, host.limit);
+  const shown = useDrawn(entries, host.limit, cover.modal);
   // Room at the gate's end, so the stack never covers its last control.
   useLayoutEffect(() => {
     const element = root.current;
@@ -995,7 +1025,13 @@ function NoticeItem({
           setHeld((h) => ({ ...h, focus: false }));
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Escape' && view.dismiss) {
+        // A dialog the renderer opened, in a portal or inside the notice,
+        // handles its own Escape: it closes the dialog, not the notice.
+        if (
+          event.key === 'Escape' &&
+          view.dismiss &&
+          !inRendererDialog(event.currentTarget, event.target)
+        ) {
           event.stopPropagation();
           view.dismiss();
         }
@@ -1004,6 +1040,18 @@ function NoticeItem({
       <Notice notice={view} />
     </li>
   );
+}
+
+/** Whether a key event on a notice comes from a dialog its renderer opened. */
+function inRendererDialog(item: HTMLElement, target: EventTarget) {
+  // React events bubble from a portal, which lies outside the notice.
+  if (!(target instanceof Node) || !item.contains(target)) return true;
+  const from = target instanceof Element ? target : target.parentElement;
+  const dialog = from?.closest(
+    'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]',
+  );
+  // The gate around the stack is a dialog too.
+  return Boolean(dialog && item.contains(dialog));
 }
 
 /**

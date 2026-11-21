@@ -6867,7 +6867,10 @@ async function ghost({ browser, origin, engine }) {
  * a replacement renderer's own confirmation in a portal stays open while
  * the stack waits under it, and confirming runs the action once; one in a
  * native dialog inside the notice keeps that notice drawn while a brief
- * notice published under it waits instead of expiring;
+ * notice published under it waits instead of expiring, and so does an ARIA
+ * dialog mounted there already modal; Escape in any of them closes it, not
+ * its notice; with `limit={1}` a warning that takes the slot waits for the
+ * open confirmation;
  * Escape dismisses the focused notice; reduced motion; beside AppAccess's
  * own prompt stack (`accessPrompts={false}`) above it, so Sign in takes the
  * press; inside a zoomed visual viewport, also its sides and above a
@@ -7149,6 +7152,107 @@ async function notices({ browser, origin, engine }) {
             back &&
             restored === 1,
           open,
+          during: during.items.map((i) => i.text),
+          closed,
+          back,
+          restored,
+        };
+      }),
+    );
+    // Escape inside a renderer's confirmation closes it, not its notice.
+    results.push(
+      await attemptOn(errors, 'notices-renderer-escape', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        const runs = {};
+        for (const confirm of ['portal', 'inline', 'aria']) {
+          await page.goto(origin + `/?screen=notices&confirm=${confirm}`);
+          await page.waitForFunction(() => window.noticesGate);
+          await call('undo');
+          const restore = toast.getByRole('button', { name: 'Restore' });
+          await restore.click();
+          const dialog = page.getByRole('dialog', { name: 'Restore?' });
+          await dialog.waitFor();
+          await dialog.getByRole('button', { name: 'Confirm' }).focus();
+          await page.keyboard.press('Escape');
+          const closed = await hidden(dialog);
+          await page.waitForTimeout(200);
+          const kept = await restore.isVisible();
+          const restored = await page.evaluate(() => window.restored ?? 0);
+          runs[confirm] = { closed, kept, restored };
+        }
+        return {
+          pass: Object.values(runs).every(
+            (run) => run.closed && run.kept && run.restored === 0,
+          ),
+          runs,
+        };
+      }),
+    );
+    // A notice that takes the only slot waits for the open confirmation.
+    results.push(
+      await attemptOn(errors, 'notices-renderer-keeps-slot', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        const runs = {};
+        for (const confirm of ['portal', 'inline']) {
+          await page.goto(
+            origin + `/?screen=notices&confirm=${confirm}&limit=1`,
+          );
+          await page.waitForFunction(() => window.noticesGate);
+          await call('undo', 60000);
+          await toast.getByRole('button', { name: 'Restore' }).click();
+          const dialog = page.getByRole('dialog', { name: 'Restore?' });
+          await dialog.waitFor();
+          await page.waitForTimeout(400);
+          const warning = 'Offline.';
+          await call('show', {
+            key: 'offline',
+            severity: 'warning',
+            text: warning,
+          });
+          await page.waitForTimeout(400);
+          const open = await dialog.isVisible();
+          if (open)
+            await dialog.getByRole('button', { name: 'Confirm' }).click();
+          const restored = await page.evaluate(() => window.restored ?? 0);
+          const after = await shown(toast.filter({ hasText: warning }), 2000);
+          runs[confirm] = { open, restored, after };
+        }
+        return {
+          pass: Object.values(runs).every(
+            (run) => run.open && run.restored === 1 && run.after,
+          ),
+          runs,
+        };
+      }),
+    );
+    // An ARIA dialog mounted already modal inside a notice hides the others.
+    results.push(
+      await attemptOn(errors, 'notices-renderer-aria-dialog', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices&confirm=aria');
+        await page.waitForFunction(() => window.noticesGate);
+        await call('undo');
+        // A brief notice that counts down before the dialog mounts.
+        const brief = 'Saved.';
+        await call('show', { key: 'saved', text: brief, duration: 1500 });
+        await toast.filter({ hasText: brief }).waitFor();
+        await page.waitForTimeout(300);
+        await toast.getByRole('button', { name: 'Restore' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Restore?' });
+        await dialog.waitFor();
+        await page.waitForTimeout(1700);
+        const during = await measure();
+        await dialog.getByRole('button', { name: 'Confirm' }).click();
+        const closed = await hidden(dialog);
+        const back = await shown(toast.filter({ hasText: brief }), 2000);
+        const restored = await page.evaluate(() => window.restored ?? 0);
+        return {
+          pass:
+            during.items.length === 1 &&
+            !during.items[0].text.includes(brief) &&
+            closed &&
+            back &&
+            restored === 1,
           during: during.items.map((i) => i.text),
           closed,
           back,

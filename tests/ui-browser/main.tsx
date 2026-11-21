@@ -432,11 +432,13 @@ function App() {
           beside={noticesBeside}
           confirm={
             settings.has('confirm')
-              ? settings.get('confirm') === 'inline'
-                ? 'inline'
+              ? settings.get('confirm') === 'inline' ||
+                settings.get('confirm') === 'aria'
+                ? (settings.get('confirm') as 'inline' | 'aria')
                 : 'portal'
               : null
           }
+          limit={Number(settings.get('limit')) || undefined}
         />
       ) : dateChoice ? (
         <DateChoiceGate />

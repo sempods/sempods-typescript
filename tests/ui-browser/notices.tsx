@@ -57,10 +57,52 @@ function UpdateNotice({ ready }: { readonly ready: boolean }) {
 /**
  * A replacement renderer that asks before it runs the action, in its own
  * modal dialog in a portal: the stack waits under it, its owner stays.
+ * Escape closes the question, not the notice.
  */
 function ConfirmingNotice({ notice }: NoticeProps) {
+  return <AskingNotice notice={notice} portal />;
+}
+
+/**
+ * The same question in an ARIA dialog the renderer mounts inside the notice,
+ * already marked modal.
+ */
+function AriaConfirmingNotice({ notice }: NoticeProps) {
+  return <AskingNotice notice={notice} portal={false} />;
+}
+
+function AskingNotice({
+  notice,
+  portal,
+}: NoticeProps & { readonly portal: boolean }) {
   const [asking, setAsking] = useState(false);
   const action = notice.actions[0];
+  const dialog = action && (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${action.label}?`}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') setAsking(false);
+      }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'rgb(0 0 0 / 0.4)',
+      }}
+    >
+      <Button
+        onPress={() => {
+          setAsking(false);
+          action.run();
+        }}
+      >
+        Confirm
+      </Button>
+    </div>
+  );
   return (
     <div className="notices-confirming">
       <p>{notice.text}</p>
@@ -69,32 +111,7 @@ function ConfirmingNotice({ notice }: NoticeProps) {
           {action.label}
         </Button>
       )}
-      {action &&
-        asking &&
-        createPortal(
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${action.label}?`}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              display: 'grid',
-              placeItems: 'center',
-              background: 'rgb(0 0 0 / 0.4)',
-            }}
-          >
-            <Button
-              onPress={() => {
-                setAsking(false);
-                action.run();
-              }}
-            >
-              Confirm
-            </Button>
-          </div>,
-          document.body,
-        )}
+      {asking && (portal ? createPortal(dialog, document.body) : dialog)}
     </div>
   );
 }
@@ -151,17 +168,21 @@ const items = [
  * `gate`, `AppAccess` shows its sign-in gate, before sign-in; with `beside`,
  * `AppAccess` keeps its own prompt stack beside the host; with `confirm`, a
  * replacement renderer confirms an action in its own portal dialog, with
- * `confirm=inline` in a native dialog inside the notice. The
+ * `confirm=inline` in a native dialog inside the notice and with
+ * `confirm=aria` in an ARIA dialog it mounts there; `limit` is the host's.
+ * The
  * checks publish through `window.noticesGate`, as the app's own code would.
  */
 export function NoticesGate({
   gate,
   beside,
   confirm,
+  limit,
 }: {
   readonly gate: boolean;
   readonly beside: boolean;
-  readonly confirm: 'portal' | 'inline' | null;
+  readonly confirm: 'portal' | 'inline' | 'aria' | null;
+  readonly limit: number | undefined;
 }) {
   const { show, dismiss } = useNotices();
   const [ready, setReady] = useState(false);
@@ -179,10 +200,11 @@ export function NoticesGate({
           setFailures((f) => ({ ...f, [pod]: (f[pod] ?? 0) + 1 })),
         recover: (pod: string) => setFailures((f) => ({ ...f, [pod]: 0 })),
         /** An undo notice whose action counts its runs in `restored`. */
-        undo: () =>
+        undo: (duration?: number) =>
           show({
             key: 'undo',
             text: 'Milk deleted.',
+            ...(duration ? { duration } : {}),
             action: {
               label: 'Restore',
               run: () => {
@@ -200,13 +222,16 @@ export function NoticesGate({
       <Notices
         focusTarget={edit}
         accessPrompts={!beside}
+        limit={limit}
         components={
           confirm
             ? {
                 Notice:
                   confirm === 'inline'
                     ? InlineConfirmingNotice
-                    : ConfirmingNotice,
+                    : confirm === 'aria'
+                      ? AriaConfirmingNotice
+                      : ConfirmingNotice,
               }
             : undefined
         }
