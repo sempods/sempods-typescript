@@ -446,7 +446,10 @@ function usePageCover(
       const inner = [...element.querySelectorAll(modalCandidates)].find(
         isModal,
       );
-      const owner = inner?.closest('li') ?? null;
+      // The host's own item, also around a list inside the renderer.
+      const list = element.querySelector(':scope > ul');
+      let owner: Element | null = list ? (inner ?? null) : null;
+      while (owner && owner.parentElement !== list) owner = owner.parentElement;
       const modal = Boolean(inner) || isCovered(element, layer);
       const height = view.innerHeight;
       // A pinch zoom, or a keyboard that resizes only the visual viewport
@@ -545,12 +548,15 @@ function usePageCover(
           (node as Element).querySelector(modalCandidates) !== null);
       const counts = (record: MutationRecord) =>
         // Changes inside the stack cover nothing and move no zone, except a
-        // renderer's own modal that opens, closes, mounts or unmounts there;
-        // one on its root, such as `aria-hidden` from an overlay library,
-        // does.
+        // renderer's own modal that opens, closes, mounts or unmounts there,
+        // also one kept mounted that shows or hides through `hidden`, its
+        // styles or a class, on it or around it; one on its root, such as
+        // `aria-hidden` from an overlay library, does.
         (record.attributeName === 'open' ||
           record.attributeName === 'aria-modal' ||
           [...record.addedNodes, ...record.removedNodes].some(holdsModal) ||
+          ((record.attributeName === 'hidden' || styled(record)) &&
+            holdsModal(record.target)) ||
           !(
             element &&
             element !== record.target &&

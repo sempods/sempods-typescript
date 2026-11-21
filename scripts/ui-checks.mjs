@@ -6868,7 +6868,8 @@ async function ghost({ browser, origin, engine }) {
  * the stack waits under it, and confirming runs the action once; one in a
  * native dialog inside the notice keeps that notice drawn while a brief
  * notice published under it waits instead of expiring, and so does an ARIA
- * dialog mounted there already modal; Escape in any of them closes it, not
+ * dialog mounted there already modal or kept mounted in a list of the
+ * renderer's own and shown through `hidden`; Escape in any of them closes it, not
  * its notice; with `limit={1}` a warning that takes the slot waits for the
  * open confirmation;
  * Escape dismisses the focused notice; reduced motion; beside AppAccess's
@@ -6890,7 +6891,7 @@ async function notices({ browser, origin, engine }) {
       [name, args],
     );
   const toast = page.locator(
-    '[data-sempods-ui="notices"]:not([data-placement]) li',
+    '[data-sempods-ui="notices"]:not([data-placement]) > ul > li',
   );
   /** What the page shows: rows, composer, stack and live regions. */
   const measure = () =>
@@ -6904,9 +6905,9 @@ async function notices({ browser, origin, engine }) {
         '[data-sempods-ui="notices"]:not([data-placement])',
       );
       // A covered stack keeps its notices mounted, hidden.
-      const items = [...(host?.querySelectorAll('li') ?? [])].filter(
-        (li) => !li.closest('[hidden]'),
-      );
+      const items = [
+        ...(host?.querySelectorAll(':scope > ul > li') ?? []),
+      ].filter((li) => !li.closest('[hidden]'));
       const live = (role) =>
         [
           ...document.querySelectorAll(
@@ -7225,41 +7226,48 @@ async function notices({ browser, origin, engine }) {
         };
       }),
     );
-    // An ARIA dialog mounted already modal inside a notice hides the others.
-    results.push(
-      await attemptOn(errors, 'notices-renderer-aria-dialog', async () => {
-        await page.setViewportSize({ width: 375, height: 812 });
-        await page.goto(origin + '/?screen=notices&confirm=aria');
-        await page.waitForFunction(() => window.noticesGate);
-        await call('undo');
-        // A brief notice that counts down before the dialog mounts.
-        const brief = 'Saved.';
-        await call('show', { key: 'saved', text: brief, duration: 1500 });
-        await toast.filter({ hasText: brief }).waitFor();
-        await page.waitForTimeout(300);
-        await toast.getByRole('button', { name: 'Restore' }).click();
-        const dialog = page.getByRole('dialog', { name: 'Restore?' });
-        await dialog.waitFor();
-        await page.waitForTimeout(1700);
-        const during = await measure();
-        await dialog.getByRole('button', { name: 'Confirm' }).click();
-        const closed = await hidden(dialog);
-        const back = await shown(toast.filter({ hasText: brief }), 2000);
-        const restored = await page.evaluate(() => window.restored ?? 0);
-        return {
-          pass:
-            during.items.length === 1 &&
-            !during.items[0].text.includes(brief) &&
-            closed &&
-            back &&
-            restored === 1,
-          during: during.items.map((i) => i.text),
-          closed,
-          back,
-          restored,
-        };
-      }),
-    );
+    // An ARIA dialog mounted already modal inside a notice hides the others,
+    // and so does one kept mounted in the renderer's own list and shown
+    // through `hidden`.
+    for (const confirm of ['aria', 'kept'])
+      results.push(
+        await attemptOn(
+          errors,
+          `notices-renderer-${confirm}-dialog`,
+          async () => {
+            await page.setViewportSize({ width: 375, height: 812 });
+            await page.goto(origin + `/?screen=notices&confirm=${confirm}`);
+            await page.waitForFunction(() => window.noticesGate);
+            await call('undo');
+            // A brief notice that counts down before the dialog mounts.
+            const brief = 'Saved.';
+            await call('show', { key: 'saved', text: brief, duration: 1500 });
+            await toast.filter({ hasText: brief }).waitFor();
+            await page.waitForTimeout(300);
+            await toast.getByRole('button', { name: 'Restore' }).click();
+            const dialog = page.getByRole('dialog', { name: 'Restore?' });
+            await dialog.waitFor();
+            await page.waitForTimeout(1700);
+            const during = await measure();
+            await dialog.getByRole('button', { name: 'Confirm' }).click();
+            const closed = await hidden(dialog);
+            const back = await shown(toast.filter({ hasText: brief }), 2000);
+            const restored = await page.evaluate(() => window.restored ?? 0);
+            return {
+              pass:
+                during.items.length === 1 &&
+                !during.items[0].text.includes(brief) &&
+                closed &&
+                back &&
+                restored === 1,
+              during: during.items.map((i) => i.text),
+              closed,
+              back,
+              restored,
+            };
+          },
+        ),
+      );
     results.push(
       await attemptOn(errors, 'notices-escape-and-motion', async () => {
         await page.setViewportSize({ width: 1280, height: 812 });

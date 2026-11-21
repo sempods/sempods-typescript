@@ -71,10 +71,19 @@ function AriaConfirmingNotice({ notice }: NoticeProps) {
   return <AskingNotice notice={notice} portal={false} />;
 }
 
+/**
+ * The same ARIA dialog kept mounted inside a list of the renderer's own and
+ * shown through `hidden`.
+ */
+function KeptConfirmingNotice({ notice }: NoticeProps) {
+  return <AskingNotice notice={notice} portal={false} kept />;
+}
+
 function AskingNotice({
   notice,
   portal,
-}: NoticeProps & { readonly portal: boolean }) {
+  kept = false,
+}: NoticeProps & { readonly portal: boolean; readonly kept?: boolean }) {
   const [asking, setAsking] = useState(false);
   const action = notice.actions[0];
   const dialog = action && (
@@ -82,6 +91,7 @@ function AskingNotice({
       role="dialog"
       aria-modal="true"
       aria-label={`${action.label}?`}
+      hidden={kept && !asking}
       onKeyDown={(event) => {
         if (event.key === 'Escape') setAsking(false);
       }}
@@ -111,7 +121,13 @@ function AskingNotice({
           {action.label}
         </Button>
       )}
-      {asking && (portal ? createPortal(dialog, document.body) : dialog)}
+      {kept ? (
+        <ul>
+          <li>{dialog}</li>
+        </ul>
+      ) : (
+        asking && (portal ? createPortal(dialog, document.body) : dialog)
+      )}
     </div>
   );
 }
@@ -169,7 +185,8 @@ const items = [
  * `AppAccess` keeps its own prompt stack beside the host; with `confirm`, a
  * replacement renderer confirms an action in its own portal dialog, with
  * `confirm=inline` in a native dialog inside the notice and with
- * `confirm=aria` in an ARIA dialog it mounts there; `limit` is the host's.
+ * `confirm=aria` in an ARIA dialog it mounts there, with `confirm=kept` in
+ * one kept mounted in a list of its own; `limit` is the host's.
  * The
  * checks publish through `window.noticesGate`, as the app's own code would.
  */
@@ -181,7 +198,7 @@ export function NoticesGate({
 }: {
   readonly gate: boolean;
   readonly beside: boolean;
-  readonly confirm: 'portal' | 'inline' | 'aria' | null;
+  readonly confirm: 'portal' | 'inline' | 'aria' | 'kept' | null;
   readonly limit: number | undefined;
 }) {
   const { show, dismiss } = useNotices();
@@ -231,7 +248,9 @@ export function NoticesGate({
                     ? InlineConfirmingNotice
                     : confirm === 'aria'
                       ? AriaConfirmingNotice
-                      : ConfirmingNotice,
+                      : confirm === 'kept'
+                        ? KeptConfirmingNotice
+                        : ConfirmingNotice,
               }
             : undefined
         }

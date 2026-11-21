@@ -1835,8 +1835,15 @@ it('waits under a modal a renderer opened inline, keeping that notice drawn', as
   await waitFor(() => expect(announced()).toEqual(['Deleted.', 'Saved.']));
 });
 
-/** A renderer that confirms its action in a dialog: a portal or inline. */
-function confirming(where: 'portal' | 'inline' | 'aria') {
+/**
+ * A renderer that confirms its action in a dialog: in a portal, inline, an
+ * ARIA one mounted inline or one kept mounted that `hidden` toggles,
+ * optionally inside a list of the renderer's own.
+ */
+function confirming(
+  where: 'portal' | 'inline' | 'aria' | 'kept',
+  nested = false,
+) {
   return function Confirming({ notice }: NoticeProps) {
     const [asking, setAsking] = useState(false);
     const action = notice.actions[0];
@@ -1856,19 +1863,31 @@ function confirming(where: 'portal' | 'inline' | 'aria') {
           {confirm}
         </dialog>
       ) : (
-        <div role="dialog" aria-modal="true" aria-label="Restore?">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Restore?"
+          hidden={where === 'kept' && !asking}
+        >
           {confirm}
         </div>
       );
+    const placed =
+      where === 'portal' ? createPortal(dialog, document.body) : dialog;
+    const shown = action && (asking || where === 'kept') && placed;
     return (
       <>
         <p>{notice.text}</p>
         {action && (
           <button onClick={() => setAsking(true)}>{action.label}</button>
         )}
-        {action &&
-          asking &&
-          (where === 'portal' ? createPortal(dialog, document.body) : dialog)}
+        {nested ? (
+          <ul>
+            <li>{shown}</li>
+          </ul>
+        ) : (
+          shown
+        )}
       </>
     );
   };
@@ -1977,6 +1996,45 @@ it('waits under an inline dialog its renderer mounts already modal', async () =>
   await waitFor(() => expect(texts()).toEqual(['Saved.']));
   expect(running(timers)).toHaveLength(1);
 });
+
+it.each([
+  ['kept mounted and shown through `hidden`', confirming('kept')],
+  ['inside a list of its renderer', confirming('aria', true)],
+] as const)(
+  'waits under an inline dialog %s, keeping that notice drawn',
+  async (_, Renderer) => {
+    const runtime = await signedIn();
+    const timers = briefTimers();
+    const undo = vi.fn(async () => {});
+    render(
+      <SempodsProvider runtime={runtime}>
+        <Notices components={{ Notice: Renderer }} />
+        <Publisher />
+      </SempodsProvider>,
+    );
+    act(() =>
+      actions.show({
+        key: 'undo',
+        text: 'Deleted.',
+        action: { label: 'Restore', run: undo },
+      }),
+    );
+    act(() => actions.show({ key: 'saved', text: 'Saved.' }));
+    await waitFor(() => expect(running(timers)).toHaveLength(1));
+    await act(async () => new Promise((done) => setTimeout(done, 50)));
+    act(() => screen.getByRole('button', { name: 'Restore' }).click());
+    // The dialog stays reachable, the brief notice waits.
+    await waitFor(() => expect(running(timers)).toEqual([]));
+    await act(async () => new Promise((done) => setTimeout(done, 50)));
+    const dialog = screen.getByRole('dialog', { name: 'Restore?' });
+    const saved = () => texts().filter((text) => text?.startsWith('Saved.'));
+    expect(saved()).toEqual([]);
+    await act(async () => within(dialog).getByRole('button').click());
+    expect(undo).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(saved()).toHaveLength(1));
+    expect(running(timers)).toHaveLength(1);
+  },
+);
 
 it('keeps no announcement history of superseded events under a long-lived key', async () => {
   const runtime = await signedIn();

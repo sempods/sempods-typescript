@@ -1666,10 +1666,11 @@ export function Shell() {
   timers, announcements, keyboard dismissal and the action guards; render
   `actions` as buttons and `dismiss` as one more. A renderer may ask before
   it runs an action, in its own modal dialog, in a portal or a native or
-  ARIA dialog inside the notice: the stack waits under it and keeps the
-  renderer mounted, and that notice drawn, so the dialog stays open, also
-  when another notice would take its place. Escape in the dialog belongs to
-  it and never dismisses the notice.
+  ARIA dialog inside the notice, mounted when it opens or kept mounted and
+  shown through `hidden`, its styles or a class: the stack waits under it
+  and keeps the renderer mounted, and that notice drawn, so the dialog stays
+  open, also when another notice would take its place. Escape in the dialog
+  belongs to it and never dismisses the notice.
 
 Choose the place by what the person has to do:
 

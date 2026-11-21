@@ -279,11 +279,12 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     shows and announces an error once it closes; a replacement renderer's own
     confirmation dialog in a portal (`&confirm`) stays open while the stack
     waits under it, and Confirm runs the action once; with a native dialog
-    inside the notice (`&confirm=inline`) or an ARIA one mounted there
-    (`&confirm=aria`), a brief notice published under it waits instead of
-    expiring; Escape in any of these confirmations closes it, not its
-    notice; with `&limit=1` a warning that takes the slot waits for the open
-    confirmation; Escape dismisses the focused notice and
+    inside the notice (`&confirm=inline`), an ARIA one mounted there
+    (`&confirm=aria`) or one kept mounted in the renderer's own list and shown
+    through `hidden` (`&confirm=kept`), a brief notice published under it
+    waits instead of expiring; Escape in any of these confirmations closes
+    it, not its notice; with `&limit=1` a warning that takes the slot waits
+    for the open confirmation; Escape dismisses the focused notice and
     returns the focus to the host's `focusTarget`; reduced motion stops its
     entrance; beside `AppAccess`'s own prompt stack
     (`accessPrompts={false}`, `&beside`) it stays above that stack, so a press
