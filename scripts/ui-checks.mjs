@@ -1058,13 +1058,20 @@ async function interaction({ browser, origin, engine }) {
         stage = 'actions';
         await more.focus();
         await page.keyboard.press('Enter');
-        const actions = sheet.getByRole('group', { name: /^Actions for / });
+        // Located by class: in Firefox 159 under Playwright 1.65, reading
+        // buttons below a role locator for this group crashed the page,
+        // while the page's own reads did not. Its role and name are checked.
+        const actions = sheet.locator('.sp-pod-menu');
         await actions.waitFor();
+        const group = await actions.evaluate((el) => ({
+          role: el.getAttribute('role'),
+          name: el.getAttribute('aria-label'),
+        }));
         const box = await actions.boundingBox();
         const viewport = page.viewportSize();
-        const names = await actions.getByRole('button').allTextContents();
+        const names = await actions.locator('button').allTextContents();
         const firstFocused = await actions
-          .getByRole('button')
+          .locator('button')
           .first()
           .evaluate((el) => el === document.activeElement);
         stage = 'escape';
@@ -1115,6 +1122,8 @@ async function interaction({ browser, origin, engine }) {
             box !== null &&
             box.x >= 0 &&
             box.x + box.width <= viewport.width &&
+            group.role === 'group' &&
+            /^Actions for /.test(group.name ?? '') &&
             names.includes('Change sharing') &&
             names.includes('Sign out on this device') &&
             firstFocused &&
@@ -1130,6 +1139,7 @@ async function interaction({ browser, origin, engine }) {
           moreSize,
           toggleSize,
           box,
+          group,
           names,
           firstFocused,
           backOnMore,
