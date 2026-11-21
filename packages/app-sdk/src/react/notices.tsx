@@ -244,24 +244,33 @@ function visible(entries: readonly Entry[], limit: number) {
 const none: readonly Entry[] = [];
 
 /**
- * The notices a host draws, up to its limit. While a modal covers them,
- * those drawn when it opened stay mounted beside the new ones, so a notice
- * that takes a slot never unmounts a renderer's open confirmation; the order
- * applies once the modal closes.
+ * The notices a host draws, up to its limit. A notice that loses its slot
+ * stays mounted until nothing covers the stack: checked right after the
+ * commit, so a confirmation its renderer opens in the same update as the
+ * notice that displaces it stays open too. While a modal covers them, those
+ * drawn when it opened stay beside the new ones; the order applies once it
+ * closes.
  */
 function useDrawn(
   entries: readonly Entry[],
   limit: number,
   suspended: boolean,
+  root: RefObject<HTMLElement | null>,
+  layer: 'page' | 'gate',
 ) {
   const shown = useMemo(() => visible(entries, limit), [entries, limit]);
   const [held, setHeld] = useState(shown);
-  if (!suspended && held !== shown) setHeld(shown);
+  useLayoutEffect(() => {
+    if (suspended || held === shown) return;
+    const element = root.current;
+    if (element && modalOf(element, layer).modal) return;
+    setHeld(shown);
+  }, [suspended, held, shown, root, layer]);
   return useMemo(() => {
-    if (!suspended || held === shown) return shown;
+    if (held === shown) return shown;
     const kept = new Set([...held, ...shown].map((entry) => entry.id));
     return entries.filter((entry) => kept.has(entry.id));
-  }, [suspended, held, shown, entries]);
+  }, [held, shown, entries]);
 }
 
 function appEntries(records: readonly NoticeRecord[]): Entry[] {
@@ -439,18 +448,7 @@ function usePageCover(
       frame = 0;
       const element = own.current;
       if (!element) return;
-      // Every host keeps the opening order, from its first measure on.
-      trackOpened(document);
-      // A renderer's own modal inside the stack, such as an inline
-      // `<dialog>` opened with `showModal()`, covers the other notices.
-      const inner = [...element.querySelectorAll(modalCandidates)].find(
-        isModal,
-      );
-      // The host's own item, also around a list inside the renderer.
-      const list = element.querySelector(':scope > ul');
-      let owner: Element | null = list ? (inner ?? null) : null;
-      while (owner && owner.parentElement !== list) owner = owner.parentElement;
-      const modal = Boolean(inner) || isCovered(element, layer);
+      const { modal, owner } = modalOf(element, layer);
       const height = view.innerHeight;
       // A pinch zoom, or a keyboard that resizes only the visual viewport
       // (Chrome on Android by default, iOS), hides the layout viewport's end.
@@ -614,6 +612,23 @@ function placement(cover: Cover): CSSProperties | undefined {
   return Object.keys(style).length ? (style as CSSProperties) : undefined;
 }
 
+/**
+ * Whether a modal covers the stack in `element` right now, and the host's
+ * item that holds a renderer's own modal.
+ */
+function modalOf(element: HTMLElement, layer: 'page' | 'gate') {
+  // Every host keeps the opening order, from its first look on.
+  trackOpened(element.ownerDocument);
+  // A renderer's own modal inside the stack, such as an inline `<dialog>`
+  // opened with `showModal()`, covers the other notices.
+  const inner = [...element.querySelectorAll(modalCandidates)].find(isModal);
+  // The host's own item, also around a list inside the renderer.
+  const list = element.querySelector(':scope > ul');
+  let owner: Element | null = list ? (inner ?? null) : null;
+  while (owner && owner.parentElement !== list) owner = owner.parentElement;
+  return { modal: Boolean(inner) || isCovered(element, layer), owner };
+}
+
 /** Whether a modal above `element`'s layer covers it, right now. */
 function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
   const document = element.ownerDocument;
@@ -771,7 +786,13 @@ export function Notices(props: NoticesProps) {
     'page',
     first && !gated && entries.length > 0,
   );
-  const shown = useDrawn(!first || gated ? none : entries, limit, cover.modal);
+  const shown = useDrawn(
+    !first || gated ? none : entries,
+    limit,
+    cover.modal,
+    root,
+    'page',
+  );
   return (
     <div
       ref={root}
@@ -816,7 +837,7 @@ function GateStack({ host }: { readonly host: Host }) {
   // A dialog above the gate, such as the app's settings, makes the stack
   // wait: its notices time out and are announced once it closes.
   const cover = usePageCover(root, 'gate', entries.length > 0);
-  const shown = useDrawn(entries, host.limit, cover.modal);
+  const shown = useDrawn(entries, host.limit, cover.modal, root, 'gate');
   // Room at the gate's end, so the stack never covers its last control.
   useLayoutEffect(() => {
     const element = root.current;

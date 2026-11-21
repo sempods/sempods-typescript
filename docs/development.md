@@ -285,7 +285,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     waits instead of expiring; Escape in any of these confirmations closes
     it, not its notice, and a new event under the same key closes it, so
     only a question asked anew answers that event; with `&limit=1` a warning
-    that takes the slot waits for the open confirmation; Escape dismisses the focused notice and
+    that takes the slot waits for the open confirmation, also one published
+    in the same task as the press that opens it; Escape dismisses the focused notice and
     returns the focus to the host's `focusTarget`; reduced motion stops its
     entrance; beside `AppAccess`'s own prompt stack
     (`accessPrompts={false}`, `&beside`) it stays above that stack, so a press

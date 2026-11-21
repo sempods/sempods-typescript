@@ -1963,6 +1963,38 @@ it.each(['portal', 'inline'] as const)(
   },
 );
 
+it.each(['portal', 'inline'] as const)(
+  'keeps a %s confirmation opened in the same update as the notice that takes its slot',
+  async (where) => {
+    const runtime = await signedIn();
+    const undo = vi.fn(async () => {});
+    render(
+      <SempodsProvider runtime={runtime}>
+        <Notices limit={1} components={{ Notice: confirming(where) }} />
+        <Publisher />
+      </SempodsProvider>,
+    );
+    act(() =>
+      actions.show({
+        key: 'undo',
+        text: 'Deleted.',
+        duration: 60000,
+        action: { label: 'Restore', run: undo },
+      }),
+    );
+    // Before the host has measured the dialog, a warning takes the slot.
+    act(() => {
+      screen.getByRole('button', { name: 'Restore' }).click();
+      actions.show({ key: 'offline', severity: 'warning', text: 'Offline.' });
+    });
+    const dialog = screen.getByRole('dialog', { name: 'Restore?' });
+    await act(async () => new Promise((done) => setTimeout(done, 50)));
+    await act(async () => within(dialog).getByRole('button').click());
+    expect(undo).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(texts()).toEqual(['Offline.']));
+  },
+);
+
 it('waits under an inline dialog its renderer mounts already modal', async () => {
   const runtime = await signedIn();
   const timers = briefTimers();

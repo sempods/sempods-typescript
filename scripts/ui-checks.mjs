@@ -6872,7 +6872,8 @@ async function ghost({ browser, origin, engine }) {
  * renderer's own and shown through `hidden`; Escape in any of them closes it, not
  * its notice, and a new event under the same key closes it, so Confirm
  * answers only the event it was opened for; with `limit={1}` a warning that
- * takes the slot waits for the open confirmation;
+ * takes the slot waits for the open confirmation, also one published in the
+ * same task as the press that opens it;
  * Escape dismisses the focused notice; reduced motion; beside AppAccess's
  * own prompt stack (`accessPrompts={false}`) above it, so Sign in takes the
  * press; inside a zoomed visual viewport, also its sides and above a
@@ -6886,11 +6887,15 @@ async function notices({ browser, origin, engine }) {
   const { context, page, errors } = await newPage(browser);
   const update =
     'A new version is ready. It is used once every window of this app has been closed.';
-  const call = (name, ...args) =>
-    page.evaluate(
+  // The page sets `noticesGate` in an effect, after its first paint: each
+  // call waits for it.
+  const call = async (name, ...args) => {
+    await page.waitForFunction(() => window.noticesGate);
+    return page.evaluate(
       ([name, args]) => window.noticesGate[name](...args),
       [name, args],
     );
+  };
   const toast = page.locator(
     '[data-sempods-ui="notices"]:not([data-placement]) > ul > li',
   );
@@ -7239,29 +7244,49 @@ async function notices({ browser, origin, engine }) {
       await attemptOn(errors, 'notices-renderer-keeps-slot', async () => {
         await page.setViewportSize({ width: 375, height: 812 });
         const runs = {};
-        for (const confirm of ['portal', 'inline']) {
+        const warning = 'Offline.';
+        // Later, once the host has seen the dialog, or in the same task as
+        // the press that opens it, before the host's next look.
+        for (const [confirm, when] of [
+          ['portal', 'later'],
+          ['inline', 'later'],
+          ['portal', 'same'],
+          ['inline', 'same'],
+        ]) {
           await page.goto(
             origin + `/?screen=notices&confirm=${confirm}&limit=1`,
           );
-          await page.waitForFunction(() => window.noticesGate);
           await call('undo', 60000);
-          await toast.getByRole('button', { name: 'Restore' }).click();
           const dialog = page.getByRole('dialog', { name: 'Restore?' });
-          await dialog.waitFor();
-          await page.waitForTimeout(400);
-          const warning = 'Offline.';
-          await call('show', {
+          const offline = {
             key: 'offline',
             severity: 'warning',
             text: warning,
-          });
+          };
+          if (when === 'same') {
+            await toast.getByRole('button', { name: 'Restore' }).waitFor();
+            await page.evaluate((notice) => {
+              const restore = [
+                ...document.querySelectorAll(
+                  '[data-sempods-ui="notices"]:not([data-placement]) > ul > li button',
+                ),
+              ].find((button) => button.textContent === 'Restore');
+              restore.click();
+              window.noticesGate.show(notice);
+            }, offline);
+          } else {
+            await toast.getByRole('button', { name: 'Restore' }).click();
+            await dialog.waitFor();
+            await page.waitForTimeout(400);
+            await call('show', offline);
+          }
           await page.waitForTimeout(400);
           const open = await dialog.isVisible();
           if (open)
             await dialog.getByRole('button', { name: 'Confirm' }).click();
           const restored = await page.evaluate(() => window.restored ?? 0);
           const after = await shown(toast.filter({ hasText: warning }), 2000);
-          runs[confirm] = { open, restored, after };
+          runs[`${confirm}-${when}`] = { open, restored, after };
         }
         return {
           pass: Object.values(runs).every(
