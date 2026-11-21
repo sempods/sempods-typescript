@@ -318,6 +318,8 @@ export function PodManagement({
   const pressing = useRef(false);
   useEffect(() => {
     if (!menu) return;
+    // The press that opened them ended before they opened.
+    pressing.current = false;
     const head = triggers.current.get(menu)?.parentElement;
     const document = head?.ownerDocument;
     if (!head || !document) return;

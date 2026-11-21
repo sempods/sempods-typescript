@@ -222,6 +222,33 @@ it('closes a Pod’s actions with Escape, not the dialog, and returns the focus'
   expect(onClose).not.toHaveBeenCalled();
 });
 
+it('closes a Pod’s actions opened by a pointer once the keyboard leaves them', async () => {
+  const f = fixture();
+  const { runtime } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  const trigger = await podActions();
+  // A pointer opens them: its press ends before they open.
+  fireEvent.pointerDown(trigger);
+  fireEvent.pointerUp(trigger);
+  fireEvent.click(trigger);
+  const menu = screen.getByRole('group', {
+    name: 'Actions for pod.example/alice',
+  });
+  // Tab from the last action to the next control.
+  const last = within(menu).getAllByRole('button').at(-1)!;
+  const next = screen.getByRole('button', { name: 'Connect another Pod' });
+  fireEvent.blur(last, { relatedTarget: next });
+  expect(
+    screen.queryByRole('group', { name: 'Actions for pod.example/alice' }),
+  ).toBeNull();
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+});
+
 it.each(['en', 'de'] as const)(
   'connects another Pod in a step of the dialog and goes back to the list (%s)',
   async (language) => {
