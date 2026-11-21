@@ -59,7 +59,13 @@ class NoticeStore {
   /** Held notices the person dismissed, until their holders retire them. */
   private quiet = new Set<string>();
   private orders = new Map<string, number>();
-  private announced = new Map<string, number>();
+  /** The events announced per notice or prompt, until it retires. */
+  private announced = new Map<string, Set<number>>();
+  /**
+   * A holder's record that a `show` covers: it returns as it was, with its
+   * event, its announcement and its running action, once the `show` goes.
+   */
+  private behind = new Map<string, NoticeRecord>();
   /**
    * The action that runs for a notice or prompt, across remounts and hosts:
    * its token and the event it started in. Retiring a notice drops it, so a
@@ -144,14 +150,15 @@ class NoticeStore {
   show = (notice: Notice) => {
     checked(notice);
     const previous = this.records.get(notice.key);
+    // A `show` takes the key until it goes; a holder's notice waits behind
+    // it, also an identical one, which it only renews.
+    if (previous && this.owners.get(notice.key) !== shown)
+      this.behind.set(notice.key, previous);
+    this.owners.set(notice.key, shown);
     if (previous && !previous.dismissed && sameNotice(previous.notice, notice))
-      // An identical repeat restarts the timer of whoever owns it.
+      // An identical repeat restarts the timer: one announcement.
       this.put(notice, { renewed: previous.renewed + 1 });
-    else {
-      // A `show` takes the key until it goes; holders wait behind it.
-      this.owners.set(notice.key, shown);
-      this.put(notice, { event: ++this.events, dismissed: false });
-    }
+    else this.put(notice, { event: ++this.events, dismissed: false });
     this.emit();
   };
   /** `useNotice`: a holder's notice, updated in place, silently. */
@@ -194,16 +201,14 @@ class NoticeStore {
     if (held && held.size === 0) {
       this.holders.delete(key);
       this.quiet.delete(key);
+      this.behind.delete(key);
     }
     if (this.owners.get(key) !== holder) return;
     if (!this.reclaim(key)) this.retire(key);
   }
   /** The latest holder's notice takes the key again; false without one. */
   private reclaim(key: string) {
-    const held = [...(this.holders.get(key) ?? [])].filter(
-      (entry): entry is [symbol, Notice] => entry[1] !== null,
-    );
-    const latest = held[held.length - 1];
+    const latest = this.latestHolder(key);
     if (!latest) return false;
     const [holder, notice] = latest;
     this.owners.set(key, holder);
@@ -221,19 +226,49 @@ class NoticeStore {
   private retire(key: string) {
     if (!this.records.delete(key)) return;
     this.owners.delete(key);
+    this.behind.delete(key);
     this.runs.delete(key);
     this.announced.delete(appId(key));
     this.forgetRun(appId(key));
     this.emit();
   }
-  /** A shown notice goes; a holder's notice behind it shows again. */
+  /**
+   * A shown notice goes; a holder's notice behind it shows again as it was:
+   * the same event, so it is not announced again and an action it started
+   * stays guarded until that settles.
+   */
   private close(key: string) {
+    const covered = this.behind.get(key);
+    const latest = this.latestHolder(key);
+    if (covered && latest) {
+      const [holder, notice] = latest;
+      this.behind.delete(key);
+      this.owners.set(key, holder);
+      this.records.set(key, { ...covered, notice });
+      if (notice.action) this.runs.set(key, notice.action.run);
+      else this.runs.delete(key);
+      this.emit();
+      return;
+    }
     this.retire(key);
     this.reclaim(key);
+  }
+  private latestHolder(key: string) {
+    const held = [...(this.holders.get(key) ?? [])].filter(
+      (entry): entry is [symbol, Notice] => entry[1] !== null,
+    );
+    return held[held.length - 1];
   }
   dismiss = (key: string) => {
     const record = this.records.get(key);
     if (!record || record.dismissed) return false;
+    // An identical `show` only renewed the holder's notice: dismissing it
+    // dismisses that.
+    const latest = this.latestHolder(key);
+    if (latest && this.behind.get(key)?.event === record.event) {
+      this.behind.delete(key);
+      this.owners.set(key, latest[0]);
+    }
     // A holder's notice stays dismissed until its holders retire it.
     if (this.owners.get(key) !== shown) {
       this.quiet.add(key);
@@ -303,8 +338,10 @@ class NoticeStore {
   }
   /** Whether this event still needs its one announcement; marks it made. */
   announce(id: string, event: number) {
-    if (this.announced.get(id) === event) return false;
-    this.announced.set(id, event);
+    const made = this.announced.get(id) ?? new Set<number>();
+    if (made.has(event)) return false;
+    made.add(event);
+    this.announced.set(id, made);
     return true;
   }
   forgetPrompt(id: string) {

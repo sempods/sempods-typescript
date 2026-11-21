@@ -1657,3 +1657,80 @@ it('follows a changed AppAccess focusTarget when focus returns from an access pr
   await waitFor(() => expect(items()).toEqual([]));
   await waitFor(() => expect(document.activeElement?.textContent).toBe('B'));
 });
+
+it('keeps a held notice, its announcement and its running action while a show covers it', async () => {
+  const runtime = await signedIn();
+  let finish!: () => void;
+  const retry = vi.fn(() => {
+    actions.show({ key: 'connection', text: 'Reconnecting.' });
+    return new Promise<void>((done) => (finish = done));
+  });
+  function Connection() {
+    useNotice({
+      key: 'connection',
+      text: 'Offline.',
+      severity: 'warning',
+      action: { label: 'Retry', run: retry },
+    });
+    return null;
+  }
+  render(
+    <App runtime={runtime}>
+      <Connection />
+    </App>,
+  );
+  const button = () => screen.getByRole('button', { name: 'Retry' });
+  await act(async () => button().click());
+  await waitFor(() => expect(texts()).toEqual(['Reconnecting.OK']));
+  // Dismissed before the retry settles: the warning returns, still guarded.
+  act(() => void actions.dismiss('connection'));
+  await waitFor(() => expect(texts()).toEqual(['Offline.RetryOK']));
+  expect(button()).toHaveProperty('disabled', true);
+  await act(async () => button().click());
+  expect(retry).toHaveBeenCalledTimes(1);
+  // One continuous outage: Offline is not announced again.
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(announced()).toEqual(['Offline.', 'Reconnecting.']);
+  await act(async () => finish());
+  expect(button()).toHaveProperty('disabled', false);
+});
+
+it('keeps an identical show when its holder lets go, announced once, and dismisses both together', async () => {
+  const runtime = await signedIn();
+  const offline: Notice = {
+    key: 'connection',
+    text: 'Offline.',
+    severity: 'warning',
+  };
+  let handOver!: () => void;
+  let setHeld!: (held: boolean) => void;
+  function Connection() {
+    const [held, set] = useState(true);
+    setHeld = set;
+    handOver = () => {
+      actions.show(offline);
+      set(false);
+    };
+    useNotice(held ? offline : null);
+    return null;
+  }
+  render(
+    <App runtime={runtime}>
+      <Connection />
+    </App>,
+  );
+  await waitFor(() => expect(texts()).toEqual(['Offline.OK']));
+  act(() => handOver());
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  expect(texts()).toEqual(['Offline.OK']);
+  expect(announced()).toEqual(['Offline.']);
+  act(() => void actions.dismiss('connection'));
+  expect(items()).toEqual([]);
+  // Held again and covered by an identical show: one dismissal hides both.
+  act(() => setHeld(true));
+  await waitFor(() => expect(texts()).toEqual(['Offline.OK']));
+  act(() => actions.show(offline));
+  act(() => void actions.dismiss('connection'));
+  await act(async () => new Promise((done) => setTimeout(done, 20)));
+  expect(items()).toEqual([]);
+});

@@ -1597,12 +1597,14 @@ export function Shell() {
 - **Key:** one stable `key` per message. Publishing it again updates the
   notice in place, so repeats coalesce: a Pod that keeps failing has one
   warning whose text changes, not a growing stack. Several publishers may
-  share a key. A `show` takes it until that notice goes; a `useNotice` behind
-  it waits and shows again afterwards, and letting go of the key never removes
-  the newer `show`. Among `useNotice` holders, the one that declared last owns
-  the notice and its action; when it unmounts, the holder that stays takes
-  over with its own text and action. Give holders of one key the same message,
-  or separate keys.
+  share a key. A `show` takes it until that notice goes, also an identical
+  one, which is not announced again; a `useNotice` behind it waits and returns
+  as it was afterwards, without a new announcement and with an action it
+  started still guarded, and letting go of the key never removes the newer
+  `show`. Among `useNotice` holders, the one that declared last owns the
+  notice and its action; when it unmounts, the holder that stays takes over
+  with its own text and action. Give holders of one key the same message, or
+  separate keys.
 - **Severity and acknowledgement are separate.** `severity` is `info`,
   `warning` or `error`. `duration` decides whether the notice waits for the
   person: an `info` without an action hides after about 6 seconds, warnings,
