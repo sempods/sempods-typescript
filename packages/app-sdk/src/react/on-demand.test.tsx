@@ -165,14 +165,14 @@ it('starts a Pod overview with no catalogue, labels or Context access, and opens
   fireEvent.click(screen.getByText('Manage access'));
   // Management lists what this app may do in each readable Context; without
   // a Context flow it asks for no selection.
-  const access = await screen.findByRole('region', {
+  const access = await screen.findByRole('list', {
     name: 'Available to this app',
   });
   expect(
     within(access)
       .getAllByRole('listitem')
       .map((item) => item.textContent),
-  ).toEqual(['workRead and write', 'personalRead only']);
+  ).toEqual(['workCan edit', 'personalRead only']);
   expect(screen.queryByRole('combobox', { name: 'Data context' })).toBeNull();
   expect(f.runtime.getSnapshot()[0]?.selectedContext).toBeNull();
   expect(f.count('/_system/contexts')).toBe(1);

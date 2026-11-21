@@ -1,5 +1,6 @@
 /* global document, window, URLSearchParams, sessionStorage, IDBObjectStore, DOMException */
 import assert from 'node:assert/strict';
+import { podActions } from './pod-actions.mjs';
 import { execFileSync } from 'node:child_process';
 import {
   cp,
@@ -1368,6 +1369,7 @@ try {
     .getByRole('button', { name: 'Pods & sharing', exact: true })
     .click();
   await presetDraft.fill('Keep this draft');
+  await podActions(page);
   await page
     .getByRole('button', { name: 'Change sharing', exact: true })
     .click();
@@ -1376,6 +1378,7 @@ try {
   assert.equal(await presetDraft.inputValue(), 'Keep this draft');
   assert.equal(exchanges, beforePreset + 1);
   await presetDraft.fill('');
+  await podActions(page);
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Change sharing', exact: true }).click(),
@@ -1402,7 +1405,12 @@ try {
       const appUrl =
         origin + '/app?identity=signout-' + surface + '-' + language;
       const signIn = language === 'en' ? 'Sign in' : 'Anmelden';
-      const signOut = language === 'en' ? 'Sign out' : 'Abmelden';
+      // Management's actions for the Pod sign out on this device (#386).
+      const actions = language === 'en' ? /^Actions for / : /^Aktionen für /;
+      const signOut =
+        language === 'en'
+          ? 'Sign out on this device'
+          : 'Auf diesem Gerät abmelden';
       const tryAgain = language === 'en' ? 'Try again' : 'Erneut versuchen';
       const message =
         language === 'en'
@@ -1434,6 +1442,7 @@ try {
           },
         });
       });
+      await page.getByRole('button', { name: actions }).click();
       await page.getByRole('button', { name: signOut, exact: true }).click();
       // The gate offers the retry of the sign-out, never a sign-in (#238).
       const gate = page.locator('[data-sempods-ui="gate"]');
@@ -1601,6 +1610,7 @@ try {
     exact: true,
   });
   await taskTitle.fill('Unsaved title');
+  await podActions(appDialog);
   await changeSharing.click();
   await confirmation.waitFor();
   assert.equal(await topmost(keep), true);
@@ -1628,6 +1638,7 @@ try {
   await confirmation.waitFor({ state: 'detached' });
   assert.equal(await appDialog.evaluate((d) => d.open), true);
   assert.equal(await taskTitle.inputValue(), 'Unsaved title');
+  await podActions(appDialog);
   await changeSharing.click();
   await keep.click();
   await confirmation.waitFor({ state: 'detached' });
@@ -1642,6 +1653,7 @@ try {
   await appDialog.getByRole('button', { name: 'Save', exact: true }).click();
   await appDialog.getByText(/The result is unconfirmed/).waitFor();
   await page.unroute('**/_system/resources/**', dropWrite);
+  await podActions(appDialog);
   await changeSharing.click();
   await confirmation
     .getByText(/A write is still unconfirmed and may already have changed/)
@@ -1789,11 +1801,16 @@ try {
       true,
     );
     await host.click();
+    // The Pod's actions hold Change sharing (#386).
+    const more = region.getByRole('button', {
+      name: de ? /^Aktionen für / : /^Actions for /,
+    });
     const retry = region.getByRole('button', {
       name: de ? 'Freigabe ändern' : 'Change sharing',
       exact: true,
     });
     consent = 'deny';
+    await more.click();
     await Promise.all([page.waitForURL('**/callback?**'), retry.click()]);
     await page.waitForURL('**/app?identity=' + identity);
     // The unchanged sharing is information; Change sharing stays in management.
@@ -1802,7 +1819,7 @@ try {
       .waitFor();
     await page.getByLabel('Preset draft').waitFor();
     await host.click();
-    await retry.waitFor();
+    await more.waitFor();
     await host.evaluate((el) => {
       window.hostFocusCount = 0;
       el.addEventListener('focus', () => window.hostFocusCount++);
@@ -1815,7 +1832,10 @@ try {
       await preparing;
       await route.fulfill({ status: 503, body: 'Discovery unavailable' });
     });
-    await retry.focus();
+    // By keyboard: the actions open on their first, Change sharing.
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await retry.waitFor();
     await page.keyboard.press('Enter');
     await page.waitForFunction(() =>
       document.querySelector('[data-sempods-access]')?.closest('[inert]'),
@@ -1828,7 +1848,7 @@ try {
         !document.querySelector('[data-sempods-access]')?.closest('[inert]'),
     );
     assert.equal(await region.isVisible(), true);
-    assert.equal(await retry.isEnabled(), true);
+    assert.equal(await more.isEnabled(), true);
     assert.equal(
       await page.evaluate(() => window.hostFocusCount),
       0,
@@ -1859,11 +1879,15 @@ try {
   await page
     .getByRole('button', { name: 'Pods & sharing', exact: true })
     .click();
-  // In management, signing in to another Pod is a collapsed section.
-  await page.getByText('Connect another Pod', { exact: true }).click();
+  // In management, signing in to another Pod is a step of its own (#386).
+  await page
+    .getByRole('button', { name: 'Connect another Pod', exact: true })
+    .click();
   await page
     .getByLabel('Pod address', { exact: true })
     .fill(origin + '/refusing');
+  // The chooser's list covers its action until it closes.
+  await page.keyboard.press('Escape');
   const beforeLoginRequired = exchanges;
   await Promise.all([
     page.waitForURL('**/callback?**'),
@@ -2213,25 +2237,28 @@ try {
   await editRegion.waitFor({ state: 'detached' });
   assert.equal(overviewNoteWrites, 2);
   // Switching Pods retires an editor that belongs to the previous connection.
-  // In management, signing in to another Pod is a collapsed section.
-  await page.getByText('Connect another Pod', { exact: true }).click();
+  // In management, signing in to another Pod is a step of its own (#386).
+  await page
+    .getByRole('button', { name: 'Connect another Pod', exact: true })
+    .click();
   await page
     .getByLabel('Pod address', { exact: true })
     .fill(origin + '/second-pod');
+  // The chooser's list covers its action until it closes.
+  await page.keyboard.press('Escape');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Sign in', exact: true }).click(),
   ]);
   await page.waitForURL(origin + '/app?identity=overview');
+  // Management switches Pods with the Pod's own Use this Pod (#386).
   const choosePod = async (name) => {
-    const pods = page.getByLabel('Active pod');
-    const value = await pods.evaluate(
-      (select, wanted) =>
-        [...select.options].find((o) => o.text.includes(wanted))?.value,
-      name,
-    );
-    assert.ok(value, 'pod option ' + name);
-    await pods.selectOption(value);
+    await page
+      .getByRole('button', { name: new RegExp('^Actions for .*' + name) })
+      .click();
+    await page
+      .getByRole('button', { name: 'Use this Pod', exact: true })
+      .click();
   };
   // The failed sign-in to the second Pod blocks: the gate offers the other Pod.
   const overviewGate = page.locator('[data-sempods-ui="gate"]');

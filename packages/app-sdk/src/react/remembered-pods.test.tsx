@@ -15,6 +15,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import { podAction, podActionNames } from './access-pods.test.js';
 import { AppAccess, SempodsProvider } from './index.js';
 import {
   fixture,
@@ -186,9 +187,8 @@ it('shows only the address field when the runtime does not remember Pods', async
       <AppAccess appName="Shopping" open />
     </SempodsProvider>,
   );
-  await act(async () =>
-    (await screen.findByRole('button', { name: 'Sign out' })).click(),
-  );
+  const action = await podAction('Sign out on this device');
+  await act(async () => action.click());
   await waitFor(() => expect(runtime.getSnapshot()).toEqual([]));
   expect(screen.queryByRole('list', { name: texts.en.list })).toBeNull();
   expect(screen.getByRole('combobox', { name: 'Pod address' })).toBeTruthy();
@@ -239,16 +239,15 @@ it('keeps a remembered Pod reachable in management while another Pod restores', 
       <AppAccess appName="Shopping" open onClose={() => {}} />
     </SempodsProvider>,
   );
-  const list = await screen.findByRole('list', { name: texts.en.list });
+  const row = await screen.findByRole('group', { name: 'pod.example/bob' });
   expect(
     Object.fromEntries(next.getSnapshot().map((c) => [c.id, c.session.kind])),
   ).toEqual({ [alice.id]: 'restoring', [bob.id]: 'signed-out' });
   expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull();
-  expect(within(list).getByText('pod.example/bob')).toBeTruthy();
+  expect(within(row).getByText('Signed out')).toBeTruthy();
   const navigations = f.navigate.mock.calls.length;
-  await act(async () =>
-    within(list).getByRole('button', { name: 'Sign in' }).click(),
-  );
+  const signIn = await podAction('Sign in', 'pod.example/bob');
+  await act(async () => signIn.click());
   await waitFor(() =>
     expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
   );
@@ -316,7 +315,7 @@ it.each(['en', 'de'] as const)(
   },
 );
 
-it('names the active Pod in management beside a remembered one', async () => {
+it('names the active Pod in management beside a remembered one, each in its row', async () => {
   const { f, runtime, other } = await twoPods((r) =>
     cleanups.push(() => r.dispose()),
   );
@@ -331,16 +330,20 @@ it('names the active Pod in management beside a remembered one', async () => {
       <AppAccess appName="Shopping" open />
     </SempodsProvider>,
   );
-  await screen.findByRole('button', { name: 'Sign out' });
-  // No Pod selector for one signed-in Pod: its address names it instead.
-  expect(screen.queryByLabelText('Active pod')).toBeNull();
-  const region = screen.getByRole('region', { name: 'Pods & sharing' });
-  const list = within(region).getByRole('list', { name: texts.en.list });
-  const named = within(region)
-    .getAllByText('pod.example/alice')
-    .filter((element) => !list.contains(element));
-  expect(named).toHaveLength(1);
-  expect(within(list).getByText('pod.example/bob')).toBeTruthy();
+  // Each Pod is one row: the signed-in one selected, the remembered one
+  // signed out, each with its own actions.
+  const alice = await screen.findByRole('group', { name: 'pod.example/alice' });
+  const bob = screen.getByRole('group', { name: 'pod.example/bob' });
+  expect(within(alice).getByText('Selected')).toBeTruthy();
+  expect(within(bob).getByText('Signed out')).toBeTruthy();
+  expect(await podActionNames('pod.example/alice')).toEqual([
+    'Change sharing',
+    'Sign out on this device',
+  ]);
+  expect(await podActionNames('pod.example/bob')).toEqual([
+    'Sign in',
+    'Remove from this device',
+  ]);
 });
 
 it.each(['choice', 'address'] as const)(

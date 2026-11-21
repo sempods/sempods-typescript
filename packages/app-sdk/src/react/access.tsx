@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -44,6 +43,7 @@ import {
 } from './access-prompts.js';
 import { useFirst } from './first.js';
 import { enteredPod, SignInConnections } from './access-sign-in.js';
+import { PodManagement, useAccessAction, type PodView } from './access-pods.js';
 import { useFocusHold } from './focus.js';
 import { AppStartup } from './startup.js';
 
@@ -87,6 +87,20 @@ export interface AppAccessProps {
   readonly podAddressPrefix?: string;
   /** Host-owned management toggle; demands Context discovery in on-demand mode, never login. */
   readonly open?: boolean;
+  /**
+   * How the app's view uses its Pods, for management. `selected` (default):
+   * it works in the active Pod, whose row is marked **Selected**; another
+   * Pod's actions offer **Use this Pod**, a guarded switch. `combined`: it
+   * shows several Pods at once, without that marker or switch. A connection
+   * alone does not say how the app uses it, so the app declares it.
+   */
+  readonly podView?: PodView;
+  /**
+   * With `podView="combined"`: one short line above the Pod list on which
+   * Pods contribute to this view, for example "Tasks from all signed-in
+   * Pods". Display only.
+   */
+  readonly podViewDescription?: ReactNode;
   /**
    * Shows management (`open`) as a modal dialog with a title and a close
    * button; Escape, the close button and a click beside it call this, which
@@ -313,25 +327,38 @@ function Management({
   readonly onClose: () => void;
 }) {
   const { messages: m } = useSdkLocale();
-  const app = useApp();
-  const activeId = useAppFacts((s) => activeCatalogue(s).activeId);
-  // Opening the management dialog checks the access again, so it needs no
-  // separate button.
-  const refreshContexts = app.refreshContexts;
-  useLayoutEffect(() => {
-    if (activeId) void refreshContexts(activeId).catch(() => {});
-  }, [activeId, refreshContexts]);
+  const add = useAddStep();
   return (
     <AccessDialog
       ui="management"
-      title={m.controls.dataAccess}
+      title={
+        add.adding
+          ? (m.controls.connectAnother ?? m.controls.dataAccess)
+          : m.controls.dataAccess
+      }
       onClose={onClose}
+      {...(add.adding ? { onBack: add.back } : {})}
       {...(focusTarget ? { returnFocus: focusTarget } : {})}
     >
-      <AccessSection {...props} manage asDialog />
+      <AccessSection {...props} manage asDialog add={add} />
     </AccessDialog>
   );
 }
+
+/**
+ * Management's step that connects another Pod: `returned` once its back
+ * action went to the Pod list, which then focuses the step's trigger.
+ */
+function useAddStep() {
+  const [step, setStep] = useState<'list' | 'adding' | 'returned'>('list');
+  return {
+    adding: step === 'adding',
+    returned: step === 'returned',
+    start: () => setStep('adding'),
+    back: () => setStep('returned'),
+  };
+}
+type AddStep = ReturnType<typeof useAddStep>;
 
 /**
  * The connection view: Context flows inline (`manage` false) or management.
@@ -352,10 +379,31 @@ function AccessSection({
   components,
   className,
   style,
-}: ContextAccessProps & {
-  readonly manage: boolean;
-  readonly asDialog?: boolean;
-}) {
+  podView = 'selected',
+  podViewDescription,
+  add: addStep,
+}: ContextAccessProps &
+  Pick<AppAccessProps, 'podView' | 'podViewDescription'> & {
+    readonly manage: boolean;
+    readonly asDialog?: boolean;
+    /** The dialog's own step, whose back action is in its header. */
+    readonly add?: AddStep;
+  }) {
+  const ownStep = useAddStep();
+  const add = addStep ?? ownStep;
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  // Opening the management dialog checks the active Pod's access again, so
+  // it needs no separate button (in place, **Check access** does it);
+  // another Pod's is checked when its row opens.
+  const activeId = useAppFacts((s) => activeCatalogue(s).activeId);
+  const refreshContexts = useApp().refreshContexts;
+  useLayoutEffect(() => {
+    if (asDialog && activeId) void refreshContexts(activeId).catch(() => {});
+  }, [asDialog, activeId, refreshContexts]);
+  useLayoutEffect(() => {
+    // In place, the step's heading takes the focus, as the dialog's does.
+    if (manage && !asDialog && add.adding) stepHeading.current?.focus();
+  }, [manage, asDialog, add.adding]);
   const state = useAppState();
   const access = useWorkflowAccess();
   // Management lists the Contexts (discovery); only a Context flow, or the
@@ -444,20 +492,29 @@ function AccessSection({
       </style>
       {!hidden && (
         <div className="sp-access-content">
-          {!asDialog && (
-            <header>
-              {icon && namesApp && appName && (
-                <div className="sp-access-icon" aria-hidden="true">
-                  {icon}
-                </div>
-              )}
-              <Heading>
-                {namesApp && appName ? appName : m.controls.dataAccess}
+          {!asDialog && manage && add.adding ? (
+            <header className="sp-access-step">
+              <BackButton onBack={add.back} />
+              <Heading ref={stepHeading} tabIndex={-1}>
+                {m.controls.connectAnother ?? m.controls.dataAccess}
               </Heading>
-              {namesApp && appName && description && (
-                <p className="sp-access-description">{description}</p>
-              )}
             </header>
+          ) : (
+            !asDialog && (
+              <header>
+                {icon && namesApp && appName && (
+                  <div className="sp-access-icon" aria-hidden="true">
+                    {icon}
+                  </div>
+                )}
+                <Heading>
+                  {namesApp && appName ? appName : m.controls.dataAccess}
+                </Heading>
+                {namesApp && appName && description && (
+                  <p className="sp-access-description">{description}</p>
+                )}
+              </header>
+            )
           )}
           {Connections ? (
             body === 'leaving' ? (
@@ -485,11 +542,16 @@ function AccessSection({
               mode={mode}
               body={body}
               podAddress={podAddress}
+              podView={podView}
+              podViewDescription={podViewDescription}
+              add={add}
+              notice={notice}
               {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
               {...(podNames ? { podNames } : {})}
             />
           )}
-          {notice && <AccessNotice />}
+          {/* Management's Pod list shows it in the active Pod's row. */}
+          {notice && (!manage || Connections) && <AccessNotice />}
         </div>
       )}
     </section>
@@ -766,6 +828,7 @@ function AccessDialog({
   ui,
   title,
   onClose,
+  onBack,
   returnFocus,
   children,
 }: {
@@ -773,14 +836,22 @@ function AccessDialog({
   readonly ui: 'management' | 'settings';
   readonly title: string;
   readonly onClose: () => void;
+  /** A step of its own: a back button before the title, also for Escape. */
+  readonly onBack?: () => void;
   /** Focus after closing (`focusTarget`); otherwise the element focused before. */
   readonly returnFocus?: RefObject<HTMLElement | null>;
   readonly children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const label = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const { messages: m, direction } = useSdkLocale();
   useModalDialog(dialog, true, returnFocus);
+  const step = Boolean(onBack);
+  useLayoutEffect(() => {
+    // A new step announces its title.
+    if (step) heading.current?.focus();
+  }, [step]);
   return (
     <dialog
       ref={dialog}
@@ -791,7 +862,7 @@ function AccessDialog({
       dir={direction}
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        (onBack ?? onClose)();
       }}
       onClick={(event) => {
         // A click on the backdrop reaches the dialog element itself.
@@ -800,7 +871,10 @@ function AccessDialog({
     >
       <SdkStyles />
       <header className="sp-access-dialog-header">
-        <h2 id={label}>{title}</h2>
+        {onBack && <BackButton onBack={onBack} />}
+        <h2 id={label} ref={heading} tabIndex={-1}>
+          {title}
+        </h2>
         <button
           className="sp-access-close"
           aria-label={m.controls.close}
@@ -817,6 +891,25 @@ function AccessDialog({
   );
 }
 
+/** Back from a step of management to the Pod list. */
+function BackButton({ onBack }: { readonly onBack: () => void }) {
+  const { messages: m } = useSdkLocale();
+  const label = m.controls.back ?? m.controls.cancel;
+  return (
+    <button
+      type="button"
+      className="sp-access-close sp-access-back"
+      aria-label={label}
+      title={label}
+      onClick={onBack}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m14 5-7 7 7 7" />
+      </svg>
+    </button>
+  );
+}
+
 function AccessConnections({
   manage,
   mode,
@@ -827,9 +920,17 @@ function AccessConnections({
   body,
   podAddress,
   podAddressPrefix,
+  podView,
+  podViewDescription,
+  add,
+  notice,
 }: {
   readonly manage: boolean;
   readonly mode: 'single' | 'multiple';
+  readonly podView: PodView;
+  readonly podViewDescription?: ReactNode;
+  readonly add: AddStep;
+  readonly notice: boolean;
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
   readonly podAddressPrefix?: string | undefined;
@@ -846,12 +947,9 @@ function AccessConnections({
   const id = useId();
   const disconnectId = useId();
   const [url, setUrl] = useState('');
-  const [busy, setBusy] = useState(false);
-  const inFlight = useRef(false);
-  const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
-  // Remembered Pods: signed out at a known address (see `rememberPods`). The
-  // connected management view lists them under the other-Pod action;
-  // the gate uses SignInConnections. A Pod being forgotten
+  const { act, unavailable, failure } = useAccessAction();
+  // Remembered Pods: signed out at a known address (see `rememberPods`).
+  // Management lists them as rows; the gate uses SignInConnections. A Pod being forgotten
   // stays in that list; if forgetting could not be saved, with the failure
   // and Forget again, so its address is not kept against the choice.
   const forgetting = (entry: Connection) =>
@@ -878,8 +976,8 @@ function AccessConnections({
   const reads = readsAtAll(c);
   const anonymous = c?.reading === 'anonymous';
   // Inline beside the content, the access prompt already offers signing in
-  // to a connection that reads without a token; management offers it too.
-  const inPrompt = anonymous && !manage;
+  // to a connection that reads without a token.
+  const inPrompt = anonymous;
   // Adding a Pod signs in only where sign-in is required; otherwise it opens
   // the Pod to read without a token.
   const addLabel =
@@ -893,7 +991,6 @@ function AccessConnections({
   // sign-in may omit its address; management keeps it inspectable.
   const addressHidden =
     podAddress === 'hidden' &&
-    !manage &&
     state.allowedPods?.length === 1 &&
     defaultUrl === state.allowedPods[0];
   const fixedContext =
@@ -903,46 +1000,6 @@ function AccessConnections({
   const readable = (knownContexts(c?.catalogue) ?? []).filter(
     (entry) => entry.readable,
   );
-  const unavailable =
-    busy ||
-    state.changing ||
-    state.confirmingLeave ||
-    !state.startup ||
-    // Without sign-in nothing is stored, on purpose.
-    (state.startup.storage !== 'durable' && state.signIn !== 'none') ||
-    Boolean(state.startupError);
-  // The control that started the running action. Its own action disables it,
-  // and a disabled control loses the focus in WebKit (the focus fixup rule),
-  // which stays on the body once the control is enabled again (#332).
-  const actionFocus = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    const target = actionFocus.current;
-    if (unavailable || !target) return;
-    actionFocus.current = null;
-    // Only a lost focus returns: one the action moved elsewhere stays there.
-    const active = target.ownerDocument.activeElement;
-    if (target.isConnected && (!active || active === target.ownerDocument.body))
-      target.focus();
-  }, [unavailable]);
-  async function act(task: () => Promise<unknown>) {
-    if (inFlight.current || unavailable) return;
-    const focused = document.activeElement;
-    actionFocus.current =
-      focused instanceof HTMLElement && focused !== document.body
-        ? focused
-        : null;
-    inFlight.current = true;
-    setBusy(true);
-    setFailure(null);
-    try {
-      await task();
-    } catch (cause) {
-      setFailure({ cause });
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  }
   async function connect(target: string) {
     // Reuse a permitted stored or prepared connection, including after a failed
     // authorization preparation. The controller still guards selection/login.
@@ -966,14 +1023,12 @@ function AccessConnections({
     } else await app.connect(target);
   }
   // Without sign-in only the default Pod connects: no other address to add.
-  const showNew =
-    state.signIn !== 'none' && ((manage && mode === 'multiple') || !c);
+  const showNew = state.signIn !== 'none' && !c;
   const showDefault =
     (mode === 'multiple' || !c) &&
     defaultUrl &&
     c?.podUrl !== defaultUrl &&
-    !remembered.some((entry) => entry.podUrl === defaultUrl) &&
-    !(manage && !state.allowedPods);
+    !remembered.some((entry) => entry.podUrl === defaultUrl);
   const choice = url || defaultUrl || '';
   // The callback notice already names why this connection's sign-in ended.
   const shownByNotice =
@@ -992,8 +1047,7 @@ function AccessConnections({
     (!addressHidden || podNames?.[target]?.trim()) && (
       <p id={lineId}>{name(target)}</p>
     );
-  // Management names the Pod its actions target; a display name never
-  // replaces that Pod's address, also beside several saved connections.
+  // A display name never replaces a saved Pod's address.
   const namedAddress = (target: string) =>
     podNames?.[target]?.trim() && <p className="sp-access-address">{target}</p>;
   const labels =
@@ -1083,9 +1137,6 @@ function AccessConnections({
       </select>
     </label>
   );
-  // Signing in to a new Pod. In management of a connection it is a secondary,
-  // collapsed action after the connected Pod.
-  const another = manage && Boolean(c);
   const rememberedList = remembered.length > 0 && (
     <ul
       key="remembered"
@@ -1147,11 +1198,7 @@ function AccessConnections({
   // A connection that reads without a token (always, under `none`) has no
   // session to sign out of; a remembered address, or one whose session ended
   // here, is forgotten instead.
-  const signsOut =
-    c !== undefined &&
-    !anonymous &&
-    c.session.kind !== 'signed-out' &&
-    (manage || c.session.kind === 'ended');
+  const signsOut = c !== undefined && !anonymous && c.session.kind === 'ended';
   const forgets =
     c !== undefined &&
     anonymous &&
@@ -1262,7 +1309,7 @@ function AccessConnections({
       </form>
     ) : defaultSignIn ? (
       defaultSignIn
-    ) : showNew && !state.allowedPods && (!state.preset || manage) ? (
+    ) : showNew && !state.allowedPods && !state.preset ? (
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -1292,20 +1339,39 @@ function AccessConnections({
       </form>
     ) : null;
 
-  if (manage && !c && body === 'connections')
-    return (
+  // The page is navigating to the Pod's sign-in: no action applies any more.
+  if (body === 'leaving')
+    return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
+  if (manage) {
+    // Without a connected Pod, management is the sign-in's chooser; with
+    // one, its Pod list, and connecting another Pod is a step of its own.
+    const connected = state.connections.some(
+      (entry) => !remembered.includes(entry),
+    );
+    return connected && !add.adding ? (
+      <PodManagement
+        mode={mode}
+        podNames={podNames}
+        podView={podView}
+        podViewDescription={podViewDescription}
+        contextRequired={contextRequired}
+        switching={switching}
+        recheck={discovery}
+        onAdd={add.start}
+        focusAdd={add.returned}
+        notice={notice}
+      />
+    ) : (
       <SignInConnections
         mode={mode}
         surface="management"
         podAddress={podAddress}
+        {...(connected ? { adding: true, onAdded: add.back } : {})}
         {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
         {...(podNames ? { podNames } : {})}
       />
     );
-
-  // The page is navigating to the Pod's sign-in: no action applies any more.
-  if (body === 'leaving')
-    return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
+  }
   // A restore that never settles must not hide signing in to the configured
   // Pod, to a remembered one, or switching to another saved one.
   if (body === 'loading')
@@ -1320,19 +1386,15 @@ function AccessConnections({
     );
   return (
     <>
-      {!another && rememberedList}
-      {!another && addPod}
+      {rememberedList}
+      {addPod}
       {activePod}
-      {/* Without the Pod selector, the active Pod is named here. */}
-      {manage && active && selectable.length < 2 && podLine(c!.podUrl)}
-      {manage && active && namedAddress(c!.podUrl)}
       {c?.session.kind === 'restoring' && (
         <p role="status">{m.controls.loading}</p>
       )}
       {c && !active && c.session.kind !== 'restoring' && (
         <>
           {podLine(c.podUrl)}
-          {manage && namedAddress(c.podUrl)}
           {c.session.kind === 'ended' &&
             !disconnectFailed &&
             !shownByNotice &&
@@ -1411,7 +1473,7 @@ function AccessConnections({
         </p>
       )}
       {reads &&
-        (contextRequired || manage) &&
+        contextRequired &&
         !fixedContext &&
         c?.catalogue.kind === 'ready' &&
         readable.length === 0 && (
@@ -1421,28 +1483,8 @@ function AccessConnections({
               : m.noContexts}
           </p>
         )}
-      {manage &&
-        reads &&
-        c?.catalogue.kind === 'loading' &&
-        !c.catalogue.contexts && <p role="status">{m.cataloguePending}</p>}
-      {manage && reads && !contextRequired && readable.length > 0 && (
-        // What the catalogue says this app may do in each readable Context:
-        // caller-relative rights, not which grant or public access gave them.
-        <section aria-label={m.controls.contextAccess}>
-          <p className="sp-access-label">{m.controls.contextAccess}</p>
-          <ul className="sp-access-contexts">
-            {readable.map((entry) => (
-              <li key={entry.iri}>
-                <span>{contextLabel(entry.iri)}</span>
-                {accessFact(entry)}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {manage && actions}
-      {/* Management and the remembered list already show the Pod address. */}
-      {c && !manage && (
+      {/* The remembered list already shows the Pod address. */}
+      {c && (
         <details>
           <summary>{m.controls.addresses}</summary>
           <p>{c.podUrl}</p>
@@ -1460,14 +1502,7 @@ function AccessConnections({
           </dl>
         </details>
       )}
-      {!manage && actions}
-      {another && (addPod || rememberedList) && (
-        <details className="sp-access-another">
-          <summary>{m.controls.connectAnother}</summary>
-          {rememberedList}
-          {addPod}
-        </details>
-      )}
+      {actions}
       {failure && <p role="alert">{error(failure.cause)}</p>}
     </>
   );
@@ -1522,7 +1557,36 @@ const styles = `
 [data-sempods-access] .sp-access-label, [data-sempods-access] .sp-access-fact { font-size:.875rem; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-context { margin:4px 0 16px; padding-inline-start:12px; border-inline-start:2px solid var(--sp-line); text-align:start; }
 [data-sempods-access] .sp-access-label { text-align:start; margin:16px 0 0; }
-[data-sempods-access] .sp-access-another { margin-top:16px; }
+/* Management's Pod rows: a name that expands the Pod's access, a marker, and
+   a 44px button with the actions for that Pod. */
+[data-sempods-access] .sp-pods { text-align:start; }
+[data-sempods-access] .sp-pods-scope { margin:0 0 12px; font-size:.875rem; color:var(--sp-muted); }
+[data-sempods-access] .sp-pods-list { border-block-end:1px solid var(--sp-line); }
+[data-sempods-access] .sp-pod { border-block-start:1px solid var(--sp-line); }
+[data-sempods-access] .sp-pod-head { position:relative; display:flex; align-items:center; gap:4px; }
+[data-sempods-access] .sp-pod-toggle { flex:1; min-width:0; display:flex; align-items:center; gap:8px; padding:6px 4px; text-align:start; font-weight:600; color:var(--sp-text); background:transparent; border-color:transparent; }
+[data-sempods-access] .sp-pod-toggle svg { flex:none; width:16px; height:16px; fill:none; stroke:var(--sp-muted); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .15s; }
+[data-sempods-access] .sp-pod-toggle:dir(rtl) svg { transform:scaleX(-1); }
+[data-sempods-access] .sp-pod-toggle[aria-expanded=true] svg { transform:rotate(90deg); }
+[data-sempods-access] .sp-pod-name { flex:1; min-width:0; overflow-wrap:anywhere; }
+[data-sempods-access] .sp-pod-marker { flex:none; font-size:.8125rem; font-weight:500; color:var(--sp-muted); }
+[data-sempods-access] .sp-pod-more { flex:none; display:grid; place-items:center; width:44px; height:44px; padding:0; color:var(--sp-muted); background:transparent; border-color:transparent; }
+[data-sempods-access] .sp-pod-more svg { width:20px; height:20px; fill:currentColor; }
+[data-sempods-access] .sp-pod-more[aria-expanded=true] { background:color-mix(in oklch,transparent,var(--sp-text) 8%); }
+[data-sempods-access] .sp-pod-menu { position:absolute; inset-block-start:calc(100% - 4px); inset-inline-end:0; z-index:2; display:grid; min-width:min(14rem,calc(100vw - 48px)); max-width:calc(100vw - 48px); padding:4px; background:var(--sp-bg); border:1px solid var(--sp-field-line); border-radius:calc(var(--sp-radius) * 1.25); box-shadow:0 8px 24px color-mix(in srgb,var(--sp-text) 10%,transparent); }
+[data-sempods-access] .sp-pod-menu button { text-align:start; font-weight:400; color:var(--sp-text); background:transparent; border-color:transparent; padding:10px 12px; }
+[data-sempods-access] .sp-pod > [role=alert] { margin:0 0 8px; padding-inline-start:28px; }
+[data-sempods-access] .sp-pod-details { padding:0 0 12px; padding-inline-start:28px; }
+[data-sempods-access] .sp-pod-details p { margin:4px 0; }
+[data-sempods-access] .sp-pod-details label { margin:8px 0; }
+[data-sempods-access] .sp-pod-details .sp-access-contexts { margin:0; }
+[data-sempods-access] .sp-pod-details .sp-access-contexts li { padding:4px 0; border:0; }
+[data-sempods-access] .sp-pods-add { display:inline-flex; align-items:center; gap:8px; margin-top:8px; padding-inline:4px; color:var(--sp-text); background:transparent; border-color:transparent; }
+[data-sempods-access] .sp-pods-add svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
+/* In place, a step's heading follows its back button, as in the dialog. */
+[data-sempods-access] .sp-access-step { display:flex; align-items:center; gap:8px; text-align:start; }
+[data-sempods-access] .sp-access-step .sp-access-close { flex:none; border-color:transparent; background:transparent; }
+[data-sempods-access] .sp-access-step h2:focus, .sp-access-dialog-header h2:focus { outline:none; }
 [data-sempods-access] .sp-access-remembered { list-style:none; margin:0 0 16px; padding:0; }
 [data-sempods-access] .sp-access-remembered li { padding:8px 0; border-block-end:1px solid var(--sp-line); }
 [data-sempods-access] .sp-access-remembered p { margin:4px 0; }
@@ -1556,7 +1620,9 @@ const styles = `
 /* An icon control, not an action role: no surface or border of its own. */
 .sp-access-close { width:44px; height:44px; display:grid; place-items:center; padding:0; color:var(--sp-text); background:transparent; border-color:transparent; }
 .sp-access-close:hover { background:color-mix(in oklch,transparent,var(--sp-text) 8%); }
-.sp-access-close svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
+.sp-access-close svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.sp-access-back:dir(rtl) svg { transform:scaleX(-1); }
+.sp-access-dialog-header:has(> .sp-access-back) { padding-inline-start:12px; }
 .sp-access-dialog [data-sempods-access] { padding:8px 24px 24px; text-align:start; }
 .sp-access-dialog [data-sempods-access] .sp-access-content { max-width:none; }
 .sp-access-dialog [data-sempods-access] .sp-access-actions { justify-content:flex-start; margin-inline-start:-14px; }

@@ -17,6 +17,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import { podAction, podActionNames } from './access-pods.test.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   catalogue,
@@ -186,15 +187,12 @@ it('lets the person forget a Pod they signed out of, while reading on', async ()
   });
   expect(within(prompt).getByRole('button', { name: 'Forget' })).toBeTruthy();
   // Management offers it too, and no sign-out without a session.
-  const management = document.querySelector<HTMLElement>(
-    '[data-sempods-access]:not([hidden])',
-  )!;
-  expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
-  await act(async () =>
-    within(management)
-      .getByRole('button', { name: 'Remove from this device' })
-      .click(),
-  );
+  expect(await podActionNames()).toEqual([
+    'Sign in',
+    'Remove from this device',
+  ]);
+  const remove = await podAction('Remove from this device');
+  await act(async () => remove.click());
   // Forgotten: the default Pod is listed again, never signed in to.
   await waitFor(() =>
     expect(runtime.getSnapshot()).toMatchObject([
@@ -322,7 +320,7 @@ it('keeps the view for an unconfirmed write until it is resolved', async () => {
   expect(next!.getSnapshot()).toMatchObject({ current: true, write: false });
 });
 
-it('lists every Pod read without a token in the Pod selector', async () => {
+it('lists every Pod read without a token as a row and selects one without signing in', async () => {
   const f = start({ signIn: 'optional', preset: { podUrl: pod } });
   await f.runtime.initialize();
   await f.runtime.connect('https://pod.example/bob');
@@ -331,21 +329,18 @@ it('lists every Pod read without a token in the Pod selector', async () => {
       <AppAccess appName="Recipes" open />
     </SempodsProvider>,
   );
-  const selector = (await screen.findByLabelText(
-    'Active pod',
-  )) as HTMLSelectElement;
-  const options = [...selector.options].filter((o) => o.value);
-  expect(options).toHaveLength(2);
-  await act(async () => {
-    fireEvent.change(selector, {
-      target: { value: options.find((o) => o.value !== pod)!.value },
-    });
-  });
+  const alice = await screen.findByRole('group', { name: 'pod.example/alice' });
+  const bob = screen.getByRole('group', { name: 'pod.example/bob' });
+  expect(within(alice).getByText('Selected')).toBeTruthy();
+  expect(await podActionNames('pod.example/bob')).toEqual([
+    'Sign in',
+    'Use this Pod',
+  ]);
+  const use = await podAction('Use this Pod', 'pod.example/bob');
+  await act(async () => use.click());
   // Choosing it does not sign in.
+  expect(within(bob).getByText('Selected')).toBeTruthy();
   expect(f.navigate).not.toHaveBeenCalled();
-  expect(
-    screen.queryByRole('list', { name: 'Pods on this device' }),
-  ).toBeNull();
 });
 
 const task = fields(
@@ -551,7 +546,7 @@ it.each(['unmount', 'activity'] as const)(
   },
 );
 
-it('opens a signed-in Pod by its address without signing in again', async () => {
+it('selects a signed-in Pod again from its row without signing in again', async () => {
   const f = start({
     signIn: 'optional',
     allowedPods: [pod, 'https://pod.example/bob'],
@@ -565,17 +560,26 @@ it('opens a signed-in Pod by its address without signing in again', async () => 
       <AppAccess appName="Recipes" open />
     </SempodsProvider>,
   );
-  // Management's Pod chooser opens the signed-in Pod again.
-  const chooser = (await screen.findByLabelText(
-    'Pod address',
-  )) as HTMLSelectElement;
-  fireEvent.change(chooser, { target: { value: pod } });
-  const open = screen.getByRole('button', {
-    name: 'Open',
-  }) as HTMLButtonElement;
-  await act(async () => open.click());
-  // The action has ended once the controls are enabled again.
-  await waitFor(() => expect(open.disabled).toBe(false));
+  // Every permitted Pod is connected, so there is no other Pod to connect:
+  // the signed-in Pod's row selects it again.
+  expect(
+    screen.queryByRole('button', { name: 'Connect another Pod' }),
+  ).toBeNull();
+  // From Bob, read without a token, back to Alice's session.
+  const bob = await podAction('Use this Pod', 'pod.example/bob');
+  await act(async () => bob.click());
+  const use = (await podAction(
+    'Use this Pod',
+    'pod.example/alice',
+  )) as HTMLButtonElement;
+  await act(async () => use.click());
+  await waitFor(() =>
+    expect(
+      within(
+        screen.getByRole('group', { name: 'pod.example/alice' }),
+      ).getByText('Selected'),
+    ).toBeTruthy(),
+  );
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });

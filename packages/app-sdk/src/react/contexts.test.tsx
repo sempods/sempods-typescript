@@ -294,7 +294,7 @@ it('names only the selected Context in management when the app switches', async 
   const f = await returnedSession(keep);
   render(<App runtime={f.runtime} open />);
   const region = await screen.findByRole('region', { name: 'Pods & sharing' });
-  await within(region).findByText('Read and write');
+  await within(region).findByText('Can edit');
   expect(within(region).getByText('work', { exact: false })).toBeTruthy();
   expect(
     within(region).queryByRole('combobox', { name: 'Data context' }),
