@@ -6642,6 +6642,7 @@ export const suites = {
   viewTabs,
   viewStrip,
   ghost,
+  notices,
   dateChoice,
   editorFooter,
   rename,
@@ -7236,6 +7237,767 @@ async function ghost({ browser, origin, engine }) {
       });
     }
   } finally {
+    results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
+    await context.close();
+  }
+  return results;
+}
+
+/**
+ * The shared notification host (#385) on `?screen=notices`: a shopping list
+ * with a composer fixed at the bottom and an app dialog. The PWA pilot's
+ * update notice at 375 and 1280px in light and dark: outside the flow, no
+ * row moves, above the composer and inside the screen, no focus taken,
+ * announced once, contrast; with the phone keyboard open (a shrinking
+ * viewport) above the composer that holds the focus; repeated failures of
+ * one Pod as one warning that retires; while the app's dialog is open the
+ * stack waits and covers nothing, and shows and announces once it closes;
+ * a replacement renderer's own confirmation in a portal stays open while
+ * the stack waits under it, and confirming runs the action once;
+ * Escape dismisses the focused notice; reduced motion; beside AppAccess's
+ * own prompt stack (`accessPrompts={false}`) above it, so Sign in takes the
+ * press; inside a zoomed visual viewport, also its sides and above a
+ * composer kept at its bottom (Chromium); while an app dialog opens and
+ * closes through its styles or a class, also one with `display: contents`;
+ * above a composer moved through its style; and before sign-in inside the
+ * SDK's gate, clear of its sign-in button, its height free of the page's
+ * avoided zones, and without polling while nothing waits.
+ */
+async function notices({ browser, origin, engine }) {
+  const { context, page, errors } = await newPage(browser);
+  const update =
+    'A new version is ready. It is used once every window of this app has been closed.';
+  const call = (name, ...args) =>
+    page.evaluate(
+      ([name, args]) => window.noticesGate[name](...args),
+      [name, args],
+    );
+  const toast = page.locator(
+    '[data-sempods-ui="notices"]:not([data-placement]) li',
+  );
+  /** What the page shows: rows, composer, stack and live regions. */
+  const measure = () =>
+    page.evaluate(() => {
+      const rect = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+      };
+      const host = document.querySelector(
+        '[data-sempods-ui="notices"]:not([data-placement])',
+      );
+      // A covered stack keeps its notices mounted, hidden.
+      const items = [...(host?.querySelectorAll('li') ?? [])].filter(
+        (li) => !li.closest('[hidden]'),
+      );
+      const live = (role) =>
+        [
+          ...document.querySelectorAll(
+            `[data-sempods-ui="notices"] [role="${role}"] p`,
+          ),
+        ].map((p) => p.textContent);
+      return {
+        rows: [...document.querySelectorAll('.notices-items li')].map(
+          (li) => rect(li).top,
+        ),
+        scroll: document.documentElement.scrollHeight,
+        composer: rect(
+          document.querySelector('form[data-sempods-notices-avoid]'),
+        ),
+        position: host ? getComputedStyle(host).position : null,
+        items: items.map((li) => ({
+          ...rect(li),
+          text: li.textContent,
+          severity: li.dataset.severity,
+          animation: getComputedStyle(li).animationName,
+        })),
+        width: innerWidth,
+        height: innerHeight,
+        focus:
+          document.activeElement?.getAttribute('aria-label') ??
+          document.activeElement?.textContent ??
+          null,
+        polite: live('status'),
+        assertive: live('alert'),
+      };
+    });
+  const inside = (m) =>
+    m.items.every(
+      (i) =>
+        i.left >= 0 && i.right <= m.width && i.top >= 0 && i.bottom <= m.height,
+    );
+  const aboveComposer = (m) =>
+    m.items.every((i) => i.bottom <= m.composer.top + 0.5);
+  const results = [];
+  try {
+    for (const scheme of ['light', 'dark'])
+      for (const width of [375, 1280])
+        results.push(
+          await attemptOn(
+            errors,
+            `notices-update-${width}-${scheme}`,
+            async () => {
+              await page.setViewportSize({ width, height: 812 });
+              await page.emulateMedia({ colorScheme: scheme });
+              await page.goto(origin + '/?screen=notices');
+              const input = page.getByLabel('New item', { exact: true });
+              await input.waitFor();
+              await input.focus();
+              const before = await measure();
+              await call('update', true);
+              await toast.first().waitFor();
+              await settle(page);
+              const after = await measure();
+              await page.addScriptTag({ content: contrastScript });
+              const failing = await page
+                .locator('[data-sempods-ui="notices"]:not([data-placement])')
+                .evaluate((el) => window.uiContrast(el).filter((r) => !r.pass));
+              return {
+                pass:
+                  after.position === 'fixed' &&
+                  after.items.length === 1 &&
+                  after.items[0].text.includes(update) &&
+                  JSON.stringify(after.rows) === JSON.stringify(before.rows) &&
+                  after.scroll === before.scroll &&
+                  inside(after) &&
+                  aboveComposer(after) &&
+                  after.focus === 'New item' &&
+                  after.polite.length === 1 &&
+                  after.polite[0] === update &&
+                  failing.length === 0,
+                after,
+                failing,
+              };
+            },
+          ),
+        );
+    results.push(
+      await attemptOn(errors, 'notices-keyboard-open', async () => {
+        await page.emulateMedia({ colorScheme: null });
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        const input = page.getByLabel('New item', { exact: true });
+        await input.fill('Oat milk');
+        await call('update', true);
+        await toast.first().waitFor();
+        // The keyboard opens over the composer, as a shrinking viewport.
+        await page.setViewportSize({ width: 375, height: 420 });
+        await settle(page);
+        await page.waitForTimeout(100);
+        const m = await measure();
+        // The composer grows, as an auto-growing field does: the stack moves.
+        await page
+          .locator('form[data-sempods-notices-avoid]')
+          .evaluate((form) => (form.style.paddingTop = '48px'));
+        await page.waitForTimeout(150);
+        await settle(page);
+        const grown = await measure();
+        return {
+          pass:
+            m.items.length === 1 &&
+            inside(m) &&
+            aboveComposer(m) &&
+            m.composer.bottom <= m.height + 0.5 &&
+            m.focus === 'New item' &&
+            (await input.inputValue()) === 'Oat milk' &&
+            grown.composer.top < m.composer.top &&
+            aboveComposer(grown),
+          m,
+          grown,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-repeated-pod-failure', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        for (let i = 0; i < 3; i++) await call('fail', 'pod.example/alice');
+        await toast.first().waitFor();
+        await settle(page);
+        const failing = await measure();
+        await call('recover', 'pod.example/alice');
+        const retired = await gone(toast);
+        return {
+          pass:
+            failing.items.length === 1 &&
+            failing.items[0].severity === 'warning' &&
+            failing.items[0].text.includes('3 attempts so far') &&
+            failing.polite.length === 1 &&
+            retired,
+          failing,
+          retired,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-open-dialog', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByRole('button', { name: 'Edit list' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Edit list' });
+        await dialog.waitFor();
+        await settle(page);
+        await call('show', {
+          key: 'sync',
+          severity: 'error',
+          text: 'The list could not be synchronised.',
+        });
+        await page.waitForTimeout(300);
+        const during = await measure();
+        // Nothing of the host lies above the dialog's own controls.
+        const done = dialog.getByRole('button', { name: 'Done' });
+        const box = await done.boundingBox();
+        const onTop = await page.evaluate(
+          ([x, y]) =>
+            document.elementFromPoint(x, y)?.closest('[role="dialog"]') !==
+            null,
+          [box.x + box.width / 2, box.y + box.height / 2],
+        );
+        await done.click();
+        await hidden(dialog);
+        await toast.first().waitFor();
+        await settle(page);
+        const after = await measure();
+        return {
+          pass:
+            during.items.length === 0 &&
+            during.assertive.length === 0 &&
+            onTop &&
+            after.items.length === 1 &&
+            after.items[0].severity === 'error' &&
+            after.assertive.length === 1,
+          during,
+          onTop,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-renderer-confirmation', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices&confirm');
+        await page.waitForFunction(() => window.noticesGate);
+        await call('undo');
+        await toast.first().waitFor();
+        await toast.getByRole('button', { name: 'Restore' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Restore?' });
+        await dialog.waitFor();
+        // Long enough for the host to see the modal and wait under it.
+        await page.waitForTimeout(400);
+        const during = await measure();
+        const open = await dialog.isVisible();
+        await dialog.getByRole('button', { name: 'Confirm' }).click();
+        const closed = await hidden(dialog);
+        const settled = await gone(toast);
+        const restored = await page.evaluate(() => window.restored ?? 0);
+        return {
+          pass:
+            open &&
+            during.items.length === 0 &&
+            closed &&
+            settled &&
+            restored === 1,
+          open,
+          during,
+          closed,
+          settled,
+          restored,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-escape-and-motion', async () => {
+        await page.setViewportSize({ width: 1280, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        const input = page.getByLabel('New item', { exact: true });
+        await input.focus();
+        await call('update', true);
+        await toast.first().waitFor();
+        await settle(page);
+        const moving = (await measure()).items[0]?.animation;
+        await toast.getByRole('button', { name: 'OK' }).focus();
+        await page.keyboard.press('Escape');
+        const dismissed = await gone(toast);
+        // To the host's focusTarget, the list's Edit button.
+        const back = await focusUntil(page, /^Edit list$/, async () =>
+          page.evaluate(() => document.activeElement?.textContent ?? ''),
+        );
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await call('show', { key: 'saved', text: 'Saved.' });
+        await toast.first().waitFor();
+        const still = (await measure()).items[0]?.animation;
+        await page.emulateMedia({ reducedMotion: null });
+        return {
+          pass:
+            moving === 'sp-notice-in' &&
+            dismissed &&
+            back === 'Edit list' &&
+            still === 'none',
+          moving,
+          dismissed,
+          back,
+          still,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-beside-access-prompts', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await fetch(origin + '/__reset');
+        await page.goto(origin + '/?screen=notices&beside');
+        const gate = page.locator('dialog[data-sempods-ui="gate"]');
+        await gate.waitFor();
+        // Reading a Pod without a token: AppAccess offers to sign in from
+        // its own stack, beside the host (`accessPrompts={false}`).
+        await page.evaluate(
+          (pod) => window.gateRuntime.connect(pod),
+          origin + '/alice',
+        );
+        await gone(gate);
+        const prompts = page.locator('[data-sempods-ui="prompts"]');
+        const signIn = prompts.getByRole('button', {
+          name: 'Sign in',
+          exact: true,
+        });
+        await signIn.waitFor();
+        await call('update', true);
+        await toast.first().waitFor();
+        await settle(page);
+        const box = await signIn.boundingBox();
+        const center = [box.x + box.width / 2, box.y + box.height / 2];
+        const state = await page.evaluate(([x, y]) => {
+          const stack = document
+            .querySelector('[data-sempods-ui="prompts"] ul')
+            .getBoundingClientRect();
+          const notice = document
+            .querySelector(
+              '[data-sempods-ui="notices"]:not([data-placement]) li',
+            )
+            .getBoundingClientRect();
+          return {
+            hit: document.elementFromPoint(x, y)?.closest('button')
+              ?.textContent,
+            stack: { top: stack.top, bottom: stack.bottom },
+            notice: { top: notice.top, bottom: notice.bottom },
+            height: innerHeight,
+          };
+        }, center);
+        // The press reaches Sign in; held before it leaves for the provider.
+        await page.evaluate(() =>
+          window.addEventListener(
+            'click',
+            (event) => {
+              window.pressed = event.target.closest?.('button')?.textContent;
+              event.stopPropagation();
+              event.preventDefault();
+            },
+            { capture: true, once: true },
+          ),
+        );
+        await page.mouse.click(...center);
+        const pressed = await page.evaluate(() => window.pressed);
+        return {
+          pass:
+            state.hit === 'Sign in' &&
+            pressed === 'Sign in' &&
+            state.notice.bottom <= state.stack.top + 0.5 &&
+            state.notice.top >= 0,
+          state,
+          pressed,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-visual-viewport', async () => {
+        // Only Chromium can shrink the visual viewport alone (DevTools
+        // protocol), as a pinch zoom or Chrome's default keyboard does.
+        if (engine !== 'chromium')
+          return { pass: false, skip: 'no visual viewport emulation' };
+        const cdp = await context.newCDPSession(page);
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        await call('update', true);
+        await toast.first().waitFor();
+        const read = () =>
+          page.evaluate(() => {
+            const box = (element) => {
+              const r = element.getBoundingClientRect();
+              return {
+                top: r.top,
+                bottom: r.bottom,
+                left: r.left,
+                right: r.right,
+              };
+            };
+            const item = document.querySelector(
+              '[data-sempods-ui="notices"]:not([data-placement]) li',
+            );
+            const stack = item.parentElement;
+            const v = window.visualViewport;
+            return {
+              layout: innerHeight,
+              seen: {
+                top: v.offsetTop,
+                bottom: v.offsetTop + v.height,
+                left: v.offsetLeft,
+                right: v.offsetLeft + v.width,
+              },
+              notice: box(item),
+              stack: box(stack),
+              scrolls:
+                stack.scrollHeight > stack.clientHeight &&
+                getComputedStyle(stack).overflowY === 'auto',
+              buttons: [...item.querySelectorAll('button')].map(box),
+              composer: box(
+                document.querySelector('form[data-sempods-notices-avoid]'),
+              ),
+            };
+          });
+        // The notice and its buttons, inside what the person sees; beyond
+        // the room there, the stack's box, which scrolls to the rest.
+        const inside = (m, boxes) =>
+          boxes.every(
+            (r) =>
+              r.top >= m.seen.top - 0.5 &&
+              r.bottom <= m.seen.bottom + 0.5 &&
+              r.left >= m.seen.left - 0.5 &&
+              r.right <= m.seen.right + 0.5,
+          );
+        const within = (m) => inside(m, [m.notice, ...m.buttons]);
+        const zoom = async (pageScaleFactor) => {
+          await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor });
+          await page.waitForTimeout(150);
+          await settle(page);
+          return read();
+        };
+        try {
+          const zoomed = await zoom(2);
+          // Zoomed further, the app keeps its composer at the visible
+          // bottom, as one that follows the visual viewport does.
+          await page.evaluate(() => {
+            const form = document.querySelector(
+              'form[data-sempods-notices-avoid]',
+            );
+            const v = window.visualViewport;
+            const place = () =>
+              (form.style.bottom = `${innerHeight - v.offsetTop - v.height}px`);
+            v.addEventListener('resize', place);
+            v.addEventListener('scroll', place);
+          });
+          const further = await zoom(2.5);
+          const back = await zoom(1);
+          return {
+            pass:
+              zoomed.layout === 812 &&
+              zoomed.seen.bottom < 500 &&
+              zoomed.seen.right < 200 &&
+              within(zoomed) &&
+              further.seen.bottom < 406 &&
+              Math.abs(further.composer.bottom - further.seen.bottom) < 1 &&
+              further.stack.bottom <= further.composer.top + 0.5 &&
+              inside(further, [further.stack]) &&
+              (within(further) || further.scrolls) &&
+              back.seen.bottom === 812 &&
+              within(back) &&
+              back.notice.bottom > zoomed.notice.bottom,
+            zoomed,
+            further,
+            back,
+          };
+        } finally {
+          await cdp
+            .send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
+            .catch(() => {});
+          await cdp.detach().catch(() => {});
+        }
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-dialog-closed-by-css', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        const runs = {};
+        for (const [property, value] of [
+          ['display', 'none'],
+          ['visibility', 'hidden'],
+        ]) {
+          // The app's own dialog, kept mounted and closed through a style.
+          await page.evaluate(() => {
+            const dialog = document.createElement('div');
+            dialog.id = 'css-dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
+            dialog.textContent = 'Edit';
+            document.body.append(dialog);
+          });
+          const text = `Not synchronised (${property}).`;
+          await call('show', { key: property, severity: 'error', text });
+          await page.waitForTimeout(300);
+          const during = await measure();
+          await page.evaluate(
+            ([property, value]) =>
+              (document.getElementById('css-dialog').style[property] = value),
+            [property, value],
+          );
+          // No resize and no observed attribute: the host looks again.
+          await toast.filter({ hasText: text }).waitFor({ timeout: 2000 });
+          await settle(page);
+          const after = await measure();
+          runs[property] = {
+            during: during.items.length,
+            after: after.items.length,
+            announced: after.assertive.filter((t) => t === text).length,
+          };
+          await call('dismiss', property);
+          await page.evaluate(() =>
+            document.getElementById('css-dialog').remove(),
+          );
+        }
+        // Opened and closed again through a class on a wrapper, as an
+        // overlay library does: the stack waits while it is open.
+        await page.evaluate(() => {
+          const style = document.createElement('style');
+          style.textContent = '.css-overlay-closed { display: none; }';
+          const wrapper = document.createElement('div');
+          wrapper.id = 'css-overlay';
+          wrapper.className = 'css-overlay-closed';
+          wrapper.innerHTML =
+            '<div role="dialog" aria-modal="true">Filter</div>';
+          document.head.append(style);
+          document.body.append(wrapper);
+        });
+        const brief = 'Filters saved.';
+        await call('show', { key: 'filters', text: brief });
+        const item = toast.filter({ hasText: brief });
+        await item.waitFor();
+        await page.waitForTimeout(100);
+        await page.evaluate(() =>
+          document
+            .getElementById('css-overlay')
+            .classList.remove('css-overlay-closed'),
+        );
+        // Well before its 6 second timer could hide it.
+        const waited = await item
+          .waitFor({ state: 'hidden', timeout: 1000 })
+          .then(
+            () => true,
+            () => false,
+          );
+        await page.evaluate(() =>
+          document
+            .getElementById('css-overlay')
+            .classList.add('css-overlay-closed'),
+        );
+        const back = await item.waitFor({ timeout: 2000 }).then(
+          () => true,
+          () => false,
+        );
+        await page.evaluate(() =>
+          document.getElementById('css-overlay').remove(),
+        );
+        // A modal without a box of its own (`display: contents`) around its
+        // visible panel covers the page as well.
+        await call('dismiss', 'filters');
+        await page.evaluate(() => {
+          const contents = document.createElement('div');
+          contents.id = 'contents-dialog';
+          contents.setAttribute('role', 'dialog');
+          contents.setAttribute('aria-modal', 'true');
+          contents.style.display = 'contents';
+          contents.innerHTML =
+            '<div style="position:fixed;inset:20%;background:Canvas">Sort</div>';
+          document.body.append(contents);
+        });
+        const sorted = 'Sorted by name.';
+        await call('show', { key: 'sorted', text: sorted });
+        await page.waitForTimeout(300);
+        const behind = (await measure()).items.filter((i) =>
+          i.text.includes(sorted),
+        ).length;
+        await page.evaluate(() =>
+          document.getElementById('contents-dialog').remove(),
+        );
+        const shownAfter = await toast
+          .filter({ hasText: sorted })
+          .waitFor({ timeout: 2000 })
+          .then(
+            () => true,
+            () => false,
+          );
+        return {
+          pass:
+            Object.values(runs).every(
+              (run) =>
+                run.during === 0 && run.after === 1 && run.announced === 1,
+            ) &&
+            waited &&
+            back &&
+            behind === 0 &&
+            shownAfter,
+          runs,
+          waited,
+          back,
+          behind,
+          shownAfter,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-composer-moves', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices');
+        await page.getByLabel('New item', { exact: true }).waitFor();
+        await call('update', true);
+        await toast.first().waitFor();
+        await settle(page);
+        const before = await measure();
+        // Moved up through its style alone, without resizing.
+        await page
+          .locator('form[data-sempods-notices-avoid]')
+          .evaluate((form) => (form.style.bottom = '80px'));
+        await page.waitForTimeout(150);
+        await settle(page);
+        const after = await measure();
+        return {
+          pass:
+            aboveComposer(before) &&
+            after.composer.top < before.composer.top - 70 &&
+            aboveComposer(after) &&
+            inside(after),
+          before,
+          after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-gate-ignores-page-zones', async () => {
+        await page.setViewportSize({ width: 667, height: 375 });
+        await fetch(origin + '/__reset');
+        await page.goto(origin + '/?screen=notices&gate');
+        const gate = page.locator('dialog[data-sempods-ui="gate"]');
+        await gate.getByRole('button', { name: 'Sign in' }).waitFor();
+        // A tall composer behind the gate, marked for the page's stack.
+        await page
+          .locator('form[data-sempods-notices-avoid]')
+          .evaluate((form) => (form.style.paddingTop = '274px'));
+        await settle(page);
+        // The gate is open and nothing waits: no host looks each frame.
+        const queries = await page.evaluate(async () => {
+          let count = 0;
+          const original = window.Document.prototype.querySelectorAll;
+          window.Document.prototype.querySelectorAll = function (...args) {
+            count++;
+            return original.apply(this, args);
+          };
+          await new Promise((done) => setTimeout(done, 1000));
+          window.Document.prototype.querySelectorAll = original;
+          return count;
+        });
+        await call('update', true);
+        const inGate = gate.locator('[data-placement="gate"] li');
+        await inGate.first().waitFor();
+        await settle(page);
+        const list = await gate
+          .locator('[data-placement="gate"] ul')
+          .evaluate((ul) => ({
+            height: ul.clientHeight,
+            content: ul.scrollHeight,
+            composer: document
+              .querySelector('form[data-sempods-notices-avoid]')
+              .getBoundingClientRect().height,
+          }));
+        return {
+          pass:
+            queries < 10 &&
+            list.composer > 300 &&
+            list.height > 60 &&
+            list.content <= list.height + 1,
+          queries,
+          list,
+        };
+      }),
+    );
+    for (const height of [812, 560])
+      results.push(
+        await attemptOn(
+          errors,
+          `notices-before-sign-in-${height}`,
+          async () => {
+            await page.setViewportSize({ width: 375, height });
+            await fetch(origin + '/__reset');
+            await page.goto(origin + '/?screen=notices&gate');
+            const gate = page.locator('dialog[data-sempods-ui="gate"]');
+            const signIn = gate.getByRole('button', { name: 'Sign in' });
+            await signIn.waitFor();
+            const focusBefore = await page.evaluate(
+              () => document.activeElement?.outerHTML.slice(0, 80) ?? '',
+            );
+            await call('update', true);
+            const inGate = gate.locator('[data-placement="gate"] li');
+            await inGate.first().waitFor();
+            await settle(page);
+            await signIn.scrollIntoViewIfNeeded();
+            const box = await signIn.boundingBox();
+            const state = await page.evaluate(
+              ([x, y]) => {
+                const gate = document.querySelector(
+                  'dialog[data-sempods-ui="gate"]',
+                );
+                const list = gate.querySelector('[data-placement="gate"] li');
+                const r = list.getBoundingClientRect();
+                return {
+                  clear: Boolean(
+                    document.elementFromPoint(x, y)?.closest('button'),
+                  ),
+                  notice: { top: r.top, bottom: r.bottom },
+                  height: innerHeight,
+                  reserved: parseFloat(getComputedStyle(gate).paddingBottom),
+                  outside: document.querySelectorAll(
+                    '[data-sempods-ui="notices"]:not([data-placement]) li',
+                  ).length,
+                  announced: [
+                    ...gate.querySelectorAll(
+                      '[data-placement="gate"] [role="status"] p',
+                    ),
+                  ].map((p) => p.textContent),
+                  focus: document.activeElement?.outerHTML.slice(0, 80) ?? '',
+                };
+              },
+              [box.x + box.width / 2, box.y + box.height / 2],
+            );
+            // Escape on the notice keeps the focus inside the modal gate;
+            // the app's focus target behind it is inert.
+            await inGate.first().getByRole('button', { name: 'OK' }).focus();
+            await page.keyboard.press('Escape');
+            const dismissed = await gone(inGate);
+            await page.waitForTimeout(100);
+            const staysInGate = await gate.evaluate((element) =>
+              element.contains(document.activeElement),
+            );
+            return {
+              pass:
+                state.clear &&
+                state.notice.bottom <= state.height + 0.5 &&
+                state.reserved > 0 &&
+                state.outside === 0 &&
+                state.announced.length === 1 &&
+                state.announced[0] === update &&
+                state.focus === focusBefore &&
+                dismissed &&
+                staysInGate,
+              state,
+              dismissed,
+              staysInGate,
+              engine,
+            };
+          },
+        ),
+      );
+  } finally {
+    await page.emulateMedia({ colorScheme: null, reducedMotion: null });
     results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
     await context.close();
   }

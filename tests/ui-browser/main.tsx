@@ -38,6 +38,11 @@
 // Button, a LinkButton, an ActionButton and a HeaderMenu, beside a native
 // button; the checks swap the stylesheet for no-preflight.css, a host that
 // imports only Tailwind's theme and utilities (#392).
+// With `?screen=notices`, the page is a shopping list with a composer at the
+// bottom and an app dialog beside the SDK's shared notification host (#385);
+// with `&gate` as well, the SDK's sign-in gate shows before sign-in; with
+// `&beside`, sign-in is optional and the host leaves the access prompts to
+// `AppAccess` (`accessPrompts={false}`).
 // With `?screen=rename`, the page is the README's shopping list whose item
 // names are renamed in their rows (rename-row.tsx, #394); with `&shape=menu`
 // as well, the second shape, a list renamed from its rows' menus.
@@ -115,6 +120,7 @@ import { DeleteActions } from './delete-actions';
 import './index.css';
 import { ContextSwitchGate } from './context-switch';
 import { MenuConfirmGate } from './menu-confirm';
+import { NoticesGate } from './notices';
 import { ShoppingList } from './rename-row';
 import { RenameMenuGate } from './rename-menu';
 import { DateChoiceGate } from './date-choice';
@@ -277,6 +283,9 @@ const strip = settings.get('screen') === 'strip';
 const confirmation = settings.get('screen') === 'confirm';
 const menuConfirm = settings.get('screen') === 'menu-confirm';
 const ghosts = settings.get('screen') === 'ghost';
+const notices = settings.get('screen') === 'notices';
+// Beside `AppAccess` and its own prompt stack, reading a Pod without a token.
+const noticesBeside = notices && settings.has('beside');
 // The sign-in callback returns to the renamed rows it started from.
 if (settings.get('screen') === 'rename')
   sessionStorage.setItem('rename-gate', settings.toString());
@@ -396,9 +405,10 @@ function App() {
     replaceUrl,
     development: 'loopback-http',
     // Reading without a token: opening a Pod ends the gate in place.
-    ...(gateSettings ? { signIn: 'optional' as const } : {}),
+    ...(gateSettings || noticesBeside ? { signIn: 'optional' as const } : {}),
   });
-  if (gateSettings) Object.assign(window, { gateRuntime: runtime });
+  if (gateSettings || noticesBeside)
+    Object.assign(window, { gateRuntime: runtime });
   const appSettings = {
     label: lang === 'de' ? 'Einstellungen' : 'Settings',
     content: <SettingsChoices lang={lang} setLang={setLang} />,
@@ -433,6 +443,12 @@ function App() {
         <ConfirmGate pills={settings.get('footer') === 'pill'} />
       ) : menuConfirm ? (
         <MenuConfirmGate />
+      ) : notices ? (
+        <NoticesGate
+          gate={settings.has('gate')}
+          beside={noticesBeside}
+          confirm={settings.has('confirm')}
+        />
       ) : dateChoice ? (
         <DateChoiceGate />
       ) : gateSettings ? (

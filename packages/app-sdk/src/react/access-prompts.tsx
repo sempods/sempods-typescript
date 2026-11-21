@@ -19,6 +19,7 @@ import { useSdkLocale } from './locale.js';
 import { podName } from './names.js';
 import { layered, SdkStyles } from './styles.js';
 import { useFirst } from './first.js';
+import { useNoticeHost, useNoticeStore } from './notice-store.js';
 import { useCommitted } from './hooks.js';
 import { returnFocusAfterCommit, useFocusHold } from './focus.js';
 
@@ -101,6 +102,37 @@ export function ProviderLink({
   );
 }
 
+type PromptAction = AccessPromptFact['actions'][number];
+
+/** Internal: the localized label of one of a prompt's actions. */
+export function promptActionLabel(
+  m: ReturnType<typeof useSdkLocale>['messages'],
+  prompt: AccessPromptFact,
+  action: PromptAction,
+) {
+  return action === 'sign-in'
+    ? prompt.reason === 'missing-scopes'
+      ? m.controls.updateAccess
+      : m.controls.signIn
+    : action === 'retry'
+      ? m.controls.retry
+      : action === 'forget'
+        ? (m.controls.forget ?? 'Forget')
+        : action === 'reload'
+          ? (m.controls.reload ?? m.controls.retry)
+          : (m.controls.dismiss ?? m.controls.close ?? 'OK');
+}
+
+/**
+ * Internal: the actions a prompt offers here; a sign-in without a known
+ * address needs the gate's address field.
+ */
+export function offeredActions(prompt: AccessPromptFact, fixed: boolean) {
+  return prompt.actions.filter(
+    (action) => action !== 'sign-in' || prompt.connectionId !== null || fixed,
+  );
+}
+
 /** Internal: a prompt's action buttons, run through the controller's guards. */
 export function PromptActions({
   prompt,
@@ -127,22 +159,7 @@ export function PromptActions({
   const [failure, setFailure] = useState<{ readonly cause: unknown } | null>(
     null,
   );
-  const label = (action: AccessPromptFact['actions'][number]) =>
-    action === 'sign-in'
-      ? prompt.reason === 'missing-scopes'
-        ? m.controls.updateAccess
-        : m.controls.signIn
-      : action === 'retry'
-        ? m.controls.retry
-        : action === 'forget'
-          ? m.controls.forget
-          : action === 'reload'
-            ? (m.controls.reload ?? m.controls.retry)
-            : (m.controls.dismiss ?? m.controls.close ?? 'OK');
-  // A sign-in without a known address needs the gate's address field.
-  const actions = prompt.actions.filter(
-    (action) => action !== 'sign-in' || prompt.connectionId !== null || fixed,
-  );
+  const actions = offeredActions(prompt, fixed);
   if (actions.length === 0) return null;
   return (
     <>
@@ -161,7 +178,7 @@ export function PromptActions({
                 .finally(() => setBusy(false));
             }}
           >
-            {label(action)}
+            {promptActionLabel(m, prompt, action)}
           </button>
         ))}
       </div>
@@ -247,8 +264,11 @@ export function AccessPrompt({ prompt, focusTarget }: AccessPromptProps) {
   );
 }
 
-/** About 6 seconds, then an info prompt hides, unless focused or hovered. */
-const infoTimeout = 6000;
+/**
+ * Internal: about 6 seconds, then an info prompt or a brief notice hides,
+ * unless focused or hovered.
+ */
+export const infoTimeout = 6000;
 
 function TimedPrompt({
   prompt,
@@ -294,7 +314,9 @@ function TimedPrompt({
  * Info prompts hide after about 6 seconds unless focused or hovered, which
  * dismisses them; action prompts stay until dismissed or resolved. Each
  * prompt gets `focusTarget` (see `AccessPrompt`). Shows nothing while a
- * blocking prompt holds the gate or the app still starts.
+ * blocking prompt holds the gate or the app still starts, and nothing while
+ * a `Notices` host is mounted that shows them instead (unless it is given
+ * `accessPrompts={false}`).
  */
 export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const { blocking, prompts } = useAccessPrompts();
@@ -303,10 +325,22 @@ export function AccessPrompts({ focusTarget }: AccessPromptsProps) {
   const first = useFirst('prompts');
   // Prompts about other Pods wait for the startup screen to end.
   const starting = useAppFacts((s) => s.starting);
-  const shown = blocking || !first || starting ? [] : prompts;
+  // A mounted `Notices` host shows them in the shared stack instead, and
+  // returns focus from them to this `focusTarget` unless it has its own.
+  const host = useNoticeHost();
+  const store = useNoticeStore();
+  useLayoutEffect(() => {
+    if (!first) return;
+    store.setAccessFocus(focusTarget);
+    return () => store.setAccessFocus(undefined);
+  }, [store, first, focusTarget]);
+  const taken = Boolean(host?.accessPrompts);
+  const shown = blocking || !first || starting || taken ? [] : prompts;
   return (
     <div
       data-sempods-ui="prompts"
+      // A `Notices` host beside it (`accessPrompts={false}`) stays above it.
+      data-sempods-notices-avoid=""
       aria-live="polite"
       dir={direction}
       hidden={shown.length === 0}

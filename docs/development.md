@@ -278,7 +278,37 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     from a row's menu, where the field takes the focus the closing menu
     hands back and its own draft policy keeps a changed field open, also
     while another row is renamed, with the same rule for what Save may write
-    over.
+    over;
+  - the shared notification host (#385) on `?screen=notices`, a shopping list
+    with a composer fixed at the bottom: the PWA pilot's update notice at 375
+    and 1280px in light and dark stays outside the flow (no row moves, no
+    scroll height added), inside the screen and above the composer, takes no
+    focus, is announced once and passes rendered contrast; with the keyboard
+    open (375 × 420) it stays above the composer, which keeps the focus and
+    its draft, also once the composer grows; three failures of one Pod update
+    one warning, which retires once the Pod recovers; while the app's dialog
+    is open the stack shows nothing and covers none of its controls, then
+    shows and announces an error once it closes; a replacement renderer's own
+    confirmation dialog in a portal (`&confirm`) stays open while the stack
+    waits under it, and Confirm runs the action once; Escape dismisses the
+    focused notice and returns the focus to the host's `focusTarget`; reduced
+    motion stops its entrance; beside `AppAccess`'s own prompt stack
+    (`accessPrompts={false}`, `&beside`) it stays above that stack, so a press
+    on Sign in reaches it; after an app dialog kept mounted closes through
+    `display` or `visibility`, the queued error shows and is announced once
+    without a resize, and while an overlay opened by removing a class covers
+    it, a brief notice waits instead of expiring, then returns once the class
+    closes it again; a composer moved up through its style alone keeps the
+    notice above it; with a 330px composer behind the gate at 667 × 375, the
+    gate's notice keeps its full height, and while nothing waits no host
+    queries the page each frame; in Chromium, with the page zoomed to 2×, the
+    notice and its button stay inside the visual viewport, its sides included,
+    and at 2.5× above a composer the app keeps at the visible bottom; before
+    sign-in at 812 and 560px high it shows inside the SDK's gate, which keeps
+    its Sign in clear, and Escape on it keeps the focus inside the gate. The
+    keyboard check shrinks the layout viewport; a visual viewport shrunk
+    alone, as Chrome on Android and iOS do for the keyboard by default, is
+    covered only by the Chromium zoom.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay
