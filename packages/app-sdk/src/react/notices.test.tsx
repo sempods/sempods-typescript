@@ -6,7 +6,7 @@
  * `AppAccess` unchanged without the host.
  */
 import { webcrypto } from 'node:crypto';
-import { useRef, useState, type ReactNode } from 'react';
+import { memo, useRef, useState, type ReactNode } from 'react';
 import {
   act,
   cleanup,
@@ -1537,4 +1537,123 @@ it('reports in the console once when notices are published without a host', asyn
   act(() => actions.show({ key: 'saved', text: 'Saved.' }));
   await act(async () => new Promise((done) => setTimeout(done, 2100)));
   expect(reports()).toBe(once);
+});
+
+it('keeps a newer show when the holder of the same key lets go in the same update', async () => {
+  const runtime = await signedIn();
+  let recover!: () => void;
+  function Connection() {
+    const [offline, setOffline] = useState(true);
+    recover = () => {
+      setOffline(false);
+      actions.show({ key: 'connection', text: 'Back online.' });
+    };
+    useNotice(
+      offline
+        ? { key: 'connection', text: 'Offline.', severity: 'warning' }
+        : null,
+    );
+    return null;
+  }
+  render(
+    <App runtime={runtime}>
+      <Connection />
+    </App>,
+  );
+  await waitFor(() => expect(texts()).toEqual(['Offline.OK']));
+  act(() => recover());
+  await waitFor(() => expect(texts()).toEqual(['Back online.OK']));
+  await waitFor(() => expect(announced()).toContain('Back online.'));
+});
+
+it('passes a coalesced notice and its action to the holder that stays', async () => {
+  const runtime = await signedIn();
+  const dashboard = vi.fn();
+  const detail = vi.fn();
+  // Memoized: the dashboard does not render again when the detail closes.
+  const Warning = memo(function Warning({ run }: { readonly run: () => void }) {
+    useNotice({
+      key: 'pod-unreachable:alice',
+      text: 'Alice cannot be reached.',
+      severity: 'warning',
+      action: { label: 'Retry', run },
+    });
+    return null;
+  });
+  const ui = (open: boolean) => (
+    <App runtime={runtime}>
+      <Warning run={dashboard} />
+      {open && <Warning run={detail} />}
+    </App>
+  );
+  const view = render(ui(true));
+  await waitFor(() => expect(items()).toHaveLength(1));
+  // The detail view closes: its retry goes with it.
+  view.rerender(ui(false));
+  await act(async () => screen.getByRole('button', { name: 'Retry' }).click());
+  expect(detail).not.toHaveBeenCalled();
+  expect(dashboard).toHaveBeenCalledTimes(1);
+});
+
+it('shows a held notice again once a show over it goes, and keeps a dismissed one dismissed', async () => {
+  const runtime = await signedIn();
+  function Held({ tick }: { readonly tick: number }) {
+    useNotice({ key: 'sync', text: 'Sync paused.', severity: 'warning' });
+    return <span data-tick={tick} />;
+  }
+  const ui = (tick: number) => (
+    <App runtime={runtime}>
+      <Held tick={tick} />
+    </App>
+  );
+  const view = render(ui(0));
+  await waitFor(() => expect(texts()).toEqual(['Sync paused.OK']));
+  // A show takes the key; the holder's next render does not overwrite it.
+  act(() =>
+    actions.show({ key: 'sync', text: 'Syncing now.', severity: 'warning' }),
+  );
+  view.rerender(ui(1));
+  expect(texts()).toEqual(['Syncing now.OK']);
+  act(() => void actions.dismiss('sync'));
+  await waitFor(() => expect(texts()).toEqual(['Sync paused.OK']));
+  // Dismissed while held, it stays hidden across another show.
+  act(() => void actions.dismiss('sync'));
+  expect(items()).toEqual([]);
+  act(() =>
+    actions.show({ key: 'sync', text: 'Syncing now.', severity: 'warning' }),
+  );
+  act(() => void actions.dismiss('sync'));
+  await act(async () => new Promise((done) => setTimeout(done, 20)));
+  expect(items()).toEqual([]);
+});
+
+it('follows a changed AppAccess focusTarget when focus returns from an access prompt', async () => {
+  const { runtime } = await endedBeside();
+  let toB!: () => void;
+  function Shell() {
+    const a = useRef<HTMLButtonElement>(null);
+    const b = useRef<HTMLButtonElement>(null);
+    const [target, setTarget] = useState(() => a);
+    toB = () => setTarget(b);
+    return (
+      <>
+        <button ref={a}>A</button>
+        <button ref={b}>B</button>
+        <AppAccess appName="Tasks" focusTarget={target} />
+        <Notices />
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Shell />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(items()).toHaveLength(1));
+  act(() => toB());
+  const ok = within(items()[0]!).getByRole('button', { name: 'OK' });
+  act(() => ok.focus());
+  await act(async () => fireEvent.keyDown(ok, { key: 'Escape' }));
+  await waitFor(() => expect(items()).toEqual([]));
+  await waitFor(() => expect(document.activeElement?.textContent).toBe('B'));
 });

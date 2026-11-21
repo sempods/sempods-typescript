@@ -174,18 +174,22 @@ export function useNotices(): NoticeActions {
  * state that lasts, such as a waiting update or an unreachable Pod. Passing
  * `null` or unmounting retires it, so a warning ends with its cause. Changes
  * update it in place without a new announcement; once dismissed, it stays
- * hidden until it is retired and passed again.
+ * hidden until it is retired and passed again. A `show` under the same key
+ * takes it until that notice goes, and letting go never removes it; among
+ * several holders of a key, the one that declared last owns the notice and
+ * its action, and one that stays takes over when it unmounts.
  */
 export function useNotice(notice: Notice | null): void {
   const store = useNoticeStore();
+  const [holder] = useState(() => Symbol('useNotice'));
   const key = notice?.key ?? null;
   useEffect(() => {
     if (key === null) return;
-    store.hold(key);
-    return () => store.release(key);
-  }, [store, key]);
+    store.hold(key, holder);
+    return () => store.release(key, holder);
+  }, [store, key, holder]);
   useEffect(() => {
-    if (notice) store.declare(notice);
+    if (notice) store.declare(holder, notice);
   });
 }
 
@@ -824,6 +828,17 @@ function NoticeList({
 }) {
   const store = useNoticeStore();
   const value = useMemo(() => ({ announce, layer }), [announce, layer]);
+  // Without a focus target of its own, the host returns focus from an
+  // access prompt as `AppAccess` would: to its current `focusTarget`, read
+  // when focus returns.
+  const promptFocus = useMemo<RefObject<HTMLElement | null>>(
+    () => ({
+      get current() {
+        return (focusTarget ?? store.accessFocusTarget())?.current ?? null;
+      },
+    }),
+    [focusTarget, store],
+  );
   return (
     <Announce.Provider value={value}>
       <ul hidden={entries.length === 0}>
@@ -833,9 +848,7 @@ function NoticeList({
               key={entry.id}
               entry={entry}
               prompt={entry.prompt}
-              // Without one of its own, the host returns focus from an
-              // access prompt as `AppAccess` would.
-              focusTarget={focusTarget ?? store.accessFocusTarget()}
+              focusTarget={promptFocus}
               Notice={Notice}
             />
           ) : (
