@@ -24,7 +24,6 @@ interface Run {
 }
 interface Failure {
   readonly cause: unknown;
-  readonly event: number;
 }
 /** A mounted `Notices` host and its current options. */
 export interface Host {
@@ -59,7 +58,10 @@ class NoticeStore {
   /** Held notices the person dismissed, until their holders retire them. */
   private quiet = new Set<string>();
   private orders = new Map<string, number>();
-  /** The events announced per notice or prompt, until it retires. */
+  /**
+   * The events announced per notice or prompt, only those that can show
+   * again: the current one and a held one behind a `show`.
+   */
   private announced = new Map<string, Set<number>>();
   /**
    * A holder's record that a `show` covers: it returns as it was, with its
@@ -72,8 +74,11 @@ class NoticeStore {
    * late answer never reaches a later notice with the same key.
    */
   private running = new Map<string, Run>();
-  /** The last failed action of each, for the event it started in. */
-  private failures = new Map<string, Failure>();
+  /**
+   * The last failed action of each event that can show again, per notice
+   * or prompt: a held notice behind a `show` keeps its own.
+   */
+  private failures = new Map<string, Map<number, Failure>>();
   private sequence = 0;
   private events = 0;
   private listeners = new Set<() => void>();
@@ -298,10 +303,26 @@ class NoticeStore {
   }
   /** The event an app notice shows now; an access prompt has one. */
   private eventOf(id: string) {
-    const prefix = appId('');
-    return id.startsWith(prefix)
-      ? (this.records.get(id.slice(prefix.length))?.event ?? 0)
-      : 0;
+    const key = keyOf(id);
+    return key === null ? 0 : (this.records.get(key)?.event ?? 0);
+  }
+  /** The events of `id` that can show: now, and a held one behind a `show`. */
+  private liveEvents(id: string) {
+    const key = keyOf(id);
+    const live = new Set([this.eventOf(id)]);
+    const covered = key === null ? undefined : this.behind.get(key);
+    if (covered) live.add(covered.event);
+    return live;
+  }
+  /** Forgets what `id`'s events that can no longer show left behind. */
+  private prune(
+    id: string,
+    kept: Set<number> | Map<number, Failure> | undefined,
+  ) {
+    if (!kept) return;
+    const live = this.liveEvents(id);
+    for (const event of [...kept.keys()])
+      if (!live.has(event)) kept.delete(event);
   }
   /**
    * Marks an action of `id` as running and returns its token, or `null`
@@ -311,27 +332,31 @@ class NoticeStore {
     if (this.running.has(id)) return null;
     const run: Run = { token: Symbol(id), event: this.eventOf(id) };
     this.running.set(id, run);
-    this.failures.delete(id);
+    this.failures.get(id)?.delete(run.event);
     this.notify();
     return run.token;
   }
   /**
    * Ends the run of `token`, keeping its failure for whoever shows the same
-   * event; nothing once its notice has retired, and no failure once a
-   * changed `show` replaced the event it started in.
+   * event, also a held notice once the `show` covering it goes; nothing once
+   * its notice has retired, and no failure once a changed `show` replaced
+   * the event it started in.
    */
   end(id: string, token: symbol, failure?: { readonly cause: unknown }) {
     const run = this.running.get(id);
     if (run?.token !== token) return;
     this.running.delete(id);
-    if (failure && run.event === this.eventOf(id))
-      this.failures.set(id, { cause: failure.cause, event: run.event });
+    if (failure && this.liveEvents(id).has(run.event)) {
+      const kept = this.failures.get(id) ?? new Map<number, Failure>();
+      this.prune(id, kept);
+      kept.set(run.event, { cause: failure.cause });
+      this.failures.set(id, kept);
+    }
     this.notify();
   }
+  /** A changed `show` is a new notice: an earlier failure no longer applies. */
   failureOf(id: string) {
-    const failure = this.failures.get(id);
-    // A changed `show` is a new notice: an earlier failure no longer applies.
-    return failure?.event === this.eventOf(id) ? failure : undefined;
+    return this.failures.get(id)?.get(this.eventOf(id));
   }
   isRunning(id: string) {
     return this.running.has(id);
@@ -340,6 +365,8 @@ class NoticeStore {
   announce(id: string, event: number) {
     const made = this.announced.get(id) ?? new Set<number>();
     if (made.has(event)) return false;
+    // A long-lived key keeps no superseded events.
+    this.prune(id, made);
     made.add(event);
     this.announced.set(id, made);
     return true;
@@ -364,6 +391,11 @@ class NoticeStore {
   }
 }
 
+/** The key of an app notice's id; `null` for an access prompt. */
+function keyOf(id: string) {
+  const prefix = appId('');
+  return id.startsWith(prefix) ? id.slice(prefix.length) : null;
+}
 function checked(notice: Notice) {
   if (!notice.key) throw new Error('A notice needs a key.');
 }

@@ -7,6 +7,7 @@
  */
 import { webcrypto } from 'node:crypto';
 import { memo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   act,
   cleanup,
@@ -31,6 +32,7 @@ import {
   type NoticeProps,
   type NoticeView,
 } from './index.js';
+import { useNoticeStore } from './notice-store.js';
 
 const cleanups: (() => void)[] = [];
 beforeEach(async () => {
@@ -51,9 +53,11 @@ const host = () =>
   document.querySelector<HTMLElement>(
     '[data-sempods-ui="notices"]:not([data-placement])',
   )!;
-const items = (root: ParentNode = host()) => [
-  ...root.querySelectorAll<HTMLElement>('li'),
-];
+/** The notices `root` shows: a covered stack keeps them mounted, hidden. */
+const items = (root: ParentNode = host()) =>
+  [...root.querySelectorAll<HTMLElement>('li')].filter(
+    (item) => !item.closest('[hidden]'),
+  );
 const texts = (root?: ParentNode) =>
   items(root).map((item) => item.textContent);
 /** What the live regions of `root` announced, in order. */
@@ -1693,6 +1697,113 @@ it('keeps a held notice, its announcement and its running action while a show co
   expect(announced()).toEqual(['Offline.', 'Reconnecting.']);
   await act(async () => finish());
   expect(button()).toHaveProperty('disabled', false);
+});
+
+it('keeps the failure of a held retry for its notice once the show covering it goes', async () => {
+  const runtime = await signedIn();
+  let fail!: (cause: unknown) => void;
+  const retry = vi.fn(() => {
+    actions.show({ key: 'connection', text: 'Reconnecting.' });
+    return new Promise<void>((_, reject) => (fail = reject));
+  });
+  function Connection() {
+    useNotice({
+      key: 'connection',
+      text: 'Offline.',
+      severity: 'warning',
+      action: { label: 'Retry', run: retry },
+    });
+    return null;
+  }
+  render(
+    <App runtime={runtime}>
+      <Connection />
+    </App>,
+  );
+  const button = () => screen.getByRole('button', { name: 'Retry' });
+  await act(async () => button().click());
+  await waitFor(() => expect(texts()).toEqual(['Reconnecting.OK']));
+  // It fails while Reconnecting covers the warning: not Reconnecting's error.
+  await act(async () => fail(new Error('offline')));
+  expect(within(items()[0]!).queryByRole('alert')).toBeNull();
+  act(() => void actions.dismiss('connection'));
+  await waitFor(() => expect(items()).toHaveLength(1));
+  expect(within(items()[0]!).getByRole('alert').textContent).toBeTruthy();
+  expect(button()).toHaveProperty('disabled', false);
+});
+
+it('keeps a confirmation its renderer opened in a portal while the stack waits', async () => {
+  const runtime = await signedIn();
+  const undo = vi.fn(async () => {});
+  function Confirming({ notice }: NoticeProps) {
+    const [asking, setAsking] = useState(false);
+    const action = notice.actions[0]!;
+    return (
+      <>
+        <p>{notice.text}</p>
+        <button onClick={() => setAsking(true)}>{action.label}</button>
+        {asking &&
+          createPortal(
+            <div role="dialog" aria-modal="true" aria-label="Restore?">
+              <button
+                onClick={() => {
+                  setAsking(false);
+                  action.run();
+                }}
+              >
+                Confirm
+              </button>
+            </div>,
+            document.body,
+          )}
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Notices components={{ Notice: Confirming }} />
+      <Publisher />
+    </SempodsProvider>,
+  );
+  act(() =>
+    actions.show({
+      key: 'undo',
+      text: 'Deleted.',
+      action: { label: 'Restore', run: undo },
+    }),
+  );
+  act(() => screen.getByRole('button', { name: 'Restore' }).click());
+  // The confirmation covers the page: the stack waits, its owner stays.
+  await waitFor(() => expect(items()).toEqual([]));
+  await act(async () => new Promise((done) => setTimeout(done, 50)));
+  const dialog = screen.getByRole('dialog', { name: 'Restore?' });
+  await act(async () => within(dialog).getByRole('button').click());
+  expect(undo).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(host().querySelectorAll('li')).toHaveLength(0));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('keeps no announcement history of superseded events under a long-lived key', async () => {
+  const runtime = await signedIn();
+  let store!: ReturnType<typeof useNoticeStore>;
+  function Peek() {
+    store = useNoticeStore();
+    return null;
+  }
+  render(
+    <App runtime={runtime}>
+      <Peek />
+    </App>,
+  );
+  for (let i = 1; i <= 40; i++)
+    act(() =>
+      actions.show({ key: 'status', severity: 'warning', text: `Step ${i}.` }),
+    );
+  expect(texts()).toEqual(['Step 40.OK']);
+  expect(announced()).toHaveLength(40);
+  const kept = (store as unknown as { announced: Map<string, Set<number>> })
+    .announced;
+  expect(kept.get('app\nstatus')?.size).toBe(1);
 });
 
 it('keeps an identical show when its holder lets go, announced once, and dismisses both together', async () => {

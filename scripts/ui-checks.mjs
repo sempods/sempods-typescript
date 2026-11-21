@@ -6864,6 +6864,8 @@ async function ghost({ browser, origin, engine }) {
  * viewport) above the composer that holds the focus; repeated failures of
  * one Pod as one warning that retires; while the app's dialog is open the
  * stack waits and covers nothing, and shows and announces once it closes;
+ * a replacement renderer's own confirmation in a portal stays open while
+ * the stack waits under it, and confirming runs the action once;
  * Escape dismisses the focused notice; reduced motion; beside AppAccess's
  * own prompt stack (`accessPrompts={false}`) above it, so Sign in takes the
  * press; inside a zoomed visual viewport, also its sides and above a
@@ -6896,7 +6898,10 @@ async function notices({ browser, origin, engine }) {
       const host = document.querySelector(
         '[data-sempods-ui="notices"]:not([data-placement])',
       );
-      const items = [...(host?.querySelectorAll('li') ?? [])];
+      // A covered stack keeps its notices mounted, hidden.
+      const items = [...(host?.querySelectorAll('li') ?? [])].filter(
+        (li) => !li.closest('[hidden]'),
+      );
       const live = (role) =>
         [
           ...document.querySelectorAll(
@@ -7077,6 +7082,39 @@ async function notices({ browser, origin, engine }) {
           during,
           onTop,
           after,
+        };
+      }),
+    );
+    results.push(
+      await attemptOn(errors, 'notices-renderer-confirmation', async () => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await page.goto(origin + '/?screen=notices&confirm');
+        await page.waitForFunction(() => window.noticesGate);
+        await call('undo');
+        await toast.first().waitFor();
+        await toast.getByRole('button', { name: 'Restore' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Restore?' });
+        await dialog.waitFor();
+        // Long enough for the host to see the modal and wait under it.
+        await page.waitForTimeout(400);
+        const during = await measure();
+        const open = await dialog.isVisible();
+        await dialog.getByRole('button', { name: 'Confirm' }).click();
+        const closed = await hidden(dialog);
+        const settled = await gone(toast);
+        const restored = await page.evaluate(() => window.restored ?? 0);
+        return {
+          pass:
+            open &&
+            during.items.length === 0 &&
+            closed &&
+            settled &&
+            restored === 1,
+          open,
+          during,
+          closed,
+          settled,
+          restored,
         };
       }),
     );
@@ -7355,7 +7393,7 @@ async function notices({ browser, origin, engine }) {
         );
         // Well before its 6 second timer could hide it.
         const waited = await item
-          .waitFor({ state: 'detached', timeout: 1000 })
+          .waitFor({ state: 'hidden', timeout: 1000 })
           .then(
             () => true,
             () => false,
@@ -7388,7 +7426,9 @@ async function notices({ browser, origin, engine }) {
         const sorted = 'Sorted by name.';
         await call('show', { key: 'sorted', text: sorted });
         await page.waitForTimeout(300);
-        const behind = await toast.filter({ hasText: sorted }).count();
+        const behind = (await measure()).items.filter((i) =>
+          i.text.includes(sorted),
+        ).length;
         await page.evaluate(() =>
           document.getElementById('contents-dialog').remove(),
         );

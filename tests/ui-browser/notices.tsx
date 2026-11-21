@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AppAccess,
   Notices,
   useNotice,
   useNotices,
   type Notice,
+  type NoticeProps,
 } from '@sempods/app-sdk/react';
 import {
   Button,
@@ -52,6 +54,51 @@ function UpdateNotice({ ready }: { readonly ready: boolean }) {
   return null;
 }
 
+/**
+ * A replacement renderer that asks before it runs the action, in its own
+ * modal dialog in a portal: the stack waits under it, its owner stays.
+ */
+function ConfirmingNotice({ notice }: NoticeProps) {
+  const [asking, setAsking] = useState(false);
+  const action = notice.actions[0];
+  return (
+    <div className="notices-confirming">
+      <p>{notice.text}</p>
+      {action && (
+        <Button variant="outline" onPress={() => setAsking(true)}>
+          {action.label}
+        </Button>
+      )}
+      {action &&
+        asking &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${action.label}?`}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              display: 'grid',
+              placeItems: 'center',
+              background: 'rgb(0 0 0 / 0.4)',
+            }}
+          >
+            <Button
+              onPress={() => {
+                setAsking(false);
+                action.run();
+              }}
+            >
+              Confirm
+            </Button>
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 const items = [
   'Milk',
   'Bread',
@@ -71,15 +118,18 @@ const items = [
  * The shared notification host (#385) on a shopping list with a composer
  * fixed at the bottom (`data-sempods-notices-avoid`) and an app dialog. With
  * `gate`, `AppAccess` shows its sign-in gate, before sign-in; with `beside`,
- * `AppAccess` keeps its own prompt stack beside the host. The checks
- * publish through `window.noticesGate`, as the app's own code would.
+ * `AppAccess` keeps its own prompt stack beside the host; with `confirm`, a
+ * replacement renderer confirms an action in its own portal dialog. The
+ * checks publish through `window.noticesGate`, as the app's own code would.
  */
 export function NoticesGate({
   gate,
   beside,
+  confirm,
 }: {
   readonly gate: boolean;
   readonly beside: boolean;
+  readonly confirm: boolean;
 }) {
   const { show, dismiss } = useNotices();
   const [ready, setReady] = useState(false);
@@ -96,13 +146,30 @@ export function NoticesGate({
         fail: (pod: string) =>
           setFailures((f) => ({ ...f, [pod]: (f[pod] ?? 0) + 1 })),
         recover: (pod: string) => setFailures((f) => ({ ...f, [pod]: 0 })),
+        /** An undo notice whose action counts its runs in `restored`. */
+        undo: () =>
+          show({
+            key: 'undo',
+            text: 'Milk deleted.',
+            action: {
+              label: 'Restore',
+              run: () => {
+                const w = window as unknown as { restored?: number };
+                w.restored = (w.restored ?? 0) + 1;
+              },
+            },
+          }),
       },
     });
   }, [show, dismiss]);
   return (
     <>
       {(gate || beside) && <AppAccess appName="Konsum" />}
-      <Notices focusTarget={edit} accessPrompts={!beside} />
+      <Notices
+        focusTarget={edit}
+        accessPrompts={!beside}
+        components={confirm ? { Notice: ConfirmingNotice } : undefined}
+      />
       <UpdateNotice ready={ready} />
       {Object.entries(failures).map(([pod, count]) => (
         <PodWarning key={pod} pod={pod} failures={count} />

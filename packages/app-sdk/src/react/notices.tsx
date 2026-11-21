@@ -259,7 +259,9 @@ interface Announcement {
 const Announce = createContext<{
   readonly announce: (text: string, assertive: boolean) => void;
   readonly layer: 'page' | 'gate';
-}>({ announce: () => {}, layer: 'page' });
+  /** A modal covers the stack: its notices wait, hidden but mounted. */
+  readonly suspended: boolean;
+}>({ announce: () => {}, layer: 'page', suspended: false });
 
 /**
  * One polite and one assertive live region. Each event is added once and
@@ -713,7 +715,7 @@ export function Notices(props: NoticesProps) {
     'page',
     first && !gated && entries.length > 0,
   );
-  const shown = !first || cover.modal || gated ? [] : visible(entries, limit);
+  const shown = !first || gated ? [] : visible(entries, limit);
   return (
     <div
       ref={root}
@@ -729,6 +731,7 @@ export function Notices(props: NoticesProps) {
       <NoticeList
         entries={shown}
         layer="page"
+        suspended={cover.modal}
         announce={announce}
         focusTarget={focusTarget}
         Notice={Notice}
@@ -756,7 +759,7 @@ function GateStack({ host }: { readonly host: Host }) {
   // A dialog above the gate, such as the app's settings, makes the stack
   // wait: its notices time out and are announced once it closes.
   const cover = usePageCover(root, 'gate', entries.length > 0);
-  const shown = cover.modal ? [] : visible(entries, host.limit);
+  const shown = visible(entries, host.limit);
   // Room at the gate's end, so the stack never covers its last control.
   useLayoutEffect(() => {
     const element = root.current;
@@ -793,6 +796,7 @@ function GateStack({ host }: { readonly host: Host }) {
       <NoticeList
         entries={shown}
         layer="gate"
+        suspended={cover.modal}
         announce={announce}
         // The app's focus target is inert behind the gate: focus returns to
         // where it came from inside the gate.
@@ -812,22 +816,32 @@ function useNoticeRecords() {
   );
 }
 
-/** The shown notices of one host, each in its kind's guarded view. */
+/**
+ * The shown notices of one host, each in its kind's guarded view. While a
+ * modal covers them they stay mounted but hidden, without timers or
+ * announcements, so an overlay their renderer opened, such as its own
+ * confirmation in a portal, stays open.
+ */
 function NoticeList({
   entries,
   layer,
+  suspended,
   announce,
   focusTarget,
   Notice = DefaultNotice,
 }: {
   readonly entries: readonly Entry[];
   readonly layer: 'page' | 'gate';
+  readonly suspended: boolean;
   readonly announce: (text: string, assertive: boolean) => void;
   readonly focusTarget: RefObject<HTMLElement | null> | undefined;
   readonly Notice: ComponentType<NoticeProps> | undefined;
 }) {
   const store = useNoticeStore();
-  const value = useMemo(() => ({ announce, layer }), [announce, layer]);
+  const value = useMemo(
+    () => ({ announce, layer, suspended }),
+    [announce, layer, suspended],
+  );
   // Without a focus target of its own, the host returns focus from an
   // access prompt as `AppAccess` would: to its current `focusTarget`, read
   // when focus returns.
@@ -841,7 +855,7 @@ function NoticeList({
   );
   return (
     <Announce.Provider value={value}>
-      <ul hidden={entries.length === 0}>
+      <ul hidden={entries.length === 0 || suspended}>
         {entries.map((entry) =>
           entry.prompt ? (
             <AccessNoticeItem
@@ -879,7 +893,7 @@ function NoticeItem({
   Notice,
 }: ItemProps & { readonly view: NoticeView }) {
   const store = useNoticeStore();
-  const { announce, layer } = useContext(Announce);
+  const { announce, layer, suspended } = useContext(Announce);
   const event = entry.app?.event ?? 0;
   const message = [view.pod, view.title, view.text].filter(Boolean).join('. ');
   const element = useRef<HTMLLIElement>(null);
@@ -887,7 +901,7 @@ function NoticeItem({
   // after a modal. A modal that opened in the same event as the notice is
   // seen at once, before the host measures it: the event waits for it.
   useEffect(() => {
-    if (!message) return;
+    if (!message || suspended) return;
     let frame = 0;
     const attempt = () => {
       frame = 0;
@@ -904,19 +918,19 @@ function NoticeItem({
     return () => cancelAnimationFrame(frame);
     // Only a new event announces; a changed text or language does not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, entry.id, event]);
-  // Timer, paused while hovered or focused; a repeat or a new event
+  }, [store, entry.id, event, suspended]);
+  // Timer, paused while hovered, focused or covered; a repeat or a new event
   // restarts it, an update in place (a language change) does not.
   const [held, setHeld] = useState({ hover: false, focus: false });
   const duration = durationOf(entry);
   const renewed = entry.app?.renewed ?? 0;
   const expire = useCommitted(view.dismiss);
   useEffect(() => {
-    if (duration === null || held.hover || held.focus) return;
+    if (suspended || duration === null || held.hover || held.focus) return;
     // Hiding dismisses it, so a remount or a second host does not replay it.
     const timer = setTimeout(() => expire.current?.(), duration);
     return () => clearTimeout(timer);
-  }, [duration, held.hover, held.focus, renewed, event, expire]);
+  }, [suspended, duration, held.hover, held.focus, renewed, event, expire]);
   // Focus returns from a notice that goes while it holds focus.
   const focus = useFocusHold();
   const previous = useRef<HTMLElement | null>(null);

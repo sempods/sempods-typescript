@@ -427,7 +427,11 @@ function App() {
       ) : menuConfirm ? (
         <MenuConfirmGate />
       ) : notices ? (
-        <NoticesGate gate={settings.has('gate')} beside={noticesBeside} />
+        <NoticesGate
+          gate={settings.has('gate')}
+          beside={noticesBeside}
+          confirm={settings.has('confirm')}
+        />
       ) : dateChoice ? (
         <DateChoiceGate />
       ) : gateSettings ? (

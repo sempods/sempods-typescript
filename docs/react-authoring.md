@@ -1627,10 +1627,10 @@ export function Shell() {
   again when it runs, so a renderer that keeps an earlier callback is guarded
   too; one kept from a notice a changed `show` replaced or that was dismissed
   runs nothing, and a kept `dismiss` hides only the notice it was shown for. A
-  rejection shows its localized error in the notice, also after a remount, but
-  not on a notice a changed `show` replaced meanwhile. A shown notice retires
-  once its action resolves, unless the action showed it again; a held one
-  stays its holder's.
+  rejection shows its localized error in the notice, also after a remount or
+  once a `show` that covered the held notice goes, but not on a notice a
+  changed `show` replaced meanwhile. A shown notice retires once its action
+  resolves, unless the action showed it again; a held one stays its holder's.
 - **The host** shows at most `limit` notices (3 by default, at least 1); over
   the limit, those waiting for the person go first, so a burst of brief
   information never pushes a pending action out of reach. It is fixed at the
@@ -1649,20 +1649,24 @@ export function Shell() {
   Without a mounted host, notices show nowhere; the SDK reports that once in
   the console.
 - **Modals:** while a modal dialog covers the page (the app's own or an SDK
-  one), the stack waits and covers nothing; a dialog kept mounted but hidden
-  (`hidden`, `display: none`, `visibility: hidden`) covers nothing, and one
-  that opens or closes through its styles or a class is seen at once. The
-  waiting notices show and are announced once it closes, an error too, so keep
-  an error that concerns the dialog inside it. Beside `AppAccess` the stack
-  also waits while the app starts. Before sign-in, app notices show inside the
-  SDK's sign-in gate, which keeps room for them at its end; they wait there
-  too while the gate's settings, another dialog above it or an overlay inside
-  it, such as one of a custom `Connections` renderer, are open.
+  one), the stack waits and covers nothing: its notices stay mounted but
+  hidden, their timers and announcements wait. A dialog kept mounted but
+  hidden (`hidden`, `display: none`, `visibility: hidden`) covers nothing,
+  and one that opens or closes through its styles or a class is seen at
+  once. The waiting notices show and are announced once it closes, an error
+  too, so keep an error that concerns the dialog inside it. Beside
+  `AppAccess` the stack also waits while the app starts. Before sign-in, app
+  notices show inside the SDK's sign-in gate, which keeps room for them at
+  its end; they wait there too while the gate's settings, another dialog
+  above it or an overlay inside it, such as one of a custom `Connections`
+  renderer, are open.
 - **Another renderer:** `components={{ Notice }}` receives a `NoticeView`
   (`source`, `severity`, `title`, `text`, `actions`, `dismiss`, …) for an
   app notice or an access prompt alike. The host still owns position,
   timers, announcements, keyboard dismissal and the action guards; render
-  `actions` as buttons and `dismiss` as one more.
+  `actions` as buttons and `dismiss` as one more. A renderer may ask before
+  it runs an action, in its own modal dialog: the stack waits under it and
+  keeps the renderer mounted, so the dialog stays open.
 
 Choose the place by what the person has to do:
 
