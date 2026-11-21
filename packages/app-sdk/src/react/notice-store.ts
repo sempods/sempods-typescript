@@ -6,10 +6,7 @@ import {
 import { useController } from './app.js';
 import type { Notice, NoticeAction, NoticeProps } from './notices.js';
 
-/**
- * Internal: the app notices of one provider and the mounted `Notices` hosts,
- * kept per controller so every hook beneath a provider shares them.
- */
+/** Internal: one app notice as the store keeps it. */
 export interface NoticeRecord {
   readonly key: string;
   readonly notice: Notice;
@@ -38,6 +35,13 @@ export interface Host {
   readonly focusTarget: RefObject<HTMLElement | null> | undefined;
 }
 
+/** The id of an app notice beside the access prompts' ids. */
+export const appId = (key: string) => 'app\n' + key;
+
+/**
+ * The app notices of one provider and the mounted `Notices` hosts, kept per
+ * controller so every hook beneath a provider shares them.
+ */
 class NoticeStore {
   private records = new Map<string, NoticeRecord>();
   /** The latest action of each notice, without re-rendering for a new closure. */
@@ -57,22 +61,25 @@ class NoticeStore {
   private events = 0;
   private listeners = new Set<() => void>();
   private list: readonly NoticeRecord[] = [];
-  hosts: readonly Host[] = [];
+  private hosts: readonly Host[] = [];
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
   getSnapshot = () => this.list;
+  private notify() {
+    this.listeners.forEach((listener) => listener());
+  }
   getHosts = () => this.hosts;
 
   private emit() {
     this.list = Object.freeze(
       [...this.records.values()].sort((a, b) => a.order - b.order),
     );
-    this.listeners.forEach((listener) => listener());
+    this.notify();
   }
-  /** The stack position of an app key or access prompt id. */
+  /** The stack position of an access prompt id. */
   orderOf(id: string) {
     let order = this.orders.get(id);
     if (order === undefined) {
@@ -86,7 +93,7 @@ class NoticeStore {
     this.records.set(notice.key, {
       key: notice.key,
       notice,
-      order: previous?.order ?? this.orderOf('app\n' + notice.key),
+      order: previous?.order ?? ++this.sequence,
       event: previous?.event ?? ++this.events,
       renewed: previous?.renewed ?? 0,
       dismissed: previous?.dismissed ?? false,
@@ -130,9 +137,8 @@ class NoticeStore {
   private retire(key: string) {
     if (!this.records.delete(key)) return;
     this.runs.delete(key);
-    this.orders.delete('app\n' + key);
-    this.announced.delete('app\n' + key);
-    this.forgetRun('app\n' + key);
+    this.announced.delete(appId(key));
+    this.forgetRun(appId(key));
     this.emit();
   }
   dismiss = (key: string) => {
@@ -166,8 +172,9 @@ class NoticeStore {
   }
   /** The event an app notice shows now; an access prompt has one. */
   private eventOf(id: string) {
-    return id.startsWith('app\n')
-      ? (this.records.get(id.slice(4))?.event ?? 0)
+    const prefix = appId('');
+    return id.startsWith(prefix)
+      ? (this.records.get(id.slice(prefix.length))?.event ?? 0)
       : 0;
   }
   /**
@@ -179,7 +186,7 @@ class NoticeStore {
     const run: Run = { token: Symbol(id), event: this.eventOf(id) };
     this.running.set(id, run);
     this.failures.delete(id);
-    this.listeners.forEach((listener) => listener());
+    this.notify();
     return run.token;
   }
   /**
@@ -193,7 +200,7 @@ class NoticeStore {
     this.running.delete(id);
     if (failure && run.event === this.eventOf(id))
       this.failures.set(id, { cause: failure.cause, event: run.event });
-    this.listeners.forEach((listener) => listener());
+    this.notify();
   }
   failureOf(id: string) {
     const failure = this.failures.get(id);
@@ -221,11 +228,11 @@ class NoticeStore {
       index < 0
         ? [...this.hosts, host]
         : this.hosts.map((entry, i) => (i === index ? host : entry));
-    this.listeners.forEach((listener) => listener());
+    this.notify();
   }
   unregister(token: symbol) {
     this.hosts = this.hosts.filter((entry) => entry.token !== token);
-    this.listeners.forEach((listener) => listener());
+    this.notify();
   }
 }
 

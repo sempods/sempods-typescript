@@ -15,11 +15,19 @@ import {
 import type { AccessPrompt as AccessPromptFact } from '../authoring/access.js';
 import { runAccessAction } from '../authoring/app.js';
 import { useAppFacts, useController } from './app.js';
-import { useAccessPrompts, usePromptText } from './access-prompts.js';
+import {
+  infoTimeout,
+  offeredActions,
+  promptActionLabel,
+  useAccessPrompts,
+  usePromptText,
+} from './access-prompts.js';
 import { useFirst, useMounted } from './first.js';
 import {
+  appId,
   useNoticeHost,
   useNoticeStore,
+  type Host,
   type NoticeRecord,
 } from './notice-store.js';
 import { returnFocusAfterCommit, useFocusHold } from './focus.js';
@@ -180,14 +188,13 @@ export function useNotice(notice: Notice | null): void {
 // ---------------------------------------------------------------------------
 // The host.
 
-/** About 6 seconds, as for brief access information. */
-const briefDuration = 6000;
+/** As for brief access information. */
+const briefDuration = infoTimeout;
 const defaultLimit = 3;
 
 interface Entry {
   readonly id: string;
   readonly order: number;
-  readonly sticky: boolean;
   readonly app?: NoticeRecord;
   readonly prompt?: AccessPromptFact;
 }
@@ -211,9 +218,10 @@ function durationOf(entry: Entry): number | null {
  */
 function visible(entries: readonly Entry[], limit: number) {
   if (entries.length <= limit) return entries;
-  const sticky = entries.filter((entry) => entry.sticky).slice(0, limit);
+  const waits = (entry: Entry) => durationOf(entry) === null;
+  const sticky = entries.filter(waits).slice(0, limit);
   const brief = entries
-    .filter((entry) => !entry.sticky)
+    .filter((entry) => !waits(entry))
     .slice(0, limit - sticky.length);
   const shown = new Set([...sticky, ...brief]);
   return entries.filter((entry) => shown.has(entry));
@@ -222,15 +230,11 @@ function visible(entries: readonly Entry[], limit: number) {
 function appEntries(records: readonly NoticeRecord[]): Entry[] {
   return records
     .filter((record) => !record.dismissed)
-    .map((record) => {
-      const entry: Entry = {
-        id: 'app\n' + record.key,
-        order: record.order,
-        sticky: false,
-        app: record,
-      };
-      return { ...entry, sticky: durationOf(entry) === null };
-    });
+    .map((record) => ({
+      id: appId(record.key),
+      order: record.order,
+      app: record,
+    }));
 }
 
 interface Announcement {
@@ -265,39 +269,41 @@ function useAnnouncer() {
     }, 7000);
     timers.current.add(timer);
   }, []);
-  // Not atomic, unlike the roles' default: only the added paragraph is
-  // read, never the retained ones again.
   const regions = (
     <>
-      <div
-        className="sp-notices-live"
-        role="status"
-        aria-live="polite"
-        aria-atomic="false"
-        aria-relevant="additions"
-      >
-        {items
-          .filter((item) => !item.assertive)
-          .map((item) => (
-            <p key={item.id}>{item.text}</p>
-          ))}
-      </div>
-      <div
-        className="sp-notices-live"
-        role="alert"
-        aria-live="assertive"
-        aria-atomic="false"
-        aria-relevant="additions"
-      >
-        {items
-          .filter((item) => item.assertive)
-          .map((item) => (
-            <p key={item.id}>{item.text}</p>
-          ))}
-      </div>
+      <LiveRegion items={items} assertive={false} />
+      <LiveRegion items={items} assertive />
     </>
   );
   return { announce, regions };
+}
+
+/**
+ * Not atomic, unlike the roles' default: only the added paragraph is read,
+ * never the retained ones again.
+ */
+function LiveRegion({
+  items,
+  assertive,
+}: {
+  readonly items: readonly Announcement[];
+  readonly assertive: boolean;
+}) {
+  return (
+    <div
+      className="sp-notices-live"
+      role={assertive ? 'alert' : 'status'}
+      aria-live={assertive ? 'assertive' : 'polite'}
+      aria-atomic="false"
+      aria-relevant="additions"
+    >
+      {items
+        .filter((item) => item.assertive === assertive)
+        .map((item) => (
+          <p key={item.id}>{item.text}</p>
+        ))}
+    </div>
+  );
 }
 
 interface Cover {
@@ -366,7 +372,6 @@ function trackOpened(document: Document, last?: Element) {
  */
 function usePageCover(
   own: RefObject<HTMLElement | null>,
-  enabled: boolean,
   layer: 'page' | 'gate',
   waiting: boolean,
 ) {
@@ -379,7 +384,6 @@ function usePageCover(
     if (waiting) kick.current?.();
   }, [waiting]);
   useEffect(() => {
-    if (!enabled) return;
     const document = own.current?.ownerDocument;
     const view = document?.defaultView;
     if (!document || !view) return;
@@ -451,7 +455,8 @@ function usePageCover(
         : null;
     const zones = new Set<Element>();
     const watchZones = () => {
-      if (!sizes) return;
+      // The page's zones lie behind the gate.
+      if (!sizes || layer === 'gate') return;
       const now = new Set(
         document.querySelectorAll('[data-sempods-notices-avoid]'),
       );
@@ -477,9 +482,9 @@ function usePageCover(
         layer === 'page'
           ? `${modalCandidates}, [data-sempods-notices-avoid]`
           : modalCandidates;
-      const any = records.some(styled)
-        ? document.querySelector(watched) !== null
-        : false;
+      const candidates = records.some(styled)
+        ? [...document.querySelectorAll(watched)]
+        : [];
       const counts = (record: MutationRecord) =>
         // Changes inside the stack cover nothing and move no zone; one on
         // its root, such as `aria-hidden` from an overlay library, does.
@@ -489,10 +494,7 @@ function usePageCover(
           element.contains(record.target)
         ) &&
         (!styled(record) ||
-          (any &&
-            record.target instanceof Element &&
-            (record.target.matches(watched) ||
-              record.target.querySelector(watched) !== null)));
+          candidates.some((candidate) => record.target.contains(candidate)));
       if (records.length > 0 && !records.some(counts)) return;
       watchZones();
       schedule();
@@ -529,13 +531,13 @@ function usePageCover(
       if (frame) view.cancelAnimationFrame(frame);
       kick.current = null;
     };
-  }, [own, enabled, layer]);
+  }, [own, layer]);
   return cover;
 }
 /** How the host places itself, from `usePageCover`. */
-function placement(cover: Cover, avoid: boolean): CSSProperties | undefined {
+function placement(cover: Cover): CSSProperties | undefined {
   const style: Record<string, string> = {};
-  if (avoid && cover.avoid) style['--sp-notices-avoid'] = `${cover.avoid}px`;
+  if (cover.avoid) style['--sp-notices-avoid'] = `${cover.avoid}px`;
   if (cover.below) style['--sp-notices-below'] = `${cover.below}px`;
   if (cover.room) style['--sp-notices-room'] = `${cover.room}px`;
   if (cover.left) style['--sp-notices-left'] = `${cover.left}px`;
@@ -585,9 +587,12 @@ function isCovered(element: HTMLElement, layer: 'page' | 'gate') {
 const modalCandidates = 'dialog[open], [aria-modal="true"]';
 
 function isModal(element: Element) {
+  if (element.localName === 'dialog' && !topLayerModal(element)) return false;
   // A dialog kept mounted while hidden covers nothing.
-  if (!rendered(element)) return false;
-  if (element.localName !== 'dialog') return true;
+  return rendered(element);
+}
+/** Whether an open dialog is modal; checked before its costlier styles. */
+function topLayerModal(element: Element) {
   // Without a top layer (jsdom), an SDK dialog opens with the attribute.
   if (typeof (element as HTMLDialogElement).showModal !== 'function')
     return true;
@@ -646,21 +651,13 @@ export function Notices(props: NoticesProps) {
   );
   // One stack per provider, also with several hosts.
   const first = useFirst('notices');
-  const records = useSyncExternalStore(
-    store.subscribe,
-    store.getSnapshot,
-    store.getSnapshot,
-  );
+  const records = useNoticeRecords();
   const { blocking, prompts } = useAccessPrompts();
   const starting = useAppFacts((s) => s.starting);
   const gateMounted = useMounted('gate');
   const { direction } = useSdkLocale();
   const root = useRef<HTMLDivElement>(null);
   const { announce, regions } = useAnnouncer();
-  const pageAnnounce = useMemo(
-    () => ({ announce, layer: 'page' as const }),
-    [announce],
-  );
   const live = useRef(new Set<string>());
   const entries = useMemo(() => {
     const access: Entry[] =
@@ -669,7 +666,6 @@ export function Notices(props: NoticesProps) {
         : prompts.map((prompt) => ({
             id: prompt.id,
             order: store.orderOf(prompt.id),
-            sticky: prompt.severity !== 'info',
             prompt,
           }));
     return [...access, ...appEntries(records)].sort(
@@ -687,7 +683,6 @@ export function Notices(props: NoticesProps) {
   const gated = (Boolean(blocking) || starting) && gateMounted;
   const cover = usePageCover(
     root,
-    true,
     'page',
     first && !gated && entries.length > 0,
   );
@@ -697,25 +692,20 @@ export function Notices(props: NoticesProps) {
       ref={root}
       data-sempods-ui="notices"
       dir={direction}
-      style={placement(cover, true)}
+      style={placement(cover)}
     >
       <SdkStyles />
       <style href="sempods-notices" precedence="sempods">
         {layered(styles)}
       </style>
       {first && regions}
-      <Announce.Provider value={pageAnnounce}>
-        <ul hidden={shown.length === 0}>
-          {shown.map((entry) => (
-            <NoticeItem
-              key={entry.id}
-              entry={entry}
-              focusTarget={focusTarget}
-              Notice={Notice ?? DefaultNotice}
-            />
-          ))}
-        </ul>
-      </Announce.Provider>
+      <NoticeList
+        entries={shown}
+        layer="page"
+        announce={announce}
+        focusTarget={focusTarget}
+        Notice={Notice}
+      />
     </div>
   );
 }
@@ -726,26 +716,20 @@ export function Notices(props: NoticesProps) {
  * and limit it uses; the gate keeps room for it at its end.
  */
 export function GateNotices() {
-  const store = useNoticeStore();
   const host = useNoticeHost();
-  const records = useSyncExternalStore(
-    store.subscribe,
-    store.getSnapshot,
-    store.getSnapshot,
-  );
+  return host ? <GateStack host={host} /> : null;
+}
+
+function GateStack({ host }: { readonly host: Host }) {
+  const records = useNoticeRecords();
   const { direction } = useSdkLocale();
   const { announce, regions } = useAnnouncer();
   const root = useRef<HTMLDivElement>(null);
+  const entries = useMemo(() => appEntries(records), [records]);
   // A dialog above the gate, such as the app's settings, makes the stack
   // wait: its notices time out and are announced once it closes.
-  const waiting = appEntries(records).length > 0;
-  const cover = usePageCover(root, Boolean(host), 'gate', waiting);
-  const gateAnnounce = useMemo(
-    () => ({ announce, layer: 'gate' as const }),
-    [announce],
-  );
-  const shown =
-    host && !cover.modal ? visible(appEntries(records), host.limit) : [];
+  const cover = usePageCover(root, 'gate', entries.length > 0);
+  const shown = cover.modal ? [] : visible(entries, host.limit);
   // Room at the gate's end, so the stack never covers its last control.
   useLayoutEffect(() => {
     const element = root.current;
@@ -767,49 +751,95 @@ export function GateNotices() {
       gate.style.paddingBlockEnd = '';
     };
   }, [shown.length]);
-  if (!host) return null;
   return (
     <div
       ref={root}
       data-sempods-ui="notices"
       data-placement="gate"
       dir={direction}
-      // The page's avoided zones lie behind the gate.
-      style={placement(cover, false)}
+      style={placement(cover)}
     >
       <style href="sempods-notices" precedence="sempods">
         {layered(styles)}
       </style>
       {regions}
-      <Announce.Provider value={gateAnnounce}>
-        <ul hidden={shown.length === 0}>
-          {shown.map((entry) => (
-            <NoticeItem
-              key={entry.id}
-              entry={entry}
-              // The app's focus target is inert behind the gate: focus
-              // returns to where it came from inside the gate.
-              focusTarget={undefined}
-              Notice={host.Notice ?? DefaultNotice}
-            />
-          ))}
-        </ul>
-      </Announce.Provider>
+      <NoticeList
+        entries={shown}
+        layer="gate"
+        announce={announce}
+        // The app's focus target is inert behind the gate: focus returns to
+        // where it came from inside the gate.
+        focusTarget={undefined}
+        Notice={host.Notice}
+      />
     </div>
   );
 }
 
-function NoticeItem({
-  entry,
+function useNoticeRecords() {
+  const store = useNoticeStore();
+  return useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
+}
+
+/** The shown notices of one host, each in its kind's guarded view. */
+function NoticeList({
+  entries,
+  layer,
+  announce,
   focusTarget,
-  Notice,
+  Notice = DefaultNotice,
 }: {
+  readonly entries: readonly Entry[];
+  readonly layer: 'page' | 'gate';
+  readonly announce: (text: string, assertive: boolean) => void;
+  readonly focusTarget: RefObject<HTMLElement | null> | undefined;
+  readonly Notice: ComponentType<NoticeProps> | undefined;
+}) {
+  const value = useMemo(() => ({ announce, layer }), [announce, layer]);
+  return (
+    <Announce.Provider value={value}>
+      <ul hidden={entries.length === 0}>
+        {entries.map((entry) =>
+          entry.prompt ? (
+            <AccessNoticeItem
+              key={entry.id}
+              entry={entry}
+              prompt={entry.prompt}
+              focusTarget={focusTarget}
+              Notice={Notice}
+            />
+          ) : (
+            <AppNoticeItem
+              key={entry.id}
+              entry={entry}
+              record={entry.app!}
+              focusTarget={focusTarget}
+              Notice={Notice}
+            />
+          ),
+        )}
+      </ul>
+    </Announce.Provider>
+  );
+}
+
+interface ItemProps {
   readonly entry: Entry;
   readonly focusTarget: RefObject<HTMLElement | null> | undefined;
   readonly Notice: ComponentType<NoticeProps>;
-}) {
+}
+
+function NoticeItem({
+  entry,
+  view,
+  focusTarget,
+  Notice,
+}: ItemProps & { readonly view: NoticeView }) {
   const store = useNoticeStore();
-  const view = useNoticeView(entry);
   const { announce, layer } = useContext(Announce);
   const event = entry.app?.event ?? 0;
   const message = [view.pod, view.title, view.text].filter(Boolean).join('. ');
@@ -892,44 +922,30 @@ function NoticeItem({
   );
 }
 
-/** Internal: the guarded view of one entry, app or access. */
-function useNoticeView(entry: Entry): NoticeView {
+/**
+ * The guards both kinds share: running and its failure are kept per notice
+ * in the store, so a remount (after a modal, in another host, after
+ * sign-in) never runs it twice at once and shows its failure again.
+ */
+function useGuardedRun(id: string) {
   const app = useController();
   const store = useNoticeStore();
-  const { changing, confirmingLeave, fixed, connections, activeId } =
-    useAppFacts(
-      (s) => ({
-        changing: s.changing,
-        confirmingLeave: s.confirmingLeave,
-        fixed: Boolean(s.preset?.podUrl ?? s.allowedPods?.length === 1),
-        connections: s.connections,
-        activeId: s.activeId,
-      }),
-      (a, b) =>
-        a.changing === b.changing &&
-        a.confirmingLeave === b.confirmingLeave &&
-        a.fixed === b.fixed &&
-        a.connections === b.connections &&
-        a.activeId === b.activeId,
-    );
+  const { changing, confirmingLeave } = useAppFacts(
+    (s) => ({ changing: s.changing, confirmingLeave: s.confirmingLeave }),
+    (a, b) =>
+      a.changing === b.changing && a.confirmingLeave === b.confirmingLeave,
+  );
   const { messages: m, error } = useSdkLocale();
-  const prompt = entry.prompt;
-  // Hooks run for both kinds; only an access prompt has a text to derive.
-  const promptText = usePromptText(prompt ?? placeholder);
-  // Running is kept per notice in the store, so a remount (after a modal,
-  // in another host, after sign-in) never runs it twice at once.
   const busy = useSyncExternalStore(
     store.subscribe,
-    () => store.isRunning(entry.id),
-    () => store.isRunning(entry.id),
+    () => store.isRunning(id),
+    () => store.isRunning(id),
   );
-  // So is its failure: the instance that shows it now displays it.
   const failure = useSyncExternalStore(
     store.subscribe,
-    () => store.failureOf(entry.id),
-    () => store.failureOf(entry.id),
+    () => store.failureOf(id),
+    () => store.failureOf(id),
   );
-  const disabled = busy || changing || confirmingLeave;
   const guarded =
     (run: () => Promise<unknown>, current = () => true) =>
     () => {
@@ -939,61 +955,80 @@ function useNoticeView(entry: Entry): NoticeView {
       if (!current()) return;
       const now = app.getSnapshot();
       const token =
-        now.changing || now.confirmingLeave ? null : store.begin(entry.id);
+        now.changing || now.confirmingLeave ? null : store.begin(id);
       if (token === null) return;
       void run().then(
-        () => store.end(entry.id, token),
-        (cause: unknown) => store.end(entry.id, token, { cause }),
+        () => store.end(id, token),
+        (cause: unknown) => store.end(id, token, { cause }),
       );
     };
-  const dismissLabel = m.controls.dismiss ?? m.controls.close ?? 'OK';
-  const failed = failure ? error(failure.cause) : null;
-  if (prompt) {
-    const c = connections.find((entry) => entry.id === prompt.connectionId);
-    const label = (action: AccessPromptFact['actions'][number]) =>
-      action === 'sign-in'
-        ? prompt.reason === 'missing-scopes'
-          ? m.controls.updateAccess
-          : m.controls.signIn
-        : action === 'retry'
-          ? m.controls.retry
-          : action === 'forget'
-            ? (m.controls.forget ?? 'Forget')
-            : (m.controls.reload ?? m.controls.retry);
-    // A sign-in without a known address needs the gate's address field.
-    const actions = prompt.actions.filter(
-      (action) =>
-        action !== 'dismiss' &&
-        (action !== 'sign-in' || prompt.connectionId !== null || fixed),
-    );
-    return {
-      key: prompt.id,
-      source: 'access',
-      reason: prompt.reason,
-      severity: prompt.severity === 'info' ? 'info' : 'warning',
-      title: null,
-      text: promptText,
-      pod: c && c.id !== activeId ? podName(c.podUrl) : null,
-      link: prompt.providerLink
-        ? {
-            href: prompt.providerLink,
-            label: m.controls.providerLink ?? m.controls.signIn,
-          }
-        : null,
-      actions: actions.map((action, index) => ({
-        label: label(action),
+  return {
+    disabled: busy || changing || confirmingLeave,
+    guarded,
+    failure: failure ? error(failure.cause) : null,
+    dismissLabel: m.controls.dismiss ?? m.controls.close ?? 'OK',
+  };
+}
+
+function AccessNoticeItem({
+  prompt,
+  ...props
+}: ItemProps & { readonly prompt: AccessPromptFact }) {
+  const app = useController();
+  const { fixed, connections, activeId } = useAppFacts(
+    (s) => ({
+      fixed: Boolean(s.preset?.podUrl ?? s.allowedPods?.length === 1),
+      connections: s.connections,
+      activeId: s.activeId,
+    }),
+    (a, b) =>
+      a.fixed === b.fixed &&
+      a.connections === b.connections &&
+      a.activeId === b.activeId,
+  );
+  const { messages: m } = useSdkLocale();
+  const text = usePromptText(prompt);
+  const { disabled, guarded, failure, dismissLabel } = useGuardedRun(prompt.id);
+  const c = connections.find((entry) => entry.id === prompt.connectionId);
+  const view: NoticeView = {
+    key: prompt.id,
+    source: 'access',
+    reason: prompt.reason,
+    severity: prompt.severity === 'info' ? 'info' : 'warning',
+    title: null,
+    text,
+    pod: c && c.id !== activeId ? podName(c.podUrl) : null,
+    link: prompt.providerLink
+      ? {
+          href: prompt.providerLink,
+          label: m.controls.providerLink ?? m.controls.signIn,
+        }
+      : null,
+    actions: offeredActions(prompt, fixed)
+      .filter((action) => action !== 'dismiss')
+      .map((action, index) => ({
+        label: promptActionLabel(m, prompt, action),
         primary: prompt.severity !== 'info' && index === 0,
         disabled,
         run: guarded(() => runAccessAction(app, prompt, action)),
       })),
-      failure: failed,
-      dismiss: prompt.actions.includes('dismiss')
-        ? () => void app.dismiss(prompt.id)
-        : null,
-      dismissLabel,
-    };
-  }
-  const record = entry.app!;
+    failure,
+    dismiss: prompt.actions.includes('dismiss')
+      ? () => void app.dismiss(prompt.id)
+      : null,
+    dismissLabel,
+  };
+  return <NoticeItem {...props} view={view} />;
+}
+
+function AppNoticeItem({
+  record,
+  ...props
+}: ItemProps & { readonly record: NoticeRecord }) {
+  const store = useNoticeStore();
+  const { disabled, guarded, failure, dismissLabel } = useGuardedRun(
+    appId(record.key),
+  );
   const notice = record.notice;
   // A renderer may keep a callback, for an exit animation or its own
   // confirmation: it acts only on the event it was shown for, while that
@@ -1002,7 +1037,7 @@ function useNoticeView(entry: Entry): NoticeView {
     const now = store.recordOf(record.key);
     return now?.event === record.event && !now.dismissed;
   };
-  return {
+  const view: NoticeView = {
     key: record.key,
     source: 'app',
     severity: notice.severity ?? 'info',
@@ -1016,37 +1051,26 @@ function useNoticeView(entry: Entry): NoticeView {
             label: notice.action.label,
             primary: true,
             disabled,
-            run: guarded(
-              async () => {
-                const run = store.run(record.key);
-                const before = store.recordOf(record.key);
-                if (!run || !before) return;
-                await run();
-                // A shown notice has done its job, unless the action showed
-                // it again; a held one is its holder's.
-                store.settle(record.key, before);
-              },
-              // The latest closure of the same event runs; a changed `show`
-              // replaced it with another action the person has not seen.
-              current,
-            ),
+            run: guarded(async () => {
+              const run = store.run(record.key);
+              const before = store.recordOf(record.key);
+              if (!run || !before) return;
+              await run();
+              // A shown notice has done its job, unless the action showed
+              // it again; a held one is its holder's.
+              store.settle(record.key, before);
+            }, current),
           },
         ]
       : [],
-    failure: failed,
+    failure,
     dismiss: () => {
       if (current()) store.dismiss(record.key);
     },
     dismissLabel,
   };
+  return <NoticeItem {...props} view={view} />;
 }
-const placeholder: AccessPromptFact = Object.freeze({
-  id: '',
-  severity: 'info',
-  reason: 'no-connection',
-  connectionId: null,
-  actions: [],
-});
 
 /** The default renderer: an SDK surface with the shared button styles. */
 function DefaultNotice({ notice }: NoticeProps) {
@@ -1145,7 +1169,6 @@ const styles = `
 [data-sempods-ui="notices"] .sp-notice-title + p { margin-block-start:4px; }
 [data-sempods-ui="notices"] .sp-prompt-pod { font-size:.875rem; color:var(--sp-muted); margin-block:8px 0; }
 [data-sempods-ui="notices"] .sp-sdk-actions { justify-content:flex-end; }
-[data-sempods-ui="notices"][data-placement="gate"] { position:fixed; }
 @keyframes sp-notice-in { from { opacity:0; transform:translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { [data-sempods-ui="notices"] li { animation:none; } }
 `;

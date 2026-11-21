@@ -5,14 +5,21 @@ type Kind = 'gate' | 'prompts' | 'notices';
 interface Owners {
   readonly mounted: Record<Kind, symbol[]>;
   readonly listeners: Set<() => void>;
+  /** Stable, so `useSyncExternalStore` subscribes once. */
+  readonly subscribe: (listener: () => void) => () => void;
 }
 const registry = new WeakMap<object, Owners>();
 function ownersOf(app: object) {
   let owners = registry.get(app);
   if (!owners) {
+    const listeners = new Set<() => void>();
     owners = {
       mounted: { gate: [], prompts: [], notices: [] },
-      listeners: new Set(),
+      listeners,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
     };
     registry.set(app, owners);
   }
@@ -38,14 +45,7 @@ export function useFirst(kind: Kind): boolean {
     };
   }, [owners, kind, token]);
   const first = () => owners.mounted[kind][0] === token;
-  return useSyncExternalStore(
-    (listener) => {
-      owners.listeners.add(listener);
-      return () => owners.listeners.delete(listener);
-    },
-    first,
-    first,
-  );
+  return useSyncExternalStore(owners.subscribe, first, first);
 }
 
 /** Internal: whether any instance of this kind is mounted under the provider. */
@@ -53,12 +53,5 @@ export function useMounted(kind: Kind): boolean {
   const app = useController();
   const owners = ownersOf(app);
   const mounted = () => owners.mounted[kind].length > 0;
-  return useSyncExternalStore(
-    (listener) => {
-      owners.listeners.add(listener);
-      return () => owners.listeners.delete(listener);
-    },
-    mounted,
-    mounted,
-  );
+  return useSyncExternalStore(owners.subscribe, mounted, mounted);
 }

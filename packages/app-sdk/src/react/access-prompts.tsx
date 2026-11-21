@@ -102,6 +102,37 @@ export function ProviderLink({
   );
 }
 
+type PromptAction = AccessPromptFact['actions'][number];
+
+/** Internal: the localized label of one of a prompt's actions. */
+export function promptActionLabel(
+  m: ReturnType<typeof useSdkLocale>['messages'],
+  prompt: AccessPromptFact,
+  action: PromptAction,
+) {
+  return action === 'sign-in'
+    ? prompt.reason === 'missing-scopes'
+      ? m.controls.updateAccess
+      : m.controls.signIn
+    : action === 'retry'
+      ? m.controls.retry
+      : action === 'forget'
+        ? (m.controls.forget ?? 'Forget')
+        : action === 'reload'
+          ? (m.controls.reload ?? m.controls.retry)
+          : (m.controls.dismiss ?? m.controls.close ?? 'OK');
+}
+
+/**
+ * Internal: the actions a prompt offers here; a sign-in without a known
+ * address needs the gate's address field.
+ */
+export function offeredActions(prompt: AccessPromptFact, fixed: boolean) {
+  return prompt.actions.filter(
+    (action) => action !== 'sign-in' || prompt.connectionId !== null || fixed,
+  );
+}
+
 /** Internal: a prompt's action buttons, run through the controller's guards. */
 export function PromptActions({
   prompt,
@@ -128,22 +159,7 @@ export function PromptActions({
   const [failure, setFailure] = useState<{ readonly cause: unknown } | null>(
     null,
   );
-  const label = (action: AccessPromptFact['actions'][number]) =>
-    action === 'sign-in'
-      ? prompt.reason === 'missing-scopes'
-        ? m.controls.updateAccess
-        : m.controls.signIn
-      : action === 'retry'
-        ? m.controls.retry
-        : action === 'forget'
-          ? m.controls.forget
-          : action === 'reload'
-            ? (m.controls.reload ?? m.controls.retry)
-            : (m.controls.dismiss ?? m.controls.close ?? 'OK');
-  // A sign-in without a known address needs the gate's address field.
-  const actions = prompt.actions.filter(
-    (action) => action !== 'sign-in' || prompt.connectionId !== null || fixed,
-  );
+  const actions = offeredActions(prompt, fixed);
   if (actions.length === 0) return null;
   return (
     <>
@@ -162,7 +178,7 @@ export function PromptActions({
                 .finally(() => setBusy(false));
             }}
           >
-            {label(action)}
+            {promptActionLabel(m, prompt, action)}
           </button>
         ))}
       </div>
@@ -248,8 +264,11 @@ export function AccessPrompt({ prompt, focusTarget }: AccessPromptProps) {
   );
 }
 
-/** About 6 seconds, then an info prompt hides, unless focused or hovered. */
-const infoTimeout = 6000;
+/**
+ * Internal: about 6 seconds, then an info prompt or a brief notice hides,
+ * unless focused or hovered.
+ */
+export const infoTimeout = 6000;
 
 function TimedPrompt({
   prompt,
