@@ -32,3 +32,6 @@ Review the current commit, not an earlier approval. Check package boundaries,
 credential recipients, retained write uncertainty, target/draft lifetime and
 public API compatibility where affected. Report concrete regressions with a
 reproduction or code path. Distinguish fixture results from live/device evidence.
+
+When asked to review a GitHub pull request, post each actionable finding in
+English as an inline review comment on the relevant lines of the current diff.
