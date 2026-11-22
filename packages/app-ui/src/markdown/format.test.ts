@@ -78,6 +78,12 @@ describe('emphasis', () => {
     expect(run('bold', '[## Title\ntext]')).toBe('[## **Title**\n**text**]');
   });
 
+  it('grows a selection that crosses a span over all of it', () => {
+    expect(run('bold', '**hel[lo** world]')).toBe('**[hello world]**');
+    expect(run('bold', '[say **hel]lo**')).toBe('**[say hello]**');
+    expect(run('italic', '*hel[lo* world]')).toBe('*[hello world]*');
+  });
+
   it('takes the emphasis off a selection inside a larger span', () => {
     expect(run('bold', '**[hello] world**')).toBe('[hello] **world**');
     expect(run('bold', '**say [hello] world**')).toBe(

@@ -126,6 +126,44 @@ function unmark(
   return result + text.slice(from);
 }
 
+/**
+ * The selection grown over every `kind` span of its lines that it only
+ * partly covers, so that one starting inside `**hello**` and ending after
+ * it holds the whole span and the merge makes it one: `**hello world**`.
+ * A span that encloses or lies inside the selection leaves it as it is.
+ */
+function widen(
+  kind: Emphasis,
+  source: string,
+  start: number,
+  end: number,
+): [number, number] {
+  const line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
+  const next = source.indexOf('\n', end);
+  const found = markers(
+    kind,
+    source.slice(line, next === -1 ? undefined : next),
+  );
+  for (let grown = true; grown;) {
+    grown = false;
+    for (const open of found) {
+      const close = found[open.mate];
+      if (!close || close.at <= open.at) continue;
+      const a = line + open.at;
+      const b = line + close.at + close.length;
+      const crosses =
+        a < end &&
+        start < b &&
+        !(a <= start && b >= end) &&
+        !(start <= a && b <= end);
+      if (!crosses) continue;
+      [start, end] = [Math.min(start, a), Math.max(end, b)];
+      grown = true;
+    }
+  }
+  return [start, end];
+}
+
 /** An emphasis edit of one span, and whether it removes the emphasis. */
 type SpanEdit = MarkdownEdit & { readonly removes: boolean };
 
@@ -145,7 +183,9 @@ function span(
   const n = kind === 'bold' ? 2 : 1;
   const mark = '*'.repeat(n);
   const [start, end] =
-    selStart === selEnd ? [selStart, selEnd] : inward(source, selStart, selEnd);
+    selStart === selEnd
+      ? [selStart, selEnd]
+      : widen(kind, source, ...inward(source, selStart, selEnd));
   const inner = source.slice(start, end);
   // Markers just outside the selection: as if they were part of it.
   if (holds(kind, stars(source.slice(0, start), source.slice(end)))) {
