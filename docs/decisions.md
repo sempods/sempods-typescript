@@ -51,7 +51,10 @@ text and its first paint (#395).
 _Why:_ the formatting actions an app needs are small edits of the source;
 the kit's textarea takes the theme's roles, focus rings and 44px targets as
 they are, keeps the source exactly as typed and lets the browser keep the
-undo history.
+undo history. The actions read the source with react-markdown's own parser
+and check each edit by parsing its result, so they agree with the preview;
+where an effect is not predictable, the action is disabled rather than
+guessed.
 
 ## The protocol stays pure; convenience lives in the SDK
 

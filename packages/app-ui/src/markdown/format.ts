@@ -2,7 +2,15 @@
  * The formatting actions of `MarkdownField`, as pure edits of the source: each
  * replaces one range and names the selection after it, so the field can apply
  * it through the browser's own text input and keep its undo history.
+ *
+ * An action reads the source with the parser that renders it, so it agrees
+ * with the preview on what is emphasis, a link or code, and changes only
+ * markers it adds or removes. Where its effect is not predictable, such as a
+ * selection that cuts into code or a link's address, it is not offered: the
+ * edit is `null`. Every edit is checked by parsing its result: text, code
+ * and addresses stay as they were.
  */
+import { parseMarkdown, type MarkdownNode } from './parse.js';
 
 /** The formatting actions the field's toolbar offers. */
 export type MarkdownFormat =
@@ -18,421 +26,347 @@ export interface MarkdownEdit {
   readonly select: readonly [number, number];
 }
 
-const isSpace = (char: string | undefined) =>
-  char !== undefined && /\s/.test(char);
+const begin = (node: MarkdownNode) => node.position?.start.offset ?? 0;
+const finish = (node: MarkdownNode) => node.position?.end.offset ?? 0;
 
-/** The selection without whitespace at its edges, which markers exclude. */
-function inward(source: string, start: number, end: number): [number, number] {
-  while (start < end && isSpace(source[start])) start++;
-  while (end > start && isSpace(source[end - 1])) end--;
-  return [start, end];
+/** The last source parsed whole, as the field asks again for the same one. */
+let last: { readonly source: string; readonly tree: MarkdownNode } | null =
+  null;
+function tree(source: string): MarkdownNode {
+  if (last?.source !== source) last = { source, tree: parseMarkdown(source) };
+  return last.tree;
 }
 
-/** The number of `*` that end `left` and start `right`, the smaller one. */
-function stars(left: string, right: string): number {
-  const before = /\**$/.exec(left)?.[0].length ?? 0;
-  const after = /^\**/.exec(right)?.[0].length ?? 0;
-  return Math.min(before, after);
+/** Inline nodes whose source the field never cuts into. */
+const ATOMIC = new Set([
+  'inlineCode',
+  'html',
+  'image',
+  'imageReference',
+  'break',
+  'footnoteReference',
+]);
+const LINKS = new Set(['link', 'linkReference']);
+/** Blocks that hold inline text: emphasis and links apply in them only. */
+const TEXT_BLOCKS = new Set(['paragraph', 'heading', 'tableCell']);
+
+/** Every node below `node`, in source order. */
+function* below(node: MarkdownNode): Generator<MarkdownNode> {
+  for (const child of node.children ?? []) {
+    yield child;
+    yield* below(child);
+  }
 }
 
 /**
- * Whether `count` enclosing stars hold the emphasis: bold needs two, italic
- * an odd count (`*x*`, `***x***`); `**x**` is bold, not italic.
+ * The blocks of inline text that `[start, end)` touches, in source order; a
+ * caret touches the one it is in or at the edge of.
  */
-const holds = (kind: 'bold' | 'italic', count: number) =>
-  kind === 'bold' ? count >= 2 : count % 2 === 1;
-
-type Emphasis = 'bold' | 'italic';
-
-/** A run of stars that can mark `kind`, and the run it pairs with. */
-interface Marker {
-  readonly at: number;
-  readonly length: number;
-  readonly open: boolean;
-  readonly close: boolean;
-  mate: number;
-}
-
-/** The ranges of code spans, whose stars are text. */
-function codeSpans(text: string): [number, number][] {
-  const ticks = [...text.matchAll(/`+/g)];
-  const spans: [number, number][] = [];
-  for (let i = 0; i < ticks.length; i++) {
-    const open = ticks[i]!;
-    const j = ticks.findIndex(
-      (tick, k) => k > i && tick[0].length === open[0].length,
-    );
-    if (j < 0) continue;
-    const close = ticks[j]!;
-    spans.push([open.index, close.index + close[0].length]);
-    i = j;
-  }
-  return spans;
-}
-
-/**
- * The star runs in `text` that can mark `kind`, paired as emphasis pairs:
- * a run opens before text and closes after it, as CommonMark's flanking
- * rule has it in short. Stars in code spans, escaped stars and stars
- * between spaces, such as `2 * 3`, are text and never paired.
- */
-function markers(kind: Emphasis, text: string): Marker[] {
-  const code = codeSpans(text);
-  const found: Marker[] = [];
-  for (const run of text.matchAll(/\*+/g)) {
-    const at = run.index;
-    if (text[at - 1] === '\\' || !holds(kind, run[0].length)) continue;
-    if (code.some(([from, to]) => at >= from && at < to)) continue;
-    const before = text[at - 1];
-    const after = text[at + run[0].length];
-    found.push({
-      at,
-      length: run[0].length,
-      open: after !== undefined && !isSpace(after),
-      close: before !== undefined && !isSpace(before),
-      mate: -1,
-    });
-  }
-  const stack: number[] = [];
-  found.forEach((marker, i) => {
-    if (marker.close && stack.length > 0) {
-      const j = stack.pop()!;
-      marker.mate = j;
-      found[j]!.mate = i;
-    } else if (marker.open) stack.push(i);
-  });
+function textBlocks(
+  root: MarkdownNode,
+  start: number,
+  end: number,
+): MarkdownNode[] {
+  const found: MarkdownNode[] = [];
+  const touches = (node: MarkdownNode) =>
+    start === end
+      ? begin(node) <= start && start <= finish(node)
+      : begin(node) < end && start < finish(node);
+  const visit = (node: MarkdownNode) => {
+    for (const child of node.children ?? []) {
+      if (!touches(child)) continue;
+      if (TEXT_BLOCKS.has(child.type)) found.push(child);
+      else visit(child);
+    }
+  };
+  visit(root);
   return found;
 }
 
-/**
- * `text` without the `kind` markers of every paired run, except those at
- * the given positions; unpaired stars stay as they are. A run loses the
- * stars of `kind` only, so `***x***` keeps the other emphasis.
- */
-function unmark(
-  kind: Emphasis,
-  text: string,
-  found: readonly Marker[],
-  keep: readonly number[] = [],
-): string {
-  const n = kind === 'bold' ? 2 : 1;
-  let result = '';
-  let from = 0;
-  for (const marker of found) {
-    if (marker.mate < 0 || keep.includes(marker.at)) continue;
-    result += text.slice(from, marker.at);
-    from = marker.at + n;
-  }
-  return result + text.slice(from);
+/** The inline content of a block: after a heading's `#`, before its end. */
+function content(block: MarkdownNode): [number, number] | null {
+  const children = block.children ?? [];
+  if (children.length === 0) return null;
+  return [begin(children[0]!), finish(children[children.length - 1]!)];
 }
 
+const lineStart = (source: string, at: number) =>
+  at === 0 ? 0 : source.lastIndexOf('\n', at - 1) + 1;
+
 /**
- * The selection grown over every `kind` span of its lines that it only
- * partly covers, so that one starting inside `**hello**` and ending after
- * it holds the whole span and the merge makes it one: `**hello world**`.
- * A span that encloses or lies inside the selection leaves it as it is.
+ * `[start, end)` without whitespace at its edges, and without the quote
+ * markers that continue a paragraph's lines inside a quote.
  */
-function widen(
-  kind: Emphasis,
-  source: string,
-  start: number,
-  end: number,
-): [number, number] {
-  const line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
-  const next = source.indexOf('\n', end);
-  const found = markers(
-    kind,
-    source.slice(line, next === -1 ? undefined : next),
-  );
-  for (let grown = true; grown;) {
-    grown = false;
-    for (const open of found) {
-      const close = found[open.mate];
-      if (!close || close.at <= open.at) continue;
-      const a = line + open.at;
-      const b = line + close.at + close.length;
-      const crosses =
-        a < end &&
-        start < b &&
-        !(a <= start && b >= end) &&
-        !(start <= a && b <= end);
-      if (!crosses) continue;
-      [start, end] = [Math.min(start, a), Math.max(end, b)];
-      grown = true;
-    }
+function inward(source: string, start: number, end: number): [number, number] {
+  const prefixOnly = (from: number, to: number) =>
+    /^[ \t>]*$/.test(source.slice(from, to));
+  for (;;) {
+    while (start < end && /\s/.test(source[start]!)) start++;
+    if (
+      start < end &&
+      source[start] === '>' &&
+      prefixOnly(lineStart(source, start), start)
+    )
+      start++;
+    else break;
+  }
+  for (;;) {
+    while (end > start && /\s/.test(source[end - 1]!)) end--;
+    const line = lineStart(source, end);
+    if (line > start && end > line && prefixOnly(line, end)) end = line;
+    else break;
   }
   return [start, end];
 }
 
-/** An emphasis edit of one span, and whether it removes the emphasis. */
-type SpanEdit = MarkdownEdit & { readonly removes: boolean };
+/** How a range relates to the inline nodes of its block. */
+interface Reading {
+  /** Nodes of the asked type that enclose the range, the innermost last. */
+  readonly enclosing: MarkdownNode[];
+  /** Nodes of the asked type inside the range. */
+  readonly inside: MarkdownNode[];
+}
 
 /**
- * Bold (`**`) or italic (`*`) around one span of a line, or removed when it
- * is already inside it or includes its markers. A span that holds spans of
- * its own (`**a** and **b**`) is no one span: their markers are merged into
- * one pair around the whole span. Stars that are text stay. An empty span
- * inserts the pair with the caret between them.
+ * How `[start, end)` lies in `block`'s inline nodes, or `null` when an
+ * action there would not be predictable: the range cuts into code, HTML or
+ * an image, lies in a marker or a link's address, or partly covers a node
+ * other than text. A caret at a node's edge is outside it. With `links`
+ * false, a link around or inside the range is not predictable either.
  */
-function span(
-  kind: Emphasis,
-  source: string,
-  selStart: number,
-  selEnd: number,
-): SpanEdit {
-  const n = kind === 'bold' ? 2 : 1;
-  const mark = '*'.repeat(n);
-  const [start, end] =
-    selStart === selEnd
-      ? [selStart, selEnd]
-      : widen(kind, source, ...inward(source, selStart, selEnd));
-  const inner = source.slice(start, end);
-  // Markers just outside the selection: as if they were part of it.
-  if (holds(kind, stars(source.slice(0, start), source.slice(end)))) {
-    const marked = mark + inner + mark;
-    const found = markers(kind, marked);
-    const last = found.length - 1;
-    // They enclose one span, or nothing yet: remove them.
-    if (
-      inner === '' ||
-      (found[0]?.at === 0 && found[0].mate === last && last > 0)
-    )
-      return {
-        from: start - n,
-        to: end + n,
-        insert: inner,
-        select: [start - n, end - n],
-        removes: true,
-      };
-    // Spans of the selection's own join the enclosing one.
-    const plain = unmark(kind, marked, found, [0, marked.length - n]).slice(
-      n,
-      -n,
-    );
-    return {
-      from: start,
-      to: end,
-      insert: plain,
-      select: [start, start + plain.length],
-      removes: false,
-    };
+function read(
+  block: MarkdownNode,
+  start: number,
+  end: number,
+  type: string,
+  links: boolean,
+): Reading | null {
+  const enclosing: MarkdownNode[] = [];
+  const inside: MarkdownNode[] = [];
+  for (const node of below(block)) {
+    const [from, to] = [begin(node), finish(node)];
+    const caret = start === end;
+    if (to <= start || from >= (caret ? start : end)) continue;
+    if (from <= start && end <= to) {
+      if (node.type === 'text') continue;
+      if (ATOMIC.has(node.type) || (!links && LINKS.has(node.type)))
+        return null;
+      const inner = content(node);
+      const whole = from === start && to === end;
+      if (!whole && (!inner || start < inner[0] || end > inner[1])) return null;
+      if (node.type === type) enclosing.push(node);
+      continue;
+    }
+    if (!caret && start <= from && to <= end) {
+      if (!links && LINKS.has(node.type)) return null;
+      if (node.type === type) inside.push(node);
+      continue;
+    }
+    if (node.type !== 'text') return null;
   }
-  // A caret inside a span: the span loses its emphasis, as a whole.
-  if (start === end) {
-    const pair = enclosing(kind, source, start, end);
-    if (pair) {
-      const { line, open, close } = pair;
-      const insert =
-        '*'.repeat(open.length - n) +
-        source.slice(line + open.at + open.length, line + close.at) +
-        '*'.repeat(close.length - n);
-      return {
-        from: line + open.at,
-        to: line + close.at + close.length,
-        insert,
-        select: [start - n, start - n],
-        removes: true,
-      };
+  return { enclosing, inside };
+}
+
+/** A replacement of `remove` characters at `at`. */
+interface Op {
+  readonly at: number;
+  readonly remove: number;
+  readonly insert: string;
+}
+
+/** The ops applied to `source` as one edit, which they all lie in. */
+function combine(source: string, ops: readonly Op[]): MarkdownEdit {
+  const sorted = [...ops].sort((a, b) => a.at - b.at || a.remove - b.remove);
+  const from = sorted[0]!.at;
+  let insert = '';
+  let cursor = from;
+  for (const op of sorted) {
+    insert += source.slice(cursor, op.at) + op.insert;
+    cursor = op.at + op.remove;
+  }
+  return { from, to: cursor, insert, select: [from, from] };
+}
+
+/**
+ * Where `at` is after the ops: text inserted at `at` lies before it with
+ * `after`, behind it without.
+ */
+function moved(ops: readonly Op[], at: number, after: boolean): number {
+  let shift = 0;
+  for (const op of ops) {
+    const end = op.at + op.remove;
+    if (op.remove > 0 ? at >= end : at > op.at || (after && at === op.at))
+      shift += op.insert.length - op.remove;
+    else if (op.at < at && at < end) shift += op.at - at;
+  }
+  return at + shift;
+}
+
+type Emphasis = 'strong' | 'emphasis';
+
+/** What one block's part of an emphasis action does. */
+interface Part {
+  readonly ops: Op[];
+  readonly removes: boolean;
+  /** The part's range, which has the emphasis afterwards, or no longer. */
+  readonly range: [number, number];
+}
+
+/**
+ * Bold or italic on `[start, end)` within one block: removed from the span
+ * that encloses it (as the preview shows it, whether marked with `*` or
+ * `_`), or added around it, spans of the same kind inside it merged into
+ * one. A range that partly covers such a span grows over all of it.
+ */
+function emphasisPart(
+  type: Emphasis,
+  source: string,
+  block: MarkdownNode,
+  start: number,
+  end: number,
+): Part | null {
+  for (let grown = start < end; grown;) {
+    grown = false;
+    for (const node of below(block)) {
+      if (node.type !== type) continue;
+      const [from, to] = [begin(node), finish(node)];
+      const partly =
+        from < end &&
+        start < to &&
+        (from < start || to > end) &&
+        !(from <= start && end <= to);
+      if (!partly) continue;
+      [start, end] = [Math.min(start, from), Math.max(end, to)];
+      grown = true;
     }
   }
-  const found = markers(kind, inner);
-  const last = found.length - 1;
-  // Markers at the selection's edges that enclose one span: remove them,
-  // keep the rest selected.
-  if (
-    last > 0 &&
-    found[0]!.at === 0 &&
-    found[0]!.mate === last &&
-    found[last]!.at + found[last]!.length === inner.length
-  ) {
-    const content = unmark(
-      kind,
-      inner,
-      found,
-      found.slice(1, last).map((m) => m.at),
-    );
+  const reading = read(block, start, end, type, true);
+  if (!reading) return null;
+  const n = type === 'strong' ? 2 : 1;
+  const span = reading.enclosing[reading.enclosing.length - 1];
+  if (span)
     return {
-      from: start,
-      to: end,
-      insert: content,
-      select: [start, start + content.length],
+      ops: [
+        { at: begin(span), remove: n, insert: '' },
+        { at: finish(span) - n, remove: n, insert: '' },
+      ],
       removes: true,
+      range: [start, end],
     };
-  }
-  const plain = unmark(kind, inner, found);
-  // Inside a larger span of the line: take the emphasis off the selection
-  // only, splitting the span around it.
-  if (inner !== '' && plain === inner) {
-    const split = splitSpan(kind, source, start, end);
-    if (split) return split;
-  }
-  return {
-    from: start,
-    to: end,
-    insert: mark + plain + mark,
-    select: [start + n, start + n + plain.length],
-    removes: false,
-  };
-}
-
-/**
- * The innermost `kind` span of the selection's line that encloses the
- * selection, with the line's start, or `null`.
- */
-function enclosing(
-  kind: Emphasis,
-  source: string,
-  start: number,
-  end: number,
-): { line: number; open: Marker; close: Marker } | null {
-  const line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
-  const next = source.indexOf('\n', end);
-  const found = markers(
-    kind,
-    source.slice(line, next === -1 ? undefined : next),
-  );
-  let best: { line: number; open: Marker; close: Marker } | null = null;
-  for (const open of found) {
-    const close = found[open.mate];
-    if (!close || close.at <= open.at) continue;
-    if (open.at + open.length <= start - line && close.at >= end - line)
-      if (!best || open.at > best.open.at) best = { line, open, close };
-  }
-  return best;
-}
-
-/**
- * The edit that ends the innermost `kind` span of the selection's line that
- * encloses the selection before it and starts it again after it:
- * `**say hello world**` with `hello` selected becomes
- * `**say** hello **world**`. A marker never stands beside a space, where it
- * would not mark; an empty side loses its marker. `null` without such a span.
- */
-function splitSpan(
-  kind: Emphasis,
-  source: string,
-  start: number,
-  end: number,
-): SpanEdit | null {
-  const n = kind === 'bold' ? 2 : 1;
-  const mark = '*'.repeat(n);
-  const pair = enclosing(kind, source, start, end);
-  if (!pair) return null;
-  const { line, open, close } = pair;
-  const from = line + open.at;
-  const to = line + close.at + close.length;
-  const before = source.slice(line + open.at + open.length, start);
-  const after = source.slice(end, line + close.at);
-  const opening = '*'.repeat(open.length);
-  const closing = '*'.repeat(close.length);
-  const left = before.trim()
-    ? opening + before.trimEnd() + mark + before.slice(before.trimEnd().length)
-    : '*'.repeat(open.length - n) + before;
-  const lead = after.length - after.trimStart().length;
-  const right = after.trim()
-    ? after.slice(0, lead) + mark + after.trimStart() + closing
-    : after + '*'.repeat(close.length - n);
-  const middle = source.slice(start, end);
-  const at = from + left.length;
-  return {
-    from,
-    to,
-    insert: left + middle + right,
-    select: [at, at + middle.length],
-    removes: true,
-  };
-}
-
-/** What starts a line before its text: list markers, a heading, a quote. */
-const LINE_PREFIX =
-  /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|#{1,6}(?:[ \t]+|$)|>[ \t]?)*/;
-
-/**
- * The parts of the selection, one per block, without a line's prefix and
- * whitespace at their edges. A paragraph's or list item's lines joined by
- * soft line breaks are one block, as emphasis may span them; a blank line,
- * a heading and a line that starts a list item or a quote start another.
- * Blocks with nothing selected are skipped.
- */
-function blockSpans(
-  source: string,
-  start: number,
-  end: number,
-): [number, number][] {
-  const spans: [number, number][] = [];
-  // The span of the block that the next line may continue, if any.
-  let open: [number, number] | null = null;
-  // Whether the next line without a marker continues the current block.
-  let joinable = false;
-  let line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
-  while (line <= end) {
-    const next = source.indexOf('\n', line);
-    const lineEnd = next === -1 ? source.length : next;
-    const text = source.slice(line, lineEnd);
-    const prefix = LINE_PREFIX.exec(text)![0];
-    const blank = text.trim() === '';
-    const marker = prefix.trim() !== '';
-    const continues = joinable && !blank && !marker;
-    if (!continues) open = null;
-    const [a, b] = inward(
-      source,
-      Math.max(start, line + prefix.length),
-      Math.min(end, lineEnd),
+  const unmark = reading.inside.flatMap((node) => [
+    { at: begin(node), remove: n, insert: '' },
+    { at: finish(node) - n, remove: n, insert: '' },
+  ]);
+  // All of the range's text has the emphasis already, as in `***a***`.
+  const covered =
+    reading.inside.length > 0 &&
+    [...below(block)].every(
+      (node) =>
+        node.type !== 'text' ||
+        finish(node) <= start ||
+        begin(node) >= end ||
+        reading.inside.some(
+          (span) => begin(span) <= begin(node) && finish(node) <= finish(span),
+        ),
     );
-    if (a < b) {
-      if (open) open[1] = b;
-      else spans.push((open = [a, b]));
-    }
-    joinable = !blank && !prefix.trim().startsWith('#');
-    if (next === -1) break;
-    line = next + 1;
-  }
-  return spans;
+  if (covered) return { ops: unmark, removes: true, range: [start, end] };
+  const mark = '*'.repeat(n);
+  return {
+    ops: [
+      { at: start, remove: 0, insert: mark },
+      ...unmark,
+      { at: end, remove: 0, insert: mark },
+    ],
+    removes: false,
+    range: [start, end],
+  };
 }
 
 /**
- * Bold or italic on the selection. Emphasis cannot cross a paragraph, a
- * list item, a heading or a line's prefix, so it applies to each selected
- * block on its own, after its list marker, heading or quote: removed from
+ * Bold or italic on the selection. Emphasis cannot cross a block, so it
+ * applies to each selected paragraph, list item or heading on its own, after
+ * its list marker, heading or quote, and leaves code blocks out: removed from
  * all of them when every one has it already, otherwise added where it is
- * missing.
+ * missing. A caret inside a span removes it, elsewhere a pair of markers is
+ * inserted around it, or removed again.
  */
 function emphasis(
-  kind: Emphasis,
+  type: Emphasis,
   source: string,
   start: number,
   end: number,
-): MarkdownEdit {
-  const spans = start === end ? [] : blockSpans(source, start, end);
-  if (spans.length <= 1) {
-    const [a, b] = spans[0] ?? [start, end];
-    const edit = span(kind, source, a, b);
-    return {
-      from: edit.from,
-      to: edit.to,
-      insert: edit.insert,
-      select: edit.select,
-    };
+): MarkdownEdit | null {
+  const root = tree(source);
+  const n = type === 'strong' ? 2 : 1;
+  const mark = '*'.repeat(n);
+  if (start === end) {
+    const block = textBlocks(root, start, end)[0];
+    const reading = block ? read(block, start, end, type, true) : null;
+    if (block && !reading) return null;
+    const span = reading?.enclosing[reading.enclosing.length - 1];
+    if (span) {
+      const ops = [
+        { at: begin(span), remove: n, insert: '' },
+        { at: finish(span) - n, remove: n, insert: '' },
+      ];
+      const at = moved(ops, start, true);
+      const edit = { ...combine(source, ops), select: [at, at] as const };
+      return checked(root, source, edit, [
+        { range: [at, at], type, has: false },
+      ]);
+    }
+    const pair =
+      source.slice(start - n, start) === mark &&
+      source.slice(start, start + n) === mark;
+    const edit: MarkdownEdit = pair
+      ? {
+          from: start - n,
+          to: start + n,
+          insert: '',
+          select: [start - n, start - n],
+        }
+      : {
+          from: start,
+          to: start,
+          insert: mark + mark,
+          select: [start + n, start + n],
+        };
+    return checked(root, source, edit, [], { text: false });
   }
-  const edits = spans.map(([a, b]) => span(kind, source, a, b));
-  const removing = edits.every((edit) => edit.removes);
-  const from = edits[0]!.from;
-  const to = edits[edits.length - 1]!.to;
-  let insert = '';
-  let at = from;
-  for (const edit of edits) {
-    if (edit.removes !== removing) continue;
-    insert += source.slice(at, edit.from) + edit.insert;
-    at = edit.to;
+  const parts: Part[] = [];
+  for (const block of textBlocks(root, start, end)) {
+    const inner = content(block);
+    if (!inner) continue;
+    const [a, b] = inward(
+      source,
+      Math.max(start, inner[0]),
+      Math.min(end, inner[1]),
+    );
+    if (a >= b) continue;
+    const part = emphasisPart(type, source, block, a, b);
+    if (!part) return null;
+    parts.push(part);
   }
-  insert += source.slice(at, to);
-  // The selection keeps its start before the first line's prefix.
-  return {
-    from,
-    to,
-    insert,
-    select: [Math.min(start, from), from + insert.length],
+  if (parts.length === 0) return null;
+  const removing = parts.every((part) => part.removes);
+  const applied = parts.filter((part) => part.removes === removing);
+  const ops = applied.flatMap((part) => part.ops);
+  const targets = applied.map((part) => ({
+    range: [
+      moved(ops, part.range[0], true),
+      moved(ops, part.range[1], false),
+    ] as [number, number],
+    type,
+    has: !removing,
+  }));
+  const one = parts.length === 1;
+  const edit = {
+    ...combine(source, ops),
+    select: one
+      ? targets[0]!.range
+      : ([moved(ops, start, false), moved(ops, end, true)] as const),
   };
+  return checked(root, source, edit, targets);
 }
 
 /** The lines the selection touches: a selection ending at a line start excludes that line. */
@@ -549,50 +483,196 @@ function label(text: string): string {
 }
 
 /**
- * A link around the selection: its text with `https://` selected for the
- * address, or, for a selected address, the address with the caret in the
- * empty text. A selection over several paragraphs links its first one.
+ * A link around the selection's first stretch of inline text, which leaves
+ * a block's marker and the blocks after it alone: its text with `https://`
+ * selected for the address, or, for a selected address, the address with the
+ * caret in the empty text. A link cannot hold another or cut into code, so
+ * a selection that would is not linked.
  */
-function link(source: string, selStart: number, selEnd: number): MarkdownEdit {
-  let [start, end] =
-    selStart === selEnd ? [selStart, selEnd] : inward(source, selStart, selEnd);
-  // A link's text cannot span paragraphs: the first one's part is linked.
-  const blank = /\n[ \t]*\n/.exec(source.slice(start, end));
-  if (blank) [start, end] = inward(source, start, start + blank.index);
-  const inner = source.slice(start, end);
-  if (inner === '' || URL_ONLY.test(inner)) {
-    const insert = `[](${inner ? destination(inner) : 'https://'})`;
-    return { from: start, to: end, insert, select: [start + 1, start + 1] };
+function link(source: string, start: number, end: number): MarkdownEdit | null {
+  const root = tree(source);
+  if (start === end) {
+    const block = textBlocks(root, start, end)[0];
+    if (block && !read(block, start, end, 'link', false)) return null;
+    const edit: MarkdownEdit = {
+      from: start,
+      to: end,
+      insert: '[](https://)',
+      select: [start + 1, start + 1],
+    };
+    return checked(root, source, edit, [], {
+      text: false,
+      link: { at: start, url: 'https://' },
+    });
   }
-  const text = label(inner);
-  const insert = `[${text}](https://)`;
-  const address = start + text.length + 3;
-  return {
-    from: start,
-    to: end,
-    insert,
-    select: [address, address + 'https://'.length],
+  for (const block of textBlocks(root, start, end)) {
+    const inner = content(block);
+    if (!inner) continue;
+    const [a, b] = inward(
+      source,
+      Math.max(start, inner[0]),
+      Math.min(end, inner[1]),
+    );
+    if (a >= b) continue;
+    if (!read(block, a, b, 'link', false)) return null;
+    const text = source.slice(a, b);
+    if (URL_ONLY.test(text)) {
+      const edit: MarkdownEdit = {
+        from: a,
+        to: b,
+        insert: `[](${destination(text)})`,
+        select: [a + 1, a + 1],
+      };
+      return checked(root, source, edit, [], { link: { at: a, url: text } });
+    }
+    const name = label(text);
+    const address = a + name.length + 3;
+    const edit: MarkdownEdit = {
+      from: a,
+      to: b,
+      insert: `[${name}](https://)`,
+      select: [address, address + 'https://'.length],
+    };
+    return checked(root, source, edit, [], {
+      link: { at: a, url: 'https://' },
+    });
+  }
+  return null;
+}
+
+/** A node of `type` that an edit must have put around a range, or taken off. */
+interface Target {
+  readonly range: readonly [number, number];
+  readonly type: string;
+  readonly has: boolean;
+}
+
+/** What else the check of an edit expects. */
+interface Expect {
+  /** Whether the text stays the same; not for inserted markers. */
+  readonly text?: boolean;
+  /** The link the edit adds, by its start and address. */
+  readonly link?: { readonly at: number; readonly url: string };
+}
+
+/**
+ * The top-level blocks around `[from, to)`, as whole lines: an edit there
+ * changes how they parse, but not the blocks before or after them.
+ */
+function region(
+  root: MarkdownNode,
+  source: string,
+  from: number,
+  to: number,
+): [number, number] {
+  let lo = 0;
+  let hi = source.length;
+  for (const child of root.children ?? []) {
+    if (begin(child) <= from) lo = begin(child);
+    if (finish(child) >= to) {
+      hi = finish(child);
+      break;
+    }
+  }
+  const next = source.indexOf('\n', Math.max(hi, to));
+  return [
+    lineStart(source, Math.min(lo, from)),
+    next === -1 ? source.length : next,
+  ];
+}
+
+/**
+ * What a reader gets from a tree besides its formatting: its text without
+ * whitespace, and its code, HTML and addresses in order. The link `added`
+ * is left out of them, its address counted as text if it has none.
+ */
+function signature(
+  root: MarkdownNode,
+  added?: { readonly at: number; readonly url: string },
+) {
+  let text = '';
+  const marks: string[] = [];
+  let found = false;
+  for (const node of below(root)) {
+    if (node.type === 'text') text += node.value;
+    else if (['inlineCode', 'code', 'html'].includes(node.type))
+      marks.push(`${node.type} ${node.value}`);
+    if (node.url === undefined) continue;
+    if (
+      added &&
+      !found &&
+      node.type === 'link' &&
+      begin(node) === added.at &&
+      node.url === added.url
+    ) {
+      found = true;
+      if (!node.children?.length) text += node.url;
+    } else marks.push(`${node.type} ${node.url}`);
+  }
+  return { text: text.replace(/\s+/g, ''), marks: marks.join('\n'), found };
+}
+
+/**
+ * `edit`, if parsing its result shows what it means to do: the targets have
+ * their emphasis, or no longer, the added link is there, and the text, code,
+ * HTML and addresses stay as they were; otherwise `null`. Only the blocks
+ * around the edit are parsed again.
+ */
+function checked(
+  root: MarkdownNode,
+  source: string,
+  edit: MarkdownEdit,
+  targets: readonly Target[],
+  expect: Expect = {},
+): MarkdownEdit | null {
+  const next = source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
+  const delta = edit.insert.length - (edit.to - edit.from);
+  const [lo, hi] = region(root, source, edit.from, edit.to);
+  const before = signature(parseMarkdown(source.slice(lo, hi)));
+  const result = parseMarkdown(next.slice(lo, hi + delta));
+  const added = expect.link && {
+    at: expect.link.at - lo,
+    url: expect.link.url,
   };
+  const after = signature(result, added);
+  if (added && !after.found) return null;
+  if (before.marks !== after.marks) return null;
+  if (expect.text !== false && before.text !== after.text) return null;
+  for (const target of targets) {
+    const [a, b] = [target.range[0] - lo, target.range[1] - lo];
+    let has = false;
+    for (const node of below(result))
+      if (
+        node.type === target.type &&
+        (a < b
+          ? begin(node) <= a && b <= finish(node)
+          : begin(node) < a && a < finish(node))
+      )
+        has = true;
+    if (has !== target.has) return null;
+  }
+  return edit;
 }
 
 /**
  * The edit that one formatting action makes to `source` with the selection
- * `[start, end)`.
+ * `[start, end)`, or `null` where its effect would not be predictable.
  */
 export function formatMarkdown(
   kind: MarkdownFormat,
   source: string,
   start: number,
   end: number,
-): MarkdownEdit {
+): MarkdownEdit | null {
   const [a, b] = start <= end ? [start, end] : [end, start];
   switch (kind) {
     case 'bold':
+      return emphasis('strong', source, a, b);
     case 'italic':
-      return emphasis(kind, source, a, b);
+      return emphasis('emphasis', source, a, b);
     case 'link':
       return link(source, a, b);
     default:
-      return linePrefix(kind, source, a, b);
+      return checked(tree(source), source, linePrefix(kind, source, a, b), []);
   }
 }

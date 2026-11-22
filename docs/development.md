@@ -320,7 +320,8 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   - the Markdown entry (#395) on `?screen=markdown`, installed with its
     optional `react-markdown` peer: the reading view is formatted in its
     first state on the page, fetches none of the images in Markdown or
-    embedded HTML, shows that HTML as text, links only web addresses and
+    embedded HTML, shows that HTML as text, shows a hard and a typed line
+    break as one new line each, links only web addresses and
     opens one in a new tab without an opener on a press; `MarkdownField`
     switches between reading and writing in place at 1280 and 375px by
     pointer and Enter, with the focus in the text and then back on the

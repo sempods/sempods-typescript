@@ -271,8 +271,6 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
     '--cell-size',
     'bg-action',
     'data-exiting\\:animate-out',
-    // The Markdown entry's: the preview beside the source in a wide field.
-    '@2xl\\:grid-cols-2',
   ])
     assert.ok(css.includes(candidate), `built CSS lacks ${candidate}`);
 

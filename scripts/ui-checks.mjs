@@ -9590,7 +9590,8 @@ async function deleteIcon({ browser, origin }) {
 
 /**
  * The Markdown entry (`?screen=markdown`, #395): the reading view renders in
- * the first paint and fetches nothing, links open on a press; the field
+ * the first paint and fetches nothing, shows each line break once, links
+ * open on a press; the field
  * switches presentation in place with the focus, keeps the draft, formats
  * the selection by pointer, touch and keyboard with the browser's undo,
  * lets Tab leave the text, shows the preview beside the source only when
@@ -9659,6 +9660,25 @@ async function markdown({ browser, origin, engine }) {
               first.strong === 'before noon' &&
               !first.raw,
             first,
+          };
+        }),
+      );
+      results.push(
+        await attemptOn(errors, 'markdown-line-breaks', async () => {
+          // A hard and a typed line break each start one new line: the two
+          // short lines of each paragraph take two line boxes.
+          const lines = await details.evaluate((el) =>
+            [...el.querySelectorAll('p')]
+              .filter((p) => /Bring the key|Call /.test(p.textContent))
+              .map((p) => {
+                const height = p.getBoundingClientRect().height;
+                const line = parseFloat(getComputedStyle(p).lineHeight);
+                return Math.round(height / line);
+              }),
+          );
+          return {
+            pass: lines.length === 2 && lines.every((n) => n === 2),
+            lines,
           };
         }),
       );

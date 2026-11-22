@@ -1843,7 +1843,7 @@ not with `lazy()`: the view and the field are one small module, so a stored
 text shows formatted in the first paint and writing needs no loading state.
 
 - **`MarkdownView`** shows a `source` as read-only content: paragraphs (a
-  line break typed in one shows as one), headings, lists, emphasis, quotes,
+  line break typed in one shows as one, as a hard break does), headings, lists, emphasis, quotes,
   code and links. A `#` heading is an `h3` below a dialog's `h2`, and
   `headingLevel` moves the start; deeper ones follow down to `h6`. Text in a
   Pod may come from any app, so the view runs and fetches nothing: embedded
@@ -1854,9 +1854,12 @@ text shows formatted in the first paint and writing needs no loading state.
 - **`MarkdownField`** is the controlled field around it: the app passes
   `value` (the source, `''` for none) and `onChange`, which receives every
   change exactly as typed, also indentation, trailing spaces of a hard line
-  break and a text of only spaces. It never trims or normalizes, and opening
-  it, switching its presentation or leaving it never calls `onChange`, so
-  the draft and the Pod stay untouched. The containing editor owns
+  break and a text of only spaces. It never trims or normalizes, and the
+  text input shows exactly `value`. Opening it, switching its presentation
+  or leaving it never calls `onChange`, so the draft and the Pod stay
+  untouched. Once the person edits, the browser's text input reports every
+  line ending as `\n`, also on lines they did not touch: a text stored with
+  `\r\n` is saved with `\n` after an edit. The containing editor owns
   validation, save, cancel and conflicts.
 
 The field is a group named by its `label`. It starts with
@@ -1867,15 +1870,18 @@ at the field's top end switches between the two, so it stays in place:
 editing moves the focus into the text input, **Preview** returns it to that
 action. Writing adds a toolbar of 44px actions that act on the selection:
 heading, bold, italic, bulleted and numbered list, and link (the link's
-address is selected to type over). Bold and italic apply to each selected
-paragraph, list item or heading on its own, after its list marker, heading
-or quote, since emphasis cannot cross them; lines joined by a soft line
-break stay one span. A selection that is only partly bold or italic becomes
-so as a whole, its own markers merged into one pair. A selection inside a
-larger bold or italic span loses it alone, the span split around it. With
-only a caret inside such a span, the span loses it. A link over several
-paragraphs links the first one. Stars
-that are text, such as in `2 * 3` or in code, stay. Pressing one keeps the focus and the
+address is selected to type over). The actions read the source with the
+parser that renders it, so they agree with the preview: a selection inside a
+bold or italic span, or a caret in it, takes that span's emphasis off, as
+the preview shows it, whether marked with `*` or `_`; any other selection
+gets it, its own spans of that kind merged into one. Bold and italic apply
+to each selected paragraph, list item or heading on its own, after its list
+marker, heading or quote, and leave code blocks out. A link takes the first
+selected stretch of text, without a list marker or the blocks after it.
+Where an action's effect would not be predictable, it is disabled: inside
+code or a link's address, across part of a link or code, or a link inside a
+link. Each edit is checked by parsing its result, so text, code and
+addresses stay as they were. Pressing one keeps the focus and the
 on-screen keyboard in the text; from the keyboard, the arrow keys move along
 the toolbar and Tab leaves it. In the text input, Ctrl+B, Ctrl+I and Ctrl+K
 (Command on Apple systems) do the same, and the browser's undo reverts a
@@ -1883,17 +1889,19 @@ formatting step (WebKit on macOS takes it back together with typing just
 before it, as it groups typing). The text input stays mounted once written in and is only hidden
 while reading, so its undo history survives a preview. Tab moves to the next control instead of typing a tab.
 From 42rem of the field's own width, the preview is shown beside the source
-as it is typed; a narrower field writes at full width and previews on
-demand. `readOnly` shows the rendered text without an action, and nothing
+as it is typed; a narrower field writes at full width, parses nothing while
+typing and previews on demand. `readOnly` shows the rendered text without an action, and nothing
 when there is no text; a separate reading place, such as a task's details,
 uses `MarkdownView` with the same rendering. Texts follow the SDK provider's
 language (English or German); `labels` replaces any of them.
 
 For an SDK field, declare the text without `trim`, so Markdown keeps its
-indentation and line breaks, and as `optional`. A text of only spaces is no
-text: pass `null`, so the field stays absent instead of making the draft
-invalid; the field keeps showing the spaces as typed, so the first line of an
-indented code block can be written. The UI gate runs this file as written:
+indentation and line breaks, and as `optional`, mapping only an empty text
+to `null`, so the field is absent. The draft then holds exactly what the
+field shows: the four spaces that start an indented code block make it
+invalid only until the code follows. An app that saves a text of only
+spaces as no text converts it when it saves. The UI gate runs this file as
+written:
 
 ```tsx
 // task-notes.tsx
@@ -1955,9 +1963,9 @@ export function TaskNotes({
           <MarkdownField
             label={t.notes}
             value={draft.notes ?? ''}
-            // Only spaces are no text: the optional field stays absent.
+            // No text: the optional field stays absent.
             onChange={(notes) =>
-              change({ ...draft, notes: notes.trim() ? notes : null })
+              change({ ...draft, notes: notes === '' ? null : notes })
             }
           />
         </div>
@@ -1971,7 +1979,7 @@ A text read in a preferred language variant
 ([recipe](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant))
 passes that variant's text and replaces only it:
 `value={draft.notes.value ?? ''}` and
-`onChange={(notes) => change({ ...draft, notes: editTextVariant(draft.notes, notes.trim() ? notes : null) })}`.
+`onChange={(notes) => change({ ...draft, notes: editTextVariant(draft.notes, notes === '' ? null : notes) })}`.
 Other languages stay as they are. While the variant is `ambiguous`, its
 `value` is `null`: show its `values` instead of the field until the person
 chooses to replace them.

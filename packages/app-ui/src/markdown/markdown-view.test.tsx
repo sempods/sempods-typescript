@@ -17,12 +17,26 @@ it('renders paragraphs, headings, lists and emphasis', () => {
   expect(screen.getByRole('heading', { level: 4, name: 'Steps' })).toBeTruthy();
   expect(container.querySelector('strong')?.textContent).toBe('bold');
   expect(container.querySelector('em')?.textContent).toBe('italic');
-  // A typed line break stays in the paragraph's text and shows as one.
+  // A typed line break shows as one.
   const paragraph = container.querySelector('p');
+  expect(paragraph?.querySelectorAll('br')).toHaveLength(1);
   expect(paragraph?.textContent).toContain(',\nthen');
-  expect(paragraph?.className).toContain('whitespace-pre-line');
   expect(container.querySelectorAll('ul > li')).toHaveLength(2);
   expect(container.querySelectorAll('ol > li')).toHaveLength(2);
+});
+
+it('shows a hard line break as one break, as a typed one', () => {
+  const { container } = render(
+    <MarkdownView
+      source={'hard  \nbreak\n\nsoft\nbreak\n\nboth\\\nand\nmore'}
+    />,
+  );
+  const breaks = [...container.querySelectorAll('p')].map(
+    (p) => p.querySelectorAll('br').length,
+  );
+  expect(breaks).toEqual([1, 1, 2]);
+  for (const p of container.querySelectorAll('p'))
+    expect(getComputedStyle(p).whiteSpace).not.toMatch(/pre/);
 });
 
 it('starts headings at the given level and stops at h6', () => {

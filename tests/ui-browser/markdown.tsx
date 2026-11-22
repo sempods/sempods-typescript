@@ -6,7 +6,7 @@ import { TaskNotes } from './task-notes';
 
 /**
  * Notes as another app may have stored them: Markdown with emphasis, a
- * typed line break, lists and a web link, beside embedded HTML, an image,
+ * typed and a hard line break, lists and a web link, beside embedded HTML, an image,
  * a script address and an image in HTML that a reader must not fetch.
  */
 export const SAMPLE = [
@@ -14,6 +14,9 @@ export const SAMPLE = [
   '',
   'Call **before noon** and ask for *Ms Weber*.',
   'The second line of the paragraph.',
+  '',
+  'Bring the key  ',
+  'and the ladder.',
   '',
   '- Shut off the water',
   '- Read the [manual](https://manual.example/tap)',
@@ -101,7 +104,7 @@ function MarkdownForm({
           defaultPresentation={write ? 'write' : 'read'}
           onChange={(source) => {
             setChanges((n) => n + 1);
-            setValue(source.trim() ? source : '');
+            setValue(source);
           }}
         />
         <button type="button">After the notes</button>

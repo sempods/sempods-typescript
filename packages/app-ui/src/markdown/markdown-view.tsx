@@ -20,6 +20,35 @@ export interface MarkdownViewProps {
 
 const block = 'my-3 first:mt-0 last:mb-0';
 
+interface TreeNode {
+  type: string;
+  value?: string;
+  children?: TreeNode[];
+}
+
+/**
+ * A line break typed in a paragraph shows as one, as a hard break does: each
+ * becomes a `<br>`, so a hard break, whose source ends the line too, adds
+ * no second one.
+ */
+const typedBreaks = () => (tree: unknown) => {
+  const visit = (node: TreeNode) => {
+    if (!node.children) return;
+    node.children = node.children.flatMap((child): TreeNode[] => {
+      visit(child);
+      if (child.type !== 'text' || !child.value?.includes('\n')) return [child];
+      return child.value
+        .split('\n')
+        .flatMap((line, i): TreeNode[] => [
+          ...(i > 0 ? [{ type: 'break' }] : []),
+          ...(line ? [{ type: 'text', value: line }] : []),
+        ]);
+    });
+  };
+  visit(tree as TreeNode);
+};
+const remarkPlugins = [typedBreaks];
+
 function headings(base: number): Partial<Components> {
   const heading =
     (depth: number) =>
@@ -62,10 +91,7 @@ const elements: Partial<Components> = {
     ) : (
       <span>{children}</span>
     ),
-  // A line break typed in a paragraph shows as one.
-  p: ({ children }) => (
-    <p className={cn(block, 'whitespace-pre-line')}>{children}</p>
-  ),
+  p: ({ children }) => <p className={block}>{children}</p>,
   ul: ({ children }) => (
     <ul className={cn(block, 'list-disc ps-6')}>{children}</ul>
   ),
@@ -124,7 +150,9 @@ export function MarkdownView({
         className,
       )}
     >
-      <Markdown components={components}>{source}</Markdown>
+      <Markdown components={components} remarkPlugins={remarkPlugins}>
+        {source}
+      </Markdown>
     </div>
   );
 }

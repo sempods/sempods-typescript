@@ -1,6 +1,8 @@
 import {
   useDeferredValue,
+  useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -37,8 +39,9 @@ export interface MarkdownFieldProps {
   readonly value: string;
   /**
    * Every change the person makes, with the source exactly as typed: the
-   * field neither trims nor normalizes it. Opening, switching the
-   * presentation and leaving never call it.
+   * field neither trims nor normalizes it, though the browser's text input
+   * reports its line endings as `\n`, including on untouched lines. Opening,
+   * switching the presentation and leaving never call it.
    */
   readonly onChange: (value: string) => void;
   /**
@@ -68,6 +71,18 @@ const shortcuts: Readonly<Record<string, MarkdownFormat>> = {
   k: 'link',
 };
 
+const kinds: readonly MarkdownFormat[] = [
+  'heading',
+  'bold',
+  'italic',
+  'bulletList',
+  'numberedList',
+  'link',
+];
+
+/** The field's width from which the preview stands beside the source. */
+const WIDE_REM = 42;
+
 const apple = () =>
   typeof navigator !== 'undefined' &&
   /Mac|iPhone|iPad|iPod/.test(navigator.platform);
@@ -76,7 +91,9 @@ const apple = () =>
  * A Markdown text, controlled by the app: rendered for reading, and written
  * as source with a preview. Writing offers formatting actions that act on
  * the selection (heading, bold, italic, lists, link), with Ctrl or Command
- * + B, I and K; Tab leaves the text input for the next control. One action
+ * + B, I and K; an action whose effect would not be predictable there, such
+ * as bold inside code, is disabled. Tab leaves the text input for the next
+ * control. One action
  * at the field's top end switches between reading and writing, so it stays
  * in place: editing moves the focus into the text, preview back to that
  * action. A wide field shows the preview beside the source as it is typed.
@@ -100,15 +117,16 @@ export function MarkdownField({
   // Whether the person has written here: from then on the text input stays.
   const [written, setWritten] = useState(writing);
   if (writing && !written) setWritten(true);
+  const root = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
-  // Whitespace typed while the app's draft holds no text, as an optional
-  // field without text keeps it: shown as typed, so the first indented line
-  // of a code block can be written.
-  const [blank, setBlank] = useState('');
-  const shown = value === '' ? blank : value;
-  const filled = shown.trim() !== '';
-  const preview = useDeferredValue(shown);
+  const filled = value.trim() !== '';
+  const preview = useDeferredValue(value);
+  // Whether the field is wide enough for the preview beside the source.
+  const [wide, setWide] = useState(false);
+  // The actions the selection does not allow, checked once it rests.
+  const [unavailable, setUnavailable] = useState<readonly MarkdownFormat[]>([]);
+  const check = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Where the focus goes after a switch the person made.
   const moved = useRef<'text' | 'toggle' | null>(null);
   // The selection after an edit that the browser could not apply itself.
@@ -125,12 +143,50 @@ export function MarkdownField({
     if (!selection || !textarea.current) return;
     pending.current = null;
     textarea.current.setSelectionRange(selection[0], selection[1]);
-  }, [shown]);
+  }, [value]);
+  useLayoutEffect(() => {
+    const field = root.current;
+    if (!writing || !field) return;
+    const measure = () => {
+      const rem =
+        parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      setWide(field.getBoundingClientRect().width >= WIDE_REM * rem);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(field);
+    return () => observer.disconnect();
+  }, [writing]);
 
-  const emit = (source: string) => {
-    setBlank(source.trim() === '' ? source : '');
-    onChange(source);
+  // Reads the source again once the selection rests, not on every key.
+  const recheck = () => {
+    clearTimeout(check.current);
+    check.current = setTimeout(() => {
+      const input = textarea.current;
+      if (!input) return;
+      const next = kinds.filter(
+        (kind) =>
+          !formatMarkdown(
+            kind,
+            input.value,
+            input.selectionStart,
+            input.selectionEnd,
+          ),
+      );
+      setUnavailable((now) => (now.join() === next.join() ? now : next));
+    }, 150);
   };
+  useEffect(() => {
+    if (writing) recheck();
+  }, [value, writing]);
+  useEffect(() => () => clearTimeout(check.current), []);
+  // The preview, parsed again only for a new source.
+  const live = useMemo(
+    () => <MarkdownView source={preview} headingLevel={headingLevel} />,
+    [preview, headingLevel],
+  );
+
   const format = (kind: MarkdownFormat) => {
     const input = textarea.current;
     if (!input) return;
@@ -141,6 +197,7 @@ export function MarkdownField({
       input.selectionStart,
       input.selectionEnd,
     );
+    if (!edit) return;
     const next =
       source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
     input.focus();
@@ -162,7 +219,7 @@ export function MarkdownField({
     }
     if (input.value !== source) return;
     pending.current = edit.select;
-    emit(next);
+    onChange(next);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || event.altKey || event.shiftKey) return;
@@ -191,11 +248,12 @@ export function MarkdownField({
   const switchLabel = writing ? t.preview : filled ? t.edit : t.addText;
   return (
     <div
+      ref={root}
       role="group"
       aria-label={label}
       data-slot="markdown-field"
       data-presentation={writing ? 'write' : 'read'}
-      className={cn('@container grid min-w-0', className)}
+      className={cn('grid min-w-0', className)}
     >
       <div className="flex min-h-11 items-start gap-1">
         {writing ? (
@@ -209,6 +267,7 @@ export function MarkdownField({
                 variant="ghost"
                 className="size-11 text-muted-foreground hover:text-foreground"
                 aria-label={name}
+                isDisabled={unavailable.includes(kind)}
                 preventFocusOnPress
                 onPress={() => format(kind)}
               >
@@ -263,25 +322,34 @@ export function MarkdownField({
               margin: '-0.25rem',
             }}
           >
-            <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
+            <div
+              className="grid min-w-0 gap-4"
+              style={
+                writing && wide
+                  ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }
+                  : undefined
+              }
+            >
               <Textarea
                 ref={textarea}
                 aria-label={label}
                 placeholder={placeholder}
-                value={shown}
+                value={value}
                 spellCheck
-                onChange={(event) => emit(event.target.value)}
+                onChange={(event) => onChange(event.target.value)}
+                onSelect={recheck}
                 onKeyDown={onKeyDown}
                 className="min-h-40 text-base leading-relaxed md:text-base"
               />
-              {/* Wide: the preview beside the source, as it is typed. */}
-              {writing && (
+              {/* Wide: the preview beside the source, as it is typed; only
+                  there, so a narrow field parses nothing while typing. */}
+              {writing && wide && (
                 <div
                   role="region"
                   aria-label={t.preview}
-                  className="hidden min-w-0 px-1 @2xl:block"
+                  className="min-w-0 px-1"
                 >
-                  <MarkdownView source={preview} headingLevel={headingLevel} />
+                  {live}
                 </div>
               )}
             </div>
@@ -290,7 +358,7 @@ export function MarkdownField({
       )}
       {!writing && filled && (
         <MarkdownView
-          source={shown}
+          source={value}
           headingLevel={headingLevel}
           className="mt-2"
         />
