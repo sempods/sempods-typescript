@@ -47,6 +47,7 @@ type Emphasis = 'bold' | 'italic';
 /** A run of stars that can mark `kind`, and the run it pairs with. */
 interface Marker {
   readonly at: number;
+  readonly length: number;
   readonly open: boolean;
   readonly close: boolean;
   mate: number;
@@ -86,6 +87,7 @@ function markers(kind: Emphasis, text: string): Marker[] {
     const after = text[at + run[0].length];
     found.push({
       at,
+      length: run[0].length,
       open: after !== undefined && !isSpace(after),
       close: before !== undefined && !isSpace(before),
       mate: -1,
@@ -178,7 +180,7 @@ function emphasis(
     last > 0 &&
     found[0]!.at === 0 &&
     found[0]!.mate === last &&
-    found[last]!.at + n === inner.length
+    found[last]!.at + found[last]!.length === inner.length
   ) {
     const content = unmark(
       kind,
@@ -209,7 +211,8 @@ function lineRange(
   end: number,
 ): [number, number] {
   const last = end > start && source[end - 1] === '\n' ? end - 1 : end;
-  const from = source.lastIndexOf('\n', start - 1) + 1;
+  // lastIndexOf clamps a negative position to 0, which finds a first `\n`.
+  const from = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
   const next = source.indexOf('\n', last);
   return [from, next === -1 ? source.length : next];
 }

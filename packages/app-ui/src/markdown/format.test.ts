@@ -36,6 +36,8 @@ describe('emphasis', () => {
     expect(run('italic', '***[word]***')).toBe('**[word]**');
     expect(run('bold', '*[word]*')).toBe('***[word]***');
     expect(run('bold', '***[word]***')).toBe('*[word]*');
+    expect(run('bold', '[***word***]')).toBe('[*word*]');
+    expect(run('italic', '[***word***]')).toBe('[**word**]');
     expect(run('italic', '[**word**]')).toBe('*[**word**]*');
   });
 
@@ -108,6 +110,11 @@ describe('line prefixes', () => {
 
   it('leaves the line after a selection that ends at its start', () => {
     expect(run('bulletList', '[one\n]two')).toBe('[- one]\ntwo');
+  });
+
+  it('takes the first line at the start of a source that begins with a line break', () => {
+    expect(run('heading', '|\nfoo')).toBe('## |\nfoo');
+    expect(run('bulletList', '|\nfoo')).toBe('- |\nfoo');
   });
 
   it('starts a list on an empty line', () => {

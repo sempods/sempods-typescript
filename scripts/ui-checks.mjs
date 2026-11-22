@@ -9943,15 +9943,27 @@ async function markdown({ browser, origin, engine }) {
           // Preview and back: the same text input, with its history.
           await toggle(page).click();
           await text(page).waitFor({ state: 'hidden' });
+          // Kept while reading, but taking no room and out of reach.
+          const kept = await notes(page)
+            .locator('textarea')
+            .evaluate((el) => ({
+              height: el.closest('[inert]')?.getBoundingClientRect().height,
+              focused: document.activeElement === el,
+            }));
           await toggle(page).click();
           await text(page).waitFor();
           await page.keyboard.press('ControlOrMeta+Z');
           await settle(page);
           const undone = (await draft(page)).draft;
           return {
-            pass: bold === 'Buy **milk**' && undone === 'Buy milk',
+            pass:
+              bold === 'Buy **milk**' &&
+              undone === 'Buy milk' &&
+              kept.height === 0 &&
+              !kept.focused,
             bold,
             undone,
+            kept,
           };
         }),
       );

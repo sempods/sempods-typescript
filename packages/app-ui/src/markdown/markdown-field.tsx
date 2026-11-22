@@ -3,7 +3,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -67,19 +66,6 @@ const shortcuts: Readonly<Record<string, MarkdownFormat>> = {
   b: 'bold',
   i: 'italic',
   k: 'link',
-};
-
-/**
- * The text input while reading: kept rendered, so its undo history stays,
- * but invisible, out of the layout and, with `inert`, out of reach.
- */
-const concealed: CSSProperties = {
-  visibility: 'hidden',
-  position: 'absolute',
-  width: 1,
-  height: 1,
-  overflow: 'hidden',
-  clipPath: 'inset(50%)',
 };
 
 const apple = () =>
@@ -209,7 +195,7 @@ export function MarkdownField({
       aria-label={label}
       data-slot="markdown-field"
       data-presentation={writing ? 'write' : 'read'}
-      className={cn('@container relative grid min-w-0 gap-2', className)}
+      className={cn('@container grid min-w-0', className)}
     >
       <div className="flex min-h-11 items-start gap-1">
         {writing ? (
@@ -254,38 +240,60 @@ export function MarkdownField({
         )}
       </div>
       {/* Once written in, the text input stays mounted and is only hidden
-          while reading: the browser keeps its undo history across a preview.
-          Not with display: none, which ends that history in Firefox. */}
+          while reading, so the browser keeps its undo history across a
+          preview. Hiding changes no display, position or overflow, which
+          makes Firefox rebuild the input and drop that history: its row
+          collapses to 0fr, invisible and inert. */}
       {written && (
         <div
           inert={!writing}
-          style={writing ? undefined : concealed}
-          className="grid min-w-0 gap-4 @2xl:grid-cols-2"
+          style={{
+            display: 'grid',
+            gridTemplateRows: writing ? '1fr' : '0fr',
+            marginTop: writing ? '0.5rem' : 0,
+            visibility: writing ? 'visible' : 'hidden',
+          }}
         >
-          <Textarea
-            ref={textarea}
-            aria-label={label}
-            placeholder={placeholder}
-            value={shown}
-            spellCheck
-            onChange={(event) => emit(event.target.value)}
-            onKeyDown={onKeyDown}
-            className="min-h-40 text-base leading-relaxed md:text-base"
-          />
-          {/* Wide: the preview beside the source, as it is typed. */}
-          {writing && (
-            <div
-              role="region"
-              aria-label={t.preview}
-              className="hidden min-w-0 px-1 @2xl:block"
-            >
-              <MarkdownView source={preview} headingLevel={headingLevel} />
+          {/* Room for the focus ring, which the clip would cut. */}
+          <div
+            style={{
+              minHeight: 0,
+              overflow: 'hidden',
+              padding: '0.25rem',
+              margin: '-0.25rem',
+            }}
+          >
+            <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
+              <Textarea
+                ref={textarea}
+                aria-label={label}
+                placeholder={placeholder}
+                value={shown}
+                spellCheck
+                onChange={(event) => emit(event.target.value)}
+                onKeyDown={onKeyDown}
+                className="min-h-40 text-base leading-relaxed md:text-base"
+              />
+              {/* Wide: the preview beside the source, as it is typed. */}
+              {writing && (
+                <div
+                  role="region"
+                  aria-label={t.preview}
+                  className="hidden min-w-0 px-1 @2xl:block"
+                >
+                  <MarkdownView source={preview} headingLevel={headingLevel} />
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
       {!writing && filled && (
-        <MarkdownView source={shown} headingLevel={headingLevel} />
+        <MarkdownView
+          source={shown}
+          headingLevel={headingLevel}
+          className="mt-2"
+        />
       )}
     </div>
   );
