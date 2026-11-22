@@ -37,10 +37,12 @@ export interface LeaveGuard {
    * The connection whose explicit Context this work belongs to, set when it
    * stays with that connection rather than with the active one (an
    * origin-bound overview row or editor, #408). Connection actions then
-   * leave it only when they act on that connection's session: `authorize`,
-   * `disconnect` and `forget` with its ID, `connect` to its Pod, and the
-   * access prompts doing the same. `selectConnection`, `selectTarget` on
-   * another Pod and actions on other connections neither ask about it nor
+   * leave it only when they act on that connection (`disconnect` and
+   * `forget` with its ID, and the access prompts doing the same) or leave
+   * the page for a sign-in: `authorize` of any connection, `connect` under
+   * `signIn: 'required'` and a prompt's sign-in. `selectConnection`,
+   * `selectTarget` on another Pod, `connect` without a sign-in and
+   * `disconnect`/`forget` of other connections neither ask about it nor
    * discard it, and its pending write does not block them. Without it, every
    * connection action leaves the guard.
    */
@@ -147,10 +149,11 @@ function cannotWork(c: Connection) {
 }
 /**
  * A guarded change: row navigation, a Context selection, or a connection
- * action with the connections whose session it acts on (`on`; none for a
- * change of the active connection alone).
+ * action with the connections it acts on (`on`; none for a change of the
+ * active connection alone, `all` for one that may leave the page to sign in).
  */
-type Change = 'navigate' | 'context' | { readonly on: readonly string[] };
+type Change =
+  'navigate' | 'context' | { readonly on: readonly string[] | 'all' };
 /** A change of the active connection that acts on no connection's session. */
 const switching: Change = { on: [] };
 /**
@@ -162,7 +165,11 @@ function leaves(change: Change, guard: LeaveGuard) {
     return guard.scope !== 'target' && guard.scope !== 'explicit';
   if (change === 'context')
     return guard.scope !== 'connection' && guard.scope !== 'explicit';
-  return guard.connection === undefined || change.on.includes(guard.connection);
+  return (
+    guard.connection === undefined ||
+    change.on === 'all' ||
+    change.on.includes(guard.connection)
+  );
 }
 export interface AppSnapshot {
   /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
@@ -664,15 +671,16 @@ export function createAppController(
       (g) => (change === 'navigate' || leaves(change, g)) && g.blocked(),
     );
   }
-  /** The connections a connection action on one of them acts on. */
+  /** A connection action on one connection that stays on the page. */
   const on = (id: string): Change => ({ on: [id] });
-  /** The connections `connect(url)` may sign in again: those of that Pod. */
-  const ofPod = (url: string | undefined): Change => ({
-    on: runtime
-      .getSnapshot()
-      .filter((c) => c.podUrl === (url ?? defaultPodUrl))
-      .map((c) => c.id),
-  });
+  /**
+   * A sign-in leaves the page (`beginAuthorization`), and with it the work
+   * of every connection.
+   */
+  const signingIn: Change = { on: 'all' };
+  /** `connect` signs in under `signIn: 'required'`; otherwise it only switches. */
+  const connectChange = (): Change =>
+    runtime.signIn === 'required' ? signingIn : switching;
   async function guard(
     action: () => void | Promise<void>,
     change: Change,
@@ -941,7 +949,7 @@ export function createAppController(
      * retry `disconnect`/`forget` before connecting again.
      */
     connect(url = defaultPodUrl) {
-      return guard(connecting(url), ofPod(url));
+      return guard(connecting(url), connectChange());
     },
     /**
      * Signs in to an existing connection, or, with
@@ -951,7 +959,7 @@ export function createAppController(
      * failed retirement rejects with `RuntimeError('storage')` until retried.
      */
     authorize(id: string, options?: { readonly intent?: AuthorizationIntent }) {
-      return guard(authorizing(id, options?.intent), on(id));
+      return guard(authorizing(id, options?.intent), signingIn);
     },
     /**
      * Guarded like `selectConnection`. `true` means the action ran, not that
@@ -1042,9 +1050,12 @@ export function createAppController(
       tracker.current(prompt, action) ? 'yes' : 'gone';
     if (available() !== 'yes') return false;
     const id = prompt.connectionId;
-    // The prompt's connection, or the Pod a sign-in without one connects to.
-    const guarded = (run: () => void | Promise<void>) =>
-      guard(run, id ? on(id) : ofPod(defaultPodUrl), undefined, available);
+    // What the prompt's action acts on: its connection, or every one for a
+    // sign-in, which leaves the page.
+    const guarded = (
+      run: () => void | Promise<void>,
+      change: Change = id ? on(id) : switching,
+    ) => guard(run, change, undefined, available);
     switch (action) {
       case 'dismiss':
         return controller.dismiss(prompt.id);
@@ -1068,11 +1079,12 @@ export function createAppController(
               id,
               prompt.reason === 'missing-scopes' ? 'change-sharing' : undefined,
             ),
+            signingIn,
           );
         // Without a fixed address the app asks for one (`connect(url)`).
         return defaultPodUrl === undefined
           ? false
-          : guarded(connecting(defaultPodUrl));
+          : guarded(connecting(defaultPodUrl), connectChange());
     }
   }
   retainedNavigation.set(controller, (action, retained) =>

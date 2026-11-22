@@ -940,7 +940,22 @@ it('asks about origin-bound work only for actions on its own connection (#408)',
   expect(await app.forget(f.id)).toBe(false);
   expect(app.getSnapshot().confirmingLeave).toBe(false);
   expect(await app.selectConnection(other.id)).toBe(true);
+  // A sign-in on any connection leaves the page, and with it this work: it
+  // blocks while pending and asks otherwise (`beginAuthorization` navigates).
+  const begin = vi.spyOn(runtime, 'beginAuthorization');
+  expect(await app.authorize(other.id)).toBe(false);
+  expect(await app.connect('https://pod.example/carol')).toBe(false);
   busy = false;
+  for (const signIn of [
+    () => app.authorize(other.id),
+    () => app.connect('https://pod.example/carol'),
+  ]) {
+    const asked = signIn();
+    expect(app.getSnapshot().confirmingLeave).toBe(true);
+    app.cancelLeave();
+    expect(await asked).toBe(false);
+  }
+  expect(begin).not.toHaveBeenCalled();
   // Signing out another connection does not ask about it.
   expect(await app.disconnect(other.id)).toBe(true);
   expect(discard).not.toHaveBeenCalled();

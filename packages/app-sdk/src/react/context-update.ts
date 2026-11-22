@@ -132,9 +132,9 @@ const sameList = (a: readonly unknown[], b: readonly unknown[]) =>
  * that connection's Context whether or not it is active, without selecting
  * it or changing a creation's destination. Its lane, its recovery and its
  * leave guard stay with that connection: another active connection neither
- * retires nor asks about them, while connection actions on that connection
- * (sign-in, sign-out, forget) ask first, and a new authorization of it
- * retires them as for the active one. Its `unresolved` entry carries the
+ * retires nor asks about them, while signing that connection out, removing
+ * it and any sign-in (which leaves the page) ask first, and a new
+ * authorization of it retires them as for the active one. Its `unresolved` entry carries the
  * `connection`, so the same subject in two Pods stays two resources. Write a
  * resource through one form only: a row with and without `connection` has
  * separate lanes.
@@ -182,22 +182,19 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     (s) => [...origins].map((id) => s.connections.find((c) => c.id === id)),
     sameList,
   );
-  // Under `on-demand`, each of them asks for its own catalogue once known
-  // without one (`required` loads every connection's).
-  const undiscovered = useAppFacts((s) =>
-    s.contextSelection === 'on-demand'
-      ? [...origins]
-          .filter((id) => {
-            const c = s.connections.find((entry) => entry.id === id);
-            return c?.reading && c.catalogue.kind === 'unknown';
-          })
-          .join(' ')
-      : '',
-  );
+  // Under `on-demand`, each of them asks for its own catalogue while it has
+  // none (`required` loads every connection's). After every commit, so a
+  // connection first bound while rendering is asked for at once; a started
+  // load is no longer `unknown`.
   useEffect(() => {
-    for (const id of undiscovered ? undiscovered.split(' ') : [])
-      void app.runtime.loadContexts(id).catch(() => {});
-  }, [app, undiscovered]);
+    const s = app.getSnapshot();
+    if (s.contextSelection !== 'on-demand') return;
+    for (const id of origins) {
+      const c = s.connections.find((entry) => entry.id === id);
+      if (c?.reading && c.catalogue.kind === 'unknown')
+        void app.runtime.loadContexts(id).catch(() => {});
+    }
+  });
 
   // What a row needs of its Context, once per connection, Context and render.
   const contexts = new Map<string, Target<D>>();

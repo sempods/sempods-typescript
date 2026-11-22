@@ -1043,10 +1043,12 @@ void edit.open({ subject: snapshot.iri, context, connection });
   destination of a creation, or switches the active Pod.
 - Its work stays with its connection. Switching the active Pod
   (`selectConnection`, `selectTarget`) neither asks about it nor retires it,
-  and its pending write does not block that. Signing in again, signing out or
-  removing that connection asks first, and signing in again or removing it
-  ends that work, as a new sign-in ends work of the active connection. A
-  session that ends by itself keeps it, as for the active connection.
+  and its pending write does not block that. Signing out or removing that
+  connection asks first. So does any sign-in (`authorize` of any connection,
+  `connect` under `signIn: 'required'`), because it leaves the page; its
+  pending write blocks these. A new sign-in or removing the connection ends
+  that work, as a new sign-in ends work of the active connection. A session
+  that ends by itself keeps it, as for the active connection.
 - `unresolved` lists such resources with their `connection`
   (`{ connection, context, iri }`), and `for` of that entry gives its notice.
   The same subject IRI read from two connections is two resources; key rows
@@ -1054,7 +1056,9 @@ void edit.open({ subject: snapshot.iri, context, connection });
 - `row.problem` and the editor's `problem` use that connection's catalogue.
   Under `contextSelection="on-demand"` the SDK asks for that catalogue once
   a row or editor of the connection is rendered; `AppAccess` keeps
-  presenting the active connection only.
+  presenting the active connection only. After a failed catalogue the app
+  offers its own retry, `useApp().refreshContexts(connection)`, or a
+  `usePodContexts` group's `retry()`.
 - `useContextEditor().open({ subject, context, connection })` opens the
   editor in that connection. It is `retired` only once the connection is
   removed. Opening another row or `close()` asks first, as for the active
@@ -1171,8 +1175,8 @@ function Notes() {
   never attached to another Context, connection or subject.
 - It is a `connection`-scoped guard: a Context selection leaves it alone;
   opening another row, `close()` and connection actions ask first, and its
-  pending write blocks them. With `connection` in the target, only the
-  actions on that connection ask first
+  pending write blocks them. With `connection` in the target, of the
+  connection actions only those on that connection and sign-ins ask first
   ([rows of several connected Pods](#rows-of-several-connected-pods)).
 - Its writes refresh lists and retire success feedback of the same Context's
   selected view, and the other way round.
@@ -2221,12 +2225,14 @@ Read state with `useAppState`, `useConnections` and `useView`.
 - Work bound to its own connection
   ([rows of several connected Pods](#rows-of-several-connected-pods),
   `LeaveGuard.connection` for a guard registered with the controller) is left
-  by a connection action only when it acts on that connection: `authorize`,
-  `disconnect` or `forget` with its ID, or `connect` to its Pod.
-  `selectConnection` and `selectTarget` to another Pod leave it alone.
+  by a connection action only when it acts on that connection (`disconnect`
+  or `forget` with its ID) or signs in, which leaves the page: `authorize` of
+  any connection and `connect` under `signIn: 'required'`.
+  `selectConnection`, `selectTarget` to another Pod and `connect` without a
+  sign-in leave it alone.
 - A pending write blocks every change, except that a saving `connection` or
   `explicit` draft does not block a Context selection, and work bound to its
-  own connection blocks only the connection actions on it. A confirmation names
+  own connection blocks only the connection actions that leave it. A confirmation names
   unconfirmed writes it leaves and warns that discarding does not undo them.
 - A declined change discards nothing; the target stays when its replacement is
   gone. A prompt whose connection stops being active (a returning sign-in, a
