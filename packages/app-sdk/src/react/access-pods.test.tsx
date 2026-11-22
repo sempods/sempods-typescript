@@ -434,6 +434,12 @@ it('moves a focus lost with a removed Pod’s row to the list', async () => {
     'pod.example/alice',
   );
   await act(async () => signOut.click());
+  // Her saved address is removed once she is signed out.
+  await waitFor(() =>
+    expect(
+      runtime.getSnapshot().find((entry) => entry.podUrl === pod)?.session.kind,
+    ).toBe('signed-out'),
+  );
   const remove = await podAction(/^Remove/, 'pod.example/alice');
   await act(async () => remove.click());
   await waitFor(() =>
