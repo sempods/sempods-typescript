@@ -68,6 +68,21 @@ it('moves the focus into the text to edit and back to its action to preview', ()
   expect(draft()).toBe(source);
 });
 
+it('keeps the same text input across a preview, so undo survives it', () => {
+  render(<Notes initial="Some text" />);
+  const toggle = button('Edit text');
+  fireEvent.click(toggle);
+  const input = text();
+  fireEvent.click(toggle);
+  // Hidden while reading: neither shown nor reachable.
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(input.isConnected).toBe(true);
+  expect(input.closest('.hidden')).not.toBeNull();
+  fireEvent.click(toggle);
+  expect(text()).toBe(input);
+  expect(document.activeElement).toBe(input);
+});
+
 it('offers Add text for an empty field and starts writing there', () => {
   render(<Notes />);
   const add = button('Add text');

@@ -9763,7 +9763,7 @@ async function markdown({ browser, origin, engine }) {
             const writing = await box(toggle(page));
             const source = await text(page).inputValue();
             await toggle(page).click();
-            await text(page).waitFor({ state: 'detached' });
+            await text(page).waitFor({ state: 'hidden' });
             const back = await focused(page);
             const after = await box(toggle(page));
             // The keyboard way: Enter on the action, then Enter on Preview.
@@ -9772,7 +9772,7 @@ async function markdown({ browser, origin, engine }) {
             const keyText = await focused(page);
             await toggle(page).focus();
             await toggle(page).press('Enter');
-            await text(page).waitFor({ state: 'detached' });
+            await text(page).waitFor({ state: 'hidden' });
             const keyBack = await focused(page);
             const state = await draft(page);
             return {
@@ -9933,6 +9933,32 @@ async function markdown({ browser, origin, engine }) {
         }),
       );
       results.push(
+        await attemptOn(errors, 'markdown-undo-after-preview', async () => {
+          // A fresh page: the undo history holds only this check's steps.
+          await page.goto(address('&notes=empty&write'));
+          await text(page).waitFor();
+          await text(page).fill('Buy milk');
+          await select(4, 8);
+          await page.keyboard.press('ControlOrMeta+B');
+          const bold = (await draft(page)).draft;
+          // Preview and back: the same text input, with its history.
+          await toggle(page).click();
+          await text(page).waitFor({ state: 'hidden' });
+          await toggle(page).click();
+          await text(page).waitFor();
+          await page.keyboard.press('ControlOrMeta+Z');
+          await settle(page);
+          const undone = (await draft(page)).draft;
+          return {
+            pass:
+              bold === 'Buy **milk**' &&
+              undone === (engine === 'webkit' ? '' : 'Buy milk'),
+            bold,
+            undone,
+          };
+        }),
+      );
+      results.push(
         await attemptOn(errors, 'markdown-tab-leaves-text', async () => {
           await text(page).focus();
           await page.keyboard.press(tab);
@@ -9978,7 +10004,7 @@ async function markdown({ browser, origin, engine }) {
           const kept = await focused(page);
           const bold = (await draft(page)).draft;
           await toggle(page).tap();
-          await text(page).waitFor({ state: 'detached' });
+          await text(page).waitFor({ state: 'hidden' });
           const rendered = await notes(page).locator('strong').textContent();
           await toggle(page).tap();
           await text(page).waitFor();

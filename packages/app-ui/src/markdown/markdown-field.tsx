@@ -97,6 +97,9 @@ export function MarkdownField({
   const [presentation, setPresentation] =
     useState<MarkdownPresentation>(defaultPresentation);
   const writing = presentation === 'write' && !readOnly;
+  // Whether the person has written here: from then on the text input stays.
+  const [written, setWritten] = useState(writing);
+  if (writing && !written) setWritten(true);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   // Whitespace typed while the app's draft holds no text, as an optional
@@ -236,8 +239,16 @@ export function MarkdownField({
           </Button>
         )}
       </div>
-      {writing ? (
-        <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
+      {/* Once written in, the text input stays mounted and is only hidden
+          while reading: the browser keeps its undo history across a preview. */}
+      {written && (
+        <div
+          hidden={!writing}
+          className={cn(
+            'min-w-0 gap-4 @2xl:grid-cols-2',
+            writing ? 'grid' : 'hidden',
+          )}
+        >
           <Textarea
             ref={textarea}
             aria-label={label}
@@ -249,16 +260,19 @@ export function MarkdownField({
             className="min-h-40 text-base leading-relaxed md:text-base"
           />
           {/* Wide: the preview beside the source, as it is typed. */}
-          <div
-            role="region"
-            aria-label={t.preview}
-            className="hidden min-w-0 px-1 @2xl:block"
-          >
-            <MarkdownView source={preview} headingLevel={headingLevel} />
-          </div>
+          {writing && (
+            <div
+              role="region"
+              aria-label={t.preview}
+              className="hidden min-w-0 px-1 @2xl:block"
+            >
+              <MarkdownView source={preview} headingLevel={headingLevel} />
+            </div>
+          )}
         </div>
-      ) : (
-        filled && <MarkdownView source={shown} headingLevel={headingLevel} />
+      )}
+      {!writing && filled && (
+        <MarkdownView source={shown} headingLevel={headingLevel} />
       )}
     </div>
   );
