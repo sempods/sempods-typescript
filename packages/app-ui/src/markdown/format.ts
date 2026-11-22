@@ -42,74 +42,158 @@ function stars(left: string, right: string): number {
 const holds = (kind: 'bold' | 'italic', count: number) =>
   kind === 'bold' ? count >= 2 : count % 2 === 1;
 
+type Emphasis = 'bold' | 'italic';
+
+/** A run of stars that can mark `kind`, and the run it pairs with. */
+interface Marker {
+  readonly at: number;
+  readonly open: boolean;
+  readonly close: boolean;
+  mate: number;
+}
+
+/** The ranges of code spans, whose stars are text. */
+function codeSpans(text: string): [number, number][] {
+  const ticks = [...text.matchAll(/`+/g)];
+  const spans: [number, number][] = [];
+  for (let i = 0; i < ticks.length; i++) {
+    const open = ticks[i]!;
+    const j = ticks.findIndex(
+      (tick, k) => k > i && tick[0].length === open[0].length,
+    );
+    if (j < 0) continue;
+    const close = ticks[j]!;
+    spans.push([open.index, close.index + close[0].length]);
+    i = j;
+  }
+  return spans;
+}
+
 /**
- * The text without the markers of `kind`: a run of stars loses two for bold
- * and, when odd, one for italic, so `***x***` keeps the other emphasis.
+ * The star runs in `text` that can mark `kind`, paired as emphasis pairs:
+ * a run opens before text and closes after it, as CommonMark's flanking
+ * rule has it in short. Stars in code spans, escaped stars and stars
+ * between spaces, such as `2 * 3`, are text and never paired.
  */
-const unmarked = (kind: 'bold' | 'italic', text: string) =>
-  text.replace(/\*+/g, (run) =>
-    '*'.repeat(
-      kind === 'bold'
-        ? run.length >= 2
-          ? run.length - 2
-          : run.length
-        : run.length % 2 === 1
-          ? run.length - 1
-          : run.length,
-    ),
-  );
+function markers(kind: Emphasis, text: string): Marker[] {
+  const code = codeSpans(text);
+  const found: Marker[] = [];
+  for (const run of text.matchAll(/\*+/g)) {
+    const at = run.index;
+    if (text[at - 1] === '\\' || !holds(kind, run[0].length)) continue;
+    if (code.some(([from, to]) => at >= from && at < to)) continue;
+    const before = text[at - 1];
+    const after = text[at + run[0].length];
+    found.push({
+      at,
+      open: after !== undefined && !isSpace(after),
+      close: before !== undefined && !isSpace(before),
+      mate: -1,
+    });
+  }
+  const stack: number[] = [];
+  found.forEach((marker, i) => {
+    if (marker.close && stack.length > 0) {
+      const j = stack.pop()!;
+      marker.mate = j;
+      found[j]!.mate = i;
+    } else if (marker.open) stack.push(i);
+  });
+  return found;
+}
+
+/**
+ * `text` without the `kind` markers of every paired run, except those at
+ * the given positions; unpaired stars stay as they are. A run loses the
+ * stars of `kind` only, so `***x***` keeps the other emphasis.
+ */
+function unmark(
+  kind: Emphasis,
+  text: string,
+  found: readonly Marker[],
+  keep: readonly number[] = [],
+): string {
+  const n = kind === 'bold' ? 2 : 1;
+  let result = '';
+  let from = 0;
+  for (const marker of found) {
+    if (marker.mate < 0 || keep.includes(marker.at)) continue;
+    result += text.slice(from, marker.at);
+    from = marker.at + n;
+  }
+  return result + text.slice(from);
+}
 
 /**
  * Bold (`**`) or italic (`*`) around the selection, or removed when the
  * selection is already inside it or includes its markers. A selection that
- * holds spans of its own (`**a** and **b**`) is no one span: its markers
- * are merged into one around the whole selection. An empty selection
- * inserts the pair with the caret between them.
+ * holds spans of its own (`**a** and **b**`) is no one span: their markers
+ * are merged into one pair around the whole selection. Stars that are text
+ * stay. An empty selection inserts the pair with the caret between them.
  */
 function emphasis(
-  kind: 'bold' | 'italic',
+  kind: Emphasis,
   source: string,
   selStart: number,
   selEnd: number,
 ): MarkdownEdit {
   const n = kind === 'bold' ? 2 : 1;
+  const mark = '*'.repeat(n);
   const [start, end] =
     selStart === selEnd ? [selStart, selEnd] : inward(source, selStart, selEnd);
   const inner = source.slice(start, end);
-  const plain = unmarked(kind, inner);
-  const spans = plain !== inner;
-  // Inside markers: remove them, unless the selection holds spans of its
-  // own, which join the enclosing one instead.
-  if (holds(kind, stars(source.slice(0, start), source.slice(end))))
-    return spans
-      ? {
-          from: start,
-          to: end,
-          insert: plain,
-          select: [start, start + plain.length],
-        }
-      : {
-          from: start - n,
-          to: end + n,
-          insert: inner,
-          select: [start - n, end - n],
-        };
+  // Markers just outside the selection: as if they were part of it.
+  if (holds(kind, stars(source.slice(0, start), source.slice(end)))) {
+    const marked = mark + inner + mark;
+    const found = markers(kind, marked);
+    const last = found.length - 1;
+    // They enclose one span, or nothing yet: remove them.
+    if (
+      inner === '' ||
+      (found[0]?.at === 0 && found[0].mate === last && last > 0)
+    )
+      return {
+        from: start - n,
+        to: end + n,
+        insert: inner,
+        select: [start - n, end - n],
+      };
+    // Spans of the selection's own join the enclosing one.
+    const plain = unmark(kind, marked, found, [0, marked.length - n]).slice(
+      n,
+      -n,
+    );
+    return {
+      from: start,
+      to: end,
+      insert: plain,
+      select: [start, start + plain.length],
+    };
+  }
+  const found = markers(kind, inner);
+  const last = found.length - 1;
   // Markers at the selection's edges that enclose one span: remove them,
   // keep the rest selected.
-  const edge = /^\*+/.exec(inner)?.[0].length ?? 0;
-  const content = inner.slice(n, inner.length - n);
   if (
-    inner.length >= 2 * n + 1 &&
-    holds(kind, Math.min(edge, /\*+$/.exec(inner)?.[0].length ?? 0)) &&
-    unmarked(kind, content) === content
-  )
+    last > 0 &&
+    found[0]!.at === 0 &&
+    found[0]!.mate === last &&
+    found[last]!.at + n === inner.length
+  ) {
+    const content = unmark(
+      kind,
+      inner,
+      found,
+      found.slice(1, last).map((m) => m.at),
+    );
     return {
       from: start,
       to: end,
       insert: content,
       select: [start, start + content.length],
     };
-  const mark = '*'.repeat(n);
+  }
+  const plain = unmark(kind, inner, found);
   return {
     from: start,
     to: end,

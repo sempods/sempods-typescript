@@ -77,7 +77,7 @@ it('keeps the same text input across a preview, so undo survives it', () => {
   // Hidden while reading: neither shown nor reachable.
   expect(screen.queryByRole('textbox')).toBeNull();
   expect(input.isConnected).toBe(true);
-  expect(input.closest('.hidden')).not.toBeNull();
+  expect(input.closest('[inert]')).not.toBeNull();
   fireEvent.click(toggle);
   expect(text()).toBe(input);
   expect(document.activeElement).toBe(input);

@@ -10170,8 +10170,11 @@ async function markdown({ browser, origin, engine }) {
         await attemptOn(errors, 'markdown-editor-saves-as-typed', async () => {
           await toggle(page).click();
           await text(page).fill(SOURCE);
-          await save.click();
-          await page.waitForResponse((r) => r.request().method() === 'PATCH');
+          // Waiting from before the press: the answer can come first.
+          await Promise.all([
+            page.waitForResponse((r) => r.request().method() === 'PATCH'),
+            save.click(),
+          ]);
           await settle(page);
           const saved = await description();
           const value =

@@ -55,6 +55,15 @@ describe('emphasis', () => {
     expect(run('italic', '[***a*** and *b*]')).toBe('*[**a** and b]*');
   });
 
+  it('keeps stars that are text', () => {
+    expect(run('italic', '[2 * 3 = 6]')).toBe('*[2 * 3 = 6]*');
+    expect(run('bold', '[match `**/*.ts` files]')).toBe(
+      '**[match `**/*.ts` files]**',
+    );
+    expect(run('bold', '[a \\**b** c]')).toBe('**[a \\**b** c]**');
+    expect(run('bold', '[**open only]')).toBe('**[**open only]**');
+  });
+
   it('keeps whitespace at the edges of the selection outside the markers', () => {
     expect(run('bold', 'a[ word ]b')).toBe('a **[word]** b');
   });

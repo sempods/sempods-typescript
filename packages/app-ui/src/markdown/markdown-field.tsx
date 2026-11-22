@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -66,6 +67,19 @@ const shortcuts: Readonly<Record<string, MarkdownFormat>> = {
   b: 'bold',
   i: 'italic',
   k: 'link',
+};
+
+/**
+ * The text input while reading: kept rendered, so its undo history stays,
+ * but invisible, out of the layout and, with `inert`, out of reach.
+ */
+const concealed: CSSProperties = {
+  visibility: 'hidden',
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
 };
 
 const apple = () =>
@@ -195,7 +209,7 @@ export function MarkdownField({
       aria-label={label}
       data-slot="markdown-field"
       data-presentation={writing ? 'write' : 'read'}
-      className={cn('@container grid min-w-0 gap-2', className)}
+      className={cn('@container relative grid min-w-0 gap-2', className)}
     >
       <div className="flex min-h-11 items-start gap-1">
         {writing ? (
@@ -240,14 +254,13 @@ export function MarkdownField({
         )}
       </div>
       {/* Once written in, the text input stays mounted and is only hidden
-          while reading: the browser keeps its undo history across a preview. */}
+          while reading: the browser keeps its undo history across a preview.
+          Not with display: none, which ends that history in Firefox. */}
       {written && (
         <div
-          hidden={!writing}
-          className={cn(
-            'min-w-0 gap-4 @2xl:grid-cols-2',
-            writing ? 'grid' : 'hidden',
-          )}
+          inert={!writing}
+          style={writing ? undefined : concealed}
+          className="grid min-w-0 gap-4 @2xl:grid-cols-2"
         >
           <Textarea
             ref={textarea}
