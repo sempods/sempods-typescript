@@ -350,6 +350,21 @@ definition's modification instant, so an exact `toEqual({ kind: 'saved' })`
 in a test of a definition with `timestamps` expects it. See [before the list
 reads again](timestamps.md#before-the-list-reads-again).
 
+### App notices in the shared host
+
+Nothing changes until an app renders `<Notices />`. To adopt it, render it
+once beneath `SempodsProvider` beside `AppAccess`; the access prompts then
+move from `AppAccess`'s stack into it. Their buttons and texts stay; the
+visible prompt has no `status` or `alert` role, because the host announces
+each one once through its own live region, so a test that finds a prompt by
+that role finds it by `[data-sempods-ui="prompt"]` instead. An app that
+presents the prompts itself with `AccessPrompt` passes `accessPrompts={false}`.
+An app that copied
+the PWA recipe's `NewVersionNotice` copies it again: it now publishes through
+`useNotice` and renders nothing itself. Replace other app-wide paragraphs, such
+as a completed batch, with `useNotice` or `useNotices`, and keep recovery for
+a write at its row ([app-wide notices](react-authoring.md#app-wide-notices)).
+
 ### Presets, a minimum and typed days in date choosers
 
 0.9.0's `@sempods/app-ui` adds `DateChoice`, the calendar-day choice of
