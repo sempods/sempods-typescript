@@ -449,6 +449,26 @@ const destination = (address: string) =>
     : address;
 
 /**
+ * Text as a link's label: a `[` or `]` without its partner would end the
+ * label early or move its start, so it is escaped; pairs and escaped ones
+ * stay as they are.
+ */
+function label(text: string): string {
+  const open: number[] = [];
+  const unmatched = new Set<number>();
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\\') i++;
+    else if (text[i] === '[') open.push(i);
+    else if (text[i] === ']') {
+      if (open.length > 0) open.pop();
+      else unmatched.add(i);
+    }
+  }
+  for (const i of open) unmatched.add(i);
+  return [...text].map((c, i) => (unmatched.has(i) ? '\\' + c : c)).join('');
+}
+
+/**
  * A link around the selection: its text with `https://` selected for the
  * address, or, for a selected address, the address with the caret in the
  * empty text.
@@ -461,8 +481,9 @@ function link(source: string, selStart: number, selEnd: number): MarkdownEdit {
     const insert = `[](${inner ? destination(inner) : 'https://'})`;
     return { from: start, to: end, insert, select: [start + 1, start + 1] };
   }
-  const insert = `[${inner}](https://)`;
-  const address = start + inner.length + 3;
+  const text = label(inner);
+  const insert = `[${text}](https://)`;
+  const address = start + text.length + 3;
   return {
     from: start,
     to: end,

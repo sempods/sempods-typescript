@@ -167,6 +167,24 @@ describe('links', () => {
     );
   });
 
+  it('escapes a bracket of the text without its partner', () => {
+    // Called directly: the helper's selection marks are brackets.
+    const label = (text: string) => {
+      const edit = formatMarkdown('link', text, 0, text.length);
+      return [edit.insert, edit.insert.slice(...edit.select)];
+    };
+    expect(label('price [USD')).toEqual([
+      '[price \\[USD](https://)',
+      'https://',
+    ]);
+    expect(label('a ] b')).toEqual(['[a \\] b](https://)', 'https://']);
+    expect(label('see [note] here')).toEqual([
+      '[see [note] here](https://)',
+      'https://',
+    ]);
+    expect(label('a \\[ b')).toEqual(['[a \\[ b](https://)', 'https://']);
+  });
+
   it('keeps a selected address whole that holds parentheses', () => {
     expect(run('link', '[https://example.org/a)b]')).toBe(
       '[|](<https://example.org/a)b>)',
