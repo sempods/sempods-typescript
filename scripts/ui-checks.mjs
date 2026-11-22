@@ -7,6 +7,7 @@
 // { id, pass, ... }.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { actionsName, podActions, podActionsButton } from './pod-actions.mjs';
 
 const contrastScript = readFileSync(
   join(import.meta.dirname, 'ui-contrast.js'),
@@ -1045,7 +1046,7 @@ async function interaction({ browser, origin, engine }) {
         await page.getByRole('menuitem', { name: 'Pods & sharing' }).click();
         await sheet.waitFor();
         await gone(page.getByRole('menu'));
-        const more = sheet.getByRole('button', { name: /^Actions for / });
+        const more = podActionsButton(sheet);
         const toggle = sheet.locator('.sp-pod-toggle').first();
         const size = (locator) =>
           locator.evaluate((el) => {
@@ -1138,7 +1139,7 @@ async function interaction({ browser, origin, engine }) {
             box.x >= 0 &&
             box.x + box.width <= viewport.width &&
             group.role === 'group' &&
-            /^Actions for /.test(group.name ?? '') &&
+            actionsName.test(group.name ?? '') &&
             names.includes('Change sharing') &&
             names.includes('Sign out on this device') &&
             firstFocused &&
@@ -5123,7 +5124,7 @@ async function accessSettings({ browser, origin, engine }) {
           // Management stays open above the gate after the sign-out.
           const sheet = p.getByRole('dialog', { name: /Pods & sharing/ });
           // The Pod's own actions sign out on this device (#386).
-          await sheet.getByRole('button', { name: /^Actions for / }).click();
+          await podActions(sheet);
           await sheet
             .getByRole('button', { name: 'Sign out on this device' })
             .click();

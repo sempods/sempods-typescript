@@ -25,25 +25,31 @@ export async function podActions(pod?: string) {
   });
 }
 
+/** Opens a Pod row's actions, unless open, and returns them. */
+async function openPodActions(pod?: string) {
+  const trigger = await podActions(pod);
+  if (trigger.getAttribute('aria-expanded') !== 'true')
+    fireEvent.click(trigger);
+  return document.getElementById(trigger.getAttribute('aria-controls')!)!;
+}
+
 /**
  * Opens a Pod row's actions (unless open) and returns the one named
  * `action`, for example "Sign out on this device".
  */
 export async function podAction(action: string | RegExp, pod?: string) {
-  const trigger = await podActions(pod);
-  if (trigger.getAttribute('aria-expanded') !== 'true')
-    fireEvent.click(trigger);
-  const menu = document.getElementById(trigger.getAttribute('aria-controls')!)!;
-  return within(menu).getByRole('button', { name: action });
+  return within(await openPodActions(pod)).getByRole('button', {
+    name: action,
+  });
 }
 
 /** The names of a Pod row's actions, opening them. */
 export async function podActionNames(pod?: string) {
-  const trigger = await podActions(pod);
-  if (trigger.getAttribute('aria-expanded') !== 'true')
-    fireEvent.click(trigger);
-  const menu = document.getElementById(trigger.getAttribute('aria-controls')!)!;
-  return within(menu)
+  return within(await openPodActions(pod))
     .getAllByRole('button')
     .map((button) => button.textContent);
 }
+
+/** A Pod row's name, the first button of its row, which opens its details. */
+export const podToggle = (row: HTMLElement) =>
+  within(row).getAllByRole('button')[0]!;

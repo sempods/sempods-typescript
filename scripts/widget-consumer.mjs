@@ -1,6 +1,6 @@
 /* global document, window */
 import assert from 'node:assert/strict';
-import { podActions } from './pod-actions.mjs';
+import { podActions, podActionsButton } from './pod-actions.mjs';
 import { execFileSync } from 'node:child_process';
 import { cp, lstat, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -361,9 +361,7 @@ export async function checkWidgets(page, origin, data) {
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   const heldWrite = await dispatched;
   // Programmatic click deliberately bypasses inert hit testing; the action must guard too.
-  await page
-    .getByRole('button', { name: /^Actions for / })
-    .evaluate((button) => button.click());
+  await podActionsButton(page).evaluate((button) => button.click());
   await page
     .getByRole('button', { name: 'Change sharing', exact: true })
     .evaluate((button) => button.click());

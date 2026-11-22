@@ -18,19 +18,20 @@ import type { Connection } from '../runtime/types.js';
  * unavailable (a guarded change, its prompt, startup or storage). An
  * unguarded action for one connection (a retry, a catalogue check) passes
  * that connection as `scope`: it holds only that connection's controls
- * (`busy`). The control that started an action gets the focus back once it
+ * (`holds`). The control that started an action gets the focus back once it
  * is enabled again: a disabled control loses the focus in WebKit (the focus
  * fixup rule), which stays on the body otherwise (#332).
  */
 export function useAccessAction() {
   const state = useAppState();
-  const [busy, setBusy] = useState(false);
-  const inFlight = useRef(false);
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
-  const scopedFlight = useRef(new Set<string>());
-  const [scoped, setScoped] = useState<ReadonlySet<string>>(() => new Set());
+  // The scopes of running actions; `null` for an action of the whole view.
+  const inFlight = useRef(new Set<string | null>());
+  const [running, setRunning] = useState<ReadonlySet<string | null>>(
+    () => new Set(),
+  );
   const unavailable =
-    busy ||
+    running.has(null) ||
     state.changing ||
     state.confirmingLeave ||
     !state.startup ||
@@ -46,47 +47,31 @@ export function useAccessAction() {
     const active = target.ownerDocument.activeElement;
     if (target.isConnected && (!active || active === target.ownerDocument.body))
       target.focus();
-  }, [unavailable, scoped]);
+  }, [unavailable, running]);
   async function act(task: () => Promise<unknown>, scope?: string) {
-    if (unavailable) return;
-    if (
-      scope === undefined ? inFlight.current : scopedFlight.current.has(scope)
-    )
-      return;
+    const key = scope ?? null;
+    const flights = inFlight.current;
+    if (unavailable || flights.has(key)) return;
     const focused = document.activeElement;
     actionFocus.current =
       focused instanceof HTMLElement && focused !== document.body
         ? focused
         : null;
-    if (scope !== undefined) {
-      const running = scopedFlight.current;
-      running.add(scope);
-      setScoped(new Set(running));
-      setFailure(null);
-      try {
-        await task();
-      } catch (cause) {
-        setFailure({ cause });
-      } finally {
-        running.delete(scope);
-        setScoped(new Set(running));
-      }
-      return;
-    }
-    inFlight.current = true;
-    setBusy(true);
+    flights.add(key);
+    setRunning(new Set(flights));
     setFailure(null);
     try {
       await task();
     } catch (cause) {
       setFailure({ cause });
     } finally {
-      inFlight.current = false;
-      setBusy(false);
+      flights.delete(key);
+      setRunning(new Set(flights));
     }
   }
-  const holds = (scope: string) => scoped.has(scope);
-  return { act, unavailable, busy: holds, failure };
+  /** Whether an action scoped to this connection runs. */
+  const holds = (scope: string) => running.has(scope);
+  return { act, unavailable, holds, failure };
 }
 
 /** How the app's view uses its Pods; see `AppAccessProps.podView`. */
@@ -138,7 +123,7 @@ export function PodManagement({
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
   const id = useId();
-  const { act, unavailable, busy, failure } = useAccessAction();
+  const { act, unavailable, holds, failure } = useAccessAction();
   const combined = podView === 'combined';
   const connections = state.connections;
   const activeId = state.activeId;
@@ -147,34 +132,38 @@ export function PodManagement({
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(),
   );
+  // The Pod the app's single-Pod view uses.
+  const isSelected = (entry: Connection) =>
+    !combined && entry.id === activeId && reads(entry);
   const isOpen = (entry: Connection) =>
-    toggled.get(entry.id) ??
-    (connections.length === 1 ||
-      (!combined && entry.id === activeId && reads(entry)));
+    toggled.get(entry.id) ?? (connections.length === 1 || isSelected(entry));
   const [menu, setMenu] = useState<string | null>(null);
   const triggers = useRef(new Map<string, HTMLButtonElement>());
-  const toggles = useRef(new Map<string, HTMLButtonElement>());
   const list = useRef<HTMLDivElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
-  // A removed Pod's row goes: its focus moves to the list.
-  const removing = useRef<string | null>(null);
+  const shownIds = useRef(connections.map((entry) => entry.id));
 
   useLayoutEffect(() => {
     // Once the last permitted Pod is connected, the button is gone: the Pod
     // just connected, now selected, takes the focus.
-    if (focusAdd)
-      (
-        addButton.current ??
-        (activeId ? toggles.current.get(activeId) : undefined) ??
-        list.current?.querySelector<HTMLElement>('.sp-pod-toggle')
-      )?.focus();
+    if (!focusAdd) return;
+    const toggles =
+      list.current?.querySelectorAll<HTMLElement>('.sp-pod-toggle');
+    const active = connections.findIndex((entry) => entry.id === activeId);
+    (addButton.current ?? toggles?.[Math.max(active, 0)])?.focus();
     // Only on mounting, coming back from connecting another Pod.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useLayoutEffect(() => {
-    const gone = removing.current;
-    if (!gone || connections.some((entry) => entry.id === gone)) return;
-    removing.current = null;
+    // A Pod's row went (removed here or elsewhere): a focus lost with it
+    // moves to the list.
+    const before = shownIds.current;
+    const ids = connections.map((entry) => entry.id);
+    shownIds.current = ids;
+    if (before.every((rowId) => ids.includes(rowId))) return;
+    const document = list.current?.ownerDocument;
+    const focused = document?.activeElement;
+    if (focused && focused !== document.body && focused.isConnected) return;
     (
       list.current?.querySelector<HTMLElement>('.sp-pod-toggle') ??
       addButton.current
@@ -230,8 +219,7 @@ export function PodManagement({
     if (s.kind === 'restoring') return m.controls.loading;
     if (s.kind === 'ended')
       return s.restorable ? m.controls.unavailable : m.controls.ended;
-    if (!combined && entry.id === activeId && reads(entry))
-      return m.controls.selected;
+    if (isSelected(entry)) return m.controls.selected;
     if (s.kind === 'signed-out') return m.controls.signedOut;
     return undefined;
   };
@@ -353,13 +341,14 @@ export function PodManagement({
   const pressing = useRef(false);
   useEffect(() => {
     if (!menu) return;
-    // The press that opened them ended before they opened.
+    // Only a press while these actions are open counts.
     pressing.current = false;
     const head = triggers.current.get(menu)?.parentElement;
     const document = head?.ownerDocument;
     if (!head || !document) return;
     const outside = (event: PointerEvent) => {
-      if (!head.contains(event.target as Node | null)) setMenu(null);
+      if (head.contains(event.target as Node | null)) pressing.current = true;
+      else setMenu(null);
     };
     const released = () => {
       pressing.current = false;
@@ -373,10 +362,11 @@ export function PodManagement({
       document.removeEventListener('pointercancel', released, true);
     };
   }, [menu]);
-  function closeMenu(focus: boolean) {
+  /** Closes the open actions, the focus back on their ⋯ button. */
+  function closeMenu() {
     const open = menu;
     setMenu(null);
-    if (focus && open) triggers.current.get(open)?.focus();
+    if (open) triggers.current.get(open)?.focus();
   }
 
   return (
@@ -394,6 +384,8 @@ export function PodManagement({
           const open = isOpen(entry);
           const s = entry.session;
           const failedSave = s.kind === 'ended' && s.saved === false;
+          const actionsLabel = m.podActions?.(name) ?? name;
+          const held = unavailable || holds(entry.id);
           return (
             <div
               key={entry.id}
@@ -403,16 +395,13 @@ export function PodManagement({
             >
               <div
                 className="sp-pod-head"
-                onPointerDownCapture={() => {
-                  pressing.current = true;
-                }}
                 onKeyDown={(event) => {
                   // Escape closes open actions, also from their ⋯ button
                   // (Shift+Tab), not the dialog around them.
                   if (event.key !== 'Escape' || menu !== entry.id) return;
                   event.preventDefault();
                   event.stopPropagation();
-                  closeMenu(true);
+                  closeMenu();
                 }}
                 onBlur={(event) => {
                   // The keyboard leaves the actions. A press on one moves
@@ -425,15 +414,11 @@ export function PodManagement({
                     next &&
                     !event.currentTarget.contains(next)
                   )
-                    closeMenu(false);
+                    setMenu(null);
                 }}
               >
                 <button
                   type="button"
-                  ref={(element) => {
-                    if (element) toggles.current.set(entry.id, element);
-                    else toggles.current.delete(entry.id);
-                  }}
                   className="sp-pod-toggle"
                   aria-expanded={open}
                   aria-controls={`${rowId}-details`}
@@ -455,8 +440,8 @@ export function PodManagement({
                       else triggers.current.delete(entry.id);
                     }}
                     className="sp-pod-more"
-                    aria-label={m.podActions?.(name) ?? name}
-                    title={m.podActions?.(name) ?? name}
+                    aria-label={actionsLabel}
+                    title={actionsLabel}
                     aria-expanded={menu === entry.id}
                     aria-controls={`${rowId}-actions`}
                     onClick={() => setMenu(menu === entry.id ? null : entry.id)}
@@ -471,12 +456,11 @@ export function PodManagement({
                 {menu === entry.id && (
                   <PodMenu
                     id={`${rowId}-actions`}
-                    label={m.podActions?.(name) ?? name}
+                    label={actionsLabel}
                     actions={actions}
-                    disabled={unavailable || busy(entry.id)}
+                    disabled={held}
                     onRun={(action) => {
-                      closeMenu(true);
-                      if (action.key === 'remove') removing.current = entry.id;
+                      closeMenu();
                       void act(action.run, action.own ? entry.id : undefined);
                     }}
                   />
@@ -504,7 +488,7 @@ export function PodManagement({
                     podNames={podNames}
                     contextRequired={contextRequired}
                     switching={switching}
-                    unavailable={unavailable || busy(entry.id)}
+                    unavailable={held}
                     act={act}
                   />
                 )}
@@ -637,34 +621,13 @@ function PodDetails({
   const readable = (knownContexts(c.catalogue) ?? []).filter(
     (entry) => entry.readable,
   );
-  const labels =
-    c.catalogue.kind !== 'unknown' ? c.catalogue.labels : undefined;
-  const contextLabel = (iri: string) =>
-    distinctName(
-      iri,
-      readable.map((entry) => entry.iri),
-      (value) => contextName(value, labels),
-    );
-  const fact = (entry: { readonly writable: boolean }) => (
-    <span className="sp-access-fact">
-      {entry.writable ? m.controls.canChange : m.controls.canRead}
-    </span>
-  );
-  const selectedEntry = active
-    ? readable.find((entry) => entry.iri === c.selectedContext)
-    : undefined;
+  const contextLabel = contextLabeler(readable, c.catalogue);
   // A preset's Context is the only one this app uses in its Pod.
   const fixedEntry = fixedContext
     ? readable.find((entry) => entry.iri === fixedContext)
     : undefined;
   // The active Pod's selection, while a Context flow needs one.
   const selecting = active && contextRequired && !fixedContext;
-  const named =
-    readable.length === 1 && selectedEntry
-      ? selectedEntry
-      : switching
-        ? selectedEntry
-        : undefined;
   // A preset Context the catalogue does not list as readable.
   const fixedMissing =
     fixedContext !== undefined && c.catalogue.kind === 'ready' && !fixedEntry;
@@ -687,45 +650,20 @@ function PodDetails({
           {fixedEntry && (
             <>
               {' · '}
-              {fact(fixedEntry)}
+              <AccessFact writable={fixedEntry.writable} />
             </>
           )}
         </p>
       )}
-      {selecting && named ? (
-        <p className="sp-access-context">
-          {contextLabel(named.iri)}
-          {' · '}
-          {fact(named)}
-        </p>
-      ) : selecting && switching && !c.selectedContext ? (
-        readable.length > 0 && <p role="status">{m.controls.loading}</p>
-      ) : selecting ? (
-        <label>
-          {m.dataContext}
-          <select
-            aria-label={m.dataContext}
-            value={c.selectedContext ?? ''}
-            disabled={
-              unavailable ||
-              c.catalogue.kind !== 'ready' ||
-              readable.length === 0
-            }
-            onChange={(event) =>
-              void act(() => app.selectContext(event.target.value))
-            }
-          >
-            <option value="" disabled>
-              {m.chooseContext}
-            </option>
-            {readable.map((entry) => (
-              <option key={entry.iri} value={entry.iri}>
-                {contextLabel(entry.iri)}
-              </option>
-            ))}
-          </select>
-          {selectedEntry && fact(selectedEntry)}
-        </label>
+      {selecting ? (
+        <ContextChoice
+          connection={c}
+          readable={readable}
+          label={contextLabel}
+          switching={switching}
+          unavailable={unavailable}
+          act={act}
+        />
       ) : (
         !fixedContext &&
         readable.length > 0 && (
@@ -738,7 +676,7 @@ function PodDetails({
             {readable.map((entry) => (
               <li key={entry.iri}>
                 <span>{contextLabel(entry.iri)}</span>
-                {fact(entry)}
+                <AccessFact writable={entry.writable} />
               </li>
             ))}
           </ul>
@@ -773,5 +711,102 @@ function PodDetails({
         </div>
       )}
     </>
+  );
+}
+
+type ReadableContext = NonNullable<ReturnType<typeof knownContexts>>[number];
+
+/**
+ * Names the readable Contexts of one Pod apart, each name computed once; a
+ * Context the catalogue does not list (a preset's) is named on its own.
+ */
+export function contextLabeler(
+  readable: readonly ReadableContext[],
+  catalogue: Connection['catalogue'] | undefined,
+) {
+  const labels =
+    catalogue && catalogue.kind !== 'unknown' ? catalogue.labels : undefined;
+  const iris = readable.map((entry) => entry.iri);
+  const name = (iri: string) => contextName(iri, labels);
+  const shown = new Map(
+    iris.map((iri) => [iri, distinctName(iri, iris, name)]),
+  );
+  return (iri: string) => shown.get(iri) ?? distinctName(iri, iris, name);
+}
+
+/** What the catalogue says this app may do in a Context. */
+export function AccessFact({ writable }: { readonly writable: boolean }) {
+  const { messages: m } = useSdkLocale();
+  return (
+    <span className="sp-access-fact">
+      {writable ? m.controls.canChange : m.controls.canRead}
+    </span>
+  );
+}
+
+/**
+ * The active Pod's Context while a Context flow needs one. One readable
+ * Context, already selected, is only named: a choice adds nothing; so is the
+ * selection of an app-owned switch (`switching`), whose first selection this
+ * waits for. Otherwise the person chooses it here.
+ */
+export function ContextChoice({
+  connection: c,
+  readable,
+  label,
+  switching,
+  unavailable,
+  act,
+}: {
+  readonly connection: Connection;
+  readonly readable: readonly ReadableContext[];
+  readonly label: (iri: string) => string;
+  readonly switching: boolean;
+  readonly unavailable: boolean;
+  readonly act: (task: () => Promise<unknown>) => Promise<void>;
+}) {
+  const app = useApp();
+  const { messages: m } = useSdkLocale();
+  const selected = readable.find((entry) => entry.iri === c.selectedContext);
+  const named = readable.length === 1 || switching ? selected : undefined;
+  if (named)
+    // Set off below the Pod: the Context this app works in.
+    return (
+      <p className="sp-access-context">
+        {label(named.iri)}
+        {' · '}
+        <AccessFact writable={named.writable} />
+      </p>
+    );
+  // The app's own switch selects a first Context; this only waits. A kept
+  // selection that lost access needs the chooser below instead.
+  if (switching && !c.selectedContext)
+    return readable.length > 0 ? (
+      <p role="status">{m.controls.loading}</p>
+    ) : null;
+  return (
+    <label>
+      {m.dataContext}
+      <select
+        aria-label={m.dataContext}
+        value={c.selectedContext ?? ''}
+        disabled={
+          unavailable || c.catalogue.kind !== 'ready' || readable.length === 0
+        }
+        onChange={(event) =>
+          void act(() => app.selectContext(event.target.value))
+        }
+      >
+        <option value="" disabled>
+          {m.chooseContext}
+        </option>
+        {readable.map((entry) => (
+          <option key={entry.iri} value={entry.iri}>
+            {label(entry.iri)}
+          </option>
+        ))}
+      </select>
+      {selected && <AccessFact writable={selected.writable} />}
+    </label>
   );
 }

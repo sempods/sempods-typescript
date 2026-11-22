@@ -16,6 +16,19 @@ export function knownContexts(catalogue: CatalogueFact | undefined) {
     : undefined;
 }
 
+/**
+ * A remembered Pod: signed out at a known address (see `rememberPods`), or
+ * being forgotten. One read without a token (`signIn: 'optional'`) is a
+ * readable one, not one that needs signing in first.
+ */
+export function isRemembered(entry: Connection) {
+  const s = entry.session;
+  return (
+    (s.kind === 'signed-out' || (s.kind === 'ended' && s.forget === true)) &&
+    entry.reading !== 'anonymous'
+  );
+}
+
 /** Private rendering inputs; authority stays with the runtime. */
 export interface AccessFacts {
   readonly state: Pick<AppSnapshot, 'contextSelection' | 'preset'>;

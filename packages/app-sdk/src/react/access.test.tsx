@@ -34,7 +34,11 @@ import {
   jwt,
   settleLease,
 } from '../runtime/fixture.test.js';
-import { podAction, podActionNames } from './pod-actions.helpers.test.js';
+import {
+  podAction,
+  podActionNames,
+  podToggle,
+} from './pod-actions.helpers.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import { openSessionStore } from '../sessions/store.js';
 import type { SessionRecord } from '../sessions/records.js';
@@ -2208,10 +2212,8 @@ it('names several Pods by their names and keeps the selected Pod’s address in 
     within(row).queryByText('Selected'),
   )!;
   const unselected = selected === personal ? workRow : personal;
-  // Each row's first button is its name, which opens it.
-  const toggle = (row: HTMLElement) => within(row).getAllByRole('button')[0]!;
-  expect(toggle(selected).getAttribute('aria-expanded')).toBe('true');
-  expect(toggle(unselected).getAttribute('aria-expanded')).toBe('false');
+  expect(podToggle(selected).getAttribute('aria-expanded')).toBe('true');
+  expect(podToggle(unselected).getAttribute('aria-expanded')).toBe('false');
   const url = selected === personal ? pod : other;
   expect(within(selected).getByText(url)).toBeTruthy();
   // The other row names only its Pod until it opens.

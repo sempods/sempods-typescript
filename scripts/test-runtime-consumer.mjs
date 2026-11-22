@@ -1,6 +1,6 @@
 /* global document, window, URLSearchParams, sessionStorage, IDBObjectStore, DOMException */
 import assert from 'node:assert/strict';
-import { podActions } from './pod-actions.mjs';
+import { podActions, podActionsButton } from './pod-actions.mjs';
 import { execFileSync } from 'node:child_process';
 import {
   cp,
@@ -1406,7 +1406,6 @@ try {
         origin + '/app?identity=signout-' + surface + '-' + language;
       const signIn = language === 'en' ? 'Sign in' : 'Anmelden';
       // Management's actions for the Pod sign out on this device (#386).
-      const actions = language === 'en' ? /^Actions for / : /^Aktionen für /;
       const signOut =
         language === 'en'
           ? 'Sign out on this device'
@@ -1442,7 +1441,7 @@ try {
           },
         });
       });
-      await page.getByRole('button', { name: actions }).click();
+      await podActions(page);
       await page.getByRole('button', { name: signOut, exact: true }).click();
       // The gate offers the retry of the sign-out, never a sign-in (#238).
       const gate = page.locator('[data-sempods-ui="gate"]');
@@ -1802,9 +1801,7 @@ try {
     );
     await host.click();
     // The Pod's actions hold Change sharing (#386).
-    const more = region.getByRole('button', {
-      name: de ? /^Aktionen für / : /^Actions for /,
-    });
+    const more = podActionsButton(region);
     const retry = region.getByRole('button', {
       name: de ? 'Freigabe ändern' : 'Change sharing',
       exact: true,
@@ -2253,9 +2250,7 @@ try {
   await page.waitForURL(origin + '/app?identity=overview');
   // Management switches Pods with the Pod's own Use this Pod (#386).
   const choosePod = async (name) => {
-    await page
-      .getByRole('button', { name: new RegExp('^Actions for .*' + name) })
-      .click();
+    await podActions(page, name);
     await page
       .getByRole('button', { name: 'Use this Pod', exact: true })
       .click();

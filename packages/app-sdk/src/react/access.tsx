@@ -27,9 +27,10 @@ import { useSdkLocale } from './locale.js';
 import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { layered, SdkStyles } from './styles.js';
 import { topLayer, TopLayerSlot, useModalDialog } from './confirm.js';
-import { contextName, podName, distinctName } from './names.js';
+import { podName, distinctName } from './names.js';
 import type { Connection } from '../runtime/types.js';
 import {
+  isRemembered,
   knownContexts,
   presentAccess,
   reads as readsAtAll,
@@ -43,7 +44,13 @@ import {
 } from './access-prompts.js';
 import { useFirst } from './first.js';
 import { enteredPod, SignInConnections } from './access-sign-in.js';
-import { PodManagement, useAccessAction, type PodView } from './access-pods.js';
+import {
+  ContextChoice,
+  contextLabeler,
+  PodManagement,
+  useAccessAction,
+  type PodView,
+} from './access-pods.js';
 import { useFocusHold } from './focus.js';
 import { AppStartup } from './startup.js';
 
@@ -492,15 +499,15 @@ function AccessSection({
       </style>
       {!hidden && (
         <div className="sp-access-content">
-          {!asDialog && manage && add.adding ? (
-            <header className="sp-access-step">
-              <BackButton onBack={add.back} />
-              <Heading ref={stepHeading} tabIndex={-1}>
-                {m.controls.connectAnother ?? m.controls.dataAccess}
-              </Heading>
-            </header>
-          ) : (
-            !asDialog && (
+          {!asDialog &&
+            (manage && add.adding ? (
+              <header className="sp-access-step">
+                <BackButton onBack={add.back} />
+                <Heading ref={stepHeading} tabIndex={-1}>
+                  {m.controls.connectAnother ?? m.controls.dataAccess}
+                </Heading>
+              </header>
+            ) : (
               <header>
                 {icon && namesApp && appName && (
                   <div className="sp-access-icon" aria-hidden="true">
@@ -514,8 +521,7 @@ function AccessSection({
                   <p className="sp-access-description">{description}</p>
                 )}
               </header>
-            )
-          )}
+            ))}
           {Connections ? (
             body === 'leaving' ? (
               <p role="status">{m.controls.leaving ?? m.controls.loading}</p>
@@ -532,13 +538,12 @@ function AccessSection({
                 {...(podNames ? { podNames } : {})}
               />
             )
-          ) : (
-            <AccessConnections
+          ) : manage ? (
+            <ManagementConnections
               contextRequired={contextRequired}
               switching={switching}
               // The dialog checks the access again on opening instead.
-              discovery={discovery && !asDialog}
-              manage={manage}
+              recheck={discovery && !asDialog}
               mode={mode}
               body={body}
               podAddress={podAddress}
@@ -547,6 +552,16 @@ function AccessSection({
               add={add}
               notice={notice}
               {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
+              {...(podNames ? { podNames } : {})}
+            />
+          ) : (
+            <AccessConnections
+              contextRequired={contextRequired}
+              switching={switching}
+              discovery={discovery}
+              mode={mode}
+              body={body}
+              podAddress={podAddress}
               {...(podNames ? { podNames } : {})}
             />
           )}
@@ -910,13 +925,16 @@ function BackButton({ onBack }: { readonly onBack: () => void }) {
   );
 }
 
-function AccessConnections({
-  manage,
+/**
+ * Management: without a connected Pod, the sign-in's chooser; with one, its
+ * Pod list, and connecting another Pod is a step of its own.
+ */
+function ManagementConnections({
   mode,
   podNames,
   contextRequired,
   switching,
-  discovery,
+  recheck,
   body,
   podAddress,
   podAddressPrefix,
@@ -925,15 +943,63 @@ function AccessConnections({
   add,
   notice,
 }: {
-  readonly manage: boolean;
   readonly mode: 'single' | 'multiple';
+  readonly podNames?: Readonly<Record<string, string>>;
+  readonly podAddress: 'visible' | 'hidden';
+  readonly podAddressPrefix?: string | undefined;
+  readonly contextRequired: boolean;
+  readonly switching: boolean;
+  readonly recheck: boolean;
+  readonly body: ConnectionBody;
   readonly podView: PodView;
   readonly podViewDescription?: ReactNode;
   readonly add: AddStep;
   readonly notice: boolean;
+}) {
+  const state = useAppState();
+  const { messages: m } = useSdkLocale();
+  // The page is navigating to the Pod's sign-in: no action applies any more.
+  if (body === 'leaving')
+    return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
+  const connected = state.connections.some((entry) => !isRemembered(entry));
+  return connected && !add.adding ? (
+    <PodManagement
+      mode={mode}
+      podNames={podNames}
+      podView={podView}
+      podViewDescription={podViewDescription}
+      contextRequired={contextRequired}
+      switching={switching}
+      recheck={recheck}
+      onAdd={add.start}
+      focusAdd={add.returned}
+      notice={notice}
+    />
+  ) : (
+    <SignInConnections
+      mode={mode}
+      surface="management"
+      podAddress={podAddress}
+      {...(connected ? { adding: true, onAdded: add.back } : {})}
+      {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
+      {...(podNames ? { podNames } : {})}
+    />
+  );
+}
+
+/** A Context flow's connection view, inline beside the content. */
+function AccessConnections({
+  mode,
+  podNames,
+  contextRequired,
+  switching,
+  discovery,
+  body,
+  podAddress,
+}: {
+  readonly mode: 'single' | 'multiple';
   readonly podNames?: Readonly<Record<string, string>>;
   readonly podAddress: 'visible' | 'hidden';
-  readonly podAddressPrefix?: string | undefined;
   readonly contextRequired: boolean;
   /** The app selects through its own switch (`useContexts`): no chooser here. */
   readonly switching: boolean;
@@ -948,20 +1014,12 @@ function AccessConnections({
   const disconnectId = useId();
   const [url, setUrl] = useState('');
   const { act, unavailable, failure } = useAccessAction();
-  // Remembered Pods: signed out at a known address (see `rememberPods`).
-  // Management lists them as rows; the gate uses SignInConnections. A Pod being forgotten
-  // stays in that list; if forgetting could not be saved, with the failure
-  // and Forget again, so its address is not kept against the choice.
+  // A Pod being forgotten stays in the remembered list; if forgetting could
+  // not be saved, with the failure and Forget again, so its address is not
+  // kept against the choice.
   const forgetting = (entry: Connection) =>
     entry.session.kind === 'ended' && entry.session.forget === true;
-  // A connection reading without a token (`signIn: 'optional'`) is a
-  // readable one, chosen in the Pod selector like a signed-in one, not a
-  // remembered one that needs signing in first.
-  const remembered = state.connections.filter(
-    (entry) =>
-      (entry.session.kind === 'signed-out' || forgetting(entry)) &&
-      entry.reading !== 'anonymous',
-  );
+  const remembered = state.connections.filter(isRemembered);
   const found = state.connections.find((entry) => entry.id === state.activeId);
   // The connection shown as connected; a remembered active one is signed in
   // to from its list, so the rest of this view treats it as none.
@@ -975,9 +1033,6 @@ function AccessConnections({
   // Signed in, or reading without a token: its Contexts can be chosen.
   const reads = readsAtAll(c);
   const anonymous = c?.reading === 'anonymous';
-  // Inline beside the content, the access prompt already offers signing in
-  // to a connection that reads without a token.
-  const inPrompt = anonymous;
   // Adding a Pod signs in only where sign-in is required; otherwise it opens
   // the Pod to read without a token.
   const addLabel =
@@ -988,7 +1043,7 @@ function AccessConnections({
     state.preset?.podUrl ??
     (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
   // With exactly one permitted Pod the configuration fixes the destination, so
-  // sign-in may omit its address; management keeps it inspectable.
+  // sign-in may omit its address.
   const addressHidden =
     podAddress === 'hidden' &&
     state.allowedPods?.length === 1 &&
@@ -1050,28 +1105,7 @@ function AccessConnections({
   // A display name never replaces a saved Pod's address.
   const namedAddress = (target: string) =>
     podNames?.[target]?.trim() && <p className="sp-access-address">{target}</p>;
-  const labels =
-    c?.catalogue.kind !== 'unknown' ? c?.catalogue.labels : undefined;
-  const selectedEntry = readable.find(
-    (entry) => entry.iri === c?.selectedContext,
-  );
-  // What the catalogue says this app may do in a Context.
-  const accessFact = (entry: { readonly writable: boolean }) => (
-    <span className="sp-access-fact">
-      {entry.writable ? m.controls.canChange : m.controls.canRead}
-    </span>
-  );
-  // One readable Context, already selected: a choice adds nothing. With an
-  // app-owned switch, the selected Context is only named here.
-  const onlyContext =
-    readable.length === 1 && selectedEntry ? selectedEntry : undefined;
-  const named = onlyContext ?? (switching ? selectedEntry : undefined);
-  const contextLabel = (iri: string) =>
-    distinctName(
-      iri,
-      readable.map((entry) => entry.iri),
-      (value) => contextName(value, labels),
-    );
+  const contextLabel = contextLabeler(readable, c?.catalogue);
   // Keyed so that switching between the validating and connection views keeps
   // these controls (and keyboard focus) mounted.
   const defaultSignIn = showDefault && defaultUrl && (
@@ -1342,36 +1376,6 @@ function AccessConnections({
   // The page is navigating to the Pod's sign-in: no action applies any more.
   if (body === 'leaving')
     return <p role="status">{m.controls.leaving ?? m.controls.loading}</p>;
-  if (manage) {
-    // Without a connected Pod, management is the sign-in's chooser; with
-    // one, its Pod list, and connecting another Pod is a step of its own.
-    const connected = state.connections.some(
-      (entry) => !remembered.includes(entry),
-    );
-    return connected && !add.adding ? (
-      <PodManagement
-        mode={mode}
-        podNames={podNames}
-        podView={podView}
-        podViewDescription={podViewDescription}
-        contextRequired={contextRequired}
-        switching={switching}
-        recheck={discovery}
-        onAdd={add.start}
-        focusAdd={add.returned}
-        notice={notice}
-      />
-    ) : (
-      <SignInConnections
-        mode={mode}
-        surface="management"
-        podAddress={podAddress}
-        {...(connected ? { adding: true, onAdded: add.back } : {})}
-        {...(podAddressPrefix !== undefined ? { podAddressPrefix } : {})}
-        {...(podNames ? { podNames } : {})}
-      />
-    );
-  }
   // A restore that never settles must not hide signing in to the configured
   // Pod, to a remembered one, or switching to another saved one.
   if (body === 'loading')
@@ -1398,11 +1402,13 @@ function AccessConnections({
           {c.session.kind === 'ended' &&
             !disconnectFailed &&
             !shownByNotice &&
-            !inPrompt && (
+            // Inline beside the content, the access prompt already offers
+            // signing in to a connection that reads without a token.
+            !anonymous && (
               <p role="status">{endedMessage(c.session, m, true)}</p>
             )}
           {/* After a failed sign-out, the sign-out button repeats it. */}
-          {disconnectFailed || inPrompt ? null : c.session.kind === 'ended' &&
+          {disconnectFailed || anonymous ? null : c.session.kind === 'ended' &&
             c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button
@@ -1425,48 +1431,16 @@ function AccessConnections({
           )}
         </>
       )}
-      {reads && contextRequired && !fixedContext && named ? (
-        // Set off below the Pod: the Context this app works in.
-        <p className="sp-access-context">
-          {contextLabel(named.iri)}
-          {' · '}
-          {accessFact(named)}
-        </p>
-      ) : reads &&
-        contextRequired &&
-        !fixedContext &&
-        switching &&
-        !c?.selectedContext ? (
-        // The app's own switch selects a first Context; this only waits. A
-        // kept selection that lost access needs the chooser below instead.
-        readable.length > 0 && <p role="status">{m.controls.loading}</p>
-      ) : reads && contextRequired && !fixedContext ? (
-        <label>
-          {m.dataContext}
-          <select
-            aria-label={m.dataContext}
-            value={c?.selectedContext ?? ''}
-            disabled={
-              unavailable ||
-              c?.catalogue.kind !== 'ready' ||
-              readable.length === 0
-            }
-            onChange={(event) =>
-              void act(() => app.selectContext(event.target.value))
-            }
-          >
-            <option value="" disabled>
-              {m.chooseContext}
-            </option>
-            {readable.map((entry) => (
-              <option key={entry.iri} value={entry.iri}>
-                {contextLabel(entry.iri)}
-              </option>
-            ))}
-          </select>
-          {selectedEntry && accessFact(selectedEntry)}
-        </label>
-      ) : null}
+      {reads && c && contextRequired && !fixedContext && (
+        <ContextChoice
+          connection={c}
+          readable={readable}
+          label={contextLabel}
+          switching={switching}
+          unavailable={unavailable}
+          act={act}
+        />
+      )}
       {reads && contextRequired && fixedContext && (
         <p>
           {m.dataContext}: {contextLabel(fixedContext)}
@@ -1554,9 +1528,8 @@ const styles = `
 [data-sempods-access] .sp-access-hint, [data-sempods-access] .sp-access-address, [data-sempods-access] details { font-size:.875rem; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-contexts { list-style:none; margin:8px 0 16px; padding:0; text-align:start; }
 [data-sempods-access] .sp-access-contexts li { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; padding:8px 0; border-block-end:1px solid var(--sp-line); }
-[data-sempods-access] .sp-access-label, [data-sempods-access] .sp-access-fact { font-size:.875rem; color:var(--sp-muted); }
+[data-sempods-access] .sp-access-fact { font-size:.875rem; color:var(--sp-muted); }
 [data-sempods-access] .sp-access-context { margin:4px 0 16px; padding-inline-start:12px; border-inline-start:2px solid var(--sp-line); text-align:start; }
-[data-sempods-access] .sp-access-label { text-align:start; margin:16px 0 0; }
 /* Management's Pod rows: a name that expands the Pod's access, a marker, and
    a 44px button with the actions for that Pod. */
 [data-sempods-access] .sp-pods { text-align:start; }

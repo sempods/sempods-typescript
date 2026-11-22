@@ -951,11 +951,11 @@ export function createAppController(
      * (`LeaveGuard.scope`).
      */
     disconnect(id: string) {
-      return guard(disconnecting(id), retiring(id));
+      return retire(id, false);
     },
     /** Signs out if needed and forgets the Pod; guarded and reported like `disconnect`. */
     forget(id: string) {
-      return guard(forgetting(id), retiring(id));
+      return retire(id, true);
     },
     /**
      * Retires a prompt of `access.prompts` that offers `dismiss`, for this
@@ -1008,23 +1008,25 @@ export function createAppController(
         : runtime.beginAuthorization(id, { intent });
     };
   }
-  /** Retiring another connection keeps the selected view (`LeaveGuard.scope`). */
-  function retiring(id: string): Change {
-    return activeId !== null && id !== activeId
-      ? { retiring: id }
-      : 'connection';
-  }
-  function disconnecting(id: string) {
-    return async () => {
-      if ((await runtime.disconnect(id)).kind === 'disconnected')
-        callbackNotice = false;
-    };
-  }
-  function forgetting(id: string) {
-    return async () => {
-      if ((await runtime.forget(id)).kind === 'disconnected')
-        callbackNotice = false;
-    };
+  /**
+   * Signs out of, or forgets, a connection, guarded. Retiring another
+   * connection than the active one keeps the selected view
+   * (`LeaveGuard.scope`).
+   */
+  function retire(id: string, forget: boolean, available?: () => Availability) {
+    const change: Change =
+      activeId !== null && id !== activeId ? { retiring: id } : 'connection';
+    return guard(
+      async () => {
+        const outcome = await (forget
+          ? runtime.forget(id)
+          : runtime.disconnect(id));
+        if (outcome.kind === 'disconnected') callbackNotice = false;
+      },
+      change,
+      undefined,
+      available,
+    );
   }
   /**
    * Runs one offered prompt action. The prompt must still be current with
@@ -1039,10 +1041,8 @@ export function createAppController(
       tracker.current(prompt, action) ? 'yes' : 'gone';
     if (available() !== 'yes') return false;
     const id = prompt.connectionId;
-    const guarded = (
-      run: () => void | Promise<void>,
-      change: Change = 'connection',
-    ) => guard(run, change, undefined, available);
+    const guarded = (run: () => void | Promise<void>) =>
+      guard(run, 'connection', undefined, available);
     switch (action) {
       case 'dismiss':
         return controller.dismiss(prompt.id);
@@ -1054,11 +1054,11 @@ export function createAppController(
         if (!id) return false;
         // Retrying a sign-out or removal that could not be saved.
         if (prompt.reason !== 'unreachable')
-          return guarded(disconnecting(id), retiring(id));
+          return retire(id, false, available);
         await runtime.retryRestore(id);
         return true;
       case 'forget':
-        return id ? guarded(forgetting(id), retiring(id)) : false;
+        return id ? retire(id, true, available) : false;
       case 'sign-in':
         // Missing scopes are granted on the consent page, which a reused
         // grant would skip.

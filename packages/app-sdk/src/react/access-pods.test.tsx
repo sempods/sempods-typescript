@@ -31,6 +31,7 @@ import {
   podAction,
   podActionNames,
   podActions,
+  podToggle,
 } from './pod-actions.helpers.test.js';
 import { englishMessages, germanMessages } from '../locale.js';
 
@@ -68,8 +69,6 @@ const catalogueReads = (
   f.fetch.mock.calls.filter(([url]) => url === base + '/_system/contexts')
     .length;
 const row = (name: string) => screen.getByRole('group', { name });
-const toggle = (element: HTMLElement) =>
-  within(element).getAllByRole('button')[0]!;
 
 it('finds the Pod actions by the label of each shipped locale', () => {
   for (const messages of [englishMessages, germanMessages]) {
@@ -95,16 +94,16 @@ it('marks the selected Pod, loads another Pod’s access when its row opens and 
   await waitFor(() =>
     expect(within(row('pod.example/bob')).getByText('Selected')).toBeTruthy(),
   );
-  expect(toggle(row('pod.example/bob')).getAttribute('aria-expanded')).toBe(
+  expect(podToggle(row('pod.example/bob')).getAttribute('aria-expanded')).toBe(
     'true',
   );
   const alice = row('pod.example/alice');
-  expect(toggle(alice).getAttribute('aria-expanded')).toBe('false');
+  expect(podToggle(alice).getAttribute('aria-expanded')).toBe('false');
   expect(within(alice).queryByText('Selected')).toBeNull();
   expect(within(dialog).queryByRole('combobox', { name: /pod/i })).toBeNull();
   // Opening Alice's row asks her Pod what this app may do there, once.
   const before = catalogueReads(f, pod);
-  fireEvent.click(toggle(alice));
+  fireEvent.click(podToggle(alice));
   const rights = await within(alice).findByRole('list', {
     name: 'Available to this app',
   });
@@ -165,7 +164,7 @@ it('shows a combined view without a selected Pod or a switch, with the app’s l
   for (const name of ['pod.example/alice', 'pod.example/bob']) {
     expect(within(row(name)).queryByText('Selected')).toBeNull();
     // Several Pods: each row closed until opened.
-    expect(toggle(row(name)).getAttribute('aria-expanded')).toBe('false');
+    expect(podToggle(row(name)).getAttribute('aria-expanded')).toBe('false');
     expect(await podActionNames(name)).toEqual([
       'Change sharing',
       'Sign out on this device',
@@ -368,7 +367,7 @@ it('focuses the Pod just opened once no other permitted Pod is left to connect',
   expect(
     within(dialog).queryByRole('button', { name: 'Connect another Pod' }),
   ).toBeNull();
-  expect(document.activeElement).toBe(toggle(bobs));
+  expect(document.activeElement).toBe(podToggle(bobs));
 });
 
 it('signs out of another Pod keeping the selected Pod’s drafts, also in an explicit Context', async () => {
@@ -422,6 +421,31 @@ it('signs out of another Pod keeping the selected Pod’s drafts, also in an exp
   expect(discarded).not.toHaveBeenCalled();
 });
 
+it('moves a focus lost with a removed Pod’s row to the list', async () => {
+  const { runtime } = await alicesAndBobs();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  const signOut = await podAction(
+    'Sign out on this device',
+    'pod.example/alice',
+  );
+  await act(async () => signOut.click());
+  const remove = await podAction(/^Remove/, 'pod.example/alice');
+  await act(async () => remove.click());
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('group', { name: 'pod.example/alice' }),
+    ).toBeNull(),
+  );
+  await waitFor(() =>
+    expect(document.activeElement).toBe(podToggle(row('pod.example/bob'))),
+  );
+});
+
 it('tells Pods with the same name apart and names each one’s actions', async () => {
   const { runtime } = await alicesAndBobs();
   render(
@@ -470,7 +494,7 @@ it('marks an unreachable Pod and offers its retry while the other Pod stays usab
     'Use this Pod',
     'Sign out on this device',
   ]);
-  fireEvent.click(toggle(unreachable));
+  fireEvent.click(podToggle(unreachable));
   expect(
     within(unreachable).getByText(
       'The Pod cannot be reached right now. You stay signed in; this app reconnects when the network is back.',
