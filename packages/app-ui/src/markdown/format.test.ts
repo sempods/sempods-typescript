@@ -57,6 +57,17 @@ describe('emphasis', () => {
     expect(run('italic', '[***a*** and *b*]')).toBe('*[**a** and b]*');
   });
 
+  it('applies to each selected line, after its prefix', () => {
+    expect(run('bold', '[first\n\nsecond]')).toBe('[**first**\n\n**second**]');
+    expect(run('bold', '[**first**\n\nsecond]')).toBe(
+      '[**first**\n\n**second**]',
+    );
+    expect(run('bold', '[**first**\n\n**second**]')).toBe('[first\n\nsecond]');
+    expect(run('italic', '[- one\n- two]')).toBe('[- *one*\n- *two*]');
+    expect(run('bold', '[## Title]')).toBe('## **[Title]**');
+    expect(run('bold', '> [quoted]')).toBe('> **[quoted]**');
+  });
+
   it('keeps stars that are text', () => {
     expect(run('italic', '[2 * 3 = 6]')).toBe('*[2 * 3 = 6]*');
     expect(run('bold', '[match `**/*.ts` files]')).toBe(

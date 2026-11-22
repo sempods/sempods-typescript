@@ -126,19 +126,22 @@ function unmark(
   return result + text.slice(from);
 }
 
+/** An emphasis edit of one span, and whether it removes the emphasis. */
+type SpanEdit = MarkdownEdit & { readonly removes: boolean };
+
 /**
- * Bold (`**`) or italic (`*`) around the selection, or removed when the
- * selection is already inside it or includes its markers. A selection that
- * holds spans of its own (`**a** and **b**`) is no one span: their markers
- * are merged into one pair around the whole selection. Stars that are text
- * stay. An empty selection inserts the pair with the caret between them.
+ * Bold (`**`) or italic (`*`) around one span of a line, or removed when it
+ * is already inside it or includes its markers. A span that holds spans of
+ * its own (`**a** and **b**`) is no one span: their markers are merged into
+ * one pair around the whole span. Stars that are text stay. An empty span
+ * inserts the pair with the caret between them.
  */
-function emphasis(
+function span(
   kind: Emphasis,
   source: string,
   selStart: number,
   selEnd: number,
-): MarkdownEdit {
+): SpanEdit {
   const n = kind === 'bold' ? 2 : 1;
   const mark = '*'.repeat(n);
   const [start, end] =
@@ -159,6 +162,7 @@ function emphasis(
         to: end + n,
         insert: inner,
         select: [start - n, end - n],
+        removes: true,
       };
     // Spans of the selection's own join the enclosing one.
     const plain = unmark(kind, marked, found, [0, marked.length - n]).slice(
@@ -170,6 +174,7 @@ function emphasis(
       to: end,
       insert: plain,
       select: [start, start + plain.length],
+      removes: false,
     };
   }
   const found = markers(kind, inner);
@@ -193,6 +198,7 @@ function emphasis(
       to: end,
       insert: content,
       select: [start, start + content.length],
+      removes: true,
     };
   }
   const plain = unmark(kind, inner, found);
@@ -201,6 +207,82 @@ function emphasis(
     to: end,
     insert: mark + plain + mark,
     select: [start + n, start + n + plain.length],
+    removes: false,
+  };
+}
+
+/** What starts a line before its text: list markers, a heading, a quote. */
+const LINE_PREFIX =
+  /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|#{1,6}(?:[ \t]+|$)|>[ \t]?)*/;
+
+/**
+ * The parts of the selection, one per line, without the line's prefix and
+ * whitespace at their edges; lines with nothing left are skipped.
+ */
+function lineSpans(
+  source: string,
+  start: number,
+  end: number,
+): [number, number][] {
+  const spans: [number, number][] = [];
+  let line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
+  while (line <= end) {
+    const next = source.indexOf('\n', line);
+    const lineEnd = next === -1 ? source.length : next;
+    const prefix = LINE_PREFIX.exec(source.slice(line, lineEnd))![0].length;
+    const [a, b] = inward(
+      source,
+      Math.max(start, line + prefix),
+      Math.min(end, lineEnd),
+    );
+    if (a < b) spans.push([a, b]);
+    if (next === -1) break;
+    line = next + 1;
+  }
+  return spans;
+}
+
+/**
+ * Bold or italic on the selection. Emphasis cannot cross a line's prefix,
+ * a list item or a paragraph, so it applies to each selected line on its
+ * own, after its list marker, heading or quote: removed from all of them
+ * when every one has it already, otherwise added where it is missing.
+ */
+function emphasis(
+  kind: Emphasis,
+  source: string,
+  start: number,
+  end: number,
+): MarkdownEdit {
+  const spans = start === end ? [] : lineSpans(source, start, end);
+  if (spans.length <= 1) {
+    const [a, b] = spans[0] ?? [start, end];
+    const edit = span(kind, source, a, b);
+    return {
+      from: edit.from,
+      to: edit.to,
+      insert: edit.insert,
+      select: edit.select,
+    };
+  }
+  const edits = spans.map(([a, b]) => span(kind, source, a, b));
+  const removing = edits.every((edit) => edit.removes);
+  const from = edits[0]!.from;
+  const to = edits[edits.length - 1]!.to;
+  let insert = '';
+  let at = from;
+  for (const edit of edits) {
+    if (edit.removes !== removing) continue;
+    insert += source.slice(at, edit.from) + edit.insert;
+    at = edit.to;
+  }
+  insert += source.slice(at, to);
+  // The selection keeps its start before the first line's prefix.
+  return {
+    from,
+    to,
+    insert,
+    select: [Math.min(start, from), from + insert.length],
   };
 }
 
