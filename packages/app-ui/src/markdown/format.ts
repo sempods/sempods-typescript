@@ -217,6 +217,24 @@ function span(
       removes: false,
     };
   }
+  // A caret inside a span: the span loses its emphasis, as a whole.
+  if (start === end) {
+    const pair = enclosing(kind, source, start, end);
+    if (pair) {
+      const { line, open, close } = pair;
+      const insert =
+        '*'.repeat(open.length - n) +
+        source.slice(line + open.at + open.length, line + close.at) +
+        '*'.repeat(close.length - n);
+      return {
+        from: line + open.at,
+        to: line + close.at + close.length,
+        insert,
+        select: [start - n, start - n],
+        removes: true,
+      };
+    }
+  }
   const found = markers(kind, inner);
   const last = found.length - 1;
   // Markers at the selection's edges that enclose one span: remove them,
@@ -258,6 +276,32 @@ function span(
 }
 
 /**
+ * The innermost `kind` span of the selection's line that encloses the
+ * selection, with the line's start, or `null`.
+ */
+function enclosing(
+  kind: Emphasis,
+  source: string,
+  start: number,
+  end: number,
+): { line: number; open: Marker; close: Marker } | null {
+  const line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
+  const next = source.indexOf('\n', end);
+  const found = markers(
+    kind,
+    source.slice(line, next === -1 ? undefined : next),
+  );
+  let best: { line: number; open: Marker; close: Marker } | null = null;
+  for (const open of found) {
+    const close = found[open.mate];
+    if (!close || close.at <= open.at) continue;
+    if (open.at + open.length <= start - line && close.at >= end - line)
+      if (!best || open.at > best.open.at) best = { line, open, close };
+  }
+  return best;
+}
+
+/**
  * The edit that ends the innermost `kind` span of the selection's line that
  * encloses the selection before it and starts it again after it:
  * `**say hello world**` with `hello` selected becomes
@@ -272,19 +316,9 @@ function splitSpan(
 ): SpanEdit | null {
   const n = kind === 'bold' ? 2 : 1;
   const mark = '*'.repeat(n);
-  const line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
-  const next = source.indexOf('\n', end);
-  const text = source.slice(line, next === -1 ? source.length : next);
-  const found = markers(kind, text);
-  let open: Marker | undefined;
-  let close: Marker | undefined;
-  for (const marker of found) {
-    const mate = found[marker.mate];
-    if (!mate || mate.at <= marker.at) continue;
-    if (marker.at + marker.length <= start - line && mate.at >= end - line)
-      if (!open || marker.at > open.at) [open, close] = [marker, mate];
-  }
-  if (!open || !close) return null;
+  const pair = enclosing(kind, source, start, end);
+  if (!pair) return null;
+  const { line, open, close } = pair;
   const from = line + open.at;
   const to = line + close.at + close.length;
   const before = source.slice(line + open.at + open.length, start);
@@ -511,11 +545,14 @@ function label(text: string): string {
 /**
  * A link around the selection: its text with `https://` selected for the
  * address, or, for a selected address, the address with the caret in the
- * empty text.
+ * empty text. A selection over several paragraphs links its first one.
  */
 function link(source: string, selStart: number, selEnd: number): MarkdownEdit {
-  const [start, end] =
+  let [start, end] =
     selStart === selEnd ? [selStart, selEnd] : inward(source, selStart, selEnd);
+  // A link's text cannot span paragraphs: the first one's part is linked.
+  const blank = /\n[ \t]*\n/.exec(source.slice(start, end));
+  if (blank) [start, end] = inward(source, start, start + blank.index);
   const inner = source.slice(start, end);
   if (inner === '' || URL_ONLY.test(inner)) {
     const insert = `[](${inner ? destination(inner) : 'https://'})`;

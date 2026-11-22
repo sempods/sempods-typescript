@@ -84,6 +84,14 @@ describe('emphasis', () => {
     expect(run('italic', '*hel[lo* world]')).toBe('*[hello world]*');
   });
 
+  it('takes the emphasis off the span a caret is in', () => {
+    expect(run('bold', '**hel|lo** world')).toBe('hel|lo world');
+    expect(run('bold', '**hello|** world')).toBe('hello| world');
+    expect(run('italic', 'a *b|c* d')).toBe('a b|c d');
+    expect(run('italic', '***a|b***')).toBe('**a|b**');
+    expect(run('bold', 'plain |text')).toBe('plain **|**text');
+  });
+
   it('takes the emphasis off a selection inside a larger span', () => {
     expect(run('bold', '**[hello] world**')).toBe('[hello] **world**');
     expect(run('bold', '**say [hello] world**')).toBe(
@@ -197,6 +205,12 @@ describe('links', () => {
     );
     expect(run('link', '[https://example.org/a<b>\\c]')).toBe(
       '[|](<https://example.org/a\\<b\\>\\\\c>)',
+    );
+  });
+
+  it('links only the first paragraph of the selection', () => {
+    expect(run('link', '[one\nline\n\nnext]')).toBe(
+      '[one\nline]([https://])\n\nnext',
     );
   });
 

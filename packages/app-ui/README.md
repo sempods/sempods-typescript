@@ -1872,7 +1872,9 @@ paragraph, list item or heading on its own, after its list marker, heading
 or quote, since emphasis cannot cross them; lines joined by a soft line
 break stay one span. A selection that is only partly bold or italic becomes
 so as a whole, its own markers merged into one pair. A selection inside a
-larger bold or italic span loses it alone, the span split around it. Stars
+larger bold or italic span loses it alone, the span split around it. With
+only a caret inside such a span, the span loses it. A link over several
+paragraphs links the first one. Stars
 that are text, such as in `2 * 3` or in code, stay. Pressing one keeps the focus and the
 on-screen keyboard in the text; from the keyboard, the arrow keys move along
 the toolbar and Tab leaves it. In the text input, Ctrl+B, Ctrl+I and Ctrl+K
