@@ -963,7 +963,8 @@ export function useContextEditor<D>(
       // (this hook remounted): returning to it leaves nothing, so it does not
       // ask, and a pending save does not block it.
       if (
-        !(liveLane(now, snapshot) && now!.lane.connection === connection) &&
+        // Any live target, also of another connection, is left: ask first.
+        !liveLane(now, snapshot) &&
         editorsOf(app).retains(
           target.context,
           target.subject,

@@ -375,3 +375,33 @@ it('ends the work bound to a connection once that connection is removed', async 
   expect(unresolved).toEqual([]);
   expect(state.activeId).toBe(bob);
 });
+
+it('asks before leaving a live editor for a retained one of another connection', async () => {
+  const { alice, bob, writes } = await setup();
+  const bobs = { subject: 'urn:s', context: home, connection: bob };
+  const alices = { subject: 'urn:a', context: work, connection: alice };
+  await act(async () => {
+    expect(await edit.open(bobs)).toBe(true);
+  });
+  await waitFor(() => expect(edit.phase).toBe('ready'));
+  // Bob's idle editor stays retained once Alice's row opens.
+  await act(async () => {
+    expect(await edit.open(alices)).toBe(true);
+  });
+  await waitFor(() => expect(edit.phase).toBe('ready'));
+  await act(async () => {
+    await edit.editor!.loaded;
+  });
+  act(() => edit.editor!.change({ title: 'Oat milk' }));
+  // Back to Bob's row: Alice's draft is left, so the SDK asks first.
+  let back: Promise<boolean> | undefined;
+  act(() => {
+    back = edit.open(bobs);
+  });
+  await waitFor(() => expect(state.confirmingLeave).toBe(true));
+  act(() => stay());
+  expect(await back).toBe(false);
+  expect(edit.target).toEqual(alices);
+  expect(edit.editor!.state.draft?.title).toBe('Oat milk');
+  expect(writes).toEqual([]);
+});
