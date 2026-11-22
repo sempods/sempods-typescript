@@ -1870,7 +1870,8 @@ heading, bold, italic, bulleted and numbered list, and link (the link's
 address is selected to type over). Bold and italic apply to each selected
 line on its own, after its list marker, heading or quote, since emphasis
 cannot cross them. A selection that is only partly bold or italic becomes
-so as a whole, its own markers merged into one pair. Stars
+so as a whole, its own markers merged into one pair. A selection inside a
+larger bold or italic span loses it alone, the span split around it. Stars
 that are text, such as in `2 * 3` or in code, stay. Pressing one keeps the focus and the
 on-screen keyboard in the text; from the keyboard, the arrow keys move along
 the toolbar and Tab leaves it. In the text input, Ctrl+B, Ctrl+I and Ctrl+K

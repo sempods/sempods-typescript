@@ -202,12 +202,70 @@ function span(
     };
   }
   const plain = unmark(kind, inner, found);
+  // Inside a larger span of the line: take the emphasis off the selection
+  // only, splitting the span around it.
+  if (inner !== '' && plain === inner) {
+    const split = splitSpan(kind, source, start, end);
+    if (split) return split;
+  }
   return {
     from: start,
     to: end,
     insert: mark + plain + mark,
     select: [start + n, start + n + plain.length],
     removes: false,
+  };
+}
+
+/**
+ * The edit that ends the innermost `kind` span of the selection's line that
+ * encloses the selection before it and starts it again after it:
+ * `**say hello world**` with `hello` selected becomes
+ * `**say** hello **world**`. A marker never stands beside a space, where it
+ * would not mark; an empty side loses its marker. `null` without such a span.
+ */
+function splitSpan(
+  kind: Emphasis,
+  source: string,
+  start: number,
+  end: number,
+): SpanEdit | null {
+  const n = kind === 'bold' ? 2 : 1;
+  const mark = '*'.repeat(n);
+  const line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
+  const next = source.indexOf('\n', end);
+  const text = source.slice(line, next === -1 ? source.length : next);
+  const found = markers(kind, text);
+  let open: Marker | undefined;
+  let close: Marker | undefined;
+  for (const marker of found) {
+    const mate = found[marker.mate];
+    if (!mate || mate.at <= marker.at) continue;
+    if (marker.at + marker.length <= start - line && mate.at >= end - line)
+      if (!open || marker.at > open.at) [open, close] = [marker, mate];
+  }
+  if (!open || !close) return null;
+  const from = line + open.at;
+  const to = line + close.at + close.length;
+  const before = source.slice(line + open.at + open.length, start);
+  const after = source.slice(end, line + close.at);
+  const opening = '*'.repeat(open.length);
+  const closing = '*'.repeat(close.length);
+  const left = before.trim()
+    ? opening + before.trimEnd() + mark + before.slice(before.trimEnd().length)
+    : '*'.repeat(open.length - n) + before;
+  const lead = after.length - after.trimStart().length;
+  const right = after.trim()
+    ? after.slice(0, lead) + mark + after.trimStart() + closing
+    : after + '*'.repeat(close.length - n);
+  const middle = source.slice(start, end);
+  const at = from + left.length;
+  return {
+    from,
+    to,
+    insert: left + middle + right,
+    select: [at, at + middle.length],
+    removes: true,
   };
 }
 

@@ -68,6 +68,17 @@ describe('emphasis', () => {
     expect(run('bold', '> [quoted]')).toBe('> **[quoted]**');
   });
 
+  it('takes the emphasis off a selection inside a larger span', () => {
+    expect(run('bold', '**[hello] world**')).toBe('[hello] **world**');
+    expect(run('bold', '**say [hello] world**')).toBe(
+      '**say** [hello] **world**',
+    );
+    expect(run('bold', '**say [hello]**')).toBe('**say** [hello]');
+    expect(run('italic', '*say [hi] there*')).toBe('*say* [hi] *there*');
+    // The other emphasis stays.
+    expect(run('italic', '***[a] b***')).toBe('**[a] *b***');
+  });
+
   it('keeps stars that are text', () => {
     expect(run('italic', '[2 * 3 = 6]')).toBe('*[2 * 3 = 6]*');
     expect(run('bold', '[match `**/*.ts` files]')).toBe(
