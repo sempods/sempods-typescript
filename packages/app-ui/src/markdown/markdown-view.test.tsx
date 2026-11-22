@@ -62,6 +62,19 @@ it('links an address in angle brackets as the field writes it', () => {
   );
 });
 
+it('links labels as the field escapes them', () => {
+  const { container } = render(
+    <MarkdownView
+      source={
+        '[💰 price \\[USD](https://example.org/a) [C:\\folder\\\\](https://example.org/b)'
+      }
+    />,
+  );
+  expect(
+    [...container.querySelectorAll('a')].map((a) => a.textContent),
+  ).toEqual(['💰 price [USD', 'C:\\folder\\']);
+});
+
 it('shows embedded HTML as text and images only as their description', () => {
   const { container } = render(
     <MarkdownView

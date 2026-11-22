@@ -197,6 +197,17 @@ describe('links', () => {
       'https://',
     ]);
     expect(label('a \\[ b')).toEqual(['[a \\[ b](https://)', 'https://']);
+    // Offsets count UTF-16 units, as an emoji before the bracket has two.
+    expect(label('💰 price [USD')).toEqual([
+      '[💰 price \\[USD](https://)',
+      'https://',
+    ]);
+    // A backslash at the end must not escape the closing bracket.
+    expect(label('C:\\folder\\')).toEqual([
+      '[C:\\folder\\\\](https://)',
+      'https://',
+    ]);
+    expect(label('ends \\\\')).toEqual(['[ends \\\\](https://)', 'https://']);
   });
 
   it('keeps a selected address whole that holds parentheses', () => {

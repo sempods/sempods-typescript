@@ -524,8 +524,8 @@ const destination = (address: string) =>
 
 /**
  * Text as a link's label: a `[` or `]` without its partner would end the
- * label early or move its start, so it is escaped; pairs and escaped ones
- * stay as they are.
+ * label early or move its start, and a backslash at its end would escape
+ * the closing `]`, so they are escaped; pairs and escaped ones stay.
  */
 function label(text: string): string {
   const open: number[] = [];
@@ -539,7 +539,13 @@ function label(text: string): string {
     }
   }
   for (const i of open) unmatched.add(i);
-  return [...text].map((c, i) => (unmatched.has(i) ? '\\' + c : c)).join('');
+  // UTF-16 offsets, as found above: an emoji before a bracket counts two.
+  let result = '';
+  for (let i = 0; i < text.length; i++)
+    result += unmatched.has(i) ? '\\' + text[i] : text[i];
+  // An odd run of backslashes at the end would escape the closing `]`.
+  const trailing = /\\*$/.exec(text)![0].length;
+  return trailing % 2 === 1 ? result + '\\' : result;
 }
 
 /**
