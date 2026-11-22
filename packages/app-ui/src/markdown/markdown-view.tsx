@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import Markdown, { type Components, type ExtraProps } from 'react-markdown';
 import { cn } from 'cn';
 
@@ -131,9 +131,10 @@ const elements: Partial<Components> = {
  * quotes, code and links that open on a press. Embedded HTML shows as its
  * text and images as their description, so displaying text from a Pod
  * neither runs nor fetches anything. It renders in the first paint, without
- * loading anything first.
+ * loading anything first. It parses again only for a new source or heading
+ * level, not when its parent renders again.
  */
-export function MarkdownView({
+export const MarkdownView = memo(function MarkdownView({
   source,
   headingLevel = 3,
   className,
@@ -155,4 +156,4 @@ export function MarkdownView({
       </Markdown>
     </div>
   );
-}
+});

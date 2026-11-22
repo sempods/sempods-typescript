@@ -154,9 +154,9 @@ try {
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
   // The installed README's examples: its task dialog, its quick edit, its
   // workspace, its view links, its view strip, its confirmation, its "Not
-  // today" action, its delete actions, its task notes and its address model are the
-  // reference screen's, so the checks run them as shipped; other TSX examples
-  // are only compiled. Its stylesheet setup is the one the screen uses.
+  // today" action, its delete actions, its task notes and its address model
+  // are the reference screen's, so the checks run them as shipped; other TSX
+  // examples are only compiled. Its stylesheet setup is the one the screen uses.
   const readme = await readFile(
     join(temp, 'node_modules/@sempods/app-ui/README.md'),
     'utf8',

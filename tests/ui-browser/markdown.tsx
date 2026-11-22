@@ -9,7 +9,7 @@ import { TaskNotes } from './task-notes';
  * typed and a hard line break, lists and a web link, beside embedded HTML, an image,
  * a script address and an image in HTML that a reader must not fetch.
  */
-export const SAMPLE = [
+const SAMPLE = [
   '# Plan',
   '',
   'Call **before noon** and ask for *Ms Weber*.',
@@ -30,6 +30,12 @@ export const SAMPLE = [
   '',
   '[run](javascript:window.hacked=1)',
 ].join('\n');
+
+/** A long draft: 400 headings, each with a paragraph. */
+const LONG = Array.from(
+  { length: 400 },
+  (_, i) => `## Step ${i + 1}\n\nCheck **part ${i + 1}** twice.`,
+).join('\n\n');
 
 /**
  * The Markdown entry (`?screen=markdown`, #395). Without `part`, no
@@ -73,17 +79,8 @@ function MarkdownForm({
   readonly write: boolean;
 }) {
   const [title, setTitle] = useState('Call the plumber');
-  const [value, setValue] = useState(() =>
-    notes === 'empty'
-      ? ''
-      : notes === 'short'
-        ? 'Buy milk'
-        : notes === 'long'
-          ? Array.from(
-              { length: 400 },
-              (_, i) => `## Step ${i + 1}\n\nCheck **part ${i + 1}** twice.`,
-            ).join('\n\n')
-          : SAMPLE,
+  const [value, setValue] = useState(
+    () => ({ empty: '', short: 'Buy milk', long: LONG })[notes ?? ''] ?? SAMPLE,
   );
   const [changes, setChanges] = useState(0);
   return (

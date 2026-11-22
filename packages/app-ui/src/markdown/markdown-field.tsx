@@ -2,11 +2,9 @@ import {
   useDeferredValue,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
-  type ReactNode,
 } from 'react';
 import {
   BoldIcon,
@@ -17,12 +15,13 @@ import {
   ListIcon,
   ListOrderedIcon,
   PencilIcon,
+  type LucideIcon,
 } from 'lucide-react';
 import { Toolbar } from 'react-aria-components';
 import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Textarea } from '../components/textarea.js';
-import { formatMarkdown, type MarkdownFormat } from './format.js';
+import { applyEdit, formatMarkdown, type MarkdownFormat } from './format.js';
 import { MarkdownView, type MarkdownViewProps } from './markdown-view.js';
 import { useMarkdownTexts, type MarkdownFieldLabels } from './texts.js';
 
@@ -71,14 +70,16 @@ const shortcuts: Readonly<Record<string, MarkdownFormat>> = {
   k: 'link',
 };
 
-const kinds: readonly MarkdownFormat[] = [
-  'heading',
-  'bold',
-  'italic',
-  'bulletList',
-  'numberedList',
-  'link',
-];
+/** The toolbar's actions in order, each named by its text of the same key. */
+const actions = [
+  ['heading', Heading2Icon],
+  ['bold', BoldIcon],
+  ['italic', ItalicIcon],
+  ['bulletList', ListIcon],
+  ['numberedList', ListOrderedIcon],
+  ['link', LinkIcon],
+] as const satisfies readonly (readonly [MarkdownFormat, LucideIcon])[];
+const kinds = actions.map(([kind]) => kind);
 
 /** The field's width from which the preview stands beside the source. */
 const WIDE_REM = 42;
@@ -93,10 +94,9 @@ const apple = () =>
  * the selection (heading, bold, italic, lists, link), with Ctrl or Command
  * + B, I and K; an action whose effect would not be predictable there, such
  * as bold inside code, is disabled. Tab leaves the text input for the next
- * control. One action
- * at the field's top end switches between reading and writing, so it stays
- * in place: editing moves the focus into the text, preview back to that
- * action. A wide field shows the preview beside the source as it is typed.
+ * control. One action at the field's top end switches between reading and
+ * writing, so it stays in place: editing moves the focus into the text,
+ * preview back to that action. A wide field shows the preview beside the source as it is typed.
  * The containing editor owns validation, save, cancel and conflicts.
  */
 export function MarkdownField({
@@ -181,11 +181,6 @@ export function MarkdownField({
     if (writing) recheck();
   }, [value, writing]);
   useEffect(() => () => clearTimeout(check.current), []);
-  // The preview, parsed again only for a new source.
-  const live = useMemo(
-    () => <MarkdownView source={preview} headingLevel={headingLevel} />,
-    [preview, headingLevel],
-  );
 
   const format = (kind: MarkdownFormat) => {
     const input = textarea.current;
@@ -198,8 +193,7 @@ export function MarkdownField({
       input.selectionEnd,
     );
     if (!edit) return;
-    const next =
-      source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
+    const next = applyEdit(source, edit);
     input.focus();
     input.setSelectionRange(edit.from, edit.to);
     // The browser's own text input keeps the edit in its undo history and
@@ -237,14 +231,8 @@ export function MarkdownField({
   };
 
   if (readOnly && !filled) return null;
-  const actions: [MarkdownFormat, string, ReactNode][] = [
-    ['heading', t.heading, <Heading2Icon key="heading" />],
-    ['bold', t.bold, <BoldIcon key="bold" />],
-    ['italic', t.italic, <ItalicIcon key="italic" />],
-    ['bulletList', t.bulletList, <ListIcon key="bulletList" />],
-    ['numberedList', t.numberedList, <ListOrderedIcon key="numberedList" />],
-    ['link', t.link, <LinkIcon key="link" />],
-  ];
+  // The preview stands beside the source.
+  const beside = writing && wide;
   const switchLabel = writing ? t.preview : filled ? t.edit : t.addText;
   return (
     <div
@@ -261,18 +249,18 @@ export function MarkdownField({
             aria-label={t.formatting}
             className="flex min-w-0 flex-1 flex-wrap gap-0.5"
           >
-            {actions.map(([kind, name, icon]) => (
+            {actions.map(([kind, Icon]) => (
               <Button
                 key={kind}
                 variant="ghost"
                 className="size-11 text-muted-foreground hover:text-foreground"
-                aria-label={name}
+                aria-label={t[kind]}
                 isDisabled={unavailable.includes(kind)}
                 preventFocusOnPress
                 onPress={() => format(kind)}
               >
                 <span aria-hidden="true" className="contents">
-                  {icon}
+                  <Icon />
                 </span>
               </Button>
             ))}
@@ -325,7 +313,7 @@ export function MarkdownField({
             <div
               className="grid min-w-0 gap-4"
               style={
-                writing && wide
+                beside
                   ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }
                   : undefined
               }
@@ -343,13 +331,13 @@ export function MarkdownField({
               />
               {/* Wide: the preview beside the source, as it is typed; only
                   there, so a narrow field parses nothing while typing. */}
-              {writing && wide && (
+              {beside && (
                 <div
                   role="region"
                   aria-label={t.preview}
                   className="min-w-0 px-1"
                 >
-                  {live}
+                  <MarkdownView source={preview} headingLevel={headingLevel} />
                 </div>
               )}
             </div>

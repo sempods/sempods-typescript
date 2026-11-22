@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMarkdown, type MarkdownFormat } from './format.js';
+import { applyEdit, formatMarkdown, type MarkdownFormat } from './format.js';
 
 /**
  * Applies one action to a source whose selection is marked with `[` and `]`,
@@ -20,7 +20,7 @@ function run(kind: MarkdownFormat, marked: string): string | null {
         marked.slice(end + 2);
   const edit = formatMarkdown(kind, source, start, end);
   if (!edit) return null;
-  const next = source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
+  const next = applyEdit(source, edit);
   const [a, b] = edit.select;
   return a === b
     ? next.slice(0, a) + '|' + next.slice(a)

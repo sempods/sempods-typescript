@@ -9614,12 +9614,6 @@ async function markdown({ browser, origin, engine }) {
       draft: JSON.parse(el.getAttribute('data-draft')),
       changes: Number(el.getAttribute('data-changes')),
     }));
-  /** The focused element: its tag and accessible name, as far as needed. */
-  const focused = (page) =>
-    page.evaluate(() => {
-      const el = document.activeElement;
-      return `${el?.tagName.toLowerCase()} ${el?.getAttribute('aria-label') ?? el?.textContent?.trim() ?? ''}`;
-    });
   const box = async (locator) => {
     const b = await locator.boundingBox();
     return b && [b.x, b.y, b.width, b.height].map((n) => Math.round(n));
@@ -9798,11 +9792,11 @@ async function markdown({ browser, origin, engine }) {
             return {
               pass:
                 reading === 'Edit text' &&
-                intoText === 'textarea Notes' &&
+                intoText === 'textarea "Notes"' &&
                 source.startsWith(SAMPLE_START) &&
-                back === 'button Edit text' &&
-                keyText === 'textarea Notes' &&
-                keyBack === 'button Edit text' &&
+                back === 'button "Edit text"' &&
+                keyText === 'textarea "Notes"' &&
+                keyBack === 'button "Edit text"' &&
                 JSON.stringify(before) === JSON.stringify(writing) &&
                 JSON.stringify(before) === JSON.stringify(after) &&
                 state.changes === 0 &&
@@ -9889,8 +9883,6 @@ async function markdown({ browser, origin, engine }) {
   {
     const { context, page, errors } = await newPage(browser);
     try {
-      await page.goto(address('&notes=empty&write'));
-      await text(page).waitFor();
       const select = (from, to) =>
         text(page).evaluate(
           (el, [a, b]) => el.setSelectionRange(a, b),
@@ -9943,9 +9935,9 @@ async function markdown({ browser, origin, engine }) {
           const back = await focused(page);
           return {
             pass:
-              arrow === 'button Bold' &&
+              arrow === 'button "Bold"' &&
               italic === 'Buy *milk*' &&
-              back === 'textarea Notes',
+              back === 'textarea "Notes"',
             arrow,
             italic,
             back,
@@ -9997,9 +9989,9 @@ async function markdown({ browser, origin, engine }) {
           const previous = await focused(page);
           return {
             pass:
-              next === 'button After the notes' &&
+              next === 'button "After the notes"' &&
               !value.includes('\t') &&
-              previous === 'textarea Notes',
+              previous === 'textarea "Notes"',
             next,
             previous,
           };
@@ -10040,11 +10032,11 @@ async function markdown({ browser, origin, engine }) {
           const again = await focused(page);
           return {
             pass:
-              add === 'textarea Notes' &&
-              kept === 'textarea Notes' &&
+              add === 'textarea "Notes"' &&
+              kept === 'textarea "Notes"' &&
               bold === 'Buy **milk**' &&
               rendered === 'milk' &&
-              again === 'textarea Notes',
+              again === 'textarea "Notes"',
             add,
             kept,
             bold,
@@ -10156,11 +10148,10 @@ async function markdown({ browser, origin, engine }) {
     page.on('request', (r) => {
       if (r.method() === 'PATCH') patches.push(r.url());
     });
+    const { iri, work } = plumberTask(origin);
     const description = async () =>
       (await storedTasks(origin)).find(
-        (t) =>
-          t.context === origin + '/alice/_system/contexts/work' &&
-          t.body['@id'] === origin + '/alice/tasks/1',
+        (t) => t.context === work && t.body['@id'] === iri,
       );
     const SOURCE =
       '    code first\n\nA line with a hard break  \nnext line\n\n- item';
