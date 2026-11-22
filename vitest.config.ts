@@ -1,4 +1,9 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
-  test: { include: ['packages/**/*.test.{ts,tsx}'], environment: 'node' },
+  test: {
+    include: ['packages/**/*.test.{ts,tsx}'],
+    // Shared test helpers: typechecked with the tests, never a suite.
+    exclude: [...configDefaults.exclude, 'packages/**/*.helpers.test.{ts,tsx}'],
+    environment: 'node',
+  },
 });

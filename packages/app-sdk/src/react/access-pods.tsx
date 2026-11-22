@@ -665,10 +665,16 @@ function PodDetails({
       : switching
         ? selectedEntry
         : undefined;
-  // The row names a failed or pending catalogue itself; the notice adds what
-  // else limits the app's target, such as missing feature access.
+  // A preset Context the catalogue does not list as readable.
+  const fixedMissing =
+    fixedContext !== undefined && c.catalogue.kind === 'ready' && !fixedEntry;
+  // The row names a failed or pending catalogue and a missing preset Context
+  // itself; the notice adds what else limits the app's target, such as
+  // missing feature access.
   const ownStatus =
-    c.catalogue.kind === 'failed' || !knownContexts(c.catalogue);
+    c.catalogue.kind === 'failed' ||
+    !knownContexts(c.catalogue) ||
+    fixedMissing;
   return (
     <>
       {address}
@@ -742,9 +748,12 @@ function PodDetails({
         (c.catalogue.kind === 'loading' && !c.catalogue.contexts)) && (
         <p role="status">{m.cataloguePending}</p>
       )}
+      {fixedMissing && (
+        <p role="status">{m.controls.presetContextUnavailable}</p>
+      )}
       {c.catalogue.kind === 'ready' &&
-        // An unreadable preset Context is named by the notice, if shown.
-        (fixedContext ? !fixedEntry && !notice : readable.length === 0) && (
+        !fixedContext &&
+        readable.length === 0 && (
           <p role="status">
             {anonymous && state.signIn !== 'none'
               ? (m.controls.noPublicData ?? m.noContexts)

@@ -27,15 +27,21 @@ export interface LeaveGuard {
    *   explicit Context that row navigation does not touch; left by connection
    *   actions.
    *
-   * `disconnect` and `forget` of a connection other than the active one keep
-   * the selected view: they leave only `connection` and `explicit` guards,
-   * which may be bound to that Pod.
+   * `disconnect` and `forget` of a connection other than the active one
+   * leave only the guards of that connection (`connectionId`); a guard that
+   * does not name its connection is left when it is `connection` or
+   * `explicit`, which may be bound to that Pod.
    *
    * A pending write (`blocked()`) blocks every change, except that a
    * `connection` or `explicit` guard does not block `selectContext`, which
    * leaves it alone.
    */
   readonly scope?: 'local' | 'target' | 'connection' | 'explicit';
+  /**
+   * The connection this guard's work belongs to, when known: signing out of
+   * or forgetting another connection keeps it (see `scope`).
+   */
+  readonly connectionId?: string;
   unconfirmed?(): boolean;
   blocked(): boolean;
   dirty(): boolean;
@@ -140,12 +146,16 @@ function cannotWork(c: Connection) {
  * A guarded change: row navigation, a Context selection, a connection action,
  * or signing out of (or forgetting) a connection that is not the active one.
  */
-type Change = 'navigate' | 'context' | 'connection' | 'elsewhere';
+type Change =
+  'navigate' | 'context' | 'connection' | { readonly retiring: string };
 /** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
 function leaves(change: Change, guard: LeaveGuard) {
-  // The selected view stays; an explicit Context may be bound to that Pod.
-  if (change === 'elsewhere')
-    return guard.scope === 'connection' || guard.scope === 'explicit';
+  // Only that connection's work goes; the selected view stays, and an
+  // explicit Context whose connection is unknown may be bound to it.
+  if (typeof change === 'object')
+    return guard.connectionId !== undefined
+      ? guard.connectionId === change.retiring
+      : guard.scope === 'connection' || guard.scope === 'explicit';
   if (change === 'navigate')
     return guard.scope !== 'target' && guard.scope !== 'explicit';
   if (change === 'context')
@@ -1000,7 +1010,9 @@ export function createAppController(
   }
   /** Retiring another connection keeps the selected view (`LeaveGuard.scope`). */
   function retiring(id: string): Change {
-    return activeId !== null && id !== activeId ? 'elsewhere' : 'connection';
+    return activeId !== null && id !== activeId
+      ? { retiring: id }
+      : 'connection';
   }
   function disconnecting(id: string) {
     return async () => {
@@ -1027,8 +1039,10 @@ export function createAppController(
       tracker.current(prompt, action) ? 'yes' : 'gone';
     if (available() !== 'yes') return false;
     const id = prompt.connectionId;
-    const guarded = (run: () => void | Promise<void>) =>
-      guard(run, 'connection', undefined, available);
+    const guarded = (
+      run: () => void | Promise<void>,
+      change: Change = 'connection',
+    ) => guard(run, change, undefined, available);
     switch (action) {
       case 'dismiss':
         return controller.dismiss(prompt.id);
@@ -1038,11 +1052,13 @@ export function createAppController(
         return true;
       case 'retry':
         if (!id) return false;
-        if (prompt.reason !== 'unreachable') return guarded(disconnecting(id));
+        // Retrying a sign-out or removal that could not be saved.
+        if (prompt.reason !== 'unreachable')
+          return guarded(disconnecting(id), retiring(id));
         await runtime.retryRestore(id);
         return true;
       case 'forget':
-        return id ? guarded(forgetting(id)) : false;
+        return id ? guarded(forgetting(id), retiring(id)) : false;
       case 'sign-in':
         // Missing scopes are granted on the consent page, which a reused
         // grant would skip.

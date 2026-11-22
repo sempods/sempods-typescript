@@ -34,7 +34,7 @@ import {
   jwt,
   settleLease,
 } from '../runtime/fixture.test.js';
-import { podAction, podActionNames } from './pod-actions.test.js';
+import { podAction, podActionNames } from './pod-actions.helpers.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import { openSessionStore } from '../sessions/store.js';
 import type { SessionRecord } from '../sessions/records.js';

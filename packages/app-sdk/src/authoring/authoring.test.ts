@@ -13,7 +13,7 @@ import {
   twoPods,
 } from '../runtime/fixture.test.js';
 import { bindResourceEditor } from './editor.js';
-import { createAppController } from './app.js';
+import { createAppController, runAccessAction } from './app.js';
 import { createViewLoader } from './load.js';
 import { observeStarts } from './changes.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
@@ -641,6 +641,52 @@ it('signs out of another connection keeping the selected view, but asks about an
   app.cancelLeave();
   expect(await leaving).toBe(false);
   expect(selected).not.toHaveBeenCalled();
+});
+it('keeps the active connection’s explicit draft and retries another connection’s failed sign-out without asking', async () => {
+  const f = await connected();
+  const bob = await f.runtime.connect('https://pod.example/bob');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  expect(await app.selectConnection(bob.id)).toBe(true);
+  const selected = vi.fn();
+  const explicit = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard: selected });
+  // Bob's own draft in an explicit Context names its connection.
+  app.register({
+    scope: 'explicit',
+    connectionId: bob.id,
+    dirty: () => true,
+    blocked: () => false,
+    discard: explicit,
+  });
+  const write = vi
+    .spyOn(IDBObjectStore.prototype, 'put')
+    .mockImplementation(() => {
+      throw new Error('fixture storage failure');
+    });
+  expect(await app.disconnect(f.id)).toBe(true);
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  write.mockRestore();
+  const failed = app
+    .getSnapshot()
+    .access.prompts.find(
+      (prompt) =>
+        prompt.connectionId === f.id && prompt.reason === 'sign-out-failed',
+    );
+  expect(failed?.actions).toContain('retry');
+  // The retry of the notice decides like the first attempt.
+  expect(await runAccessAction(app, failed!, 'retry')).toBe(true);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: bob.id,
+    confirmingLeave: false,
+  });
+  expect(
+    app.getSnapshot().connections.find((c) => c.id === f.id)?.session.kind,
+  ).toBe('signed-out');
+  expect(selected).not.toHaveBeenCalled();
+  expect(explicit).not.toHaveBeenCalled();
 });
 it('lets a Context selection pass a pending explicit-scoped creation, which still blocks row navigation', async () => {
   const f = await connected();

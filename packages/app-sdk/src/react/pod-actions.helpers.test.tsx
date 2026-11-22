@@ -1,10 +1,11 @@
-// Helpers for Pods & sharing management (#386), shared by its test suites:
-// a module of their own, so importing them registers no Pod row tests.
-import { expect, it } from 'vitest';
+// Helpers for Pods & sharing management (#386), shared by its test suites.
+// A `.helpers.test` module registers no tests: Vitest does not collect it
+// (vitest.config.ts), and importing it adds none to a suite.
+import { expect } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { englishMessages, germanMessages } from '../locale.js';
 
-const actionsName = /^(Actions for|Aktionen für) /;
+/** The name of a Pod's ⋯ button in the shipped locales. */
+export const actionsName = /^(Actions for|Aktionen für) /;
 
 /**
  * The ⋯ button of a Pod row in management: of the Pod named `pod`, else of
@@ -46,10 +47,3 @@ export async function podActionNames(pod?: string) {
     .getAllByRole('button')
     .map((button) => button.textContent);
 }
-
-it('finds the Pod actions by the label of each shipped locale', () => {
-  for (const messages of [englishMessages, germanMessages]) {
-    const label = messages.podActions!('pod.example/alice');
-    expect(label.replace(actionsName, '')).toBe('pod.example/alice');
-  }
-});

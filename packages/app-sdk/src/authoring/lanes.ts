@@ -109,6 +109,7 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
       lane,
       this.app.register({
         ...lane.guard(this.scope),
+        ...(this.connection ? { connectionId: this.connection } : {}),
         subscribe: this.subscribe,
       }),
     );

@@ -15,7 +15,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { podAction } from './pod-actions.test.js';
+import { podAction } from './pod-actions.helpers.test.js';
 import {
   AppAccess,
   SempodsProvider,

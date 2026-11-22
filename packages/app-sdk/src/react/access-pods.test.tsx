@@ -10,7 +10,13 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
-import { AppAccess, SempodsProvider, useDraftGuard } from './index.js';
+import { fields, text } from '@sempods/client-sdk/edit';
+import {
+  AppAccess,
+  SempodsProvider,
+  useCreation,
+  useDraftGuard,
+} from './index.js';
 import {
   catalogue,
   fixture,
@@ -20,7 +26,13 @@ import {
   twoPods,
   work,
 } from '../runtime/fixture.test.js';
-import { podAction, podActionNames, podActions } from './pod-actions.test.js';
+import {
+  actionsName,
+  podAction,
+  podActionNames,
+  podActions,
+} from './pod-actions.helpers.test.js';
+import { englishMessages, germanMessages } from '../locale.js';
 
 // Pods & sharing management grouped by Pod (#386): one row per Pod, its
 // actions behind its own button, and connecting another Pod as a step.
@@ -58,6 +70,13 @@ const catalogueReads = (
 const row = (name: string) => screen.getByRole('group', { name });
 const toggle = (element: HTMLElement) =>
   within(element).getAllByRole('button')[0]!;
+
+it('finds the Pod actions by the label of each shipped locale', () => {
+  for (const messages of [englishMessages, germanMessages]) {
+    const label = messages.podActions!('pod.example/alice');
+    expect(label.replace(actionsName, '')).toBe('pod.example/alice');
+  }
+});
 
 it('marks the selected Pod, loads another Pod’s access when its row opens and switches only through the guarded action', async () => {
   const { f, runtime } = await alicesAndBobs();
@@ -295,6 +314,37 @@ it.each(['required', 'on-demand'] as const)(
   },
 );
 
+it.each(['required', 'on-demand'] as const)(
+  'names a missing preset Context, not an empty Pod (%s)',
+  async (contextSelection) => {
+    const missing = pod + '/_system/contexts/not-yet-granted';
+    const f = await returnedSession(
+      (r) => cleanups.push(() => r.dispose()),
+      fixture({
+        preferences: null,
+        preset: { podUrl: pod, contextIri: missing },
+      }),
+    );
+    f.setCatalogue(async () => catalogue([work], []));
+    render(
+      <SempodsProvider runtime={f.runtime} contextSelection={contextSelection}>
+        <AppAccess appName="Tasks" open onClose={() => {}} />
+      </SempodsProvider>,
+    );
+    const alice = await screen.findByRole('group', {
+      name: 'pod.example/alice',
+    });
+    await waitFor(() =>
+      expect(
+        within(alice).getAllByText(
+          'The configured context is not readable on this Pod.',
+        ),
+      ).toHaveLength(1),
+    );
+    expect(within(alice).queryByText(/^No readable contexts/)).toBeNull();
+  },
+);
+
 it('focuses the Pod just opened once no other permitted Pod is left to connect', async () => {
   const f = fixture({ signIn: 'optional', allowedPods: [pod, bob] });
   const { runtime } = await f.login();
@@ -319,6 +369,57 @@ it('focuses the Pod just opened once no other permitted Pod is left to connect',
     within(dialog).queryByRole('button', { name: 'Connect another Pod' }),
   ).toBeNull();
   expect(document.activeElement).toBe(toggle(bobs));
+});
+
+it('signs out of another Pod keeping the selected Pod’s drafts, also in an explicit Context', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  f.setCatalogue(async (url) =>
+    url.startsWith(bob) ? catalogue([club], [club], bob) : catalogue(),
+  );
+  const task = fields(
+    { title: text('urn:title', { language: null }) },
+    { type: 'urn:Task' },
+  );
+  const discarded = vi.fn();
+  function Drafts() {
+    useDraftGuard(true, discarded);
+    const creation = useCreation(task, {
+      initial: { title: '' },
+      collection: 'tasks',
+      context: club,
+    });
+    return (
+      <input
+        aria-label="Title"
+        disabled={!creation.canEdit}
+        value={creation.draft.title}
+        onChange={(e) => creation.change({ title: e.target.value })}
+      />
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Drafts />
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  const title = screen.getByLabelText('Title') as HTMLInputElement;
+  await waitFor(() => expect(title.disabled).toBe(false));
+  fireEvent.change(title, { target: { value: 'Club evening' } });
+  const signOut = await podAction(
+    'Sign out on this device',
+    'pod.example/alice',
+  );
+  await act(async () => signOut.click());
+  await waitFor(() =>
+    expect(
+      runtime.getSnapshot().find((entry) => entry.podUrl === pod)?.session.kind,
+    ).toBe('signed-out'),
+  );
+  expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull();
+  expect(title.value).toBe('Club evening');
+  expect(discarded).not.toHaveBeenCalled();
 });
 
 it('tells Pods with the same name apart and names each one’s actions', async () => {

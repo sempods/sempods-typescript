@@ -1390,10 +1390,12 @@ function AppContent() {
   device**, an unreachable one **Try again**. Sign-out and removal stay on
   this device; revoking access is the Pod's consent behind **Change
   sharing**. Signing out of or removing a Pod that is not the selected one
-  keeps the selected view's drafts: it asks only about drafts in explicit
-  Contexts (`useApp().disconnect`), and its **Try again** holds only that
-  Pod's row. After a sign-out that could not be saved, **Try again** repeats
-  it, and its failure shows in the row.
+  keeps the selected Pod's drafts, also those of SDK forms and editors in
+  an explicit Context; it asks only about work that may belong to that Pod,
+  such as an app's own `useDraftGuard` with the `connection` or `explicit`
+  scope (`useApp().disconnect`). Its **Try again** holds only that Pod's
+  row. After a sign-out that could not be saved, **Try again** repeats it,
+  also from its notice, and its failure shows in the row.
 - Open, a row shows the Pod's address beside a display name, then its
   readable Contexts with **Read only** or **Can edit**, or that they are
   loading, unavailable (with **Check access**) or none. For the selected Pod

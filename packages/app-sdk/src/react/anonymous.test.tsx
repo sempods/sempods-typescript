@@ -17,7 +17,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
-import { podAction, podActionNames } from './pod-actions.test.js';
+import { podAction, podActionNames } from './pod-actions.helpers.test.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   catalogue,
