@@ -53,6 +53,15 @@ it('links only web addresses, opening them in a new tab', () => {
   expect(container.textContent).toContain('here');
 });
 
+it('links an address in angle brackets as the field writes it', () => {
+  const { container } = render(
+    <MarkdownView source="[page](<https://example.org/a)b>)" />,
+  );
+  expect(container.querySelector('a')?.getAttribute('href')).toBe(
+    'https://example.org/a)b',
+  );
+});
+
 it('shows embedded HTML as text and images only as their description', () => {
   const { container } = render(
     <MarkdownView

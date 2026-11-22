@@ -167,6 +167,15 @@ describe('links', () => {
     );
   });
 
+  it('keeps a selected address whole that holds parentheses', () => {
+    expect(run('link', '[https://example.org/a)b]')).toBe(
+      '[|](<https://example.org/a)b>)',
+    );
+    expect(run('link', '[https://example.org/a<b>\\c]')).toBe(
+      '[|](<https://example.org/a\\<b\\>\\\\c>)',
+    );
+  });
+
   it('inserts an empty link at the caret', () => {
     expect(run('link', 'a |b')).toBe('a [|](https://)b');
   });

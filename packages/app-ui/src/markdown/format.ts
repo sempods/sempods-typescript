@@ -439,6 +439,16 @@ function linePrefix(
 const URL_ONLY = /^https?:\/\/\S+$/i;
 
 /**
+ * An address as a link destination: in angle brackets, with `<`, `>` and
+ * `\\` escaped, when it holds characters that would end or change a plain
+ * one, such as an unbalanced `)`.
+ */
+const destination = (address: string) =>
+  /[()<>\\]/.test(address)
+    ? '<' + address.replace(/[<>\\]/g, '\\$&') + '>'
+    : address;
+
+/**
  * A link around the selection: its text with `https://` selected for the
  * address, or, for a selected address, the address with the caret in the
  * empty text.
@@ -448,7 +458,7 @@ function link(source: string, selStart: number, selEnd: number): MarkdownEdit {
     selStart === selEnd ? [selStart, selEnd] : inward(source, selStart, selEnd);
   const inner = source.slice(start, end);
   if (inner === '' || URL_ONLY.test(inner)) {
-    const insert = `[](${inner || 'https://'})`;
+    const insert = `[](${inner ? destination(inner) : 'https://'})`;
     return { from: start, to: end, insert, select: [start + 1, start + 1] };
   }
   const insert = `[${inner}](https://)`;
