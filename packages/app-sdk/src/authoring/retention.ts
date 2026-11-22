@@ -1,5 +1,6 @@
 import type { AppController } from './app.js';
 import type { BoundView } from '../runtime/view.js';
+import { removalsOf } from '../runtime/removals.js';
 
 /**
  * Internal: the one lifetime rule for captured work (resource editors,
@@ -17,22 +18,22 @@ import type { BoundView } from '../runtime/view.js';
  * authorization, and gets no write authority back. Once a view saw a new
  * session, its work is never kept again, also after that session ended too.
  *
- * Origin-bound work (`origin`, #408) belongs to its connection rather than
- * to the active one: another active connection does not end it, removing its
- * connection does.
+ * Origin-bound work (#408) belongs to its connection rather than to the
+ * active one: another active connection does not end it, removing its
+ * connection does, also when the runtime adds one under the same ID again.
+ * `origin` is `originOf(app, connection)` when the work was captured.
  */
 export function keepsWork(
   app: AppController,
   connection: string | null,
   view: BoundView,
   working: boolean,
-  origin = false,
+  origin?: number,
 ) {
-  const snapshot = app.getSnapshot();
   if (
-    origin
-      ? !snapshot.connections.some((entry) => entry.id === connection)
-      : snapshot.activeId !== connection
+    origin !== undefined
+      ? !sameConnection(app, connection, origin)
+      : app.getSnapshot().activeId !== connection
   )
     return false;
   if (view.getSnapshot().current) return true;
@@ -44,6 +45,31 @@ export function keepsWork(
 }
 /** Views a new authorization came after: their work is never kept again. */
 const superseded = new WeakSet<BoundView>();
+/**
+ * Whether a new authorization came after `view` (`keepsWork` noticed it):
+ * its work ends, also while a component still shows it.
+ */
+export function supersededView(view: BoundView) {
+  return superseded.has(view);
+}
+/**
+ * The identity of a connection for origin-bound work: how often its ID was
+ * removed. A connection added again under the same ID has another one.
+ */
+export function originOf(app: AppController, connection: string | null) {
+  return removalsOf(app.runtime, connection);
+}
+/** Whether `connection` is still the one `origin` (`originOf`) was taken from. */
+export function sameConnection(
+  app: AppController,
+  connection: string | null,
+  origin: number,
+) {
+  return (
+    app.getSnapshot().connections.some((entry) => entry.id === connection) &&
+    originOf(app, connection) === origin
+  );
+}
 
 /**
  * Whether a connection's access ended without a new authorization: it reads

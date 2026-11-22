@@ -32,7 +32,12 @@ import {
   type RemoveSnapshotOutcome,
   type CreateOutcome,
 } from '@sempods/client-sdk/edit';
-import { startupSettled, type AppSnapshot } from '../authoring/app.js';
+import {
+  navigateWhile,
+  startupSettled,
+  type AppController,
+  type AppSnapshot,
+} from '../authoring/app.js';
 import { createLoader } from '../authoring/load.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
@@ -60,6 +65,8 @@ import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
 import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
 import {
+  originOf,
+  sameConnection,
   sameTarget as sameViewTarget,
   sessionsOf,
 } from '../authoring/retention.js';
@@ -596,6 +603,8 @@ interface ContextLane {
   readonly connection: string;
   /** Bound to `connection` whether or not it is active (`target.connection`). */
   readonly origin: string | undefined;
+  /** That connection's identity when it was opened (`originOf`). */
+  readonly life: number | undefined;
 }
 interface ContextLaneState {
   readonly lane: ContextLane;
@@ -612,14 +621,15 @@ const sameTarget = (a: ContextTarget, b: ContextTarget) =>
   a.connection === b.connection;
 /**
  * Whether a lane is still live: not retired, and its connection active, or
- * for an origin-bound lane still connected.
+ * for an origin-bound lane still the connection it was opened in (not
+ * removed, also when one was added again under its ID).
  */
-const liveLane = (s: ContextLaneState | null, app: AppSnapshot) =>
+const liveLane = (s: ContextLaneState | null, app: AppController) =>
   s !== null &&
   !s.retired &&
   (s.lane.origin === undefined
-    ? s.lane.connection === app.activeId
-    : app.connections.some((c) => c.id === s.lane.origin));
+    ? s.lane.connection === app.getSnapshot().activeId
+    : sameConnection(app, s.lane.origin, s.lane.life!));
 /**
  * Edits one Pod-overview row in its own Context. The SELECT row is only a
  * pointer: the editor reads the subject fresh in that Context through
@@ -646,8 +656,9 @@ const liveLane = (s: ContextLaneState | null, app: AppSnapshot) =>
  *   resource exists or saving is permitted: loading, `404`, offline failures,
  *   blocked access and review are states of that editor, with its retry.
  * - `retired`: another connection became active (with `target.connection`:
- *   that connection was removed). The editor is gone and the target is never
- *   revived; close it, or open the row again.
+ *   that connection was removed, also when the runtime added one under its
+ *   ID again). The editor is gone and the target is never revived; close
+ *   it, or open the row again.
  *
  * Once an editor exists, losing read access, a failed catalogue refresh or the
  * session ending keep it with its draft and any unconfirmed-write review, also
@@ -721,8 +732,11 @@ export function useContextEditor<D>(
     const bound = laneOpen?.origin !== undefined;
     return {
       activeId: s.activeId,
-      // An origin-bound lane lives while its connection is there.
-      connected: own !== undefined,
+      // An origin-bound lane lives while its connection is the one it was
+      // opened in.
+      connected:
+        own !== undefined &&
+        (!bound || sameConnection(app, laneOpen.connection, laneOpen.life!)),
       // No Context-bound editor before startup settles (a returning sign-in
       // may still replace the active connection), as for the selected view.
       // `pod` exists while the active connection reads; an origin-bound
@@ -909,7 +923,7 @@ export function useContextEditor<D>(
       const now = latest.current;
       const binding = now?.binding;
       if (
-        liveLane(now, app.getSnapshot()) &&
+        liveLane(now, app) &&
         sameTarget(now!.lane.target, target) &&
         // A binding that can never become valid again (session end, another
         // subject) is replaced by a fresh lane, after the leave policy asks,
@@ -945,6 +959,9 @@ export function useContextEditor<D>(
           !snapshot.connections.some((c) => c.id === origin))
       )
         return Promise.resolve(false);
+      // The connection as it is now: removed meanwhile (also when added
+      // again under its ID), the row is gone.
+      const life = origin !== undefined ? originOf(app, origin) : undefined;
       const opened = (): ContextLaneState => ({
         lane: {
           target: {
@@ -954,6 +971,7 @@ export function useContextEditor<D>(
           },
           connection,
           origin,
+          life,
         },
         binding: null,
         activated: false,
@@ -964,7 +982,7 @@ export function useContextEditor<D>(
       // ask, and a pending save does not block it.
       if (
         // Any live target, also of another connection, is left: ask first.
-        !liveLane(now, snapshot) &&
+        !liveLane(now, app) &&
         editorsOf(app).retains(
           target.context,
           target.subject,
@@ -975,11 +993,19 @@ export function useContextEditor<D>(
         apply(opened);
         return Promise.resolve(true);
       }
-      const result = app
-        .navigate(() => apply(opened))
-        .finally(() => {
-          if (opening.current?.result === result) opening.current = null;
-        });
+      // A row of another connection can go while the person is asked: then
+      // the prompt is withdrawn and nothing open here is discarded.
+      const result = (
+        origin !== undefined
+          ? navigateWhile(
+              app,
+              () => apply(opened),
+              () => sameConnection(app, origin, life!),
+            )
+          : app.navigate(() => apply(opened))
+      ).finally(() => {
+        if (opening.current?.result === result) opening.current = null;
+      });
       opening.current = { target, result };
       return result;
     },
@@ -991,7 +1017,7 @@ export function useContextEditor<D>(
     const clear = () => apply(() => null);
     // A retired target has no guard left; clearing it at once also keeps an
     // unrelated pending prompt from blocking the close.
-    if (!liveLane(now, app.getSnapshot())) {
+    if (!liveLane(now, app)) {
       clear();
       return Promise.resolve(true);
     }

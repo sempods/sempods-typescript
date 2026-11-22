@@ -1027,13 +1027,37 @@ row came from. Pass that connection with the row, and the row is written or
 edited there, whichever Pod is active:
 
 ```tsx
-// Fragment: a row read in `context` through `runtime.bindContext(connection, context)`.
+// Fragment: `rows` are { connection, context, snapshot }, each read in its
+// Context through `runtime.bindContext(connection, context)`.
 const overview = useContextUpdate(taskFields);
 const edit = useContextEditor(taskFields);
-const row = overview.for({ connection, context, snapshot });
-void row.update({ done: true });
-void edit.open({ subject: snapshot.iri, context, connection });
-<UnresolvedNotices of={overview} shown={rows} />; // rows: { connection, context, snapshot }[]
+rows.map((item) => {
+  const row = overview.for(item);
+  return (
+    <li key={`${item.connection}\n${item.context} ${item.snapshot.iri}`}>
+      <Checkbox
+        aria-label={row.data.title}
+        isSelected={row.data.done}
+        isDisabled={!row.canMutate}
+        onChange={(done) => void row.update({ done })}
+      />
+      {row.data.title}
+      <button
+        onClick={() =>
+          void edit.open({
+            subject: item.snapshot.iri,
+            context: item.context,
+            connection: item.connection,
+          })
+        }
+      >
+        Edit
+      </button>
+      <UpdateNotice {...row.notice} />
+    </li>
+  );
+});
+<UnresolvedNotices of={overview} shown={rows} />;
 ```
 
 - The write uses the row's own snapshot evidence in that connection's
@@ -1047,7 +1071,8 @@ void edit.open({ subject: snapshot.iri, context, connection });
   connection asks first. So does any sign-in (`authorize` of any connection,
   `connect` under `signIn: 'required'`), because it leaves the page; its
   pending write blocks these. A new sign-in or removing the connection ends
-  that work, as a new sign-in ends work of the active connection. A session
+  that work, also an editor on screen, as a new sign-in ends work of the
+  active connection. A session
   that ends by itself keeps it, as for the active connection.
 - `unresolved` lists such resources with their `connection`
   (`{ connection, context, iri }`), and `for` of that entry gives its notice.
@@ -1061,8 +1086,11 @@ void edit.open({ subject: snapshot.iri, context, connection });
   `usePodContexts` group's `retry()`.
 - `useContextEditor().open({ subject, context, connection })` opens the
   editor in that connection. It is `retired` only once the connection is
-  removed. Opening another row or `close()` asks first, as for the active
-  connection.
+  removed, also when the runtime adds one under the same ID again (the
+  default Pod read without a token after `forget`). Opening another row or
+  `close()` asks first, as for the active connection; a row whose
+  connection goes while the person is asked withdraws the question and
+  keeps the open editor.
 - A bulk action captures the shown rows' commands and runs them one after
   the other, as [several rows from one decision](#several-rows-from-one-decision)
   describes, stopping at the first result that is not `removed`.

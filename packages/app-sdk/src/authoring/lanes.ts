@@ -3,7 +3,7 @@ import type { AppController } from './app.js';
 import type { BoundView } from '../runtime/view.js';
 import { notify, observeStarts, startCount } from './changes.js';
 import { Lane, type LaneScope } from './lane.js';
-import { keepsWork, sameTarget } from './retention.js';
+import { keepsWork, originOf, sameTarget } from './retention.js';
 
 /** At most this many settled, unguarded lanes stay per group for feedback. */
 const SETTLED = 200;
@@ -45,15 +45,19 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     private readonly drop: () => void,
     /** The kind of lane this group holds (`Lane`, or `CreationLane`). */
     private readonly make: LaneKind<D, L>,
-    /** Bound to `connection` whether or not it is active (explicit only). */
-    readonly origin = false,
+    /**
+     * Bound to `connection` whether or not it is active (explicit only): that
+     * connection's identity (`originOf`) when the group was created.
+     */
+    readonly origin?: number,
   ) {}
 
   /** Whether its target is still the one its lanes write to. */
   holds() {
     if (!this.alive) return false;
     const snapshot = this.app.getSnapshot();
-    if (!this.origin && snapshot.activeId !== this.connection) return false;
+    if (this.origin === undefined && snapshot.activeId !== this.connection)
+      return false;
     if (this.scope === 'target') return snapshot.view === this.view;
     return keepsWork(
       this.app,
@@ -120,7 +124,7 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
       lane,
       this.app.register({
         ...lane.guard(this.scope),
-        ...(this.origin && this.connection !== null
+        ...(this.origin !== undefined && this.connection !== null
           ? { connection: this.connection }
           : {}),
         subscribe: this.subscribe,
@@ -301,7 +305,7 @@ export function lanesOf(app: AppController): LaneStore {
           if (
             kept.view !== view &&
             sameTarget(kept.view, view) &&
-            kept.origin === (origin !== undefined) &&
+            (kept.origin !== undefined) === (origin !== undefined) &&
             (origin === undefined || kept.connection === origin) &&
             !kept.view.getSnapshot().current &&
             kept.holds()
@@ -322,7 +326,7 @@ export function lanesOf(app: AppController): LaneStore {
           if (byKey.get(name) === group) byKey.delete(name);
         },
         kind,
-        origin !== undefined,
+        origin !== undefined ? originOf(app, origin) : undefined,
       );
       byKey.set(name, group as unknown as LaneGroup<unknown, Lane<unknown>>);
       return group;
@@ -332,7 +336,7 @@ export function lanesOf(app: AppController): LaneStore {
       for (const group of channel(`${scope} ${key}`).groups)
         if (
           group.view.contextIri === context &&
-          group.origin === (origin !== undefined) &&
+          (group.origin !== undefined) === (origin !== undefined) &&
           (origin === undefined || group.connection === origin) &&
           !group.view.getSnapshot().current &&
           group.holds()

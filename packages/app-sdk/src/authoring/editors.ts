@@ -3,7 +3,13 @@ import type { AppController, LeaveGuard } from './app.js';
 import { navigateRetaining } from './app.js';
 import type { BoundView } from '../runtime/view.js';
 import { bindResourceEditor } from './editor.js';
-import { keepsWork, sameTarget } from './retention.js';
+import {
+  keepsWork,
+  originOf,
+  sameConnection,
+  sameTarget,
+  supersededView,
+} from './retention.js';
 
 /** At most this many released editors without unsaved work stay per store. */
 const IDLE = 20;
@@ -196,18 +202,26 @@ export function editorsOf(app: AppController): EditorStore {
       } else {
         const bound = target === 'explicit' && origin !== undefined;
         const connection = bound ? origin : app.getSnapshot().activeId;
+        // The identity of an origin-bound editor's connection: one added
+        // again under the same ID is another connection.
+        const life = bound ? originOf(app, connection) : undefined;
         // An explicit editor in use stays through read loss and an ended
         // session (its hook retires it on another connection, or once an
         // origin-bound one's connection is gone); released, it stays while
-        // `keepsWork` keeps its work.
+        // `keepsWork` keeps its work. A new authorization ends it also while
+        // a component shows it: earlier work is never handed to it.
         const holds = () => {
           const snapshot = app.getSnapshot();
           if (!bound && snapshot.activeId !== connection) return false;
           if (target === 'selected') return snapshot.view === view;
           // Evaluated also while a component holds it, so a new
           // authorization is noticed (`keepsWork` remembers it).
-          const kept = keepsWork(app, connection, view, working(), bound);
-          return (entries.get(name)?.holders ?? 0) > 0 || kept;
+          if (keepsWork(app, connection, view, working(), life)) return true;
+          return (
+            (entries.get(name)?.holders ?? 0) > 0 &&
+            !supersededView(view) &&
+            (life === undefined || sameConnection(app, connection, life))
+          );
         };
         const editor = bindResourceEditor(view, iri, definition);
         // A draft its leave guard discarded is no work any more, also when
@@ -271,7 +285,7 @@ export function editorsOf(app: AppController): EditorStore {
           working,
           keptForWork: () =>
             !view.getSnapshot().current &&
-            keepsWork(app, connection, view, working(), bound),
+            keepsWork(app, connection, view, working(), life),
           stop: () => {
             stops.forEach((stop) => stop());
             unregister();

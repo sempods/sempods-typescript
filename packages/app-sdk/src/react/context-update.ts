@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import {
   removeSnapshot,
   updateFields,
@@ -178,6 +184,10 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   // component: their facts (catalogue, session, scopes) render again, as the
   // active one's do. It only grows, up to the connections there are.
   const origins = useRef(new Set<string>()).current;
+  // A connection first bound while a row's own component renders (not this
+  // hook's) renders this hook again, after that render, so the effect below
+  // asks for its catalogue.
+  const [, noticed] = useReducer((n: number) => n + 1, 0);
   useAppFacts(
     (s) => [...origins].map((id) => s.connections.find((c) => c.id === id)),
     sameList,
@@ -202,7 +212,10 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     const cached = `${origin ?? ''}\n${context}`;
     let found = contexts.get(cached);
     if (found) return found;
-    if (origin !== undefined) origins.add(origin);
+    if (origin !== undefined && !origins.has(origin)) {
+      origins.add(origin);
+      queueMicrotask(noticed);
+    }
     // Without a current view (a session that ended), writes kept for their
     // recovery are found through their own view (`keepsWork`).
     const view =

@@ -2,7 +2,7 @@
 /** Overview rows and editors bound to the connection they were read from (#408). */
 import { webcrypto } from 'node:crypto';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { listSubjects } from '@sempods/client-sdk/edit';
 import {
@@ -16,13 +16,18 @@ import {
   type ContextEditor,
   type ContextResource,
   type ContextUpdateItem,
-} from '@sempods/app-sdk/react';
+} from './index.js';
 import { taskFields, type Task } from '../../../../examples/todo/src/domain.js';
 import type { BrowserRuntime } from '../runtime/types.js';
+import { createBrowserRuntime } from '../runtime/runtime.js';
 import {
   catalogue,
+  fixture,
   personal,
+  pod,
   resourceIri,
+  restored,
+  settleLease,
   twoPods,
   work,
 } from '../runtime/fixture.test.js';
@@ -404,4 +409,172 @@ it('asks before leaving a live editor for a retained one of another connection',
   expect(edit.target).toEqual(alices);
   expect(edit.editor!.state.draft?.title).toBe('Oat milk');
   expect(writes).toEqual([]);
+});
+
+it('withdraws the question when the row to open loses its connection meanwhile', async () => {
+  const { runtime, alice, bob } = await setup();
+  const bobs = { subject: 'urn:s', context: home, connection: bob };
+  await act(async () => {
+    expect(await edit.open(bobs)).toBe(true);
+  });
+  await waitFor(() => expect(edit.phase).toBe('ready'));
+  await act(async () => {
+    await edit.editor!.loaded;
+  });
+  act(() => edit.editor!.change({ title: 'Oat milk' }));
+  let opening: Promise<boolean> | undefined;
+  act(() => {
+    opening = edit.open({ subject: 'urn:a', context: work, connection: alice });
+  });
+  await waitFor(() => expect(state.confirmingLeave).toBe(true));
+  // Alice's Pod is forgotten elsewhere (another tab) while the person is asked.
+  await act(async () => {
+    await runtime.forget(alice);
+  });
+  expect(await opening).toBe(false);
+  expect(state.confirmingLeave).toBe(false);
+  expect(edit.target).toEqual(bobs);
+  expect(edit.phase).toBe('ready');
+  expect(edit.editor!.state.draft?.title).toBe('Oat milk');
+});
+
+/** Rows the child shows from its own state; the parent only owns the hook. */
+let showRows: (rows: readonly Row[]) => void;
+function Revealing({
+  overview,
+}: {
+  readonly overview: ReturnType<typeof useContextUpdate<Task>>;
+}) {
+  const [rows, set] = useState<readonly Row[]>([]);
+  useEffect(() => {
+    showRows = set;
+  }, []);
+  return (
+    <ul>
+      {rows.map((item) => {
+        const row = overview.for(item);
+        return (
+          <li key={item.snapshot.iri}>
+            <button disabled={!row.canMutate}>Toggle {row.data.title}</button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+function Owner() {
+  const overview = useContextUpdate(taskFields);
+  state = useAppState();
+  return <Revealing overview={overview} />;
+}
+
+it("asks for an inactive Pod's catalogue when a row's own component first shows it", async () => {
+  const two = await twoPods((r) => void runtimes.push(r));
+  const { f } = two;
+  const bob = two.other.id;
+  f.setCatalogue(async (url) =>
+    url.startsWith(bobUrl)
+      ? catalogue([home], [home], bobUrl)
+      : catalogue([work, personal], [work, personal]),
+  );
+  // A later page start, not a sign-in's return: no catalogue is read yet.
+  two.runtime.dispose();
+  await settleLease();
+  const runtime = createBrowserRuntime({
+    ...f.options,
+    location: () => 'https://app.example/',
+  });
+  runtimes.push(runtime);
+  await runtime.initialize();
+  await restored(runtime);
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Owner />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(showRows).toBeDefined());
+  // Bob's Pod is not active, and nothing read its catalogue yet.
+  const bobs = () => state.connections.find((c) => c.id === bob)!;
+  await waitFor(() => expect(state.activeId).toBe(f.id));
+  expect(bobs().catalogue.kind).toBe('unknown');
+  // A row read elsewhere: its snapshot needs no catalogue to exist.
+  const listed = await listSubjects(
+    {
+      sparql: {
+        construct: async () => ({
+          kind: 'ok',
+          body: [
+            {
+              '@id': 'urn:a',
+              '@type': [schema + 'Action'],
+              [schema + 'name']: [{ '@value': 'Milk' }],
+              [schema + 'actionStatus']: [
+                { '@id': schema + 'PotentialActionStatus' },
+              ],
+            },
+          ],
+        }),
+      },
+    } as unknown as Parameters<typeof listSubjects>[0],
+    taskFields,
+  );
+  if (listed.kind !== 'ok') throw new Error(listed.kind);
+  act(() =>
+    showRows(
+      listed.body.items.map((snapshot) => ({
+        connection: bob,
+        context: home,
+        snapshot,
+      })),
+    ),
+  );
+  await waitFor(() => expect(bobs().catalogue.kind).toBe('ready'));
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole('button', { name: 'Toggle Milk' })
+        .hasAttribute('disabled'),
+    ).toBe(false),
+  );
+});
+
+it('retires an editor whose connection is forgotten and added again under its ID', async () => {
+  const f = fixture({
+    preferences: null,
+    signIn: 'optional',
+    preset: { podUrl: pod },
+  });
+  runtimes.push(f.runtime);
+  f.setCatalogue(async () => catalogue([work], []));
+  f.setResource(async (url) =>
+    Response.json(
+      {
+        '@id': resourceIri(url),
+        '@type': [schema + 'Action'],
+        [schema + 'name']: [{ '@value': 'Milk' }],
+        [schema + 'actionStatus']: [
+          { '@id': schema + 'PotentialActionStatus' },
+        ],
+      },
+      { headers: { etag: '"t1"' } },
+    ),
+  );
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <Probe />
+      <Overview names={{}} />
+    </SempodsProvider>,
+  );
+  // The default Pod, read without a token, under its stable ID.
+  await waitFor(() => expect(state.activeId).toBe(pod));
+  await act(async () => {
+    await edit.open({ subject: 'urn:a', context: work, connection: pod });
+  });
+  await waitFor(() => expect(edit.phase).toBe('ready'));
+  await act(async () => {
+    expect(await app.forget(pod)).toBe(true);
+  });
+  // The runtime lists the default Pod again under the same ID.
+  expect(state.connections.map((c) => c.id)).toEqual([pod]);
+  await waitFor(() => expect(edit.phase).toBe('retired'));
 });

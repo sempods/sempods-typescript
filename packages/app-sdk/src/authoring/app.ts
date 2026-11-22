@@ -290,6 +290,28 @@ export function navigateRetaining(
     retainedNavigation.get(app)?.(action, retained) ?? app.navigate(action)
   );
 }
+const checkedNavigation = new WeakMap<
+  object,
+  (
+    action: () => void | Promise<void>,
+    available: () => boolean,
+  ) => Promise<boolean>
+>();
+/**
+ * Internal: row navigation to a destination that can go away while the
+ * person is asked, such as a row of another connection (#408). Losing it
+ * withdraws the prompt, as for `selectTarget`: nothing runs and no guard is
+ * discarded. No public API.
+ */
+export function navigateWhile(
+  app: AppController,
+  action: () => void | Promise<void>,
+  available: () => boolean,
+): Promise<boolean> {
+  const navigate = checkedNavigation.get(app);
+  if (navigate) return navigate(action, available);
+  return available() ? app.navigate(action) : Promise.resolve(false);
+}
 /**
  * Selection/leave policy, the active Pod reader and the Context-discovery policy
  * (`contextSelection`). Authentication and request authority remain in the runtime.
@@ -1089,6 +1111,13 @@ export function createAppController(
   }
   retainedNavigation.set(controller, (action, retained) =>
     guard(action, 'navigate', retained),
+  );
+  checkedNavigation.set(controller, (action, available) =>
+    available()
+      ? guard(action, 'navigate', undefined, () =>
+          available() ? 'yes' : 'gone',
+        )
+      : Promise.resolve(false),
   );
   selectionDemands.set(controller, (demanded) => {
     if (demanded === selectionDemand) return;
