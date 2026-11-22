@@ -438,6 +438,35 @@ it('withdraws the question when the row to open loses its connection meanwhile',
   expect(edit.editor!.state.draft?.title).toBe('Oat milk');
 });
 
+it('withdraws the question when the row to open is signed out meanwhile', async () => {
+  const { runtime, alice, bob } = await setup();
+  const bobs = { subject: 'urn:s', context: home, connection: bob };
+  await act(async () => {
+    expect(await edit.open(bobs)).toBe(true);
+  });
+  await waitFor(() => expect(edit.phase).toBe('ready'));
+  await act(async () => {
+    await edit.editor!.loaded;
+  });
+  act(() => edit.editor!.change({ title: 'Oat milk' }));
+  let opening: Promise<boolean> | undefined;
+  act(() => {
+    opening = edit.open({ subject: 'urn:a', context: work, connection: alice });
+  });
+  await waitFor(() => expect(state.confirmingLeave).toBe(true));
+  // Alice signs out elsewhere (another tab): her connection stays listed,
+  // but no longer reads.
+  await act(async () => {
+    await runtime.disconnect(alice);
+  });
+  expect(state.connections.some((c) => c.id === alice)).toBe(true);
+  expect(await opening).toBe(false);
+  expect(state.confirmingLeave).toBe(false);
+  expect(edit.target).toEqual(bobs);
+  expect(edit.phase).toBe('ready');
+  expect(edit.editor!.state.draft?.title).toBe('Oat milk');
+});
+
 /** Rows the child shows from its own state; the parent only owns the hook. */
 let showRows: (rows: readonly Row[]) => void;
 function Revealing({
@@ -577,4 +606,80 @@ it('retires an editor whose connection is forgotten and added again under its ID
   // The runtime lists the default Pod again under the same ID.
   expect(state.connections.map((c) => c.id)).toEqual([pod]);
   await waitFor(() => expect(edit.phase).toBe('retired'));
+});
+
+it('asks for no catalogue of a connection added again once its rows are gone', async () => {
+  const f = fixture({
+    preferences: null,
+    signIn: 'optional',
+    preset: { podUrl: pod },
+  });
+  runtimes.push(f.runtime);
+  const asked: string[] = [];
+  f.setCatalogue(async (url) => {
+    asked.push(url.startsWith(bobUrl) ? 'bob' : 'default');
+    return url.startsWith(bobUrl)
+      ? catalogue([home], [], bobUrl)
+      : catalogue([work], []);
+  });
+  render(
+    <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
+      <Probe />
+      <Overview names={{}} />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(state.activeId).toBe(pod));
+  // Bob's Pod, read without a token, becomes the active one.
+  const bob = (await f.runtime.connect(bobUrl)).id;
+  await act(async () => {
+    expect(await app.selectConnection(bob)).toBe(true);
+  });
+  await waitFor(() => expect(state.activeId).toBe(bob));
+  const defaults = () => state.connections.find((c) => c.id === pod)!;
+  // A row of the default Pod asks for its catalogue.
+  const listed = await listSubjects(
+    {
+      sparql: {
+        construct: async () => ({
+          kind: 'ok',
+          body: [
+            {
+              '@id': 'urn:a',
+              '@type': [schema + 'Action'],
+              [schema + 'name']: [{ '@value': 'Milk' }],
+              [schema + 'actionStatus']: [
+                { '@id': schema + 'PotentialActionStatus' },
+              ],
+            },
+          ],
+        }),
+      },
+    } as unknown as Parameters<typeof listSubjects>[0],
+    taskFields,
+  );
+  if (listed.kind !== 'ok') throw new Error(listed.kind);
+  const rows = listed.body.items.map((snapshot): Row => ({
+    connection: pod,
+    context: work,
+    snapshot,
+  }));
+  act(() => setRows(rows));
+  await waitFor(() => expect(defaults().catalogue.kind).toBe('ready'));
+  const before = asked.filter((a) => a === 'default').length;
+  // Its rows are filtered out, then it is forgotten: the runtime lists the
+  // default Pod again under the same ID, with no catalogue read.
+  act(() => setRows([]));
+  await act(async () => {
+    expect(await app.forget(pod)).toBe(true);
+  });
+  expect(state.connections.map((c) => c.id)).toContain(pod);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(asked.filter((a) => a === 'default').length).toBe(before);
+  expect(defaults().catalogue.kind).toBe('unknown');
+  // A row of its own asks again.
+  act(() => setRows(rows));
+  await waitFor(() => expect(defaults().catalogue.kind).toBe('ready'));
+  expect(asked.filter((a) => a === 'default').length).toBe(before + 1);
 });

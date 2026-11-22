@@ -28,6 +28,7 @@ import {
   type NotSent,
 } from '../authoring/lane.js';
 import { lanesOf, type LaneGroup } from '../authoring/lanes.js';
+import { originOf, sameConnection } from '../authoring/retention.js';
 import {
   activeCatalogue,
   shallowEqual,
@@ -181,27 +182,34 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   // the screen and the definition end its commands here.
   const originShown = useCommandToken(key);
   // The connections rows were bound to while rendering, also by a row's own
-  // component: their facts (catalogue, session, scopes) render again, as the
-  // active one's do. It only grows, up to the connections there are.
-  const origins = useRef(new Set<string>()).current;
+  // component, each with its identity then (`originOf`): their facts
+  // (catalogue, session, scopes) render again, as the active one's do. It
+  // only grows, up to the connections there are.
+  const origins = useRef(new Map<string, number>()).current;
   // A connection first bound while a row's own component renders (not this
   // hook's) renders this hook again, after that render, so the effect below
   // asks for its catalogue.
   const [, noticed] = useReducer((n: number) => n + 1, 0);
   useAppFacts(
-    (s) => [...origins].map((id) => s.connections.find((c) => c.id === id)),
+    (s) =>
+      [...origins.keys()].map((id) => s.connections.find((c) => c.id === id)),
     sameList,
   );
   // Under `on-demand`, each of them asks for its own catalogue while it has
   // none (`required` loads every connection's). After every commit, so a
   // connection first bound while rendering is asked for at once; a started
-  // load is no longer `unknown`.
+  // load is no longer `unknown`. A connection removed since (also when added
+  // again under its ID) waits until a row of its own is bound.
   useEffect(() => {
     const s = app.getSnapshot();
     if (s.contextSelection !== 'on-demand') return;
-    for (const id of origins) {
+    for (const [id, life] of origins) {
       const c = s.connections.find((entry) => entry.id === id);
-      if (c?.reading && c.catalogue.kind === 'unknown')
+      if (
+        c?.reading &&
+        c.catalogue.kind === 'unknown' &&
+        sameConnection(app, id, life)
+      )
         void app.runtime.loadContexts(id).catch(() => {});
     }
   });
@@ -212,9 +220,12 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     const cached = `${origin ?? ''}\n${context}`;
     let found = contexts.get(cached);
     if (found) return found;
-    if (origin !== undefined && !origins.has(origin)) {
-      origins.add(origin);
-      queueMicrotask(noticed);
+    if (origin !== undefined) {
+      const life = originOf(app, origin);
+      if (origins.get(origin) !== life) {
+        origins.set(origin, life);
+        queueMicrotask(noticed);
+      }
     }
     // Without a current view (a session that ended), writes kept for their
     // recovery are found through their own view (`keepsWork`).

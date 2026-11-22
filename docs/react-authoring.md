@@ -1080,7 +1080,8 @@ rows.map((item) => {
   by connection, Context and IRI, and pass `connection` in `shown` too.
 - `row.problem` and the editor's `problem` use that connection's catalogue.
   Under `contextSelection="on-demand"` the SDK asks for that catalogue once
-  a row or editor of the connection is rendered; `AppAccess` keeps
+  a row or editor of the connection is rendered. A connection added again
+  under the same ID waits for a row of its own. `AppAccess` keeps
   presenting the active connection only. After a failed catalogue the app
   offers its own retry, `useApp().refreshContexts(connection)`, or a
   `usePodContexts` group's `retry()`.
@@ -1088,9 +1089,9 @@ rows.map((item) => {
   editor in that connection. It is `retired` only once the connection is
   removed, also when the runtime adds one under the same ID again (the
   default Pod read without a token after `forget`). Opening another row or
-  `close()` asks first, as for the active connection; a row whose
-  connection goes while the person is asked withdraws the question and
-  keeps the open editor.
+  `close()` asks first, as for the active connection. A row whose
+  connection goes, or stops reading (signed out in another tab), while the
+  person is asked withdraws the question and keeps the open editor.
 - A bulk action captures the shown rows' commands and runs them one after
   the other, as [several rows from one decision](#several-rows-from-one-decision)
   describes, stopping at the first result that is not `removed`.

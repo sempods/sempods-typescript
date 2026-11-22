@@ -993,14 +993,22 @@ export function useContextEditor<D>(
         apply(opened);
         return Promise.resolve(true);
       }
-      // A row of another connection can go while the person is asked: then
-      // the prompt is withdrawn and nothing open here is discarded.
+      // A row of another connection can go while the person is asked, also
+      // when its connection stays listed but no longer reads (signed out in
+      // another tab): then the prompt is withdrawn and nothing open here is
+      // discarded.
+      const reading = () =>
+        Boolean(
+          app.getSnapshot().connections.find((c) => c.id === origin)?.reading,
+        );
+      const readable = origin !== undefined && reading();
       const result = (
         origin !== undefined
           ? navigateWhile(
               app,
               () => apply(opened),
-              () => sameConnection(app, origin, life!),
+              () =>
+                sameConnection(app, origin, life!) && (!readable || reading()),
             )
           : app.navigate(() => apply(opened))
       ).finally(() => {
