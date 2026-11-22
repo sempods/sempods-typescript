@@ -1871,8 +1871,8 @@ address is selected to type over). Pressing one keeps the focus and the
 on-screen keyboard in the text; from the keyboard, the arrow keys move along
 the toolbar and Tab leaves it. In the text input, Ctrl+B, Ctrl+I and Ctrl+K
 (Command on Apple systems) do the same, and the browser's undo reverts a
-formatting step (WebKit takes it back together with typing just before it,
-as it groups typing). The text input stays mounted once written in and is only hidden
+formatting step (WebKit on macOS takes it back together with typing just
+before it, as it groups typing). The text input stays mounted once written in and is only hidden
 while reading, so its undo history survives a preview. Tab moves to the next control instead of typing a tab.
 From 42rem of the field's own width, the preview is shown beside the source
 as it is typed; a narrower field writes at full width and previews on

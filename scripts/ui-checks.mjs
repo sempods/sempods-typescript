@@ -9878,9 +9878,9 @@ async function markdown({ browser, origin, engine }) {
         );
       results.push(
         await attemptOn(errors, 'markdown-shortcuts-and-undo', async () => {
-          // WebKit takes back the typing before a formatting with it in one
-          // step, as it does for typing itself: redo brings both back.
-          await text(page).fill('Buy milk');
+          // Text the page starts with, so nothing typed shares the undo
+          // step: WebKit on macOS groups typing with a formatting after it.
+          await page.goto(address('&notes=short&write'));
           await text(page).click();
           await page.keyboard.press('End');
           for (let i = 0; i < 4; i++)
@@ -9900,7 +9900,7 @@ async function markdown({ browser, origin, engine }) {
             pass:
               bold === 'Buy **milk**' &&
               selected === 'milk' &&
-              undone === (engine === 'webkit' ? '' : 'Buy milk') &&
+              undone === 'Buy milk' &&
               redone === 'Buy **milk**',
             bold,
             selected,
@@ -9935,9 +9935,8 @@ async function markdown({ browser, origin, engine }) {
       results.push(
         await attemptOn(errors, 'markdown-undo-after-preview', async () => {
           // A fresh page: the undo history holds only this check's steps.
-          await page.goto(address('&notes=empty&write'));
-          await text(page).waitFor();
-          await text(page).fill('Buy milk');
+          await page.goto(address('&notes=short&write'));
+          await text(page).focus();
           await select(4, 8);
           await page.keyboard.press('ControlOrMeta+B');
           const bold = (await draft(page)).draft;
@@ -9950,9 +9949,7 @@ async function markdown({ browser, origin, engine }) {
           await settle(page);
           const undone = (await draft(page)).draft;
           return {
-            pass:
-              bold === 'Buy **milk**' &&
-              undone === (engine === 'webkit' ? '' : 'Buy milk'),
+            pass: bold === 'Buy **milk**' && undone === 'Buy milk',
             bold,
             undone,
           };

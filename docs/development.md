@@ -326,8 +326,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     pointer and Enter, with the focus in the text and then back on the
     action, and reports no change; the preview stands beside the source at
     1280px only, and at 375 and 320px the field fits with 44px targets;
-    Ctrl/Cmd+B formats the selection and undo and redo work (WebKit undoes
-    the typing before it in the same step, as for typing itself), also
+    Ctrl/Cmd+B formats the selection and undo and redo work (the text comes
+    from the page, because WebKit on macOS undoes typing just before a
+    formatting in the same step, as for typing itself), also
     after a preview and back, the
     toolbar moves with the arrow keys and gives the focus back to the text,
     and Tab leaves the text; a touch on Bold keeps the focus in the text;

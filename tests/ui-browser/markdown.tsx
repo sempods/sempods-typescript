@@ -32,7 +32,7 @@ export const SAMPLE = [
  * The Markdown entry (`?screen=markdown`, #395). Without `part`, no
  * sign-in: a reading view of `SAMPLE`, and a form with a title and the
  * notes as a `MarkdownField`, followed by a button. `notes=empty` starts the
- * notes empty, `notes=long` with a long draft, `write` in the write
+ * notes empty, `notes=short` with “Buy milk”, `notes=long` with a long draft, `write` in the write
  * presentation. The draft and the number of changes the field reported are
  * on the page. With `part=editor`, after sign-in, the README's
  * `task-notes.tsx` edits the fixture's plumber task in its source Context.
@@ -73,12 +73,14 @@ function MarkdownForm({
   const [value, setValue] = useState(() =>
     notes === 'empty'
       ? ''
-      : notes === 'long'
-        ? Array.from(
-            { length: 400 },
-            (_, i) => `## Step ${i + 1}\n\nCheck **part ${i + 1}** twice.`,
-          ).join('\n\n')
-        : SAMPLE,
+      : notes === 'short'
+        ? 'Buy milk'
+        : notes === 'long'
+          ? Array.from(
+              { length: 400 },
+              (_, i) => `## Step ${i + 1}\n\nCheck **part ${i + 1}** twice.`,
+            ).join('\n\n')
+          : SAMPLE,
   );
   const [changes, setChanges] = useState(0);
   return (
