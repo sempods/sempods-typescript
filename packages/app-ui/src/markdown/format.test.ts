@@ -39,6 +39,22 @@ describe('emphasis', () => {
     expect(run('italic', '[**word**]')).toBe('*[**word**]*');
   });
 
+  it('merges spans of its own into one around the selection', () => {
+    expect(run('bold', '[**first** and **second**]')).toBe(
+      '**[first and second]**',
+    );
+    expect(run('bold', '**[first** and **second]**')).toBe(
+      '**[first and second]**',
+    );
+    expect(run('italic', '[*first* and *second*]')).toBe(
+      '*[first and second]*',
+    );
+    expect(run('bold', '[**partly** bold]')).toBe('**[partly bold]**');
+    // The other emphasis stays.
+    expect(run('bold', '[*a* and **b**]')).toBe('**[*a* and b]**');
+    expect(run('italic', '[***a*** and *b*]')).toBe('*[**a** and b]*');
+  });
+
   it('keeps whitespace at the edges of the selection outside the markers', () => {
     expect(run('bold', 'a[ word ]b')).toBe('a **[word]** b');
   });

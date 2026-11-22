@@ -43,8 +43,27 @@ const holds = (kind: 'bold' | 'italic', count: number) =>
   kind === 'bold' ? count >= 2 : count % 2 === 1;
 
 /**
+ * The text without the markers of `kind`: a run of stars loses two for bold
+ * and, when odd, one for italic, so `***x***` keeps the other emphasis.
+ */
+const unmarked = (kind: 'bold' | 'italic', text: string) =>
+  text.replace(/\*+/g, (run) =>
+    '*'.repeat(
+      kind === 'bold'
+        ? run.length >= 2
+          ? run.length - 2
+          : run.length
+        : run.length % 2 === 1
+          ? run.length - 1
+          : run.length,
+    ),
+  );
+
+/**
  * Bold (`**`) or italic (`*`) around the selection, or removed when the
- * selection is already inside it or includes its markers. An empty selection
+ * selection is already inside it or includes its markers. A selection that
+ * holds spans of its own (`**a** and **b**`) is no one span: its markers
+ * are merged into one around the whole selection. An empty selection
  * inserts the pair with the caret between them.
  */
 function emphasis(
@@ -57,34 +76,45 @@ function emphasis(
   const [start, end] =
     selStart === selEnd ? [selStart, selEnd] : inward(source, selStart, selEnd);
   const inner = source.slice(start, end);
-  // Markers just outside the selection: remove them.
+  const plain = unmarked(kind, inner);
+  const spans = plain !== inner;
+  // Inside markers: remove them, unless the selection holds spans of its
+  // own, which join the enclosing one instead.
   if (holds(kind, stars(source.slice(0, start), source.slice(end))))
-    return {
-      from: start - n,
-      to: end + n,
-      insert: inner,
-      select: [start - n, end - n],
-    };
-  // Markers at the selection's edges: remove them, keep the rest selected.
+    return spans
+      ? {
+          from: start,
+          to: end,
+          insert: plain,
+          select: [start, start + plain.length],
+        }
+      : {
+          from: start - n,
+          to: end + n,
+          insert: inner,
+          select: [start - n, end - n],
+        };
+  // Markers at the selection's edges that enclose one span: remove them,
+  // keep the rest selected.
   const edge = /^\*+/.exec(inner)?.[0].length ?? 0;
+  const content = inner.slice(n, inner.length - n);
   if (
     inner.length >= 2 * n + 1 &&
-    holds(kind, Math.min(edge, /\*+$/.exec(inner)?.[0].length ?? 0))
-  ) {
-    const content = inner.slice(n, inner.length - n);
+    holds(kind, Math.min(edge, /\*+$/.exec(inner)?.[0].length ?? 0)) &&
+    unmarked(kind, content) === content
+  )
     return {
       from: start,
       to: end,
       insert: content,
       select: [start, start + content.length],
     };
-  }
   const mark = '*'.repeat(n);
   return {
     from: start,
     to: end,
-    insert: mark + inner + mark,
-    select: [start + n, start + n + inner.length],
+    insert: mark + plain + mark,
+    select: [start + n, start + n + plain.length],
   };
 }
 
