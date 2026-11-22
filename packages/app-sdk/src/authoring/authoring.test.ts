@@ -642,6 +642,44 @@ it('signs out of another connection keeping the selected view, but asks about an
   expect(await leaving).toBe(false);
   expect(selected).not.toHaveBeenCalled();
 });
+it('signs out of another connection while the selected view saves, but not while that connection’s own work saves', async () => {
+  const f = await connected();
+  const bob = await f.runtime.connect('https://pod.example/bob');
+  const carol = await f.runtime.connect('https://pod.example/carol');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const active = app.getSnapshot().activeId!;
+  // A save in the selected view and one of an explicit editor on it.
+  app.register({ dirty: () => false, blocked: () => true, discard: vi.fn() });
+  app.register({
+    scope: 'explicit',
+    connectionId: active,
+    dirty: () => false,
+    blocked: () => true,
+    discard: vi.fn(),
+  });
+  expect(await app.disconnect(bob.id)).toBe(true);
+  // Bob was never signed in to: his connection is gone.
+  expect(app.getSnapshot().connections.some((c) => c.id === bob.id)).toBe(
+    false,
+  );
+  // Carol's own pending work still blocks retiring her.
+  app.register({
+    scope: 'explicit',
+    connectionId: carol.id,
+    dirty: () => false,
+    blocked: () => true,
+    discard: vi.fn(),
+  });
+  expect(await app.forget(carol.id)).toBe(false);
+  expect(app.getSnapshot().connections.some((c) => c.id === carol.id)).toBe(
+    true,
+  );
+  // Signing out of the active connection still waits for its saves.
+  expect(await app.disconnect(active)).toBe(false);
+});
 it('keeps the active connection’s explicit draft and retries another connection’s failed sign-out without asking', async () => {
   const f = await connected();
   const bob = await f.runtime.connect('https://pod.example/bob');

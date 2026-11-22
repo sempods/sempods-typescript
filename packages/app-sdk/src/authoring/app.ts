@@ -34,7 +34,8 @@ export interface LeaveGuard {
    *
    * A pending write (`blocked()`) blocks every change, except that a
    * `connection` or `explicit` guard does not block `selectContext`, which
-   * leaves it alone.
+   * leaves it alone, and signing out of or forgetting another connection is
+   * blocked only by the guards it leaves.
    */
   readonly scope?: 'local' | 'target' | 'connection' | 'explicit';
   /**
@@ -657,8 +658,11 @@ export function createAppController(
   function blocked(change: Change) {
     return [...guards].some(
       (g) =>
-        (change !== 'context' ||
-          (g.scope !== 'connection' && g.scope !== 'explicit')) &&
+        // Retiring another connection keeps the guards it does not leave.
+        (typeof change === 'object'
+          ? leaves(change, g)
+          : change !== 'context' ||
+            (g.scope !== 'connection' && g.scope !== 'explicit')) &&
         g.blocked(),
     );
   }

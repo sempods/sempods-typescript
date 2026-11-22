@@ -19,10 +19,12 @@ import {
 } from './index.js';
 import {
   catalogue,
+  deferred,
   fixture,
   pod,
   restart,
   returnedSession,
+  storeWith,
   twoPods,
   work,
 } from '../runtime/fixture.test.js';
@@ -534,4 +536,108 @@ it('marks an unreachable Pod and offers its retry while the other Pod stays usab
       next.getSnapshot().find((entry) => entry.podUrl === bob)?.session.kind,
     ).toBe('active'),
   );
+});
+
+it('shows a failed retry in its Pod’s row, apart from the other Pod', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation((url, init) =>
+    url.startsWith(bob + '/.well-known')
+      ? Promise.reject(new TypeError('offline'))
+      : original(url, init),
+  );
+  const next = await restart(f, runtime, (r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  await waitFor(() =>
+    expect(
+      next.getSnapshot().find((entry) => entry.podUrl === bob)?.session,
+    ).toMatchObject({ kind: 'ended', restorable: true }),
+  );
+  vi.spyOn(next, 'retryRestore').mockRejectedValue(new Error('offline'));
+  render(
+    <SempodsProvider runtime={next}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  const dialog = await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  const retry = await podAction('Try again', 'pod.example/bob');
+  await act(async () => retry.click());
+  await waitFor(() =>
+    expect(within(row('pod.example/bob')).getByRole('alert')).toBeTruthy(),
+  );
+  expect(within(row('pod.example/alice')).queryByRole('alert')).toBeNull();
+  // Not repeated at the end of the list, where it would name no Pod.
+  expect(within(dialog).getAllByRole('alert')).toHaveLength(1);
+});
+
+it('leaves the focus alone when another Pod’s row goes', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+      <button type="button">Outside</button>
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  // The person was last in Bob's row, then the focus was lost elsewhere.
+  podToggle(row('pod.example/bob')).focus();
+  (document.activeElement as HTMLElement).blur();
+  expect(document.activeElement).toBe(document.body);
+  // Alice's saved address is removed elsewhere.
+  await act(async () => {
+    await runtime.forget(f.id);
+  });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('group', { name: 'pod.example/alice' }),
+    ).toBeNull(),
+  );
+  expect(document.activeElement).toBe(document.body);
+});
+
+it('closes a Pod’s actions once it has none left', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  // Removing Alice's saved address waits until the test lets it finish.
+  const held = deferred<void>();
+  const next = await restart(
+    f,
+    runtime,
+    (r) => cleanups.push(() => r.dispose()),
+    {
+      openStore: storeWith(f.factory, (store) => ({
+        remove: async (...args) => {
+          await held.promise;
+          return store.remove(...args);
+        },
+      })),
+    },
+  );
+  render(
+    <SempodsProvider runtime={next}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  fireEvent.click(await podActions('pod.example/alice'));
+  expect(document.querySelector('.sp-pod-menu')).not.toBeNull();
+  // Removed elsewhere while its actions are open: until that is saved, the
+  // Pod has no action left.
+  let removal: Promise<unknown> | undefined;
+  act(() => {
+    removal = next.forget(f.id);
+  });
+  await waitFor(() =>
+    expect(
+      next.getSnapshot().find((entry) => entry.id === f.id)?.session,
+    ).toMatchObject({ kind: 'ended', forget: true }),
+  );
+  expect(row('pod.example/alice')).toBeTruthy();
+  await waitFor(() =>
+    expect(document.querySelector('.sp-pod-menu')).toBeNull(),
+  );
+  await act(async () => {
+    held.resolve();
+    await removal;
+  });
 });

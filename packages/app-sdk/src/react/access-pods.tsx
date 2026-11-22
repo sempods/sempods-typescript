@@ -18,14 +18,17 @@ import type { Connection } from '../runtime/types.js';
  * unavailable (a guarded change, its prompt, startup or storage). An
  * unguarded action for one connection (a retry, a catalogue check) passes
  * that connection as `scope`: it holds only that connection's controls
- * (`holds`). The control that started an action gets the focus back once it
- * is enabled again: a disabled control loses the focus in WebKit (the focus
- * fixup rule), which stays on the body otherwise (#332).
+ * (`holds`) and reports its failure apart (`failureOf`). The control that
+ * started an action gets the focus back once it is enabled again: a disabled
+ * control loses the focus in WebKit (the focus fixup rule), which stays on
+ * the body otherwise (#332).
  */
 export function useAccessAction() {
   const state = useAppState();
-  const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
-  // The scopes of running actions; `null` for an action of the whole view.
+  // Each scope's failure; `null` for an action of the whole view.
+  const [failures, setFailures] = useState<
+    ReadonlyMap<string | null, { cause: unknown }>
+  >(() => new Map());
   const inFlight = useRef(new Set<string | null>());
   const [running, setRunning] = useState<ReadonlySet<string | null>>(
     () => new Set(),
@@ -38,32 +41,44 @@ export function useAccessAction() {
     // Without sign-in nothing is stored, on purpose.
     (state.startup.storage !== 'durable' && state.signIn !== 'none') ||
     Boolean(state.startupError);
-  const actionFocus = useRef<HTMLElement | null>(null);
+  // The control that started each running action, by its scope.
+  const actionFocus = useRef(new Map<string | null, HTMLElement>());
   useEffect(() => {
-    const target = actionFocus.current;
-    if (unavailable || !target || target.matches(':disabled')) return;
-    actionFocus.current = null;
-    // Only a lost focus returns: one the action moved elsewhere stays there.
-    const active = target.ownerDocument.activeElement;
-    if (target.isConnected && (!active || active === target.ownerDocument.body))
-      target.focus();
+    for (const [key, target] of actionFocus.current) {
+      if (unavailable || running.has(key) || target.matches(':disabled'))
+        continue;
+      actionFocus.current.delete(key);
+      // Only a lost focus returns: one the action moved elsewhere stays there.
+      const active = target.ownerDocument.activeElement;
+      if (
+        target.isConnected &&
+        (!active || active === target.ownerDocument.body)
+      )
+        target.focus();
+    }
   }, [unavailable, running]);
+  const report = (key: string | null, failure: { cause: unknown } | null) =>
+    setFailures((current) => {
+      const next = new Map(current);
+      if (failure) next.set(key, failure);
+      else next.delete(key);
+      return next;
+    });
   async function act(task: () => Promise<unknown>, scope?: string) {
     const key = scope ?? null;
     const flights = inFlight.current;
     if (unavailable || flights.has(key)) return;
     const focused = document.activeElement;
-    actionFocus.current =
-      focused instanceof HTMLElement && focused !== document.body
-        ? focused
-        : null;
+    if (focused instanceof HTMLElement && focused !== document.body)
+      actionFocus.current.set(key, focused);
+    else actionFocus.current.delete(key);
     flights.add(key);
     setRunning(new Set(flights));
-    setFailure(null);
+    report(key, null);
     try {
       await task();
     } catch (cause) {
-      setFailure({ cause });
+      report(key, { cause });
     } finally {
       flights.delete(key);
       setRunning(new Set(flights));
@@ -71,7 +86,15 @@ export function useAccessAction() {
   }
   /** Whether an action scoped to this connection runs. */
   const holds = (scope: string) => running.has(scope);
-  return { act, unavailable, holds, failure };
+  /** The failure of the last action scoped to this connection. */
+  const failureOf = (scope: string) => failures.get(scope) ?? null;
+  return {
+    act,
+    unavailable,
+    holds,
+    failure: failures.get(null) ?? null,
+    failureOf,
+  };
 }
 
 /** How the app's view uses its Pods; see `AppAccessProps.podView`. */
@@ -123,7 +146,7 @@ export function PodManagement({
   const state = useAppState();
   const { messages: m, error } = useSdkLocale();
   const id = useId();
-  const { act, unavailable, holds, failure } = useAccessAction();
+  const { act, unavailable, holds, failure, failureOf } = useAccessAction();
   const combined = podView === 'combined';
   const connections = state.connections;
   const activeId = state.activeId;
@@ -142,6 +165,8 @@ export function PodManagement({
   const list = useRef<HTMLDivElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const shownIds = useRef(connections.map((entry) => entry.id));
+  // The row that last held the focus inside the list.
+  const focusedRow = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     // Once the last permitted Pod is connected, the button is gone: the Pod
@@ -156,11 +181,13 @@ export function PodManagement({
   }, []);
   useLayoutEffect(() => {
     // A Pod's row went (removed here or elsewhere): a focus lost with it
-    // moves to the list.
+    // moves to the list; another row's removal leaves the focus alone.
     const before = shownIds.current;
     const ids = connections.map((entry) => entry.id);
     shownIds.current = ids;
-    if (before.every((rowId) => ids.includes(rowId))) return;
+    const held = focusedRow.current;
+    if (!held || !before.includes(held) || ids.includes(held)) return;
+    focusedRow.current = null;
     const document = list.current?.ownerDocument;
     const focused = document?.activeElement;
     if (focused && focused !== document.body && focused.isConnected) return;
@@ -336,6 +363,13 @@ export function PodManagement({
         (target) => !connections.some((entry) => entry.podUrl === target),
       ));
 
+  // Actions whose row went, or that have none left (a removal elsewhere),
+  // close: no button would close them any more.
+  const menuEntry =
+    menu === null ? undefined : connections.find((entry) => entry.id === menu);
+  if (menu !== null && (!menuEntry || actionsOf(menuEntry).length === 0))
+    setMenu(null);
+
   // A press outside a Pod's actions and their button closes them; one
   // inside is not leaving them, wherever the browser puts the focus.
   const pressing = useRef(false);
@@ -386,12 +420,16 @@ export function PodManagement({
           const failedSave = s.kind === 'ended' && s.saved === false;
           const actionsLabel = m.podActions?.(name) ?? name;
           const held = unavailable || holds(entry.id);
+          const ownFailure = failureOf(entry.id);
           return (
             <div
               key={entry.id}
               role="group"
               aria-labelledby={`${rowId}-name`}
               className="sp-pod"
+              onFocus={() => {
+                focusedRow.current = entry.id;
+              }}
             >
               <div
                 className="sp-pod-head"
@@ -474,6 +512,8 @@ export function PodManagement({
                     : m.controls.disconnectFailed}
                 </p>
               )}
+              {/* A failed retry or access check of this Pod. */}
+              {ownFailure && <p role="alert">{error(ownFailure.cause)}</p>}
               <div
                 id={`${rowId}-details`}
                 className="sp-pod-details"

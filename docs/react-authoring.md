@@ -2193,8 +2193,13 @@ Read state with `useAppState`, `useConnections` and `useView`.
 | Context selection (`selectContext`)                                | `local` (or unscoped) and `target` guards     |
 | `selectConnection`, `connect`, `authorize`, `disconnect`, `forget` | every guard                                   |
 
+- `disconnect` or `forget` of a connection that is not the active one leaves
+  only the work bound to it: SDK forms and editors name their connection
+  (`LeaveGuard.connectionId`), and an app's own `connection` or `explicit`
+  guard, which may be bound to that Pod, is asked about too.
 - A pending write blocks every change, except that a saving `connection` or
-  `explicit` draft does not block a Context selection. A confirmation names
+  `explicit` draft does not block a Context selection, and signing out of or
+  removing another Pod waits only for the writes it would leave. A confirmation names
   unconfirmed writes it leaves and warns that discarding does not undo them.
 - A declined change discards nothing; the target stays when its replacement is
   gone. A prompt whose connection stops being active (a returning sign-in, a
