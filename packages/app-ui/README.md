@@ -23,8 +23,9 @@ Peers: React 19, `@sempods/app-sdk` and `@sempods/client-sdk` of the same minor
 version as this package, and Tailwind CSS 4.1 or newer (checked with 4.3.3).
 The package ships built JavaScript with TypeScript declarations;
 `react-aria-components`, `@internationalized/date`, `lucide-react` and the
-class utilities are its own dependencies. The `shadcn` CLI is not needed at
-runtime.
+class utilities are its own dependencies. `react-markdown` 10 is an optional
+peer, needed only for the [Markdown entry](#markdown-text). The `shadcn` CLI
+is not needed at runtime.
 
 ## Set up Tailwind
 
@@ -1825,6 +1826,147 @@ suggestion field's announcements) follow the SDK provider's language
 (English or German); the menu's and the date chooser's can be passed as
 props.
 
+## Markdown text
+
+Long text fields, such as a task's notes in `schema:description`, can be
+read and written as Markdown with the opt-in entry `@sempods/app-ui/markdown`.
+It renders with [react-markdown](https://github.com/remarkjs/react-markdown),
+an optional peer that only an app using the entry installs:
+
+```sh
+npm install react-markdown
+```
+
+An app that only shows plain text imports nothing from it and needs nothing
+more; the package's main entry never loads it. Import the entry statically,
+not with `lazy()`: the view and the field are one small module, so a stored
+text shows formatted in the first paint and writing needs no loading state.
+
+- **`MarkdownView`** shows a `source` as read-only content: paragraphs (a
+  line break typed in one shows as one), headings, lists, emphasis, quotes,
+  code and links. A `#` heading is an `h3` below a dialog's `h2`, and
+  `headingLevel` moves the start; deeper ones follow down to `h6`. Text in a
+  Pod may come from any app, so the view runs and fetches nothing: embedded
+  HTML shows as its text, an image as its description only, and only
+  `http:` and `https:` addresses become links, which open in a new tab on
+  the person's press (`rel="noopener noreferrer"`); any other address stays
+  text.
+- **`MarkdownField`** is the controlled field around it: the app passes
+  `value` (the source, `''` for none) and `onChange`, which receives every
+  change exactly as typed, also indentation, trailing spaces of a hard line
+  break and a text of only spaces. It never trims or normalizes, and opening
+  it, switching its presentation or leaving it never calls `onChange`, so
+  the draft and the Pod stay untouched. The containing editor owns
+  validation, save, cancel and conflicts.
+
+The field is a group named by its `label`. It starts with
+`defaultPresentation`: `read` (default) shows the rendered text and an
+**Edit text** action, or only **Add text** while there is no text, as the
+body of a title-first form; `write` starts with the text input. One action
+at the field's top end switches between the two, so it stays in place:
+editing moves the focus into the text input, **Preview** returns it to that
+action. Writing adds a toolbar of 44px actions that act on the selection:
+heading, bold, italic, bulleted and numbered list, and link (the link's
+address is selected to type over). Pressing one keeps the focus and the
+on-screen keyboard in the text; from the keyboard, the arrow keys move along
+the toolbar and Tab leaves it. In the text input, Ctrl+B, Ctrl+I and Ctrl+K
+(Command on Apple systems) do the same, and the browser's undo reverts a
+formatting step (WebKit takes it back together with typing just before it,
+as it groups typing). Tab moves to the next control instead of typing a tab.
+From 42rem of the field's own width, the preview is shown beside the source
+as it is typed; a narrower field writes at full width and previews on
+demand. `readOnly` shows the rendered text without an action, and nothing
+when there is no text; a separate reading place, such as a task's details,
+uses `MarkdownView` with the same rendering. Texts follow the SDK provider's
+language (English or German); `labels` replaces any of them.
+
+For an SDK field, declare the text without `trim`, so Markdown keeps its
+indentation and line breaks, and as `optional`. A text of only spaces is no
+text: pass `null`, so the field stays absent instead of making the draft
+invalid; the field keeps showing the spaces as typed, so the first line of an
+indented code block can be written. The UI gate runs this file as written:
+
+```tsx
+// task-notes.tsx
+import { useEffect } from 'react';
+import {
+  ResourceEditor,
+  useAppState,
+  useContextEditor,
+  useMessages,
+} from '@sempods/app-sdk/react';
+import { fields, text } from '@sempods/client-sdk/edit';
+import { Input } from '@sempods/app-ui';
+import { MarkdownField } from '@sempods/app-ui/markdown';
+
+const schema = 'https://schema.org/';
+export const noteFields = fields(
+  {
+    title: text(schema + 'name', { language: null, trim: true }),
+    // Markdown as typed: no trim, so indentation and hard breaks stay.
+    notes: text(schema + 'description', { language: null, optional: true }),
+  },
+  { type: schema + 'Action' },
+);
+
+const texts = {
+  en: { title: 'Title', notes: 'Notes' },
+  de: { title: 'Titel', notes: 'Notizen' },
+};
+
+export function TaskNotes({
+  subject,
+  context,
+}: {
+  readonly subject: string;
+  readonly context: string;
+}) {
+  const t = useMessages(texts);
+  const edit = useContextEditor(noteFields);
+  const { open } = edit;
+  const { changing } = useAppState();
+  useEffect(() => {
+    if (!changing) void open({ subject, context });
+  }, [subject, context, changing, open]);
+  return (
+    <ResourceEditor
+      editor={edit.editor}
+      labels={{ title: t.title, notes: t.notes }}
+    >
+      {(draft, change) => (
+        <div className="grid gap-5">
+          <label className="grid gap-1.5">
+            {t.title}
+            <Input
+              value={draft.title}
+              onChange={(e) => change({ ...draft, title: e.target.value })}
+              required
+            />
+          </label>
+          <MarkdownField
+            label={t.notes}
+            value={draft.notes ?? ''}
+            // Only spaces are no text: the optional field stays absent.
+            onChange={(notes) =>
+              change({ ...draft, notes: notes.trim() ? notes : null })
+            }
+          />
+        </div>
+      )}
+    </ResourceEditor>
+  );
+}
+```
+
+A text read in a preferred language variant
+([recipe](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant))
+passes that variant's text and replaces only it:
+`value={draft.notes.value ?? ''}` and
+`onChange={(notes) => change({ ...draft, notes: editTextVariant(draft.notes, notes.trim() ? notes : null) })}`.
+Other languages stay as they are. While the variant is `ambiguous`, its
+`value` is `null`: show its `values` instead of the field until the person
+chooses to replace them.
+
 ## Router
 
 `useNav(model)` routes an app over its own address model: the app says which
@@ -2298,8 +2440,14 @@ the "Not today" `DateChoice` in a `ScreenDialog` with a preset, a typed day, an
 impossible and an early day, Enter in a form, Remove date, Escape after a
 picked day, reopening the date chooser during its exit, the
 focus trap and 44px targets without horizontal overflow at 375 and 360px
-wide; and the README's delete actions, where `RemoveButton`'s default icon
-and `DeleteIcon` draw the same outline at 1rem under two root font sizes. It
+wide; the README's delete actions, where `RemoveButton`'s default icon
+and `DeleteIcon` draw the same outline at 1rem under two root font sizes;
+and the Markdown entry: a reading view formatted from its first state that
+fetches and runs nothing, a link opened on a press, switching in place with
+the focus, formatting by pointer, touch and keyboard with undo, Tab leaving
+the text, the preview beside the source only when wide, 320px, light and
+dark, and `task-notes.tsx` in an SDK editor writing nothing until saved and
+saving the text as typed. It
 uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 

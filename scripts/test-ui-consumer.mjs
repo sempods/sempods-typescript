@@ -8,7 +8,7 @@
 // against its own Pod and browser instance.
 //
 // Usage: node scripts/test-ui-consumer.mjs [--browsers=chromium,webkit,firefox]
-//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs,viewStrip,ghost,editorFooter,dateChoice,rename,deleteIcon]
+//        [--only=contexts,contextQualifiers,gate,roundtrip,interaction,integration,contrast,routing,theme,compact,insets,workspace,search,accessSettings,startup,addPod,checkbox,confirmation,menuDialog,viewTabs,viewStrip,ghost,editorFooter,dateChoice,rename,deleteIcon,markdown]
 //        [--lanes=<suites at once per browser, default 1>]
 //        [--evidence=<directory for JSON results>] [--keep]
 import assert from 'node:assert/strict';
@@ -78,6 +78,10 @@ try {
     await readFile(join(root, 'package.json'), 'utf8'),
   ).devDependencies;
   const dependencies = { react: tools.react, 'react-dom': tools['react-dom'] };
+  // The Markdown entry's optional peer, as an app that uses it installs it.
+  dependencies['react-markdown'] = JSON.parse(
+    await readFile(join(root, 'packages/app-ui/package.json'), 'utf8'),
+  ).devDependencies['react-markdown'];
   for (const name of await readdir(temp)) {
     if (!name.endsWith('.tgz')) continue;
     const manifest = JSON.parse(
@@ -102,11 +106,17 @@ try {
         'dist/index.d.ts',
         'dist/theme-check/index.js',
         'dist/theme-check/index.d.ts',
+        'dist/markdown/index.js',
+        'dist/markdown/index.d.ts',
         'LICENSE',
         'NOTICE',
       ])
         assert.ok(files.includes('package/' + file), `app-ui lacks ${file}`);
       assert.equal(manifest.license, 'Apache-2.0');
+      // Optional: an app that only shows plain text installs no Markdown.
+      assert.deepEqual(manifest.peerDependenciesMeta, {
+        'react-markdown': { optional: true },
+      });
       assert.deepEqual(
         files.filter(
           (f) =>
@@ -144,7 +154,7 @@ try {
   await cp(join(root, 'tests/ui-browser'), app, { recursive: true });
   // The installed README's examples: its task dialog, its quick edit, its
   // workspace, its view links, its view strip, its confirmation, its "Not
-  // today" action, its delete actions and its address model are the
+  // today" action, its delete actions, its task notes and its address model are the
   // reference screen's, so the checks run them as shipped; other TSX examples
   // are only compiled. Its stylesheet setup is the one the screen uses.
   const readme = await readFile(
@@ -172,6 +182,7 @@ try {
     await ship('tsx', 'rename-row.tsx'),
     await ship('tsx', 'not-today.tsx'),
     await ship('tsx', 'delete-actions.tsx'),
+    await ship('tsx', 'task-notes.tsx'),
   ];
   for (const [i, example] of blocks('tsx').entries())
     if (!shipped.includes(example))
@@ -260,6 +271,8 @@ export default { root: 'app', plugins: [tailwindcss()], build: { outDir: 'dist',
     '--cell-size',
     'bg-action',
     'data-exiting\\:animate-out',
+    // The Markdown entry's: the preview beside the source in a wide field.
+    '@2xl\\:grid-cols-2',
   ])
     assert.ok(css.includes(candidate), `built CSS lacks ${candidate}`);
 

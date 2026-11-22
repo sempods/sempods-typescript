@@ -42,6 +42,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./markdown": {
+      "types": "./dist/markdown/index.d.ts",
+      "import": "./dist/markdown/index.js"
+    },
     "./theme-check": {
       "types": "./dist/theme-check/index.d.ts",
       "import": "./dist/theme-check/index.js"
@@ -61,11 +65,18 @@
     "@sempods/client-sdk": "workspace:~",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
     "tailwindcss": "^4.1.0"
+  },
+  "peerDependenciesMeta": {
+    "react-markdown": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@sempods/app-sdk": "workspace:*",
-    "@sempods/client-sdk": "workspace:*"
+    "@sempods/client-sdk": "workspace:*",
+    "react-markdown": "10.1.0"
   },
   "publishConfig": {
     "access": "public",

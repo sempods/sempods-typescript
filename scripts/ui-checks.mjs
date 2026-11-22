@@ -6647,6 +6647,7 @@ export const suites = {
   editorFooter,
   rename,
   deleteIcon,
+  markdown,
 };
 
 /** The shipped chooser, with two fixture Pods and SDK draft guards. */
@@ -9583,6 +9584,604 @@ async function deleteIcon({ browser, origin }) {
   } finally {
     results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
     await context.close();
+  }
+  return results;
+}
+
+/**
+ * The Markdown entry (`?screen=markdown`, #395): the reading view renders in
+ * the first paint and fetches nothing, links open on a press; the field
+ * switches presentation in place with the focus, keeps the draft, formats
+ * the selection by pointer, touch and keyboard with the browser's undo,
+ * lets Tab leave the text, shows the preview beside the source only when
+ * wide, fits 320px, follows light and dark; and in an SDK editor, opening
+ * and switching write nothing while a saved text keeps its indentation and
+ * hard line breaks.
+ */
+async function markdown({ browser, origin, engine }) {
+  const results = [];
+  const tab = tabKey(engine);
+  const address = (query = '') => origin + '/?screen=markdown' + query;
+  const notes = (page) => page.getByRole('group', { name: 'Notes' });
+  const toggle = (page) =>
+    notes(page).getByRole('button', {
+      name: /^(Edit text|Preview|Add text)$/,
+    });
+  const text = (page) => notes(page).getByRole('textbox', { name: 'Notes' });
+  const draft = (page) =>
+    page.locator('output[data-draft]').evaluate((el) => ({
+      draft: JSON.parse(el.getAttribute('data-draft')),
+      changes: Number(el.getAttribute('data-changes')),
+    }));
+  /** The focused element: its tag and accessible name, as far as needed. */
+  const focused = (page) =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      return `${el?.tagName.toLowerCase()} ${el?.getAttribute('aria-label') ?? el?.textContent?.trim() ?? ''}`;
+    });
+  const box = async (locator) => {
+    const b = await locator.boundingBox();
+    return b && [b.x, b.y, b.width, b.height].map((n) => Math.round(n));
+  };
+  const SAMPLE_START = '# Plan\n\nCall **before noon**';
+
+  {
+    const { context, page, errors } = await newPage(browser);
+    const media = [];
+    page.on('request', (r) => {
+      if (r.url().includes('media.example')) media.push(r.url());
+    });
+    try {
+      // The first state of the view that the page ever has.
+      await page.addInitScript(() => {
+        new MutationObserver((_, observer) => {
+          const view = document.querySelector('[data-slot=markdown-view]');
+          if (!view) return;
+          observer.disconnect();
+          Object.assign(window, {
+            firstView: {
+              heading: view.querySelector('h3')?.textContent ?? null,
+              strong: view.querySelector('strong')?.textContent ?? null,
+              raw: view.textContent.includes('**'),
+            },
+          });
+        }).observe(document, { childList: true, subtree: true });
+      });
+      await page.goto(address());
+      const details = page.getByRole('region', { name: 'Task details' });
+      await details.getByRole('heading', { name: 'Plan' }).waitFor();
+      results.push(
+        await attemptOn(errors, 'markdown-first-paint', async () => {
+          const first = await page.evaluate(() => window.firstView);
+          return {
+            pass:
+              first?.heading === 'Plan' &&
+              first.strong === 'before noon' &&
+              !first.raw,
+            first,
+          };
+        }),
+      );
+      results.push(
+        await attemptOn(
+          errors,
+          'markdown-fetches-and-runs-nothing',
+          async () => {
+            const run = details.getByText('run', { exact: true });
+            await run.click();
+            await settle(page);
+            const view = await details.evaluate((el) => ({
+              images: el.querySelectorAll('img').length,
+              bold: el.querySelectorAll('b').length,
+              text: el.textContent,
+              links: [...el.querySelectorAll('a')].map((a) => [
+                a.textContent,
+                a.getAttribute('href'),
+                a.target,
+                a.rel,
+              ]),
+              hacked: 'hacked' in window,
+            }));
+            return {
+              pass:
+                media.length === 0 &&
+                view.images === 0 &&
+                view.bold === 0 &&
+                view.text.includes(
+                  '<img src="https://media.example/html.gif" alt="html"> <b>not bold</b>',
+                ) &&
+                view.text.includes('Photo of the tap') &&
+                JSON.stringify(view.links) ===
+                  JSON.stringify([
+                    [
+                      'manual',
+                      'https://manual.example/tap',
+                      '_blank',
+                      'noopener noreferrer',
+                    ],
+                  ]) &&
+                !view.hacked,
+              media,
+              view: { ...view, text: undefined },
+            };
+          },
+        ),
+      );
+      results.push(
+        await attemptOn(errors, 'markdown-link-opens-on-press', async () => {
+          await context.route('https://manual.example/**', (route) =>
+            route.fulfill({
+              contentType: 'text/html',
+              body: '<title>Manual</title>',
+            }),
+          );
+          const [opened] = await Promise.all([
+            context.waitForEvent('page'),
+            details.getByRole('link', { name: 'manual' }).click(),
+          ]);
+          await opened.waitForLoadState();
+          const opener = await opened.evaluate(() => window.opener === null);
+          const url = opened.url();
+          await opened.close();
+          return {
+            pass: url === 'https://manual.example/tap' && opener,
+            url,
+            opener,
+          };
+        }),
+      );
+    } finally {
+      results.push({
+        id: 'markdown-reading-page-errors',
+        pass: errors.length === 0,
+        errors,
+      });
+      await context.close();
+    }
+  }
+
+  for (const [width, height] of [
+    [1280, 800],
+    [375, 740],
+  ]) {
+    const { context, page, errors } = await newPage(browser, {
+      viewport: { width, height },
+    });
+    try {
+      await page.goto(address());
+      await toggle(page).waitFor();
+      results.push(
+        await attemptOn(
+          errors,
+          `markdown-switch-in-place-${width}`,
+          async () => {
+            const before = await box(toggle(page));
+            const reading = await toggle(page).getAttribute('aria-label');
+            await toggle(page).click();
+            await text(page).waitFor();
+            const intoText = await focused(page);
+            const writing = await box(toggle(page));
+            const source = await text(page).inputValue();
+            await toggle(page).click();
+            await text(page).waitFor({ state: 'detached' });
+            const back = await focused(page);
+            const after = await box(toggle(page));
+            // The keyboard way: Enter on the action, then Enter on Preview.
+            await toggle(page).press('Enter');
+            await text(page).waitFor();
+            const keyText = await focused(page);
+            await toggle(page).focus();
+            await toggle(page).press('Enter');
+            await text(page).waitFor({ state: 'detached' });
+            const keyBack = await focused(page);
+            const state = await draft(page);
+            return {
+              pass:
+                reading === 'Edit text' &&
+                intoText === 'textarea Notes' &&
+                source.startsWith(SAMPLE_START) &&
+                back === 'button Edit text' &&
+                keyText === 'textarea Notes' &&
+                keyBack === 'button Edit text' &&
+                JSON.stringify(before) === JSON.stringify(writing) &&
+                JSON.stringify(before) === JSON.stringify(after) &&
+                state.changes === 0 &&
+                state.draft === source,
+              before,
+              writing,
+              after,
+              intoText,
+              back,
+              keyText,
+              keyBack,
+              changes: state.changes,
+            };
+          },
+        ),
+      );
+      results.push(
+        await attemptOn(
+          errors,
+          `markdown-preview-beside-${width}`,
+          async () => {
+            await toggle(page).click();
+            await text(page).waitFor();
+            await settle(page);
+            const preview = notes(page).getByRole('region', {
+              name: 'Preview',
+            });
+            const beside = await preview.isVisible();
+            const source = await box(text(page));
+            const rendered = beside ? await box(preview) : null;
+            const fit = [];
+            for (const narrow of width < 768 ? [375, 320] : [width]) {
+              await page.setViewportSize({ width: narrow, height });
+              await settle(page);
+              fit.push(
+                await page.evaluate(() => {
+                  const field = document.querySelector(
+                    '[data-slot=markdown-field]',
+                  );
+                  const buttons = [...field.querySelectorAll('button')].map(
+                    (b) => b.getBoundingClientRect(),
+                  );
+                  return {
+                    width: innerWidth,
+                    overflow: document.documentElement.scrollWidth > innerWidth,
+                    targets: buttons.every(
+                      (b) => b.width >= 44 && b.height >= 44,
+                    ),
+                    inside: buttons.every(
+                      (b) => b.left >= 0 && b.right <= innerWidth,
+                    ),
+                  };
+                }),
+              );
+            }
+            await page.setViewportSize({ width, height });
+            return {
+              pass:
+                (width >= 1024
+                  ? beside &&
+                    rendered !== null &&
+                    rendered[0] >= source[0] + source[2] &&
+                    Math.abs(rendered[1] - source[1]) <= 1
+                  : !beside) &&
+                fit.every((f) => !f.overflow && f.targets && f.inside),
+              beside,
+              source,
+              rendered,
+              fit,
+            };
+          },
+        ),
+      );
+    } finally {
+      results.push({
+        id: `markdown-switch-page-errors-${width}`,
+        pass: errors.length === 0,
+        errors,
+      });
+      await context.close();
+    }
+  }
+
+  {
+    const { context, page, errors } = await newPage(browser);
+    try {
+      await page.goto(address('&notes=empty&write'));
+      await text(page).waitFor();
+      const select = (from, to) =>
+        text(page).evaluate(
+          (el, [a, b]) => el.setSelectionRange(a, b),
+          [from, to],
+        );
+      results.push(
+        await attemptOn(errors, 'markdown-shortcuts-and-undo', async () => {
+          // WebKit takes back the typing before a formatting with it in one
+          // step, as it does for typing itself: redo brings both back.
+          await text(page).fill('Buy milk');
+          await text(page).click();
+          await page.keyboard.press('End');
+          for (let i = 0; i < 4; i++)
+            await page.keyboard.press('Shift+ArrowLeft');
+          await page.keyboard.press('ControlOrMeta+B');
+          const bold = (await draft(page)).draft;
+          const selected = await text(page).evaluate((el) =>
+            el.value.slice(el.selectionStart, el.selectionEnd),
+          );
+          await page.keyboard.press('ControlOrMeta+Z');
+          await settle(page);
+          const undone = (await draft(page)).draft;
+          await page.keyboard.press('ControlOrMeta+Shift+Z');
+          await settle(page);
+          const redone = (await draft(page)).draft;
+          return {
+            pass:
+              bold === 'Buy **milk**' &&
+              selected === 'milk' &&
+              undone === (engine === 'webkit' ? '' : 'Buy milk') &&
+              redone === 'Buy **milk**',
+            bold,
+            selected,
+            undone,
+            redone,
+          };
+        }),
+      );
+      results.push(
+        await attemptOn(errors, 'markdown-toolbar-keyboard', async () => {
+          await text(page).fill('Buy milk');
+          await select(4, 8);
+          const heading = notes(page).getByRole('button', { name: 'Heading' });
+          await heading.focus();
+          await page.keyboard.press('ArrowRight');
+          const arrow = await focused(page);
+          await page.keyboard.press('ArrowRight');
+          await page.keyboard.press('Enter');
+          const italic = (await draft(page)).draft;
+          const back = await focused(page);
+          return {
+            pass:
+              arrow === 'button Bold' &&
+              italic === 'Buy *milk*' &&
+              back === 'textarea Notes',
+            arrow,
+            italic,
+            back,
+          };
+        }),
+      );
+      results.push(
+        await attemptOn(errors, 'markdown-tab-leaves-text', async () => {
+          await text(page).focus();
+          await page.keyboard.press(tab);
+          const next = await focused(page);
+          const value = await text(page).inputValue();
+          await page.keyboard.press('Shift+' + tab);
+          const previous = await focused(page);
+          return {
+            pass:
+              next === 'button After the notes' &&
+              !value.includes('\t') &&
+              previous === 'textarea Notes',
+            next,
+            previous,
+          };
+        }),
+      );
+    } finally {
+      results.push({
+        id: 'markdown-keyboard-page-errors',
+        pass: errors.length === 0,
+        errors,
+      });
+      await context.close();
+    }
+  }
+
+  {
+    const { context, page, errors } = await newPage(browser, {
+      viewport: { width: 375, height: 740 },
+      hasTouch: true,
+    });
+    try {
+      await page.goto(address('&notes=empty'));
+      results.push(
+        await attemptOn(errors, 'markdown-touch', async () => {
+          await toggle(page).tap();
+          await text(page).waitFor();
+          const add = await focused(page);
+          await page.keyboard.type('Buy milk');
+          await text(page).evaluate((el) => el.setSelectionRange(4, 8));
+          await notes(page).getByRole('button', { name: 'Bold' }).tap();
+          const kept = await focused(page);
+          const bold = (await draft(page)).draft;
+          await toggle(page).tap();
+          await text(page).waitFor({ state: 'detached' });
+          const rendered = await notes(page).locator('strong').textContent();
+          await toggle(page).tap();
+          await text(page).waitFor();
+          const again = await focused(page);
+          return {
+            pass:
+              add === 'textarea Notes' &&
+              kept === 'textarea Notes' &&
+              bold === 'Buy **milk**' &&
+              rendered === 'milk' &&
+              again === 'textarea Notes',
+            add,
+            kept,
+            bold,
+            rendered,
+            again,
+          };
+        }),
+      );
+    } finally {
+      results.push({
+        id: 'markdown-touch-page-errors',
+        pass: errors.length === 0,
+        errors,
+      });
+      await context.close();
+    }
+  }
+
+  {
+    const { context, page, errors } = await newPage(browser, {
+      viewport: { width: 375, height: 740 },
+    });
+    try {
+      await page.goto(address('&notes=long'));
+      await toggle(page).waitFor();
+      results.push(
+        await attemptOn(errors, 'markdown-long-draft-switches', async () => {
+          const initial = (await draft(page)).draft;
+          const place = await box(toggle(page));
+          const places = [];
+          for (let i = 0; i < 12; i++) {
+            await toggle(page).click();
+            places.push(await box(toggle(page)));
+          }
+          await settle(page);
+          const state = await draft(page);
+          const reading = await notes(page).getByRole('heading').count();
+          return {
+            pass:
+              initial.length > 10000 &&
+              places.every(
+                (p) => JSON.stringify(p) === JSON.stringify(place),
+              ) &&
+              state.draft === initial &&
+              state.changes === 0 &&
+              reading === 400,
+            place,
+            places,
+            changes: state.changes,
+            reading,
+          };
+        }),
+      );
+    } finally {
+      results.push({
+        id: 'markdown-long-page-errors',
+        pass: errors.length === 0,
+        errors,
+      });
+      await context.close();
+    }
+  }
+
+  results.push(
+    await attempt('markdown-light-and-dark', async () => {
+      const schemes = {};
+      for (const colorScheme of ['light', 'dark']) {
+        const { context, page } = await newPage(browser, { colorScheme });
+        try {
+          await page.goto(address('&write'));
+          await text(page).waitFor();
+          schemes[colorScheme] = await page.evaluate(() => {
+            const color = (el) => getComputedStyle(el).color;
+            const field = document.querySelector('[data-slot=markdown-field]');
+            return {
+              page: color(document.body),
+              background: getComputedStyle(document.body).backgroundColor,
+              view: color(
+                document.querySelector('[data-slot=markdown-view] p'),
+              ),
+              text: color(field.querySelector('textarea')),
+              preview: color(
+                field.querySelector(
+                  '[role=region] [data-slot=markdown-view] p',
+                ),
+              ),
+            };
+          });
+        } finally {
+          await context.close();
+        }
+      }
+      const { light, dark } = schemes;
+      return {
+        pass:
+          light.background !== dark.background &&
+          [light, dark].every(
+            (s) =>
+              s.view === s.page && s.text === s.page && s.preview === s.page,
+          ),
+        schemes,
+      };
+    }),
+  );
+
+  {
+    const { context, page, errors } = await newPage(browser);
+    const patches = [];
+    page.on('request', (r) => {
+      if (r.method() === 'PATCH') patches.push(r.url());
+    });
+    const description = async () =>
+      (await storedTasks(origin)).find(
+        (t) =>
+          t.context === origin + '/alice/_system/contexts/work' &&
+          t.body['@id'] === origin + '/alice/tasks/1',
+      );
+    const SOURCE =
+      '    code first\n\nA line with a hard break  \nnext line\n\n- item';
+    try {
+      await signIn(page, origin, '/?screen=markdown&part=editor', {
+        choose: false,
+      });
+      await chooser(page).selectOption({ label: 'work' });
+      await toggle(page).waitFor({ timeout: 15000 });
+      const save = page.getByRole('button', { name: 'Save', exact: true });
+      const discard = page.getByRole('button', {
+        name: 'Discard changes',
+        exact: true,
+      });
+      results.push(
+        await attemptOn(
+          errors,
+          'markdown-editor-switch-writes-nothing',
+          async () => {
+            const before = await description();
+            const label = await toggle(page).textContent();
+            for (let i = 0; i < 4; i++) await toggle(page).click();
+            await settle(page);
+            const after = await description();
+            return {
+              pass:
+                label === 'Add text' &&
+                (await save.isDisabled()) &&
+                (await discard.isDisabled()) &&
+                patches.length === 0 &&
+                after.version === before.version,
+              label,
+              patches,
+            };
+          },
+        ),
+      );
+      results.push(
+        await attemptOn(errors, 'markdown-editor-saves-as-typed', async () => {
+          await toggle(page).click();
+          await text(page).fill(SOURCE);
+          await save.click();
+          await page.waitForResponse((r) => r.request().method() === 'PATCH');
+          await settle(page);
+          const saved = await description();
+          const value =
+            saved.body['https://schema.org/description']?.[0]?.['@value'];
+          // Opened again, the saved text shows rendered and writes nothing.
+          await page.goto(address('&part=editor'));
+          await toggle(page).waitFor({ timeout: 15000 });
+          const reopened = await toggle(page).getAttribute('aria-label');
+          const code = await notes(page).locator('pre').textContent();
+          await settle(page);
+          const later = await description();
+          return {
+            pass:
+              value === SOURCE &&
+              reopened === 'Edit text' &&
+              code === 'code first\n' &&
+              later.version === saved.version &&
+              patches.length === 1,
+            value,
+            reopened,
+            code,
+            patches: patches.length,
+          };
+        }),
+      );
+    } finally {
+      results.push({
+        id: 'markdown-editor-page-errors',
+        pass: errors.length === 0,
+        errors,
+      });
+      await context.close();
+    }
   }
   return results;
 }
