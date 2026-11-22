@@ -68,6 +68,16 @@ describe('emphasis', () => {
     expect(run('bold', '> [quoted]')).toBe('> **[quoted]**');
   });
 
+  it('keeps a paragraph or list item over soft line breaks as one span', () => {
+    expect(run('bold', '[**hello\nworld**]')).toBe('[hello\nworld]');
+    expect(run('italic', '[*hello\nworld*]')).toBe('[hello\nworld]');
+    expect(run('bold', '[hello\nworld]')).toBe('**[hello\nworld]**');
+    expect(run('bold', '[- one\n  more\n- two]')).toBe(
+      '[- **one\n  more**\n- **two**]',
+    );
+    expect(run('bold', '[## Title\ntext]')).toBe('[## **Title**\n**text**]');
+  });
+
   it('takes the emphasis off a selection inside a larger span', () => {
     expect(run('bold', '**[hello] world**')).toBe('[hello] **world**');
     expect(run('bold', '**say [hello] world**')).toBe(

@@ -1868,8 +1868,9 @@ editing moves the focus into the text input, **Preview** returns it to that
 action. Writing adds a toolbar of 44px actions that act on the selection:
 heading, bold, italic, bulleted and numbered list, and link (the link's
 address is selected to type over). Bold and italic apply to each selected
-line on its own, after its list marker, heading or quote, since emphasis
-cannot cross them. A selection that is only partly bold or italic becomes
+paragraph, list item or heading on its own, after its list marker, heading
+or quote, since emphasis cannot cross them; lines joined by a soft line
+break stay one span. A selection that is only partly bold or italic becomes
 so as a whole, its own markers merged into one pair. A selection inside a
 larger bold or italic span loses it alone, the span split around it. Stars
 that are text, such as in `2 * 3` or in code, stay. Pressing one keeps the focus and the

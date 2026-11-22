@@ -274,26 +274,42 @@ const LINE_PREFIX =
   /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|#{1,6}(?:[ \t]+|$)|>[ \t]?)*/;
 
 /**
- * The parts of the selection, one per line, without the line's prefix and
- * whitespace at their edges; lines with nothing left are skipped.
+ * The parts of the selection, one per block, without a line's prefix and
+ * whitespace at their edges. A paragraph's or list item's lines joined by
+ * soft line breaks are one block, as emphasis may span them; a blank line,
+ * a heading and a line that starts a list item or a quote start another.
+ * Blocks with nothing selected are skipped.
  */
-function lineSpans(
+function blockSpans(
   source: string,
   start: number,
   end: number,
 ): [number, number][] {
   const spans: [number, number][] = [];
+  // The span of the block that the next line may continue, if any.
+  let open: [number, number] | null = null;
+  // Whether the next line without a marker continues the current block.
+  let joinable = false;
   let line = start === 0 ? 0 : source.lastIndexOf('\n', start - 1) + 1;
   while (line <= end) {
     const next = source.indexOf('\n', line);
     const lineEnd = next === -1 ? source.length : next;
-    const prefix = LINE_PREFIX.exec(source.slice(line, lineEnd))![0].length;
+    const text = source.slice(line, lineEnd);
+    const prefix = LINE_PREFIX.exec(text)![0];
+    const blank = text.trim() === '';
+    const marker = prefix.trim() !== '';
+    const continues = joinable && !blank && !marker;
+    if (!continues) open = null;
     const [a, b] = inward(
       source,
-      Math.max(start, line + prefix),
+      Math.max(start, line + prefix.length),
       Math.min(end, lineEnd),
     );
-    if (a < b) spans.push([a, b]);
+    if (a < b) {
+      if (open) open[1] = b;
+      else spans.push((open = [a, b]));
+    }
+    joinable = !blank && !prefix.trim().startsWith('#');
     if (next === -1) break;
     line = next + 1;
   }
@@ -301,10 +317,11 @@ function lineSpans(
 }
 
 /**
- * Bold or italic on the selection. Emphasis cannot cross a line's prefix,
- * a list item or a paragraph, so it applies to each selected line on its
- * own, after its list marker, heading or quote: removed from all of them
- * when every one has it already, otherwise added where it is missing.
+ * Bold or italic on the selection. Emphasis cannot cross a paragraph, a
+ * list item, a heading or a line's prefix, so it applies to each selected
+ * block on its own, after its list marker, heading or quote: removed from
+ * all of them when every one has it already, otherwise added where it is
+ * missing.
  */
 function emphasis(
   kind: Emphasis,
@@ -312,7 +329,7 @@ function emphasis(
   start: number,
   end: number,
 ): MarkdownEdit {
-  const spans = start === end ? [] : lineSpans(source, start, end);
+  const spans = start === end ? [] : blockSpans(source, start, end);
   if (spans.length <= 1) {
     const [a, b] = spans[0] ?? [start, end];
     const edit = span(kind, source, a, b);
