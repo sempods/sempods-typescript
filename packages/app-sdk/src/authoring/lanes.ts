@@ -19,6 +19,9 @@ export type { LaneScope } from './lane.js';
  * selected view, another active connection, or an explicit view no longer
  * current that `keepsWork` does not keep (its work resolved, or a new
  * authorization). Then its lanes never update again and their guards go.
+ * An origin-bound group (`origin`, #408) belongs to its view's connection,
+ * not to the active one: another active connection leaves it alone, and its
+ * guards carry that connection (`LeaveGuard.connection`).
  */
 export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
   readonly lanes = new Map<string, L>();
@@ -35,22 +38,30 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
     private readonly app: AppController,
     readonly scope: LaneScope,
     /** The connection the group was created for. */
-    private readonly connection: string | null,
+    readonly connection: string | null,
     /** The groups of this scope and key across views (see `LaneChannel`). */
     private readonly channel: LaneChannel,
     /** Leaves the store's lookup once it retired. */
     private readonly drop: () => void,
     /** The kind of lane this group holds (`Lane`, or `CreationLane`). */
     private readonly make: LaneKind<D, L>,
+    /** Bound to `connection` whether or not it is active (explicit only). */
+    readonly origin = false,
   ) {}
 
   /** Whether its target is still the one its lanes write to. */
   holds() {
     if (!this.alive) return false;
     const snapshot = this.app.getSnapshot();
-    if (snapshot.activeId !== this.connection) return false;
+    if (!this.origin && snapshot.activeId !== this.connection) return false;
     if (this.scope === 'target') return snapshot.view === this.view;
-    return keepsWork(this.app, this.connection, this.view, this.working());
+    return keepsWork(
+      this.app,
+      this.connection,
+      this.view,
+      this.working(),
+      this.origin,
+    );
   }
   /** A captured write that still needs its recovery. */
   working() {
@@ -109,6 +120,9 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
       lane,
       this.app.register({
         ...lane.guard(this.scope),
+        ...(this.origin && this.connection !== null
+          ? { connection: this.connection }
+          : {}),
         subscribe: this.subscribe,
       }),
     );
@@ -220,21 +234,32 @@ export class LaneChannel {
 
 /** Internal: the lane groups of one controller, by view, scope and definition. */
 export interface LaneStore {
+  /**
+   * With `origin`, an explicit group bound to that connection (the view's)
+   * whether or not it is active; use a key of its own for such groups.
+   */
   group<D, L extends Lane<D> = Lane<D>>(
     view: BoundView,
     key: string,
     definition: FieldDefinition<D>,
     scope: LaneScope,
     kind?: LaneKind<D, L>,
+    origin?: string,
   ): LaneGroup<D, L>;
   /** The started groups of one scope and key across views. */
   channel(key: string, scope: LaneScope): LaneChannel;
   /**
    * The view of an explicit group kept for its work through access loss
-   * (`keepsWork`) for this key and Context, for a hook that has no current
-   * view of it (a session that ended without a token).
+   * (`keepsWork`) for this key and Context (and origin connection), for a
+   * hook that has no current view of it (a session that ended without a
+   * token).
    */
-  kept(key: string, scope: LaneScope, context: string): BoundView | undefined;
+  kept(
+    key: string,
+    scope: LaneScope,
+    context: string,
+    origin?: string,
+  ): BoundView | undefined;
 }
 
 const stores = new WeakMap<AppController, LaneStore>();
@@ -263,6 +288,7 @@ export function lanesOf(app: AppController): LaneStore {
       definition: FieldDefinition<D>,
       scope: LaneScope,
       kind: LaneKind<D, L> = Lane as unknown as LaneKind<D, L>,
+      origin?: string,
     ) {
       let byKey = groups.get(view);
       if (!byKey) groups.set(view, (byKey = new Map()));
@@ -275,6 +301,8 @@ export function lanesOf(app: AppController): LaneStore {
           if (
             kept.view !== view &&
             sameTarget(kept.view, view) &&
+            kept.origin === (origin !== undefined) &&
+            (origin === undefined || kept.connection === origin) &&
             !kept.view.getSnapshot().current &&
             kept.holds()
           )
@@ -288,21 +316,24 @@ export function lanesOf(app: AppController): LaneStore {
         definition,
         app,
         scope,
-        app.getSnapshot().activeId,
+        origin ?? app.getSnapshot().activeId,
         channel(name),
         () => {
           if (byKey.get(name) === group) byKey.delete(name);
         },
         kind,
+        origin !== undefined,
       );
       byKey.set(name, group as unknown as LaneGroup<unknown, Lane<unknown>>);
       return group;
     },
     channel: (key: string, scope: LaneScope) => channel(`${scope} ${key}`),
-    kept(key: string, scope: LaneScope, context: string) {
+    kept(key: string, scope: LaneScope, context: string, origin?: string) {
       for (const group of channel(`${scope} ${key}`).groups)
         if (
           group.view.contextIri === context &&
+          group.origin === (origin !== undefined) &&
+          (origin === undefined || group.connection === origin) &&
           !group.view.getSnapshot().current &&
           group.holds()
         )

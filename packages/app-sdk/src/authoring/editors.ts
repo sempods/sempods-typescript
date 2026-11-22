@@ -24,6 +24,8 @@ interface Entry {
   readonly shape: string;
   readonly target: EditorTarget;
   readonly scope: LeaveGuard['scope'];
+  /** The connection it is bound to whether or not it is active (#408). */
+  readonly origin: string | undefined;
   readonly editor: ResourceEditor<unknown>;
   readonly guard: LeaveGuard;
   holders: number;
@@ -58,6 +60,12 @@ interface Entry {
  * its draft, pending write or review), it is disposed and its guard goes. An
  * explicit editor kept that way is found again through the view that
  * replaced its own, and keeps its own view and write authority.
+ *
+ * An explicit editor claimed with `origin` (#408) belongs to that connection
+ * (its view's) rather than to the active one: another active connection
+ * leaves it alone, removing its connection ends it, and its guard carries
+ * the connection (`LeaveGuard.connection`). The lookups below take the same
+ * `origin`; an editor of the active connection is never an origin-bound one.
  */
 export interface EditorStore {
   claim<D>(
@@ -67,6 +75,7 @@ export interface EditorStore {
     definition: EditDefinition<D>,
     scope: LeaveGuard['scope'],
     target: EditorTarget,
+    origin?: string,
   ): {
     readonly editor: ResourceEditor<D>;
     /**
@@ -80,7 +89,12 @@ export interface EditorStore {
    * active connection, for example one a remounted `useContextEditor`
    * reopens: returning to it leaves nothing. It binds nothing.
    */
-  retains(context: string, iri: string, scope: LeaveGuard['scope']): boolean;
+  retains(
+    context: string,
+    iri: string,
+    scope: LeaveGuard['scope'],
+    origin?: string,
+  ): boolean;
   /**
    * The view of an explicit editor kept for its work through access loss
    * (`keepsWork`) for this Context, subject, scope and definition (`key` and
@@ -93,6 +107,7 @@ export interface EditorStore {
     scope: LeaveGuard['scope'],
     key: string,
     definition: EditDefinition<D>,
+    origin?: string,
   ): BoundView | undefined;
   /**
    * Whether the editor of this view, subject, scope and definition still
@@ -105,6 +120,7 @@ export interface EditorStore {
     scope: LeaveGuard['scope'],
     key: string,
     definition: EditDefinition<D>,
+    origin?: string,
   ): boolean;
   /** Reopen a selected resource, retaining only its own same-view editor guards. */
   reopen(view: BoundView, iri: string, action: () => void): Promise<boolean>;
@@ -124,8 +140,12 @@ export function editorsOf(app: AppController): EditorStore {
     if (id === undefined) ids.set(value, (id = ++objects));
     return id;
   };
-  const nameOf = (view: BoundView, iri: string, scope: LeaveGuard['scope']) =>
-    `${idOf(view)} ${scope ?? 'local'} ${iri}`;
+  const nameOf = (
+    view: BoundView,
+    iri: string,
+    scope: LeaveGuard['scope'],
+    origin: string | undefined,
+  ) => `${idOf(view)} ${scope ?? 'local'}${origin ? ' origin' : ''} ${iri}`;
   const remove = (name: string) => {
     const entry = entries.get(name);
     if (!entry) return;
@@ -148,6 +168,7 @@ export function editorsOf(app: AppController): EditorStore {
       definition: EditDefinition<D>,
       scope: LeaveGuard['scope'],
       target: EditorTarget,
+      origin?: string,
     ) {
       const shape =
         key === 'custom' ? `custom ${idOf(definition as object)}` : key;
@@ -161,28 +182,31 @@ export function editorsOf(app: AppController): EditorStore {
                 sameTarget(other.view, view) &&
                 other.iri === iri &&
                 other.scope === scope &&
+                other.origin === origin &&
                 other.shape === shape &&
                 other.keptForWork(),
             )
           : undefined;
-      const name = kept?.[0] ?? `${nameOf(view, iri, scope)} ${shape}`;
+      const name = kept?.[0] ?? `${nameOf(view, iri, scope, origin)} ${shape}`;
       let entry = entries.get(name);
       if (entry) {
         // Most recently claimed last, for the bound.
         entries.delete(name);
         entries.set(name, entry);
       } else {
-        const connection = app.getSnapshot().activeId;
+        const bound = target === 'explicit' && origin !== undefined;
+        const connection = bound ? origin : app.getSnapshot().activeId;
         // An explicit editor in use stays through read loss and an ended
-        // session (its hook retires it on another connection); released, it
-        // stays while `keepsWork` keeps its work.
+        // session (its hook retires it on another connection, or once an
+        // origin-bound one's connection is gone); released, it stays while
+        // `keepsWork` keeps its work.
         const holds = () => {
           const snapshot = app.getSnapshot();
-          if (snapshot.activeId !== connection) return false;
+          if (!bound && snapshot.activeId !== connection) return false;
           if (target === 'selected') return snapshot.view === view;
           // Evaluated also while a component holds it, so a new
           // authorization is noticed (`keepsWork` remembers it).
-          const kept = keepsWork(app, connection, view, working());
+          const kept = keepsWork(app, connection, view, working(), bound);
           return (entries.get(name)?.holders ?? 0) > 0 || kept;
         };
         const editor = bindResourceEditor(view, iri, definition);
@@ -199,6 +223,7 @@ export function editorsOf(app: AppController): EditorStore {
         const working = () => !abandoned() && busy(editor);
         const guard: LeaveGuard = {
           ...(scope ? { scope } : {}),
+          ...(bound ? { connection: origin } : {}),
           unconfirmed: () =>
             !abandoned() && editor.state.review?.kind === 'unconfirmed',
           dirty: () =>
@@ -238,6 +263,7 @@ export function editorsOf(app: AppController): EditorStore {
           shape,
           target,
           scope,
+          origin: bound ? origin : undefined,
           editor: editor as ResourceEditor<unknown>,
           guard,
           holders: 0,
@@ -245,7 +271,7 @@ export function editorsOf(app: AppController): EditorStore {
           working,
           keptForWork: () =>
             !view.getSnapshot().current &&
-            keepsWork(app, connection, view, working()),
+            keepsWork(app, connection, view, working(), bound),
           stop: () => {
             stops.forEach((stop) => stop());
             unregister();
@@ -273,12 +299,18 @@ export function editorsOf(app: AppController): EditorStore {
         },
       };
     },
-    retains(context: string, iri: string, scope: LeaveGuard['scope']) {
+    retains(
+      context: string,
+      iri: string,
+      scope: LeaveGuard['scope'],
+      origin?: string,
+    ) {
       return [...entries.values()].some(
         (entry) =>
           entry.view.contextIri === context &&
           entry.iri === iri &&
           entry.scope === scope &&
+          entry.origin === origin &&
           entry.holds(),
       );
     },
@@ -288,6 +320,7 @@ export function editorsOf(app: AppController): EditorStore {
       scope: LeaveGuard['scope'],
       key: string,
       definition: EditDefinition<D>,
+      origin?: string,
     ) {
       const shape =
         key === 'custom' ? `custom ${idOf(definition as object)}` : key;
@@ -297,6 +330,7 @@ export function editorsOf(app: AppController): EditorStore {
           entry.view.contextIri === context &&
           entry.iri === iri &&
           entry.scope === scope &&
+          entry.origin === origin &&
           entry.shape === shape &&
           entry.keptForWork()
         )
@@ -309,11 +343,14 @@ export function editorsOf(app: AppController): EditorStore {
       scope: LeaveGuard['scope'],
       key: string,
       definition: EditDefinition<D>,
+      origin?: string,
     ) {
       const shape =
         key === 'custom' ? `custom ${idOf(definition as object)}` : key;
       return (
-        entries.get(`${nameOf(view, iri, scope)} ${shape}`)?.working() ?? false
+        entries
+          .get(`${nameOf(view, iri, scope, origin)} ${shape}`)
+          ?.working() ?? false
       );
     },
     reopen(view, iri, action) {

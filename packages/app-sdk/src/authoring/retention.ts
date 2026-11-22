@@ -16,14 +16,25 @@ import type { BoundView } from '../runtime/view.js';
  * or controller disposal ends it: earlier work is never adopted by a new
  * authorization, and gets no write authority back. Once a view saw a new
  * session, its work is never kept again, also after that session ended too.
+ *
+ * Origin-bound work (`origin`, #408) belongs to its connection rather than
+ * to the active one: another active connection does not end it, removing its
+ * connection does.
  */
 export function keepsWork(
   app: AppController,
   connection: string | null,
   view: BoundView,
   working: boolean,
+  origin = false,
 ) {
-  if (app.getSnapshot().activeId !== connection) return false;
+  const snapshot = app.getSnapshot();
+  if (
+    origin
+      ? !snapshot.connections.some((entry) => entry.id === connection)
+      : snapshot.activeId !== connection
+  )
+    return false;
   if (view.getSnapshot().current) return true;
   if (!accessLost(app, connection)) {
     superseded.add(view);

@@ -192,23 +192,34 @@ export function UnresolvedNotices<D>(
       }
     | {
         readonly of: Pick<ContextUpdate<D>, 'unresolved' | 'for'>;
-        /** The overview items on screen; their notices show with them. */
+        /**
+         * The overview items on screen; their notices show with them. A row
+         * bound to its own connection passes it as for `for(item)`.
+         */
         readonly shown:
           | readonly {
+              readonly connection?: string;
               readonly context: string;
               readonly snapshot: { readonly iri: string };
             }[]
           | undefined;
       },
 ) {
-  // One key per resource: its IRI, or its Context and IRI in an overview.
+  // One key per resource: its IRI, or its connection, Context and IRI in an
+  // overview, so the same subject in two Pods is two resources.
   const entries = (props.of.unresolved as readonly Unresolved[]).map(
     (entry) => ({ entry, key: keyOf(entry) }),
   );
   const rows = new Set(
     (props.shown ?? []).map((row) =>
       'snapshot' in row
-        ? keyOf({ context: row.context, iri: row.snapshot.iri })
+        ? keyOf({
+            ...(row.connection !== undefined
+              ? { connection: row.connection }
+              : {}),
+            context: row.context,
+            iri: row.snapshot.iri,
+          })
         : row.iri,
     ),
   );
@@ -227,7 +238,9 @@ export function UnresolvedNotices<D>(
 }
 type Unresolved = string | ContextResource;
 const keyOf = (entry: Unresolved) =>
-  typeof entry === 'string' ? entry : `${entry.context} ${entry.iri}`;
+  typeof entry === 'string'
+    ? entry
+    : `${entry.connection ?? ''}\n${entry.context} ${entry.iri}`;
 /**
  * What a read is doing when its data does not say it: loading before any
  * data, a failed refresh (its error, a note when kept data is still shown,

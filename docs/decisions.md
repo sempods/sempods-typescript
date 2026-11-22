@@ -127,6 +127,10 @@ the connection, so writes through either refresh the other's lists; handle
 lifetimes and `key`s stay separate. React's `useContextEditor` edits a Pod-overview row through
 such a binding and registers its editor as a `connection`-scoped guard, so
 editing a row never retargets the app's selection or its other screens.
+Given the row's connection, the editor and `useContextUpdate`'s row lanes
+belong to that connection rather than to the active one: another active
+connection leaves them alone, and only actions on their own connection ask
+about them (`LeaveGuard.connection`, #408).
 
 Client-sdk and the browser runtime implement independent Pod readers.
 `BoundPod` invalidation depends on connection/session/grants, while Context

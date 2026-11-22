@@ -29,9 +29,22 @@ export interface LeaveGuard {
    *
    * A pending write (`blocked()`) blocks every change, except that a
    * `connection` or `explicit` guard does not block `selectContext`, which
-   * leaves it alone.
+   * leaves it alone, and a guard with `connection` does not block the
+   * connection actions that leave it alone.
    */
   readonly scope?: 'local' | 'target' | 'connection' | 'explicit';
+  /**
+   * The connection whose explicit Context this work belongs to, set when it
+   * stays with that connection rather than with the active one (an
+   * origin-bound overview row or editor, #408). Connection actions then
+   * leave it only when they act on that connection's session: `authorize`,
+   * `disconnect` and `forget` with its ID, `connect` to its Pod, and the
+   * access prompts doing the same. `selectConnection`, `selectTarget` on
+   * another Pod and actions on other connections neither ask about it nor
+   * discard it, and its pending write does not block them. Without it, every
+   * connection action leaves the guard.
+   */
+  readonly connection?: string;
   unconfirmed?(): boolean;
   blocked(): boolean;
   dirty(): boolean;
@@ -132,15 +145,24 @@ function cannotWork(c: Connection) {
     c.missingRequiredScopes.length > 0
   );
 }
-/** A guarded change: row navigation, a Context selection, or a connection action. */
-type Change = 'navigate' | 'context' | 'connection';
-/** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
+/**
+ * A guarded change: row navigation, a Context selection, or a connection
+ * action with the connections whose session it acts on (`on`; none for a
+ * change of the active connection alone).
+ */
+type Change = 'navigate' | 'context' | { readonly on: readonly string[] };
+/** A change of the active connection that acts on no connection's session. */
+const switching: Change = { on: [] };
+/**
+ * Whether a guarded change leaves a guard (see `LeaveGuard.scope` and
+ * `LeaveGuard.connection`).
+ */
 function leaves(change: Change, guard: LeaveGuard) {
   if (change === 'navigate')
     return guard.scope !== 'target' && guard.scope !== 'explicit';
   if (change === 'context')
     return guard.scope !== 'connection' && guard.scope !== 'explicit';
-  return true;
+  return guard.connection === undefined || change.on.includes(guard.connection);
 }
 export interface AppSnapshot {
   /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
@@ -372,8 +394,8 @@ export function createAppController(
   /** Whether nothing a change would leave holds work: no automatic switch otherwise. */
   function quiet() {
     return (
-      !blocked('connection') &&
-      !leavingGuards('connection').some((g) => g.dirty() || g.unconfirmed?.())
+      !blocked(switching) &&
+      !leavingGuards(switching).some((g) => g.dirty() || g.unconfirmed?.())
     );
   }
   /**
@@ -633,18 +655,27 @@ export function createAppController(
   function leavingGuards(change: Change, retained?: ReadonlySet<LeaveGuard>) {
     return [...guards].filter((g) => !retained?.has(g) && leaves(change, g));
   }
-  /** Whether a pending write blocks a change: always, unless it ignores the guard. */
+  /**
+   * Whether a pending write blocks a change: row navigation always, a
+   * Context selection or connection action unless it leaves the guard alone.
+   */
   function blocked(change: Change) {
     return [...guards].some(
-      (g) =>
-        (change !== 'context' ||
-          (g.scope !== 'connection' && g.scope !== 'explicit')) &&
-        g.blocked(),
+      (g) => (change === 'navigate' || leaves(change, g)) && g.blocked(),
     );
   }
+  /** The connections a connection action on one of them acts on. */
+  const on = (id: string): Change => ({ on: [id] });
+  /** The connections `connect(url)` may sign in again: those of that Pod. */
+  const ofPod = (url: string | undefined): Change => ({
+    on: runtime
+      .getSnapshot()
+      .filter((c) => c.podUrl === (url ?? defaultPodUrl))
+      .map((c) => c.id),
+  });
   async function guard(
     action: () => void | Promise<void>,
-    change: Change = 'connection',
+    change: Change,
     retained?: ReadonlySet<LeaveGuard>,
     available?: () => Availability,
   ): Promise<boolean> {
@@ -824,7 +855,7 @@ export function createAppController(
         view = null;
         callbackNotice = false;
         publish();
-      });
+      }, switching);
     },
     /** Guarded like `selectConnection`. */
     selectContext(iri: string) {
@@ -860,7 +891,7 @@ export function createAppController(
         runtime.getSnapshot().find((c) => c.id === id)?.selectedContext === iri
       )
         return { kind: 'selected' };
-      const change: Change = same ? 'context' : 'connection';
+      const change: Change = same ? 'context' : switching;
       if (changing || pending || blocked(change)) return { kind: 'blocked' };
       let accepted: boolean;
       try {
@@ -910,7 +941,7 @@ export function createAppController(
      * retry `disconnect`/`forget` before connecting again.
      */
     connect(url = defaultPodUrl) {
-      return guard(connecting(url));
+      return guard(connecting(url), ofPod(url));
     },
     /**
      * Signs in to an existing connection, or, with
@@ -920,7 +951,7 @@ export function createAppController(
      * failed retirement rejects with `RuntimeError('storage')` until retried.
      */
     authorize(id: string, options?: { readonly intent?: AuthorizationIntent }) {
-      return guard(authorizing(id, options?.intent));
+      return guard(authorizing(id, options?.intent), on(id));
     },
     /**
      * Guarded like `selectConnection`. `true` means the action ran, not that
@@ -929,11 +960,11 @@ export function createAppController(
      * to another one with a session, as a removed one does.
      */
     disconnect(id: string) {
-      return guard(disconnecting(id));
+      return guard(disconnecting(id), on(id));
     },
     /** Signs out if needed and forgets the Pod; guarded and reported like `disconnect`. */
     forget(id: string) {
-      return guard(forgetting(id));
+      return guard(forgetting(id), on(id));
     },
     /**
      * Retires a prompt of `access.prompts` that offers `dismiss`, for this
@@ -1011,8 +1042,9 @@ export function createAppController(
       tracker.current(prompt, action) ? 'yes' : 'gone';
     if (available() !== 'yes') return false;
     const id = prompt.connectionId;
+    // The prompt's connection, or the Pod a sign-in without one connects to.
     const guarded = (run: () => void | Promise<void>) =>
-      guard(run, 'connection', undefined, available);
+      guard(run, id ? on(id) : ofPod(defaultPodUrl), undefined, available);
     switch (action) {
       case 'dismiss':
         return controller.dismiss(prompt.id);

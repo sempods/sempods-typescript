@@ -186,6 +186,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [One type across Contexts](#pod-overviews-with-contexts-on-demand)      | `usePodList` + `LoadNotice` (React)                                        | A `fields()` definition with a `type`                                        |
 | [One-click overview rows](#one-click-overview-rows)                     | `useContextUpdate` (React)                                                 | The same definition as `usePodList`                                          |
 | [Edit a Pod-overview row](#editing-an-overview-row)                     | `useContextEditor`, `ResourceEditor` (React)                               | The row's subject and `GRAPH` Context                                        |
+| [Write rows of several Pods](#rows-of-several-connected-pods)           | `useContextUpdate`, `useContextEditor` with `connection` (React)           | The connection each row was read from                                        |
 | [Read arbitrary resources](#read-arbitrary-resources)                   | `useLoad` (React)                                                          | A `ViewRead`; `key` for its inputs                                           |
 | [Read each connection's Pod](#reads-per-connection)                     | `usePodLoad(pod, read)` + `LoadNotice` (React)                             | A `runtime.bindPod(id)` handle per connection; one component each            |
 | [Custom connection controls](#custom-layouts-without-appaccess)         | `useApp`, `useAppState`, `useConnections` (React)                          | Guarded actions only                                                         |
@@ -1012,9 +1013,57 @@ list.data?.items.map((item) => {
   a Context is not available here, with SDK texts in
   `messages.contextProblems`.
 - The guards survive row navigation and Context selection; connection actions
-  ask first. Another active connection retires them.
+  ask first. Another active connection retires them, unless the rows are
+  [bound to their own connection](#rows-of-several-connected-pods).
 
 See the [one-click recipe](../examples/todo/recipes/overview-toggle.tsx).
+
+### Rows of several connected Pods
+
+An overview across connected Pods, such as one task queue from every
+readable connection, reads each Pod on its own
+([reads per connection](#reads-per-connection)) and keeps which connection a
+row came from. Pass that connection with the row, and the row is written or
+edited there, whichever Pod is active:
+
+```tsx
+// Fragment: a row read in `context` through `runtime.bindContext(connection, context)`.
+const overview = useContextUpdate(taskFields);
+const edit = useContextEditor(taskFields);
+const row = overview.for({ connection, context, snapshot });
+void row.update({ done: true });
+void edit.open({ subject: snapshot.iri, context, connection });
+<UnresolvedNotices of={overview} shown={rows} />; // rows: { connection, context, snapshot }[]
+```
+
+- The write uses the row's own snapshot evidence in that connection's
+  Context, with the same conditional writes, `changed-on-pod`, `unconfirmed`
+  recovery, spent snapshots, drafts and reviews as for the active
+  connection. Nothing selects that connection, changes its Context or the
+  destination of a creation, or switches the active Pod.
+- Its work stays with its connection. Switching the active Pod
+  (`selectConnection`, `selectTarget`) neither asks about it nor retires it,
+  and its pending write does not block that. Signing in again, signing out or
+  removing that connection asks first, and signing in again or removing it
+  ends that work, as a new sign-in ends work of the active connection. A
+  session that ends by itself keeps it, as for the active connection.
+- `unresolved` lists such resources with their `connection`
+  (`{ connection, context, iri }`), and `for` of that entry gives its notice.
+  The same subject IRI read from two connections is two resources; key rows
+  by connection, Context and IRI, and pass `connection` in `shown` too.
+- `row.problem` and the editor's `problem` use that connection's catalogue.
+  Under `contextSelection="on-demand"` the SDK asks for that catalogue once
+  a row or editor of the connection is rendered; `AppAccess` keeps
+  presenting the active connection only.
+- `useContextEditor().open({ subject, context, connection })` opens the
+  editor in that connection. It is `retired` only once the connection is
+  removed. Opening another row or `close()` asks first, as for the active
+  connection.
+- A bulk action captures the shown rows' commands and runs them one after
+  the other, as [several rows from one decision](#several-rows-from-one-decision)
+  describes, stopping at the first result that is not `removed`.
+- Use one form per resource. A row with `connection` and the same row
+  without it have separate lanes.
 
 ### Several rows from one decision
 
@@ -1038,7 +1087,10 @@ in one list (`useFieldUpdate`) or across the readable Contexts of a Pod
   under: render them in a component keyed by `useAppState().pod?.key`, so
   another Pod, a sign-out or a new sign-in starts afresh, and close the
   question when an area it names can no longer be read. Switching Pods
-  retires the previous connection's recovery notices.
+  retires the previous connection's recovery notices, unless the rows are
+  [bound to their own connection](#rows-of-several-connected-pods), as in an
+  overview across Pods; render that one outside a component keyed by the
+  active Pod.
 - Then `await` one command after the other with a progress line, and stop at
   the first result that is not `removed`: a change on the Pod, an unconfirmed
   answer such as a lost response, a refusal, or `not-sent`. Its `reason` says
@@ -1107,7 +1159,7 @@ function Notes() {
 | `loading`     | Startup, sign-in or the catalogue is not settled; no editor starts before startup settles                                        |
 | `unavailable` | `problem` is `unreadable`, `discovery-failed` or `refused` (sends nothing); a later catalogue listing the Context still opens it |
 | `ready`       | The editor exists; loading, `404`, offline, blocked access and review are its own states, with its retry                         |
-| `retired`     | Another connection became active; never revived, `close()` clears it                                                             |
+| `retired`     | Another connection became active (with `connection`: that connection was removed); never revived, `close()` clears it            |
 
 - `open` needs no `TargetScreen` or selection; it resolves `true` once the
   target is open. `AppAccess` stays hidden while the catalogue loads but shows
@@ -1119,7 +1171,9 @@ function Notes() {
   never attached to another Context, connection or subject.
 - It is a `connection`-scoped guard: a Context selection leaves it alone;
   opening another row, `close()` and connection actions ask first, and its
-  pending write blocks them.
+  pending write blocks them. With `connection` in the target, only the
+  actions on that connection ask first
+  ([rows of several connected Pods](#rows-of-several-connected-pods)).
 - Its writes refresh lists and retire success feedback of the same Context's
   selected view, and the other way round.
 - A subject in several Contexts gives one row per Context, each with only its
@@ -2164,8 +2218,15 @@ Read state with `useAppState`, `useConnections` and `useView`.
 | Context selection (`selectContext`)                                | `local` (or unscoped) and `target` guards     |
 | `selectConnection`, `connect`, `authorize`, `disconnect`, `forget` | every guard                                   |
 
+- Work bound to its own connection
+  ([rows of several connected Pods](#rows-of-several-connected-pods),
+  `LeaveGuard.connection` for a guard registered with the controller) is left
+  by a connection action only when it acts on that connection: `authorize`,
+  `disconnect` or `forget` with its ID, or `connect` to its Pod.
+  `selectConnection` and `selectTarget` to another Pod leave it alone.
 - A pending write blocks every change, except that a saving `connection` or
-  `explicit` draft does not block a Context selection. A confirmation names
+  `explicit` draft does not block a Context selection, and work bound to its
+  own connection blocks only the connection actions on it. A confirmation names
   unconfirmed writes it leaves and warns that discarding does not undo them.
 - A declined change discards nothing; the target stays when its replacement is
   gone. A prompt whose connection stops being active (a returning sign-in, a

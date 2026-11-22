@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import {
   removeSnapshot,
   updateFields,
@@ -41,11 +41,27 @@ import type { PodListItem } from './pod-list.js';
 
 /** A resource in its own Context, as `useContextUpdate().unresolved` lists it. */
 export interface ContextResource {
+  /**
+   * The connection it was read from, for a row bound to it (#408); absent for
+   * a row of the active connection.
+   */
+  readonly connection?: string;
   readonly context: string;
   readonly iri: string;
 }
+/**
+ * An overview item as `useContextUpdate().for` takes it: a `usePodList` item
+ * of the active connection, or with `connection` a row read from that
+ * connection's Context, for example with `listSubjects` through
+ * `runtime.bindContext(connection, context)`.
+ */
+export interface ContextUpdateItem<D> extends PodListItem<D> {
+  readonly connection?: string;
+}
 /** One resource of `useContextUpdate`, from `for({ context, iri })`. */
 export interface ContextUpdateState<D> extends FieldUpdateState<D> {
+  /** Set for a row bound to its own connection (`for({ connection, … })`). */
+  readonly connection?: string;
   readonly context: string;
   /** Why its Context is not available here; texts: `contextProblems`. */
   readonly problem: ContextEditorProblem | null;
@@ -62,23 +78,36 @@ interface Target<D> {
   readonly writable: boolean;
 }
 /**
- * The Context's view of the active connection (cached by the runtime: the same
- * view `usePodList` read the rows from), `'refused'` for a configuration
+ * The Context's view of a connection (cached by the runtime: the same view
+ * `usePodList` read the rows from), `'refused'` for a configuration
  * refusal, `null` while there is none.
  */
 function bindOrRefuse(
   app: ReturnType<typeof useController>,
-  activeId: string | null,
+  connection: string | null,
   context: string,
 ): BoundView | 'refused' | null {
-  if (!activeId) return null;
+  if (!connection) return null;
   try {
-    return app.runtime.bindContext(activeId, context);
+    return app.runtime.bindContext(connection, context);
   } catch (error) {
     if (!(error instanceof RuntimeError)) throw error;
     return error.problem === 'configuration' ? 'refused' : null;
   }
 }
+/** Whether a connection reads (signed in, or without a token): it can bind. */
+function reads(app: ReturnType<typeof useController>, id: string) {
+  return Boolean(
+    app.getSnapshot().connections.find((c) => c.id === id)?.reading,
+  );
+}
+/** A reading connection's catalogue, as `activeCatalogue` gives the active one's. */
+function catalogueOf(app: ReturnType<typeof useController>, id: string) {
+  const connection = app.getSnapshot().connections.find((c) => c.id === id);
+  return connection?.reading ? connection.catalogue : undefined;
+}
+const sameList = (a: readonly unknown[], b: readonly unknown[]) =>
+  a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
 
 /**
  * One-click updates and removals of overview rows, each in its own Context:
@@ -97,6 +126,18 @@ function bindOrRefuse(
  * them; `for({ context, iri })` gives the `notice` of one whose row is gone
  * (`<UnresolvedNotices of={overview} shown={list.data?.items} />`). Another
  * active connection retires them. Pass the same definition as to `usePodList`.
+ *
+ * An overview across connected Pods (#408) passes each row's `connection`
+ * (`for({ connection, context, snapshot })`): the row is then written in
+ * that connection's Context whether or not it is active, without selecting
+ * it or changing a creation's destination. Its lane, its recovery and its
+ * leave guard stay with that connection: another active connection neither
+ * retires nor asks about them, while connection actions on that connection
+ * (sign-in, sign-out, forget) ask first, and a new authorization of it
+ * retires them as for the active one. Its `unresolved` entry carries the
+ * `connection`, so the same subject in two Pods stays two resources. Write a
+ * resource through one form only: a row with and without `connection` has
+ * separate lanes.
  */
 export function useContextUpdate<D>(input: FieldDefinition<D>) {
   const { key, definition } = useDefinition(input, 'useContextUpdate');
@@ -119,36 +160,93 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     channel.getVersion,
     channel.getVersion,
   );
+  // Rows bound to their own connection (`connection`), in their own groups.
+  const originName = `origin rows ${key}`;
+  const originChannel = store.channel(originName, 'explicit');
+  const originChanges = useSyncExternalStore(
+    originChannel.subscribe,
+    originChannel.getVersion,
+    originChannel.getVersion,
+  );
   // Commands start only while this screen is shown, for this connection, its
   // authorization and definition; one kept from an earlier one never again.
   const shown = useCommandToken(activeId, pod, key);
+  // An origin-bound row's group carries its own connection's lifetime: only
+  // the screen and the definition end its commands here.
+  const originShown = useCommandToken(key);
+  // The connections rows were bound to while rendering, also by a row's own
+  // component: their facts (catalogue, session, scopes) render again, as the
+  // active one's do. It only grows, up to the connections there are.
+  const origins = useRef(new Set<string>()).current;
+  useAppFacts(
+    (s) => [...origins].map((id) => s.connections.find((c) => c.id === id)),
+    sameList,
+  );
+  // Under `on-demand`, each of them asks for its own catalogue once known
+  // without one (`required` loads every connection's).
+  const undiscovered = useAppFacts((s) =>
+    s.contextSelection === 'on-demand'
+      ? [...origins]
+          .filter((id) => {
+            const c = s.connections.find((entry) => entry.id === id);
+            return c?.reading && c.catalogue.kind === 'unknown';
+          })
+          .join(' ')
+      : '',
+  );
+  useEffect(() => {
+    for (const id of undiscovered ? undiscovered.split(' ') : [])
+      void app.runtime.loadContexts(id).catch(() => {});
+  }, [app, undiscovered]);
 
-  // What a row needs of its Context, once per Context and render.
+  // What a row needs of its Context, once per connection, Context and render.
   const contexts = new Map<string, Target<D>>();
-  const target = (context: string): Target<D> => {
-    let found = contexts.get(context);
+  const target = (context: string, origin?: string): Target<D> => {
+    const cached = `${origin ?? ''}\n${context}`;
+    let found = contexts.get(cached);
     if (found) return found;
+    if (origin !== undefined) origins.add(origin);
     // Without a current view (a session that ended), writes kept for their
     // recovery are found through their own view (`keepsWork`).
     const view =
-      bindOrRefuse(app, activeId, context) ??
-      store.kept(name, 'explicit', context) ??
-      null;
+      origin === undefined
+        ? (bindOrRefuse(app, activeId, context) ??
+          store.kept(name, 'explicit', context) ??
+          null)
+        : ((reads(app, origin) ? bindOrRefuse(app, origin, context) : null) ??
+          store.kept(originName, 'explicit', context, origin) ??
+          null);
     const bound = view && view !== 'refused' ? view : null;
-    const problem = contextProblem(catalogue, context, view === 'refused');
+    const problem = contextProblem(
+      origin === undefined ? catalogue : catalogueOf(app, origin),
+      context,
+      view === 'refused',
+    );
     found = {
       view: bound,
-      group: bound ? store.group(bound, name, definition, 'explicit') : null,
+      group: bound
+        ? origin === undefined
+          ? store.group(bound, name, definition, 'explicit')
+          : store.group(
+              bound,
+              originName,
+              definition,
+              'explicit',
+              undefined,
+              origin,
+            )
+        : null,
       problem,
       writable: Boolean(bound?.getSnapshot().write) && problem === null,
     };
-    contexts.set(context, found);
+    contexts.set(cached, found);
     return found;
   };
   // Through the group the row was rendered with: its own lifetime check
   // ends a command kept past another connection or target, also before this
   // screen renders again (never a fresh lookup for the connection now).
   const run = (
+    token: { readonly current: boolean },
     group: LaneGroup<D> | null,
     iri: string,
     operation: 'update' | 'remove',
@@ -156,22 +254,23 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     subject?: Snapshot<D>,
     after?: D,
   ): Promise<MutationOutcome<D> | NotSent> => {
-    if (!shown.current || (group && !group.holds()))
+    if (!token.current || (group && !group.holds()))
       return Promise.resolve(notSent('ended'));
     if (!group) return Promise.resolve(notSent('unavailable'));
     // A refused write sends nothing and keeps the resource's recovery.
     return group.lane(iri).execute(operation, iri, action, subject, after);
   };
 
-  function rowFor(item: PodListItem<D>): ContextUpdateRow<D>;
+  function rowFor(item: ContextUpdateItem<D>): ContextUpdateRow<D>;
   function rowFor(item: ContextResource): ContextUpdateState<D>;
   function rowFor(
-    item: PodListItem<D> | ContextResource,
+    item: ContextUpdateItem<D> | ContextResource,
   ): ContextUpdateState<D> | ContextUpdateRow<D> {
-    const { context } = item;
+    const { context, connection } = item;
     const snapshot = 'snapshot' in item ? item.snapshot : undefined;
     const iri = 'snapshot' in item ? item.snapshot.iri : item.iri;
-    const { view, group, problem, writable } = target(context);
+    const { view, group, problem, writable } = target(context, connection);
+    const token = connection === undefined ? shown : originShown;
     const own = laneState<D>(
       group?.lanes.get(iri),
       writable,
@@ -181,6 +280,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     );
     // Without a snapshot there is nothing to write from: recovery only.
     const state: ContextUpdateState<D> = {
+      ...(connection !== undefined ? { connection } : {}),
       context,
       problem,
       notice: own.notice,
@@ -194,6 +294,7 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
       timestamps: shownTimestamps(snapshot),
       update: (change: Partial<D>) =>
         run(
+          token,
           group,
           iri,
           'update',
@@ -202,15 +303,15 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
           changedData(snapshot.data, change),
         ) as Promise<UpdateOutcome<D> | NotSent>,
       remove: () =>
-        run(group, iri, 'remove', (v) =>
+        run(token, group, iri, 'remove', (v) =>
           removeSnapshot(v, snapshot, definition),
         ) as Promise<RemoveSnapshotOutcome<D> | NotSent>,
     } satisfies ContextUpdateRow<D>;
   }
   // Stable between lane changes, so it fits effect dependencies.
   const unresolved = useMemo(
-    () =>
-      channel.held<D>().flatMap((group) =>
+    () => [
+      ...channel.held<D>().flatMap((group) =>
         [...group.lanes.values()]
           .filter((lane) => lane.unresolved)
           .map((lane): ContextResource => ({
@@ -218,9 +319,20 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
             iri: lane.iri,
           })),
       ),
-    // `changes` moves with every lane change of these groups.
+      ...originChannel.held<D>().flatMap((group) =>
+        [...group.lanes.values()]
+          .filter((lane) => lane.unresolved)
+          .map((lane): ContextResource => ({
+            connection: group.connection!,
+            context: group.view.contextIri,
+            iri: lane.iri,
+          })),
+      ),
+    ],
+    // `changes` and `originChanges` move with every lane change of these
+    // groups; `activeId` with the groups of the active connection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [channel, changes, activeId],
+    [channel, changes, originChannel, originChanges, activeId],
   );
   return {
     /**
@@ -233,7 +345,8 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     for: rowFor,
     /**
      * Resources whose write is unconfirmed or changed on the Pod, until
-     * checked and acknowledged, across Contexts of the active connection.
+     * checked and acknowledged, across Contexts of the active connection,
+     * then those of rows bound to their own connection (with `connection`).
      */
     unresolved,
   };

@@ -902,3 +902,51 @@ it('activates the completed callback connection without choosing a context or re
   await Promise.resolve();
   expect(app.getSnapshot().activeId).toBe(f.id);
 });
+it('asks about origin-bound work only for actions on its own connection (#408)', async () => {
+  const { f, runtime, other } = await twoPods((r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  const app = createAppController(runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().activeId).toBe(other.id));
+  // Alice's unresolved row while Bob is active.
+  let busy = false;
+  const discard = vi.fn();
+  app.register({
+    scope: 'explicit',
+    connection: f.id,
+    dirty: () => true,
+    blocked: () => busy,
+    discard,
+  });
+  // Switching the active Pod, either way, leaves it alone.
+  expect(await app.selectConnection(f.id)).toBe(true);
+  expect(await app.selectConnection(other.id)).toBe(true);
+  expect(
+    (await app.selectTarget({ connectionId: f.id, contextIri: work })).kind,
+  ).toBe('selected');
+  expect(app.getSnapshot().activeId).toBe(f.id);
+  // Navigation and Context selection leave an explicit guard alone too.
+  expect(await app.selectContext(personal)).toBe(true);
+  expect(discard).not.toHaveBeenCalled();
+  // An action on its own connection asks first and discards it once confirmed.
+  const signOut = app.disconnect(f.id);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  app.cancelLeave();
+  expect(await signOut).toBe(false);
+  // Its pending write blocks only the actions on its connection.
+  busy = true;
+  expect(await app.forget(f.id)).toBe(false);
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  expect(await app.selectConnection(other.id)).toBe(true);
+  busy = false;
+  // Signing out another connection does not ask about it.
+  expect(await app.disconnect(other.id)).toBe(true);
+  expect(discard).not.toHaveBeenCalled();
+  const again = app.disconnect(f.id);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  await app.confirmLeave();
+  expect(await again).toBe(true);
+  expect(discard).toHaveBeenCalledOnce();
+});
