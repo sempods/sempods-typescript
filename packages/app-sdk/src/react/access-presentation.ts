@@ -31,7 +31,10 @@ export function isRemembered(entry: Connection) {
 
 /** Private rendering inputs; authority stays with the runtime. */
 export interface AccessFacts {
-  readonly state: Pick<AppSnapshot, 'contextSelection' | 'preset'>;
+  readonly state: Pick<
+    AppSnapshot,
+    'contextSelection' | 'preset' | 'connections'
+  >;
   readonly connection: Connection | undefined;
   readonly podReadable: boolean;
   readonly viewReadable: boolean;
@@ -74,8 +77,11 @@ export function presentAccess(f: AccessFacts) {
     !catalogueFailed &&
     !(selection && c?.catalogue.kind === 'ready') &&
     ((selection && !f.catalogueSettled) || !f.podReadable);
+  // Any Pod's redirect, not only the selected one's, ends this page: no
+  // action may start another.
   const body: ConnectionBody =
-    c?.session.kind === 'leaving'
+    c?.session.kind === 'leaving' ||
+    state.connections.some((entry) => entry.session.kind === 'leaving')
       ? 'leaving'
       : validating
         ? 'loading'

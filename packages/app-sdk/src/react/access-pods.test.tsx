@@ -36,6 +36,7 @@ import {
   podToggle,
 } from './pod-actions.helpers.test.js';
 import { englishMessages, germanMessages } from '../locale.js';
+import { contextLabeler } from './access-pods.js';
 
 // Pods & sharing management grouped by Pod (#386): one row per Pod, its
 // actions behind its own button, and connecting another Pod as a step.
@@ -538,6 +539,69 @@ it('marks an unreachable Pod and offers its retry while the other Pod stays usab
   );
 });
 
+it('names Contexts apart in one pass over a large catalogue', () => {
+  const iris = Array.from(
+    { length: 1000 },
+    (_, index) => `${bob}/_system/contexts/c${index}`,
+  );
+  const names: Record<string, string> = Object.fromEntries(
+    iris.map((iri, index) => [iri, `Context ${index}`]),
+  );
+  names[iris[1]!] = 'Context 0';
+  let lookups = 0;
+  const labels = new Proxy(names, {
+    get: (target, key) => {
+      lookups += 1;
+      return target[key as string];
+    },
+  });
+  const label = contextLabeler(
+    iris.map((iri) => ({
+      iri,
+      readable: true,
+      writable: false,
+      manageable: false,
+    })),
+    { kind: 'ready', labels } as never,
+  );
+  expect(label(iris[2]!)).toBe('Context 2');
+  expect(label(iris[0]!)).toBe(`Context 0 · ${iris[0]}`);
+  expect(label(iris[1]!)).toBe(`Context 0 · ${iris[1]}`);
+  // A preset Context the catalogue does not list is named on its own.
+  expect(label(club)).toBe('club');
+  expect(label(`${pod}/_system/contexts/Context 2`)).toBe(
+    `Context 2 · ${pod}/_system/contexts/Context 2`,
+  );
+  expect(lookups).toBeLessThan(2 * iris.length);
+});
+
+it('offers no other action once another Pod leaves for its sign-in', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  const navigations = f.navigate.mock.calls.length;
+  const sharing = await podAction('Change sharing', 'pod.example/alice');
+  await act(async () => sharing.click());
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+  // Bob stays selected, but the page is on its way to Alice's Pod: no
+  // action of Bob's may send it elsewhere.
+  expect(
+    runtime.getSnapshot().find((entry) => entry.podUrl === bob)?.session.kind,
+  ).toBe('active');
+  expect(
+    await within(screen.getByRole('dialog')).findAllByText(
+      'Opening your Pod’s sign-in…',
+    ),
+  ).toHaveLength(1);
+  expect(screen.queryAllByRole('button', { name: actionsName })).toEqual([]);
+});
+
 it('shows a failed retry in its Pod’s row, apart from the other Pod', async () => {
   const { f, runtime } = await alicesAndBobs();
   const original = f.fetch.getMockImplementation()!;
@@ -594,6 +658,50 @@ it('leaves the focus alone when another Pod’s row goes', async () => {
     ).toBeNull(),
   );
   expect(document.activeElement).toBe(document.body);
+});
+
+it('leaves a focus that moved out of the list when its row goes', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+      <button type="button">Outside</button>
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  // The person was in Alice's row, moved on to the page, then lost the focus.
+  podToggle(row('pod.example/alice')).focus();
+  screen.getByRole('button', { name: 'Outside', hidden: true }).focus();
+  (document.activeElement as HTMLElement).blur();
+  expect(document.activeElement).toBe(document.body);
+  // Alice's saved address is removed elsewhere.
+  await act(async () => {
+    await runtime.forget(f.id);
+  });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('group', { name: 'pod.example/alice' }),
+    ).toBeNull(),
+  );
+  expect(document.activeElement).toBe(document.body);
+});
+
+it('closes a Pod’s actions when its details open', async () => {
+  const { runtime } = await alicesAndBobs();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  fireEvent.click(await podActions('pod.example/alice'));
+  expect(document.querySelector('.sp-pod-menu')).not.toBeNull();
+  const toggle = podToggle(row('pod.example/alice'));
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.pointerDown(toggle);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('.sp-pod-menu')).toBeNull();
 });
 
 it('closes a Pod’s actions once it has none left', async () => {

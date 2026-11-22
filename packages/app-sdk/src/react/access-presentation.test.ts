@@ -28,7 +28,7 @@ const connected = (overrides: Partial<Connection> = {}): Connection => {
   };
 };
 const base: AccessFacts = {
-  state: { contextSelection: 'on-demand', preset: undefined },
+  state: { contextSelection: 'on-demand', preset: undefined, connections: [] },
   connection: connected(),
   podReadable: true,
   viewReadable: false,
@@ -257,6 +257,23 @@ it.each<{ name: string; facts: Partial<AccessFacts>; expected: Decision }>([
       connection: connected({
         session: { kind: 'leaving', subject: 'urn:person' },
       }),
+    },
+    expected: { body: 'leaving', visible: true, notice: false },
+  },
+  {
+    name: 'open management shows another Pod leaving',
+    facts: {
+      manage: true,
+      state: {
+        contextSelection: 'on-demand',
+        preset: undefined,
+        connections: [
+          connected({
+            id: 'bob',
+            session: { kind: 'leaving', subject: 'urn:bob' },
+          }),
+        ],
+      },
     },
     expected: { body: 'leaving', visible: true, notice: false },
   },

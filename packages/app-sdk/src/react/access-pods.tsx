@@ -197,6 +197,24 @@ export function PodManagement({
     )?.focus();
   }, [connections]);
 
+  useEffect(() => {
+    // The focus moved on, or a press went, outside the list: a later removal
+    // did not take the focus with it.
+    const element = list.current;
+    const document = element?.ownerDocument;
+    if (!element || !document) return;
+    const away = (event: Event) => {
+      if (!element.contains(event.target as Node | null))
+        focusedRow.current = null;
+    };
+    document.addEventListener('focusin', away, true);
+    document.addEventListener('pointerdown', away, true);
+    return () => {
+      document.removeEventListener('focusin', away, true);
+      document.removeEventListener('pointerdown', away, true);
+    };
+  }, []);
+
   // Details on demand: opening another Pod's row checks its access. The
   // active one's is checked by opening management (dialog), **Check access**
   // (in place) or its discovery demand, so it sends no second request.
@@ -460,7 +478,11 @@ export function PodManagement({
                   className="sp-pod-toggle"
                   aria-expanded={open}
                   aria-controls={`${rowId}-details`}
-                  onClick={() => toggle(entry)}
+                  onClick={() => {
+                    // The details open or close in place of the actions.
+                    if (menu === entry.id) setMenu(null);
+                    toggle(entry);
+                  }}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m9 6 6 6-6 6" />
@@ -757,8 +779,10 @@ function PodDetails({
 type ReadableContext = NonNullable<ReturnType<typeof knownContexts>>[number];
 
 /**
- * Names the readable Contexts of one Pod apart, each name computed once; a
- * Context the catalogue does not list (a preset's) is named on its own.
+ * Names the readable Contexts of one Pod apart: a name that another readable
+ * Context shares adds the address. Each name is computed and counted once, so
+ * a large catalogue stays linear; a Context the catalogue does not list (a
+ * preset's) is named on its own.
  */
 export function contextLabeler(
   readable: readonly ReadableContext[],
@@ -766,12 +790,20 @@ export function contextLabeler(
 ) {
   const labels =
     catalogue && catalogue.kind !== 'unknown' ? catalogue.labels : undefined;
-  const iris = readable.map((entry) => entry.iri);
-  const name = (iri: string) => contextName(iri, labels);
-  const shown = new Map(
-    iris.map((iri) => [iri, distinctName(iri, iris, name)]),
+  const names = new Map(
+    readable.map((entry) => [entry.iri, contextName(entry.iri, labels)]),
   );
-  return (iri: string) => shown.get(iri) ?? distinctName(iri, iris, name);
+  const uses = new Map<string, number>();
+  for (const label of names.values())
+    uses.set(label, (uses.get(label) ?? 0) + 1);
+  return (iri: string) => {
+    const own = names.get(iri);
+    const label = own ?? contextName(iri, labels);
+    // Another readable Context has this name; its own entry counts once.
+    return (uses.get(label) ?? 0) > (own === undefined ? 0 : 1)
+      ? `${label} · ${iri}`
+      : label;
+  };
 }
 
 /** What the catalogue says this app may do in a Context. */
