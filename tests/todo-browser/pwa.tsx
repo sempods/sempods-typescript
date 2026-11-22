@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { createBrowserRuntime } from '@sempods/app-sdk';
+import { Notices } from '@sempods/app-sdk/react';
 import { TodoApp } from './examples/todo/src/app.js';
 import {
   NewVersionNotice,
@@ -23,6 +24,7 @@ const registration = registerAppWorker('/sw.js');
 createRoot(document.getElementById('root')!).render(
   <TodoApp runtime={runtime}>
     <NewVersionNotice registration={registration} />
+    <Notices />
   </TodoApp>,
 );
 window.addEventListener('pagehide', () => runtime.dispose());

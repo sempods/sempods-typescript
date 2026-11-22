@@ -17,6 +17,16 @@ export type {
   AccessPromptProps,
   AccessPromptsProps,
 } from './access-prompts.js';
+export { Notices, useNotice, useNotices } from './notices.js';
+export type {
+  Notice,
+  NoticeAction,
+  NoticeActions,
+  NoticeProps,
+  NoticesProps,
+  NoticeView,
+  NoticeViewAction,
+} from './notices.js';
 export {
   SempodsProvider,
   TargetScreen,

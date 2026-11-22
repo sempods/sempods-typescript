@@ -27,6 +27,7 @@ import { useSdkLocale } from './locale.js';
 import { AccessNotice, CallbackNotice, endedMessage } from './components.js';
 import { layered, SdkStyles } from './styles.js';
 import { topLayer, TopLayerSlot, useModalDialog } from './confirm.js';
+import { GateNotices } from './notices.js';
 import { podName, distinctName } from './names.js';
 import type { Connection } from '../runtime/types.js';
 import {
@@ -794,6 +795,8 @@ function GateDialog({
           )}
         </div>
       </section>
+      {/* App notices, such as a waiting update, also before sign-in. */}
+      <GateNotices />
     </dialog>
   );
 }
