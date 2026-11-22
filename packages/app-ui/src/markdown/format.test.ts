@@ -11,10 +11,13 @@ function run(kind: MarkdownFormat, marked: string): string | null {
   const caret = marked.indexOf('|');
   const start = caret >= 0 ? caret : marked.indexOf(open);
   const end = caret >= 0 ? caret : marked.indexOf(close) - 1;
+  // Without the marks, cut out at their offsets.
   const source =
     caret >= 0
-      ? marked.replace('|', '')
-      : marked.replace(open, '').replace(close, '');
+      ? marked.slice(0, caret) + marked.slice(caret + 1)
+      : marked.slice(0, start) +
+        marked.slice(start + 1, end + 1) +
+        marked.slice(end + 2);
   const edit = formatMarkdown(kind, source, start, end);
   if (!edit) return null;
   const next = source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
