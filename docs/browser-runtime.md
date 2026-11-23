@@ -998,7 +998,9 @@ not navigate this document cancels on that signal and returns `'signal'`:
 the page then stays without `window.stop()`. A
 re-authorization then restores the session, a first sign-in ends
 `interrupted` without a request and its saved attempt is retired, and the
-silent one is signed out, its attempt kept for its answer. `SempodsProvider` offers it as **Stay on this page** once a
+silent one is signed out, its attempt kept for its answer. If the page cannot read
+its record then, the connection ends `restorable` with `storage`, and
+`retryRestore(id)` (or coming back online) lists it again. `SempodsProvider` offers it as **Stay on this page** once a
 redirect takes a few seconds. After the session ended (for example a failed
 refresh), it prepares under a fresh lifetime in the same runtime, which a
 disconnect or dispose during preparation still cancels without navigating. A

@@ -62,8 +62,15 @@ export interface Entry {
   rechecking?: Promise<unknown>;
   /** Another consent outcome arrived during that read: it runs once more. */
   recheckAgain?: true;
-  /** The record carried a re-authorization when last seen (`noteAttempt`). */
-  attemptSeen?: true;
+  /** The record's `attemptEnded` marker as last seen (`noteAttempt`). */
+  attemptEnded?: string | undefined;
+  /** The session generation a page that left to re-authorize left from. */
+  leftFrom?: string;
+  /**
+   * A page that stayed, whose record could not be read: `retryRestore`
+   * lists it again, keeping its view for that session generation.
+   */
+  relisting?: string | undefined;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**

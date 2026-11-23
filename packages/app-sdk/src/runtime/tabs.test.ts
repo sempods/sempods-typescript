@@ -1149,6 +1149,76 @@ it('reads Context access again in every tab when a renewal drops an attempt they
     );
 });
 
+it('keeps the page that left to re-authorize blocked after a sign-out it could not save, while another tab renews', async () => {
+  const channels = memoryChannels();
+  const factory = new IDBFactory();
+  let failing = false;
+  const t = await tabs(channels, {
+    factory,
+    options: {
+      openStore: storeWith(
+        factory,
+        (store) => ({
+          commit: (id, revision, value) =>
+            failing && (value as { kind?: string }).kind === 'disconnected'
+              ? Promise.reject(new Error('disk full'))
+              : store.commit(id, revision, value),
+        }),
+        channels,
+      ),
+    },
+  });
+  // Tab a's navigation stays on the page.
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  failing = true;
+  expect(await t.a.disconnect(t.id)).toEqual({ kind: 'blocked-locally' });
+  failing = false;
+  advance(3600_000);
+  expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes()).toHaveLength(1);
+  await quiet();
+  expect(t.session(t.a)).toMatchObject({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
+});
+
+it('reads Context access again when a background tab hears of a renewal and a denial only together', async () => {
+  let holding = false;
+  const held: (() => void)[] = [];
+  const t = await tabs(
+    memoryChannels((send) => {
+      if (holding) held.push(send);
+      else setTimeout(send);
+    }),
+  );
+  holding = true;
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ resumed: true });
+  await back.loadContexts(t.id);
+  back.selectContext(t.id, work);
+  advance(3600_000);
+  expect(await back.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes()).toHaveLength(1);
+  t.setCatalogue(async () => catalogue([], []));
+  holding = false;
+  held.splice(0).forEach((send) => send());
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()[0]?.catalogue).toMatchObject({
+      kind: 'ready',
+      contexts: [],
+    }),
+  );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

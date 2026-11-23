@@ -51,6 +51,7 @@ export type SessionRecord = { readonly version: 1 } & (
       readonly binding: SessionBinding;
       readonly credentials: ExchangeResult;
       readonly pending?: PendingAttempt;
+      readonly attemptEnded?: string;
     }
   | {
       readonly kind: 'claimed';
@@ -65,6 +66,12 @@ export type SessionRecord = { readonly version: 1 } & (
       readonly resend?: RefreshResend;
       /** A refresh claim's session's re-authorization; never in a code claim. */
       readonly pending?: PendingAttempt;
+      /**
+       * Changes each time a re-authorization of this session ends without a
+       * new grant (0.10.0), so every tab reads Context access again, also
+       * one that never saw the attempt. Kept by renewals; in `ready` too.
+       */
+      readonly attemptEnded?: string;
     }
   | {
       readonly kind: 'disconnected';
@@ -173,6 +180,7 @@ export function parseSessionRecord(
               scopes: binding.scopes,
             }),
             ...parsePending(value.pending, binding, config),
+            ...parseEnded(value.attemptEnded),
           };
           break;
         case 'claimed':
@@ -195,7 +203,10 @@ export function parseSessionRecord(
               ? {}
               : { resend: parseResend(value.resend) }),
             ...(value.operation === 'refresh'
-              ? parsePending(value.pending, binding, config)
+              ? {
+                  ...parsePending(value.pending, binding, config),
+                  ...parseEnded(value.attemptEnded),
+                }
               : {}),
           };
           break;
@@ -290,6 +301,13 @@ function parsePending(
   } catch {
     return {};
   }
+}
+
+/** A marker this SDK cannot read is left out, like an unreadable `pending`. */
+function parseEnded(value: unknown): { readonly attemptEnded?: string } {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+    ? { attemptEnded: value }
+    : {};
 }
 
 /** A pending attempt that may still settle: claimed, or open and unexpired. */

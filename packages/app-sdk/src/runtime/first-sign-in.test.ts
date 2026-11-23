@@ -566,3 +566,27 @@ it('recognizes the answer to a silent sign-in an SDK 0.9 tab started', async () 
     expect(await savedRecords(f.factory)).toEqual([]),
   );
 });
+
+it('leaves an expired silent attempt of a Pod outside allowedPods alone', async () => {
+  const f = silent();
+  await f.runtime.initialize();
+  expect(await savedRecords(f.factory)).toHaveLength(1);
+  f.runtime.dispose();
+  await settleLease();
+  const later = Date.now() + 11 * 60_000;
+  vi.spyOn(Date, 'now').mockReturnValue(later);
+  // The app now allows only another Pod.
+  const other = 'https://pod.example/bob';
+  const next = createBrowserRuntime({
+    ...f.options,
+    preset: { podUrl: other },
+    allowedPods: [other],
+    tabStorage: memoryStorage(),
+  });
+  keep(next);
+  await next.initialize();
+  expect(await savedRecords(f.factory)).toHaveLength(1);
+  // An existing installation: no silent sign-in to the other Pod.
+  expect(silentAttempts(f)).toBe(1);
+  vi.restoreAllMocks();
+});

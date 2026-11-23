@@ -1186,7 +1186,11 @@ describe('a re-authorization pending beside its session (#393)', () => {
     if (pending.value.kind !== 'ready') throw new Error('Expected ready');
     const { pending: _dropped, ...session } = pending.value;
     void _dropped;
-    expect(after.value).toEqual(session);
+    // Marked as ended, so every tab reads Context access again.
+    expect(after.value).toEqual({
+      ...session,
+      attemptEnded: expect.any(String),
+    });
     await expect(
       transitions.claimPending(pending.id, expected, denied(next)),
     ).rejects.toMatchObject({ problem: 'attempt' });

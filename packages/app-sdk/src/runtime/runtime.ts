@@ -543,8 +543,14 @@ export function createBrowserRuntime(
     // blocked, and a retry applies to the newer record; only a new sign-in
     // elsewhere, or a sign-out there that saves a sign-out, replaces it.
     const s = e.view.session;
+    // A page that left to re-authorize covers the session it left from too.
+    const covered =
+      same ||
+      (value !== undefined &&
+        e.leftFrom !== undefined &&
+        sessionBinding(value).generation === e.leftFrom);
     if (
-      same &&
+      covered &&
       s.kind === 'ended' &&
       s.problem === 'disconnected' &&
       s.saved === false &&
@@ -578,16 +584,8 @@ export function createBrowserRuntime(
         sameBinding(e, value)
       ) {
         e.revision = stored!.revision;
-        // The same credentials under a newer revision without an attempt: a
-        // re-authorization ended without a new grant, also one this tab
-        // missed entirely (the back/forward cache). It may still have changed
-        // what the Pod grants (a removed access, a narrower choice whose
-        // answer was lost): Context access is read again.
-        if (value.pending) e.attemptSeen = true;
-        else {
-          delete e.attemptSeen;
-          recheckAccess(e);
-        }
+        // A re-authorization started or ended elsewhere (see `noteAttempt`).
+        noteAttempt(e, value);
         return false;
       }
       // Its result follows here when this tab uses or restores the session;
@@ -686,8 +684,8 @@ export function createBrowserRuntime(
       e.view = { ...e.view, requestedScopes: b.scopes };
       return e;
     }
-    if ((value.kind === 'ready' || value.kind === 'claimed') && value.pending)
-      e.attemptSeen = true;
+    if (value.kind === 'ready' || value.kind === 'claimed')
+      e.attemptEnded = value.attemptEnded;
     const problem = interruption(value);
     const restores =
       value.kind === 'ready' ||
@@ -1690,18 +1688,16 @@ export function createBrowserRuntime(
     else again();
   }
   /**
-   * Follows whether this connection's record carries a re-authorization: one
-   * that is gone without a new grant (dropped by a renewal, denied, failed)
-   * may still have changed what the Pod grants, so Context access is read
-   * again.
+   * Follows the record's `attemptEnded` marker: a re-authorization that
+   * ended without a new grant (denied, failed, dropped by a renewal), also
+   * one this tab never saw, may still have changed what the Pod grants (a
+   * removed access, a narrower choice whose answer was lost), so Context
+   * access is read again.
    */
   function noteAttempt(e: Entry, value: SessionRecord) {
-    if ((value.kind === 'ready' || value.kind === 'claimed') && value.pending) {
-      e.attemptSeen = true;
-      return;
-    }
-    if (!e.attemptSeen) return;
-    delete e.attemptSeen;
+    if (value.kind !== 'ready' && value.kind !== 'claimed') return;
+    if (value.attemptEnded === e.attemptEnded) return;
+    e.attemptEnded = value.attemptEnded;
     recheckAccess(e);
   }
   /** Counts the browser's `online` events, so a restoration knows it missed one. */
@@ -1818,6 +1814,15 @@ export function createBrowserRuntime(
     const lost = e.lost;
     const session = e.view.session;
     if (session.kind !== 'ended' || !session.restorable) return;
+    if ('relisting' in e) {
+      // A page that stayed, whose record could not be read.
+      const leftFrom = e.relisting;
+      delete e.relisting;
+      e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+      publish();
+      await relist(e, leftFrom);
+      return;
+    }
     if (lost && eligible(e, lost.generation)) {
       // Offline still: keep the one resend for later.
       if (offline() && withinGrace(lost.sentAt)) return;
@@ -1925,7 +1930,24 @@ export function createBrowserRuntime(
           void load(next).catch(() => {});
       })
       .catch(() => {
-        // Unreadable: listed by the next start.
+        // Unreadable now: shown as a storage problem the person can retry
+        // (`retryRestore`, also on `online`), rather than restoring forever.
+        if (
+          disposed ||
+          entries.get(e.view.id) !== e ||
+          e.view.session.kind !== 'restoring'
+        )
+          return;
+        e.relisting = leftFrom;
+        e.view = {
+          ...e.view,
+          session: Object.freeze({
+            kind: 'ended',
+            problem: 'storage',
+            restorable: true,
+          }),
+        };
+        publish();
       });
   }
   /**
@@ -2437,6 +2459,9 @@ export function createBrowserRuntime(
               () => commit(true),
               runtimeLifetime.signal,
             );
+      // The session this page left from, which a sign-out here covers.
+      if (leftFrom === undefined) delete e.leftFrom;
+      else e.leftFrom = leftFrom;
       return { generation, url, leftFrom };
     };
     let prepared: {
@@ -2648,6 +2673,8 @@ export function createBrowserRuntime(
           if (pending) throw new RuntimeError('attempt');
           pending = saved;
         }
+        // Records of Pods outside `allowedPods` stay untouched.
+        if (!allows(b.pod.podUrl)) continue;
         if (
           !callback &&
           saved.value.kind === 'authorizing' &&
@@ -2662,7 +2689,6 @@ export function createBrowserRuntime(
             // Listed signed out; deleted by the next start.
           }
         }
-        if (!allows(b.pod.podUrl)) continue;
         if (saved.value.kind === 'disconnected' && !rememberPods) {
           forgotten.push(saved);
           continue;

@@ -1017,3 +1017,37 @@ it('keeps a sign-out that starts while a page that stayed reads its record', asy
   ]);
   expect(() => runtime.bindPod(id)).toThrow();
 });
+
+it('offers a retry when the page that stayed cannot read its record', async () => {
+  const factory = new IDBFactory();
+  const failing = { read: false };
+  const f = fixture({
+    openStore: storeWith(factory, (store) => ({
+      async read(id) {
+        if (failing.read) {
+          failing.read = false;
+          throw new Error('read failed');
+        }
+        return store.read(id);
+      },
+    })),
+  });
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  await runtime.beginAuthorization(id);
+  failing.read = true;
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  await vi.waitFor(() =>
+    expect(runtime.getSnapshot()[0]?.session).toEqual({
+      kind: 'ended',
+      problem: 'storage',
+      restorable: true,
+    }),
+  );
+  await runtime.retryRestore(id);
+  expect(runtime.getSnapshot()[0]?.session).toEqual({
+    kind: 'active',
+    subject: me,
+  });
+});

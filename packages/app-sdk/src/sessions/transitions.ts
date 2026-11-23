@@ -145,13 +145,12 @@ export function createSessionTransitions(
         }
         // A renewal keeps the session's re-authorization pending; a code
         // exchange is the new grant, with nothing pending.
-        const pending = before ? carried(claimed.value) : undefined;
         return commit(claimed.id, claimed.revision, {
           version: 1,
           kind: 'ready',
           binding,
           credentials: result,
-          ...(pending ? { pending } : {}),
+          ...(before ? following(claimed.value) : {}),
         });
       },
     };
@@ -170,15 +169,14 @@ export function createSessionTransitions(
     // answer within the Pod's grace period; a code claim keeps nothing.
     const credentials =
       current.value.kind === 'ready' ? current.value.credentials : undefined;
-    const pending =
-      operation === 'refresh' ? carried(current.value) : undefined;
+    const kept = operation === 'refresh' ? following(current.value) : {};
     return commit(current.id, current.revision, {
       version: 1,
       kind: 'claimed',
       binding: expected,
       operation,
       subject: credentials?.subject ?? null,
-      ...(pending ? { pending } : {}),
+      ...kept,
       ...(operation === 'refresh' && credentials?.refreshToken
         ? {
             resend: {
@@ -319,7 +317,7 @@ export function createSessionTransitions(
                 binding: sessionBinding(value),
                 reason: answer.problem,
               }
-            : withoutPending(value),
+            : ended(value),
         );
         return change.kind === 'conflict'
           ? conflict
@@ -389,7 +387,7 @@ export function createSessionTransitions(
           value.pending &&
           pendingGeneration(value.pending) === generation
         ) {
-          next = withoutPending(value);
+          next = ended(value);
           outcome = 'kept';
         } else if (
           value.kind === 'claimed' &&
@@ -525,12 +523,11 @@ export function createSessionTransitions(
         throw new SessionTransitionError('state');
       assertSessionBinding(value.binding, binding);
       const resend = { ...value.resend, resent: true as const };
-      const pending = carried(value);
       const result = await commit(id, revision, {
         ...withoutPending(value),
         binding,
         resend,
-        ...(pending ? { pending } : {}),
+        ...following(value),
       });
       if (result.kind === 'conflict') return conflict;
       return {
@@ -591,6 +588,28 @@ function withoutPending<T extends SessionRecord>(value: T): T {
   const next = { ...value };
   delete (next as { pending?: PendingAttempt }).pending;
   return next;
+}
+/** A new `attemptEnded` marker: a re-authorization ended without a grant. */
+const endMark = () => crypto.randomUUID();
+/** The session without its attempt, which ended without a new grant. */
+function ended<T extends SessionRecord>(value: T): T {
+  return { ...withoutPending(value), attemptEnded: endMark() };
+}
+/**
+ * What a renewal of the session keeps: its attempt while `carried`, and the
+ * `attemptEnded` marker, renewed when the renewal drops an attempt.
+ */
+function following(value: SessionRecord): {
+  readonly pending?: PendingAttempt;
+  readonly attemptEnded?: string;
+} {
+  if (value.kind !== 'ready' && value.kind !== 'claimed') return {};
+  const pending = carried(value);
+  const mark = value.pending && !pending ? endMark() : value.attemptEnded;
+  return {
+    ...(pending ? { pending } : {}),
+    ...(mark ? { attemptEnded: mark } : {}),
+  };
 }
 
 /** Exchange claims use the same discovery/client continuity checks. */
