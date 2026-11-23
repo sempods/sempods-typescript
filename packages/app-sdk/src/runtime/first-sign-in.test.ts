@@ -484,6 +484,25 @@ it('keeps reading the default Pod without a token when the Pod needs the person'
   ]);
 });
 
+it('still asks silently beside a Pod added without a sign-in (#372)', async () => {
+  const f = silent({ signIn: 'optional', firstSignIn: 'click' });
+  await f.runtime.initialize();
+  await f.runtime.connect('https://pod.example/bob');
+  expect(await savedRecords(f.factory)).toMatchObject([
+    { value: { kind: 'address' } },
+  ]);
+  f.runtime.dispose();
+  await settleLease();
+  const tab = createBrowserRuntime({
+    ...f.options,
+    firstSignIn: 'silent',
+    tabStorage: memoryStorage(),
+  });
+  keep(tab);
+  await tab.initialize();
+  expect(silentAttempts(f)).toBe(1);
+});
+
 it('rejects silent without a default Pod or a did:web identity, before any I/O', () => {
   for (const options of [
     { identity, firstSignIn: 'silent' },

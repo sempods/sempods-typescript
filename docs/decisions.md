@@ -417,8 +417,8 @@ access) until that work is resolved or discarded. Writes
 follow the anonymous catalogue, which lists nothing as writable. Under
 `optional` a runtime reads several Pods that way, each its own connection,
 and remembers the address of an added one as a record without discovery or
-client (#372), so the next start and other tabs list it like any remembered
-Pod. `none` uses no session store or lock and needs one default Pod. Under `optional`, signing
+client (#372), so the next start and other tabs list it as a Pod never
+signed in to. `none` uses no session store or lock and needs one default Pod. Under `optional`, signing
 in adds `public-read` to the optional scopes, and required scopes are a
 configuration error.
 

@@ -306,7 +306,8 @@ export interface BrowserRuntimeOptions {
    * `preset`, or a single `allowedPods` entry) where people usually have a
    * session at that Pod already (single sign-on). When nothing is stored
    * for this app on the device (no session, no remembered Pod, also none
-   * that `allowedPods` excludes now), `initialize()` connects the
+   * that `allowedPods` excludes now; the address of a Pod only read without
+   * a token does not count), `initialize()` connects the
    * default Pod and navigates to its provider once with `prompt=none`
    * instead of resolving: signed in there with a grant for this app, the
    * person returns signed in without a click. Otherwise the Pod answers

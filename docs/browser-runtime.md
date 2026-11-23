@@ -340,7 +340,8 @@ const runtime = createBrowserRuntime({
 
 When nothing is stored for the app on this device (no session, no remembered
 Pod, no unreadable record, also none of a Pod that `allowedPods` now
-excludes), `initialize()` connects the default Pod and
+excludes; the address of a Pod only read without a token does not count),
+`initialize()` connects the default Pod and
 navigates to its provider once with `prompt=none`, instead of resolving. The
 Pod answers at once, without showing anything:
 
@@ -1046,7 +1047,9 @@ A Pod address outlives its session, so people do not type it again on their
 own device. Signing out (`disconnect(id)`) and a session that ends (a refused
 renewal, an expired token without a refresh token, a failed sign-in) keep the
 connection's record with only its address (the Pod binding) and why the
-session ended: no token and no verifier. The connection stays in the snapshot,
+session ended: no token and no verifier. Under `signIn: 'optional'`, a Pod
+added and only read without a token is remembered too, by its address alone
+([apps without sign-in](#apps-without-sign-in)). The connection stays in the snapshot,
 and the next start lists it again, as
 
 ```ts
