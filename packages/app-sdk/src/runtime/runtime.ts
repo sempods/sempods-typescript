@@ -566,16 +566,12 @@ export function createBrowserRuntime(
         sameBinding(e, value)
       ) {
         e.revision = stored!.revision;
-        // A re-authorization that ended without a new grant may still have
-        // changed what the Pod grants (a removed access, a narrower choice
-        // whose answer was lost): Context access is read again.
-        const ended = e.reauthorized && !value.pending;
-        if (value.pending) e.reauthorized = true;
-        else delete e.reauthorized;
-        if (ended) {
-          invalidateContexts(e);
-          void forbidden(e);
-        }
+        // The same credentials under a newer revision without an attempt: a
+        // re-authorization ended without a new grant, also one this tab
+        // missed entirely (the back/forward cache). It may still have changed
+        // what the Pod grants (a removed access, a narrower choice whose
+        // answer was lost): Context access is read again.
+        if (!value.pending) recheckAccess(e);
         return false;
       }
       // Its result follows here when this tab uses or restores the session;
@@ -592,9 +588,6 @@ export function createBrowserRuntime(
       // and takes its client.
       if (value.kind === 'ready' && sameBinding(e, value)) {
         e.revision = stored!.revision;
-        // Renewed elsewhere, with a re-authorization pending or not.
-        if (value.pending) e.reauthorized = true;
-        else delete e.reauthorized;
         if (e.lost) clearTimeout(e.lost.timer);
         delete e.lost;
         delete e.restorable;
@@ -675,10 +668,6 @@ export function createBrowserRuntime(
       e.view = { ...e.view, requestedScopes: b.scopes };
       return e;
     }
-    // Another tab's re-authorization of this session is out: once it ends
-    // without a grant, Context access is read again (see `adopt`).
-    if ((value.kind === 'ready' || value.kind === 'claimed') && value.pending)
-      e.reauthorized = true;
     const problem = interruption(value);
     const restores =
       value.kind === 'ready' ||
@@ -1631,6 +1620,21 @@ export function createBrowserRuntime(
     return e.revalidation;
   }
 
+  /**
+   * Reads Context access again after a consent outcome: once a catalogue
+   * read under way settled, as it may describe the access from before. Only
+   * for a connection whose catalogue the app read.
+   */
+  function recheckAccess(e: Entry) {
+    if (e.view.catalogue.kind === 'unknown') return;
+    invalidateContexts(e);
+    const generation = e.generation;
+    const again = () => {
+      if (eligible(e, generation)) void load(e).catch(() => {});
+    };
+    if (e.catalogue) void e.catalogue.then(again, again);
+    else again();
+  }
   /** Counts the browser's `online` events, so a restoration knows it missed one. */
   let onlineEvents = 0;
   /** Restores one saved signed-in Pod; publishes its own outcome (`active`/`ended`). */
@@ -2262,9 +2266,24 @@ export function createBrowserRuntime(
         Date.now(),
         options.development,
       );
-      const commit = () =>
+      const commit = (locking = false) =>
         serial(e, async () => {
           if (!still()) throw new RuntimeError('disconnected');
+          if (locking) {
+            // A renewal of this session that finished before the lock was
+            // granted, whose announcement has not arrived yet: the attempt
+            // is stored beside its result.
+            const stored = await sessions!.read(id);
+            if (!still()) throw new RuntimeError('disconnected');
+            const value = stored?.value;
+            if (
+              value &&
+              (value.kind === 'ready' ||
+                (value.kind === 'claimed' && value.operation === 'refresh')) &&
+              sessionBinding(value).generation === before
+            )
+              e.revision = stored.revision;
+          }
           // Another tab changed the record first: shown here, and a retry
           // prepares on it.
           const change = await sessions!.prepare(
@@ -2319,7 +2338,7 @@ export function createBrowserRuntime(
           : await locked(
               `sempods:refresh:${namespace}:${id}`,
               e,
-              commit,
+              () => commit(true),
               runtimeLifetime.signal,
             );
       return { generation, url, leftFrom };
@@ -2632,11 +2651,15 @@ export function createBrowserRuntime(
             destination,
           );
         } finally {
-          // Restored before the report, as any outcome but a new grant
-          // leaves the session to restore.
+          // Any outcome but a new grant leaves the session to restore: before
+          // the report once the attempt was answered, otherwise (waited too
+          // long for the lock, a forged callback) beside it, so the report
+          // comes at its deadline.
           const listed = entries.get(pending.id);
-          if (outcome?.kind !== 'completed' && listed)
+          if (outcome?.kind === 'kept' && listed)
             await relist(listed, listed.generation);
+          else if (outcome?.kind !== 'completed' && listed)
+            void relist(listed, listed.generation);
         }
         if (outcome.kind === 'completed')
           return {
@@ -2645,16 +2668,24 @@ export function createBrowserRuntime(
             connectionId: pending.id,
           };
         const problem = runtimeProblem(outcome.error);
+        // Only a session that restored usable (not one that expired while
+        // the person was at the Pod) is in use again.
+        const kept = entries.get(pending.id)?.view.session.kind;
         return {
           ...report,
           interaction: problem === 'denied' ? 'cancelled' : 'failed',
           attemptConnectionId: pending.id,
-          resumed: true,
+          ...(kept === 'active' || kept === 'renewing'
+            ? { resumed: true as const }
+            : {}),
           problem,
           ...runtimeFailure(outcome.error),
         };
       }
-      const silent = pending.value.silent === true;
+      // Also one an SDK 0.9 tab started, noted only in this tab's storage.
+      const silent =
+        pending.value.silent === true ||
+        silentNote === `attempt:${attempt.state}`;
       try {
         const connectionId = await redeem(
           pending.id,
@@ -2746,6 +2777,9 @@ export function createBrowserRuntime(
     }
     const e = get(id);
     if (forget) e.forgetting = true;
+    // A sign-in this tab still prepares (one waiting for the refresh lock)
+    // stops: only a new action signs in again.
+    delete e.preparation;
     // Register before abort/notifications so reentrant callers see the retirement.
     const operation = retire(e, 'disconnected', deleting, true)
       .then(

@@ -58,11 +58,6 @@ export interface Entry {
    * starts, and a session that ends while it waits does not stop it.
    */
   preparation?: object;
-  /**
-   * Another tab's re-authorization of this session is pending: once it ends
-   * without a new grant, Context access is read again.
-   */
-  reauthorized?: true;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**

@@ -306,6 +306,7 @@ it('renews a session that expired while away; the expired attempt’s late answe
     interaction: 'failed',
     problem: 'attempt',
   });
+  await restored(next);
   const reads = next.bindPod(id);
   await reads.sparql.construct('CONSTRUCT {} WHERE {}');
   await vi.waitFor(async () =>
@@ -855,4 +856,70 @@ it('lets a sign-out after the new grant was stored, before this tab uses it, sta
     reason: 'disconnected',
   });
   store.close();
+});
+
+it('reports no resumed session when the session expired while the person was at the Pod', async () => {
+  const f = fixture();
+  keep(f.runtime);
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 120 }),
+      token_type: 'Bearer',
+    }),
+  );
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  await runtime.beginAuthorization(id);
+  const authorization = new URL(f.navigate.mock.calls.at(-1)![0]);
+  runtime.dispose();
+  await settleLease();
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5 * 60_000);
+  const next = denial(f, authorization);
+  const report = await next.initialize();
+  expect(report).toMatchObject({ interaction: 'cancelled', problem: 'denied' });
+  expect(report).not.toHaveProperty('resumed');
+  expect(next.getSnapshot()[0]?.session).toMatchObject({
+    kind: 'ended',
+    problem: 'expired',
+  });
+});
+
+it('reports a lock it waited too long for at its deadline, while a due session waits to restore', async () => {
+  const { f, id, authorization } = await reauthorizing();
+  // Another tab holds the session's refresh lock and does not let go.
+  const held = deferred<void>();
+  void f.options.locks!.request(
+    `sempods:refresh:${namespace}:${id}`,
+    {},
+    () => held.promise,
+  );
+  // The saved credential is due, so its restoration needs that lock too.
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3590_000);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const discovered = f.count('/.well-known/oauth-authorization-server');
+    const next = denial(f, authorization);
+    let report: Awaited<ReturnType<BrowserRuntime['initialize']>> | undefined;
+    void next.initialize().then((value) => (report = value));
+    // Its wait starts once its discovery answered; the deadline is 60 s.
+    await vi.waitFor(() =>
+      expect(f.count('/.well-known/oauth-authorization-server')).toBe(
+        discovered + 1,
+      ),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(report).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() =>
+      expect(report).toMatchObject({
+        interaction: 'failed',
+        problem: 'coordination',
+      }),
+    );
+    expect(report).not.toHaveProperty('resumed');
+  } finally {
+    vi.useRealTimers();
+    held.resolve();
+  }
 });

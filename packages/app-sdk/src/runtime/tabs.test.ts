@@ -12,6 +12,7 @@ import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
   callback,
+  catalogue,
   deferred,
   fixture,
   fixtureNamespace,
@@ -821,6 +822,116 @@ it('reads Context access again in a tab that started while the re-authorization 
   expect(await back.initialize()).toMatchObject({ resumed: true });
   await vi.waitFor(() => expect(catalogues()).toBe(before + 1));
   expect(t.session(c)).toMatchObject({ kind: 'active' });
+});
+
+it('reads Context access again after a consent round trip a cached page missed', async () => {
+  const pageshow = bfcache();
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  freeze(true);
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ resumed: true });
+  const catalogues = () =>
+    t.fetch.mock.calls.filter(([url]) => url.endsWith('/_system/contexts'))
+      .length;
+  const before = catalogues();
+  freeze(false);
+  pageshow();
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 1));
+  expect(t.session(t.b)).toMatchObject({ kind: 'active' });
+});
+
+it('reads Context access once more after a read under way when consent ends', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  t.a.dispose();
+  const held = deferred<Response>();
+  let first = true;
+  t.setCatalogue(async () => {
+    if (!first) return catalogue([], []);
+    first = false;
+    return held.promise;
+  });
+  const catalogues = () =>
+    t.fetch.mock.calls.filter(([url]) => url.endsWith('/_system/contexts'))
+      .length;
+  const before = catalogues();
+  void t.b.loadContexts(t.id).catch(() => {});
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 1));
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  await back.initialize();
+  await quiet();
+  // The read under way may describe the access from before consent.
+  held.resolve(catalogue());
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 2));
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()[0]?.catalogue).toMatchObject({
+      kind: 'ready',
+      contexts: [],
+    }),
+  );
+});
+
+it('stops a sign-in waiting for the refresh lock when the connection is signed out', async () => {
+  const t = await tabs();
+  const held = deferred<Response>();
+  t.setToken(() => held.promise);
+  t.setQuery(async () => unauthorized());
+  void t.b.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  const navigations = t.navigate.mock.calls.length;
+  const begun = t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  expect(await t.a.disconnect(t.id)).toEqual({ kind: 'disconnected' });
+  held.resolve(
+    Response.json({
+      access_token: mint('late'),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-late',
+    }),
+  );
+  await expect(begun).rejects.toMatchObject({ problem: 'disconnected' });
+  expect(t.navigate.mock.calls.length).toBe(navigations);
+  expect(await records(t.factory)).toMatchObject([
+    { value: { kind: 'disconnected', reason: 'disconnected' } },
+  ]);
+});
+
+it('stores the attempt beside a renewal whose announcement has not arrived yet', async () => {
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  const held = deferred<Response>();
+  t.setToken(() => held.promise);
+  t.setQuery(async () => unauthorized());
+  void t.b.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  const navigations = t.navigate.mock.calls.length;
+  freeze(true);
+  const begun = t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  held.resolve(
+    Response.json({
+      access_token: mint('renewed'),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-renewed',
+    }),
+  );
+  await begun;
+  expect(t.navigate.mock.calls.length).toBe(navigations + 1);
+  expect(await records(t.factory)).toMatchObject([
+    {
+      value: {
+        kind: 'ready',
+        credentials: { refreshToken: 'refresh-renewed' },
+        pending: { kind: 'open' },
+      },
+    },
+  ]);
 });
 
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {

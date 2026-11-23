@@ -537,3 +537,32 @@ it('rejects silent without a default Pod or a did:web identity, before any I/O',
     }),
   );
 });
+
+it('recognizes the answer to a silent sign-in an SDK 0.9 tab started', async () => {
+  const f = silent();
+  await f.runtime.initialize();
+  const state = new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.get(
+    'state',
+  )!;
+  f.runtime.dispose();
+  await settleLease();
+  // 0.9 stored an ordinary attempt and noted its state in the tab.
+  const store = await openSessionStore(
+    JSON.stringify(['did-web', identity.clientId]),
+    f.factory,
+  );
+  const [saved] = (await store.list()).records;
+  const { silent: _silent, ...older } = saved!.value as Record<string, unknown>;
+  void _silent;
+  await store.commit(saved!.id, saved!.revision, older);
+  store.close();
+  f.tab.setItem([...f.tab.map.keys()][0]!, `attempt:${state}`);
+  const back = await answered(f, 'error=login_required');
+  expect(await back.initialize()).toMatchObject({
+    interaction: 'none',
+    firstSignIn: { problem: 'login-required' },
+  });
+  await vi.waitFor(async () =>
+    expect(await savedRecords(f.factory)).toEqual([]),
+  );
+});
