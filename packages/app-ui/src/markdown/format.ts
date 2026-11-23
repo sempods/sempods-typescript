@@ -30,17 +30,24 @@ const begin = (node: MarkdownNode) => node.position?.start.offset ?? 0;
 const finish = (node: MarkdownNode) => node.position?.end.offset ?? 0;
 
 /**
- * The last source parsed whole, and the signatures of its regions that the
- * checks read: the field asks for every action on the same source.
+ * The last source parsed whole, its link definitions, and the signatures of
+ * its regions that the checks read: the field asks for every action on the
+ * same source.
  */
 let last: {
   readonly source: string;
   readonly tree: MarkdownNode;
+  readonly definitions: readonly MarkdownNode[];
   readonly regions: Map<string, Signature>;
 } | null = null;
 function parsed(source: string) {
-  if (last?.source !== source)
-    last = { source, tree: parseMarkdown(source), regions: new Map() };
+  if (last?.source !== source) {
+    const tree = parseMarkdown(source);
+    const definitions = [...below(tree)].filter(
+      (node) => node.type === 'definition',
+    );
+    last = { source, tree, definitions, regions: new Map() };
+  }
   return last;
 }
 const tree = (source: string) => parsed(source).tree;
@@ -241,6 +248,9 @@ function moved(ops: readonly Op[], at: number, after: boolean): number {
 
 type Emphasis = 'strong' | 'emphasis';
 
+/** A character the person might type, as a letter is to the parser. */
+const TYPED = '\uE000';
+
 const MARK: Readonly<Record<Emphasis, string>> = {
   strong: '**',
   emphasis: '*',
@@ -357,23 +367,48 @@ function emphasis(
     }
     const mark = MARK[type];
     const n = mark.length;
-    const pair =
-      source.slice(start - n, start) === mark &&
-      source.slice(start, start + n) === mark;
-    const edit: MarkdownEdit = pair
-      ? {
+    // An empty pair of this kind: its own markers, or this kind's around the
+    // other's, as in `***|***`; not the other's alone, as `**|**` for italic.
+    const stars = (from: number, step: number) => {
+      let i = from;
+      while (source[i] === '*') i += step;
+      return Math.abs(i - from);
+    };
+    const run = stars(start - 1, -1);
+    if (run === stars(start, 1) && (run === n || run === 3))
+      return checked(
+        root,
+        source,
+        {
           from: start - n,
           to: start + n,
           insert: '',
           select: [start - n, start - n],
-        }
-      : {
-          from: start,
-          to: start,
-          insert: mark + mark,
-          select: [start + n, start + n],
-        };
-    return checked(root, source, edit, [], { text: false });
+        },
+        [],
+        { text: false },
+      );
+    // An empty pair parses as stars only, so it is checked as typed into:
+    // next to a span of its kind, the stars would show as text.
+    const probe: MarkdownEdit = {
+      from: start,
+      to: start,
+      insert: mark + TYPED + mark,
+      select: [start, start],
+    };
+    const typed = [start + n, start + n + 1] as const;
+    if (
+      !checked(root, source, probe, [{ range: typed, type, has: true }], {
+        typed: TYPED,
+      })
+    )
+      return null;
+    return {
+      from: start,
+      to: start,
+      insert: mark + mark,
+      select: [start + n, start + n],
+    };
   }
   const parts: Part[] = [];
   for (const [block, a, b] of stretches(source, root, start, end)) {
@@ -427,7 +462,8 @@ const NUMBERED = /^(\s*)\d{1,9}[.)]\s+/;
 /**
  * A prefix on every non-empty line the selection touches (`## `, `- `,
  * `1. `), or removed from all of them when every one has it already. A list
- * replaces the other kind of list, a heading another level.
+ * replaces the other kind of list, a heading another level. Lines taken out
+ * of a list become a paragraph of their own.
  */
 function linePrefix(
   kind: 'heading' | 'bulletList' | 'numberedList',
@@ -470,15 +506,26 @@ function linePrefix(
     prefixes.push([oldLength, indent.length + prefix.length]);
     return indent + prefix + line.slice(oldLength);
   });
-  const insert = next.join('\n');
+  const body = next.join('\n');
+  // Lines taken out of a list stand apart from the lines around them, which
+  // they would otherwise continue: an item's text, or a paragraph.
+  const filledAt = (line: number) => {
+    const close = source.indexOf('\n', line);
+    return source.slice(line, close === -1 ? undefined : close).trim() !== '';
+  };
+  const apart = remove && kind !== 'heading';
+  const lead = apart && from > 0 && filledAt(lineStart(source, from - 1));
+  const trail = apart && to < source.length && filledAt(to + 1);
+  const insert = (lead ? '\n' : '') + body + (trail ? '\n' : '');
+  const at = from + (lead ? 1 : 0);
   if (start === end) {
     const [oldLength, newLength] = prefixes[0]!;
     const offset = start - from;
     const caret =
-      from + (offset <= oldLength ? newLength : offset - oldLength + newLength);
+      at + (offset <= oldLength ? newLength : offset - oldLength + newLength);
     return { from, to, insert, select: [caret, caret] };
   }
-  return { from, to, insert, select: [from, from + insert.length] };
+  return { from, to, insert, select: [at, at + body.length] };
 }
 
 const URL_ONLY = /^https?:\/\/\S+$/i;
@@ -580,6 +627,11 @@ interface Target {
 interface Expect {
   /** Whether the text stays the same; not for inserted markers. */
   readonly text?: boolean;
+  /**
+   * A character the edit types between markers it inserts: it must be text
+   * of its own there. Stars that were text may become those markers.
+   */
+  readonly typed?: string;
   /** The link the edit adds, by its start and address. */
   readonly link?: { readonly at: number; readonly url: string };
 }
@@ -669,7 +721,7 @@ function covers(
  * `edit`, if parsing its result shows what it means to do: the targets have
  * their emphasis, or no longer, the added link is there, and the text, code,
  * HTML and addresses stay as they were; otherwise `null`. Only the blocks
- * around the edit are parsed again.
+ * around the edit are parsed again, with the link definitions outside them.
  */
 function checked(
   root: MarkdownNode,
@@ -681,17 +733,22 @@ function checked(
   const next = applyEdit(source, edit);
   const delta = edit.insert.length - (edit.to - edit.from);
   const [lo, hi] = region(root, source, edit.from, edit.to);
-  const { regions } = parsed(source);
+  const { regions, definitions } = parsed(source);
+  // The link definitions outside the region, which its references use.
+  const outside = definitions
+    .filter((node) => finish(node) <= lo || begin(node) >= hi)
+    .map((node) => '\n\n' + source.slice(begin(node), finish(node)))
+    .join('');
   const key = `${lo}:${hi}`;
   const before =
     regions.get(key) ??
     signature(
       lo === 0 && hi === source.length
         ? root
-        : parseMarkdown(source.slice(lo, hi)),
+        : parseMarkdown(source.slice(lo, hi) + outside),
     );
   regions.set(key, before);
-  const result = parseMarkdown(next.slice(lo, hi + delta));
+  const result = parseMarkdown(next.slice(lo, hi + delta) + outside);
   const added = expect.link && {
     at: expect.link.at - lo,
     url: expect.link.url,
@@ -699,7 +756,13 @@ function checked(
   const after = signature(result, added);
   if (added && !after.found) return null;
   if (before.marks !== after.marks) return null;
-  if (expect.text !== false && before.text !== after.text) return null;
+  if (expect.typed) {
+    // Typed alone between the markers, not joined to stars shown as text.
+    const alone = [...below(result)].some(
+      (node) => node.type === 'text' && node.value === expect.typed,
+    );
+    if (!alone) return null;
+  } else if (expect.text !== false && before.text !== after.text) return null;
   for (const target of targets) {
     const [a, b] = [target.range[0] - lo, target.range[1] - lo];
     if (covers(result, target.type, a, b) !== target.has) return null;

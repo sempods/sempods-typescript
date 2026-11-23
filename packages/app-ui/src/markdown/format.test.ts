@@ -134,6 +134,38 @@ describe('emphasis', () => {
     expect(run('bold', 'a **|**b')).toBe('a |b');
     expect(run('italic', '|')).toBe('*|*');
   });
+
+  it('adds the other emphasis inside an empty pair, and removes its own', () => {
+    expect(run('italic', '**|**')).toBe('***|***');
+    expect(run('bold', '*|*')).toBe('***|***');
+    expect(run('italic', '***|***')).toBe('**|**');
+    expect(run('bold', '***|***')).toBe('*|*');
+  });
+
+  it('offers no pair at a caret where typing would show the stars', () => {
+    expect(run('bold', '**a**|')).toBeNull();
+    expect(run('italic', '*a*|')).toBeNull();
+    expect(run('bold', 'a |**b**')).toBeNull();
+    // Another kind of emphasis beside it takes the pair.
+    expect(run('bold', '*a*|')).toBe('*a***|**');
+  });
+});
+
+describe('references', () => {
+  const ref = '\n\n[foo]: https://example.org';
+
+  it('keeps a reference link a link', () => {
+    expect(run('bold', `see [«foo»] now${ref}`)).toBeNull();
+    expect(run('bold', `see «[foo]» now${ref}`)).toBe(
+      `see **«[foo]»** now${ref}`,
+    );
+    expect(run('italic', `see [foo][«x»] now\n\n[x]: https://a.b`)).toBeNull();
+  });
+
+  it('inserts no link that a reference before it would take', () => {
+    expect(run('link', `[foo]|${ref}`)).toBeNull();
+    expect(run('link', `[foo] |${ref}`)).toBe(`[foo] [|](https://)${ref}`);
+  });
 });
 
 describe('code and addresses', () => {
@@ -193,6 +225,13 @@ describe('line prefixes', () => {
     expect(run('numberedList', '[1. one\n2. two]')).toBe('[one\ntwo]');
     expect(run('numberedList', '[- one\n* two]')).toBe('[1. one\n2. two]');
     expect(run('bulletList', '[1. one\n- two]')).toBe('[- one\n- two]');
+  });
+
+  it('sets lines taken out of a list apart from the lines around them', () => {
+    expect(run('numberedList', '1. a\n2. b|')).toBe('1. a\n\nb|');
+    expect(run('bulletList', '- a\n- |b\n- c')).toBe('- a\n\n|b\n\n- c');
+    expect(run('bulletList', 'intro\n[- a\n- b]')).toBe('intro\n\n[a\nb]');
+    expect(run('bulletList', '- a\n\n- |b')).toBe('- a\n\n|b');
   });
 
   it('keeps the indentation of nested items', () => {

@@ -1878,6 +1878,7 @@ gets it, its own spans of that kind merged into one. Bold and italic apply
 to each selected paragraph, list item or heading on its own, after its list
 marker, heading or quote, and leave code blocks out. A link takes the first
 selected stretch of text, without a list marker or the blocks after it.
+Lines taken out of a list become a paragraph of their own.
 Where an action's effect would not be predictable, it is disabled: inside
 code or a link's address, across part of a link or code, or a link inside a
 link. Each edit is checked by parsing its result, so text, code and
