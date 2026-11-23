@@ -8,7 +8,7 @@
     "@sempods/app-ui": "workspace:*",
     "@sempods/client-sdk": "workspace:*",
     "jsonld": "9.0.0",
-    "lucide-react": "1.72.0",
+    "lucide-react": "1.77.0",
     "n3": "2.13.12",
     "react": "19.3.1",
     "react-dom": "19.3.1"
