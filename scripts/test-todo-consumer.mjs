@@ -1,5 +1,6 @@
 /* global getComputedStyle, window, document, URLSearchParams, navigator, caches, Event */
 import assert from 'node:assert/strict';
+import { podActions } from './pod-actions.mjs';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -951,6 +952,7 @@ try {
       });
     await input.fill('Keep this draft');
     await menu(page, 'Pods & sharing');
+    await podActions(page);
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
@@ -1439,6 +1441,7 @@ try {
         window.innerHeight,
       ]),
     );
+    await podActions(page);
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();
@@ -1480,8 +1483,9 @@ try {
     await page.keyboard.press('Escape');
     assert.equal(await field.inputValue(), 'Unfinished baseline');
     await closeManagement(page);
-    // Above 30rem, management is a centred dialog, also under the reset; its
-    // other actions follow the three secondary tokens, its close icon none.
+    // Above 30rem, management is a centred dialog, also under the reset. Its
+    // Pod's actions are quiet entries behind their button (#386), like its
+    // close icon, whatever the secondary tokens say.
     await page.setViewportSize({ width: 800, height: 800 });
     const secondary = {
       '--sempods-secondary-bg': 'rgb(16, 17, 18)',
@@ -1513,11 +1517,13 @@ try {
       wideTop > 15 && Math.abs(wideTop - wideBottom) <= 1,
       `${wideTop} ${wideBottom}`,
     );
+    await podActions(management);
+    const [itemFill, , , itemBorder] = await look(
+      management.getByRole('button', { name: 'Change sharing', exact: true }),
+    );
     assert.deepEqual(
-      await look(
-        management.getByRole('button', { name: 'Change sharing', exact: true }),
-      ),
-      ['rgb(16, 17, 18)', 'rgb(70, 80, 90)', '1px', 'rgb(19, 20, 21)'],
+      [itemFill, itemBorder],
+      ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)'],
     );
     const [closeFill, , , closeBorder] = await look(
       management.locator('.sp-access-close'),
@@ -1594,6 +1600,7 @@ try {
       releaseDiscovery();
     };
     await page.route('**/.well-known/oauth-protected-resource', holdDiscovery);
+    await podActions(page);
     await page
       .getByRole('button', { name: 'Change sharing', exact: true })
       .click();

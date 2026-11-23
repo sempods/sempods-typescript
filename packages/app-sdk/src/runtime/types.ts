@@ -251,7 +251,20 @@ export interface BrowserRuntimeOptions {
   /** Defaults to createPod. Overrides must preserve the client request and outcome contract. */
   readonly podFactory?: PodFactory;
   readonly location?: () => string;
-  readonly navigate?: (url: string) => void;
+  /**
+   * Leaves for a Pod's sign-in (default `window.location.assign`). `signal`
+   * aborts when the page stays instead (`cancelAuthorization`), which first
+   * calls `window.stop()` to stop a navigation of this document still
+   * loading; that also stops the page's other loads in flight. A navigation
+   * that does not go through this document (a host-managed sign-in) cancels
+   * on `signal` and returns exactly `'signal'`: the page then stays without
+   * `window.stop()`, also when it calls `cancelAuthorization` before it
+   * returns. Any other return value is ignored.
+   */
+  readonly navigate?: (
+    url: string,
+    options: { readonly signal: AbortSignal },
+  ) => unknown;
   readonly replaceUrl?: (url: string) => void;
   /**
    * Advanced/test storage adapters; omitted adapters use IndexedDB with a
@@ -418,6 +431,20 @@ export interface BrowserRuntime {
     id: string,
     options?: { readonly intent?: AuthorizationIntent },
   ): Promise<void>;
+  /**
+   * Stays on this page instead of the sign-in that `beginAuthorization`
+   * started here: for a navigation the browser stopped, or one the person
+   * kept the page from (a leave prompt's **Stay**), which leaves the
+   * connection `leaving`. A navigation of this document still loading is
+   * stopped first (`window.stop()`), unless `navigate` returned `'signal'`,
+   * and the `signal` given to `navigate` aborts. A re-authorization resumes the session it started from
+   * (`restoring`, then `active`, or `ended` if it cannot), as when the page
+   * comes back from the back/forward cache; a first sign-in ends
+   * `interrupted` here, without a request, and its saved attempt is retired
+   * like a failed first sign-in; the silent first sign-in is signed out.
+   * Returns whether such an attempt was abandoned; `false` changes nothing.
+   */
+  cancelAuthorization(id: string): boolean;
   /**
    * Signs out on this device: blocks this connection locally, then removes its
    * saved session. The connection stays listed as

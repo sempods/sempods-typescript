@@ -1551,7 +1551,9 @@ export function useCreation<D extends object>(
     replace(copy(initial.current));
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(options.initial);
-  useDraftGuard(dirty, reset, fixed ? 'explicit' : 'target');
+  // The form's own draft belongs to the active connection's view: signing
+  // out of another Pod keeps it.
+  useLeaveGuard(dirty, reset, fixed ? 'explicit' : 'target', activeId);
   // Pending, unresolved or held for an explicit retry.
   const locked = (of: CreationLane<D> | null | undefined) =>
     Boolean(of?.outstanding());
@@ -1664,6 +1666,15 @@ export function useDraftGuard(
   discard: () => void,
   scope: 'local' | 'target' | 'connection' | 'explicit' = 'target',
 ) {
+  useLeaveGuard(dirty, discard, scope, null);
+}
+/** `useDraftGuard`, for SDK forms that know their connection (`LeaveGuard.connectionId`). */
+function useLeaveGuard(
+  dirty: boolean,
+  discard: () => void,
+  scope: 'local' | 'target' | 'connection' | 'explicit',
+  connectionId: string | null,
+) {
   const app = useController();
   const latest = useCommitted({ dirty, discard });
   const [listeners] = useState(() => new Set<() => void>());
@@ -1671,6 +1682,7 @@ export function useDraftGuard(
     () =>
       app.register({
         scope,
+        ...(connectionId ? { connectionId } : {}),
         dirty: () => latest.current.dirty,
         blocked: () => false,
         discard: () => latest.current.discard(),
@@ -1681,7 +1693,7 @@ export function useDraftGuard(
           };
         },
       }),
-    [app, scope, latest, listeners],
+    [app, scope, connectionId, latest, listeners],
   );
   // Committed before effects run, so the controller reads the new value.
   useEffect(() => {

@@ -709,7 +709,8 @@ const lists = useContexts();
   reads still happen once.
 - While mounted, `AppAccess` shows no chooser (only its loading status until
   the hook selects) and management names only the selected Context. Sign-in,
-  recovery, **Change sharing** and **Sign out** stay in `AppAccess`.
+  recovery, **Change sharing** and **Sign out on this device** stay in
+  `AppAccess`.
 
 The [TODO example](../examples/todo/src/app.tsx) puts `ContextSwitch` (below)
 in its header and keeps sharing in **Pods & sharing**.
@@ -793,9 +794,10 @@ contract below; the standard component already does so.
   preset) can be selected. Labels are read once per Pod, not again on token
   renewal.
 - `select` resolves a `TargetSelection`: `selected`, `declined`, `blocked`
-  (a pending write or another change) or `unavailable` with a `reason`. It asks
-  at most once about drafts and unconfirmed writes; a Pod change leaves guards
-  as `selectConnection` does, the same Pod as `selectContext`. The Context is
+  (a pending write, another change or a Pod's pending sign-in redirect) or
+  `unavailable` with a `reason`. It asks at most once about drafts and
+  unconfirmed writes; a Pod change leaves guards as `selectConnection` does,
+  the same Pod as `selectContext`. The Context is
   selected on the target Pod before it becomes active, so no screen ever sees
   that Pod with its previous, possibly writable, Context. A target whose Pod,
   sign-in or listing disappears while the person is asked withdraws the
@@ -865,7 +867,9 @@ export function ShareAnotherList({ connectionId }: { connectionId: string }) {
   `useSdkLocale().error`. After a confirmed leave question it resolves
   `false` instead, and the SDK's confirmation reports the failure.
 - Otherwise the page leaves for the Pod: the connection is `leaving` and the
-  content inert. After consent the app returns to `returnTo`, the new grant
+  content inert. Until the page has left, `share` and the other connection
+  actions resolve `false`, also for another Pod, so none replaces that
+  redirect. After consent the app returns to `returnTo`, the new grant
   replaces the old one and that Pod is the active one; the catalogue is read
   again, and the remembered Context is selected while it stays readable.
 - Cancelled or declined, the earlier session resumes with its access
@@ -1384,6 +1388,8 @@ not a failure. A `ready` source with no hits is a successful empty answer.
 | `podAddressPrefix`       | `string`                          | Initial editable address, default `https://sempods.org/`; empty disables it. Never changes permitted Pods or a configured target.      |
 | `open`                   | `boolean`                         | Host-owned **Pods & sharing** management; never starts a login, demands discovery in on-demand mode                                    |
 | `onClose`                | `() => void`                      | Management as a modal dialog; Escape, **Close** and a click beside it call this to reset `open`. Without it, management is in place    |
+| `podView`                | `'selected'` \| `'combined'`      | How the app's view uses its Pods: `selected` (default) marks the active Pod **Selected**; `combined` shows several at once, no switch  |
+| `podViewDescription`     | `ReactNode`                       | With `podView="combined"`: one short line above management's Pod list on which Pods this view shows                                    |
 | `only`                   | `'management'`                    | Renders management alone (while `open`), for an app that places the gate, Context surface and prompts itself                           |
 | `focusTarget`            | `RefObject<HTMLElement \| null>`  | Focus returns here when the focused surface hides after its guarded transition (not for visible retry or error feedback)               |
 | `settings`               | `{ label, content, icon? }`       | The app's own settings while the gate blocks, in a dialog above it; see [settings before sign-in](#app-settings-before-sign-in)        |
@@ -1469,18 +1475,45 @@ function AppContent() {
   opens above it, and opening re-checks access (no **Check access**). Sign-in
   is the gate's. Up to 30rem wide it is a bottom sheet across the
   screen's width, as small-screen app dialogs usually are; wider, it is centred.
-- It shows the Pod, then the Context and this app's access (**Read only** or
-  **Read and write**); several Contexts appear in the **Data context** chooser
-  (only in `'required'` mode or while a Context flow needs a selection),
-  otherwise **Available to this app** lists them. Then **Change sharing**,
-  **Sign out** with its this-device note (`controls.disconnectHint`; empty
-  hides it), and last a collapsed **Connect another Pod** (`mode="multiple"`).
-  After a sign-out that could not be saved, **Try again** repeats it in place
-  of a sign-in.
+- Each Pod is one row: its name (`podNames`, equal names with their address)
+  opens what this app may do there, and a 44px **⋯** button, named "Actions
+  for" the Pod (`podActions`), holds the actions for that Pod. With one Pod
+  its row is open; of several, the selected one's. Opening a row only
+  inspects it: it never switches Pods or changes the Context or a draft.
+- A row's marker says **Selected** for the Pod the app works in, or
+  **Signed out**, **Unavailable** (unreachable) or **Session ended**. Its
+  actions are **Change sharing**, **Use this Pod** for another connected Pod
+  (a guarded switch, asking before drafts are left), and **Sign out on this
+  device**; a signed-out Pod offers **Sign in** and **Remove from this
+  device**, an unreachable one **Try again**. Sign-out and removal stay on
+  this device; revoking access is the Pod's consent behind **Change
+  sharing**. Signing out of or removing a Pod that is not the selected one
+  keeps the selected Pod's drafts, also those of SDK forms and editors in
+  an explicit Context; it asks only about work that may belong to that Pod,
+  such as an app's own `useDraftGuard` with the `connection` or `explicit`
+  scope (`useApp().disconnect`). Its **Try again** holds only that Pod's
+  row. After a sign-out that could not be saved, **Try again** repeats it,
+  also from its notice. A Pod action that fails, such as **Change sharing**
+  while that Pod cannot be reached, shows its error in that Pod's row.
+- Open, a row shows the Pod's address beside a display name, then its
+  readable Contexts with **Read only** or **Can edit**, or that they are
+  loading, unavailable (with **Check access**) or none. For the selected Pod
+  a Context flow's selection is here: the **Data context** chooser (only in
+  `'required'` mode or while a Context flow needs one), or the one Context.
+  Another Pod's access is read when its row opens.
+- An app that shows several Pods at once sets `podView="combined"`: no
+  marker and no **Use this Pod**, and `podViewDescription` may say which Pods
+  the view shows. A connection alone does not tell the SDK how the app uses
+  it.
+- **Connect another Pod** follows the list (`mode="multiple"`, while sign-in
+  and `allowedPods` permit another Pod). It opens a step in the same dialog
+  with the sign-in's Pod chooser and **Back** (Escape too), which returns the
+  focus to it. Without a connected Pod, management is that chooser.
 - These are the catalogue's rights for this session, not whether a Context is
   shared or public; changing them is the Pod's consent behind **Change
-  sharing** ([changing sharing](#changing-what-the-app-may-access)). It sends
-  one catalogue request and no extra label reads.
+  sharing** ([changing sharing](#changing-what-the-app-may-access)). Opening
+  the dialog sends one catalogue request for the selected Pod and no extra
+  label reads.
 
 ### Startup screen and static splash
 
@@ -2241,7 +2274,8 @@ host runtime and provider, without `AppAccess` in every widget.
 
 `useApp()` has the guarded `selectConnection`, `selectContext`, `connect`,
 `authorize`, `disconnect`, `forget` and `navigate(action)`, plus unguarded
-`refreshContexts(id)`, `loadContextLabels(id, iris)` and `retryRestore(id)`.
+`refreshContexts(id)`, `loadContextLabels(id, iris)`, `retryRestore(id)` and
+`cancelAuthorization(id)`.
 Read state with `useAppState`, `useConnections` and `useView`.
 `useDraftGuard(dirty, discard, scope?)` registers your own draft:
 
@@ -2258,6 +2292,10 @@ Read state with `useAppState`, `useConnections` and `useView`.
 | Context selection (`selectContext`)                                | `local` (or unscoped) and `target` guards     |
 | `selectConnection`, `connect`, `authorize`, `disconnect`, `forget` | every guard, except as below                  |
 
+- `disconnect` or `forget` of a connection that is not the active one leaves
+  only the work bound to it: SDK forms and editors name their connection
+  (`LeaveGuard.connectionId`), and an app's own `connection` or `explicit`
+  guard that names none, which may be bound to that Pod, is asked about too.
 - Work bound to its own connection
   ([rows of several connected Pods](#rows-of-several-connected-pods),
   `LeaveGuard.connection` for a guard registered with the controller) is left
@@ -2267,8 +2305,9 @@ Read state with `useAppState`, `useConnections` and `useView`.
   `selectConnection`, `selectTarget` to another Pod and `connect` without a
   sign-in leave it alone.
 - A pending write blocks every change, except that a saving `connection` or
-  `explicit` draft does not block a Context selection, and work bound to its
-  own connection blocks only the connection actions that leave it. A
+  `explicit` draft does not block a Context selection, work bound to its own
+  connection blocks only the connection actions that leave it, and signing
+  out of or removing another Pod waits only for the writes it would leave. A
   confirmation names unconfirmed writes it leaves and warns that discarding
   does not undo them.
 - A declined change discards nothing; the target stays when its replacement is
@@ -2276,6 +2315,16 @@ Read state with `useAppState`, `useConnections` and `useView`.
   removal, a sign-out) is cancelled: the action resolves `false`, nothing runs.
   A prompt to open a row bound to its own connection follows that connection
   instead: it is cancelled once that connection goes or stops reading.
+- While any Pod's sign-in or **Change sharing** redirect is pending, not only
+  the selected Pod's, the page is leaving: every guarded change resolves
+  `false` at once, a prompt still open is cancelled, and the content is
+  inert. Selecting the Pod or Context that is already selected resolves
+  `true` and changes nothing. A redirect still here after three seconds (the
+  browser stopped it, or the person stayed in a leave prompt) asks whether
+  to **Stay on this page** or **Keep waiting**; staying abandons the attempt
+  (`cancelAuthorization(id)`), so the Pod's earlier session resumes (a
+  first sign-in ends `interrupted`) and the content works again. Each
+  redirect waits its own three seconds. A custom surface can offer the same.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.
 - Leaving the document (reload, closing the tab, typing an address, Back past

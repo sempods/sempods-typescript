@@ -139,6 +139,23 @@ function signedOut(reason: string | undefined): SessionFact {
   );
 }
 
+/**
+ * One redirect to a Pod's sign-in: whether its `navigate` cancels it on the
+ * signal itself (`owned`), whether that call is still running (`calling`),
+ * and whether the page stayed meanwhile (`stayed`), so the document stop
+ * waits for its answer.
+ */
+interface Navigation {
+  readonly controller: AbortController;
+  owned: boolean;
+  calling: boolean;
+  stayed: boolean;
+}
+/** Stops a navigation of this document still loading. */
+function stopDocument() {
+  (globalThis as { stop?: () => void }).stop?.();
+}
+
 /** Creates no storage, request or navigation until initialize/connect is called. */
 export function createBrowserRuntime(
   options: BrowserRuntimeOptions,
@@ -391,6 +408,14 @@ export function createBrowserRuntime(
   const connecting = new Map<string, Promise<Connection>>();
   /** Connections whose sign-in is being prepared here. */
   const preparing = new Set<string>();
+  /** Abandons this page's redirect of a `leaving` connection; see `watchReturn`. */
+  const abandons = new Map<
+    string,
+    {
+      readonly abandon: (staying: boolean) => boolean;
+      readonly navigation: Navigation;
+    }
+  >();
   const contexts = createContextMemory(
     namespace,
     options.preferences === undefined
@@ -1871,7 +1896,13 @@ export function createBrowserRuntime(
    * resumes the session it started from; the silent first sign-in instead
    * ends signed out, as if never started.
    */
-  function watchReturn(e: Entry, generation: string, silent = false) {
+  function watchReturn(
+    e: Entry,
+    generation: string,
+    /** A silent first sign-in, a re-authorization or another first sign-in. */
+    kind: 'silent' | 'resume' | 'first',
+    navigation: Navigation,
+  ) {
     const page = globalThis as {
       addEventListener?: (
         type: string,
@@ -1882,23 +1913,40 @@ export function createBrowserRuntime(
         listener: (event: Event) => void,
       ) => void;
     };
-    if (!page.addEventListener || !page.removeEventListener) return;
-    const stop = () => page.removeEventListener!('pageshow', shown);
-    function shown(event: Event) {
-      if (!(event as Event & { persisted?: boolean }).persisted) return;
+    const id = e.view.id;
+    const stop = () => {
+      page.removeEventListener?.('pageshow', shown);
+      if (abandons.get(id)?.abandon === abandon) abandons.delete(id);
+    };
+    /**
+     * The page came back (`pageshow`) or stays (`cancelAuthorization`): this
+     * attempt is abandoned. Staying ends a first sign-in here, without a
+     * request; a return leaves its record to a tab that may complete it.
+     */
+    function abandon(staying: boolean) {
       stop();
-      if (eligible(e, generation) && e.view.session.kind === 'leaving') {
-        if (silent) {
-          noteSilent('tried');
-          decline(e);
-          return;
-        }
-        e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
-        publish();
-        void resumeAbandoned(e, 'interrupted');
+      if (!eligible(e, generation) || e.view.session.kind !== 'leaving')
+        return false;
+      navigation.controller.abort(new RuntimeError('interrupted'));
+      if (kind === 'silent') {
+        noteSilent('tried');
+        decline(e);
+        return true;
       }
+      if (kind === 'first' && staying) {
+        end(e, new RuntimeError('interrupted'), true, false);
+        return true;
+      }
+      e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+      publish();
+      void resumeAbandoned(e, 'interrupted');
+      return true;
     }
-    page.addEventListener('pageshow', shown);
+    function shown(event: Event) {
+      if ((event as Event & { persisted?: boolean }).persisted) abandon(false);
+    }
+    abandons.set(id, { abandon, navigation });
+    page.addEventListener?.('pageshow', shown);
     e.lifetime.signal.addEventListener('abort', stop, { once: true });
   }
   /** Resumes an abandoned re-authorization at startup; publishes its own outcome. */
@@ -2180,16 +2228,22 @@ export function createBrowserRuntime(
       // is forgotten, only when this page comes back without a callback; see
       // `leftFrom`.
       if (reauthorizing || intent === 'silent') noteLeaving(attempt.state);
-      return { generation, url };
+      return { generation, url, reauthorizing };
     };
-    let prepared: { generation: string; url: string };
+    let prepared: { generation: string; url: string; reauthorizing: boolean };
     if ((e.revision === null || intent === 'silent') && lease?.store.watch) {
       // The first record for this Pod, decided under its lock: two tabs
       // preparing at once do not both create one. A silent sign-in decides
       // there too, also on a record it listed meanwhile (see `follows`).
       const outcome = await locked<
         | { joined: Entry; session: boolean }
-        | { prepared: { generation: string; url: string } }
+        | {
+            prepared: {
+              generation: string;
+              url: string;
+              reauthorizing: boolean;
+            };
+          }
       >(`sempods:connect:${namespace}:${e.view.podUrl}`, e, async () => {
         let saved = await savedFor(e.view.podUrl);
         current(e, before);
@@ -2253,10 +2307,33 @@ export function createBrowserRuntime(
       }
       prepared = outcome.prepared;
     } else prepared = await store();
-    const { generation, url } = prepared;
+    const { generation, url, reauthorizing } = prepared;
     current(e, generation);
-    watchReturn(e, generation, intent === 'silent');
-    (options.navigate ?? ((url) => window.location.assign(url)))(url);
+    const navigation: Navigation = {
+      controller: new AbortController(),
+      owned: false,
+      calling: true,
+      stayed: false,
+    };
+    watchReturn(
+      e,
+      generation,
+      intent === 'silent' ? 'silent' : reauthorizing ? 'resume' : 'first',
+      navigation,
+    );
+    let handled: unknown;
+    try {
+      handled = (options.navigate ?? ((url) => window.location.assign(url)))(
+        url,
+        { signal: navigation.controller.signal },
+      );
+    } finally {
+      navigation.calling = false;
+      navigation.owned = handled === 'signal';
+      // Staying from within `navigate` (it could not open its sign-in): the
+      // document stops only for a navigation that does not cancel itself.
+      if (navigation.stayed && !navigation.owned) stopDocument();
+    }
   }
   async function bootstrap(): Promise<StartupReport> {
     let report: StartupReport = {
@@ -2762,6 +2839,18 @@ export function createBrowserRuntime(
       )
         throw new RuntimeError('configuration');
       return authorize(id, intent);
+    },
+    cancelAuthorization(id) {
+      const attempt = abandons.get(id);
+      if (!attempt) return false;
+      // A navigation of this document still loading stops here, whichever
+      // `navigate` started it, unless that one cancels on its `signal`
+      // itself; `abandon` aborts the signal. While `navigate` still runs,
+      // its answer decides once it returns.
+      const navigation = attempt.navigation;
+      if (navigation.calling) navigation.stayed = true;
+      else if (!navigation.owned) stopDocument();
+      return attempt.abandon(true);
     },
     disconnect(id) {
       return leave(id, false);

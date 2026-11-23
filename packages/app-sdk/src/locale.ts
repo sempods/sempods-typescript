@@ -157,9 +157,10 @@ export interface UiMessages {
    */
   readonly disconnect: string;
   /**
-   * Shown with `disconnect`; an empty string shows no note. Optional in the
-   * type (added in 0.6.0) so a complete catalog written for 0.5.0 still
-   * compiles; `createLocale` fills it from the language defaults.
+   * Shown with `disconnect` beside an ended session; an empty string shows
+   * no note. Management's `disconnectHere` names the device itself instead.
+   * Optional in the type (added in 0.6.0) so a complete catalog written for
+   * 0.5.0 still compiles; `createLocale` fills it from the language defaults.
    */
   readonly disconnectHint?: string;
   /** Failed durable sign-out; explicit retry, never reload advice. Filled from locale defaults. */
@@ -203,12 +204,36 @@ export interface UiMessages {
   /*
    * Management (added in 0.6.0; optional in the type, `createLocale` fills
    * them): the heading of the readable Contexts, what this app may do in
-   * each (`canRead`, `canChange`), and the collapsed sign-in to another Pod.
+   * each (`canRead`, `canChange`), and the step that connects another Pod.
    */
   readonly contextAccess?: string;
   readonly canRead?: string;
   readonly canChange?: string;
   readonly connectAnother?: string;
+  /*
+   * Pod rows in management (added in 0.9.0; optional in the type,
+   * `createLocale` fills them): the marker of the Pod a single-Pod view works
+   * in, of a signed-out, an unreachable and an ended Pod, the action that
+   * makes another Pod the selected one, sign-out on this device, the note in a
+   * signed-out Pod's row and the way back from connecting another Pod.
+   */
+  readonly selected?: string;
+  readonly signedOut?: string;
+  readonly unavailable?: string;
+  readonly ended?: string;
+  readonly usePod?: string;
+  readonly disconnectHere?: string;
+  readonly signInToSee?: string;
+  readonly back?: string;
+  /*
+   * A Pod's sign-in that has not opened after a while (added in 0.9.0;
+   * optional in the type, `createLocale` fills them): the note under
+   * `leaving`, staying on this page instead (`cancelAuthorization`), and
+   * waiting on.
+   */
+  readonly leavingSlow?: string;
+  readonly stayHere?: string;
+  readonly keepWaiting?: string;
   readonly refresh: string;
   readonly busy: string;
   readonly storage: string;
@@ -325,6 +350,11 @@ export interface SdkMessages {
   readonly cataloguePending: string;
   readonly catalogueError: string;
   readonly reviewAccess: string;
+  /**
+   * The name of a Pod row's action button in management, with the Pod's
+   * name. Optional in the type (added in 0.9.0); `createLocale` fills it.
+   */
+  readonly podActions?: (pod: string) => string;
   readonly missingScopes: (
     scopes: readonly string[],
     format: Formatters,
@@ -383,8 +413,20 @@ export const englishMessages: SdkMessages = {
 
     contextAccess: 'Available to this app',
     canRead: 'Read only',
-    canChange: 'Read and write',
+    canChange: 'Can edit',
     connectAnother: 'Connect another Pod',
+    selected: 'Selected',
+    signedOut: 'Signed out',
+    unavailable: 'Unavailable',
+    ended: 'Session ended',
+    usePod: 'Use this Pod',
+    disconnectHere: 'Sign out on this device',
+    signInToSee: 'Sign in to see what this app may access.',
+    back: 'Back',
+    leavingSlow:
+      'The sign-in has not opened yet. If it was stopped, stay on this page to keep working here.',
+    stayHere: 'Stay on this page',
+    keepWaiting: 'Keep waiting',
     refresh: 'Check again',
     busy: 'Open in another tab. Close that tab and reload here.',
     storage:
@@ -459,6 +501,7 @@ export const englishMessages: SdkMessages = {
   cataloguePending: 'Loading context catalogue… Access is unknown.',
   catalogueError: 'Context catalogue unavailable. Access is unknown.',
   reviewAccess: 'Review access',
+  podActions: (pod) => `Actions for ${pod}`,
   missingScopes: (scopes, format) =>
     `Review required feature access: ${format.list(scopes)}.`,
   skipped: (count, format) =>
@@ -553,8 +596,20 @@ export const germanMessages: SdkMessages = {
 
     contextAccess: 'Für diese App verfügbar',
     canRead: 'Nur lesen',
-    canChange: 'Lesen und schreiben',
+    canChange: 'Kann bearbeiten',
     connectAnother: 'Weiteren Pod verbinden',
+    selected: 'Ausgewählt',
+    signedOut: 'Abgemeldet',
+    unavailable: 'Nicht erreichbar',
+    ended: 'Sitzung beendet',
+    usePod: 'Diesen Pod verwenden',
+    disconnectHere: 'Auf diesem Gerät abmelden',
+    signInToSee: 'Melde dich an, um die Freigaben zu sehen.',
+    back: 'Zurück',
+    leavingSlow:
+      'Die Anmeldung hat sich noch nicht geöffnet. Wurde sie abgebrochen, bleib auf dieser Seite, um hier weiterzuarbeiten.',
+    stayHere: 'Auf dieser Seite bleiben',
+    keepWaiting: 'Weiter warten',
     refresh: 'Erneut prüfen',
     busy: 'In einem anderen Tab geöffnet. Schließe diesen Tab und lade hier neu.',
     storage:
@@ -632,6 +687,7 @@ export const germanMessages: SdkMessages = {
   catalogueError:
     'Kontextkatalog nicht verfügbar. Der Zugriff ist noch unbekannt.',
   reviewAccess: 'Zugriff prüfen',
+  podActions: (pod) => `Aktionen für ${pod}`,
   missingScopes: (scopes, format) =>
     `Prüfe den Zugriff auf benötigte Funktionen: ${format.list(scopes)}.`,
   skipped: (count, format) =>

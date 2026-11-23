@@ -7,6 +7,7 @@
 // { id, pass, ... }.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { actionsName, podActions, podActionsButton } from './pod-actions.mjs';
 
 const contrastScript = readFileSync(
   join(import.meta.dirname, 'ui-contrast.js'),
@@ -1030,6 +1031,144 @@ async function interaction({ browser, origin, engine }) {
         afterClose,
         closeRing,
       };
+    },
+    // Pods & sharing groups by Pod (#386): the Pod's row and its actions
+    // button are 44px targets, the actions open inside the viewport with the
+    // focus on the first, and Escape returns to the button without closing
+    // management. Connect another Pod, where offered, is a step of its own
+    // whose Escape goes back to the list and to its trigger.
+    async 'pods-management-rows'() {
+      let stage = 'open';
+      try {
+        // Management's dialog, also while its step names it otherwise.
+        const sheet = page.locator('dialog[data-sempods-ui="management"]');
+        await page.getByRole('button', { name: 'Menu', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Pods & sharing' }).click();
+        await sheet.waitFor();
+        await gone(page.getByRole('menu'));
+        const more = podActionsButton(sheet);
+        const toggle = sheet.locator('.sp-pod-toggle').first();
+        const size = (locator) =>
+          locator.evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            return { width: r.width, height: r.height };
+          });
+        stage = 'sizes';
+        const moreSize = await size(more);
+        const toggleSize = await size(toggle);
+        stage = 'actions';
+        await more.focus();
+        await page.keyboard.press('Enter');
+        // Located by class: in Firefox 159 under Playwright 1.65, reading
+        // buttons below a role locator for this group crashed the page,
+        // while the page's own reads did not. Its role and name are checked.
+        const actions = sheet.locator('.sp-pod-menu');
+        await actions.waitFor();
+        const group = await actions.evaluate((el) => ({
+          role: el.getAttribute('role'),
+          name: el.getAttribute('aria-label'),
+        }));
+        const box = await actions.boundingBox();
+        const viewport = page.viewportSize();
+        const names = await actions.locator('button').allTextContents();
+        const firstFocused = await actions
+          .locator('button')
+          .first()
+          .evaluate((el) => el === document.activeElement);
+        stage = 'escape';
+        await page.keyboard.press('Escape');
+        const actionsGone = await gone(actions);
+        await settle(page);
+        const backOnMore = await more.evaluate(
+          (el) => el === document.activeElement,
+        );
+        // Back on ⋯ (Shift+Tab where Tab reaches buttons; WebKit on macOS
+        // skips them) the actions stay open; Escape there closes them, not
+        // the dialog.
+        stage = 'escape on more';
+        await page.keyboard.press('Enter');
+        await actions.waitFor();
+        await more.focus();
+        const onMoreOpen = await more.evaluate(
+          (el) =>
+            el === document.activeElement &&
+            el.getAttribute('aria-expanded') === 'true',
+        );
+        await page.keyboard.press('Escape');
+        const closedFromMore = await gone(actions);
+        await settle(page);
+        const stillOpen = await sheet.isVisible();
+        const add = sheet.getByRole('button', { name: 'Connect another Pod' });
+        const offered = (await add.count()) > 0;
+        let step = null;
+        if (offered) {
+          stage = 'step';
+          await add.click();
+          const heading = sheet.getByRole('heading', {
+            name: 'Connect another Pod',
+          });
+          await heading.waitFor();
+          const headingFocused = await heading.evaluate(
+            (el) => el === document.activeElement,
+          );
+          const chooser =
+            (await sheet
+              .getByRole('combobox', { name: 'Pod address' })
+              .count()) === 1;
+          stage = 'back';
+          await page.keyboard.press('Escape');
+          await add.waitFor();
+          await settle(page);
+          step = {
+            headingFocused,
+            chooser,
+            backOnAdd: await add.evaluate(
+              (el) => el === document.activeElement,
+            ),
+            stillOpen: await sheet.isVisible(),
+          };
+        }
+        await page.keyboard.press('Escape');
+        const closed = await hidden(sheet);
+        return {
+          pass:
+            moreSize.width >= 44 &&
+            moreSize.height >= 44 &&
+            toggleSize.height >= 44 &&
+            box !== null &&
+            box.x >= 0 &&
+            box.x + box.width <= viewport.width &&
+            group.role === 'group' &&
+            actionsName.test(group.name ?? '') &&
+            names.includes('Change sharing') &&
+            names.includes('Sign out on this device') &&
+            firstFocused &&
+            actionsGone &&
+            backOnMore &&
+            onMoreOpen &&
+            closedFromMore &&
+            stillOpen &&
+            (!step ||
+              (step.headingFocused &&
+                step.chooser &&
+                step.backOnAdd &&
+                step.stillOpen)) &&
+            closed,
+          moreSize,
+          toggleSize,
+          box,
+          group,
+          names,
+          firstFocused,
+          backOnMore,
+          onMoreOpen,
+          closedFromMore,
+          offered,
+          step,
+        };
+      } catch (error) {
+        return { pass: false, stage, note: String(error).slice(0, 200) };
+      }
     },
     // A row's quiet menu (sempods-apps-template#145, #116, #141): a ghost
     // button with a 44px target and no fill until it is used; its Priority
@@ -4984,7 +5123,11 @@ async function accessSettings({ browser, origin, engine }) {
           await p.getByRole('menuitem', { name: 'Pods & sharing' }).click();
           // Management stays open above the gate after the sign-out.
           const sheet = p.getByRole('dialog', { name: /Pods & sharing/ });
-          await sheet.getByRole('button', { name: 'Sign out' }).click();
+          // The Pod's own actions sign out on this device (#386).
+          await podActions(sheet);
+          await sheet
+            .getByRole('button', { name: 'Sign out on this device' })
+            .click();
           const gate = p.locator('dialog[data-sempods-ui="gate"]');
           await gate
             .getByRole('button', { name: 'Sign in', exact: true })
@@ -6782,9 +6925,8 @@ async function contexts({ browser, origin }) {
             (m) =>
               m.row && !m.row.startsWith('Einkaufsliste') && m.right <= 375,
           ) &&
-          (await page
-            .getByText('Lesen und schreiben', { exact: true })
-            .count()) === 0 &&
+          (await page.getByText('Kann bearbeiten', { exact: true }).count()) ===
+            0 &&
           (await page.getByRole('menuitem').count()) === 0 &&
           (await page.getByRole('region').count()) === 0,
         geometry,

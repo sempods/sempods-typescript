@@ -14,8 +14,8 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from '@testing-library/react';
+import { podAction } from './pod-actions.helpers.test.js';
 import {
   AppAccess,
   SempodsProvider,
@@ -201,15 +201,13 @@ it.each(['saved Pod', 'Pod read without a token'] as const)(
         <AppAccess appName="Tasks" open />
       </SempodsProvider>,
     );
-    const area = await screen.findByRole('region', { name: 'Pods & sharing' });
-    const button = await waitFor(() => {
-      const scope =
-        kind === 'saved Pod'
-          ? within(area).getByRole('list', { name: 'Pods on this device' })
-          : area;
-      const found = within(scope).getByRole<HTMLButtonElement>('button', {
-        name: 'Sign in',
-      });
+    await screen.findByRole('region', { name: 'Pods & sharing' });
+    // The Pod's own row offers it among its actions.
+    const button = await waitFor(async () => {
+      const found = (await podAction(
+        'Sign in',
+        kind === 'saved Pod' ? 'pod.example/bob' : undefined,
+      )) as HTMLButtonElement;
       expect(found.disabled).toBe(false);
       return found;
     });

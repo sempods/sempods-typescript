@@ -1,5 +1,6 @@
 /* global document, window, URLSearchParams, sessionStorage, IDBObjectStore, DOMException */
 import assert from 'node:assert/strict';
+import { podActions, podActionsButton } from './pod-actions.mjs';
 import { execFileSync } from 'node:child_process';
 import {
   cp,
@@ -161,8 +162,12 @@ try {
   const serverErrors = [];
   let registrations = 0;
   let exchanges = 0;
-  /** The next consent answer: denied, or left open (no redirect back). */
+  /**
+   * The next consent answer: denied, left open (no redirect back), or never
+   * answered (`hang`, a navigation that keeps loading).
+   */
   let consent;
+  const hanging = [];
   let refreshes = 0;
   let overviewRefuse = false;
   /** A failing discovery status for the delayed Pod: 503 is transient, 404 is not. */
@@ -254,6 +259,12 @@ try {
         });
         res.end(JSON.stringify(body));
       };
+      // A page request that answers late, in flight while the page stays.
+      if (url.pathname === '/slow') {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        json({ slow: true });
+        return;
+      }
       if (url.pathname === '/app' || url.pathname === '/callback') {
         res.writeHead(200, {
           'content-type': 'text/html',
@@ -360,6 +371,10 @@ try {
         if (answer === 'open') {
           res.writeHead(200, { 'content-type': 'text/html' });
           res.end('<p>Consent</p>');
+          return;
+        }
+        if (answer === 'hang') {
+          hanging.push(res);
           return;
         }
         if (answer === 'deny') {
@@ -1152,6 +1167,116 @@ try {
     'active',
   );
   assert.deepEqual({ exchanges, refreshes }, beforeCancel);
+  // A navigation to the Pod that does not leave (#386): staying on the page
+  // stops it and resumes the session, without a token request, with the
+  // runtime's navigation and with an app's own `location.assign`.
+  const stayWhileLoading = async () => {
+    consent = 'hang';
+    const stayed = await page.evaluate(async () => {
+      const r = window.fixture.runtime;
+      const id = r.getSnapshot()[0].id;
+      const start = window.location.href;
+      await r.beginAuthorization(id);
+      const leaving = r.getSnapshot()[0].session.kind;
+      // Still loading the Pod's page.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return {
+        leaving,
+        cancelled: r.cancelAuthorization(id),
+        again: r.cancelAuthorization(id),
+        same: window.location.href === start,
+      };
+    });
+    assert.deepEqual(stayed, {
+      leaving: 'leaving',
+      cancelled: true,
+      again: false,
+      same: true,
+    });
+    assert.equal(hanging.length, 1);
+    await page.waitForFunction(
+      () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+    );
+    // The Pod's page answers late: the stopped navigation does not go there.
+    for (const res of hanging.splice(0)) {
+      if (res.destroyed) continue;
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<p>Consent</p>');
+    }
+    await page.waitForTimeout(500);
+    assert.match(page.url(), /\/app\?identity=dynamic$/);
+  };
+  await stayWhileLoading();
+  await page.evaluate(() =>
+    sessionStorage.setItem('fixture-navigate', 'assign'),
+  );
+  await page.reload();
+  await ready();
+  await restored();
+  await stayWhileLoading();
+  // A host-managed sign-in cancels on its signal: staying leaves the page's
+  // other requests running.
+  await page.evaluate(() => sessionStorage.setItem('fixture-navigate', 'host'));
+  await page.reload();
+  await ready();
+  await restored();
+  const hosted = await page.evaluate(async () => {
+    const r = window.fixture.runtime;
+    const id = r.getSnapshot()[0].id;
+    await r.beginAuthorization(id);
+    const leaving = r.getSnapshot()[0].session.kind;
+    const slow = fetch('/slow').then(
+      (response) => response.json(),
+      (error) => ({ failed: String(error) }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const cancelled = r.cancelAuthorization(id);
+    return {
+      leaving,
+      cancelled,
+      aborted: window.hostSignIn.aborted,
+      slow: await slow,
+    };
+  });
+  assert.deepEqual(hosted, {
+    leaving: 'leaving',
+    cancelled: true,
+    aborted: true,
+    slow: { slow: true },
+  });
+  await page.waitForFunction(
+    () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+  );
+  // A host that cannot open its sign-in stays from within its navigation:
+  // the page's other requests keep running there too.
+  await page.evaluate(() =>
+    sessionStorage.setItem('fixture-navigate', 'host-unavailable'),
+  );
+  await page.reload();
+  await ready();
+  await restored();
+  const unavailable = await page.evaluate(async () => {
+    const r = window.fixture.runtime;
+    const slow = fetch('/slow').then(
+      (response) => response.json(),
+      (error) => ({ failed: String(error) }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await r.beginAuthorization(r.getSnapshot()[0].id);
+    return {
+      leaving: r.getSnapshot()[0].session.kind === 'leaving',
+      slow: await slow,
+    };
+  });
+  assert.deepEqual(unavailable, { leaving: false, slow: { slow: true } });
+  await page.waitForFunction(
+    () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+  );
+  await page.evaluate(() => sessionStorage.removeItem('fixture-navigate'));
+  await page.reload();
+  await ready();
+  await restored();
+  assert.deepEqual({ exchanges, refreshes }, beforeCancel);
   // A tab opened from the one at the Pod copies its session storage (#374):
   // it does not take the attempt, and the callback completes it.
   const reauthorized = await page.evaluate(
@@ -1253,7 +1378,7 @@ try {
     await cachingBrowser.close();
   }
   console.log(
-    'Packed re-authorization in Chromium: a denied consent and a back navigation, also from the back/forward cache, keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
+    'Packed re-authorization in Chromium: a denied consent, a back navigation, also from the back/forward cache, and staying on the page during a navigation that keeps loading keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');
@@ -1368,6 +1493,7 @@ try {
     .getByRole('button', { name: 'Pods & sharing', exact: true })
     .click();
   await presetDraft.fill('Keep this draft');
+  await podActions(page);
   await page
     .getByRole('button', { name: 'Change sharing', exact: true })
     .click();
@@ -1376,6 +1502,7 @@ try {
   assert.equal(await presetDraft.inputValue(), 'Keep this draft');
   assert.equal(exchanges, beforePreset + 1);
   await presetDraft.fill('');
+  await podActions(page);
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Change sharing', exact: true }).click(),
@@ -1402,7 +1529,11 @@ try {
       const appUrl =
         origin + '/app?identity=signout-' + surface + '-' + language;
       const signIn = language === 'en' ? 'Sign in' : 'Anmelden';
-      const signOut = language === 'en' ? 'Sign out' : 'Abmelden';
+      // Management's actions for the Pod sign out on this device (#386).
+      const signOut =
+        language === 'en'
+          ? 'Sign out on this device'
+          : 'Auf diesem Gerät abmelden';
       const tryAgain = language === 'en' ? 'Try again' : 'Erneut versuchen';
       const message =
         language === 'en'
@@ -1434,6 +1565,7 @@ try {
           },
         });
       });
+      await podActions(page);
       await page.getByRole('button', { name: signOut, exact: true }).click();
       // The gate offers the retry of the sign-out, never a sign-in (#238).
       const gate = page.locator('[data-sempods-ui="gate"]');
@@ -1601,6 +1733,7 @@ try {
     exact: true,
   });
   await taskTitle.fill('Unsaved title');
+  await podActions(appDialog);
   await changeSharing.click();
   await confirmation.waitFor();
   assert.equal(await topmost(keep), true);
@@ -1628,6 +1761,7 @@ try {
   await confirmation.waitFor({ state: 'detached' });
   assert.equal(await appDialog.evaluate((d) => d.open), true);
   assert.equal(await taskTitle.inputValue(), 'Unsaved title');
+  await podActions(appDialog);
   await changeSharing.click();
   await keep.click();
   await confirmation.waitFor({ state: 'detached' });
@@ -1642,6 +1776,7 @@ try {
   await appDialog.getByRole('button', { name: 'Save', exact: true }).click();
   await appDialog.getByText(/The result is unconfirmed/).waitFor();
   await page.unroute('**/_system/resources/**', dropWrite);
+  await podActions(appDialog);
   await changeSharing.click();
   await confirmation
     .getByText(/A write is still unconfirmed and may already have changed/)
@@ -1789,11 +1924,14 @@ try {
       true,
     );
     await host.click();
+    // The Pod's actions hold Change sharing (#386).
+    const more = podActionsButton(region);
     const retry = region.getByRole('button', {
       name: de ? 'Freigabe ändern' : 'Change sharing',
       exact: true,
     });
     consent = 'deny';
+    await more.click();
     await Promise.all([page.waitForURL('**/callback?**'), retry.click()]);
     await page.waitForURL('**/app?identity=' + identity);
     // The unchanged sharing is information; Change sharing stays in management.
@@ -1802,7 +1940,7 @@ try {
       .waitFor();
     await page.getByLabel('Preset draft').waitFor();
     await host.click();
-    await retry.waitFor();
+    await more.waitFor();
     await host.evaluate((el) => {
       window.hostFocusCount = 0;
       el.addEventListener('focus', () => window.hostFocusCount++);
@@ -1815,7 +1953,10 @@ try {
       await preparing;
       await route.fulfill({ status: 503, body: 'Discovery unavailable' });
     });
-    await retry.focus();
+    // By keyboard: the actions open on their first, Change sharing.
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await retry.waitFor();
     await page.keyboard.press('Enter');
     await page.waitForFunction(() =>
       document.querySelector('[data-sempods-access]')?.closest('[inert]'),
@@ -1828,7 +1969,7 @@ try {
         !document.querySelector('[data-sempods-access]')?.closest('[inert]'),
     );
     assert.equal(await region.isVisible(), true);
-    assert.equal(await retry.isEnabled(), true);
+    assert.equal(await more.isEnabled(), true);
     assert.equal(
       await page.evaluate(() => window.hostFocusCount),
       0,
@@ -1859,11 +2000,15 @@ try {
   await page
     .getByRole('button', { name: 'Pods & sharing', exact: true })
     .click();
-  // In management, signing in to another Pod is a collapsed section.
-  await page.getByText('Connect another Pod', { exact: true }).click();
+  // In management, signing in to another Pod is a step of its own (#386).
+  await page
+    .getByRole('button', { name: 'Connect another Pod', exact: true })
+    .click();
   await page
     .getByLabel('Pod address', { exact: true })
     .fill(origin + '/refusing');
+  // The chooser's list covers its action until it closes.
+  await page.keyboard.press('Escape');
   const beforeLoginRequired = exchanges;
   await Promise.all([
     page.waitForURL('**/callback?**'),
@@ -2213,25 +2358,26 @@ try {
   await editRegion.waitFor({ state: 'detached' });
   assert.equal(overviewNoteWrites, 2);
   // Switching Pods retires an editor that belongs to the previous connection.
-  // In management, signing in to another Pod is a collapsed section.
-  await page.getByText('Connect another Pod', { exact: true }).click();
+  // In management, signing in to another Pod is a step of its own (#386).
+  await page
+    .getByRole('button', { name: 'Connect another Pod', exact: true })
+    .click();
   await page
     .getByLabel('Pod address', { exact: true })
     .fill(origin + '/second-pod');
+  // The chooser's list covers its action until it closes.
+  await page.keyboard.press('Escape');
   await Promise.all([
     page.waitForURL('**/callback?**'),
     page.getByRole('button', { name: 'Sign in', exact: true }).click(),
   ]);
   await page.waitForURL(origin + '/app?identity=overview');
+  // Management switches Pods with the Pod's own Use this Pod (#386).
   const choosePod = async (name) => {
-    const pods = page.getByLabel('Active pod');
-    const value = await pods.evaluate(
-      (select, wanted) =>
-        [...select.options].find((o) => o.text.includes(wanted))?.value,
-      name,
-    );
-    assert.ok(value, 'pod option ' + name);
-    await pods.selectOption(value);
+    await podActions(page, name);
+    await page
+      .getByRole('button', { name: 'Use this Pod', exact: true })
+      .click();
   };
   // The failed sign-in to the second Pod blocks: the gate offers the other Pod.
   const overviewGate = page.locator('[data-sempods-ui="gate"]');

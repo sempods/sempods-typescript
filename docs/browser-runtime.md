@@ -975,7 +975,18 @@ no request of the earlier session is dispatched, `bind`, `bindContext` and
 `bindPod` throw `disconnected`, and the SDK components show a status instead of a sign-in. A
 page restored from the back/forward cache with its runtime still alive resumes
 the earlier session as above; a host that disposes the runtime on `pagehide`
-recreates it, and its startup resumes it. After the session ended (for example a failed
+recreates it, and its startup resumes it. A navigation that never leaves (the
+browser stopped it, or the person stayed in a leave prompt) leaves the
+connection `leaving` until `cancelAuthorization(id)` abandons the attempt. It
+first stops a navigation of this document still loading (`window.stop()`,
+which also stops the page's other loads in flight) and aborts the `signal`
+that `navigate(url, { signal })` received. A host-managed sign-in that does
+not navigate this document cancels on that signal and returns `'signal'`:
+the page then stays without `window.stop()`. A
+re-authorization then resumes as above, a first sign-in ends `interrupted`
+without a request and its saved attempt is retired, and the silent one is
+signed out. `SempodsProvider` offers it as **Stay on this page** once a
+redirect takes a few seconds. After the session ended (for example a failed
 refresh), it prepares under a fresh lifetime in the same runtime, which a
 disconnect or dispose during preparation still cancels without navigating. A
 Pod that advertises no registration endpoint (optional, RFC 8414) still serves
@@ -1060,8 +1071,9 @@ connection signs out it gives way to such a connection, as a removed one did.
 A remembered Pod the person selects stays active, ready to sign in.
 `AppAccess` offers remembered Pods in an editable address chooser with one
 main action. **Manage saved Pods**, in its dropdown, separates removal from sign-in,
-and `controls.sessionEnded` notes an ended session. Connected management also
-lists other Pods under **Connect another Pod**. Failed retirement offers its
+and `controls.sessionEnded` notes an ended session. Connected management
+lists every Pod in its own row, a remembered one as **Signed out** with
+**Sign in** and **Remove from this device**. Failed retirement offers its
 failure and retry, never sign-in to that connection, even when it is not the
 active Pod. Controller `connect` and `authorize` reject with
 `RuntimeError('storage')` while that connection has `ended.saved === false`;

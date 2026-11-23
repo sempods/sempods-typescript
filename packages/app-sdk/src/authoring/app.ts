@@ -27,12 +27,26 @@ export interface LeaveGuard {
    *   explicit Context that row navigation does not touch; left by connection
    *   actions.
    *
+   * `disconnect` and `forget` of a connection other than the active one
+   * leave only the guards of that connection (`connectionId`); a guard that
+   * does not name its connection is left when it is `connection` or
+   * `explicit`, which may be bound to that Pod.
+   *
    * A pending write (`blocked()`) blocks every change, except that a
    * `connection` or `explicit` guard does not block `selectContext`, which
-   * leaves it alone, and a guard with `connection` does not block the
-   * connection actions that leave it alone.
+   * leaves it alone, a guard with `connection` does not block the connection
+   * actions that leave it alone, and signing out of or forgetting another
+   * connection is blocked only by the guards it leaves.
    */
   readonly scope?: 'local' | 'target' | 'connection' | 'explicit';
+  /**
+   * The connection this guard's work belongs to, when known. Signing out of
+   * or forgetting a connection that is not the active one leaves the guards
+   * that name it here (or in `connection`), keeps those that name another
+   * one, and, of the guards that name none, leaves only `connection` and
+   * `explicit` ones, which may be bound to it: the selected view stays.
+   */
+  readonly connectionId?: string;
   /**
    * The connection whose explicit Context this work belongs to, set when it
    * stays with that connection rather than with the active one (an
@@ -43,8 +57,9 @@ export interface LeaveGuard {
    * `signIn: 'required'` and a prompt's sign-in. `selectConnection`,
    * `selectTarget` on another Pod, `connect` without a sign-in and
    * `disconnect`/`forget` of other connections neither ask about it nor
-   * discard it, and its pending write does not block them. Without it, every
-   * connection action leaves the guard.
+   * discard it, and its pending write does not block them. Without it (and
+   * without `connectionId`), every connection action on the active
+   * connection leaves the guard.
    */
   readonly connection?: string;
   unconfirmed?(): boolean;
@@ -69,7 +84,9 @@ export interface ContextTarget {
  * - `selected`: that connection is active with that Context, also when it
  *   already was.
  * - `declined`: the person stayed, or the prompt was cancelled.
- * - `blocked`: a pending write, or another change preparing or asking.
+ * - `blocked`: a pending write, another change preparing or asking, or a
+ *   Pod's sign-in redirect (`leaving`), also one that started while the
+ *   person was asked.
  * - `unavailable`: the target cannot be selected, before asking or because it
  *   disappeared while the person was asked: no such `connection`, its
  *   `session` neither reads (`Connection.reading`) nor holds the required
@@ -155,25 +172,33 @@ function cannotWork(c: Connection) {
  * A guarded change: row navigation, a Context selection, or a connection
  * action with the connections it acts on (`on`; none for a change of the
  * active connection alone, `all` for one that may leave the page to sign in).
+ * `beside` marks signing out of or forgetting a connection that is not the
+ * active one: the selected view stays.
  */
 type Change =
-  'navigate' | 'context' | { readonly on: readonly string[] | 'all' };
+  | 'navigate'
+  | 'context'
+  | { readonly on: readonly string[] | 'all'; readonly beside?: true };
 /** A change of the active connection that acts on no connection's session. */
 const switching: Change = { on: [] };
 /**
- * Whether a guarded change leaves a guard (see `LeaveGuard.scope` and
- * `LeaveGuard.connection`).
+ * Whether a guarded change leaves a guard (see `LeaveGuard.scope`,
+ * `LeaveGuard.connectionId` and `LeaveGuard.connection`).
  */
 function leaves(change: Change, guard: LeaveGuard) {
   if (change === 'navigate')
     return guard.scope !== 'target' && guard.scope !== 'explicit';
   if (change === 'context')
     return guard.scope !== 'connection' && guard.scope !== 'explicit';
-  return (
-    guard.connection === undefined ||
-    change.on === 'all' ||
-    change.on.includes(guard.connection)
-  );
+  if (change.on === 'all') return true;
+  if (guard.connection !== undefined)
+    return change.on.includes(guard.connection);
+  if (!change.beside) return true;
+  // Only that connection's work goes; the selected view stays, and an
+  // explicit Context whose connection is unknown may be bound to it.
+  return guard.connectionId !== undefined
+    ? change.on.includes(guard.connectionId)
+    : guard.scope === 'connection' || guard.scope === 'explicit';
 }
 export interface AppSnapshot {
   /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
@@ -560,12 +585,13 @@ export function createAppController(
     // stopping being active without a guarded action (a returning sign-in, a
     // removed or signed-out connection) cancels it: nothing runs and no guard
     // is discarded. A prompt asked without any active connection is not about
-    // one.
+    // one. A redirect that started meanwhile (`navigating`) cancels it too.
     if (
       pending &&
       ((pending.activeId !== null &&
         (pending.activeId !== activeId || signedOut)) ||
-        pending.available?.() === 'gone')
+        pending.available?.() === 'gone' ||
+        connections.some((c) => c.session.kind === 'leaving'))
     ) {
       pending.resolve(false);
       pending = undefined;
@@ -705,6 +731,15 @@ export function createAppController(
       (g) => (change === 'navigate' || leaves(change, g)) && g.blocked(),
     );
   }
+  /**
+   * The page is on its way to a Pod's sign-in, the selected one's or
+   * another's: no connection action may start, or replace, another redirect.
+   */
+  function navigating() {
+    return runtime
+      .getSnapshot()
+      .some((connection) => connection.session.kind === 'leaving');
+  }
   /** A connection action on one connection that stays on the page. */
   const on = (id: string): Change => ({ on: [id] });
   /**
@@ -727,7 +762,7 @@ export function createAppController(
      */
     followsActive = true,
   ): Promise<boolean> {
-    if (changing || pending || blocked(change)) return false;
+    if (changing || pending || navigating() || blocked(change)) return false;
     // The person acts: the startup choice no longer changes the connection.
     choosing = false;
     stopGrace();
@@ -891,7 +926,13 @@ export function createAppController(
     /**
      * Guarded actions: each asks first while a guard is dirty and resolves
      * `false`, discarding nothing, when a guard is blocked, the person declines,
-     * or the prompt is cancelled (see `AppSnapshot.confirmingLeave`).
+     * or the prompt is cancelled (see `AppSnapshot.confirmingLeave`). While
+     * any connection is `leaving`, the page is on its way to that Pod's
+     * sign-in: each resolves `false` at once, so none replaces the redirect,
+     * and a redirect that starts while the person is asked cancels the
+     * prompt. Selecting the connection that is already active, or its
+     * already selected Context, changes nothing and resolves `true`, also
+     * then.
      */
     selectConnection(id: string) {
       if (id === activeId) return Promise.resolve(true);
@@ -978,7 +1019,9 @@ export function createAppController(
       const after = problem();
       return after
         ? { kind: 'unavailable', reason: after }
-        : { kind: 'declined' };
+        : navigating()
+          ? { kind: 'blocked' }
+          : { kind: 'declined' };
     },
     /**
      * Adds a Pod (or reuses its matching connection) and makes it
@@ -1005,14 +1048,16 @@ export function createAppController(
      * Guarded like `selectConnection`. `true` means the action ran, not that
      * sign-out was saved. On failure the connection's ended session retains
      * `saved: false`; offer a retry. A signed-out active connection gives way
-     * to another one with a session, as a removed one does.
+     * to another one with a session, as a removed one does. Signing out of
+     * another connection keeps the selected view's drafts
+     * (`LeaveGuard.scope`).
      */
     disconnect(id: string) {
-      return guard(disconnecting(id), on(id));
+      return retire(id, false);
     },
     /** Signs out if needed and forgets the Pod; guarded and reported like `disconnect`. */
     forget(id: string) {
-      return guard(forgetting(id), on(id));
+      return retire(id, true);
     },
     /**
      * Retires a prompt of `access.prompts` that offers `dismiss`, for this
@@ -1065,17 +1110,27 @@ export function createAppController(
         : runtime.beginAuthorization(id, { intent });
     };
   }
-  function disconnecting(id: string) {
-    return async () => {
-      if ((await runtime.disconnect(id)).kind === 'disconnected')
-        callbackNotice = false;
-    };
-  }
-  function forgetting(id: string) {
-    return async () => {
-      if ((await runtime.forget(id)).kind === 'disconnected')
-        callbackNotice = false;
-    };
+  /**
+   * Signs out of, or forgets, a connection, guarded. Retiring another
+   * connection than the active one keeps the selected view
+   * (`LeaveGuard.scope`).
+   */
+  function retire(id: string, forget: boolean, available?: () => Availability) {
+    const change: Change =
+      activeId !== null && id !== activeId
+        ? { on: [id], beside: true }
+        : on(id);
+    return guard(
+      async () => {
+        const outcome = await (forget
+          ? runtime.forget(id)
+          : runtime.disconnect(id));
+        if (outcome.kind === 'disconnected') callbackNotice = false;
+      },
+      change,
+      undefined,
+      available,
+    );
   }
   /**
    * Runs one offered prompt action. The prompt must still be current with
@@ -1105,11 +1160,13 @@ export function createAppController(
         return true;
       case 'retry':
         if (!id) return false;
-        if (prompt.reason !== 'unreachable') return guarded(disconnecting(id));
+        // Retrying a sign-out or removal that could not be saved.
+        if (prompt.reason !== 'unreachable')
+          return retire(id, false, available);
         await runtime.retryRestore(id);
         return true;
       case 'forget':
-        return id ? guarded(forgetting(id)) : false;
+        return id ? retire(id, true, available) : false;
       case 'sign-in':
         // Missing scopes are granted on the consent page, which a reused
         // grant would skip.

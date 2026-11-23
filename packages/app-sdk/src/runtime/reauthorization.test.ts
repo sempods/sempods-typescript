@@ -516,6 +516,95 @@ it('keeps the earlier facts while leaving and resumes from the back/forward cach
   expect(await stored(f, id)).toMatchObject({ kind: 'ready' });
 });
 
+it('stays on the page when its redirect did not leave', async () => {
+  const page = new EventTarget();
+  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
+  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
+  const f = fixture();
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  // Not leaving: nothing to abandon.
+  expect(runtime.cancelAuthorization(id)).toBe(false);
+  await runtime.beginAuthorization(id);
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('leaving');
+  // The browser stopped the navigation; the person stays here.
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('restoring');
+  expect(runtime.cancelAuthorization(id)).toBe(false);
+  await restored(runtime);
+  expect(runtime.getSnapshot()[0]).toMatchObject({
+    session: { kind: 'active', subject: me },
+    selectedContext: work,
+  });
+  expect(await runtime.bind(id).subjects.get('urn:item')).toMatchObject({
+    kind: 'ok',
+  });
+  expect(await stored(f, id)).toMatchObject({ kind: 'ready' });
+  // A later return from the back/forward cache resumes nothing again.
+  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
+  // A first sign-in that did not leave has no session to resume: it ends
+  // here, also with its Pod offline, and its attempt is retired.
+  const other = await runtime.connect('https://pod.example/bob');
+  await runtime.beginAuthorization(other.id);
+  expect(await stored(f, other.id)).toMatchObject({ kind: 'authorizing' });
+  const navigation = f.navigate.mock.calls.at(-1)![1]!;
+  expect(navigation.signal.aborted).toBe(false);
+  f.fetch.mockRejectedValue(new TypeError('offline'));
+  const requests = f.fetch.mock.calls.length;
+  expect(runtime.cancelAuthorization(other.id)).toBe(true);
+  // The app's own navigation is told to stop.
+  expect(navigation.signal.aborted).toBe(true);
+  expect(
+    runtime.getSnapshot().find((c) => c.id === other.id)?.session,
+  ).toMatchObject({ kind: 'ended', problem: 'interrupted' });
+  await vi.waitFor(async () =>
+    expect((await stored(f, other.id))?.kind).not.toBe('authorizing'),
+  );
+  expect(f.fetch.mock.calls.length).toBe(requests);
+});
+
+it('stops the document only for a navigation that does not cancel itself', async () => {
+  const stop = vi.fn();
+  vi.stubGlobal('stop', stop);
+  const f = fixture();
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  await runtime.beginAuthorization(id);
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  expect(stop).toHaveBeenCalledTimes(1);
+  await restored(runtime);
+  // A host-managed sign-in cancels on its signal: the page's loads go on.
+  f.navigate.mockReturnValueOnce('signal');
+  await runtime.beginAuthorization(id);
+  const { signal } = f.navigate.mock.calls.at(-1)![1]!;
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  expect(signal.aborted).toBe(true);
+  expect(stop).toHaveBeenCalledTimes(1);
+  await restored(runtime);
+  // Staying from within `navigate` waits for its answer: a host-managed one
+  // that could not open its sign-in stops nothing.
+  f.navigate.mockImplementationOnce((_url, options) => {
+    expect(runtime.cancelAuthorization(id)).toBe(true);
+    expect(options?.signal.aborted).toBe(true);
+    return 'signal';
+  });
+  await runtime.beginAuthorization(id);
+  expect(stop).toHaveBeenCalledTimes(1);
+  await restored(runtime);
+  // One that navigates this document is stopped once it returns.
+  f.navigate.mockImplementationOnce(() => {
+    runtime.cancelAuthorization(id);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+  await runtime.beginAuthorization(id);
+  expect(stop).toHaveBeenCalledTimes(2);
+  await restored(runtime);
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
+});
+
 it('restarts a catalogue read the leaving page aborted when it resumes', async () => {
   const page = new EventTarget();
   vi.stubGlobal('addEventListener', page.addEventListener.bind(page));

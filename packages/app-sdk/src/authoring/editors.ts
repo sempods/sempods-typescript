@@ -237,6 +237,7 @@ export function editorsOf(app: AppController): EditorStore {
         const working = () => !abandoned() && busy(editor);
         const guard: LeaveGuard = {
           ...(scope ? { scope } : {}),
+          ...(connection ? { connectionId: connection } : {}),
           ...(bound ? { connection: origin } : {}),
           unconfirmed: () =>
             !abandoned() && editor.state.review?.kind === 'unconfirmed',

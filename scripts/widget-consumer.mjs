@@ -1,5 +1,6 @@
 /* global document, window */
 import assert from 'node:assert/strict';
+import { podActions, podActionsButton } from './pod-actions.mjs';
 import { execFileSync } from 'node:child_process';
 import { cp, lstat, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -319,6 +320,7 @@ export async function checkWidgets(page, origin, data) {
   await page
     .getByRole('button', { name: 'Pods & sharing', exact: true })
     .click();
+  await podActions(page);
   await page
     .getByRole('button', { name: 'Change sharing', exact: true })
     .click();
@@ -359,6 +361,7 @@ export async function checkWidgets(page, origin, data) {
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   const heldWrite = await dispatched;
   // Programmatic click deliberately bypasses inert hit testing; the action must guard too.
+  await podActionsButton(page).evaluate((button) => button.click());
   await page
     .getByRole('button', { name: 'Change sharing', exact: true })
     .evaluate((button) => button.click());
@@ -391,6 +394,7 @@ export async function checkWidgets(page, origin, data) {
     .getByRole('button', { name: 'Check current version', exact: true })
     .waitFor();
   await page.unroute('**/widgets-pod/_system/resources/**', lost);
+  await podActions(page);
   await page
     .getByRole('button', { name: 'Change sharing', exact: true })
     .click();

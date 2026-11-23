@@ -246,6 +246,24 @@ it('leaves the attempt to the tab at the Pod in a tab opened from it', async () 
   expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
 });
 
+it('ends signed out, as if never started, when the page stays instead', async () => {
+  const f = silent();
+  await f.runtime.initialize();
+  const [connection] = f.runtime.getSnapshot();
+  expect(connection?.session.kind).toBe('leaving');
+  expect(f.runtime.cancelAuthorization(connection!.id)).toBe(true);
+  expect(f.runtime.getSnapshot()).toEqual([
+    expect.objectContaining({
+      id: connection!.id,
+      session: { kind: 'signed-out' },
+    }),
+  ]);
+  await vi.waitFor(async () =>
+    expect(await savedRecords(f.factory)).toEqual([]),
+  );
+  expect([...f.tab.map.values()]).toEqual(['tried']);
+});
+
 it('ends signed out, as if never started, when the page returns from the back/forward cache', async () => {
   const page = new EventTarget();
   vi.stubGlobal('addEventListener', page.addEventListener.bind(page));

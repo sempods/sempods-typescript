@@ -20,12 +20,17 @@ declare global {
         desiredObserved: boolean | null;
       }>;
     };
+    /** The redirect a host-managed sign-in received, and whether it stopped. */
+    hostSignIn?: { url: string; aborted: boolean };
   }
 }
 const mode = new URL(location.href).searchParams.get('identity') ?? 'dynamic';
 const redirectUri = location.origin + '/callback?identity=' + mode;
 // The harness changes deployment policy across reloads without changing identity.
 const policy = sessionStorage.getItem('fixture-policy');
+// An app's own navigation to the Pod: through the document's location, which
+// ignores the abort signal, or a host-managed sign-in that cancels on it.
+const appNavigation = sessionStorage.getItem('fixture-navigate');
 const create = () =>
   createBrowserRuntime({
     identity:
@@ -39,6 +44,33 @@ const create = () =>
     scopes: { required: ['tasks'], optional: ['ai'] },
     returnTo: '/app?identity=' + mode,
     development: 'loopback-http',
+    ...(appNavigation === 'assign'
+      ? { navigate: (url: string) => window.location.assign(url) }
+      : appNavigation === 'host'
+        ? {
+            navigate: (
+              url: string,
+              { signal }: { readonly signal: AbortSignal },
+            ) => {
+              const hosted = { url, aborted: false };
+              window.hostSignIn = hosted;
+              signal.addEventListener('abort', () => {
+                hosted.aborted = true;
+              });
+              return 'signal' as const;
+            },
+          }
+        : appNavigation === 'host-unavailable'
+          ? {
+              // A host that cannot open its sign-in stays at once, from
+              // within its navigation.
+              navigate: () => {
+                const r = window.fixture.runtime;
+                r.cancelAuthorization(r.getSnapshot()[0]!.id);
+                return 'signal' as const;
+              },
+            }
+          : {}),
     ...(policy === 'one'
       ? { allowedPods: [location.origin + '/alice'] }
       : policy === 'set'

@@ -92,7 +92,7 @@ it('groups concise names, marks only read-only lists, and selects by the pair of
   expect(menu.queryAllByRole('menuitem')).toHaveLength(0);
   expect(screen.queryByRole('region')).toBeNull();
   expect(screen.queryByText(/address/i)).toBeNull();
-  expect(screen.queryByText('Read and write')).toBeNull();
+  expect(screen.queryByText('Can edit')).toBeNull();
   expect(
     document.querySelector('svg.lucide-pencil, svg.lucide-eye'),
   ).toBeNull();
@@ -247,7 +247,7 @@ it('shows no read-only mark when every list is editable', async () => {
   await open();
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(2);
   expect(screen.queryByText('Read only')).toBeNull();
-  expect(screen.queryByText('Read and write')).toBeNull();
+  expect(screen.queryByText('Can edit')).toBeNull();
 });
 
 it('localizes authorization errors through the SDK and allows another attempt', async () => {
@@ -393,7 +393,7 @@ it('tells equal names within one Pod apart by a quieter qualifier, keeping it in
   expect(
     document.getElementById(chosen.getAttribute('aria-describedby')!)
       ?.textContent,
-  ).toBe('alice · Read and write');
+  ).toBe('alice · Can edit');
   await press(chosen);
   expect(api.list.select).toHaveBeenCalledWith(second);
 });

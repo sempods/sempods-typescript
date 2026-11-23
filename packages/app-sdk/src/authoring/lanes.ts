@@ -124,6 +124,7 @@ export class LaneGroup<D, L extends Lane<D> = Lane<D>> {
       lane,
       this.app.register({
         ...lane.guard(this.scope),
+        ...(this.connection ? { connectionId: this.connection } : {}),
         ...(this.origin !== undefined && this.connection !== null
           ? { connection: this.connection }
           : {}),

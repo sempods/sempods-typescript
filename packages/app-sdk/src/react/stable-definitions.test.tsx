@@ -104,6 +104,7 @@ it('useApp exposes only the guarded actions, as one stable object', async () => 
   expect(Object.isFrozen(seen[0])).toBe(true);
   expect(Object.keys(seen[0]!).sort()).toEqual([
     'authorize',
+    'cancelAuthorization',
     'connect',
     'disconnect',
     'forget',

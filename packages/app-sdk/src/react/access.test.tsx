@@ -34,6 +34,11 @@ import {
   jwt,
   settleLease,
 } from '../runtime/fixture.test.js';
+import {
+  podAction,
+  podActionNames,
+  podToggle,
+} from './pod-actions.helpers.test.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
 import { openSessionStore } from '../sessions/store.js';
 import type { SessionRecord } from '../sessions/records.js';
@@ -71,7 +76,10 @@ it.each([
       language === 'en'
         ? 'Sign-out was not saved on this device. Try signing out again.'
         : 'Die Abmeldung wurde auf diesem Gerät nicht gespeichert. Versuche erneut, dich abzumelden.';
-    const label = language === 'en' ? 'Sign out' : 'Abmelden';
+    const label =
+      language === 'en'
+        ? 'Sign out on this device'
+        : 'Auf diesem Gerät abmelden';
     const again = language === 'en' ? 'Try again' : 'Erneut versuchen';
     const ui = (
       <StrictMode>
@@ -92,7 +100,7 @@ it.each([
       </StrictMode>
     );
     const first = render(ui);
-    const button = await screen.findByRole('button', { name: label });
+    const button = await podAction(label);
     const write = vi
       .spyOn(IDBObjectStore.prototype, 'put')
       .mockImplementation(() => {
@@ -171,9 +179,8 @@ it('offers the sign-out retry, not a sign-in, in open modal management after a f
   );
   const management = () =>
     document.querySelector<HTMLElement>('[data-sempods-ui="management"]')!;
-  const signOut = await within(management()).findByRole('button', {
-    name: 'Sign out',
-  });
+  const signOut = await podAction('Sign out on this device');
+  expect(management().contains(signOut)).toBe(true);
   await waitFor(() =>
     expect((signOut as HTMLButtonElement).disabled).toBe(false),
   );
@@ -191,25 +198,16 @@ it('offers the sign-out retry, not a sign-in, in open modal management after a f
     ).toBe('sign-out-failed'),
   );
   // Management above the gate repeats the sign-out; it never signs in to
-  // this connection again. Another Pod stays reachable, collapsed.
-  const buttons = () =>
-    within(management())
-      .getAllByRole('button')
-      .filter((b) => !b.closest('.sp-access-another'))
-      .map((b) => b.textContent);
-  await waitFor(() => expect(buttons()).toContain('Try again'));
-  expect(buttons()).not.toContain('Sign in');
-  expect(buttons()).not.toContain('Sign out');
-  expect(management().querySelector('.sp-access-primary')?.textContent).toBe(
-    'Try again',
+  // this connection again. The failure shows in the Pod's row.
+  await waitFor(async () =>
+    expect(await podActionNames()).toEqual(['Try again']),
   );
   expect(within(management()).getByRole('alert').textContent).toBe(
     'Sign-out was not saved on this device. Try signing out again.',
   );
   write.mockRestore();
-  await act(async () =>
-    within(management()).getByRole('button', { name: 'Try again' }).click(),
-  );
+  const retry = await podAction('Try again');
+  await act(async () => retry.click());
   await waitFor(() =>
     expect(runtime.getSnapshot()[0]?.session).toEqual({
       kind: 'signed-out',
@@ -507,22 +505,22 @@ it.each([
     'en',
     {
       heading: 'Pods & sharing',
+      actions: 'Actions for pod.example/alice',
       change: 'Change sharing',
-      signOut: 'Sign out',
-      note: 'Signing out only applies to this device.',
+      signOut: 'Sign out on this device',
     },
   ],
   [
     'de',
     {
       heading: 'Pods & Freigaben',
+      actions: 'Aktionen für pod.example/alice',
       change: 'Freigabe ändern',
-      signOut: 'Abmelden',
-      note: 'Die Abmeldung gilt nur für dieses Gerät.',
+      signOut: 'Auf diesem Gerät abmelden',
     },
   ],
 ] as const)(
-  'names management actions once and explains that signing out stays on this device (%s)',
+  'names a Pod’s actions once and says that signing out stays on this device (%s)',
   async (language, text) => {
     const f = fixture();
     const logged = await f.login();
@@ -532,41 +530,23 @@ it.each([
         <AppAccess appName="Shopping" open />
       </SempodsProvider>,
     );
-    const signOut = await screen.findByRole('button', { name: text.signOut });
+    const trigger = await screen.findByRole('button', { name: text.actions });
     expect(
       screen.getByRole('heading', { level: 2, name: text.heading }),
     ).toBeTruthy();
     expect(screen.getByRole('region', { name: text.heading })).toBeTruthy();
-    expect(screen.getByRole('button', { name: text.change })).toBeTruthy();
-    const note = document.getElementById(
-      signOut.getAttribute('aria-describedby')!,
-    );
-    expect(note?.textContent).toBe(text.note);
+    expect(await podActionNames()).toEqual([text.change, text.signOut]);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    // The actions are a group named for their Pod, and take the focus.
+    const menu = screen.getByRole('group', { name: text.actions });
+    expect(menu.contains(document.activeElement)).toBe(true);
+    const signOut = within(menu).getByRole('button', { name: text.signOut });
     await act(async () => signOut.click());
     await waitFor(() =>
       expect(logged.runtime.getSnapshot()[0]?.session.kind).toBe('signed-out'),
     );
   },
 );
-
-it('omits the sign-out note and its description when an app clears it', async () => {
-  const f = fixture();
-  const logged = await f.login();
-  cleanups.push(() => logged.runtime.dispose());
-  render(
-    <SempodsProvider
-      runtime={logged.runtime}
-      messages={{ controls: { disconnectHint: '' } }}
-    >
-      <AppAccess appName="Shopping" open />
-    </SempodsProvider>,
-  );
-  const signOut = await screen.findByRole('button', { name: 'Sign out' });
-  expect(signOut.getAttribute('aria-describedby')).toBeNull();
-  expect(
-    screen.queryByText('Signing out only applies to this device.'),
-  ).toBeNull();
-});
 
 const fieldsForDraft = fields({ title: text('urn:title', { language: null }) });
 function Draft() {
@@ -657,7 +637,7 @@ it('hides usable/read-only access, keeps drafts through read loss, and guards ex
     screen.getByRole('heading', { level: 2, name: 'Pods & sharing' }),
   ).toBeTruthy();
   const navigations = f.navigate.mock.calls.length;
-  fireEvent.click(screen.getByRole('button', { name: 'Change sharing' }));
+  fireEvent.click(await podAction('Change sharing'));
   expect(await screen.findByRole('alertdialog')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
   expect((draft as HTMLInputElement).value).toBe('Keep this');
@@ -665,10 +645,8 @@ it('hides usable/read-only access, keeps drafts through read loss, and guards ex
   // Leaving opens the Pod's consent page, even with a reusable grant (#362).
   await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   fireEvent.click(
-    await waitFor(() => {
-      const button = screen.getByRole<HTMLButtonElement>('button', {
-        name: 'Change sharing',
-      });
+    await waitFor(async () => {
+      const button = (await podAction('Change sharing')) as HTMLButtonElement;
       expect(button.disabled).toBe(false);
       return button;
     }),
@@ -697,25 +675,25 @@ it('keeps the current target and draft when sign-in preparation for a known othe
   const draft = await screen.findByLabelText('Draft');
   fireEvent.change(draft, { target: { value: 'Keep this on Alice' } });
   fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
-  fireEvent.change(screen.getByLabelText('Pod address'), {
-    target: { value: other },
-  });
   const navigations = f.navigate.mock.calls.length;
-  // Bob's connection, never signed in, is also listed with its own sign-in.
-  const listed = screen.getByRole('list', { name: 'Pods on this device' });
-  expect(within(listed).getByText('pod.example/bob')).toBeTruthy();
+  // Bob's connection, never signed in, is a row with its own sign-in.
+  const bob = screen.getByRole('group', { name: 'pod.example/bob' });
+  expect(within(bob).getByText('Signed out')).toBeTruthy();
   f.fetch.mockRejectedValueOnce(new Error('offline'));
-  const form = screen.getByLabelText('Pod address').closest('form')!;
-  fireEvent.click(within(form).getByRole('button', { name: 'Sign in' }));
+  fireEvent.click(await podAction('Sign in', 'pod.example/bob'));
   await screen.findByRole('alertdialog');
   fireEvent.click(screen.getByRole('button', { name: 'Discard and continue' }));
   await screen.findByRole('alert');
   expect(screen.getByLabelText('Draft')).toBe(draft);
   expect((draft as HTMLInputElement).value).toBe('Keep this on Alice');
-  // Alice stays active: management still names her Pod, Bob stays listed.
-  expect(screen.queryByLabelText('Active pod')).toBeNull();
-  expect(screen.getByRole('button', { name: 'Change sharing' })).toBeTruthy();
-  expect(within(listed).getByText('pod.example/bob')).toBeTruthy();
+  // Alice stays selected, Bob stays listed.
+  const alice = screen.getByRole('group', { name: 'pod.example/alice' });
+  expect(within(alice).getByText('Selected')).toBeTruthy();
+  expect(await podActionNames('pod.example/alice')).toEqual([
+    'Change sharing',
+    'Sign out on this device',
+  ]);
+  expect(screen.getByRole('group', { name: 'pod.example/bob' })).toBe(bob);
   expect(f.navigate).toHaveBeenCalledTimes(navigations);
   expect(logged.runtime.getSnapshot()).toHaveLength(2);
 });
@@ -1040,17 +1018,33 @@ it.each([
       </SempodsProvider>
     );
     const mounted = render(ui('single'));
-    await screen.findByRole('button', { name: 'Check access' });
+    if (manage)
+      expect(await podActionNames()).toEqual([
+        'Change sharing',
+        'Sign out on this device',
+      ]);
+    else {
+      await screen.findByRole('button', { name: 'Check access' });
+      expect(
+        screen.getByRole('button', { name: 'Change sharing' }),
+      ).toBeTruthy();
+    }
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
     expect(screen.queryByLabelText('Pod address')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Change sharing' })).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Connect another Pod' }),
+    ).toBeNull();
     mounted.rerender(ui('multiple'));
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy();
+    // Management connects the preset Pod as another one, in its own step.
+    expect(
+      await screen.findByRole('button', {
+        name: manage ? 'Connect another Pod' : 'Sign in',
+      }),
+    ).toBeTruthy();
     if (manage) {
       mounted.rerender(ui('single'));
-      await act(async () =>
-        screen.getByRole('button', { name: 'Sign out' }).click(),
-      );
+      const signOut = await podAction('Sign out on this device');
+      await act(async () => signOut.click());
       // Without a connection, single mode still permits the configured first sign-in.
       expect(
         await screen.findByRole('button', { name: 'Sign in' }),
@@ -1181,7 +1175,7 @@ it.each(['on-demand', 'required'] as const)(
     expectNoSurface();
     // Explicit management still shows the connection and its actions.
     fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(await podActionNames()).toEqual(['Sign out on this device']);
     fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
     expectNoSurface();
     await act(async () => discovery.resolve());
@@ -1487,7 +1481,7 @@ async function bothSignedIn(f: ReturnType<typeof fixture>, other: string) {
   return { runtime, first: signed.id, second: second.id };
 }
 
-it('keeps the active-Pod selector usable in management while a saved connection restores', async () => {
+it('keeps switching Pods usable in management while a saved connection restores', async () => {
   const other = 'https://pod.example/bob';
   const f = fixture({ allowedPods: [pod, other], preferences: null });
   const both = await bothSignedIn(f, other);
@@ -1504,8 +1498,14 @@ it('keeps the active-Pod selector usable in management while a saved connection 
     },
   });
   cleanups.push(() => runtime.dispose());
+  let activeId: string | null = null;
+  function Active() {
+    activeId = useAppState().activeId;
+    return null;
+  }
   render(
     <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Active />
       <Validating mode="on-demand" />
     </SempodsProvider>,
   );
@@ -1514,14 +1514,11 @@ it('keeps the active-Pod selector usable in management while a saved connection 
   expectNoSurface();
   fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
   const region = screen.getByRole('region', { name: 'Pods & sharing' });
-  const select = within(region).getByRole('combobox', {
-    name: 'Active pod',
-  }) as HTMLSelectElement;
-  expect(select.disabled).toBe(false);
-  // The active Pod's restore keeps hanging; the other one restores.
-  const target = runtime
-    .getSnapshot()
-    .find((entry) => entry.id !== select.value)!;
+  // Both Pods are rows; the active Pod's restore keeps hanging, the other
+  // one restores.
+  const target = runtime.getSnapshot().find((entry) => entry.id !== activeId)!;
+  const name = target.podUrl.replace('https://', '');
+  expect(within(region).getByRole('group', { name })).toBeTruthy();
   await act(async () => gates.get(target.podUrl)!.resolve());
   await waitFor(() =>
     expect(
@@ -1529,16 +1526,15 @@ it('keeps the active-Pod selector usable in management while a saved connection 
         .kind,
     ).toBe('active'),
   );
-  await act(async () =>
-    fireEvent.change(select, { target: { value: target.id } }),
+  const use = (await podAction('Use this Pod', name)) as HTMLButtonElement;
+  expect(use.disabled).toBe(false);
+  await act(async () => use.click());
+  expect(activeId).toBe(target.id);
+  await waitFor(() =>
+    expect(
+      within(within(region).getByRole('group', { name })).getByText('Selected'),
+    ).toBeTruthy(),
   );
-  await waitFor(() => expect(runtime.getSnapshot()).toBeTruthy());
-  expect(
-    within(screen.getByRole('region', { name: 'Pods & sharing' })).getByRole(
-      'combobox',
-      { name: 'Active pod' },
-    ),
-  ).toHaveProperty('value', target.id);
   fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
   expectNoSurface();
 });
@@ -1634,8 +1630,12 @@ it('keeps signing in to the preset Pod and its failures in management while anot
   expectNoSurface();
   fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
   const region = screen.getByRole('region', { name: 'Pods & sharing' });
-  // Management offers the preset Pod (unrestricted) through its address field.
-  const input = within(region).getByRole('textbox', { name: 'Pod address' });
+  // Management offers the preset Pod (unrestricted) through the chooser of
+  // its Connect another Pod step.
+  fireEvent.click(
+    within(region).getByRole('button', { name: 'Connect another Pod' }),
+  );
+  const input = within(region).getByRole('combobox', { name: 'Pod address' });
   fireEvent.change(input, { target: { value: other } });
   f.fetch.mockRejectedValueOnce(new Error('offline'));
   await act(async () => fireEvent.submit(input.closest('form')!));
@@ -1731,7 +1731,7 @@ it.each(['missing scopes', 'ended session'] as const)(
 );
 
 it.each(['en', 'de'] as const)(
-  'manages the connected Pod first, with the chosen Context access, and adds another Pod collapsed (%s)',
+  'manages the connected Pod in its row, with the chosen Context access, and connects another Pod in a step (%s)',
   async (language) => {
     const de = language === 'de';
     const f = fixture();
@@ -1766,34 +1766,55 @@ it.each(['en', 'de'] as const)(
         de ? 'Vollständige Adressen' : 'Full addresses',
       ),
     ).toBeNull();
-    const change = within(region).getByRole('button', {
-      name: de ? 'Freigabe ändern' : 'Change sharing',
+    // The Pod's row names it and marks it as the selected one; its actions
+    // are behind its own button.
+    const row = within(region).getByRole('group', {
+      name: 'pod.example/alice',
     });
-    const another = within(region).getByText(
+    expect(within(row).getByText(de ? 'Ausgewählt' : 'Selected')).toBeTruthy();
+    expect(row.contains(select)).toBe(true);
+    expect(await podActionNames()).toEqual(
+      de
+        ? ['Freigabe ändern', 'Auf diesem Gerät abmelden']
+        : ['Change sharing', 'Sign out on this device'],
+    );
+    const another = within(region).getByRole('button', {
+      name: de ? 'Weiteren Pod verbinden' : 'Connect another Pod',
+    });
+    // Another Pod is an action of the whole list, after it.
+    expect(row.contains(another)).toBe(false);
+    expect(
+      row.compareDocumentPosition(another) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // It opens a step of its own with the sign-in's chooser; back returns
+    // to the list and to the action.
+    fireEvent.click(another);
+    const step = within(region).getByRole('heading', {
+      name: de ? 'Weiteren Pod verbinden' : 'Connect another Pod',
+    });
+    expect(document.activeElement).toBe(step);
+    expect(
+      within(region).getByRole('combobox', {
+        name: de ? 'Pod-Adresse' : 'Pod address',
+      }),
+    ).toBeTruthy();
+    expect(
+      within(region).queryByRole('group', { name: 'pod.example/alice' }),
+    ).toBeNull();
+    fireEvent.click(
+      within(region).getByRole('button', { name: de ? 'Zurück' : 'Back' }),
+    );
+    expect(document.activeElement?.textContent).toBe(
       de ? 'Weiteren Pod verbinden' : 'Connect another Pod',
     );
-    const order = (a: Element, b: Element) =>
-      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
-    // Pod line, the Context, the action, then another Pod.
-    expect(
-      order(within(region).getByText('pod.example/alice'), select),
-    ).toBeTruthy();
-    expect(order(select, change)).toBeTruthy();
-    expect(order(change, another)).toBeTruthy();
-    const details = another.closest('details')!;
-    expect(details.open).toBe(false);
-    fireEvent.click(another);
-    expect(details.querySelector('.sp-access-hint')).toBeNull();
-    expect(
-      within(details).getByLabelText(de ? 'Pod-Adresse' : 'Pod address'),
-    ).toBeTruthy();
+    const again = (await within(region).findByRole('combobox', {
+      name: de ? 'Datenkontext' : 'Data context',
+    })) as HTMLSelectElement;
     await act(async () => {
-      fireEvent.change(select, { target: { value: work } });
+      fireEvent.change(again, { target: { value: work } });
     });
     expect(
-      await within(region).findByText(
-        de ? 'Lesen und schreiben' : 'Read and write',
-      ),
+      await within(region).findByText(de ? 'Kann bearbeiten' : 'Can edit'),
     ).toBeTruthy();
     // Only the first catalogue, and no request for any Context but the
     // selected one's label.
@@ -1826,7 +1847,10 @@ it('keeps sign-in to a new Pod first and open without a connection, and omits it
       <AppAccess appName="Shopping" mode="single" open />
     </SempodsProvider>,
   );
-  await screen.findByRole('button', { name: 'Change sharing' });
+  expect(await podActionNames()).toEqual([
+    'Change sharing',
+    'Sign out on this device',
+  ]);
   expect(screen.queryByText('Connect another Pod')).toBeNull();
   expect(screen.queryByLabelText('Pod address')).toBeNull();
 });
@@ -1964,7 +1988,7 @@ it.each(['app', 'management'] as const)(
     const navigations = f.navigate.mock.calls.length;
     if (from === 'management') {
       fireEvent.click(screen.getByRole('button', { name: 'Manage' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Change sharing' }));
+      fireEvent.click(await podAction('Change sharing'));
     } else fireEvent.click(screen.getByRole('button', { name: 'Share' }));
     await waitFor(() =>
       expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
@@ -2165,7 +2189,7 @@ it('keeps the known Context while the management dialog checks access again', as
   expect(screen.queryByRole('combobox')).toBeNull();
 });
 
-it('keeps the active Pod address beside several named connections in management', async () => {
+it('names several Pods by their names and keeps the selected Pod’s address in its open row', async () => {
   const other = 'https://pod.example/bob';
   const f = fixture({ allowedPods: [pod, other], preferences: null });
   const both = await bothSignedIn(f, other);
@@ -2181,12 +2205,19 @@ it('keeps the active Pod address beside several named connections in management'
     </SempodsProvider>,
   );
   const dialog = await screen.findByRole('dialog', { name: 'Pods & sharing' });
-  const picker = within(dialog).getByRole('combobox', { name: 'Active pod' });
-  const active = both.runtime
-    .getSnapshot()
-    .find((entry) => entry.id === (picker as HTMLSelectElement).value)!;
-  // The selector shows names; the Pod the actions target keeps its address.
-  expect(within(dialog).getByText(active.podUrl)).toBeTruthy();
+  const personal = within(dialog).getByRole('group', { name: 'Personal' });
+  const workRow = within(dialog).getByRole('group', { name: 'Work' });
+  // The selected Pod's row is open: its name shows, its address beside it.
+  const selected = [personal, workRow].find((row) =>
+    within(row).queryByText('Selected'),
+  )!;
+  const unselected = selected === personal ? workRow : personal;
+  expect(podToggle(selected).getAttribute('aria-expanded')).toBe('true');
+  expect(podToggle(unselected).getAttribute('aria-expanded')).toBe('false');
+  const url = selected === personal ? pod : other;
+  expect(within(selected).getByText(url)).toBeTruthy();
+  // The other row names only its Pod until it opens.
+  expect(within(unselected).queryByText(/^https:/)).toBeNull();
 });
 
 it('passes presentation context to replacements, including a standalone AccessGate', async () => {

@@ -13,7 +13,7 @@ import {
   twoPods,
 } from '../runtime/fixture.test.js';
 import { bindResourceEditor } from './editor.js';
-import { createAppController } from './app.js';
+import { createAppController, runAccessAction } from './app.js';
 import { createViewLoader } from './load.js';
 import { observeStarts } from './changes.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
@@ -598,6 +598,186 @@ it('keeps an explicit-scoped draft through row navigation and Context selection,
   app.cancelLeave();
   expect(await switching).toBe(false);
   expect(discard).not.toHaveBeenCalled();
+});
+it('signs out of another connection keeping the selected view, but asks about an explicit draft', async () => {
+  const f = await connected();
+  const other = await f.runtime.connect('https://pod.example/bob');
+  const third = await f.runtime.connect('https://pod.example/carol');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const active = app.getSnapshot().activeId;
+  const selected = vi.fn();
+  app.register({
+    dirty: () => true,
+    blocked: () => false,
+    discard: selected,
+  });
+  expect(await app.disconnect(other.id)).toBe(true);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: active,
+    confirmingLeave: false,
+  });
+  expect(selected).not.toHaveBeenCalled();
+  // A draft in an explicit Context may be bound to that Pod: it asks.
+  const explicit = vi.fn();
+  app.register({
+    scope: 'explicit',
+    dirty: () => true,
+    blocked: () => false,
+    discard: explicit,
+  });
+  const forgetting = app.forget(third.id);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  await app.confirmLeave();
+  expect(await forgetting).toBe(true);
+  expect(explicit).toHaveBeenCalledOnce();
+  expect(selected).not.toHaveBeenCalled();
+  expect(app.getSnapshot().activeId).toBe(active);
+  // Signing out of the active connection still asks about the selected view.
+  const leaving = app.disconnect(active!);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  app.cancelLeave();
+  expect(await leaving).toBe(false);
+  expect(selected).not.toHaveBeenCalled();
+});
+const bobsClub = 'https://pod.example/bob/_system/contexts/club';
+const bobsHome = 'https://pod.example/bob/_system/contexts/home';
+/** Alice and Bob signed in, Bob active with his catalogue read. */
+async function bobSelected() {
+  const { f, runtime, other, otherUrl } = await twoPods((r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  f.setCatalogue(async (url) =>
+    url.startsWith(otherUrl)
+      ? catalogue([bobsClub, bobsHome], [], otherUrl)
+      : catalogue(),
+  );
+  const app = createAppController(runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().activeId).toBe(other.id));
+  await runtime.loadContexts(other.id);
+  runtime.selectContext(other.id, bobsClub);
+  return { f, runtime, app, bob: other.id };
+}
+it('withdraws a leave prompt once another Pod’s redirect starts', async () => {
+  const { f, runtime, app, bob } = await bobSelected();
+  const discard = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard });
+  const navigations = f.navigate.mock.calls.length;
+  const signIn = app.authorize(bob);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  // Alice's redirect starts while the person is asked about Bob's draft.
+  await runtime.beginAuthorization(f.id);
+  expect(f.navigate).toHaveBeenCalledTimes(navigations + 1);
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  expect(await signIn).toBe(false);
+  await app.confirmLeave();
+  expect(f.navigate).toHaveBeenCalledTimes(navigations + 1);
+  expect(discard).not.toHaveBeenCalled();
+});
+it('reports a Context switch during another Pod’s redirect as blocked', async () => {
+  const { f, runtime, app, bob } = await bobSelected();
+  const target = { connectionId: bob, contextIri: bobsHome };
+  // Asked first, then Alice's redirect starts.
+  app.register({ dirty: () => true, blocked: () => false, discard: vi.fn() });
+  const asked = app.selectTarget(target);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  await runtime.beginAuthorization(f.id);
+  expect(await asked).toEqual({ kind: 'blocked' });
+  // Already on its way: no prompt at all.
+  expect(await app.selectTarget(target)).toEqual({ kind: 'blocked' });
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  expect(await app.selectContext(bobsHome)).toBe(false);
+  // Selecting the Pod that is already selected stays a successful no-op.
+  expect(await app.selectConnection(bob)).toBe(true);
+  expect(await app.selectConnection(f.id)).toBe(false);
+});
+it('signs out of another connection while the selected view saves, but not while that connection’s own work saves', async () => {
+  const f = await connected();
+  const bob = await f.runtime.connect('https://pod.example/bob');
+  const carol = await f.runtime.connect('https://pod.example/carol');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  const active = app.getSnapshot().activeId!;
+  // A save in the selected view and one of an explicit editor on it.
+  app.register({ dirty: () => false, blocked: () => true, discard: vi.fn() });
+  app.register({
+    scope: 'explicit',
+    connectionId: active,
+    dirty: () => false,
+    blocked: () => true,
+    discard: vi.fn(),
+  });
+  expect(await app.disconnect(bob.id)).toBe(true);
+  // Bob was never signed in to: his connection is gone.
+  expect(app.getSnapshot().connections.some((c) => c.id === bob.id)).toBe(
+    false,
+  );
+  // Carol's own pending work still blocks retiring her.
+  app.register({
+    scope: 'explicit',
+    connectionId: carol.id,
+    dirty: () => false,
+    blocked: () => true,
+    discard: vi.fn(),
+  });
+  expect(await app.forget(carol.id)).toBe(false);
+  expect(app.getSnapshot().connections.some((c) => c.id === carol.id)).toBe(
+    true,
+  );
+  // Signing out of the active connection still waits for its saves.
+  expect(await app.disconnect(active)).toBe(false);
+});
+it('keeps the active connection’s explicit draft and retries another connection’s failed sign-out without asking', async () => {
+  const f = await connected();
+  const bob = await f.runtime.connect('https://pod.example/bob');
+  const app = createAppController(f.runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().view).not.toBeNull());
+  expect(await app.selectConnection(bob.id)).toBe(true);
+  const selected = vi.fn();
+  const explicit = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard: selected });
+  // Bob's own draft in an explicit Context names its connection.
+  app.register({
+    scope: 'explicit',
+    connectionId: bob.id,
+    dirty: () => true,
+    blocked: () => false,
+    discard: explicit,
+  });
+  const write = vi
+    .spyOn(IDBObjectStore.prototype, 'put')
+    .mockImplementation(() => {
+      throw new Error('fixture storage failure');
+    });
+  expect(await app.disconnect(f.id)).toBe(true);
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  write.mockRestore();
+  const failed = app
+    .getSnapshot()
+    .access.prompts.find(
+      (prompt) =>
+        prompt.connectionId === f.id && prompt.reason === 'sign-out-failed',
+    );
+  expect(failed?.actions).toContain('retry');
+  // The retry of the notice decides like the first attempt.
+  expect(await runAccessAction(app, failed!, 'retry')).toBe(true);
+  expect(app.getSnapshot()).toMatchObject({
+    activeId: bob.id,
+    confirmingLeave: false,
+  });
+  expect(
+    app.getSnapshot().connections.find((c) => c.id === f.id)?.session.kind,
+  ).toBe('signed-out');
+  expect(selected).not.toHaveBeenCalled();
+  expect(explicit).not.toHaveBeenCalled();
 });
 it('lets a Context selection pass a pending explicit-scoped creation, which still blocks row navigation', async () => {
   const f = await connected();
