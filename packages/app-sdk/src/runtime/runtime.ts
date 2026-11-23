@@ -2274,10 +2274,16 @@ export function createBrowserRuntime(
       return { generation, url, reauthorizing };
     };
     let prepared: { generation: string; url: string; reauthorizing: boolean };
-    if ((e.revision === null || intent === 'silent') && lease?.store.watch) {
+    if (
+      (e.revision === null || e.pod === undefined || intent === 'silent') &&
+      lease?.store.watch
+    ) {
       // The first record for this Pod, decided under its lock: two tabs
-      // preparing at once do not both create one. A silent sign-in decides
-      // there too, also on a record it listed meanwhile (see `follows`).
+      // preparing at once do not both create one. The first sign-in over a
+      // saved address (#372) decides there too, so a session another tab
+      // stored meanwhile is joined, not prepared over. A silent sign-in
+      // decides there too, also on a record it listed meanwhile (see
+      // `follows`).
       const outcome = await locked<
         | { joined: Entry; session: boolean }
         | {

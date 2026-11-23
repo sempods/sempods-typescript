@@ -240,9 +240,9 @@ describe('a second Pod without a token', () => {
 
 describe('several tabs', () => {
   /** Two tabs on one IndexedDB, Web Locks and channel, under `optional`. */
-  async function tabs() {
+  async function tabs(deliver?: Parameters<typeof memoryChannels>[0]) {
     const factory = new IDBFactory();
-    const channels = memoryChannels();
+    const channels = memoryChannels(deliver);
     const f = optional({
       locks: memoryLocks(),
       openStore: (namespace) => openSessionStore(namespace, factory, channels),
@@ -284,6 +284,47 @@ describe('several tabs', () => {
     await settleLease();
     t.b.dispose();
     await expect(pending).rejects.toMatchObject({ problem: 'disconnected' });
+  });
+
+  it('joins the session another tab signed in with, before its announcement arrives', async () => {
+    // Announcements between the tabs wait while `held` is set.
+    let held: (() => void)[] | null = null;
+    const t = await tabs((send) =>
+      held ? void held.push(send) : void setTimeout(send),
+    );
+    const added = await t.a.connect(bob);
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({ id: added.id }),
+    );
+    t.setToken(async () =>
+      Response.json({
+        access_token: jwt({ iss: bob }),
+        token_type: 'Bearer',
+        refresh_token: 'refresh-bob',
+      }),
+    );
+    held = [];
+    // The first tab signs in to Bob's Pod and returns signed in.
+    await t.a.beginAuthorization(added.id);
+    t.a.dispose();
+    await settleLease();
+    const back = keep(t.returned());
+    expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+    const redirects = t.navigate.mock.calls.length;
+    // The other tab still lists the address: signing in there joins the
+    // stored session instead of leaving for the Pod.
+    expect(t.b.getSnapshot()[1]).toMatchObject({ reading: 'anonymous' });
+    await t.b.beginAuthorization(added.id);
+    expect(t.navigate.mock.calls).toHaveLength(redirects);
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({
+        id: added.id,
+        session: { kind: 'active' },
+        reading: 'session',
+      }),
+    );
+    held.splice(0).forEach((send) => send());
+    held = null;
   });
 
   it('saves one address when two tabs add the same Pod at once', async () => {
