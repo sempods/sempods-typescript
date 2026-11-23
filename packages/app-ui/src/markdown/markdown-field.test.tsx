@@ -352,7 +352,7 @@ it('leaves no unfinished address to block the form on a preview', async () => {
   expect(submit).toHaveBeenCalledTimes(1);
 });
 
-it('starts writing Markdown with its actions for a text with code', () => {
+it('writes a text with code as Markdown, with its preview action only', () => {
   render(
     <Notes
       initial="Run `npm test`"
@@ -365,15 +365,7 @@ it('starts writing Markdown with its actions for a text with code', () => {
   const actions = screen
     .getAllByRole('button')
     .map((b) => b.getAttribute('aria-label'));
-  expect(actions).toEqual([
-    'Heading',
-    'Bold',
-    'Italic',
-    'Bulleted list',
-    'Numbered list',
-    'Link',
-    'Preview',
-  ]);
+  expect(actions).toEqual(['Preview']);
 });
 
 it('shows read-only text without an action, and nothing without text', () => {
@@ -429,44 +421,6 @@ it('shows exactly the value when the app replaces the Markdown', () => {
   expect(text().value).toBe('`x`');
 });
 
-it('disables an action whose effect the selection makes unpredictable', async () => {
-  render(<Notes initial="Run `npm test` now" defaultPresentation="write" />);
-  text().setSelectionRange(9, 13);
-  fireEvent.select(text());
-  await waitFor(() =>
-    expect(button('Bold').hasAttribute('disabled')).toBe(true),
-  );
-  expect(button('Link').hasAttribute('disabled')).toBe(true);
-  // The shortcut does nothing there either.
-  fireEvent.keyDown(text(), { key: 'b', ctrlKey: true });
-  expect(draft()).toBe('Run `npm test` now');
-  text().setSelectionRange(0, 3);
-  fireEvent.select(text());
-  await waitFor(() =>
-    expect(button('Bold').hasAttribute('disabled')).toBe(false),
-  );
-  fireEvent.click(button('Bold'));
-  expect(draft()).toBe('**Run** `npm test` now');
-});
-
-it('keeps link addresses and code as the preview shows them', () => {
-  const source = 'Get [data](https://example.org/a*b*c) and `**glob**` now';
-  render(<Notes initial={source} />);
-  const rendered = () => ({
-    links: [...document.querySelectorAll('a')].map((a) => a.href),
-    code: [...document.querySelectorAll('code')].map((c) => c.textContent),
-  });
-  const before = rendered();
-  fireEvent.click(button('Edit text'));
-  text().setSelectionRange(0, source.length);
-  fireEvent.click(button('Italic'));
-  fireEvent.click(button('Preview'));
-  expect(draft()).toBe('*' + source + '*');
-  expect(document.querySelector('em')).not.toBeNull();
-  expect(rendered()).toEqual(before);
-  expect(before.links).toEqual(['https://example.org/a*b*c']);
-});
-
 it('shows the preview beside the Markdown only in a wide field', () => {
   render(<Notes initial="Some **text** `x`" defaultPresentation="write" />);
   // jsdom lays nothing out: the field has no width.
@@ -484,39 +438,6 @@ it('shows the preview beside the Markdown only in a wide field', () => {
   } finally {
     width.mockRestore();
   }
-});
-
-it('formats the Markdown selection from the toolbar and keeps it selected', () => {
-  render(<Notes initial="Buy milk today `x`" defaultPresentation="write" />);
-  text().setSelectionRange(4, 8);
-  fireEvent.click(button('Bold'));
-  expect(draft()).toBe('Buy **milk** today `x`');
-  expect([text().selectionStart, text().selectionEnd]).toEqual([6, 10]);
-  expect(document.activeElement).toBe(text());
-  fireEvent.click(button('Bold'));
-  expect(draft()).toBe('Buy milk today `x`');
-  text().setSelectionRange(0, 0);
-  fireEvent.click(button('Bulleted list'));
-  expect(draft()).toBe('- Buy milk today `x`');
-});
-
-it('formats Markdown with Ctrl+B, I and K and leaves other keys to the input', () => {
-  render(<Notes initial="a word `x`" defaultPresentation="write" />);
-  text().setSelectionRange(2, 6);
-  fireEvent.keyDown(text(), { key: 'b', ctrlKey: true });
-  expect(draft()).toBe('a **word** `x`');
-  fireEvent.keyDown(text(), { key: 'i', ctrlKey: true });
-  expect(draft()).toBe('a ***word*** `x`');
-  // Shift or Alt with the key, and Tab, are not the field's.
-  for (const key of [
-    { key: 'B', ctrlKey: true, shiftKey: true },
-    { key: 'k', ctrlKey: true, altKey: true },
-    { key: 'Tab' },
-  ])
-    expect(fireEvent.keyDown(text(), key)).toBe(true);
-  expect(draft()).toBe('a ***word*** `x`');
-  fireEvent.keyDown(text(), { key: 'k', ctrlKey: true });
-  expect(draft()).toBe('a ***[word](https://)*** `x`');
 });
 
 it('names its actions in the provider language, and takes the app’s labels', async () => {

@@ -129,6 +129,20 @@ function savable(tr: Transaction): boolean {
   return ok;
 }
 
+/**
+ * Whether toggling the mark `name` on the selection would save as shown;
+ * an action that would not is disabled, so no enabled one does nothing.
+ */
+function wouldSave(state: EditorState, name: string, on: boolean): boolean {
+  const type = state.schema.marks[name];
+  if (!type || state.selection.empty) return true;
+  const tr = state.tr;
+  for (const { $from, $to } of state.selection.ranges)
+    if (on) tr.removeMark($from.pos, $to.pos, type);
+    else tr.addMark($from.pos, $to.pos, type.create());
+  return savable(tr);
+}
+
 /** Marks a transaction that brought blocks in line with their Markdown. */
 const AGREED = 'markdownAgreed';
 
@@ -450,6 +464,9 @@ export default function RichEditor({
     selector: ({ editor: e }) =>
       e && {
         active: ACTIONS.map(([, , name, attrs]) => e.isActive(name, attrs)),
+        savable: ACTIONS.map(([, , name, attrs]) =>
+          wouldSave(e.state, name, e.isActive(name, attrs)),
+        ),
         link: e.isActive('link'),
         undo: e.can().undo(),
         redo: e.can().redo(),
@@ -510,6 +527,7 @@ export default function RichEditor({
           label={texts[kind]}
           Icon={Icon}
           pressed={state?.active[i]}
+          disabled={state ? !state.savable[i] : false}
           onPress={() => toggle(editor.chain().focus()).run()}
         />
       ))}

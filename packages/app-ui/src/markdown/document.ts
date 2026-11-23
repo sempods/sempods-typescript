@@ -37,6 +37,10 @@ const MARKS: Readonly<Record<string, string>> = {
   delete: 'strike',
 };
 
+/** `node` with `marks`, if there are any. */
+const mark = (node: DocNode, marks: readonly DocMark[]): DocNode =>
+  marks.length > 0 ? { ...node, marks } : node;
+
 function inline(
   nodes: readonly MarkdownNode[] = [],
   marks: readonly DocMark[] = [],
@@ -45,7 +49,7 @@ function inline(
   for (const node of nodes) {
     if (node.type === 'text')
       (node.value ?? '').split(/\r?\n/).forEach((line, i) => {
-        if (i > 0) out.push({ type: 'hardBreak' });
+        if (i > 0) out.push(mark({ type: 'hardBreak' }, marks));
         if (line)
           out.push({
             type: 'text',
@@ -53,7 +57,9 @@ function inline(
             ...(marks.length > 0 ? { marks } : {}),
           });
       });
-    else if (node.type === 'break') out.push({ type: 'hardBreak' });
+    // A break within a link belongs to it, so the link stays one range.
+    else if (node.type === 'break')
+      out.push(mark({ type: 'hardBreak' }, marks));
     else if (MARKS[node.type])
       out.push(
         ...inline(node.children, [...marks, { type: MARKS[node.type]! }]),
@@ -196,18 +202,58 @@ const side = (char: string | undefined) =>
       ? 'punctuation'
       : 'other';
 
-/**
- * Whether the delimiter run at `[at, at + length)` of `out` opens or
- * closes emphasis as meant: CommonMark's flanking rules, which GitHub's
- * strikethrough follows as well.
- */
-function flanks(out: string, at: number, length: number, opens: boolean) {
+/** The whole delimiter run around the marker at `[at, at + length)`. */
+function run(out: string, at: number, length: number): [number, number] {
   const char = out[at]!;
   let start = at;
   while (start > 0 && out[start - 1] === char && out[start - 2] !== '\\')
     start--;
   let end = at + length;
   while (out[end] === char) end++;
+  return [start, end];
+}
+
+/**
+ * The letters next to markers that cannot open or close as written, as
+ * character references, which count as punctuation there: `**(a)**b` cannot
+ * close, `**(a)**&#98;` can, and reads back as the same text.
+ */
+function referenced(out: string, spans: readonly Span[]): string {
+  const letters = new Set<number>();
+  for (const span of spans) {
+    const [before] = run(out, span.open, span.length);
+    const [, after] = run(out, span.close, span.length);
+    if (
+      !flanks(out, span.open, span.length, true) &&
+      side(out[before - 1]) === 'other'
+    )
+      letters.add(before - 1);
+    if (
+      !flanks(out, span.close, span.length, false) &&
+      side(out[after]) === 'other'
+    )
+      letters.add(after);
+  }
+  let result = out;
+  for (const at of [...letters].sort((a, b) => b - a)) {
+    // A letter beyond the basic plane is two units, one reference.
+    const low = at > 0 && /[\udc00-\udfff]/.test(out[at]!) ? at - 1 : at;
+    const char = String.fromCodePoint(out.codePointAt(low)!);
+    result =
+      result.slice(0, low) +
+      `&#${char.codePointAt(0)};` +
+      result.slice(low + char.length);
+  }
+  return result;
+}
+
+/**
+ * Whether the delimiter run at `[at, at + length)` of `out` opens or
+ * closes emphasis as meant: CommonMark's flanking rules, which GitHub's
+ * strikethrough follows as well.
+ */
+function flanks(out: string, at: number, length: number, opens: boolean) {
+  const [start, end] = run(out, at, length);
   // By UTF-16 unit, as the parser reads: half an emoji is no punctuation.
   const before = side(out[start - 1]);
   const after = side(out[end]);
@@ -424,37 +470,38 @@ function serializeInline(
     else break;
     out = out.slice(0, out.length - trailingSpace(out));
   }
+  // Whether the parser reads the text back with these marks.
+  const agrees = (written: string) =>
+    visible(fromMarkdown(written)?.content, !heading) ===
+    visible([{ type: 'paragraph', content }], !heading);
   const failed = spans.filter(
     (span) =>
       !flanks(out, span.open, span.length, true) ||
       !flanks(out, span.close, span.length, false),
   );
-  if (failed.length === 0) {
-    // Markers that meet, as `***` or `*~~`, can pair otherwise than meant.
-    if (
-      spans.length === 0 ||
-      !/[*~]{3,}|\*~|~\*/.test(out) ||
-      visible(fromMarkdown(out)?.content, !heading) ===
-        visible([{ type: 'paragraph', content }], !heading)
-    )
-      return out;
-    // Only the emphasis whose markers meet others is left out; any other
-    // stays, as a bold word elsewhere in the paragraph.
-    const meets = spans.filter((span) =>
-      [
-        span.open - 1,
-        span.open + span.length,
-        span.close - 1,
-        span.close + span.length,
-      ].some((at) => out[at] === '*' || out[at] === '~'),
-    );
-    return serializeInline(
-      meets.length === 0 ? plain(content) : without(content, meets),
-      heading,
-    );
+  // Markers that meet, as `***` or `*~~`, can pair otherwise than meant.
+  const meet = /[*~]{3,}|\*~|~\*/.test(out);
+  if (spans.length === 0 || (failed.length === 0 && !meet) || agrees(out))
+    return out;
+  if (failed.length > 0) {
+    const fixed = referenced(out, failed);
+    if (agrees(fixed)) return fixed;
   }
-  // Marks that cannot be written leave the nodes they span, all at once.
-  return serializeInline(without(content, failed), heading);
+  // Otherwise only the marks that cannot flank or meet others are left
+  // out; any other stays, as a bold word elsewhere in the paragraph.
+  const meets = spans.filter((span) =>
+    [
+      span.open - 1,
+      span.open + span.length,
+      span.close - 1,
+      span.close + span.length,
+    ].some((at) => out[at] === '*' || out[at] === '~'),
+  );
+  const drop = [...failed, ...meets];
+  return serializeInline(
+    drop.length === 0 ? plain(content) : without(content, drop),
+    heading,
+  );
 }
 
 /** The content without the marks of `spans` over the nodes they span. */

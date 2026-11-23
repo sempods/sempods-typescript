@@ -48,7 +48,7 @@ reads, and stores
 standard Markdown: Tiptap's headless editor with the kit's own toolbar for
 paragraphs, headings, bold, italic, strikethrough, web links and lists. A
 text with anything else, which another app may have stored, is written as
-Markdown in the kit's textarea, whose actions edit the source. UIW's React
+Markdown in the kit's textarea, with the same preview. UIW's React
 Markdown Editor, which Focus used first, needed its own stylesheet and a
 dozen colour overrides, drew an overlay with its own type sizes and showed
 Markdown's characters to people who do not know them (#395).

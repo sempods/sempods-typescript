@@ -248,15 +248,25 @@ describe('marks', () => {
     ).toBe('a  b');
   });
 
-  it('leaves out emphasis whose markers would show, keeping the text', () => {
+  it('writes the letters next to markers that would show as references', () => {
     // `a**.**c`: the stars could neither open nor close.
     const doc = paragraph(text('a'), text('.', { type: 'bold' }), text('c'));
-    expect(toMarkdown(doc)).toBe('a.c');
-    expect(
-      toMarkdown(
-        paragraph(text('a'), text('(b)', { type: 'strike' }), text('c')),
-      ),
-    ).toBe('a(b)c');
+    expect(toMarkdown(doc)).toBe('&#97;**.**&#99;');
+    expect(fromMarkdown(toMarkdown(doc))).toEqual(doc);
+    // `Keep **(optional)** items` with the space before `items` deleted.
+    const joined = paragraph(
+      text('Keep '),
+      text('(optional)', { type: 'bold' }),
+      text('items'),
+    );
+    expect(toMarkdown(joined)).toBe('Keep **(optional)**&#105;tems');
+    expect(fromMarkdown(toMarkdown(joined))).toEqual(joined);
+    const struck = paragraph(
+      text('a'),
+      text('(b)', { type: 'strike' }),
+      text('c'),
+    );
+    expect(fromMarkdown(toMarkdown(struck))).toEqual(struck);
     // Next to spaces or inside words they flank, and stay.
     expect(
       toMarkdown(
@@ -383,19 +393,20 @@ describe('marks', () => {
           text('c'),
         ),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       writesBack(
         block(text('ab'), text('c', { type: 'strike' }, { type: 'bold' })),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('writes marks over a line break as one', () => {
     const href = 'https://a.b';
+    // The break belongs to the link, so the link is one range to edit.
     const link = paragraph(
       text('First', { type: 'link', attrs: { href } }),
-      hardBreak,
+      { ...hardBreak, marks: [{ type: 'link', attrs: { href } }] },
       text('Second', { type: 'link', attrs: { href } }),
     );
     expect(toMarkdown(link)).toBe('[First\\\nSecond](https://a.b)');

@@ -41,7 +41,7 @@ const LONG = Array.from(
  * The Markdown entry (`?screen=markdown`, #395). Without `part`, no
  * sign-in: a reading view of `SAMPLE`, and a form with a title and the
  * notes as a `MarkdownField`, followed by a button. `notes=empty` starts the
- * notes empty, `notes=short` with “Buy milk”, `notes=marks` with marks between letters, `notes=boundary` with bold next to a space, `notes=long` with a long draft, `write` in the write
+ * notes empty, `notes=short` with “Buy milk”, `notes=marks` with marks between letters, `notes=boundary` with bold next to a space, `notes=linebreak` with a link over two lines, `notes=long` with a long draft, `write` in the write
  * presentation. The draft and the number of changes the field reported are
  * on the page. With `part=editor`, after sign-in, the README's
  * `task-notes.tsx` edits the fixture's plumber task in its source Context.
@@ -86,6 +86,7 @@ function MarkdownForm({
         short: 'Buy milk',
         marks: 'a**b**c ab~~c~~',
         boundary: 'Keep **(optional)** items',
+        linebreak: '[First\\\nSecond](https://example.org)',
         long: LONG,
       })[notes ?? ''] ?? SAMPLE,
   );

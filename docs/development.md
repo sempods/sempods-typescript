@@ -333,10 +333,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     gives the focus back to the text, Ctrl/Cmd+K sets a link from its
     address, typed `*` and `[` stay text, `*urgent*` typed key by key stays
     text, two Shift+Enter keep a blank line, Tab leaves the text, also from
-    a list item, a formatting Markdown could not hold between letters is
-    not made, and after typing next to bold or a heading over a line break
-    the writer shows what the draft holds; a touch on Bold keeps the focus in the text; a
-    400-heading draft switched twelve
+    a list item, deleting a space next to bold keeps the bold, formatting
+    from an enabled action between letters saves and shows in the preview,
+    a new address changes a link over two lines whole, and a heading over a
+    line break shows as one line in the writer too; a touch on Bold keeps
+    the focus in the text; a 400-heading draft switched twelve
     times keeps its place and draft; both writers follow the page colour in
     light and dark; and the README's `task-notes.tsx` in an SDK editor:
     switching writes nothing and leaves Save and Discard disabled, and a

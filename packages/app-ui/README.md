@@ -1892,40 +1892,27 @@ was, such as `_a_` as `*a*`, a line break as a `\` at the line's end, or a
 list's markers. Any other text that looks like Markdown, such as
 `*urgent*` typed around a word or a `#` after a line break, is escaped, so
 it stays text; spaces at a line's start and a blank line made with two
-breaks stay as `&#32;`, which the view shows. The writer always shows what
-the draft holds: a formatting that Markdown could not hold, such as
-strikethrough on a bold letter between others, is not made, and where
-typing leaves formatting Markdown cannot hold, as bold `(optional)` run
-into the next word, or a heading over a line break, the writer shows it as
-saved. Undo back to the text as loaded reports its source as it was.
+breaks stay as `&#32;`, which the view shows. Formatting between letters
+stays too: where a marker could not open or close next to a letter, the
+letter is written as a character reference, as `**(optional)**&#105;tems`.
+The writer always shows what the draft holds: an action whose result would
+not save as shown is disabled, and a change that leaves a block Markdown
+cannot hold, as a heading over a line break, shows as saved. Undo back to
+the text as loaded reports its source as it was.
 
 **Written as Markdown.** A text with anything else, such as code, a quote,
 an image, HTML, a rule or a link with a title, which another app may have
 stored, or one the formatted writer would not write back as it reads, such
 as a heading over two lines, is written as Markdown in a text input, with a
-note why, so nothing in it is lost. `onChange` receives it exactly as
-typed, also indentation, trailing spaces of a hard line break and a text of
-only spaces; the text
-input shows exactly `value`, though the browser reports every line ending
-as `\n`, also on lines the person did not touch. Its toolbar acts on the
-selection: heading, bold, italic, bulleted and numbered list, and link (the
-link's address is selected to type over). The actions read the source with
-the parser that renders it, so they agree with the preview: a selection
-inside a bold or italic span, or a caret in it, takes that span's emphasis
-off, whether marked with `*` or `_`; any other selection gets it, its own
-spans of that kind merged into one. Bold and italic apply to each selected
-paragraph, list item or heading on its own and leave code blocks out. A
-link takes the first selected stretch of text. Lines taken out of a list
-become a paragraph of their own. Where an action's effect would not be
-predictable, it is disabled: inside code or a link's address, across part
-of a link or code, or a link inside a link; each edit is checked by parsing
-its result, so text, code and addresses stay as they were. Ctrl+B, Ctrl+I
-and Ctrl+K do the same, and the browser's undo reverts a formatting step
-(WebKit on macOS takes it back together with typing just before it, as it
-groups typing). Tab moves to the next control instead of typing a tab. From
-42rem of the field's own width, the preview is shown beside the source as
-it is typed; a narrower field writes at full width and parses nothing while
-typing.
+note why, so nothing in it is lost. It has no formatting actions: the
+person writes the Markdown, and **Preview** shows it rendered. `onChange`
+receives it exactly as typed, also indentation, trailing spaces of a hard
+line break and a text of only spaces; the text input shows exactly `value`,
+though the browser reports every line ending as `\n`, also on lines the
+person did not touch. Tab moves to the next control instead of typing a
+tab. From 42rem of the field's own width, the preview is shown beside the
+source as it is typed; a narrower field writes at full width and parses
+nothing while typing.
 
 For an SDK field, declare the text without `trim`, so Markdown keeps its
 indentation and line breaks, and as `optional`, mapping only an empty text

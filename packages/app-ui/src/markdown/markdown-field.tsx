@@ -8,28 +8,15 @@ import {
   useRef,
   useState,
   type ComponentType,
-  type KeyboardEvent,
 } from 'react';
-import {
-  BoldIcon,
-  EyeIcon,
-  Heading2Icon,
-  ItalicIcon,
-  LinkIcon,
-  ListIcon,
-  ListOrderedIcon,
-  PencilIcon,
-  type LucideIcon,
-} from 'lucide-react';
+import { EyeIcon, PencilIcon } from 'lucide-react';
 import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Textarea } from '../components/textarea.js';
 import { fromMarkdown, toMarkdown, type DocNode } from './document.js';
-import { applyEdit, formatMarkdown, type MarkdownFormat } from './format.js';
 import { MarkdownView, type MarkdownViewProps } from './markdown-view.js';
 import type { RichEditorProps } from './rich-editor.js';
 import { useMarkdownTexts, type MarkdownFieldLabels } from './texts.js';
-import { isCommand, ToolButton, ToolGroup } from './tools.js';
 
 /** How the field shows its text: rendered, or to write in. */
 export type MarkdownPresentation = 'read' | 'write';
@@ -71,24 +58,6 @@ export interface MarkdownFieldProps {
   readonly className?: string;
 }
 
-/** The keys of the formatting shortcuts, with Ctrl, or Command on Apple systems. */
-const shortcuts: Readonly<Record<string, MarkdownFormat>> = {
-  b: 'bold',
-  i: 'italic',
-  k: 'link',
-};
-
-/** The toolbar's actions in order, each named by its text of the same key. */
-const actions = [
-  ['heading', Heading2Icon],
-  ['bold', BoldIcon],
-  ['italic', ItalicIcon],
-  ['bulletList', ListIcon],
-  ['numberedList', ListOrderedIcon],
-  ['link', LinkIcon],
-] as const satisfies readonly (readonly [MarkdownFormat, LucideIcon])[];
-const kinds = actions.map(([kind]) => kind);
-
 /** The writer for text in its set, loaded once the field may need it. */
 const loadRichEditor = () => import('./rich-editor.js');
 
@@ -125,8 +94,8 @@ function writable(value: string): DocNode | null {
  * web links and lists is written formatted, without Markdown's characters,
  * and reported as standard Markdown; a toolbar and Ctrl or Command + B, I
  * and K format the selection. A text with anything else, such as code or a
- * quote from another app, is written as Markdown source with a preview, so
- * nothing in it is lost. One action at the field's top end switches between
+ * quote from another app, is written as Markdown source in a text input
+ * with a preview, so nothing in it is lost. One action at the field's top end switches between
  * reading and writing, so it stays in place: editing moves the focus into
  * the text, preview back to that action. The containing editor owns
  * validation, save, cancel and conflicts.
@@ -156,9 +125,6 @@ export function MarkdownField({
   const preview = useDeferredValue(value);
   // Whether the field is wide enough for the preview beside the source.
   const [wide, setWide] = useState(false);
-  // The actions the selection does not allow, checked once it rests.
-  const [unavailable, setUnavailable] = useState<readonly MarkdownFormat[]>([]);
-  const check = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Where the focus goes after a switch the person made.
   const moved = useRef<'text' | 'toggle' | null>(null);
   // Whether the text is written formatted, and the value that holds for: the
@@ -192,8 +158,6 @@ export function MarkdownField({
   }, []);
   // Where the rich editor's toolbar goes.
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
-  // The selection after an edit that the browser could not apply itself.
-  const pending = useRef<readonly [number, number] | null>(null);
 
   useLayoutEffect(() => {
     const target = moved.current;
@@ -216,12 +180,6 @@ export function MarkdownField({
     return () => cancelIdleCallback(idle);
   }, [readOnly]);
   useLayoutEffect(() => {
-    const selection = pending.current;
-    if (!selection || !textarea.current) return;
-    pending.current = null;
-    textarea.current.setSelectionRange(selection[0], selection[1]);
-  }, [value]);
-  useLayoutEffect(() => {
     const field = root.current;
     // Only the Markdown writer shows a preview beside it.
     if (!writing || rich || !field) return;
@@ -237,72 +195,9 @@ export function MarkdownField({
     return () => observer.disconnect();
   }, [writing, rich]);
 
-  // Reads the source again once the selection rests, not on every key.
-  const recheck = () => {
-    clearTimeout(check.current);
-    check.current = setTimeout(() => {
-      const input = textarea.current;
-      if (!input) return;
-      const next = kinds.filter(
-        (kind) =>
-          !formatMarkdown(
-            kind,
-            input.value,
-            input.selectionStart,
-            input.selectionEnd,
-          ),
-      );
-      setUnavailable((now) => (now.join() === next.join() ? now : next));
-    }, 150);
-  };
-  useEffect(() => {
-    if (writing && !rich) recheck();
-  }, [value, writing, rich]);
-  useEffect(() => () => clearTimeout(check.current), []);
-
   const emit = (next: string) => {
     setSyntax((now) => now && { ...now, value: next });
     onChange(next);
-  };
-  const format = (kind: MarkdownFormat) => {
-    const input = textarea.current;
-    if (!input) return;
-    const source = input.value;
-    const edit = formatMarkdown(
-      kind,
-      source,
-      input.selectionStart,
-      input.selectionEnd,
-    );
-    if (!edit) return;
-    const next = applyEdit(source, edit);
-    input.focus();
-    input.setSelectionRange(edit.from, edit.to);
-    // The browser's own text input keeps the edit in its undo history and
-    // reaches onChange as typing does.
-    try {
-      document.execCommand(
-        edit.insert === '' ? 'delete' : 'insertText',
-        false,
-        edit.insert,
-      );
-    } catch {
-      // Not supported: the fallback below applies the edit.
-    }
-    if (input.value === next) {
-      input.setSelectionRange(edit.select[0], edit.select[1]);
-      return;
-    }
-    if (input.value !== source) return;
-    pending.current = edit.select;
-    emit(next);
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent.isComposing || !isCommand(event)) return;
-    const kind = shortcuts[event.key.toLowerCase()];
-    if (!kind) return;
-    event.preventDefault();
-    format(kind);
   };
   const switchTo = (next: MarkdownPresentation) => {
     moved.current = next === 'write' ? 'text' : 'toggle';
@@ -325,18 +220,6 @@ export function MarkdownField({
       <div className="flex min-h-11 items-start gap-1">
         {writing && rich ? (
           <div ref={setSlot} className="flex min-w-0 flex-1" />
-        ) : writing ? (
-          <ToolGroup label={t.formatting}>
-            {actions.map(([kind, Icon]) => (
-              <ToolButton
-                key={kind}
-                label={t[kind]}
-                Icon={Icon}
-                disabled={unavailable.includes(kind)}
-                onPress={() => format(kind)}
-              />
-            ))}
-          </ToolGroup>
         ) : (
           <span className="flex-1" />
         )}
@@ -426,8 +309,6 @@ export function MarkdownField({
                     value={value}
                     spellCheck
                     onChange={(event) => emit(event.target.value)}
-                    onSelect={recheck}
-                    onKeyDown={onKeyDown}
                     className="min-h-40 text-base leading-relaxed md:text-base"
                   />
                   {/* Wide: the preview beside the source, as it is typed;

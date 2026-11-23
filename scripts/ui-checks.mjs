@@ -10107,39 +10107,76 @@ async function markdown({ browser, origin, engine }) {
         }),
       );
       results.push(
-        await attemptOn(errors, 'markdown-unsavable-formatting', async () => {
-          // Marks between letters that Markdown could not hold together.
+        await attemptOn(errors, 'markdown-formatting-survives', async () => {
+          // Marks between letters, set from enabled actions, save and show.
           await page.goto(address('&notes=marks&write'));
-          await text(page).waitFor();
+          await text(page).focus();
           await select(page, 1, 2);
-          await notes(page)
-            .getByRole('button', { name: 'Strikethrough' })
-            .click();
+          const strike = notes(page).getByRole('button', {
+            name: 'Strikethrough',
+          });
+          const enabled = await strike.isEnabled();
+          await strike.click();
           await select(page, 6, 7);
-          await notes(page).getByRole('button', { name: 'Bold' }).click();
+          await notes(page)
+            .getByRole('button', { name: 'Bold', exact: true })
+            .click();
           await settle(page);
-          const state = await draft(page);
-          const shown = await text(page).evaluate((el) => ({
-            struck: el.querySelectorAll('s').length,
-            bold: el.querySelectorAll('strong').length,
-          }));
+          const saved = (await draft(page)).draft;
+          // Reopened: the preview renders the saved value.
+          await toggle(page).click();
+          await text(page).waitFor({ state: 'hidden' });
+          const shown = await notes(page)
+            .locator('[data-slot=markdown-view]')
+            .evaluate((el) => ({
+              bold: el.querySelectorAll('strong').length,
+              struck: el.querySelectorAll('del').length,
+              text: el.textContent,
+            }));
           return {
             pass:
-              state.draft === 'a**b**c ab~~c~~' &&
-              state.changes === 0 &&
-              shown.struck === 1 &&
-              shown.bold === 1,
-            ...state,
+              enabled &&
+              saved === 'a**~~b~~**c ab**~~c~~**' &&
+              shown.bold === 2 &&
+              shown.struck === 2 &&
+              shown.text === 'abc abc',
+            enabled,
+            saved,
             shown,
           };
         }),
       );
       results.push(
+        await attemptOn(errors, 'markdown-link-over-a-break', async () => {
+          // A new address changes the whole link, over both lines.
+          await page.goto(address('&notes=linebreak&write'));
+          await text(page).focus();
+          await select(page, 2, 2);
+          await page.keyboard.press('ControlOrMeta+K');
+          await page.keyboard.type('https://example.net');
+          await page.keyboard.press('Enter');
+          await settle(page);
+          const saved = (await draft(page)).draft;
+          await toggle(page).click();
+          await text(page).waitFor({ state: 'hidden' });
+          const links = await notes(page)
+            .locator('[data-slot=markdown-view] a')
+            .evaluateAll((all) => all.map((a) => a.getAttribute('href')));
+          return {
+            pass:
+              saved === '[First\\\nSecond](https://example.net)' &&
+              JSON.stringify(links) === '["https://example.net"]',
+            saved,
+            links,
+          };
+        }),
+      );
+      results.push(
         await attemptOn(errors, 'markdown-writer-shows-the-draft', async () => {
-          // Deleting the space after `**(optional)**`: the bold cannot stay
-          // in Markdown, so the writer drops it too.
+          // Deleting the space after `**(optional)**` keeps the bold, in
+          // the writer and in the draft.
           await page.goto(address('&notes=boundary&write'));
-          await text(page).waitFor();
+          await text(page).focus();
           await select(page, 16, 16);
           await page.keyboard.press('Backspace');
           await settle(page);
@@ -10163,8 +10200,8 @@ async function markdown({ browser, origin, engine }) {
           );
           return {
             pass:
-              joined === 'Keep (optional)items' &&
-              bold === 0 &&
+              joined === 'Keep **(optional)**&#105;tems' &&
+              bold === 1 &&
               heading === '## First Second' &&
               lines === 0,
             joined,
