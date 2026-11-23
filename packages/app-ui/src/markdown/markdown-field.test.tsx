@@ -319,6 +319,27 @@ it('writes as Markdown a text it would not write back as it reads', () => {
   expect(text().value).toBe('Title\nmore\n===');
 });
 
+it('leaves no unfinished address to block the form on a preview', async () => {
+  const submit = vi.fn((event: { preventDefault(): void }) =>
+    event.preventDefault(),
+  );
+  render(
+    <form onSubmit={submit}>
+      <Notes initial="Buy milk" defaultPresentation="write" />
+      <button type="submit">Save</button>
+    </form>,
+  );
+  const input = await editor();
+  fireEvent.keyDown(input, { key: 'k', ctrlKey: true });
+  const address = screen.getByRole('textbox', { name: 'Link address' });
+  expect((address as HTMLInputElement).value).toBe('https://');
+  expect(address.closest('form')!.checkValidity()).toBe(true);
+  fireEvent.click(button('Preview'));
+  expect(document.querySelector('[data-slot=markdown-link]')).toBeNull();
+  fireEvent.click(button('Save'));
+  expect(submit).toHaveBeenCalledTimes(1);
+});
+
 it('starts writing Markdown with its actions for a text with code', () => {
   render(
     <Notes

@@ -41,8 +41,10 @@ the template's spike, sempods/sempods-apps-template#120.
 
 Markdown text is an opt-in entry of the kit, `@sempods/app-ui/markdown`,
 with `react-markdown` and Tiptap as optional peers, so apps that show plain
-text load and install nothing for it. People who write notes mostly do not
-know Markdown, so the field writes text formatted, as it reads, and stores
+text load nothing for it and install only the small parser extension for
+GitHub's strikethrough, a dependency of the kit. People who write notes
+mostly do not know Markdown, so the field writes text formatted, as it
+reads, and stores
 standard Markdown: Tiptap's headless editor with the kit's own toolbar for
 paragraphs, headings, bold, italic, strikethrough, web links and lists. A
 text with anything else, which another app may have stored, is written as

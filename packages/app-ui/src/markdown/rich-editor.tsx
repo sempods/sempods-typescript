@@ -130,7 +130,39 @@ export interface RichEditorProps {
   readonly onReady: (focus: () => void) => void;
   /** Called instead when the editor could not be loaded. */
   readonly onUnavailable: () => void;
+  /** Whether the person writes now; reading hides the editor. */
+  readonly active: boolean;
 }
+
+/** Marks a person sets with the toolbar or a shortcut, not by typing `*`. */
+const TYPED_MARKS = new Set(['bold', 'italic', 'strike']);
+
+/**
+ * StarterKit as the field uses it: Tab leaves the text, also in a list item,
+ * and `*`, `_` or `~` typed or pasted around a word stay text, as the field
+ * writes them. Lists and headings typed at a line's start stay shortcuts.
+ */
+const Kit = StarterKit.extend({
+  addExtensions() {
+    return (this.parent?.() ?? []).map((extension) => {
+      if (extension.name === 'listItem')
+        return extension.extend({
+          addKeyboardShortcuts() {
+            const shortcuts = { ...this.parent?.() };
+            delete shortcuts.Tab;
+            delete shortcuts['Shift-Tab'];
+            return shortcuts;
+          },
+        });
+      if (TYPED_MARKS.has(extension.name))
+        return extension.extend({
+          addInputRules: () => [],
+          addPasteRules: () => [],
+        });
+      return extension;
+    });
+  },
+});
 
 /** The address of the link at the selection, set, changed or removed. */
 function LinkRow({
@@ -189,7 +221,9 @@ function LinkRow({
         aria-label={texts.address}
         // Opened from the toolbar or Ctrl+K: the address is typed next.
         autoFocus
-        type="url"
+        // Text, not `url`: an unfinished address must not block the form
+        // around the field.
+        type="text"
         inputMode="url"
         value={address}
         onChange={(event) => setAddress(event.target.value)}
@@ -238,6 +272,7 @@ export default function RichEditor({
   toolbar,
   onChange,
   onReady,
+  active,
 }: RichEditorProps) {
   // The source the editor's text stands for: the one it read, or wrote last.
   const shown = useRef(value);
@@ -252,7 +287,7 @@ export default function RichEditor({
   const options = useMemo<UseEditorOptions>(
     () => ({
       extensions: [
-        StarterKit.configure({
+        Kit.configure({
           blockquote: false,
           code: false,
           codeBlock: false,
@@ -300,22 +335,29 @@ export default function RichEditor({
     }),
     [label],
   );
-  const editor = useEditor(options);
+  // None on the first render where Tiptap defers it, as on a server or
+  // in Next.js: the field then shows a waiting box.
+  const editor: Editor | null = useEditor(options);
   const state = useEditorState({
     editor,
-    selector: ({ editor: e }) => ({
-      active: ACTIONS.map(([, , name, attrs]) => e.isActive(name, attrs)),
-      link: e.isActive('link'),
-      undo: e.can().undo(),
-      redo: e.can().redo(),
-    }),
+    selector: ({ editor: e }) =>
+      e && {
+        active: ACTIONS.map(([, , name, attrs]) => e.isActive(name, attrs)),
+        link: e.isActive('link'),
+        undo: e.can().undo(),
+        redo: e.can().redo(),
+      },
   });
+  // Leaving the writer leaves an unfinished address too.
+  useEffect(() => {
+    if (!active) setLinking(false);
+  }, [active]);
 
   // A new source from the app, such as a discarded draft, replaces the text
   // and its history: undo must not bring the earlier draft back. A preview
   // keeps both, as nothing new comes from the app.
   useEffect(() => {
-    if (value === shown.current) return;
+    if (!editor || value === shown.current) return;
     shown.current = value;
     // An address typed for the earlier draft does not carry over.
     setLinking(false);
@@ -328,11 +370,12 @@ export default function RichEditor({
   }, [editor, value, doc]);
   // A new placeholder shows at once, not only after the next change.
   useEffect(() => {
-    if (editor.isInitialized)
+    if (editor?.isInitialized)
       editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false));
   }, [editor, placeholder]);
   // Ready once its view is there, which can be after this first effect.
   useEffect(() => {
+    if (!editor) return;
     const ready = () => onReady(() => editor.chain().focus().run());
     if (editor.isInitialized) {
       ready();
@@ -344,6 +387,13 @@ export default function RichEditor({
     };
   }, [editor, onReady]);
 
+  if (!editor)
+    return (
+      <div
+        aria-busy="true"
+        className="min-h-40 rounded-lg border border-input dark:bg-input/30"
+      />
+    );
   const bar = (
     <ToolGroup label={texts.formatting}>
       {ACTIONS.map(([kind, Icon, , , toggle], i) => (
@@ -351,26 +401,26 @@ export default function RichEditor({
           key={kind}
           label={texts[kind]}
           Icon={Icon}
-          pressed={state.active[i]}
+          pressed={state?.active[i]}
           onPress={() => toggle(editor.chain().focus()).run()}
         />
       ))}
       <ToolButton
         label={texts.link}
         Icon={LinkIcon}
-        pressed={state.link}
+        pressed={state?.link}
         onPress={() => setLinking((open) => !open)}
       />
       <ToolButton
         label={texts.undo}
         Icon={Undo2Icon}
-        disabled={!state.undo}
+        disabled={!state?.undo}
         onPress={() => editor.chain().focus().undo().run()}
       />
       <ToolButton
         label={texts.redo}
         Icon={Redo2Icon}
-        disabled={!state.redo}
+        disabled={!state?.redo}
         onPress={() => editor.chain().focus().redo().run()}
       />
     </ToolGroup>

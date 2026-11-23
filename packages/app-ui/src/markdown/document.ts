@@ -140,7 +140,11 @@ const escapeText = (text: string) =>
  */
 const escapeLineStart = (line: string) =>
   line
-    .replace(/^[ \t]+/, '')
+    // Spaces a person typed at a line's start stay, as characters Markdown
+    // keeps: plain ones would be dropped, or start a code block.
+    .replace(/^[ \t]+/, (space) =>
+      space.replace(/ /g, '&#32;').replace(/\t/g, '&#9;'),
+    )
     .replace(/^(#{1,6})(?=[ \t]|$)/, '\\$1')
     .replace(/^([-+])(?=[ \t]|$)/, '\\$1')
     .replace(/^(\d{1,9})([.)])(?=[ \t]|$)/, '$1\\$2')
@@ -314,15 +318,30 @@ function serializeInline(
   };
   for (const [index, node] of content.entries()) {
     if (node.type === 'hardBreak') {
-      // A break on a line with nothing yet is a `\` that shows.
-      if (out === '' || out.endsWith('\n')) continue;
+      if (out === '' || out.endsWith('\n')) {
+        // A heading has no lines; on an empty line a break would be a `\`
+        // that shows, so a space keeps the line, as a blank one.
+        if (heading) continue;
+        out += '&#32;';
+      }
       closeTo(0);
       out = out.slice(0, out.length - trailingSpace(out));
       out += heading ? ' ' : '\\\n';
       continue;
     }
+    // How far a mark of this node goes on: the longer one opens outside,
+    // so marks that end first close first, as `a***b**c*`.
+    const reach = (mark: DocMark) => {
+      let at = index;
+      while (content[at + 1]?.marks?.some((other) => sameMark(other, mark)))
+        at++;
+      return at;
+    };
     const marks = [...(node.marks ?? [])].sort(
-      (a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type),
+      (a, b) =>
+        Number(b.type === 'link') - Number(a.type === 'link') ||
+        reach(b) - reach(a) ||
+        ORDER.indexOf(a.type) - ORDER.indexOf(b.type),
     );
     // A link whose text is its address, alone, as `<address>`.
     const href = marks.length === 1 && marks[0]!.attrs?.href;
@@ -340,24 +359,27 @@ function serializeInline(
       last = index;
       continue;
     }
+    // Open marks this node has too stay open, outermost first.
     let keep = 0;
     while (
       keep < open.length &&
-      keep < marks.length &&
-      sameMark(open[keep]!.mark, marks[keep]!)
+      marks.some((mark) => sameMark(mark, open[keep]!.mark))
     )
       keep++;
     closeTo(keep);
+    const opening = marks.filter(
+      (mark) => !open.some((other) => sameMark(other.mark, mark)),
+    );
     let text = escapeText(node.text ?? '');
     // Nothing written on the line yet: it would start a block there.
     if (out === '' || (!heading && out.endsWith('\n')))
       text = escapeLineStart(text);
     // Whitespace alone takes no marks of its own: `** **` would be a rule.
-    if (keep < marks.length && /\S/.test(text)) {
+    if (opening.length > 0 && /\S/.test(node.text ?? '')) {
       const lead = /^[ \t]*/.exec(text)![0];
       out += lead;
       text = text.slice(lead.length);
-      for (const mark of marks.slice(keep)) {
+      for (const mark of opening) {
         // A `!` before a link would make it an image.
         if (mark.type === 'link' && endsUnescaped(out, '!'))
           out = out.slice(0, -1) + '\\!';
@@ -370,9 +392,13 @@ function serializeInline(
   }
   closeTo(0);
   out = out.slice(0, out.length - trailingSpace(out));
-  // A break at the end of a block is not one, also before whitespace alone.
-  while (out.endsWith('\\\n')) {
-    out = out.slice(0, -2);
+  // A break at the end of a block is not one, nor are the blank lines it
+  // ends, also before whitespace alone.
+  for (;;) {
+    if (out.endsWith('\\\n')) out = out.slice(0, -2);
+    else if (out.endsWith('&#32;') && !out.endsWith('\\&#32;'))
+      out = out.slice(0, -5);
+    else break;
     out = out.slice(0, out.length - trailingSpace(out));
   }
   const failed = spans.filter(
@@ -388,21 +414,35 @@ function serializeInline(
       visible(fromMarkdown(out)?.content) === visible(content)
     )
       return out;
-    return serializeInline(plain(content), heading);
+    // Only the emphasis whose markers meet others is left out; any other
+    // stays, as a bold word elsewhere in the paragraph.
+    const meets = spans.filter((span) =>
+      [
+        span.open - 1,
+        span.open + span.length,
+        span.close - 1,
+        span.close + span.length,
+      ].some((at) => out[at] === '*' || out[at] === '~'),
+    );
+    return serializeInline(
+      meets.length === 0 ? plain(content) : without(content, meets),
+      heading,
+    );
   }
   // Marks that cannot be written leave the nodes they span, all at once.
-  return serializeInline(
-    content.map((node, i) => {
-      const drop = failed
-        .filter((span) => span.from <= i && i <= span.to)
-        .map((span) => span.type);
-      return drop.length === 0 || !node.marks
-        ? node
-        : { ...node, marks: node.marks.filter((m) => !drop.includes(m.type)) };
-    }),
-    heading,
-  );
+  return serializeInline(without(content, failed), heading);
 }
+
+/** The content without the marks of `spans` over the nodes they span. */
+const without = (content: readonly DocNode[], spans: readonly Span[]) =>
+  content.map((node, i) => {
+    const drop = spans
+      .filter((span) => span.from <= i && i <= span.to)
+      .map((span) => span.type);
+    return drop.length === 0 || !node.marks
+      ? node
+      : { ...node, marks: node.marks.filter((m) => !drop.includes(m.type)) };
+  });
 
 /** Lines after the first indented by `by`, as a list item's content is. */
 const indent = (text: string, by: number) =>

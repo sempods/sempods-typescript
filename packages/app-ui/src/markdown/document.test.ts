@@ -133,7 +133,7 @@ describe('text that looks like Markdown', () => {
       const doc = paragraph(text('Title'), hardBreak, text(typed));
       const back = fromMarkdown(toMarkdown(doc));
       expect(back, typed).toEqual(
-        paragraph(text('Title'), hardBreak, text(typed.trimStart())),
+        paragraph(text('Title'), hardBreak, text(typed)),
       );
     }
   });
@@ -258,6 +258,51 @@ describe('marks', () => {
     expect(again('## Title \\#')).toBe('## Title \\#');
     expect(again('## \\#')).toBe('## \\#');
     expect(again('## C#')).toBe('## C#');
+  });
+
+  it('keeps the formatting around an edit that makes marks overlap', () => {
+    // `**Keep** this. a*bc*`, then Bold on `b` alone.
+    const doc = paragraph(
+      text('Keep', { type: 'bold' }),
+      text(' this. a'),
+      text('b', { type: 'bold' }, { type: 'italic' }),
+      text('c', { type: 'italic' }),
+    );
+    expect(toMarkdown(doc)).toBe('**Keep** this. a***b**c*');
+    const back = fromMarkdown(toMarkdown(doc))!;
+    expect(
+      back.content![0]!.content!.map((node) => [
+        node.text,
+        (node.marks ?? []).map((mark) => mark.type).sort(),
+      ]),
+    ).toEqual([
+      ['Keep', ['bold']],
+      [' this. a', []],
+      ['b', ['bold', 'italic']],
+      ['c', ['italic']],
+    ]);
+  });
+
+  it('keeps spaces typed at the start of a line', () => {
+    const doc = paragraph(text('    test'), hardBreak, text('  next'));
+    expect(toMarkdown(doc)).toBe('&#32;&#32;&#32;&#32;test\\\n&#32;&#32;next');
+    expect(fromMarkdown(toMarkdown(doc))).toEqual(doc);
+  });
+
+  it('keeps a blank line made of two breaks', () => {
+    const written = toMarkdown(
+      paragraph(text('First'), hardBreak, hardBreak, text('Last')),
+    );
+    expect(written).toBe('First\\\n&#32;\\\nLast');
+    const back = fromMarkdown(written)!;
+    expect(
+      back.content![0]!.content!.filter((n) => n.type === 'hardBreak'),
+    ).toHaveLength(2);
+    expect(toMarkdown(back)).toBe(written);
+    // At the end of a block, breaks add nothing.
+    expect(
+      toMarkdown(paragraph(text('First'), hardBreak, hardBreak, hardBreak)),
+    ).toBe('First');
   });
 
   it('writes a break in a heading as a space', () => {

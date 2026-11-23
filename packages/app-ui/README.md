@@ -1885,12 +1885,14 @@ Ctrl+Shift+S (Command on Apple systems) format as well, and Ctrl+K or
 **Link** asks for the address, which Enter sets and Escape leaves. As in a
 word processor, `- `, `1. ` or `## ` at a line's start begins a list or a
 heading, which undo turns back into the characters; Shift+Enter breaks a
-line. Tab leaves the text; in a list item that can move in, it indents the
-item. Each change reaches `onChange` as standard Markdown, CommonMark with
-`~~strikethrough~~`, written one way: the first change also rewrites what
-the person left as it was, such as `_a_` as `*a*`, a line break as a `\` at
-the line's end, or a list's markers. Text that looks like Markdown, such as
-a `*` or a `1.` at a line's start, is escaped, so it stays text.
+line. Tab leaves the text, also in a list item. Each change reaches
+`onChange` as standard Markdown, CommonMark with `~~strikethrough~~`,
+written one way: the first change also rewrites what the person left as it
+was, such as `_a_` as `*a*`, a line break as a `\` at the line's end, or a
+list's markers. Any other text that looks like Markdown, such as
+`*urgent*` typed around a word or a `#` after a line break, is escaped, so
+it stays text; spaces at a line's start and a blank line made with two
+breaks stay as `&#32;`.
 
 **Written as Markdown.** A text with anything else, such as code, a quote,
 an image, HTML, a rule or a link with a title, which another app may have

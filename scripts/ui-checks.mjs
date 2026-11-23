@@ -10072,6 +10072,40 @@ async function markdown({ browser, origin, engine }) {
           };
         }),
       );
+      results.push(
+        await attemptOn(errors, 'markdown-typed-text-and-lists', async () => {
+          // Typed one key at a time, as a person writes.
+          await page.goto(address('&notes=empty&write'));
+          await text(page).click();
+          await page.keyboard.type('Send *urgent* today');
+          await page.keyboard.press('Shift+Enter');
+          await page.keyboard.press('Shift+Enter');
+          await page.keyboard.type('Then');
+          await page.keyboard.press('Enter');
+          await page.keyboard.type('- one');
+          await page.keyboard.press('Enter');
+          await page.keyboard.type('two');
+          const written = (await draft(page)).draft;
+          const italic = await text(page).evaluate(
+            (el) => el.querySelectorAll('em').length,
+          );
+          // Tab in the second item leaves the text, and the list as it is.
+          await page.keyboard.press(tab);
+          const next = await focused(page);
+          const after = (await draft(page)).draft;
+          return {
+            pass:
+              written ===
+                'Send \\*urgent\\* today\\\n&#32;\\\nThen\n\n- one\n- two' &&
+              italic === 0 &&
+              next === 'button "After the notes"' &&
+              after === written,
+            written,
+            italic,
+            next,
+          };
+        }),
+      );
     } finally {
       results.push({
         id: 'markdown-keyboard-page-errors',

@@ -403,6 +403,7 @@ export function MarkdownField({
                   onChange={emit}
                   onReady={onRichReady}
                   onUnavailable={onRichUnavailable}
+                  active={writing}
                 />
               </Suspense>
             ) : (
