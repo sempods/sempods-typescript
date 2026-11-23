@@ -505,6 +505,18 @@ export function createBrowserRuntime(
       }
     });
   }
+  /**
+   * Whether this tab signed the connection out or forgot it: in progress,
+   * done, or blocked locally because it could not be saved.
+   */
+  function signedOutHere(e: Entry) {
+    const s = e.view.session;
+    return (
+      disconnects.has(e.view.id) ||
+      ((s.kind === 'ended' || s.kind === 'signed-out') &&
+        s.problem === 'disconnected')
+    );
+  }
   /** Whether the connection has, or is getting, a session another tab may end. */
   function inSession(e: Entry) {
     const s = e.view.session;
@@ -1805,6 +1817,8 @@ export function createBrowserRuntime(
   ): Promise<void> {
     return serial(e, async () => {
       if (!sessions || disposed || entries.get(e.view.id) !== e) return;
+      // A sign-out here, saved or not, stays as it is.
+      if (signedOutHere(e)) return;
       const stored = await sessions.read(e.view.id);
       if (entries.get(e.view.id) !== e || disposed) return;
       const value = stored?.value;
@@ -2041,19 +2055,26 @@ export function createBrowserRuntime(
     }
     if (disposed) throw new RuntimeError('disconnected');
     if (outcome.kind === 'kept') return outcome;
-    // A sign-out or forget after the grant was stored stays in effect: the
-    // grant is used only while the record still holds it.
-    const now = await shared.read(id).catch(() => undefined);
+    // A sign-out or forget after the grant was stored stays in effect, also
+    // one here that could not be saved: the grant is used only while this
+    // tab has not signed out and the record still holds it.
+    let now: SessionSnapshot | undefined;
+    let read = true;
+    try {
+      now = await shared.read(id);
+    } catch {
+      // Unreadable now: the stored grant stands, and the next read corrects.
+      read = false;
+    }
     if (disposed) throw new RuntimeError('disconnected');
     const old = entries.get(id);
     if (
-      disconnects.has(id) ||
       !old ||
-      !now ||
-      now.value.kind === 'disconnected'
+      signedOutHere(old) ||
+      (read && (!now || now.value.kind === 'disconnected'))
     )
       throw new RuntimeError('disconnected');
-    if (old !== e || now.revision !== outcome.record.revision) {
+    if (old !== e || (read && now!.revision !== outcome.record.revision)) {
       // Changed meanwhile: the connection follows the record as it is now.
       void sync(old);
       return { kind: 'completed' };

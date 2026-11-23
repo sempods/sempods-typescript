@@ -816,48 +816,6 @@ it('leaves a newer attempt for its own callback when a replaced one answers late
   });
 });
 
-it('lets a sign-out after the new grant was stored, before this tab uses it, stay in effect', async () => {
-  const factory = new IDBFactory();
-  const gate: { held?: ReturnType<typeof deferred<void>>; reached?: boolean } =
-    {};
-  const f = fixture({
-    scopes: { required: ['tasks'], optional: ['share'] },
-    openStore: storeWith(factory, (store) => ({
-      async commit(id, revision, value) {
-        const result = await store.commit(id, revision, value);
-        const v = value as { kind?: string; pending?: unknown };
-        if (gate.held && v.kind === 'ready' && v.pending === undefined) {
-          gate.reached = true;
-          await gate.held.promise;
-        }
-        return result;
-      },
-    })),
-  });
-  const { id, authorization } = await reauthorizing(f);
-  gate.held = deferred<void>();
-  const next = keep(f.returned(authorization));
-  const report = next.initialize();
-  await vi.waitFor(() => expect(gate.reached).toBe(true));
-  const held = gate.held;
-  delete gate.held;
-  expect(await next.disconnect(id)).toEqual({ kind: 'disconnected' });
-  held.resolve();
-  expect(await report).toMatchObject({
-    interaction: 'failed',
-    problem: 'disconnected',
-  });
-  expect(next.getSnapshot()).toMatchObject([
-    { id, session: { kind: 'signed-out', problem: 'disconnected' } },
-  ]);
-  const store = await openSessionStore(namespace, factory);
-  expect((await store.read(id))?.value).toMatchObject({
-    kind: 'disconnected',
-    reason: 'disconnected',
-  });
-  store.close();
-});
-
 it('reports no resumed session when the session expired while the person was at the Pod', async () => {
   const f = fixture();
   keep(f.runtime);
@@ -922,4 +880,106 @@ it('reports a lock it waited too long for at its deadline, while a due session w
     vi.useRealTimers();
     held.resolve();
   }
+});
+
+/**
+ * A re-authorization whose callback stored the new grant and waits at that
+ * commit's answer; `failing` makes later commits or one read fail.
+ */
+async function grantStored(failing: { commit?: boolean; read?: boolean } = {}) {
+  const factory = new IDBFactory();
+  const gate: { held?: ReturnType<typeof deferred<void>>; reached?: boolean } =
+    {};
+  const f = fixture({
+    scopes: { required: ['tasks'], optional: ['share'] },
+    openStore: storeWith(factory, (store) => ({
+      async commit(id, revision, value) {
+        if (
+          failing.commit &&
+          gate.reached &&
+          (value as { kind?: string }).kind === 'disconnected'
+        )
+          throw new Error('disk full');
+        const result = await store.commit(id, revision, value);
+        const v = value as { kind?: string; pending?: unknown };
+        if (gate.held && v.kind === 'ready' && v.pending === undefined) {
+          gate.reached = true;
+          await gate.held.promise;
+        }
+        return result;
+      },
+      async read(id) {
+        if (failing.read && gate.reached) {
+          failing.read = false;
+          throw new Error('read failed');
+        }
+        return store.read(id);
+      },
+    })),
+  });
+  const { id, authorization } = await reauthorizing(f);
+  gate.held = deferred<void>();
+  const next = keep(f.returned(authorization));
+  const report = next.initialize();
+  await vi.waitFor(() => expect(gate.reached).toBe(true));
+  const release = () => {
+    const held = gate.held!;
+    delete gate.held;
+    held.resolve();
+  };
+  const saved = async () => {
+    const store = await openSessionStore(namespace, factory);
+    try {
+      return (await store.read(id))?.value;
+    } finally {
+      store.close();
+    }
+  };
+  return { f, id, next, report, release, saved, gate };
+}
+
+it('lets a sign-out after the new grant was stored, before this tab uses it, stay in effect', async () => {
+  const t = await grantStored();
+  expect(await t.next.disconnect(t.id)).toEqual({ kind: 'disconnected' });
+  t.release();
+  expect(await t.report).toMatchObject({
+    interaction: 'failed',
+    problem: 'disconnected',
+  });
+  expect(t.next.getSnapshot()).toMatchObject([
+    { id: t.id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
+  expect(await t.saved()).toMatchObject({
+    kind: 'disconnected',
+    reason: 'disconnected',
+  });
+});
+
+it('keeps a sign-out here that could not be saved, also once the new grant was stored', async () => {
+  const t = await grantStored({ commit: true });
+  const signOut = t.next.disconnect(t.id);
+  t.release();
+  expect(await signOut).toEqual({ kind: 'blocked-locally' });
+  expect(await t.report).toMatchObject({
+    interaction: 'failed',
+    problem: 'disconnected',
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(t.next.getSnapshot()[0]?.session).toMatchObject({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
+  // The stored grant is not used here until the person signs in again.
+  expect(await t.saved()).toMatchObject({ kind: 'ready' });
+});
+
+it('uses the stored grant when the record cannot be read right after it', async () => {
+  const t = await grantStored({ read: true });
+  t.release();
+  expect(await t.report).toMatchObject({
+    interaction: 'completed',
+    connectionId: t.id,
+  });
+  expect(t.next.getSnapshot()[0]?.session.kind).toBe('active');
 });
