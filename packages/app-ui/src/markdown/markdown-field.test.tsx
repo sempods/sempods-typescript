@@ -244,7 +244,7 @@ it('decides the writer again for a value the app restores', async () => {
   expect(text().value).toBe('`y`');
 });
 
-it('leaves nothing to undo of a draft the app replaced', async () => {
+it('leaves nothing to undo or link of a draft the app replaced', async () => {
   const changed = vi.fn();
   /** A draft the app keeps, and replaces with `replace` when it comes. */
   function Draft({ replace }: { readonly replace?: string }) {
@@ -271,9 +271,15 @@ it('leaves nothing to undo of a draft the app replaced', async () => {
   await waitFor(() =>
     expect(button('Undo').hasAttribute('disabled')).toBe(false),
   );
+  // An address half typed for this draft.
+  fireEvent.keyDown(input, { key: 'k', ctrlKey: true });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Link address' }), {
+    target: { value: 'https://old.example' },
+  });
   // The app discards the draft and loads another text.
   rerender(<Draft replace="Other" />);
   await waitFor(() => expect(input.textContent).toBe('Other'));
+  expect(screen.queryByRole('textbox', { name: 'Link address' })).toBeNull();
   await waitFor(() =>
     expect(button('Undo').hasAttribute('disabled')).toBe(true),
   );

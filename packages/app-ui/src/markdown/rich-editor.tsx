@@ -312,6 +312,8 @@ export default function RichEditor({
   useEffect(() => {
     if (value === shown.current) return;
     shown.current = value;
+    // An address typed for the earlier draft does not carry over.
+    setLinking(false);
     const { schema, plugins } = editor.state;
     editor.view.updateState(
       EditorState.create({ schema, plugins, doc: schema.nodeFromJSON(doc) }),

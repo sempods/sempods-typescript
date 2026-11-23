@@ -200,6 +200,7 @@ function flanks(out: string, at: number, length: number, opens: boolean) {
     start--;
   let end = at + length;
   while (out[end] === char) end++;
+  // By UTF-16 unit, as the parser reads: half an emoji is no punctuation.
   const before = side(out[start - 1]);
   const after = side(out[end]);
   return opens

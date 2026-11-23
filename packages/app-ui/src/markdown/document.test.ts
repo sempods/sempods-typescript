@@ -190,6 +190,11 @@ describe('marks', () => {
         paragraph(text('a'), text('b', { type: 'italic' }), text('c')),
       ),
     ).toBe('a*b*c');
+    // The parser reads an emoji by its UTF-16 units, as no punctuation:
+    // around one, the markers flank as around a letter.
+    const emoji = paragraph(text('a'), text('💰', { type: 'bold' }), text('b'));
+    expect(toMarkdown(emoji)).toBe('a**💰**b');
+    expect(fromMarkdown(toMarkdown(emoji))).toEqual(emoji);
   });
 
   it('keeps a `!` before a link text, not an image', () => {
@@ -264,7 +269,7 @@ describe('any document', () => {
   };
   const pick = <T>(items: readonly T[]) =>
     items[Math.floor(random() * items.length)]!;
-  const CHARS = 'ab xy 12 *_~[]()!#&;<>`\\-+.=:/é';
+  const CHARS = 'ab xy 12 *_~[]()!#&;<>`\\-+.=:/é💰';
   const HREFS = [
     'https://a.b/x',
     'https://a.b/?x=1&copy;=2',
