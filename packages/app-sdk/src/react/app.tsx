@@ -160,14 +160,16 @@ export function useAppFacts<T>(
 export function useWriteGate() {
   return useAppFacts((s) => !s.changing && !s.confirmingLeave);
 }
+/** Internal: a connection, while it reads (`reading`), and its catalogue. */
+export function readingConnection(s: AppSnapshot, id: string | null) {
+  const connection = s.connections.find((c) => c.id === id);
+  const reading = reads(connection) ? connection : undefined;
+  return { id: reading?.id ?? null, catalogue: reading?.catalogue };
+}
 /** Internal: the active connection, while it reads (`reading`), and its catalogue. */
 export function activeCatalogue(s: AppSnapshot) {
-  const connection = s.connections.find((c) => c.id === s.activeId);
-  const reading = reads(connection) ? connection : undefined;
-  return {
-    activeId: reading?.id ?? null,
-    catalogue: reading?.catalogue,
-  };
+  const { id, catalogue } = readingConnection(s, s.activeId);
+  return { activeId: id, catalogue };
 }
 /** Pass one runtime created outside render. The provider consumes its single initializer. */
 export function SempodsProvider({

@@ -78,6 +78,7 @@ import {
   browserPreferences,
   createContextMemory,
 } from './context-memory.js';
+import { connectionRemovals } from './removals.js';
 
 import { assertCredentialRecipient, sends, type Entry } from './connection.js';
 
@@ -405,6 +406,12 @@ export function createBrowserRuntime(
   };
   const registry = createClientRegistry(protocol);
   const entries = new Map<string, Entry>();
+  /** How often each ID was removed (`connectionRemovals`). */
+  const removals = new Map<string, number>();
+  /** Removes a connection; one added again under its ID is another one. */
+  const dropEntry = (id: string) => {
+    if (entries.delete(id)) removals.set(id, (removals.get(id) ?? 0) + 1);
+  };
   const listeners = new Set<() => void>();
   const disconnects = new Map<
     string,
@@ -651,7 +658,7 @@ export function createBrowserRuntime(
     // Replaced first, so the old connection does not settle to read without
     // a token, and keeps its place in the list.
     if (next) entries.set(id, next);
-    else entries.delete(id);
+    else dropEntry(id);
     stop(e, { kind: 'signed-out' });
     if (next) {
       settle(next);
@@ -776,7 +783,7 @@ export function createBrowserRuntime(
       return false;
     for (const x of same) {
       // Removed first, so it does not settle to read without a token.
-      entries.delete(x.view.id);
+      dropEntry(x.view.id);
       stop(x, { kind: 'signed-out' });
     }
     const e = fromRecord(stored);
@@ -2595,7 +2602,7 @@ export function createBrowserRuntime(
               };
               settle(e);
             } else {
-              entries.delete(id);
+              dropEntry(id);
               ensureDefault();
             }
           }
@@ -2899,5 +2906,6 @@ export function createBrowserRuntime(
     },
   };
   activeMemories.set(runtime, contexts.active);
+  connectionRemovals.set(runtime, (id) => removals.get(id) ?? 0);
   return runtime;
 }

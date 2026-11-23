@@ -405,6 +405,19 @@ icon; an `svg` among them is no longer set to 20px by the SDK's styles, so give
 it a size of its own (`<DeleteIcon />` is 1rem). See [several rows from one
 decision](react-authoring.md#several-rows-from-one-decision).
 
+### Overview rows across connected Pods
+
+Nothing changes for an overview of the active Pod. An app that writes rows
+of several connected Pods, and so made a row's connection active under the
+leave guard before writing it, passes that connection instead:
+`overview.for({ connection, context, snapshot })` and
+`edit.open({ subject, context, connection })`. Drop the selection step and
+the wait for its handles: the row is written in its own connection while
+the active Pod stays. Key rows and `UnresolvedNotices`' `shown` by
+connection, Context and IRI; `unresolved` entries of such rows carry
+`connection`. A custom `LeaveGuard` may set `connection` for work of its
+own. See [rows of several connected Pods](react-authoring.md#rows-of-several-connected-pods).
+
 ## From 0.7.0 to 0.8.0
 
 Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to

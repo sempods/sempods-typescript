@@ -9,8 +9,10 @@ import type { AppController, LeaveGuard } from './app.js';
 import type { Connection } from '../runtime/types.js';
 import type { BoundView } from '../runtime/view.js';
 import { CreationLane } from './creation-lane.js';
+import { editorsOf } from './editors.js';
 import { lanesOf } from './lanes.js';
-import { keepsWork, sessionsOf } from './retention.js';
+import { keepsWork, originOf, sessionsOf } from './retention.js';
+import { connectionRemovals } from '../runtime/removals.js';
 
 const definition = fields({ title: text('urn:title', { language: null }) });
 const work = 'https://pod.example/alice/_system/contexts/work';
@@ -188,4 +190,76 @@ it('counts every new session of a connection, also while nobody renders', () => 
   f.signIn();
   expect(sessions('a')).toBe(2);
   expect(sessions(null)).toBe(0);
+});
+
+/** A view of `work` that an editor can be bound to; its read never answers. */
+function editable(f: ReturnType<typeof fakes>) {
+  return Object.assign(f.view(), {
+    subjects: { get: () => new Promise(() => {}) },
+  });
+}
+
+it('ends an editor on screen once its connection has a new authorization (#408)', () => {
+  const f = fakes();
+  const store = editorsOf(f.app);
+  const view = editable(f);
+  // Held by a component, never released.
+  store.claim(view, 'urn:item', 'title', definition, 'connection', 'explicit');
+  expect(f.guards.size).toBe(1);
+  // A session that ends by itself keeps it on screen.
+  f.end('anonymous');
+  expect(store.retains(work, 'urn:item', 'connection')).toBe(true);
+  // A new sign-in (here from another tab) ends it, also while it is shown.
+  f.signIn();
+  expect(store.retains(work, 'urn:item', 'connection')).toBe(false);
+  expect(f.guards.size).toBe(0);
+});
+
+it('keeps origin-bound work with its connection, not with its ID (#408)', async () => {
+  const f = fakes();
+  let removed = 0;
+  const runtime = {};
+  connectionRemovals.set(runtime, (id) => (id === 'a' ? removed : 0));
+  Object.assign(f.app, { runtime });
+  const view = editable(f);
+  const life = originOf(f.app, 'a');
+  // Rows and an editor bound to connection `a`.
+  const group = lanesOf(f.app).group(
+    view,
+    'origin rows',
+    definition,
+    'explicit',
+    undefined,
+    'a',
+  );
+  await group
+    .lane('urn:item')
+    .execute('update', 'urn:item', async () => ({ kind: 'unconfirmed' }));
+  editorsOf(f.app).claim(
+    view,
+    'urn:item',
+    'title',
+    definition,
+    'connection',
+    'explicit',
+    'a',
+  );
+  expect([...f.guards].map((g) => g.connection)).toEqual(['a', 'a']);
+  // Another active connection leaves it alone, also once access is lost.
+  f.activate('b');
+  f.end('anonymous');
+  expect(keepsWork(f.app, 'a', view, true, life)).toBe(true);
+  expect(group.holds()).toBe(true);
+  expect(editorsOf(f.app).retains(work, 'urn:item', 'connection', 'a')).toBe(
+    true,
+  );
+  // `a` is removed and added again under its ID: another connection.
+  removed = 1;
+  f.end('anonymous');
+  expect(keepsWork(f.app, 'a', view, true, life)).toBe(false);
+  expect(group.holds()).toBe(false);
+  expect(editorsOf(f.app).retains(work, 'urn:item', 'connection', 'a')).toBe(
+    false,
+  );
+  expect(f.guards.size).toBe(0);
 });

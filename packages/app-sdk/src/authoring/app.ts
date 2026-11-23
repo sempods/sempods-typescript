@@ -29,9 +29,24 @@ export interface LeaveGuard {
    *
    * A pending write (`blocked()`) blocks every change, except that a
    * `connection` or `explicit` guard does not block `selectContext`, which
-   * leaves it alone.
+   * leaves it alone, and a guard with `connection` does not block the
+   * connection actions that leave it alone.
    */
   readonly scope?: 'local' | 'target' | 'connection' | 'explicit';
+  /**
+   * The connection whose explicit Context this work belongs to, set when it
+   * stays with that connection rather than with the active one (an
+   * origin-bound overview row or editor, #408). Connection actions then
+   * leave it only when they act on that connection (`disconnect` and
+   * `forget` with its ID, and the access prompts doing the same) or leave
+   * the page for a sign-in: `authorize` of any connection, `connect` under
+   * `signIn: 'required'` and a prompt's sign-in. `selectConnection`,
+   * `selectTarget` on another Pod, `connect` without a sign-in and
+   * `disconnect`/`forget` of other connections neither ask about it nor
+   * discard it, and its pending write does not block them. Without it, every
+   * connection action leaves the guard.
+   */
+  readonly connection?: string;
   unconfirmed?(): boolean;
   blocked(): boolean;
   dirty(): boolean;
@@ -72,7 +87,11 @@ export type TargetSelection =
         'connection' | 'session' | 'catalogue' | 'unlisted' | 'preset';
     };
 type Unavailable = Extract<TargetSelection, { kind: 'unavailable' }>['reason'];
-type Availability = 'yes' | 'later' | 'gone';
+/**
+ * Internal: whether a prompt's target is there: `gone` withdraws the prompt,
+ * `later` (a catalogue being read) keeps it, but confirming runs nothing.
+ */
+export type Availability = 'yes' | 'later' | 'gone';
 
 /** Why a target cannot be selected now, from the runtime's own facts. */
 export function targetProblem(
@@ -132,15 +151,29 @@ function cannotWork(c: Connection) {
     c.missingRequiredScopes.length > 0
   );
 }
-/** A guarded change: row navigation, a Context selection, or a connection action. */
-type Change = 'navigate' | 'context' | 'connection';
-/** Whether a guarded change leaves a guard (see `LeaveGuard.scope`). */
+/**
+ * A guarded change: row navigation, a Context selection, or a connection
+ * action with the connections it acts on (`on`; none for a change of the
+ * active connection alone, `all` for one that may leave the page to sign in).
+ */
+type Change =
+  'navigate' | 'context' | { readonly on: readonly string[] | 'all' };
+/** A change of the active connection that acts on no connection's session. */
+const switching: Change = { on: [] };
+/**
+ * Whether a guarded change leaves a guard (see `LeaveGuard.scope` and
+ * `LeaveGuard.connection`).
+ */
 function leaves(change: Change, guard: LeaveGuard) {
   if (change === 'navigate')
     return guard.scope !== 'target' && guard.scope !== 'explicit';
   if (change === 'context')
     return guard.scope !== 'connection' && guard.scope !== 'explicit';
-  return true;
+  return (
+    guard.connection === undefined ||
+    change.on === 'all' ||
+    change.on.includes(guard.connection)
+  );
 }
 export interface AppSnapshot {
   /** Compatibility default is required; on-demand leaves discovery to scoped flows. */
@@ -261,6 +294,33 @@ export function navigateRetaining(
     retainedNavigation.get(app)?.(action, retained) ?? app.navigate(action)
   );
 }
+const checkedNavigation = new WeakMap<
+  object,
+  (
+    action: () => void | Promise<void>,
+    available: () => Availability,
+    followsActive: boolean,
+  ) => Promise<boolean>
+>();
+/**
+ * Internal: row navigation to a destination that can go away while the
+ * person is asked, such as a row whose Context loses access or a row of
+ * another connection (#408). Losing it withdraws the prompt, as for
+ * `selectTarget`: nothing runs and no guard is discarded; while it is
+ * `later`, confirming runs nothing either. With `followsActive` false
+ * another active connection keeps the prompt: the destination does not
+ * depend on it. No public API.
+ */
+export function navigateWhile(
+  app: AppController,
+  action: () => void | Promise<void>,
+  available: () => Availability,
+  followsActive: boolean,
+): Promise<boolean> {
+  const navigate = checkedNavigation.get(app);
+  if (navigate) return navigate(action, available, followsActive);
+  return available() !== 'gone' ? app.navigate(action) : Promise.resolve(false);
+}
 /**
  * Selection/leave policy, the active Pod reader and the Context-discovery policy
  * (`contextSelection`). Authentication and request authority remain in the runtime.
@@ -323,7 +383,10 @@ export function createAppController(
         action: () => void | Promise<void>;
         change: Change;
         resolve: (accepted: boolean) => void;
-        /** The connection that was active when the person was asked. */
+        /**
+         * The connection that was active when the person was asked; `null`
+         * for a prompt that is not about the active one.
+         */
         activeId: string | null;
         retained?: ReadonlySet<LeaveGuard>;
         /**
@@ -372,8 +435,8 @@ export function createAppController(
   /** Whether nothing a change would leave holds work: no automatic switch otherwise. */
   function quiet() {
     return (
-      !blocked('connection') &&
-      !leavingGuards('connection').some((g) => g.dirty() || g.unconfirmed?.())
+      !blocked(switching) &&
+      !leavingGuards(switching).some((g) => g.dirty() || g.unconfirmed?.())
     );
   }
   /**
@@ -633,20 +696,36 @@ export function createAppController(
   function leavingGuards(change: Change, retained?: ReadonlySet<LeaveGuard>) {
     return [...guards].filter((g) => !retained?.has(g) && leaves(change, g));
   }
-  /** Whether a pending write blocks a change: always, unless it ignores the guard. */
+  /**
+   * Whether a pending write blocks a change: row navigation always, a
+   * Context selection or connection action unless it leaves the guard alone.
+   */
   function blocked(change: Change) {
     return [...guards].some(
-      (g) =>
-        (change !== 'context' ||
-          (g.scope !== 'connection' && g.scope !== 'explicit')) &&
-        g.blocked(),
+      (g) => (change === 'navigate' || leaves(change, g)) && g.blocked(),
     );
   }
+  /** A connection action on one connection that stays on the page. */
+  const on = (id: string): Change => ({ on: [id] });
+  /**
+   * A sign-in leaves the page (`beginAuthorization`), and with it the work
+   * of every connection.
+   */
+  const signingIn: Change = { on: 'all' };
+  /** `connect` signs in under `signIn: 'required'`; otherwise it only switches. */
+  const connectChange = (): Change =>
+    runtime.signIn === 'required' ? signingIn : switching;
   async function guard(
     action: () => void | Promise<void>,
-    change: Change = 'connection',
+    change: Change,
     retained?: ReadonlySet<LeaveGuard>,
     available?: () => Availability,
+    /**
+     * Whether the action is about the active connection, so that its prompt
+     * ends once another one becomes active; `false` for a destination of its
+     * own, which `available` follows instead.
+     */
+    followsActive = true,
   ): Promise<boolean> {
     if (changing || pending || blocked(change)) return false;
     // The person acts: the startup choice no longer changes the connection.
@@ -668,7 +747,7 @@ export function createAppController(
         action,
         resolve,
         change,
-        activeId,
+        activeId: followsActive ? activeId : null,
         ...(retained ? { retained } : {}),
         ...(available ? { available } : {}),
       };
@@ -824,7 +903,7 @@ export function createAppController(
         view = null;
         callbackNotice = false;
         publish();
-      });
+      }, switching);
     },
     /** Guarded like `selectConnection`. */
     selectContext(iri: string) {
@@ -860,7 +939,7 @@ export function createAppController(
         runtime.getSnapshot().find((c) => c.id === id)?.selectedContext === iri
       )
         return { kind: 'selected' };
-      const change: Change = same ? 'context' : 'connection';
+      const change: Change = same ? 'context' : switching;
       if (changing || pending || blocked(change)) return { kind: 'blocked' };
       let accepted: boolean;
       try {
@@ -910,7 +989,7 @@ export function createAppController(
      * retry `disconnect`/`forget` before connecting again.
      */
     connect(url = defaultPodUrl) {
-      return guard(connecting(url));
+      return guard(connecting(url), connectChange());
     },
     /**
      * Signs in to an existing connection, or, with
@@ -920,7 +999,7 @@ export function createAppController(
      * failed retirement rejects with `RuntimeError('storage')` until retried.
      */
     authorize(id: string, options?: { readonly intent?: AuthorizationIntent }) {
-      return guard(authorizing(id, options?.intent));
+      return guard(authorizing(id, options?.intent), signingIn);
     },
     /**
      * Guarded like `selectConnection`. `true` means the action ran, not that
@@ -929,11 +1008,11 @@ export function createAppController(
      * to another one with a session, as a removed one does.
      */
     disconnect(id: string) {
-      return guard(disconnecting(id));
+      return guard(disconnecting(id), on(id));
     },
     /** Signs out if needed and forgets the Pod; guarded and reported like `disconnect`. */
     forget(id: string) {
-      return guard(forgetting(id));
+      return guard(forgetting(id), on(id));
     },
     /**
      * Retires a prompt of `access.prompts` that offers `dismiss`, for this
@@ -1011,8 +1090,12 @@ export function createAppController(
       tracker.current(prompt, action) ? 'yes' : 'gone';
     if (available() !== 'yes') return false;
     const id = prompt.connectionId;
-    const guarded = (run: () => void | Promise<void>) =>
-      guard(run, 'connection', undefined, available);
+    // What the prompt's action acts on: its connection, or every one for a
+    // sign-in, which leaves the page.
+    const guarded = (
+      run: () => void | Promise<void>,
+      change: Change = id ? on(id) : switching,
+    ) => guard(run, change, undefined, available);
     switch (action) {
       case 'dismiss':
         return controller.dismiss(prompt.id);
@@ -1036,15 +1119,23 @@ export function createAppController(
               id,
               prompt.reason === 'missing-scopes' ? 'change-sharing' : undefined,
             ),
+            signingIn,
           );
         // Without a fixed address the app asks for one (`connect(url)`).
         return defaultPodUrl === undefined
           ? false
-          : guarded(connecting(defaultPodUrl));
+          : guarded(connecting(defaultPodUrl), connectChange());
     }
   }
   retainedNavigation.set(controller, (action, retained) =>
     guard(action, 'navigate', retained),
+  );
+  // A destination still being read (`later`) opens when nothing asks; a
+  // confirmation then runs nothing until it is known.
+  checkedNavigation.set(controller, (action, available, followsActive) =>
+    available() !== 'gone'
+      ? guard(action, 'navigate', undefined, available, followsActive)
+      : Promise.resolve(false),
   );
   selectionDemands.set(controller, (demanded) => {
     if (demanded === selectionDemand) return;
