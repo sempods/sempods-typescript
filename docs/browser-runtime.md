@@ -978,9 +978,11 @@ the earlier session as above; a host that disposes the runtime on `pagehide`
 recreates it, and its startup resumes it. A navigation that never leaves (the
 browser stopped it, or the person stayed in a leave prompt) leaves the
 connection `leaving` until `cancelAuthorization(id)` abandons the attempt. It
-first stops a navigation of this document still loading (`window.stop()`)
-and aborts the `signal` that `navigate(url, { signal })` received, for an app
-navigation that does not go through the document's location. A
+first stops a navigation of this document still loading (`window.stop()`,
+which also stops the page's other loads in flight) and aborts the `signal`
+that `navigate(url, { signal })` received. A host-managed sign-in that does
+not navigate this document cancels on that signal and returns `'signal'`:
+the page then stays without `window.stop()`. A
 re-authorization then resumes as above, a first sign-in ends `interrupted`
 without a request and its saved attempt is retired, and the silent one is
 signed out. `SempodsProvider` offers it as **Stay on this page** once a

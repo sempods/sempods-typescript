@@ -139,6 +139,12 @@ function signedOut(reason: string | undefined): SessionFact {
 }
 
 /** Creates no storage, request or navigation until initialize/connect is called. */
+/** One redirect to a Pod's sign-in, and whether its `navigate` cancels it. */
+interface Navigation {
+  readonly controller: AbortController;
+  owned: boolean;
+}
+
 export function createBrowserRuntime(
   options: BrowserRuntimeOptions,
 ): BrowserRuntime {
@@ -391,7 +397,13 @@ export function createBrowserRuntime(
   /** Connections whose sign-in is being prepared here. */
   const preparing = new Set<string>();
   /** Abandons this page's redirect of a `leaving` connection; see `watchReturn`. */
-  const abandons = new Map<string, (staying: boolean) => boolean>();
+  const abandons = new Map<
+    string,
+    {
+      readonly abandon: (staying: boolean) => boolean;
+      readonly navigation: Navigation;
+    }
+  >();
   const contexts = createContextMemory(
     namespace,
     options.preferences === undefined
@@ -1871,7 +1883,7 @@ export function createBrowserRuntime(
     generation: string,
     /** A silent first sign-in, a re-authorization or another first sign-in. */
     kind: 'silent' | 'resume' | 'first',
-    navigation: AbortController,
+    navigation: Navigation,
   ) {
     const page = globalThis as {
       addEventListener?: (
@@ -1886,7 +1898,7 @@ export function createBrowserRuntime(
     const id = e.view.id;
     const stop = () => {
       page.removeEventListener?.('pageshow', shown);
-      if (abandons.get(id) === abandon) abandons.delete(id);
+      if (abandons.get(id)?.abandon === abandon) abandons.delete(id);
     };
     /**
      * The page came back (`pageshow`) or stays (`cancelAuthorization`): this
@@ -1897,7 +1909,7 @@ export function createBrowserRuntime(
       stop();
       if (!eligible(e, generation) || e.view.session.kind !== 'leaving')
         return false;
-      navigation.abort(new RuntimeError('interrupted'));
+      navigation.controller.abort(new RuntimeError('interrupted'));
       if (kind === 'silent') {
         noteSilent('tried');
         decline(e);
@@ -1915,7 +1927,7 @@ export function createBrowserRuntime(
     function shown(event: Event) {
       if ((event as Event & { persisted?: boolean }).persisted) abandon(false);
     }
-    abandons.set(id, abandon);
+    abandons.set(id, { abandon, navigation });
     page.addEventListener?.('pageshow', shown);
     e.lifetime.signal.addEventListener('abort', stop, { once: true });
   }
@@ -2279,16 +2291,20 @@ export function createBrowserRuntime(
     } else prepared = await store();
     const { generation, url, reauthorizing } = prepared;
     current(e, generation);
-    const navigation = new AbortController();
+    const navigation: Navigation = {
+      controller: new AbortController(),
+      owned: false,
+    };
     watchReturn(
       e,
       generation,
       intent === 'silent' ? 'silent' : reauthorizing ? 'resume' : 'first',
       navigation,
     );
-    (options.navigate ?? ((url) => window.location.assign(url)))(url, {
-      signal: navigation.signal,
-    });
+    const handled = (
+      options.navigate ?? ((url) => window.location.assign(url))
+    )(url, { signal: navigation.controller.signal });
+    navigation.owned = handled === 'signal';
   }
   async function bootstrap(): Promise<StartupReport> {
     let report: StartupReport = {
@@ -2796,12 +2812,14 @@ export function createBrowserRuntime(
       return authorize(id, intent);
     },
     cancelAuthorization(id) {
-      const abandon = abandons.get(id);
-      if (!abandon) return false;
+      const attempt = abandons.get(id);
+      if (!attempt) return false;
       // A navigation of this document still loading stops here, whichever
-      // `navigate` started it; `abandon` aborts the `signal` it was given.
-      (globalThis as { stop?: () => void }).stop?.();
-      return abandon(true);
+      // `navigate` started it, unless that one cancels on its `signal`
+      // itself; `abandon` aborts the signal.
+      if (!attempt.navigation.owned)
+        (globalThis as { stop?: () => void }).stop?.();
+      return attempt.abandon(true);
     },
     disconnect(id) {
       return leave(id, false);

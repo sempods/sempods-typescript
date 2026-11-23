@@ -253,14 +253,17 @@ export interface BrowserRuntimeOptions {
   readonly location?: () => string;
   /**
    * Leaves for a Pod's sign-in (default `window.location.assign`). `signal`
-   * aborts when the page stays instead (`cancelAuthorization`): a navigation
-   * that does not go through this document's location, which `window.stop()`
-   * already stops, must be cancelled on it.
+   * aborts when the page stays instead (`cancelAuthorization`), which first
+   * calls `window.stop()` to stop a navigation of this document still
+   * loading; that also stops the page's other loads in flight. A navigation
+   * that does not go through this document (a host-managed sign-in) cancels
+   * on `signal` and returns `'signal'`: the page then stays without
+   * `window.stop()`.
    */
   readonly navigate?: (
     url: string,
     options: { readonly signal: AbortSignal },
-  ) => void;
+  ) => void | 'signal';
   readonly replaceUrl?: (url: string) => void;
   /**
    * Advanced/test storage adapters; omitted adapters use IndexedDB with a
@@ -432,8 +435,8 @@ export interface BrowserRuntime {
    * started here: for a navigation the browser stopped, or one the person
    * kept the page from (a leave prompt's **Stay**), which leaves the
    * connection `leaving`. A navigation of this document still loading is
-   * stopped first (`window.stop()`), and the `signal` given to `navigate`
-   * aborts. A re-authorization resumes the session it started from
+   * stopped first (`window.stop()`), unless `navigate` returned `'signal'`,
+   * and the `signal` given to `navigate` aborts. A re-authorization resumes the session it started from
    * (`restoring`, then `active`, or `ended` if it cannot), as when the page
    * comes back from the back/forward cache; a first sign-in ends
    * `interrupted` here, without a request, and its saved attempt is retired

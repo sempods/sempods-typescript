@@ -565,6 +565,26 @@ it('stays on the page when its redirect did not leave', async () => {
   expect(f.fetch.mock.calls.length).toBe(requests);
 });
 
+it('stops the document only for a navigation that does not cancel itself', async () => {
+  const stop = vi.fn();
+  vi.stubGlobal('stop', stop);
+  const f = fixture();
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  await runtime.beginAuthorization(id);
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  expect(stop).toHaveBeenCalledTimes(1);
+  await restored(runtime);
+  // A host-managed sign-in cancels on its signal: the page's loads go on.
+  f.navigate.mockReturnValueOnce('signal');
+  await runtime.beginAuthorization(id);
+  const { signal } = f.navigate.mock.calls.at(-1)![1]!;
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  expect(signal.aborted).toBe(true);
+  expect(stop).toHaveBeenCalledTimes(1);
+});
+
 it('restarts a catalogue read the leaving page aborted when it resumes', async () => {
   const page = new EventTarget();
   vi.stubGlobal('addEventListener', page.addEventListener.bind(page));

@@ -259,6 +259,12 @@ try {
         });
         res.end(JSON.stringify(body));
       };
+      // A page request that answers late, in flight while the page stays.
+      if (url.pathname === '/slow') {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        json({ slow: true });
+        return;
+      }
       if (url.pathname === '/app' || url.pathname === '/callback') {
         res.writeHead(200, {
           'content-type': 'text/html',
@@ -1208,6 +1214,39 @@ try {
   await ready();
   await restored();
   await stayWhileLoading();
+  // A host-managed sign-in cancels on its signal: staying leaves the page's
+  // other requests running.
+  await page.evaluate(() => sessionStorage.setItem('fixture-navigate', 'host'));
+  await page.reload();
+  await ready();
+  await restored();
+  const hosted = await page.evaluate(async () => {
+    const r = window.fixture.runtime;
+    const id = r.getSnapshot()[0].id;
+    await r.beginAuthorization(id);
+    const leaving = r.getSnapshot()[0].session.kind;
+    const slow = fetch('/slow').then(
+      (response) => response.json(),
+      (error) => ({ failed: String(error) }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const cancelled = r.cancelAuthorization(id);
+    return {
+      leaving,
+      cancelled,
+      aborted: window.hostSignIn.aborted,
+      slow: await slow,
+    };
+  });
+  assert.deepEqual(hosted, {
+    leaving: 'leaving',
+    cancelled: true,
+    aborted: true,
+    slow: { slow: true },
+  });
+  await page.waitForFunction(
+    () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+  );
   await page.evaluate(() => sessionStorage.removeItem('fixture-navigate'));
   await page.reload();
   await ready();
