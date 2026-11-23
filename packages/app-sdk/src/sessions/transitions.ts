@@ -12,9 +12,12 @@ import {
   parseStoredCredentials,
 } from '@sempods/client-sdk/oauth/host';
 import {
+  livePending,
   parseSessionRecord,
+  pendingGeneration,
   sessionBinding,
   SessionTransitionError,
+  type PendingAttempt,
   type RefreshResend,
   type SessionConfiguration,
   type SessionRecord,
@@ -34,6 +37,22 @@ export type CodeClaim = Completion & {
   readonly kind: 'claimed';
   readonly attempt: SessionAttempt;
 };
+/**
+ * A re-authorization's callback, claimed on the session it was pending for:
+ * `claimed` with the attempt to exchange its code, or `answered` when the
+ * provider answered this attempt with an error, which consumed it.
+ */
+export type PendingClaim =
+  | (Completion & {
+      readonly kind: 'claimed';
+      readonly attempt: SessionAttempt;
+    })
+  | {
+      readonly kind: 'answered';
+      readonly error: OAuthError;
+      /** Whether the session it was pending for stays (not a handed-over one). */
+      readonly kept: boolean;
+    };
 export type RefreshClaim = Completion & {
   readonly kind: 'claimed';
   readonly binding: SessionBinding;
@@ -124,11 +143,15 @@ export function createSessionTransitions(
         } catch {
           throw new SessionTransitionError('result');
         }
+        // A renewal keeps the session's re-authorization pending; a code
+        // exchange is the new grant, with nothing pending.
+        const pending = before ? carried(claimed.value) : undefined;
         return commit(claimed.id, claimed.revision, {
           version: 1,
           kind: 'ready',
           binding,
           credentials: result,
+          ...(pending ? { pending } : {}),
         });
       },
     };
@@ -147,12 +170,15 @@ export function createSessionTransitions(
     // answer within the Pod's grace period; a code claim keeps nothing.
     const credentials =
       current.value.kind === 'ready' ? current.value.credentials : undefined;
+    const pending =
+      operation === 'refresh' ? carried(current.value) : undefined;
     return commit(current.id, current.revision, {
       version: 1,
       kind: 'claimed',
       binding: expected,
       operation,
       subject: credentials?.subject ?? null,
+      ...(pending ? { pending } : {}),
       ...(operation === 'refresh' && credentials?.refreshToken
         ? {
             resend: {
@@ -184,9 +210,17 @@ export function createSessionTransitions(
       }
       return { records, unreadable };
     },
+    /**
+     * Stores a sign-in attempt. Beside a session (a `ready` record, or a
+     * refresh claim the coordinator found under the refresh lock with no tab
+     * sending it) the attempt is pending and the session keeps working,
+     * replacing an earlier pending attempt; otherwise the attempt is the
+     * record (`authorizing`), `silent` for the silent first sign-in.
+     */
     async prepare(
       input: SessionAttempt,
       expectedRevision: string | null,
+      silent = false,
     ): Promise<SessionChange> {
       // Parsing creates a detached snapshot before the first await.
       const snapshot = validate('attempt', () =>
@@ -205,75 +239,208 @@ export function createSessionTransitions(
         sessionBinding(current.value).generation === snapshot.generation
       )
         throw new SessionTransitionError('state');
-      // A working session is kept beside the attempt (also across a replaced
-      // attempt), so a denied or abandoned re-authorization can resume it. A
-      // claimed or retired one is not.
+      const value = current?.value;
+      if (
+        value?.kind === 'ready' ||
+        (value?.kind === 'claimed' && value.operation === 'refresh')
+      )
+        return commit(snapshot.connectionId, expectedRevision, {
+          ...value,
+          pending: { kind: 'open', attempt: snapshot },
+        });
       return commit(snapshot.connectionId, expectedRevision, {
         version: 1,
         kind: 'authorizing',
         attempt: snapshot,
-        ...(current?.value.kind === 'ready'
-          ? {
-              previous: {
-                binding: current.value.binding,
-                credentials: current.value.credentials,
-              },
-            }
-          : current?.value.kind === 'authorizing' && current.value.previous
-            ? { previous: current.value.previous }
-            : {}),
+        ...(silent ? { silent: true as const } : {}),
       });
     },
     /**
-     * Resumes the session a re-authorization started from, under the attempt's
-     * generation, and consumes the attempt; `pod` is the coordinator's fresh
-     * discovery. Only for a callback the provider
-     * answered with `access_denied` for this attempt, or, without a callback, an
-     * abandoned attempt. Throws `state` when it is not eligible: a first
-     * sign-in, another answer, a previous credential that expired without a
-     * refresh token, or a binding the coordinator's discovery no longer
-     * confirms. A forged or malformed callback throws `callback`; neither
-     * changes the record.
+     * Under the refresh lock: claims the code of a re-authorization's callback
+     * on the session it is pending for, which keeps working meanwhile. Only
+     * the open attempt with the callback's state is claimed; the verifier is
+     * then dropped from the record, so a second callback cannot exchange the
+     * code again. A matching error answer (a denial, a server error)
+     * consumes the attempt (`answered`) and leaves the session as it is. A
+     * forged or malformed callback throws `callback`; a missing, replaced,
+     * claimed or expired attempt throws `attempt`; neither changes the
+     * record. An attempt its session handed over (`handOver`) is claimed as
+     * a first sign-in's: an error answer then retires the record. `expected`
+     * is the attempt's binding under the coordinator's fresh discovery.
      */
-    async resume(
+    async claimPending(
+      id: string,
+      expected: SessionBinding,
+      callback: URL,
+    ): Promise<PendingClaim | typeof conflict> {
+      const binding = expectedBinding(expected);
+      const returned = validate('configuration', () => new URL(callback.href));
+      const current = await read(id);
+      const value = current?.value;
+      const state = returned.searchParams.get('state');
+      // The session ended meanwhile and handed the attempt over (`handOver`):
+      // claimed as a first sign-in's.
+      const handed = value?.kind === 'authorizing';
+      const session =
+        value?.kind === 'ready' || value?.kind === 'claimed'
+          ? value
+          : undefined;
+      const attempt =
+        value?.kind === 'authorizing'
+          ? value.attempt
+          : session?.pending?.kind === 'open'
+            ? session.pending.attempt
+            : undefined;
+      if (
+        !current ||
+        !value ||
+        !attempt ||
+        attempt.state !== state ||
+        returned.searchParams.getAll('state').length !== 1
+      )
+        throw new SessionTransitionError('attempt');
+      validate('attempt', () => assertAttemptFresh(attempt, Date.now()));
+      let answer: OAuthError | undefined;
+      try {
+        validateAuthorizationCallback(attempt, returned);
+      } catch (error) {
+        if (!(error instanceof OAuthError) || error.problem === 'callback')
+          throw new SessionTransitionError('callback');
+        answer = error;
+      }
+      if (answer) {
+        const change = await commit(
+          id,
+          current.revision,
+          handed
+            ? {
+                version: 1,
+                kind: 'disconnected',
+                binding: sessionBinding(value),
+                reason: answer.problem,
+              }
+            : withoutPending(value),
+        );
+        return change.kind === 'conflict'
+          ? conflict
+          : { kind: 'answered', error: answer, kept: !handed };
+      }
+      assertSessionBinding(attempt, binding);
+      const claimed = await commit(
+        id,
+        current.revision,
+        handed
+          ? {
+              version: 1,
+              kind: 'claimed',
+              binding,
+              operation: 'code',
+              subject: null,
+            }
+          : {
+              ...session!,
+              pending: { kind: 'claimed', state: attempt.state, binding },
+            },
+      );
+      if (claimed.kind === 'conflict') return conflict;
+      const base = completion(claimed.record, binding);
+      let open = true;
+      return {
+        kind: 'claimed',
+        attempt,
+        revision: base.revision,
+        async complete(result) {
+          if (!open) throw new SessionTransitionError('consumed');
+          open = false;
+          const change = await base.complete(result);
+          if (change.kind === 'committed') return change;
+          // A session that ended meanwhile (not a sign-out) handed this
+          // claim over as a code claim of its generation: completed there.
+          const now = await read(id);
+          if (
+            now?.value.kind !== 'claimed' ||
+            now.value.operation !== 'code' ||
+            now.value.binding.generation !== binding.generation
+          )
+            return conflict;
+          return completion(now, binding).complete(result);
+        },
+      };
+    },
+    /**
+     * Drops the re-authorization of generation `generation` after its
+     * exchange failed: the session it was pending for stays (`kept`). A code
+     * claim it was handed over as (`handOver`) is retired with `reason`
+     * (`ended`). Changes nothing (`none`) once the record holds neither.
+     */
+    async discardPending(
+      id: string,
+      generation: string,
+      reason?: string,
+    ): Promise<'kept' | 'ended' | 'none'> {
+      for (let round = 0; round < 3; round++) {
+        const current = await read(id);
+        const value = current?.value;
+        if (!current || !value) return 'none';
+        let next: SessionRecord;
+        let outcome: 'kept' | 'ended';
+        if (
+          (value.kind === 'ready' || value.kind === 'claimed') &&
+          value.pending &&
+          pendingGeneration(value.pending) === generation
+        ) {
+          next = withoutPending(value);
+          outcome = 'kept';
+        } else if (
+          value.kind === 'claimed' &&
+          value.operation === 'code' &&
+          value.binding.generation === generation
+        ) {
+          next = {
+            version: 1,
+            kind: 'disconnected',
+            binding: value.binding,
+            ...(reason === undefined ? {} : { reason }),
+          };
+          outcome = 'ended';
+        } else return 'none';
+        if ((await commit(id, current.revision, next)).kind === 'committed')
+          return outcome;
+      }
+      throw new SessionTransitionError('state');
+    },
+    /**
+     * A session that ended while a re-authorization of it was out (not by a
+     * sign-out): the attempt becomes the record, so its callback still
+     * signs in as a first sign-in would. An open attempt is stored as
+     * `authorizing`, a claimed one as a code claim, which its exchange
+     * completes. Returns `undefined` when the record holds no such attempt.
+     */
+    async handOver(
       id: string,
       revision: string,
-      pod: SessionBinding['pod'],
-      callback?: URL,
-    ): Promise<SessionChange> {
-      const returned =
-        callback && validate('configuration', () => new URL(callback.href));
+    ): Promise<SessionChange | undefined> {
       const current = await observed(id, revision);
       if (!current) return conflict;
-      if (current.value.kind !== 'authorizing' || !current.value.previous)
-        throw new SessionTransitionError('state');
-      const { attempt, previous } = current.value;
-      if (returned) {
-        let answer: unknown;
-        try {
-          validateAuthorizationCallback(attempt, returned);
-        } catch (error) {
-          answer = error;
-        }
-        if (!(answer instanceof OAuthError) || answer.problem === 'callback')
-          throw new SessionTransitionError(answer ? 'callback' : 'state');
-        if (answer.problem !== 'denied')
-          throw new SessionTransitionError('state');
-      }
-      const { credentials } = previous;
-      if (!credentials.refreshToken && credentials.expiresAt <= Date.now())
-        throw new SessionTransitionError('state');
-      // The earlier client and scopes under the attempt's lifetime, confirmed
-      // by the coordinator's fresh discovery.
-      const resumed = { ...previous.binding, generation: attempt.generation };
-      const binding = expectedBinding({ ...resumed, pod });
-      assertSessionBinding(resumed, binding);
-      return commit(id, revision, {
-        version: 1,
-        kind: 'ready',
-        binding,
-        credentials,
-      });
+      const value = current.value;
+      const pending =
+        value.kind === 'ready' || value.kind === 'claimed'
+          ? livePending(value.pending)
+          : undefined;
+      if (!pending) return undefined;
+      return commit(
+        id,
+        revision,
+        pending.kind === 'open'
+          ? { version: 1, kind: 'authorizing', attempt: pending.attempt }
+          : {
+              version: 1,
+              kind: 'claimed',
+              binding: pending.binding,
+              operation: 'code',
+              subject: null,
+            },
+      );
     },
     async claimCode(
       id: string,
@@ -358,10 +525,12 @@ export function createSessionTransitions(
         throw new SessionTransitionError('state');
       assertSessionBinding(value.binding, binding);
       const resend = { ...value.resend, resent: true as const };
+      const pending = carried(value);
       const result = await commit(id, revision, {
-        ...value,
+        ...withoutPending(value),
         binding,
         resend,
+        ...(pending ? { pending } : {}),
       });
       if (result.kind === 'conflict') return conflict;
       return {
@@ -404,7 +573,27 @@ export function createSessionTransitions(
   };
 }
 
-/** Resume and exchange claims use the same discovery/client continuity checks. */
+/**
+ * The re-authorization a write under the refresh lock keeps: an open attempt
+ * until it expires. A claimed one found there was left by a tab that closed
+ * during its exchange (a closed tab's Web Locks are released): its code
+ * counts as spent, and it is dropped.
+ */
+function carried(value: SessionRecord): PendingAttempt | undefined {
+  const pending =
+    value.kind === 'ready' || value.kind === 'claimed'
+      ? value.pending
+      : undefined;
+  return pending?.kind === 'open' ? livePending(pending) : undefined;
+}
+function withoutPending<T extends SessionRecord>(value: T): T {
+  if (!('pending' in value)) return value;
+  const next = { ...value };
+  delete (next as { pending?: PendingAttempt }).pending;
+  return next;
+}
+
+/** Exchange claims use the same discovery/client continuity checks. */
 export function assertSessionBinding(
   binding: SessionBinding,
   expected: SessionBinding,

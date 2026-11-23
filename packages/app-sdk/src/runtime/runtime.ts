@@ -1,6 +1,7 @@
 import {
   prepareSessionAuthorization,
   safeReturnTo,
+  type SessionAttempt,
   type SessionBinding,
 } from '../sessions/authorization.js';
 import {
@@ -34,7 +35,6 @@ import {
 } from '../sessions/transitions.js';
 import {
   sessionBinding,
-  SessionTransitionError,
   type RefreshResend,
   type SessionRecord,
   type SessionSnapshot,
@@ -257,9 +257,9 @@ export function createBrowserRuntime(
   )
     throw new RuntimeError('configuration');
   /**
-   * This tab's note on the silent first sign-in: `tried`, or `attempt:` and
-   * the state of the attempt that is out. Read lazily: construction touches
-   * no storage.
+   * This tab's note that it tried the silent first sign-in (`tried`; SDK 0.9
+   * also noted `attempt:` and its state, read as tried). Read lazily:
+   * construction touches no storage.
    */
   const silentKey = `sempods.first-sign-in:${namespace}`;
   function tabMemory(): PreferenceStorage | null {
@@ -288,88 +288,6 @@ export function createBrowserRuntime(
       return memory.getItem(silentKey) === value;
     } catch {
       return false;
-    }
-  }
-  /**
-   * The state of the attempt the page's history entry left for, so only the
-   * page that left treats it as abandoned when it comes back to that entry
-   * without a callback (back navigation, also from the back/forward cache);
-   * a tab opened from it has a history of its own. Where the browser names
-   * its history entries (the Navigation API), the note is kept in
-   * `tabStorage` with that entry's key, and the app's own `history.state`
-   * stays as it is; otherwise a plain-object `history.state` carries it.
-   * `undefined` without a history (outside a browser): then any start may,
-   * as before 0.9.0.
-   */
-  const leavingKey = `sempods.leaving:${namespace}`;
-  function entryKey(): string | undefined {
-    try {
-      const key = (
-        globalThis as {
-          navigation?: { currentEntry?: { key?: unknown } | null };
-        }
-      ).navigation?.currentEntry?.key;
-      return typeof key === 'string' && key !== '' ? key : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-  function plain(value: unknown): value is Record<string, unknown> | null {
-    if (value === null) return true;
-    if (typeof value !== 'object') return false;
-    const prototype: unknown = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-  }
-  function leftFrom(): string | null | undefined {
-    const key = entryKey();
-    if (key) {
-      try {
-        const note: unknown = JSON.parse(
-          tabMemory()?.getItem(leavingKey) ?? 'null',
-        );
-        if (
-          note !== null &&
-          typeof note === 'object' &&
-          (note as { entry?: unknown }).entry === key &&
-          typeof (note as { state?: unknown }).state === 'string'
-        )
-          return (note as { state: string }).state;
-      } catch {
-        // Unreadable: the history state may still carry it.
-      }
-    }
-    try {
-      const history = globalThis.history;
-      if (!history && !key) return undefined;
-      const state: unknown = history?.state;
-      const noted = plain(state) ? state?.[leavingKey] : undefined;
-      return typeof noted === 'string' ? noted : null;
-    } catch {
-      return null;
-    }
-  }
-  /** Notes the attempt for the current history entry; see `leftFrom`. */
-  function noteLeaving(state: string) {
-    const key = entryKey();
-    if (key) {
-      try {
-        const memory = tabMemory();
-        const note = JSON.stringify({ entry: key, state });
-        memory?.setItem(leavingKey, note);
-        if (memory?.getItem(leavingKey) === note) return;
-      } catch {
-        // Noted in the history state instead.
-      }
-    }
-    try {
-      const history = globalThis.history;
-      const current: unknown = history?.state;
-      // A router's own value (a string, an array, a class instance) is left
-      // as it is: unnoted, this tab's return waits as another tab's would.
-      if (!plain(current)) return;
-      history?.replaceState({ ...current, [leavingKey]: state }, '');
-    } catch {
-      // Unnoted as well.
     }
   }
   const gracePeriod = options.refreshGracePeriod ?? REFRESH_GRACE_PERIOD;
@@ -541,15 +459,15 @@ export function createBrowserRuntime(
   }
   /**
    * Runs `work` while this tab holds the Web Lock `name`, waited for until
-   * the connection's lifetime ends; `e`'s queued writes land before it passes
-   * on.
+   * the connection's lifetime ends (or `signal` aborts); `e`'s queued writes
+   * land before it passes on.
    */
   function locked<T>(
     name: string,
     e: Entry,
     work: () => Promise<T>,
+    signal = e.lifetime.signal,
   ): Promise<T> {
-    const signal = e.lifetime.signal;
     return new Promise<T>((resolve, reject) => {
       if (!locks) {
         reject(new RuntimeError('coordination'));
@@ -622,7 +540,30 @@ export function createBrowserRuntime(
       e.revision = stored!.revision;
       return false;
     }
+    // This page leaves for its re-authorization, which other tabs' renewals
+    // keep pending: it stays leaving (see `watchReturn`).
+    if (
+      s.kind === 'leaving' &&
+      (value?.kind === 'ready' || value?.kind === 'claimed') &&
+      value.pending?.kind === 'open' &&
+      value.pending.attempt.generation === e.generation
+    ) {
+      e.revision = stored!.revision;
+      return false;
+    }
     if (same && !e.lifetime.signal.aborted) {
+      // A re-authorization started or dropped elsewhere leaves this session
+      // as it is.
+      if (
+        value.kind === 'ready' &&
+        (s.kind === 'active' || s.kind === 'renewing') &&
+        e.credentials?.accessToken === value.credentials.accessToken &&
+        e.credentials.refreshToken === value.credentials.refreshToken &&
+        sameBinding(e, value)
+      ) {
+        e.revision = stored!.revision;
+        return false;
+      }
       // Its result follows here when this tab uses or restores the session;
       // a tab not in it lists the claim anew, and the refresh lock decides
       // whether it is due a resend.
@@ -632,9 +573,9 @@ export function createBrowserRuntime(
         inSession(e)
       )
         return false;
-      // Only under the binding this connection has: a resumed earlier grant
-      // under another client is restored as a start restores it, which
-      // checks its binding and takes its client.
+      // Only under the binding this connection has: a grant under another
+      // client is restored as a start restores it, which checks its binding
+      // and takes its client.
       if (value.kind === 'ready' && sameBinding(e, value)) {
         e.revision = stored!.revision;
         if (e.lost) clearTimeout(e.lost.timer);
@@ -670,16 +611,11 @@ export function createBrowserRuntime(
   /**
    * Lists the record anew, as a start would, in place of `e`: nothing of this
    * tab's connection continues. A deleted record removes the connection and
-   * the Context chosen for it. `resumes` resumes the session an abandoned
-   * re-authorization started from, as a start does.
+   * the Context chosen for it.
    */
-  function replace(
-    e: Entry,
-    stored: SessionSnapshot | undefined,
-    resumes = false,
-  ) {
+  function replace(e: Entry, stored: SessionSnapshot | undefined) {
     const id = e.view.id;
-    const next = stored && fromRecord(stored, resumes);
+    const next = stored && fromRecord(stored);
     // Replaced first, so the old connection does not settle to read without
     // a token, and keeps its place in the list.
     if (next) entries.set(id, next);
@@ -687,8 +623,7 @@ export function createBrowserRuntime(
     stop(e, { kind: 'signed-out' });
     if (next) {
       settle(next);
-      if (resumes) void resumeAbandoned(next, interruption(stored!.value));
-      else begin(next, stored!.value);
+      begin(next, stored!.value);
     } else {
       contexts.forget(id);
       ensureDefault();
@@ -697,11 +632,11 @@ export function createBrowserRuntime(
   }
   /**
    * A connection for a saved record, as a start lists it: a session or a
-   * refresh claim restores, a remembered address is signed out, and a sign-in
-   * under way shows as interrupted, or restores the session it started from
-   * (`resumes`).
+   * refresh claim restores (also while a re-authorization of it is pending),
+   * a remembered address and a silent first sign-in under way are signed
+   * out, and another sign-in under way shows as interrupted.
    */
-  function fromRecord(saved: SessionSnapshot, resumes = false): Entry {
+  function fromRecord(saved: SessionSnapshot): Entry {
     const value = saved.value;
     const b = sessionBinding(value);
     const e = createEntry(
@@ -718,10 +653,10 @@ export function createBrowserRuntime(
       e.view = { ...e.view, session: signedOut(value.reason) };
       return e;
     }
+    if (value.kind === 'authorizing' && value.silent) return e;
     const problem = interruption(value);
     const restores =
       value.kind === 'ready' ||
-      resumes ||
       (value.kind === 'claimed' && value.resend !== undefined);
     e.view = {
       ...e.view,
@@ -738,48 +673,21 @@ export function createBrowserRuntime(
       ? 'expired'
       : 'interrupted';
   }
+  /** The attempt a record has out: its own, or one pending beside a session. */
+  function attemptOf(value: SessionRecord): SessionAttempt | undefined {
+    if (value.kind === 'authorizing') return value.attempt;
+    if (value.kind === 'ready' || value.kind === 'claimed')
+      return value.pending?.kind === 'open' ? value.pending.attempt : undefined;
+    return undefined;
+  }
   /**
-   * Starts what `fromRecord` lists as restoring, apart from a resumed
-   * sign-in: a session restores, and a refresh claim no tab finished is
-   * resent once within the grace period (also one of SDK 0.8), or ends as
-   * `interrupted`.
+   * Starts what `fromRecord` lists as restoring: a session restores, and a
+   * refresh claim no tab finished is resent once within the grace period
+   * (also one of SDK 0.8), or ends as `interrupted`.
    */
   function begin(e: Entry, value: SessionRecord) {
     if (value.kind === 'ready') void restore(e, value);
     else if (value.kind === 'claimed' && value.resend) void resumeLost(e);
-    else if (
-      value.kind === 'authorizing' &&
-      value.previous &&
-      e.view.session.kind !== 'restoring'
-    )
-      resumeOnExpiry(e, value.attempt.expiresAt);
-  }
-  /**
-   * Another tab's re-authorization that no tab completes by its expiry (its
-   * tab closed at the Pod) is abandoned: the earlier session resumes then,
-   * unless the record changed meanwhile.
-   */
-  function resumeOnExpiry(e: Entry, expiresAt: number) {
-    const revision = e.revision;
-    // Not tied to the lifetime: a connection that reads without a token
-    // meanwhile (`settle`) still resumes. A replaced one is skipped.
-    setTimeout(
-      () => {
-        if (disposed || entries.get(e.view.id) !== e) return;
-        if (e.revision !== revision) return;
-        void serial(e, async () => {
-          if (!sessions || disposed || entries.get(e.view.id) !== e) return;
-          const stored = await sessions.read(e.view.id);
-          // As a start lists an expired attempt: with its binding and
-          // generation, resuming the session it started from.
-          if (stored?.revision === revision) replace(e, stored, true);
-          else adopt(e, stored);
-        }).catch(() => {
-          // Unreadable: listed by the next start.
-        });
-      },
-      Math.min(MAX_DELAY, Math.max(0, expiresAt - Date.now())),
-    );
   }
 
   /**
@@ -1127,7 +1035,18 @@ export function createBrowserRuntime(
           contexts.forget(e.view.id);
           return false;
         }
-        if (!deleting) {
+        // A session that ended here while a re-authorization of it is out:
+        // its attempt becomes the record, which its callback signs in with.
+        const handed = insist
+          ? undefined
+          : await sessions.handOver(e.view.id, e.revision);
+        if (handed?.kind === 'committed') {
+          e.revision = handed.record.revision;
+          return true;
+        }
+        if (handed) {
+          // Changed elsewhere first: read below.
+        } else if (!deleting) {
           const change = await sessions.disconnect(
             e.view.id,
             e.revision,
@@ -1844,63 +1763,62 @@ export function createBrowserRuntime(
   };
   page.addEventListener?.('pageshow', shown);
   /**
-   * Resumes the session a denied (`callback`) or abandoned re-authorization
-   * started from, and publishes it. Returns false, changing nothing, when the
-   * stored attempt is not eligible (see the `resume` transition).
+   * Lists a connection's record anew, whatever its revision: for a page that
+   * left for a sign-in and stays or comes back (see `watchReturn`). A session
+   * it left to re-authorize restores at once, keeping the page's Context
+   * choice and catalogue; handles of the page's earlier lifetime stay
+   * retired.
    */
-  async function resume(e: Entry, callback?: URL): Promise<boolean> {
-    const generation = e.generation;
-    const pod = await discover(e.view.podUrl, e.lifetime.signal);
-    const change = await serial(e, async () => {
-      current(e, generation);
-      if (!sessions || !e.revision) throw new RuntimeError('storage');
-      let result: SessionChange;
-      try {
-        result = await sessions.resume(e.view.id, e.revision, pod, callback);
-      } catch (error) {
-        if (
-          error instanceof SessionTransitionError &&
-          error.problem === 'state'
-        )
-          return undefined;
-        throw error;
+  function relist(e: Entry): Promise<void> {
+    return serial(e, async () => {
+      if (!sessions || disposed || entries.get(e.view.id) !== e) return;
+      const stored = await sessions.read(e.view.id);
+      if (entries.get(e.view.id) !== e || disposed) return;
+      const value = stored?.value;
+      if (value?.kind !== 'ready' || e.view.session.kind !== 'restoring') {
+        replace(e, stored);
+        return;
       }
-      // Recorded first, so a disconnect queued during the commit retires
-      // the resumed record rather than conflicting with it.
-      accepted(e, result);
-      current(e, generation);
-      return result;
-    });
-    if (!change) return false;
-    current(e, generation);
-    if (change.kind !== 'committed' || change.record.value.kind !== 'ready')
-      throw new RuntimeError('state');
-    const { binding: resumed, credentials } = change.record.value;
-    e.pod = pod;
-    e.client = resumed.client;
-    e.view = { ...e.view, requestedScopes: resumed.scopes };
-    install(e, credentials);
-    // A catalogue read the leaving page aborted starts again, keeping the
-    // contexts it already confirmed.
-    if (e.view.catalogue.kind === 'loading' && !e.catalogue)
-      void load(e).catch(() => {});
-    return true;
+      const id = e.view.id;
+      const { selectedContext, catalogue } = e.view;
+      const next = fromRecord(stored!);
+      next.view = { ...next.view, selectedContext, catalogue };
+      entries.set(id, next);
+      stop(e, { kind: 'signed-out' });
+      publish();
+      return { next, value };
+    })
+      .then(async (restoring) => {
+        if (!restoring) return;
+        const { next, value } = restoring;
+        await restore(next, value);
+        // A catalogue read the leaving page aborted starts again, keeping
+        // the contexts it already confirmed.
+        if (
+          eligible(next) &&
+          next.view.session.kind === 'active' &&
+          next.view.catalogue.kind === 'loading' &&
+          !next.catalogue
+        )
+          void load(next).catch(() => {});
+      })
+      .catch(() => {
+        // Unreadable: listed by the next start.
+      });
   }
   /**
-   * A page restored from the back/forward cache comes back without a startup:
-   * an abandoned re-authorization resumes its earlier session there too, and a
-   * first sign-in shows its interruption.
-   */
-  /**
-   * A page restored from the back/forward cache while leaving for a sign-in
-   * resumes the session it started from; the silent first sign-in instead
-   * ends signed out, as if never started.
+   * A page that left for a sign-in and comes back from the back/forward
+   * cache (`pageshow`), or stays (`cancelAuthorization`), without a callback.
+   * The stored attempt stays for its callback, a newer attempt, a sign-out
+   * or its expiry; the page lists the record anew, as a start would: a
+   * re-authorized session restores at once, and a silent first sign-in is
+   * signed out. A first sign-in the page stays for ends here.
    */
   function watchReturn(
     e: Entry,
     generation: string,
     /** A silent first sign-in, a re-authorization or another first sign-in. */
-    kind: 'silent' | 'resume' | 'first',
+    kind: 'silent' | 'reauthorize' | 'first',
     navigation: Navigation,
   ) {
     const page = globalThis as {
@@ -1918,28 +1836,29 @@ export function createBrowserRuntime(
       page.removeEventListener?.('pageshow', shown);
       if (abandons.get(id)?.abandon === abandon) abandons.delete(id);
     };
-    /**
-     * The page came back (`pageshow`) or stays (`cancelAuthorization`): this
-     * attempt is abandoned. Staying ends a first sign-in here, without a
-     * request; a return leaves its record to a tab that may complete it.
-     */
     function abandon(staying: boolean) {
       stop();
       if (!eligible(e, generation) || e.view.session.kind !== 'leaving')
         return false;
       navigation.controller.abort(new RuntimeError('interrupted'));
-      if (kind === 'silent') {
-        noteSilent('tried');
-        decline(e);
-        return true;
-      }
       if (kind === 'first' && staying) {
         end(e, new RuntimeError('interrupted'), true, false);
         return true;
       }
-      e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+      if (kind === 'silent') noteSilent('tried');
+      // Shown at once; the record then decides.
+      e.view = {
+        ...e.view,
+        session: Object.freeze(
+          kind === 'reauthorize'
+            ? { kind: 'restoring' }
+            : kind === 'silent'
+              ? { kind: 'signed-out' }
+              : { kind: 'ended', problem: 'interrupted' },
+        ),
+      };
       publish();
-      void resumeAbandoned(e, 'interrupted');
+      void relist(e);
       return true;
     }
     function shown(event: Event) {
@@ -1949,46 +1868,141 @@ export function createBrowserRuntime(
     page.addEventListener?.('pageshow', shown);
     e.lifetime.signal.addEventListener('abort', stop, { once: true });
   }
-  /** Resumes an abandoned re-authorization at startup; publishes its own outcome. */
-  async function resumeAbandoned(e: Entry, ineligible: RuntimeProblem) {
-    const generation = e.generation;
-    let problem: RuntimeProblem = ineligible;
-    let cause: unknown;
+  /**
+   * Exchanges a code within one token timeout (also for a `fetch` that
+   * ignores its signal); a late answer is dropped as `interrupted`.
+   */
+  async function exchangeWithin(attempt: SessionAttempt, location: URL) {
+    const timeout = new AbortController();
+    const timer = setTimeout(
+      () => timeout.abort(new RuntimeError('interrupted')),
+      TOKEN_TIMEOUT,
+    );
+    const signal = combineSignals(runtimeLifetime.signal, timeout.signal);
+    const send: NonNullable<typeof protocol.fetch> =
+      protocol.fetch ?? ((url, init) => globalThis.fetch(url, init));
     try {
-      if (await resume(e)) return;
-    } catch (error) {
-      problem = runtimeProblem(error);
-      cause = error;
-    }
-    // Unless another tab renewed it meanwhile, or this tab is about to read
-    // what another tab stored.
-    if (
-      eligible(e, generation) &&
-      e.view.session.kind === 'restoring' &&
-      !superseded(cause)
-    ) {
-      e.view = {
-        ...e.view,
-        session: Object.freeze({
-          kind: 'ended',
-          problem,
-          ...runtimeFailure(cause),
+      return await waitFor(
+        exchangeAuthorization(attempt, location, {
+          ...protocol,
+          fetch: (url, init) =>
+            send(url, { ...init, signal: init?.signal ?? signal.signal }),
         }),
-      };
-      settle(e);
-      publish();
+        signal.signal,
+      );
+    } catch (error) {
+      if (runtimeLifetime.signal.aborted)
+        throw new RuntimeError('disconnected');
+      if (timeout.signal.aborted) throw new RuntimeError('interrupted');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal.dispose();
     }
   }
-  function setEnded(e: Entry, problem: RuntimeProblem, cause?: unknown) {
-    e.view = {
-      ...e.view,
-      session: Object.freeze({
-        kind: 'ended',
-        problem,
-        ...runtimeFailure(cause),
-      }),
+  /**
+   * Completes a re-authorization's callback on the session it was pending
+   * for. Under that connection's refresh lock, waited for at most as long as
+   * a refresh with its discovery and one resend takes (`coordination` past
+   * it), the code is claimed and exchanged within a deadline. Only a
+   * validated result, stored, replaces the session (in every tab:
+   * `completed`). Any other answer drops the attempt and leaves the session
+   * (`kept`, with the cause). Rejects when the attempt is gone, forged or
+   * waited for too long (the record is unchanged), or when a sign-out or
+   * forget meanwhile stays in effect.
+   */
+  async function reauthorize(
+    id: string,
+    attempt: SessionAttempt,
+    location: URL,
+    destination: string,
+  ): Promise<
+    | { readonly kind: 'completed' }
+    | { readonly kind: 'kept'; readonly error: unknown }
+  > {
+    const shared = sessions!;
+    const e = get(id);
+    const pod = await discover(e.view.podUrl, runtimeLifetime.signal);
+    if (disposed) throw new RuntimeError('disconnected');
+    const expected: SessionBinding = {
+      configKey: namespace,
+      connectionId: id,
+      generation: attempt.generation,
+      pod,
+      client: attempt.client,
+      scopes: attempt.scopes,
     };
-    publish();
+    const waiting = new AbortController();
+    const timer = setTimeout(
+      () => waiting.abort(),
+      DISCOVERY_TIMEOUT + 2 * TOKEN_TIMEOUT,
+    );
+    const signal = combineSignals(runtimeLifetime.signal, waiting.signal);
+    type Outcome =
+      | {
+          readonly kind: 'completed';
+          readonly record: SessionSnapshot;
+          readonly result: ExchangeResult;
+        }
+      | { readonly kind: 'kept'; readonly error: unknown };
+    let outcome: Outcome;
+    try {
+      outcome = await locked<Outcome>(
+        `sempods:refresh:${namespace}:${id}`,
+        e,
+        async () => {
+          clearTimeout(timer);
+          const claim = await shared.claimPending(id, expected, location);
+          if (claim.kind === 'conflict') throw new RuntimeError('attempt');
+          if (claim.kind === 'answered') {
+            if (!claim.kept) throw claim.error;
+            return { kind: 'kept', error: claim.error };
+          }
+          (
+            options.replaceUrl ??
+            ((url) => window.history.replaceState(null, '', url))
+          )(destination);
+          try {
+            const result = await exchangeWithin(claim.attempt, location);
+            const change = await claim.complete(result);
+            // A sign-out or forget meanwhile stays in effect.
+            if (change.kind === 'conflict') throw conflict();
+            return { kind: 'completed', record: change.record, result };
+          } catch (error) {
+            if (superseded(error)) throw error;
+            if (
+              error instanceof OAuthError &&
+              error.problem === 'invalid-client'
+            )
+              registry.clear(e.view.podUrl);
+            // Its code may be spent: the attempt is dropped either way.
+            const left = await shared
+              .discardPending(id, attempt.generation, runtimeProblem(error))
+              .catch(() => 'none' as const);
+            if (left === 'kept') return { kind: 'kept', error };
+            throw error;
+          }
+        },
+        signal.signal,
+      );
+    } catch (error) {
+      if (waiting.signal.aborted && !runtimeLifetime.signal.aborted)
+        throw new RuntimeError('coordination');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal.dispose();
+    }
+    if (disposed) throw new RuntimeError('disconnected');
+    if (outcome.kind === 'kept') return outcome;
+    // The new grant: nothing of the earlier session's connection continues.
+    const old = entries.get(id);
+    const next = fromRecord(outcome.record);
+    next.pod = pod;
+    entries.set(id, next);
+    if (old) stop(old, { kind: 'signed-out' });
+    install(next, outcome.result);
+    return { kind: 'completed' };
   }
   /** Redeems the callback's code once for its stored attempt; returns the connection. */
   async function redeem(
@@ -1996,8 +2010,6 @@ export function createBrowserRuntime(
     revision: string,
     location: URL,
     destination: string,
-    /** A re-authorization: its failure ends the session it started from. */
-    hadSession: boolean,
     /** The silent first sign-in: a Pod that needs the person first ends nothing. */
     silent = false,
   ): Promise<string> {
@@ -2041,7 +2053,7 @@ export function createBrowserRuntime(
         if (error instanceof OAuthError && error.problem === 'invalid-client')
           registry.clear(e.view.podUrl);
         if (silent && declined(error)) decline(e);
-        else end(e, error, true, hadSession);
+        else end(e, error, true, false);
         await e.persistence;
       }
       throw error;
@@ -2151,6 +2163,18 @@ export function createBrowserRuntime(
     // Prepare while the current session keeps working: if discovery,
     // registration or persisting the attempt fails, nothing was reset.
     const before = e.generation;
+    const preparation = {};
+    e.preparation = preparation;
+    /**
+     * Whether this preparation still stores its attempt: not after a
+     * sign-out, forget, dispose or a newer sign-in here; a session that
+     * ended meanwhile is signed in to again.
+     */
+    const still = () =>
+      !disposed &&
+      entries.get(id) === e &&
+      e.preparation === preparation &&
+      !disconnects.has(id);
     const signal = e.lifetime.signal;
     const pod = await discover(e.view.podUrl, signal);
     current(e, before);
@@ -2180,54 +2204,65 @@ export function createBrowserRuntime(
         Date.now(),
         options.development,
       );
-      // Without the note, its callback would end the connection as a failed
-      // sign-in: nothing is stored or started.
-      if (intent === 'silent' && !noteSilent(`attempt:${attempt.state}`))
-        throw new RuntimeError('storage');
-      const reauthorizing = await serial(e, async () => {
-        current(e, before);
-        // Another tab changed the record first: shown here, and a retry
-        // prepares on it.
-        const change = await sessions!.prepare(attempt, e.revision);
-        accepted(e, change);
-        // The revision is recorded first, so a disconnect that ran during the
-        // commit retires the new attempt; this lifetime must not continue.
-        current(e, before);
-        // Committed durably: switch to the new lifetime in the same step, so no
-        // queued refresh of the old one can act on the replaced record. The
-        // facts stay for display until the page leaves; only the session says
-        // that nothing of the earlier one dispatches any more.
-        const shown = e.view;
-        const subject =
-          shown.session.kind === 'active' ||
-          shown.session.kind === 'renewing' ||
-          shown.session.kind === 'leaving'
-            ? shown.session.subject
-            : undefined;
-        renewLifetime(e, generation);
-        e.pod = pod;
-        e.client = client;
-        // Signing in again replaces a forget that could not be saved.
-        delete e.forgetting;
-        e.view = {
-          ...shown,
-          session: Object.freeze(
-            subject === undefined
-              ? { kind: 'leaving' }
-              : { kind: 'leaving', subject },
-          ),
-        };
-        publish();
-        return (
-          change.kind === 'committed' &&
-          change.record.value.kind === 'authorizing' &&
-          change.record.value.previous !== undefined
-        );
-      });
-      // A re-authorization resumes its session, and a silent first sign-in
-      // is forgotten, only when this page comes back without a callback; see
-      // `leftFrom`.
-      if (reauthorizing || intent === 'silent') noteLeaving(attempt.state);
+      const commit = () =>
+        serial(e, async () => {
+          if (!still()) throw new RuntimeError('disconnected');
+          // Another tab changed the record first: shown here, and a retry
+          // prepares on it.
+          const change = await sessions!.prepare(
+            attempt,
+            e.revision,
+            intent === 'silent',
+          );
+          accepted(e, change);
+          // The revision is recorded first, so a disconnect that ran during
+          // the commit retires the new attempt; this lifetime must not
+          // continue.
+          if (!still()) throw new RuntimeError('disconnected');
+          // Committed durably: switch to the new lifetime in the same step,
+          // so nothing of the old one dispatches from this page while it
+          // leaves. The facts stay for display until the page leaves.
+          const shown = e.view;
+          const subject =
+            shown.session.kind === 'active' ||
+            shown.session.kind === 'renewing' ||
+            shown.session.kind === 'leaving'
+              ? shown.session.subject
+              : undefined;
+          renewLifetime(e, generation);
+          e.pod = pod;
+          e.client = client;
+          // Signing in again replaces a forget that could not be saved.
+          delete e.forgetting;
+          e.view = {
+            ...shown,
+            session: Object.freeze(
+              subject === undefined
+                ? { kind: 'leaving' }
+                : { kind: 'leaving', subject },
+            ),
+          };
+          publish();
+          // Beside a session, which keeps working in the other tabs.
+          return (
+            change.kind === 'committed' &&
+            change.record.value.kind !== 'authorizing'
+          );
+        });
+      // A session's record is changed under its refresh lock, so no refresh
+      // of it is under way meanwhile (a refresh here or in another tab
+      // finishes first), and a refresh claim found then is one no tab sends,
+      // which the attempt is stored beside. Waited for until the runtime is
+      // disposed: a session that ends meanwhile is signed in to again.
+      const reauthorizing =
+        e.revision === null
+          ? await commit()
+          : await locked(
+              `sempods:refresh:${namespace}:${id}`,
+              e,
+              commit,
+              runtimeLifetime.signal,
+            );
       return { generation, url, reauthorizing };
     };
     let prepared: { generation: string; url: string; reauthorizing: boolean };
@@ -2318,7 +2353,7 @@ export function createBrowserRuntime(
     watchReturn(
       e,
       generation,
-      intent === 'silent' ? 'silent' : reauthorizing ? 'resume' : 'first',
+      intent === 'silent' ? 'silent' : reauthorizing ? 'reauthorize' : 'first',
       navigation,
     );
     let handled: unknown;
@@ -2393,12 +2428,8 @@ export function createBrowserRuntime(
         else if (!disposed) changed(id);
       });
       const listing = await sessions.list();
-      // The silent first sign-in's note for this tab, and its attempt's state.
+      // Whether this tab tried the silent first sign-in.
       const silentNote = firstSignIn === 'silent' ? readSilentNote() : 'tried';
-      const leaving = leftFrom();
-      const silentState = silentNote?.startsWith('attempt:')
-        ? silentNote.slice('attempt:'.length)
-        : undefined;
       report = {
         ...report,
         storage: 'durable',
@@ -2406,11 +2437,14 @@ export function createBrowserRuntime(
       };
       if (disposed) throw new RuntimeError('disconnected');
       let pending: SessionSnapshot | undefined;
-      const abandoned: { e: Entry; problem: RuntimeProblem }[] = [];
+      const returned =
+        location.searchParams.getAll('state').length === 1
+          ? location.searchParams.get('state')
+          : null;
       /** Addresses an earlier start remembered, deleted under `rememberPods: false`. */
       const forgotten: SessionSnapshot[] = [];
-      /** The silent first sign-in's own attempt, deleted after coming back without an answer. */
-      const abandonedSilent = new Set<string>();
+      /** Silent first sign-ins that expired without an answer: deleted, as if never started. */
+      const expiredSilent = new Set<string>();
       // Old SDKs could save several connections for one address. Retire only
       // redundant address-only records, under the namespace lease and revision
       // check. Never merge sessions, attempts, or different exact Pod URLs.
@@ -2425,30 +2459,24 @@ export function createBrowserRuntime(
         // discovery, code claim or mutation of the foreign durable record.
         if (
           callback &&
-          saved.value.kind === 'authorizing' &&
-          location.searchParams.getAll('state').length === 1 &&
-          location.searchParams.get('state') === saved.value.attempt.state
+          returned !== null &&
+          attemptOf(saved.value)?.state === returned
         ) {
           if (pending) throw new RuntimeError('attempt');
           pending = saved;
         }
-        // A silent first sign-in left without an answer (back navigation)
-        // is as if never started; this tab does not try it again. A tab
-        // opened from the one at the Pod copies its note, but not its
-        // history entry: that attempt stays the other tab's.
         if (
           !callback &&
-          silentState !== undefined &&
-          (leaving === undefined || leaving === silentState) &&
           saved.value.kind === 'authorizing' &&
-          saved.value.attempt.state === silentState
+          saved.value.silent &&
+          saved.value.attempt.expiresAt <= Date.now()
         ) {
           try {
             await erase(saved.id, saved.revision);
-            abandonedSilent.add(saved.id);
+            expiredSilent.add(saved.id);
             continue;
           } catch {
-            // Listed as an interrupted attempt; deleted by signing out.
+            // Listed signed out; deleted by the next start.
           }
         }
         if (!allows(b.pod.podUrl)) continue;
@@ -2468,27 +2496,10 @@ export function createBrowserRuntime(
           represented.add(b.pod.podUrl);
         }
         if (disposed) throw new RuntimeError('disconnected');
-        // A re-authorization this tab left without a callback (back
-        // navigation, an abandoned attempt), or one that expired, resumes the
-        // session it started from; a denial on the callback route does so
-        // below. Another tab's attempt may still return: it waits as in the
-        // open tabs (`begin`). On the callback route no other attempt is
-        // touched: a callback with a missing or wrong state must not consume
-        // one whose real callback may follow.
-        const resumes =
-          saved.value.kind === 'authorizing' &&
-          saved.value.previous !== undefined &&
-          (!callback
-            ? leaving === undefined ||
-              leaving === saved.value.attempt.state ||
-              saved.value.attempt.expiresAt <= Date.now()
-            : pending === saved &&
-              location.searchParams.has('error') &&
-              !location.searchParams.has('code'));
-        const e = fromRecord(saved, resumes);
-        if (resumes && !callback)
-          abandoned.push({ e, problem: interruption(saved.value) });
-        entries.set(saved.id, e);
+        // A session restores also while a re-authorization of it is out, in
+        // this tab (back navigation, a reload, a tab opened from it) or
+        // another; that attempt stays for its own callback.
+        entries.set(saved.id, fromRecord(saved));
       }
       publish();
       // Best effort: a record left by a failed deletion is deleted next time.
@@ -2497,29 +2508,33 @@ export function createBrowserRuntime(
       // Restoration publishes per connection (`restoring` → `active`/`ended`).
       // Neither the startup report nor a callback waits for another Pod, so
       // one Pod whose discovery never settles cannot hold the app open.
+      // A session whose re-authorization this callback answers restores once
+      // the callback settled (`reauthorize`), so a refresh of it does not
+      // hold up the code exchange.
+      const answering =
+        callback && pending && pending.value.kind !== 'authorizing'
+          ? pending.id
+          : undefined;
       for (const saved of listing.records) {
         const e = entries.get(saved.id);
-        if (e) begin(e, saved.value);
+        if (e && saved.id !== answering) begin(e, saved.value);
       }
-      for (const { e, problem } of abandoned) void resumeAbandoned(e, problem);
       if (disposed) throw new RuntimeError('disconnected');
       initialized = true;
       const heard = early;
       early = null;
       heard.forEach(changed);
       if (!callback) {
-        // The silent attempt left without an answer is over.
-        if (silentState !== undefined) noteSilent('tried');
         if (silentNote === null) {
           // Nothing stored, judged by the durable listing: a record that an
           // app policy (`allowedPods`) hides is still an existing
           // installation. Only addresses this start deletes (`rememberPods:
-          // false`) and the abandoned silent attempt are as if never stored.
+          // false`) and expired silent attempts are as if never stored.
           if (
             listing.unreadable.length === 0 &&
             listing.records.every(
               (saved) =>
-                abandonedSilent.has(saved.id) || forgotten.includes(saved),
+                expiredSilent.has(saved.id) || forgotten.includes(saved),
             )
           )
             await signInSilently();
@@ -2529,51 +2544,54 @@ export function createBrowserRuntime(
         }
         return report;
       }
-      if (!pending || pending.value.kind !== 'authorizing')
-        throw new RuntimeError('attempt');
-      destination = pending.value.attempt.returnTo;
+      const attempt = pending && attemptOf(pending.value);
+      if (!pending || !attempt) throw new RuntimeError('attempt');
+      destination = attempt.returnTo;
       if (!allows(sessionBinding(pending.value).pod.podUrl))
         throw new RuntimeError('configuration');
       attempted = pending.id;
-      const returning = entries.get(pending.id);
-      if (returning?.view.session.kind === 'restoring') {
-        let resumed = false;
+      // A tab that returned from a sign-in never signs in silently.
+      if (silentNote === null) noteSilent('tried');
+      if (pending.value.kind !== 'authorizing') {
+        // A re-authorization: its session stays unless the callback
+        // validates.
+        let outcome: Awaited<ReturnType<typeof reauthorize>> | undefined;
         try {
-          resumed = await resume(returning, location);
+          outcome = await reauthorize(
+            pending.id,
+            attempt,
+            location,
+            destination,
+          );
         } finally {
-          if (!resumed && eligible(returning))
-            setEnded(returning, 'interrupted');
+          // Restored before the report, as any outcome but a new grant
+          // leaves the session to restore.
+          const listed = entries.get(pending.id);
+          if (outcome?.kind !== 'completed' && listed) await relist(listed);
         }
-        if (resumed) {
-          const denial = new OAuthError('denied');
+        if (outcome.kind === 'completed')
           return {
             ...report,
-            interaction: 'cancelled',
-            attemptConnectionId: pending.id,
-            resumed: true,
-            problem: runtimeProblem(denial),
-            ...runtimeFailure(denial),
+            interaction: 'completed',
+            connectionId: pending.id,
           };
-        }
-        // Not eligible (another answer, an expired earlier session, a changed
-        // binding): the callback ends the connection as for a first sign-in.
+        const problem = runtimeProblem(outcome.error);
+        return {
+          ...report,
+          interaction: problem === 'denied' ? 'cancelled' : 'failed',
+          attemptConnectionId: pending.id,
+          resumed: true,
+          problem,
+          ...runtimeFailure(outcome.error),
+        };
       }
-      // The note keeps the silent attempt's state until `redeem` has claimed
-      // its callback: a callback for another state, or one refused before
-      // the claim, leaves it, so the real answer is still known as the
-      // silent one. Any other callback is an existing installation's, which
-      // never signs in silently in this tab.
-      const silent =
-        silentState !== undefined &&
-        pending.value.attempt.state === silentState;
-      if (!silent && silentNote === null) noteSilent('tried');
+      const silent = pending.value.silent === true;
       try {
         const connectionId = await redeem(
           pending.id,
           pending.revision,
           location,
           destination,
-          pending.value.previous !== undefined,
           silent,
         );
         return { ...report, interaction: 'completed', connectionId };

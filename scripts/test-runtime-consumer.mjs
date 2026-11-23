@@ -1278,7 +1278,8 @@ try {
   await restored();
   assert.deepEqual({ exchanges, refreshes }, beforeCancel);
   // A tab opened from the one at the Pod copies its session storage (#374):
-  // it does not take the attempt, and the callback completes it.
+  // it uses the session at once while the attempt stays pending (#393), and
+  // the callback completes it.
   const reauthorized = await page.evaluate(
     () => window.fixture.runtime.getSnapshot()[0].id,
   );
@@ -1292,13 +1293,11 @@ try {
     ),
   ]);
   await opened.waitForFunction(() => document.body.dataset.ready === 'true');
-  assert.deepEqual(
-    await opened.evaluate(
-      (id) =>
-        window.fixture.runtime.getSnapshot().find((c) => c.id === id).session,
-      reauthorized,
-    ),
-    { kind: 'ended', problem: 'interrupted' },
+  await opened.waitForFunction(
+    (id) =>
+      window.fixture.runtime.getSnapshot().find((c) => c.id === id)?.session
+        .kind === 'active',
+    reauthorized,
   );
   await Promise.all([page.waitForURL('**/callback?**'), page.reload()]);
   await page.waitForURL('**/app?identity=dynamic');
@@ -1317,8 +1316,9 @@ try {
   await opened.close();
   await page.evaluate(() => sessionStorage.removeItem('fixture-kinds'));
   // Back from the Pod restores the page that left from the back/forward
-  // cache (#374): the app starts a runtime again, and that history entry
-  // resumes the earlier session. Playwright disables the cache by default.
+  // cache (#374): the app starts a runtime again, which restores the session
+  // its attempt is pending beside (#393), and no history state is written.
+  // Playwright disables the cache by default.
   const cachingBrowser = await chromium.launch({
     channel: 'chromium',
     headless: true,
@@ -1349,7 +1349,7 @@ try {
     await Promise.all([
       cached.waitForURL('**/authorize?**'),
       cached.evaluate(() => {
-        // A router's own state, which the note leaves as it is.
+        // A router's own state, which the runtime leaves as it is.
         window.history.replaceState(new Map([['screen', 'tasks']]), '');
         const r = window.fixture.runtime;
         void r.beginAuthorization(r.getSnapshot()[0].id);
@@ -1378,7 +1378,7 @@ try {
     await cachingBrowser.close();
   }
   console.log(
-    'Packed re-authorization in Chromium: a denied consent, a back navigation, also from the back/forward cache, and staying on the page during a navigation that keeps loading keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
+    'Packed re-authorization in Chromium: a denied consent, a back navigation, also from the back/forward cache, and staying on the page during a navigation that keeps loading keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod uses the session while the callback completes the attempt passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');

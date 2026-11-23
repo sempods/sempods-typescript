@@ -42,7 +42,7 @@ const text = {
     cancelled:
       'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
     unchanged:
-      'Sharing was not changed: the consent was cancelled or declined at the Pod. This app keeps the access it had.',
+      'The change was not confirmed: the consent was cancelled or declined at the Pod. This app goes on with its current session.',
     signIn: 'Sign in',
     change: 'Change sharing',
     loginRequired:
@@ -53,7 +53,7 @@ const text = {
     cancelled:
       'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
     unchanged:
-      'Die Freigabe wurde nicht geändert: Die Zustimmung wurde beim Pod abgebrochen oder abgelehnt. Diese App behält ihren bisherigen Zugriff.',
+      'Die Änderung wurde nicht bestätigt: Die Zustimmung wurde beim Pod abgebrochen oder abgelehnt. Diese App arbeitet mit ihrer bisherigen Sitzung weiter.',
     signIn: 'Anmelden',
     change: 'Freigabe ändern',
     loginRequired:
@@ -138,7 +138,7 @@ it.each(
     ),
   ),
 )(
-  'a declined re-authorization (%s, %s description) says sharing is unchanged in one dismissible info prompt',
+  'a declined re-authorization (%s, %s description) says the change was not confirmed in one dismissible info prompt',
   async (language, _name, query) => {
     const t = text[language];
     const { runtime } = await returning('again', `error=access_denied${query}`);
@@ -214,7 +214,7 @@ it.each(['ok', 'escape'] as const)(
 );
 
 it.each(['en', 'de'] as const)(
-  'another provider answer during re-authorization names its cause and offers Sign in (%s)',
+  'another provider answer during re-authorization names its cause, keeps the list and offers Sign in again (%s)',
   async (language) => {
     const t = text[language];
     const { runtime } = await returning(
@@ -222,15 +222,21 @@ it.each(['en', 'de'] as const)(
       'error=login_required&error_description=You+are+not+signed+in',
     );
     show(runtime, language);
-    const region = await screen.findByRole('region', { name: t.region });
-    expect((await within(region).findByRole('alert')).textContent).toBe(
-      t.loginRequired,
-    );
-    const primary = region.querySelectorAll('.sp-access-primary');
-    expect([...primary].map((button) => button.textContent)).toEqual([
-      t.signIn,
-    ]);
-    expect(within(region).queryByRole('button', { name: t.change })).toBeNull();
+    const prompt = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(
+        '[data-sempods-ui="prompt"][data-reason="sign-in-failed"]',
+      );
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect(prompt.textContent).toContain(t.loginRequired);
+    // The session stays: the list is shown, and signing in tries again.
+    expect(await screen.findByText('My list')).toBeTruthy();
+    expect(
+      within(prompt)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual([t.signIn, 'OK']);
     expect(document.body.textContent).not.toContain('You are not signed in');
   },
 );

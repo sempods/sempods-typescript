@@ -86,8 +86,8 @@ returning sign-in only: without a callback it stays `none`, also when storage
 or coordination fails or the runtime was already disposed. A rejected callback
 can coexist with other restored active connections.
 
-When the provider answers the stored attempt with an OAuth error, the runtime
-consumes that attempt, ends its connection with the classified
+When the provider answers a first sign-in's stored attempt with an OAuth
+error, the runtime consumes that attempt, ends its connection with the classified
 [`OAuthProblem`](../packages/client-sdk/src/oauth/errors.ts) (`denied` reports
 interaction `cancelled`) and retires its record. The connection stays listed
 until the next reload, also after a transient `provider-unavailable`. A forged
@@ -95,26 +95,45 @@ or malformed callback leaves the attempt untouched. After any failed or
 cancelled callback that matched a stored attempt, `attemptConnectionId` names
 that connection, also when discovery failed before the attempt was claimed.
 
-A re-authorization of a signed-in connection keeps the earlier session beside
-its stored attempt. Two outcomes resume it, if its credential is still usable
-(unexpired, or renewable with its refresh token) and fresh discovery confirms
-its binding:
+A re-authorization of a signed-in connection stores its attempt beside the
+session (0.10.0). The session keeps working meanwhile, in every tab: it reads,
+writes and renews within its granted permissions. Only a validated callback,
+once stored, replaces it; any other outcome drops the attempt and leaves the
+session as it is:
 
-| Outcome of the re-authorization                                            | Result                                                                                                                       |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| The provider answers `access_denied` for this attempt                      | Earlier session resumes; report `cancelled` with `resumed: true`                                                             |
-| The person returns without a callback (back navigation, abandoned attempt) | Earlier session resumes in the tab that left (`restoring` → `active`); interaction `none`; see [several tabs](#several-tabs) |
-| Any other provider error, a lost code answer, a binding or client mismatch | Connection ends as above; the earlier session is dropped                                                                     |
-| An expired earlier credential without a refresh token, or a disconnect     | Connection ends; nothing resumes                                                                                             |
-| A successful answer                                                        | The new grant replaces the earlier one, also when narrower; never a merge                                                    |
+| Outcome of the re-authorization                                                                          | Result                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A code, exchanged and stored                                                                             | The new grant replaces the session in every tab, also when narrower or for another account; never a merge                                             |
+| `access_denied`                                                                                          | Attempt dropped; report `cancelled` with `resumed: true`                                                                                              |
+| Any other provider error, a refused code, a code answer lost or not received within 20 seconds           | Attempt dropped; report `failed` with the cause and `resumed: true`                                                                                   |
+| No callback: back navigation, a reload, a tab opened from the one at the Pod, or that tab closed         | The session restores at once; the attempt stays for its callback until a newer attempt, a sign-out or forget, or its expiry after 10 minutes          |
+| A sign-out or forget before or during the code exchange                                                  | It stays in effect; the callback fails with `attempt` (before) or `disconnected` (during) and no grant is stored                                      |
+| The session ends meanwhile, not by a sign-out (a refused renewal, an expired credential without renewal) | The attempt becomes the record, as a sign-in under way (`interrupted` elsewhere); its callback signs in as a first sign-in would, its failure ends it |
 
-Resuming sends no token request and consumes the attempt: a replayed callback
-then fails with `attempt` while the session stays. A denied first sign-in ends
-its connection with `denied`, as above. A resume that cannot be stored keeps the attempt, and the next
-start resumes it. A refresh claimed before the re-authorization began is not
-kept, so its refresh token is not sent again. Records written by SDK 0.5 have
-no earlier session and end as before; records written by 0.6 are not supported
-by older SDKs.
+`resumed: true` says that the session is in use again, not what it may
+access: `access_denied` may mean that the person cancelled or removed this
+app's access at the Pod, and a Pod may accept a narrower choice before its code
+answer is lost. A removed grant shows at the next renewal, which the Pod
+refuses; the session then ends like any refused renewal. The SDK components
+therefore say neutrally that the change was not confirmed.
+
+The callback claims and exchanges the code under the connection's refresh
+lock, so no renewal of the session overlaps it. It waits for a renewal under
+way at most as long as one with its discovery and one resend takes (the
+discovery deadline plus two token timeouts); past that it fails with
+`coordination` and leaves the attempt. The claim drops the verifier from the
+record, so a replayed callback fails with `attempt` and never exchanges the
+code again. A forged or malformed callback, a late callback of a replaced
+attempt and one with a wrong issuer leave the attempt for its genuine
+callback. An attempt claimed by a tab that closed during its exchange counts
+as spent: the next renewal drops it.
+
+Records of SDK 0.6 to 0.9 kept the session as `previous` of its attempt; 0.10
+reads them as the session with the attempt pending and stores the new shape
+with its next write. A tab of SDK 0.9 beside one of 0.10 ignores the pending
+attempt and drops it with its next renewal: the session stays, and that
+attempt's callback fails with `attempt`. Records written by SDK 0.5 have no
+earlier session.
 
 `unreadable` identifies corrupt or unsupported records without deleting them
 or hiding other valid records.
@@ -130,8 +149,7 @@ credentials.
 Discovery only reads the Pod's metadata, so the runtime bounds it: a Pod whose
 discovery has not answered after 15 seconds counts as unreachable
 (`problem: 'network'`), also when its `fetch` ignores the abort signal. This
-applies to every discovery: restoration, resuming an abandoned
-re-authorization, the discovery before a refresh claim (which then spends
+applies to every discovery: restoration, the discovery before a refresh claim (which then spends
 nothing and stays signed in), rediscovery for a
 [lost renewal answer](#lost-renewal-answers), `connect(url)` (rejects),
 `beginAuthorization(id)` (rejects, nothing reset) and a callback's code claim
@@ -359,10 +377,12 @@ link that opens in a new tab.
 The attempt runs at most once per tab. The runtime notes it in
 `sessionStorage` before the redirect, so a reload, a sign-out, coming back from
 the Pod without an answer or a failed answer never starts it again; `tabStorage`
-replaces that storage in tests, and without one nothing is tried. Coming back
-to the page that left (its history entry, also from the back/forward cache)
-forgets the attempt; a tab opened from the one at the Pod copies the note but
-leaves the attempt to that tab's answer. A tab whose silent sign-in starts while another tab's sign-in to the default
+replaces that storage in tests, and without one nothing is tried. While the
+attempt is out, every tab shows its connection `signed-out`, never
+interrupted: coming back without an answer, a reload or a tab opened from the
+one at the Pod leaves the attempt for its answer, which still signs in. A click
+on **Sign in** replaces it at once, and a start after its expiry (10 minutes)
+deletes it as if it never started. A tab whose silent sign-in starts while another tab's sign-in to the default
 Pod is under way, up to the end of its code exchange, follows that sign-in
 instead of asking the Pod again, also when it listed that sign-in meanwhile.
 A preparation
@@ -773,14 +793,15 @@ to the app's other tabs with a `BroadcastChannel`. A renewal of the same
 session is used as it is; any other change lists the connection anew, as a
 reload would:
 
-| In one tab                               | The other tabs                                                              |
-| ---------------------------------------- | --------------------------------------------------------------------------- |
-| Renews the credential                    | Send with the new credential; nothing of theirs is reset                    |
-| Signs out, or a session ends there       | `signed-out` (with `problem`), as a reload would list it                    |
-| Forgets the connection                   | The connection leaves their snapshot                                        |
-| Leaves for a sign-in or re-authorization | `ended { problem: 'interrupted' }` until the result is stored               |
-| Completes that sign-in                   | `restoring`, then `active` with the new session; its catalogue loads again  |
-| Closes while its refresh answer is out   | The next tab that needs the session resends it once within the grace period |
+| In one tab                             | The other tabs                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| Renews the credential                  | Send with the new credential; nothing of theirs is reset                    |
+| Signs out, or a session ends there     | `signed-out` (with `problem`), as a reload would list it                    |
+| Forgets the connection                 | The connection leaves their snapshot                                        |
+| Leaves for a first sign-in             | `ended { problem: 'interrupted' }` until stored; a silent one `signed-out`  |
+| Leaves for a re-authorization          | Keep using the session, which renews as usual                               |
+| Completes that sign-in                 | `restoring`, then `active` with the new session; its catalogue loads again  |
+| Closes while its refresh answer is out | The next tab that needs the session resends it once within the grace period |
 
 Context selection, bound views and drafts stay per tab: another tab's renewal
 keeps them, and a new sign-in in another tab resets them as in the signing-in
@@ -802,21 +823,10 @@ blocked when another tab renews that session. Under `optional`, a connection
 reading without a token keeps doing so when another tab ends a session.
 
 A tab that starts, or reloads, while another tab is away at the Pod for a
-re-authorization shows that connection `interrupted` as the open tabs do, and
-leaves the attempt to the tab that left for it: only that tab resumes the
-earlier session when it comes back to the page it left from without a
-callback, by a back navigation, also one that restores the page from the
-back/forward cache. The SDK notes the attempt for that page's history entry:
-with the entry's key in `tabStorage` where the browser names its entries
-(`navigation.currentEntry`), leaving `history.state` as it is, and otherwise
-in a plain-object `history.state` beside the router's fields. A router's own
-value there (a string, an array, a `Map`) is never changed; without named
-entries such an attempt waits for its expiry. A tab opened from
-it has a history of its own and leaves the attempt alone, and so does the tab
-that left when it opens the app anew instead of going back. An attempt nobody
-returns to (its tab closed at the Pod) resumes the earlier session in the
-other tabs once it expires after 10 minutes. Outside a browser (no `history`),
-any start resumes it, as before 0.9.0.
+re-authorization restores the session at once, and so does that tab when it
+comes back without a callback (also from the back/forward cache), a reload of
+it and a tab opened from it: the attempt stays pending beside the session for
+its callback. Nothing is noted in the page's history or `history.state`.
 Announcements are best effort: a
 page restored from the back/forward cache reads every record again and lists
 connections added meanwhile, and a tab that missed one otherwise reads the
@@ -858,9 +868,8 @@ compatibility case keeps a residual mix-up risk (RFC 9207). sempods-kotlin
 announces support, so its callbacks use the strict path. The announcement is also
 part of the saved discovery binding, preventing silent changes on resume.
 
-A first sign-in left without a callback, an abandoned re-authorization whose
-earlier session cannot resume, and interrupted code claims (and refresh claims
-of SDK 0.7) are retained with an explicit `interrupted` session problem; an
+A first sign-in left without a callback and interrupted code claims (and
+refresh claims of SDK 0.7) are retained with an explicit `interrupted` session problem; an
 expired authorization reports `expired`.
 Neither is dispatched or silently retried on startup. A refresh the earlier
 page left is resent once instead (see
@@ -973,9 +982,10 @@ connection reports `session.kind: 'leaving'` (with the earlier `subject` for a
 re-authorization) and keeps its catalogue, selection and grants for display:
 no request of the earlier session is dispatched, `bind`, `bindContext` and
 `bindPod` throw `disconnected`, and the SDK components show a status instead of a sign-in. A
-page restored from the back/forward cache with its runtime still alive resumes
-the earlier session as above; a host that disposes the runtime on `pagehide`
-recreates it, and its startup resumes it. A navigation that never leaves (the
+page restored from the back/forward cache with its runtime still alive lists
+the connection anew, as a start would: a re-authorized session restores at
+once, keeping the page's Context choice and catalogue; a host that disposes
+the runtime on `pagehide` recreates it, and its startup does the same. A navigation that never leaves (the
 browser stopped it, or the person stayed in a leave prompt) leaves the
 connection `leaving` until `cancelAuthorization(id)` abandons the attempt. It
 first stops a navigation of this document still loading (`window.stop()`,
@@ -983,12 +993,15 @@ which also stops the page's other loads in flight) and aborts the `signal`
 that `navigate(url, { signal })` received. A host-managed sign-in that does
 not navigate this document cancels on that signal and returns `'signal'`:
 the page then stays without `window.stop()`. A
-re-authorization then resumes as above, a first sign-in ends `interrupted`
-without a request and its saved attempt is retired, and the silent one is
-signed out. `SempodsProvider` offers it as **Stay on this page** once a
+re-authorization then restores the session, a first sign-in ends
+`interrupted` without a request and its saved attempt is retired, and the
+silent one is signed out, its attempt kept for its answer. `SempodsProvider` offers it as **Stay on this page** once a
 redirect takes a few seconds. After the session ended (for example a failed
 refresh), it prepares under a fresh lifetime in the same runtime, which a
 disconnect or dispose during preparation still cancels without navigating. A
+re-authorization stores its attempt under the session's refresh lock: it
+waits for a renewal under way, in this tab or another, and a session that
+ends meanwhile is signed in to again. A
 Pod that advertises no registration endpoint (optional, RFC 8414) still serves
 `did:web` clients; dynamic clients
 need one and are refused with `invalid-config`.

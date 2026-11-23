@@ -1,10 +1,11 @@
 /**
- * Re-authorization outcomes (#98): a denied or abandoned attempt resumes the
- * session it started from when that session is still valid; every other
- * outcome ends the connection, and a successful grant replaces the old one.
+ * Re-authorization outcomes (#98, #393): the attempt is stored beside the
+ * session, which keeps working. Only a validated callback replaces it; a
+ * denial, any other failed callback, a return without a callback and expiry
+ * leave the session as it is.
  */
 import { afterEach, expect, it, vi } from 'vitest';
-import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import { IDBObjectStore } from 'fake-indexeddb';
 import { createBrowserRuntime } from './runtime.js';
 import { openSessionStore } from '../sessions/store.js';
 import type { BrowserRuntime } from './types.js';
@@ -16,7 +17,6 @@ import {
   jwt,
   restored,
   settleLease,
-  storeWith,
   unauthorized,
   work,
 } from './fixture.test.js';
@@ -79,18 +79,20 @@ async function reload(f: ReturnType<typeof fixture>) {
   return next;
 }
 
-it('keeps the earlier session beside the stored attempt', async () => {
+it('keeps the session beside the stored attempt', async () => {
   const { f, id } = await reauthorizing();
   expect(await stored(f, id)).toMatchObject({
-    kind: 'authorizing',
-    previous: {
-      binding: { connectionId: id, scopes: ['tasks', 'share'] },
-      credentials: { subject: me, scopes: ['tasks'] },
+    kind: 'ready',
+    binding: { connectionId: id, scopes: ['tasks', 'share'] },
+    credentials: { subject: me, scopes: ['tasks'] },
+    pending: {
+      kind: 'open',
+      attempt: { connectionId: id, scopes: ['tasks', 'share'] },
     },
   });
 });
 
-it('resumes the earlier session after a matched denial, without a token request', async () => {
+it('keeps the session after a matched denial, without a token request', async () => {
   const { f, id, authorization, tokens } = await reauthorizing();
   const next = denial(f, authorization);
   expect(await next.initialize()).toMatchObject({
@@ -112,7 +114,7 @@ it('resumes the earlier session after a matched denial, without a token request'
     kind: 'ok',
   });
   expect(await stored(f, id)).toMatchObject({ kind: 'ready' });
-  expect(await stored(f, id)).not.toHaveProperty('previous');
+  expect(await stored(f, id)).not.toHaveProperty('pending');
   // A reload restores it like any saved session.
   next.dispose();
   const after = await reload(f);
@@ -148,12 +150,19 @@ it('leaves the attempt intact for a forged callback; the real denial still resum
   const forged = keep(
     f.returned(authorization, 'error=access_denied&iss=https%3A%2F%2Fevil'),
   );
-  expect(await forged.initialize()).toMatchObject({
+  const report = await forged.initialize();
+  expect(report).toMatchObject({
     interaction: 'failed',
+    problem: 'callback',
     attemptConnectionId: id,
   });
-  expect(forged.getSnapshot()[0]?.session.kind).toBe('ended');
-  expect(await stored(f, id)).toMatchObject({ kind: 'authorizing' });
+  expect(report).not.toHaveProperty('resumed');
+  await restored(forged);
+  expect(forged.getSnapshot()[0]?.session.kind).toBe('active');
+  expect(await stored(f, id)).toMatchObject({
+    kind: 'ready',
+    pending: { kind: 'open' },
+  });
   forged.dispose();
   await settleLease();
   const real = denial(f, authorization);
@@ -180,7 +189,10 @@ it.each(['wrong', 'missing', 'duplicated'] as const)(
       interaction: 'failed',
       problem: 'attempt',
     });
-    expect(await stored(f, id)).toMatchObject({ kind: 'authorizing' });
+    expect(await stored(f, id)).toMatchObject({
+      kind: 'ready',
+      pending: { kind: 'open' },
+    });
     stray.dispose();
     await settleLease();
     // The real callback still redeems its code.
@@ -212,31 +224,26 @@ it('keeps a first sign-in denial signed out', async () => {
   });
 });
 
-it('ends the connection for another provider answer during re-authorization', async () => {
-  const { f, id, authorization } = await reauthorizing();
-  const next = denial(f, authorization, 'login_required');
+it('keeps the session for another provider answer, without claiming it is unchanged', async () => {
+  const { f, id, authorization, tokens } = await reauthorizing();
+  const next = denial(f, authorization, 'server_error');
   expect(await next.initialize()).toMatchObject({
     interaction: 'failed',
-    problem: 'login-required',
+    problem: 'provider-unavailable',
+    attemptConnectionId: id,
+    resumed: true,
   });
-  expect(next.getSnapshot()[0]?.session).toMatchObject({
-    kind: 'ended',
-    problem: 'login-required',
+  await restored(next);
+  expect(next.getSnapshot()[0]?.session).toEqual({
+    kind: 'active',
+    subject: me,
   });
-  await vi.waitFor(async () =>
-    expect(await stored(f, id)).toMatchObject({
-      kind: 'disconnected',
-      reason: 'login-required',
-    }),
-  );
-  next.dispose();
-  // The Pod is remembered, signed out, with why its session ended.
-  expect((await reload(f)).getSnapshot()).toMatchObject([
-    { id, session: { kind: 'signed-out', problem: 'login-required' } },
-  ]);
+  expect(f.count('/token')).toBe(tokens);
+  expect(await stored(f, id)).toMatchObject({ kind: 'ready' });
+  expect(await stored(f, id)).not.toHaveProperty('pending');
 });
 
-it('ends the connection when the earlier credential expired without a refresh token', async () => {
+it('hands the attempt over when the session expires while away; its callback then signs in', async () => {
   const f = fixture();
   keep(f.runtime);
   f.setToken(async () =>
@@ -253,18 +260,21 @@ it('ends the connection when the earlier credential expired without a refresh to
   await settleLease();
   const later = Date.now() + 5 * 60_000;
   vi.spyOn(Date, 'now').mockReturnValue(later);
-  // Abandoned: shown as interrupted, nothing resumed.
+  // Back without a callback: the expired session ends, its attempt stays.
   const back = keep(createBrowserRuntime(f.options));
   await back.initialize();
   await vi.waitFor(() =>
     expect(back.getSnapshot()[0]?.session).toEqual({
       kind: 'ended',
-      problem: 'interrupted',
+      problem: 'expired',
     }),
+  );
+  await vi.waitFor(async () =>
+    expect(await stored(f, id)).toMatchObject({ kind: 'authorizing' }),
   );
   back.dispose();
   await settleLease();
-  // Denied: ends as for a first sign-in.
+  // A denial then ends it as for a first sign-in.
   const next = denial(f, authorization);
   const report = await next.initialize();
   expect(report).toMatchObject({ interaction: 'cancelled' });
@@ -275,7 +285,7 @@ it('ends the connection when the earlier credential expired without a refresh to
   });
 });
 
-it('resumes an earlier session that expired while away, then renews it', async () => {
+it('renews a session that expired while away; the expired attempt’s late answer changes nothing', async () => {
   const { f, id, authorization } = await reauthorizing();
   vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 2 * 3600_000);
   f.setToken(async () =>
@@ -291,7 +301,10 @@ it('resumes an earlier session that expired while away, then renews it', async (
     }),
   );
   const next = denial(f, authorization);
-  expect(await next.initialize()).toMatchObject({ resumed: true });
+  expect(await next.initialize()).toMatchObject({
+    interaction: 'failed',
+    problem: 'attempt',
+  });
   const reads = next.bindPod(id);
   await reads.sparql.construct('CONSTRUCT {} WHERE {}');
   await vi.waitFor(async () =>
@@ -321,7 +334,7 @@ it('replaces the earlier grant with a narrower successful one, never merging', a
     kind: 'ready',
     credentials: { scopes: [], refreshToken: 'narrow' },
   });
-  expect(await stored(f, id)).not.toHaveProperty('previous');
+  expect(await stored(f, id)).not.toHaveProperty('pending');
   next.dispose();
   expect((await reload(f)).getSnapshot()[0]?.grantedScopes).toEqual([]);
 });
@@ -344,23 +357,40 @@ it('signs in the other account a successful re-authorization returns', async () 
   });
 });
 
-it('ends the connection when the token answer is lost; the old one never returns', async () => {
+it('keeps the session when the code answer is lost, and never sends the code again', async () => {
   const { f, id, authorization } = await reauthorizing();
   f.setToken(async () => {
     throw new TypeError('lost response');
   });
+  const tokens = f.count('/token');
   const next = keep(f.returned(authorization));
-  expect(await next.initialize()).toMatchObject({ interaction: 'failed' });
-  expect(next.getSnapshot()[0]?.session.kind).toBe('ended');
-  expect(await stored(f, id)).toMatchObject({ kind: 'disconnected' });
-  expect(await stored(f, id)).not.toHaveProperty('credentials');
+  expect(await next.initialize()).toMatchObject({
+    interaction: 'failed',
+    attemptConnectionId: id,
+    resumed: true,
+  });
+  expect(f.count('/token')).toBe(tokens + 1);
+  await restored(next);
+  expect(next.getSnapshot()[0]?.session).toEqual({
+    kind: 'active',
+    subject: me,
+  });
+  expect(await stored(f, id)).toMatchObject({
+    kind: 'ready',
+    credentials: { refreshToken: 'first-refresh' },
+  });
+  expect(await stored(f, id)).not.toHaveProperty('pending');
   next.dispose();
-  expect((await reload(f)).getSnapshot()).toMatchObject([
-    { id, session: { kind: 'signed-out' } },
-  ]);
+  await settleLease();
+  const replay = keep(f.returned(authorization));
+  expect(await replay.initialize()).toMatchObject({
+    interaction: 'failed',
+    problem: 'attempt',
+  });
+  expect(f.count('/token')).toBe(tokens + 1);
 });
 
-it('resumes the earlier session when the person comes back without a callback', async () => {
+it('restores the session when the person comes back without a callback', async () => {
   const { f, id, tokens } = await reauthorizing();
   // Also once the attempt itself expired.
   vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000);
@@ -376,7 +406,7 @@ it('resumes the earlier session when the person comes back without a callback', 
   expect(await stored(f, id)).toMatchObject({ kind: 'ready' });
 });
 
-it('keeps an abandoned attempt for the next start when storage fails', async () => {
+it('keeps the attempt when its answer cannot be stored', async () => {
   const { f, id, authorization } = await reauthorizing();
   const put = vi
     .spyOn(IDBObjectStore.prototype, 'put')
@@ -389,16 +419,21 @@ it('keeps an abandoned attempt for the next start when storage fails', async () 
     problem: 'storage',
     attemptConnectionId: id,
   });
-  expect(failing.getSnapshot()[0]?.session.kind).toBe('ended');
   put.mockRestore();
-  expect(await stored(f, id)).toMatchObject({ kind: 'authorizing' });
+  await restored(failing);
+  expect(failing.getSnapshot()[0]?.session.kind).toBe('active');
+  expect(await stored(f, id)).toMatchObject({
+    kind: 'ready',
+    pending: { kind: 'open' },
+  });
   failing.dispose();
-  // The callback was scrubbed; the next start resumes it as abandoned.
-  const after = await reload(f);
-  expect(after.getSnapshot()[0]?.session.kind).toBe('active');
+  await settleLease();
+  expect(await denial(f, authorization).initialize()).toMatchObject({
+    resumed: true,
+  });
 });
 
-it('does not resume over a record another writer changed (CAS)', async () => {
+it('does not complete on a record another writer changed', async () => {
   const { f, id, authorization } = await reauthorizing();
   const original = f.fetch.getMockImplementation()!;
   const discovery = deferred<void>();
@@ -417,17 +452,18 @@ it('does not resume over a record another writer changed (CAS)', async () => {
   await store.commit(id, current!.revision, {
     ...(current!.value as object),
     kind: 'disconnected',
-    binding: (current!.value as { previous: { binding: unknown } }).previous
-      .binding,
+    pending: undefined,
   });
   store.close();
   discovery.resolve();
-  expect(await report).toMatchObject({ interaction: 'failed' });
-  expect(next.getSnapshot()[0]?.session.kind).toBe('ended');
+  expect(await report).toMatchObject({
+    interaction: 'failed',
+    problem: 'attempt',
+  });
   expect(await stored(f, id)).toMatchObject({ kind: 'disconnected' });
 });
 
-it('does not keep a session whose refresh was claimed when re-authorization began', async () => {
+it('waits for a refresh under way, then stores the attempt beside its result', async () => {
   const f = fixture();
   keep(f.runtime);
   const { runtime, id } = await f.login();
@@ -438,9 +474,10 @@ it('does not keep a session whose refresh was claimed when re-authorization bega
   const tokens = f.count('/token');
   const read = runtime.bindPod(id).sparql.construct('CONSTRUCT {} WHERE {}');
   await vi.waitFor(() => expect(f.count('/token')).toBe(tokens + 1));
-  await runtime.beginAuthorization(id);
-  const authorization = new URL(f.navigate.mock.calls.at(-1)![0]);
-  expect(await stored(f, id)).not.toHaveProperty('previous');
+  const navigations = f.navigate.mock.calls.length;
+  const begun = runtime.beginAuthorization(id);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(f.navigate.mock.calls.length).toBe(navigations);
   held.resolve(
     Response.json({
       access_token: jwt(),
@@ -448,12 +485,21 @@ it('does not keep a session whose refresh was claimed when re-authorization bega
       refresh_token: 'late',
     }),
   );
+  await begun;
   await read;
+  const authorization = new URL(f.navigate.mock.calls.at(-1)![0]);
+  expect(await stored(f, id)).toMatchObject({
+    kind: 'ready',
+    credentials: { refreshToken: 'late' },
+    pending: { kind: 'open' },
+  });
   runtime.dispose();
   await settleLease();
   const next = denial(f, authorization);
-  expect(await next.initialize()).not.toHaveProperty('resumed');
-  expect(next.getSnapshot()[0]?.session.kind).toBe('ended');
+  expect(await next.initialize()).toMatchObject({ resumed: true });
+  await restored(next);
+  expect(next.getSnapshot()[0]?.session.kind).toBe('active');
+  expect(f.count('/token')).toBe(tokens + 1);
 });
 
 it('does not resurrect a connection disconnected while leaving', async () => {
@@ -513,7 +559,11 @@ it('keeps the earlier facts while leaving and resumes from the back/forward cach
   });
   // The handle of the earlier lifetime stays retired.
   expect(await view.subjects.get('urn:item')).toEqual({ kind: 'invalidated' });
-  expect(await stored(f, id)).toMatchObject({ kind: 'ready' });
+  // The attempt stays for its callback.
+  expect(await stored(f, id)).toMatchObject({
+    kind: 'ready',
+    pending: { kind: 'open' },
+  });
 });
 
 it('stays on the page when its redirect did not leave', async () => {
@@ -631,48 +681,7 @@ it('restarts a catalogue read the leaving page aborted when it resumes', async (
   );
 });
 
-it('retires a resumed record when sign-out runs during the resume commit', async () => {
-  const page = new EventTarget();
-  vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
-  vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
-  const factory = new IDBFactory();
-  const held: { gate?: ReturnType<typeof deferred<void>>; reached?: boolean } =
-    {};
-  const f = fixture({
-    openStore: storeWith(factory, (store) => ({
-      async commit(id, revision, value) {
-        if (held.gate) {
-          held.reached = true;
-          await held.gate.promise;
-        }
-        return store.commit(id, revision, value);
-      },
-    })),
-  });
-  keep(f.runtime);
-  const { runtime, id } = await f.login();
-  keep(runtime);
-  await runtime.beginAuthorization(id);
-  held.gate = deferred<void>();
-  page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
-  await vi.waitFor(() => expect(held.reached).toBe(true));
-  const signOut = runtime.disconnect(id);
-  const gate = held.gate;
-  delete held.gate;
-  gate.resolve();
-  expect(await signOut).toEqual({ kind: 'disconnected' });
-  const store = await openSessionStore(namespace, factory);
-  expect((await store.read(id))?.value).toMatchObject({
-    kind: 'disconnected',
-    reason: 'disconnected',
-  });
-  store.close();
-  expect(runtime.getSnapshot()).toMatchObject([
-    { id, session: { kind: 'signed-out', problem: 'disconnected' } },
-  ]);
-});
-
-it('publishes nothing from a resume that settles after dispose', async () => {
+it('publishes nothing from a callback that settles after dispose', async () => {
   const { f, authorization } = await reauthorizing();
   const original = f.fetch.getMockImplementation()!;
   const discovery = deferred<void>();
@@ -692,4 +701,115 @@ it('publishes nothing from a resume that settles after dispose', async () => {
   await report;
   expect(next.getSnapshot()).toEqual([]);
   expect(seen).toHaveBeenCalledTimes(1);
+});
+
+/** Rewrites the stored record as `change` makes it, as another SDK would. */
+async function rewrite(
+  f: ReturnType<typeof fixture>,
+  id: string,
+  change: (value: Record<string, unknown>) => Record<string, unknown>,
+) {
+  const store = await openSessionStore(namespace, f.factory);
+  try {
+    const current = (await store.read(id))!;
+    const written = await store.commit(
+      id,
+      current.revision,
+      change(current.value as Record<string, unknown>),
+    );
+    expect(written.kind).toBe('committed');
+  } finally {
+    store.close();
+  }
+}
+
+it('restores and completes a re-authorization stored by SDK 0.6 to 0.9', async () => {
+  const { f, id, authorization } = await reauthorizing();
+  // SDK 0.9 kept the session as `previous` of its attempt.
+  await rewrite(f, id, ({ binding, credentials, pending }) => ({
+    version: 1,
+    kind: 'authorizing',
+    attempt: (pending as { attempt: unknown }).attempt,
+    previous: { binding, credentials },
+  }));
+  // Back without a callback: the session restores at once.
+  const back = await reload(f);
+  expect(back.getSnapshot()[0]?.session).toEqual({
+    kind: 'active',
+    subject: me,
+  });
+  back.dispose();
+  await settleLease();
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt({ scope: 'tasks share' }),
+      token_type: 'Bearer',
+      refresh_token: 'consented',
+      scope: 'tasks share',
+    }),
+  );
+  const next = keep(f.returned(authorization));
+  expect(await next.initialize()).toMatchObject({
+    interaction: 'completed',
+    connectionId: id,
+  });
+  expect(next.getSnapshot()[0]?.grantedScopes).toEqual(['tasks', 'share']);
+  expect(await stored(f, id)).toMatchObject({
+    kind: 'ready',
+    credentials: { refreshToken: 'consented' },
+  });
+  expect(await stored(f, id)).not.toHaveProperty('previous');
+});
+
+it('keeps the session when an SDK 0.9 tab drops the pending attempt; its callback then fails', async () => {
+  const { f, id, authorization, tokens } = await reauthorizing();
+  // A 0.9 tab's renewal writes only what it knows.
+  await rewrite(f, id, (value) => {
+    const session = { ...value };
+    delete session.pending;
+    return session;
+  });
+  const next = keep(f.returned(authorization));
+  const report = await next.initialize();
+  expect(report).toMatchObject({ interaction: 'failed', problem: 'attempt' });
+  expect(report).not.toHaveProperty('resumed');
+  expect(f.count('/token')).toBe(tokens);
+  await restored(next);
+  expect(next.getSnapshot()[0]?.session).toEqual({
+    kind: 'active',
+    subject: me,
+  });
+});
+
+it('leaves a newer attempt for its own callback when a replaced one answers late', async () => {
+  const { f, id, authorization: first } = await reauthorizing();
+  const again = await reload(f);
+  await again.beginAuthorization(id, { intent: 'change-sharing' });
+  const second = new URL(f.navigate.mock.calls.at(-1)![0]);
+  again.dispose();
+  await settleLease();
+  const tokens = f.count('/token');
+  const late = keep(f.returned(first));
+  expect(await late.initialize()).toMatchObject({
+    interaction: 'failed',
+    problem: 'attempt',
+  });
+  late.dispose();
+  await settleLease();
+  // A wrong issuer for the current attempt changes nothing either.
+  const forged = keep(
+    f.returned(second, 'code=fixture-code&iss=https%3A%2F%2Fevil.example'),
+  );
+  expect(await forged.initialize()).toMatchObject({
+    interaction: 'failed',
+    problem: 'callback',
+  });
+  expect(f.count('/token')).toBe(tokens);
+  forged.dispose();
+  await settleLease();
+  const real = keep(f.returned(second));
+  expect(await real.initialize()).toMatchObject({
+    interaction: 'completed',
+    connectionId: id,
+  });
 });

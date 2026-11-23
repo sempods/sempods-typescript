@@ -22,25 +22,35 @@ export interface SessionConfiguration {
   readonly development?: DiscoveryOptions['development'];
 }
 
-/** The session a re-authorization started from, kept until the attempt settles. */
-export interface PreviousSession {
-  readonly binding: SessionBinding;
-  readonly credentials: ExchangeResult;
-}
+/**
+ * A re-authorization of a session, kept beside that session until it settles
+ * (0.10.0): `open` with its verifier until its callback claims the code, then
+ * `claimed` without it while that exchange runs. Its binding's generation
+ * becomes the new grant's. Only a validated callback replaces the session;
+ * any other outcome drops the attempt and leaves the session as it is.
+ */
+export type PendingAttempt =
+  | { readonly kind: 'open'; readonly attempt: SessionAttempt }
+  | {
+      readonly kind: 'claimed';
+      readonly state: string;
+      readonly binding: SessionBinding;
+    };
 export type SessionRecord = { readonly version: 1 } & (
   | {
       readonly kind: 'authorizing';
       readonly attempt: SessionAttempt;
       /**
-       * Absent for a first sign-in and in records of SDK 0.5 and earlier. A
-       * denied or abandoned attempt may resume it; any other outcome drops it.
+       * The silent first sign-in (`firstSignIn: 'silent'`, 0.10.0): shown
+       * signed out in every tab while it is out, never as interrupted.
        */
-      readonly previous?: PreviousSession;
+      readonly silent?: true;
     }
   | {
       readonly kind: 'ready';
       readonly binding: SessionBinding;
       readonly credentials: ExchangeResult;
+      readonly pending?: PendingAttempt;
     }
   | {
       readonly kind: 'claimed';
@@ -53,6 +63,8 @@ export type SessionRecord = { readonly version: 1 } & (
        * of SDK 0.7 and earlier, which are never sent again.
        */
       readonly resend?: RefreshResend;
+      /** A refresh claim's session's re-authorization; never in a code claim. */
+      readonly pending?: PendingAttempt;
     }
   | {
       readonly kind: 'disconnected';
@@ -114,23 +126,30 @@ export function parseSessionRecord(
     if (!record(value) || value.version !== 1) throw new Error();
     let parsed: SessionRecord;
     if (value.kind === 'authorizing') {
-      parsed = {
-        version: 1,
-        kind: 'authorizing',
-        attempt: parseStoredAttempt(
-          value.attempt,
-          config.configKey,
-          config.redirectUri,
-          config.development,
-        ),
-        ...(value.previous === undefined
-          ? {}
-          : { previous: parsePrevious(value.previous, config) }),
-      };
-      if (
-        parsed.previous &&
-        parsed.previous.binding.connectionId !== parsed.attempt.connectionId
-      )
+      const attempt = parseStoredAttempt(
+        value.attempt,
+        config.configKey,
+        config.redirectUri,
+        config.development,
+      );
+      // SDK 0.6 to 0.9 kept a re-authorized session as `previous` of its
+      // attempt: read as that session with the attempt pending, which the
+      // next write stores.
+      parsed =
+        value.previous === undefined
+          ? {
+              version: 1,
+              kind: 'authorizing',
+              attempt,
+              ...(value.silent === true ? { silent: true as const } : {}),
+            }
+          : {
+              version: 1,
+              kind: 'ready',
+              ...parsePrevious(value.previous, config),
+              pending: { kind: 'open', attempt },
+            };
+      if (sessionBinding(parsed).connectionId !== attempt.connectionId)
         throw new Error();
     } else {
       // Only a code claim still depends on its exact redirect.
@@ -153,6 +172,7 @@ export function parseSessionRecord(
               ...binding,
               scopes: binding.scopes,
             }),
+            ...parsePending(value.pending, binding, config),
           };
           break;
         case 'claimed':
@@ -174,6 +194,9 @@ export function parseSessionRecord(
             ...(value.resend === undefined || value.operation !== 'refresh'
               ? {}
               : { resend: parseResend(value.resend) }),
+            ...(value.operation === 'refresh'
+              ? parsePending(value.pending, binding, config)
+              : {}),
           };
           break;
         case 'disconnected':
@@ -219,10 +242,78 @@ function parseResend(value: unknown): RefreshResend {
   };
 }
 
+/**
+ * The re-authorization a session record carries. One this SDK cannot read
+ * (corrupt, or written by a newer SDK) is left out rather than losing the
+ * session: the next write drops it, and its callback fails as `attempt`.
+ */
+function parsePending(
+  value: unknown,
+  session: SessionBinding,
+  config: SessionConfiguration,
+): { readonly pending?: PendingAttempt } {
+  if (value === undefined) return {};
+  try {
+    if (!record(value)) throw new Error();
+    let pending: PendingAttempt;
+    let binding: SessionBinding;
+    if (value.kind === 'open') {
+      const attempt = parseStoredAttempt(
+        value.attempt,
+        config.configKey,
+        config.redirectUri,
+        config.development,
+      );
+      pending = { kind: 'open', attempt };
+      binding = attempt;
+    } else if (value.kind === 'claimed') {
+      if (
+        typeof value.state !== 'string' ||
+        !/^[A-Za-z0-9_-]{32,128}$/.test(value.state)
+      )
+        throw new Error();
+      // Its code can only be redeemed with this exact redirect.
+      binding = parseSessionBinding(
+        value.binding,
+        config.configKey,
+        config.redirectUri,
+        config.development,
+      );
+      pending = { kind: 'claimed', state: value.state, binding };
+    } else throw new Error();
+    if (
+      binding.connectionId !== session.connectionId ||
+      binding.generation === session.generation
+    )
+      throw new Error();
+    return { pending };
+  } catch {
+    return {};
+  }
+}
+
+/** A pending attempt that may still settle: claimed, or open and unexpired. */
+export function livePending(
+  pending: PendingAttempt | undefined,
+  now = Date.now(),
+): PendingAttempt | undefined {
+  if (!pending) return undefined;
+  if (pending.kind === 'claimed') return pending;
+  const { createdAt, expiresAt } = pending.attempt;
+  return createdAt <= now && now < expiresAt ? pending : undefined;
+}
+
+/** The generation a pending attempt grants under. */
+export function pendingGeneration(pending: PendingAttempt): string {
+  return pending.kind === 'open'
+    ? pending.attempt.generation
+    : pending.binding.generation;
+}
+
 function parsePrevious(
   value: unknown,
   config: SessionConfiguration,
-): PreviousSession {
+): { readonly binding: SessionBinding; readonly credentials: ExchangeResult } {
   if (!record(value)) throw new Error();
   // Like a ready record, it holds no outstanding authorization of its own.
   const binding = parseSessionBinding(

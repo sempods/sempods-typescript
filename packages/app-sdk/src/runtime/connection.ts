@@ -53,6 +53,11 @@ export interface Entry {
   clientPod: Pod;
   /** `forget(id)` was asked; its record is deleted on every retry, also by `disconnect`. */
   forgetting?: true;
+  /**
+   * The latest sign-in this tab prepares: an earlier one stops once another
+   * starts, and a session that ends while it waits does not stop it.
+   */
+  preparation?: object;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**

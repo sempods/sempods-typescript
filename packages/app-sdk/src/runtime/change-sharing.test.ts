@@ -100,7 +100,7 @@ it('asks the Pod for its consent page only when the person changes sharing', asy
   expect(asked(f).searchParams.has('prompt')).toBe(false);
 });
 
-it('resumes the earlier session when the person cancels on the consent page', async () => {
+it('keeps the session when the person cancels on the consent page', async () => {
   const { f, runtime, id } = await signedIn();
   await runtime.beginAuthorization(id, { intent: 'change-sharing' });
   const sharing = asked(f);

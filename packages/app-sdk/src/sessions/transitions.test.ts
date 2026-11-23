@@ -29,7 +29,7 @@ function committed(change: SessionChange) {
   if (change.kind !== 'committed') throw new Error('Expected commit');
   return change.record;
 }
-function claimed<T extends { kind: 'claimed' } | { kind: 'conflict' }>(
+function claimed<T extends { readonly kind: string }>(
   claim: T,
 ): Extract<T, { kind: 'claimed' }> {
   expect(claim.kind).toBe('claimed');
@@ -894,7 +894,7 @@ it('checks stored absolute expiry against JWT exp when the endpoint omitted expi
   });
 });
 
-describe('re-authorization keeps and resumes the earlier session', () => {
+describe('a re-authorization pending beside its session (#393)', () => {
   async function reauthorizing() {
     const s = await setup();
     const ready = await s.ready();
@@ -906,145 +906,405 @@ describe('re-authorization keeps and resumes the earlier session', () => {
     const pending = committed(
       await s.transitions.prepare(next, ready.revision),
     );
-    return { ...s, ready, next, pending };
+    const expected = { ...next, pod: s.attempt.pod };
+    return { ...s, ready, next, pending, expected };
   }
   const denied = (attempt: SessionAttempt, error = 'access_denied') =>
     new URL(`${callback}?error=${error}&state=${attempt.state}`);
 
-  it('stores the ready session beside the attempt and reads 0.5 records without it', async () => {
-    const { pending, ready, store, transitions } = await reauthorizing();
-    expect(pending.value).toMatchObject({
-      kind: 'authorizing',
-      previous: {
-        binding: { generation: 'generation-one' },
-        credentials: { refreshToken: 'refresh-one' },
-      },
-    });
+  it('stores the attempt beside the session, which stays as it was', async () => {
+    const { pending, ready, next, transitions, attempt } =
+      await reauthorizing();
     if (ready.value.kind !== 'ready') throw new Error('Expected ready');
-    // A record written by 0.5 has no `previous`.
-    const { previous: _previous, ...older } = pending.value as Record<
-      string,
-      unknown
-    >;
-    void _previous;
-    const written = await store.commit(pending.id, pending.revision, older);
-    expect(written.kind).toBe('committed');
-    expect((await transitions.read(pending.id))?.value).not.toHaveProperty(
-      'previous',
+    expect(pending.value).toEqual({
+      ...ready.value,
+      pending: { kind: 'open', attempt: next },
+    });
+    // A newer attempt replaces it.
+    const { attempt: third } = await prepareSessionAuthorization({
+      ...attempt,
+      generation: 'generation-three',
+      returnTo: '/',
+    });
+    const replaced = committed(
+      await transitions.prepare(third, pending.revision),
     );
+    expect(replaced.value).toMatchObject({
+      kind: 'ready',
+      binding: { generation: 'generation-one' },
+      pending: { kind: 'open', attempt: { state: third.state } },
+    });
+    // A sign-out drops it.
+    const out = committed(
+      await transitions.disconnect(
+        replaced.id,
+        replaced.revision,
+        'disconnected',
+      ),
+    );
+    expect(out.value).not.toHaveProperty('pending');
+    // Without a session, the attempt is the record; a silent one says so.
+    const { attempt: fourth } = await prepareSessionAuthorization({
+      ...attempt,
+      generation: 'generation-four',
+      returnTo: '/',
+    });
+    expect(
+      committed(await transitions.prepare(fourth, out.revision, true)).value,
+    ).toEqual({
+      version: 1,
+      kind: 'authorizing',
+      attempt: fourth,
+      silent: true,
+    });
   });
 
-  it('treats a malformed or foreign earlier session as corrupt', async () => {
-    const { pending, store, transitions } = await reauthorizing();
-    if (pending.value.kind !== 'authorizing' || !pending.value.previous)
-      throw new Error('Expected an earlier session');
-    const value = pending.value;
-    const earlier = pending.value.previous;
+  it('reads a record of SDK 0.6 to 0.9 as its session with the attempt pending', async () => {
+    const { pending, next, store, transitions } = await reauthorizing();
+    if (pending.value.kind !== 'ready') throw new Error('Expected ready');
+    const { binding, credentials: kept } = pending.value;
+    const older = {
+      version: 1,
+      kind: 'authorizing',
+      attempt: next,
+      previous: { binding, credentials: kept },
+    };
+    const written = await store.commit(pending.id, pending.revision, older);
+    expect(written.kind).toBe('committed');
+    expect((await transitions.read(pending.id))?.value).toEqual(pending.value);
+    // A record of SDK 0.5 has no earlier session.
+    const { previous: _previous, ...first } = older;
+    void _previous;
+    const current = await store.read(pending.id);
+    await store.commit(pending.id, current!.revision, first);
+    expect((await transitions.read(pending.id))?.value).toEqual({
+      version: 1,
+      kind: 'authorizing',
+      attempt: next,
+    });
+    // A malformed or foreign earlier session is corrupt.
     for (const previous of [
-      { binding: earlier.binding },
-      { ...earlier, binding: { ...earlier.binding, connectionId: 'other' } },
+      { binding },
+      { binding: { ...binding, connectionId: 'other' }, credentials: kept },
     ]) {
-      const current = await store.read(pending.id);
-      await store.commit(pending.id, current!.revision, { ...value, previous });
+      const now = await store.read(pending.id);
+      await store.commit(pending.id, now!.revision, { ...older, previous });
       await expect(transitions.read(pending.id)).rejects.toMatchObject({
         problem: 'corrupt',
       });
     }
   });
 
-  it('resumes after a matched denial or without a callback, under the attempt generation', async () => {
-    for (const answer of [true, false]) {
-      const { pending, next, transitions, attempt } = await reauthorizing();
-      const resumed = committed(
-        await transitions.resume(
-          pending.id,
-          pending.revision,
-          attempt.pod,
-          answer ? denied(next) : undefined,
-        ),
-      );
-      expect(resumed.value).toMatchObject({
-        kind: 'ready',
-        binding: { generation: 'generation-two' },
-        credentials: { refreshToken: 'refresh-one' },
+  it('keeps the session when the attempt it carries cannot be read', async () => {
+    const { pending, store, transitions } = await reauthorizing();
+    if (pending.value.kind !== 'ready') throw new Error('Expected ready');
+    for (const unknown of [
+      { kind: 'future' },
+      { kind: 'open', attempt: { state: 'x' } },
+      {
+        ...pending.value.pending,
+        attempt: {
+          ...(pending.value.pending as { attempt: SessionAttempt }).attempt,
+          generation: 'generation-one',
+        },
+      },
+    ]) {
+      const now = await store.read(pending.id);
+      await store.commit(pending.id, now!.revision, {
+        ...pending.value,
+        pending: unknown,
       });
-      // The attempt is consumed: no second resume or code claim.
-      await expect(
-        transitions.resume(pending.id, resumed.revision, attempt.pod),
-      ).rejects.toMatchObject({ problem: 'state' });
+      const read = await transitions.read(pending.id);
+      expect(read?.value).toMatchObject({ kind: 'ready' });
+      expect(read?.value).not.toHaveProperty('pending');
     }
   });
 
-  it('refuses ineligible answers and leaves forged callbacks untouched', async () => {
-    const { pending, next, transitions, attempt } = await reauthorizing();
-    const resume = (url?: URL) =>
-      transitions.resume(pending.id, pending.revision, attempt.pod, url);
-    await expect(resume(returned(next))).rejects.toMatchObject({
-      problem: 'state',
+  it('carries an open attempt through a refresh, and drops a claimed or expired one', async () => {
+    const { pending, transitions, attempt, next } = await reauthorizing();
+    if (pending.value.kind !== 'ready') throw new Error('Expected ready');
+    const session = { ...attempt, generation: 'generation-one' };
+    const claim = claimed(
+      await transitions.claimRefresh(pending.id, pending.revision, session),
+    );
+    const sent = await transitions.read(pending.id);
+    expect(sent?.value).toMatchObject({
+      kind: 'claimed',
+      pending: { kind: 'open', attempt: { state: next.state } },
     });
-    await expect(resume(denied(next, 'login_required'))).rejects.toMatchObject({
-      problem: 'state',
+    const renewed = committed(
+      await claim.complete(credentials({ refreshToken: 'refresh-two' })),
+    );
+    expect(renewed.value).toMatchObject({
+      kind: 'ready',
+      credentials: { refreshToken: 'refresh-two' },
+      pending: { kind: 'open', attempt: { state: next.state } },
     });
+    // The resend of a lost answer carries it too.
+    const lost = claimed(
+      await transitions.claimRefresh(renewed.id, renewed.revision, session),
+    );
+    const resend = claimed(
+      await transitions.resendRefresh(renewed.id, lost.revision, session),
+    );
+    expect((await transitions.read(renewed.id))?.value).toMatchObject({
+      pending: { kind: 'open' },
+    });
+    const again = committed(
+      await resend.complete(credentials({ refreshToken: 'refresh-three' })),
+    );
+    // Once claimed, a refresh under the lock drops it: its tab closed.
+    const code = claimed(
+      await transitions.claimPending(
+        again.id,
+        { ...next, pod: attempt.pod },
+        returned(next),
+      ),
+    );
+    const left = claimed(
+      await transitions.claimRefresh(again.id, code.revision, session),
+    );
+    expect((await transitions.read(again.id))?.value).not.toHaveProperty(
+      'pending',
+    );
+    const after = committed(
+      await left.complete(credentials({ refreshToken: 'refresh-four' })),
+    );
+    expect(after.value).not.toHaveProperty('pending');
+    // An expired open attempt is dropped by the next refresh as well.
+    const { attempt: late } = await prepareSessionAuthorization({
+      ...attempt,
+      generation: 'generation-three',
+      returnTo: '/',
+    });
+    const out = committed(await transitions.prepare(late, after.revision));
+    vi.spyOn(Date, 'now').mockReturnValue(late.expiresAt);
+    claimed(await transitions.claimRefresh(out.id, out.revision, session));
+    expect((await transitions.read(out.id))?.value).not.toHaveProperty(
+      'pending',
+    );
+  });
+
+  it('claims the code once without keeping the verifier, and the new grant replaces the session', async () => {
+    const { pending, transitions, next, expected, store } =
+      await reauthorizing();
+    const claim = claimed(
+      await transitions.claimPending(pending.id, expected, returned(next)),
+    );
+    expect(claim.attempt).toEqual(next);
+    const stored = (await store.read(pending.id))?.value;
+    expect(JSON.stringify(stored)).not.toContain(next.verifier);
+    expect((await transitions.read(pending.id))?.value).toMatchObject({
+      kind: 'ready',
+      binding: { generation: 'generation-one' },
+      pending: {
+        kind: 'claimed',
+        state: next.state,
+        binding: { generation: 'generation-two' },
+      },
+    });
+    // A second callback cannot exchange it again.
     await expect(
-      resume(new URL(`${denied(next).href}&iss=https%3A%2F%2Fevil`)),
-    ).rejects.toMatchObject({ problem: 'callback' });
-    await expect(
-      transitions.resume(
-        pending.id,
+      transitions.claimPending(pending.id, expected, returned(next)),
+    ).rejects.toMatchObject({ problem: 'attempt' });
+    const replaced = committed(
+      await claim.complete(
+        credentials({
+          accessToken: jwt({ sub: 'https://other.example/#me' }),
+          subject: 'https://other.example/#me',
+          refreshToken: 'new',
+        }),
+      ),
+    );
+    expect(replaced.value).toMatchObject({
+      kind: 'ready',
+      binding: { generation: 'generation-two' },
+      credentials: {
+        subject: 'https://other.example/#me',
+        refreshToken: 'new',
+      },
+    });
+    expect(replaced.value).not.toHaveProperty('pending');
+    await expect(claim.complete(credentials())).rejects.toMatchObject({
+      problem: 'consumed',
+    });
+  });
+
+  it('consumes a matching error answer and leaves the session; forged or foreign callbacks change nothing', async () => {
+    const { pending, transitions, next, expected, attempt } =
+      await reauthorizing();
+    const unchanged = async () =>
+      expect((await transitions.read(pending.id))?.revision).toBe(
         pending.revision,
+      );
+    await expect(
+      transitions.claimPending(
+        pending.id,
+        expected,
+        new URL(`${denied(next).href}&iss=https%3A%2F%2Fevil`),
+      ),
+    ).rejects.toMatchObject({ problem: 'callback' });
+    await unchanged();
+    for (const url of [
+      denied(attempt),
+      new URL(`${callback}?error=access_denied`),
+      new URL(`${denied(next).href}&state=${next.state}`),
+    ]) {
+      await expect(
+        transitions.claimPending(pending.id, expected, url),
+      ).rejects.toMatchObject({ problem: 'attempt' });
+      await unchanged();
+    }
+    // A changed token endpoint is not the attempt's binding.
+    await expect(
+      transitions.claimPending(
+        pending.id,
         {
-          ...attempt.pod,
-          endpoints: {
-            ...attempt.pod.endpoints,
-            token: `${pod}/_system/auth/token-v2`,
+          ...expected,
+          pod: {
+            ...expected.pod,
+            endpoints: {
+              ...expected.pod.endpoints,
+              token: `${pod}/_system/auth/token-v2`,
+            },
           },
         },
-        denied(next),
+        returned(next),
       ),
     ).rejects.toMatchObject({ problem: 'state' });
+    await unchanged();
+    const answer = await transitions.claimPending(
+      pending.id,
+      expected,
+      denied(next),
+    );
+    expect(answer).toMatchObject({
+      kind: 'answered',
+      error: { problem: 'denied' },
+    });
+    const after = (await transitions.read(pending.id))!;
+    if (pending.value.kind !== 'ready') throw new Error('Expected ready');
+    const { pending: _dropped, ...session } = pending.value;
+    void _dropped;
+    expect(after.value).toEqual(session);
+    await expect(
+      transitions.claimPending(pending.id, expected, denied(next)),
+    ).rejects.toMatchObject({ problem: 'attempt' });
+  });
+
+  it('refuses an expired attempt without changing the record', async () => {
+    const { pending, transitions, next, expected } = await reauthorizing();
+    vi.spyOn(Date, 'now').mockReturnValue(next.expiresAt);
+    await expect(
+      transitions.claimPending(pending.id, expected, returned(next)),
+    ).rejects.toMatchObject({ problem: 'attempt' });
     expect((await transitions.read(pending.id))?.revision).toBe(
       pending.revision,
     );
+  });
+
+  it('lets a sign-out during the exchange stay in effect', async () => {
+    const { pending, transitions, next, expected } = await reauthorizing();
+    const claim = claimed(
+      await transitions.claimPending(pending.id, expected, returned(next)),
+    );
+    const out = committed(
+      await transitions.disconnect(pending.id, claim.revision, 'disconnected'),
+    );
+    expect((await claim.complete(credentials())).kind).toBe('conflict');
+    expect((await transitions.read(pending.id))?.revision).toBe(out.revision);
+    expect(await transitions.discardPending(pending.id, 'generation-two')).toBe(
+      'none',
+    );
+  });
+
+  it('hands the attempt over when its session ends, and its callback completes it', async () => {
+    for (const stage of ['open', 'claimed'] as const) {
+      const { pending, transitions, next, expected } = await reauthorizing();
+      const claim =
+        stage === 'claimed'
+          ? claimed(
+              await transitions.claimPending(
+                pending.id,
+                expected,
+                returned(next),
+              ),
+            )
+          : undefined;
+      const revision = claim?.revision ?? pending.revision;
+      const handed = committed(
+        (await transitions.handOver(pending.id, revision))!,
+      );
+      if (stage === 'open') {
+        expect(handed.value).toEqual({
+          version: 1,
+          kind: 'authorizing',
+          attempt: next,
+        });
+        continue;
+      }
+      expect(handed.value).toMatchObject({
+        kind: 'claimed',
+        operation: 'code',
+        subject: null,
+        binding: { generation: 'generation-two' },
+      });
+      const done = committed(await claim!.complete(credentials()));
+      expect(done.value).toMatchObject({
+        kind: 'ready',
+        binding: { generation: 'generation-two' },
+      });
+    }
+    // Nothing to hand over without a pending attempt, or for a stale revision.
+    const s = await setup();
+    const ready = await s.ready();
+    expect(await s.transitions.handOver(ready.id, ready.revision)).toBe(
+      undefined,
+    );
+    expect((await s.transitions.handOver(ready.id, 'stale'))?.kind).toBe(
+      'conflict',
+    );
+  });
+
+  it('drops a failed exchange’s attempt, keeping the session or retiring a handed-over claim', async () => {
+    const { pending, transitions, next, expected } = await reauthorizing();
+    const claim = claimed(
+      await transitions.claimPending(pending.id, expected, returned(next)),
+    );
     expect(
-      (await transitions.resume(pending.id, 'stale', attempt.pod)).kind,
-    ).toBe('conflict');
-  });
-
-  it('does not resume an expired earlier session without a refresh token', async () => {
-    const s = await setup();
-    const { refreshToken: _unused, ...withoutRefresh } = credentials();
-    void _unused;
-    const saved = await s.prepare();
-    const ready = committed(
-      await claimed(
-        await s.transitions.claimCode(
-          saved.id,
-          saved.revision,
-          s.attempt,
-          returned(s.attempt),
-        ),
-      ).complete(withoutRefresh),
+      await transitions.discardPending(pending.id, 'generation-other'),
+    ).toBe('none');
+    expect(await transitions.discardPending(pending.id, 'generation-two')).toBe(
+      'kept',
     );
-    const { attempt: next } = await prepareSessionAuthorization({
-      ...s.attempt,
-      generation: 'generation-two',
-      returnTo: '/',
+    expect((await transitions.read(pending.id))?.value).toMatchObject({
+      kind: 'ready',
+      binding: { generation: 'generation-one' },
     });
-    const pending = committed(
-      await s.transitions.prepare(next, ready.revision),
+    expect((await claim.complete(credentials())).kind).toBe('conflict');
+    const again = await reauthorizing();
+    const second = claimed(
+      await again.transitions.claimPending(
+        again.pending.id,
+        again.expected,
+        returned(again.next),
+      ),
     );
-    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 2 * 3600_000);
-    await expect(
-      s.transitions.resume(pending.id, pending.revision, s.attempt.pod),
-    ).rejects.toMatchObject({ problem: 'state' });
-  });
-
-  it('keeps no earlier session for a first sign-in', async () => {
-    const s = await setup();
-    const first = await s.prepare();
-    expect(first.value).not.toHaveProperty('previous');
-    await expect(
-      s.transitions.resume(first.id, first.revision, s.attempt.pod),
-    ).rejects.toMatchObject({ problem: 'state' });
+    committed(
+      (await again.transitions.handOver(again.pending.id, second.revision))!,
+    );
+    expect(
+      await again.transitions.discardPending(
+        again.pending.id,
+        'generation-two',
+        'network',
+      ),
+    ).toBe('ended');
+    expect((await again.transitions.read(again.pending.id))?.value).toEqual({
+      version: 1,
+      kind: 'disconnected',
+      binding: expect.objectContaining({ generation: 'generation-two' }),
+      reason: 'network',
+    });
   });
 });
