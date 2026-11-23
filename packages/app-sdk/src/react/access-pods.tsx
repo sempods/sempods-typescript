@@ -349,15 +349,15 @@ export function PodManagement({
           signOut,
         ];
       case 'signed-out':
-        // The default Pod read without a token and never signed in to has
-        // no saved address to remove: every start lists it again. Any other
-        // Pod added that way is remembered by its address (#372).
+        // The default Pod's own connection, read without a token and never
+        // signed in to, has no saved address to remove: every start lists
+        // it again, by the Pod address as its ID. Any other Pod added that
+        // way is remembered by its address (#372), also one that became the
+        // default Pod later.
         return [
           ...signInAction,
           ...use,
-          ...(anonymous &&
-          s.problem === undefined &&
-          entry.podUrl === defaultPodUrl
+          ...(anonymous && s.problem === undefined && entry.id === defaultPodUrl
             ? []
             : remove),
         ];

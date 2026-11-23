@@ -373,6 +373,35 @@ it('removes a Pod added without a sign-in from this device, keeping the default 
   expect(next.getSnapshot()).toHaveLength(1);
 });
 
+it('removes a saved Pod that became the default Pod later (#372)', async () => {
+  const bob = 'https://pod.example/bob';
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  await f.runtime.initialize();
+  const added = await f.runtime.connect(bob);
+  const keep = (r: { dispose(): void }) =>
+    void cleanups.push(() => r.dispose());
+  // Reopened with Bob's Pod as the sole allowed one: his saved address.
+  const options = { ...f.options, allowedPods: [bob] };
+  delete options.preset;
+  const next = await restart({ options }, f.runtime, keep);
+  expect(next.getSnapshot()).toMatchObject([{ id: added.id, podUrl: bob }]);
+  render(
+    <SempodsProvider runtime={next}>
+      <AppAccess appName="Recipes" open />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('group', { name: 'pod.example/bob' });
+  const remove = await podAction('Remove from this device', 'pod.example/bob');
+  await act(async () => remove.click());
+  // Its address is gone; the default Pod's own connection remains.
+  await waitFor(() =>
+    expect(next.getSnapshot()).toMatchObject([{ id: bob, podUrl: bob }]),
+  );
+  expect(await podActionNames('pod.example/bob')).not.toContain(
+    'Remove from this device',
+  );
+});
+
 const task = fields(
   { title: text('urn:title', { language: null }) },
   { type: 'urn:Task' },
