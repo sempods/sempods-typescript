@@ -583,7 +583,11 @@ export function createBrowserRuntime(
         // missed entirely (the back/forward cache). It may still have changed
         // what the Pod grants (a removed access, a narrower choice whose
         // answer was lost): Context access is read again.
-        if (!value.pending) recheckAccess(e);
+        if (value.pending) e.attemptSeen = true;
+        else {
+          delete e.attemptSeen;
+          recheckAccess(e);
+        }
         return false;
       }
       // Its result follows here when this tab uses or restores the session;
@@ -604,6 +608,8 @@ export function createBrowserRuntime(
         delete e.lost;
         delete e.restorable;
         install(e, value.credentials);
+        // A renewal elsewhere that dropped an attempt this tab saw.
+        noteAttempt(e, value);
         return true;
       }
     }
@@ -680,6 +686,8 @@ export function createBrowserRuntime(
       e.view = { ...e.view, requestedScopes: b.scopes };
       return e;
     }
+    if ((value.kind === 'ready' || value.kind === 'claimed') && value.pending)
+      e.attemptSeen = true;
     const problem = interruption(value);
     const restores =
       value.kind === 'ready' ||
@@ -1150,13 +1158,18 @@ export function createBrowserRuntime(
       await resendLost(e, { sentAt: claim.sentAt });
       return 'resent';
     }
-    await serial(e, async () => {
+    const change = await serial(e, async () => {
       current(e, generation);
-      accepted(e, await claim.complete(sent.result));
+      const change = await claim.complete(sent.result);
+      accepted(e, change);
+      return change;
     });
     current(e, generation);
     e.pod = pod;
     install(e, sent.result);
+    // This renewal dropped an attempt this tab saw (expired, or claimed by a
+    // tab that closed during its exchange).
+    if (change.kind === 'committed') noteAttempt(e, change.record.value);
     return 'installed';
   }
   /**
@@ -1367,13 +1380,18 @@ export function createBrowserRuntime(
       sentAt + gracePeriod,
     );
     if (sent.kind === 'lost') throw new RuntimeError('interrupted');
-    await serial(e, async () => {
+    const change = await serial(e, async () => {
       current(e, generation);
-      accepted(e, await claim.complete(sent.result));
+      const change = await claim.complete(sent.result);
+      accepted(e, change);
+      return change;
     });
     current(e, generation);
     e.pod = pod;
     install(e, sent.result);
+    // This renewal dropped an attempt this tab saw (expired, or claimed by a
+    // tab that closed during its exchange).
+    if (change.kind === 'committed') noteAttempt(e, change.record.value);
   }
   /**
    * Offline after a lost answer, within the grace period: nothing is sent, the
@@ -1670,6 +1688,21 @@ export function createBrowserRuntime(
     };
     if (e.catalogue) void e.catalogue.then(again, again);
     else again();
+  }
+  /**
+   * Follows whether this connection's record carries a re-authorization: one
+   * that is gone without a new grant (dropped by a renewal, denied, failed)
+   * may still have changed what the Pod grants, so Context access is read
+   * again.
+   */
+  function noteAttempt(e: Entry, value: SessionRecord) {
+    if ((value.kind === 'ready' || value.kind === 'claimed') && value.pending) {
+      e.attemptSeen = true;
+      return;
+    }
+    if (!e.attemptSeen) return;
+    delete e.attemptSeen;
+    recheckAccess(e);
   }
   /** Counts the browser's `online` events, so a restoration knows it missed one. */
   let onlineEvents = 0;

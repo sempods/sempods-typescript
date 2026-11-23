@@ -62,6 +62,8 @@ export interface Entry {
   rechecking?: Promise<unknown>;
   /** Another consent outcome arrived during that read: it runs once more. */
   recheckAgain?: true;
+  /** The record carried a re-authorization when last seen (`noteAttempt`). */
+  attemptSeen?: true;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**

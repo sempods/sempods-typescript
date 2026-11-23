@@ -1121,6 +1121,34 @@ it('reads Context access once more when a second consent ends during that read',
   );
 });
 
+it('reads Context access again in every tab when a renewal drops an attempt they saw', async () => {
+  const t = await tabs();
+  // A tab that starts while the attempt is out, and has read its catalogue.
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  t.a.dispose();
+  const c = createBrowserRuntime({ ...t.options, tabStorage: memoryStorage() });
+  runtimes.push(c);
+  await c.initialize();
+  await restored(c);
+  expect(await c.loadContexts(t.id)).toMatchObject({ kind: 'ok' });
+  // The person consented to less, but the callback never came; the attempt
+  // expires, and tab b's renewal drops it.
+  t.setCatalogue(async () => catalogue([], []));
+  advance(3600_000);
+  // The read that renews is retired with the Context the Pod removed.
+  await t.b.bind(t.id).sparql.construct(query);
+  expect(t.refreshes()).toHaveLength(1);
+  const [saved] = await records(t.factory);
+  expect(saved?.value).not.toHaveProperty('pending');
+  for (const runtime of [t.b, c])
+    await vi.waitFor(() =>
+      expect(
+        runtime.getSnapshot().find((x) => x.id === t.id)?.catalogue,
+      ).toMatchObject({ kind: 'ready', contexts: [] }),
+    );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);
