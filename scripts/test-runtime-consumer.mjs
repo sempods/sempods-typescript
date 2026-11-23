@@ -162,8 +162,12 @@ try {
   const serverErrors = [];
   let registrations = 0;
   let exchanges = 0;
-  /** The next consent answer: denied, or left open (no redirect back). */
+  /**
+   * The next consent answer: denied, left open (no redirect back), or never
+   * answered (`hang`, a navigation that keeps loading).
+   */
   let consent;
+  const hanging = [];
   let refreshes = 0;
   let overviewRefuse = false;
   /** A failing discovery status for the delayed Pod: 503 is transient, 404 is not. */
@@ -361,6 +365,10 @@ try {
         if (answer === 'open') {
           res.writeHead(200, { 'content-type': 'text/html' });
           res.end('<p>Consent</p>');
+          return;
+        }
+        if (answer === 'hang') {
+          hanging.push(res);
           return;
         }
         if (answer === 'deny') {
@@ -1153,6 +1161,43 @@ try {
     'active',
   );
   assert.deepEqual({ exchanges, refreshes }, beforeCancel);
+  // A navigation to the Pod that does not leave (#386): staying on the page
+  // stops it and resumes the session, without a token request.
+  consent = 'hang';
+  const stayed = await page.evaluate(async () => {
+    const r = window.fixture.runtime;
+    const id = r.getSnapshot()[0].id;
+    const start = window.location.href;
+    await r.beginAuthorization(id);
+    const leaving = r.getSnapshot()[0].session.kind;
+    // Still loading the Pod's page.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      leaving,
+      cancelled: r.cancelAuthorization(id),
+      again: r.cancelAuthorization(id),
+      same: window.location.href === start,
+    };
+  });
+  assert.deepEqual(stayed, {
+    leaving: 'leaving',
+    cancelled: true,
+    again: false,
+    same: true,
+  });
+  assert.equal(hanging.length, 1);
+  await page.waitForFunction(
+    () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+  );
+  // The Pod's page answers late: the stopped navigation does not go there.
+  for (const res of hanging.splice(0)) {
+    if (res.destroyed) continue;
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<p>Consent</p>');
+  }
+  await page.waitForTimeout(500);
+  assert.match(page.url(), /\/app\?identity=dynamic$/);
+  assert.deepEqual({ exchanges, refreshes }, beforeCancel);
   // A tab opened from the one at the Pod copies its session storage (#374):
   // it does not take the attempt, and the callback completes it.
   const reauthorized = await page.evaluate(
@@ -1254,7 +1299,7 @@ try {
     await cachingBrowser.close();
   }
   console.log(
-    'Packed re-authorization in Chromium: a denied consent and a back navigation, also from the back/forward cache, keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
+    'Packed re-authorization in Chromium: a denied consent, a back navigation, also from the back/forward cache, and staying on the page during a navigation that keeps loading keep the session and the router history state without a signed-out state or token request, and a tab opened from the one at the Pod leaves its attempt to the callback passed.',
   );
   const before = registrations;
   await page.goto(origin + '/app?identity=did');

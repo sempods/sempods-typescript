@@ -419,6 +419,18 @@ export interface BrowserRuntime {
     options?: { readonly intent?: AuthorizationIntent },
   ): Promise<void>;
   /**
+   * Stays on this page instead of the sign-in that `beginAuthorization`
+   * started here: for a navigation the browser stopped, or one the person
+   * kept the page from (a leave prompt's **Stay**), which leaves the
+   * connection `leaving`. Without an app `navigate`, a navigation still
+   * loading is stopped first. As when the page comes back from the
+   * back/forward cache, a re-authorization resumes the session it started
+   * from (`restoring`, then `active`, or `ended` if it cannot), a first
+   * sign-in ends `interrupted`, and the silent first sign-in is signed out.
+   * Returns whether such an attempt was abandoned; `false` changes nothing.
+   */
+  cancelAuthorization(id: string): boolean;
+  /**
    * Signs out on this device: blocks this connection locally, then removes its
    * saved session. The connection stays listed as
    * `signed-out { problem: 'disconnected' }` with its address and remembered

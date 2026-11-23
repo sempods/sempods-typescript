@@ -56,7 +56,8 @@ const Demand = createContext({
 });
 /**
  * Guarded user actions for custom screens and replacement controls. Each
- * guarded action (all except `refreshContexts`, `loadContextLabels` and `retryRestore`) resolves `false`, discarding
+ * guarded action (all except `refreshContexts`, `loadContextLabels`,
+ * `retryRestore` and `cancelAuthorization`) resolves `false`, discarding
  * nothing, if the connection that was active when the person was asked stops
  * being active outside a guarded action.
  */
@@ -106,6 +107,15 @@ export interface AppActions {
    * (`session.restorable`); see `BrowserRuntime.retryRestore`. Not guarded.
    */
   retryRestore(id: string): Promise<void>;
+  /**
+   * Stay on this page instead of a sign-in or **Change sharing** redirect
+   * that did not leave (the browser stopped it, or the person chose to stay
+   * in a leave prompt), so the connection is no longer `leaving` and the
+   * content works again; see `BrowserRuntime.cancelAuthorization`. The SDK
+   * offers it as **Stay on this page** once a redirect takes a while. Not
+   * guarded; returns whether an attempt was abandoned.
+   */
+  cancelAuthorization(id: string): boolean;
   /** Run local row/page navigation under the same leave policy. */
   navigate(action: () => void | Promise<void>): Promise<boolean>;
   /**
@@ -216,6 +226,7 @@ export function SempodsProvider({
       loadContextLabels: (id: string, iris: readonly string[]) =>
         runtime.loadContextLabels(id, iris),
       retryRestore: (id: string) => runtime.retryRestore(id),
+      cancelAuthorization: (id: string) => runtime.cancelAuthorization(id),
       navigate: (action: () => void | Promise<void>) =>
         controller.navigate(action),
       selectTarget: (target: ContextTarget) => controller.selectTarget(target),
@@ -261,6 +272,7 @@ export function SempodsProvider({
           {/* Also above an app dialog that is already open (#264). */}
           <TopLayerSlot>
             <LeaveConfirmation />
+            <SlowRedirect />
           </TopLayerSlot>
         </Demand.Provider>
       </Context.Provider>
@@ -820,6 +832,55 @@ function LeaveConfirmation() {
     >
       <p>{unconfirmedLeave ? m.leaveUnconfirmed : m.leaveBody}</p>
       {failed && <p role="alert">{m.failure}</p>}
+    </ConfirmDialog>
+  );
+}
+
+/** How long a Pod's redirect may take before the page offers to stay. */
+const SLOW_REDIRECT = 3000;
+
+/**
+ * A Pod's sign-in that has not opened after a while: the browser stopped the
+ * navigation, or the person stayed in a leave prompt, and the content stays
+ * inert while the connection is `leaving`. The person may stay on this page
+ * (`cancelAuthorization`), which keeps the drafts, or keep waiting.
+ */
+function SlowRedirect() {
+  const actions = useApp();
+  const { messages } = useSdkLocale();
+  const m = messages.controls;
+  const leaving = useAppFacts((s) =>
+    s.connections
+      .filter((c) => c.session.kind === 'leaving')
+      .map((c) => c.id)
+      .join(' '),
+  );
+  // The redirect the question is about, and how often the person waited on.
+  const [asked, setAsked] = useState<string | null>(null);
+  const [waits, setWaits] = useState(0);
+  useEffect(() => {
+    if (!leaving) return;
+    const timer = setTimeout(() => setAsked(leaving), SLOW_REDIRECT);
+    return () => clearTimeout(timer);
+  }, [leaving, waits]);
+  if (!leaving || asked !== leaving) return null;
+  return (
+    <ConfirmDialog
+      open
+      ui="slow-redirect"
+      title={m.leaving ?? m.loading}
+      cancel={m.stayHere ?? m.cancel}
+      confirm={m.keepWaiting ?? m.acknowledge}
+      onCancel={() => {
+        setAsked(null);
+        for (const id of leaving.split(' ')) actions.cancelAuthorization(id);
+      }}
+      onConfirm={() => {
+        setAsked(null);
+        setWaits((count) => count + 1);
+      }}
+    >
+      <p>{m.leavingSlow}</p>
     </ConfirmDialog>
   );
 }

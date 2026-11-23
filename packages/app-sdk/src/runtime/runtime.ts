@@ -390,6 +390,8 @@ export function createBrowserRuntime(
   const connecting = new Map<string, Promise<Connection>>();
   /** Connections whose sign-in is being prepared here. */
   const preparing = new Set<string>();
+  /** Abandons this page's redirect of a `leaving` connection; see `watchReturn`. */
+  const abandons = new Map<string, () => boolean>();
   const contexts = createContextMemory(
     namespace,
     options.preferences === undefined
@@ -1875,23 +1877,31 @@ export function createBrowserRuntime(
         listener: (event: Event) => void,
       ) => void;
     };
-    if (!page.addEventListener || !page.removeEventListener) return;
-    const stop = () => page.removeEventListener!('pageshow', shown);
-    function shown(event: Event) {
-      if (!(event as Event & { persisted?: boolean }).persisted) return;
+    const id = e.view.id;
+    const stop = () => {
+      page.removeEventListener?.('pageshow', shown);
+      if (abandons.get(id) === abandon) abandons.delete(id);
+    };
+    /** The page did not leave (or came back): this attempt is abandoned. */
+    function abandon() {
       stop();
-      if (eligible(e, generation) && e.view.session.kind === 'leaving') {
-        if (silent) {
-          noteSilent('tried');
-          decline(e);
-          return;
-        }
-        e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
-        publish();
-        void resumeAbandoned(e, 'interrupted');
+      if (!eligible(e, generation) || e.view.session.kind !== 'leaving')
+        return false;
+      if (silent) {
+        noteSilent('tried');
+        decline(e);
+        return true;
       }
+      e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
+      publish();
+      void resumeAbandoned(e, 'interrupted');
+      return true;
     }
-    page.addEventListener('pageshow', shown);
+    function shown(event: Event) {
+      if ((event as Event & { persisted?: boolean }).persisted) abandon();
+    }
+    abandons.set(id, abandon);
+    page.addEventListener?.('pageshow', shown);
     e.lifetime.signal.addEventListener('abort', stop, { once: true });
   }
   /** Resumes an abandoned re-authorization at startup; publishes its own outcome. */
@@ -2755,6 +2765,14 @@ export function createBrowserRuntime(
       )
         throw new RuntimeError('configuration');
       return authorize(id, intent);
+    },
+    cancelAuthorization(id) {
+      const abandon = abandons.get(id);
+      if (!abandon) return false;
+      // The runtime's own navigation may still be loading: it stops here.
+      // An app's `navigate` stops its own.
+      if (!options.navigate) (globalThis as { stop?: () => void }).stop?.();
+      return abandon();
     },
     disconnect(id) {
       return leave(id, false);

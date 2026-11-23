@@ -975,7 +975,13 @@ no request of the earlier session is dispatched, `bind`, `bindContext` and
 `bindPod` throw `disconnected`, and the SDK components show a status instead of a sign-in. A
 page restored from the back/forward cache with its runtime still alive resumes
 the earlier session as above; a host that disposes the runtime on `pagehide`
-recreates it, and its startup resumes it. After the session ended (for example a failed
+recreates it, and its startup resumes it. A navigation that never leaves (the
+browser stopped it, or the person stayed in a leave prompt) leaves the
+connection `leaving` until `cancelAuthorization(id)` abandons the attempt the
+same way: a re-authorization resumes, a first sign-in ends `interrupted`, the
+silent one is signed out. Without an app `navigate`, it first stops a
+navigation still loading. `SempodsProvider` offers it as **Stay on this
+page** once a redirect takes a few seconds. After the session ended (for example a failed
 refresh), it prepares under a fresh lifetime in the same runtime, which a
 disconnect or dispose during preparation still cancels without navigating. A
 Pod that advertises no registration endpoint (optional, RFC 8414) still serves

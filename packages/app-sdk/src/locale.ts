@@ -225,6 +225,15 @@ export interface UiMessages {
   readonly disconnectHere?: string;
   readonly signInToSee?: string;
   readonly back?: string;
+  /*
+   * A Pod's sign-in that has not opened after a while (added in 0.9.0;
+   * optional in the type, `createLocale` fills them): the note under
+   * `leaving`, staying on this page instead (`cancelAuthorization`), and
+   * waiting on.
+   */
+  readonly leavingSlow?: string;
+  readonly stayHere?: string;
+  readonly keepWaiting?: string;
   readonly refresh: string;
   readonly busy: string;
   readonly storage: string;
@@ -414,6 +423,10 @@ export const englishMessages: SdkMessages = {
     disconnectHere: 'Sign out on this device',
     signInToSee: 'Sign in to see what this app may access.',
     back: 'Back',
+    leavingSlow:
+      'The sign-in has not opened yet. If it was stopped, stay on this page to keep working here.',
+    stayHere: 'Stay on this page',
+    keepWaiting: 'Keep waiting',
     refresh: 'Check again',
     busy: 'Open in another tab. Close that tab and reload here.',
     storage:
@@ -593,6 +606,10 @@ export const germanMessages: SdkMessages = {
     disconnectHere: 'Auf diesem Gerät abmelden',
     signInToSee: 'Melde dich an, um die Freigaben zu sehen.',
     back: 'Zurück',
+    leavingSlow:
+      'Die Anmeldung hat sich noch nicht geöffnet. Wurde sie abgebrochen, bleib auf dieser Seite, um hier weiterzuarbeiten.',
+    stayHere: 'Auf dieser Seite bleiben',
+    keepWaiting: 'Weiter warten',
     refresh: 'Erneut prüfen',
     busy: 'In einem anderen Tab geöffnet. Schließe diesen Tab und lade hier neu.',
     storage:

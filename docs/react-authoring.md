@@ -2179,7 +2179,8 @@ host runtime and provider, without `AppAccess` in every widget.
 
 `useApp()` has the guarded `selectConnection`, `selectContext`, `connect`,
 `authorize`, `disconnect`, `forget` and `navigate(action)`, plus unguarded
-`refreshContexts(id)`, `loadContextLabels(id, iris)` and `retryRestore(id)`.
+`refreshContexts(id)`, `loadContextLabels(id, iris)`, `retryRestore(id)` and
+`cancelAuthorization(id)`.
 Read state with `useAppState`, `useConnections` and `useView`.
 `useDraftGuard(dirty, discard, scope?)` registers your own draft:
 
@@ -2212,7 +2213,11 @@ Read state with `useAppState`, `useConnections` and `useView`.
   the selected Pod's, the page is leaving: every guarded change resolves
   `false` at once, a prompt still open is cancelled, and the content is
   inert. Selecting the Pod or Context that is already selected resolves
-  `true` and changes nothing.
+  `true` and changes nothing. A redirect still here after three seconds (the
+  browser stopped it, or the person stayed in a leave prompt) asks whether
+  to **Stay on this page** or **Keep waiting**; staying abandons the attempt
+  (`cancelAuthorization(id)`), so the Pod's earlier session resumes and the
+  content works again. A custom surface can offer the same.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.
 - Leaving the document (reload, closing the tab, typing an address, Back past

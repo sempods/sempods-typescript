@@ -425,8 +425,16 @@ Management no longer shows `controls.disconnectHint`. An app that shows
 several Pods at once passes `podView="combined"` so that no Pod is marked
 **Selected**. An app that translates the controls into another language adds
 `selected`, `signedOut`, `unavailable`, `ended`, `usePod`, `disconnectHere`,
-`signInToSee` and `back`, and the top-level `podActions(pod)`. See
+`signInToSee`, `back`, `leavingSlow`, `stayHere` and `keepWaiting`, and the
+top-level `podActions(pod)`. See
 [Pods & sharing management](react-authoring.md#pods--sharing-management).
+
+`BrowserRuntime` and `useApp()` add `cancelAuthorization(id)`; a test double
+that implements `BrowserRuntime` itself adds it too. While a Pod's redirect
+is pending, the app content is inert, and after three seconds a dialog
+offers **Stay on this page**: an end-to-end test whose `navigate` does not
+leave the page sees it
+([selection and draft lifetime](react-authoring.md#selection-and-draft-lifetime)).
 
 ## From 0.7.0 to 0.8.0
 

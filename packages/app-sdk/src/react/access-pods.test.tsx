@@ -582,6 +582,70 @@ it('starts no second redirect from the app once management closed', async () => 
   expect(f.navigate).toHaveBeenCalledTimes(navigations + 1);
 });
 
+it('stays on the page when another Pod’s redirect did not leave', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  function Page() {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <AppAccess appName="Tasks" open={open} onClose={() => setOpen(false)} />
+        <button type="button">Host</button>
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Page />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  cleanups.push(() => vi.useRealTimers());
+  const sharing = await podAction('Change sharing', 'pod.example/alice');
+  await act(async () => sharing.click());
+  await waitFor(() => expect(f.navigate).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(
+      runtime.getSnapshot().find((entry) => entry.podUrl === pod)?.session.kind,
+    ).toBe('leaving'),
+  );
+  // The browser stopped the navigation: after a while the page offers to stay.
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  const waiting = await screen.findByRole('alertdialog', {
+    name: 'Opening your Pod’s sign-in…',
+  });
+  // Keeping on waiting asks again after another while.
+  await act(async () =>
+    within(waiting).getByRole('button', { name: 'Keep waiting' }).click(),
+  );
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(
+    runtime.getSnapshot().find((entry) => entry.podUrl === pod)?.session.kind,
+  ).toBe('leaving');
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  const slow = await screen.findByRole('alertdialog', {
+    name: 'Opening your Pod’s sign-in…',
+  });
+  await act(async () =>
+    within(slow).getByRole('button', { name: 'Stay on this page' }).click(),
+  );
+  await waitFor(() =>
+    expect(
+      runtime.getSnapshot().find((entry) => entry.podUrl === pod)?.session.kind,
+    ).toBe('active'),
+  );
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Host' }).closest('[inert]'),
+  ).toBeNull();
+  expect(await podActionNames('pod.example/alice')).toContain('Change sharing');
+});
+
 it('names Contexts apart in one pass over a large catalogue', () => {
   const iris = Array.from(
     { length: 1000 },
