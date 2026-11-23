@@ -10,7 +10,7 @@ import {
   type UseEditorOptions,
 } from '@tiptap/react';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { TextSelection } from '@tiptap/pm/state';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import { Placeholder } from '@tiptap/extensions';
 import {
@@ -306,14 +306,18 @@ export default function RichEditor({
     }),
   });
 
-  // A new source from the app, such as a discarded draft, replaces the text.
+  // A new source from the app, such as a discarded draft, replaces the text
+  // and its history: undo must not bring the earlier draft back. A preview
+  // keeps both, as nothing new comes from the app.
   useEffect(() => {
     if (value === shown.current) return;
     shown.current = value;
-    editor
-      .chain()
-      .setContent(doc as JSONContent, { emitUpdate: false })
-      .run();
+    const { schema, plugins } = editor.state;
+    editor.view.updateState(
+      EditorState.create({ schema, plugins, doc: schema.nodeFromJSON(doc) }),
+    );
+    // A transaction that changes nothing, so the toolbar reads the new state.
+    editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false));
   }, [editor, value, doc]);
   // Ready once its view is there, which can be after this first effect.
   useEffect(() => {

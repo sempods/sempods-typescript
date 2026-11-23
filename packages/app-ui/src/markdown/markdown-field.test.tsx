@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   act,
@@ -242,6 +242,42 @@ it('decides the writer again for a value the app restores', async () => {
   expect((await editor()).textContent).toBe('plain');
   rerender(field('`y`'));
   expect(text().value).toBe('`y`');
+});
+
+it('leaves nothing to undo of a draft the app replaced', async () => {
+  const changed = vi.fn();
+  /** A draft the app keeps, and replaces with `replace` when it comes. */
+  function Draft({ replace }: { readonly replace?: string }) {
+    const [value, setValue] = useState('First');
+    useEffect(() => {
+      if (replace !== undefined) setValue(replace);
+    }, [replace]);
+    return (
+      <MarkdownField
+        label="Notes"
+        value={value}
+        onChange={(next) => {
+          changed(next);
+          setValue(next);
+        }}
+        defaultPresentation="write"
+      />
+    );
+  }
+  const { rerender } = render(<Draft />);
+  const input = await editor();
+  fireEvent.click(button('Bulleted list'));
+  expect(changed).toHaveBeenLastCalledWith('- First');
+  await waitFor(() =>
+    expect(button('Undo').hasAttribute('disabled')).toBe(false),
+  );
+  // The app discards the draft and loads another text.
+  rerender(<Draft replace="Other" />);
+  await waitFor(() => expect(input.textContent).toBe('Other'));
+  await waitFor(() =>
+    expect(button('Undo').hasAttribute('disabled')).toBe(true),
+  );
+  expect(changed).toHaveBeenCalledTimes(1);
 });
 
 it('writes as Markdown a text it would not write back as it reads', () => {
