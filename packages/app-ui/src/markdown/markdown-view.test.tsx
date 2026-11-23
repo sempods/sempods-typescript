@@ -44,6 +44,20 @@ it('shows spaces at a line start, as the writer keeps them', () => {
   );
 });
 
+it('shows spaces at a line start inside emphasis', () => {
+  const { container } = render(
+    <MarkdownView source={'**First\\\n&#32;&#32;Second**'} />,
+  );
+  expect(container.querySelector('strong')?.textContent).toBe(
+    'First\n\u00a0\u00a0Second',
+  );
+});
+
+it('shows a link over two lines as one link', () => {
+  render(<MarkdownView source={'[First\\\nSecond](https://a.b)'} />);
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+});
+
 it('shows a link over a formatting boundary as one link', () => {
   render(<MarkdownView source="**Visit** [**our** website](https://a.b)" />);
   const links = screen.getAllByRole('link');

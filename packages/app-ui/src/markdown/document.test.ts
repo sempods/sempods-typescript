@@ -391,6 +391,43 @@ describe('marks', () => {
     ).toBe(false);
   });
 
+  it('writes marks over a line break as one', () => {
+    const href = 'https://a.b';
+    const link = paragraph(
+      text('First', { type: 'link', attrs: { href } }),
+      hardBreak,
+      text('Second', { type: 'link', attrs: { href } }),
+    );
+    expect(toMarkdown(link)).toBe('[First\\\nSecond](https://a.b)');
+    expect(fromMarkdown(toMarkdown(link))).toEqual(link);
+    expect(
+      toMarkdown(
+        paragraph(
+          text('a', { type: 'bold' }),
+          hardBreak,
+          text('b', { type: 'bold' }),
+        ),
+      ),
+    ).toBe('**a\\\nb**');
+    // A mark that ends at the break closes before it.
+    expect(
+      toMarkdown(paragraph(text('a', { type: 'bold' }), hardBreak, text('b'))),
+    ).toBe('**a**\\\nb');
+  });
+
+  it('tells that a heading over a break does not write back', () => {
+    const heading: DocNode = {
+      type: 'heading',
+      attrs: { level: 2 },
+      content: [text('First'), hardBreak, text('Second')],
+    };
+    expect(writesBack(heading)).toBe(false);
+    // A break at a block's end is nothing to write.
+    expect(writesBack(paragraph(text('First'), hardBreak).content![0]!)).toBe(
+      true,
+    );
+  });
+
   it('writes a break in a heading as a space', () => {
     expect(
       toMarkdown({

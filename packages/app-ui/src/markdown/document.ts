@@ -227,11 +227,17 @@ interface Span {
 }
 
 /** Each character a reader sees, but whitespace, with its marks. */
-function visible(nodes: readonly DocNode[] = []): string {
+function visible(nodes: readonly DocNode[] = [], breaks = false): string {
   let out = '';
   for (const node of nodes) {
+    if (node.type === 'hardBreak') {
+      if (breaks) out += '\n';
+      continue;
+    }
     if (node.type !== 'text') {
-      out += visible(node.content);
+      const inner = visible(node.content, breaks);
+      // Breaks that end a block show nothing, so they are not written.
+      out += TEXT_BLOCKS.has(node.type) ? inner.replace(/\n+$/, '') : inner;
       continue;
     }
     const marks = (node.marks ?? [])
@@ -243,6 +249,9 @@ function visible(nodes: readonly DocNode[] = []): string {
   }
   return out;
 }
+
+/** Blocks of inline text, whose breaks at the end show nothing. */
+const TEXT_BLOCKS = new Set(['paragraph', 'heading']);
 
 /** Text next to text with the same marks as one, as the editor keeps it. */
 function merged(content: readonly DocNode[]): DocNode[] {
@@ -295,8 +304,19 @@ function serializeInline(
   // Markers next to whitespace would neither open nor close: the whitespace
   // moves outside them.
   const closeTo = (depth: number) => {
-    const space = out.slice(out.length - trailingSpace(out));
-    out = out.slice(0, out.length - space.length);
+    // Whitespace and the breaks and blank lines after the last text stay
+    // after the markers too: a marker on a line of its own closes nothing.
+    let cut = out.length;
+    const ends = (end: string) =>
+      cut >= end.length && out.startsWith(end, cut - end.length);
+    for (;;) {
+      while (cut > 0 && (out[cut - 1] === ' ' || out[cut - 1] === '\t')) cut--;
+      if (ends('\\\n')) cut -= 2;
+      else if (ends('&#32;') && !ends('\\&#32;')) cut -= 5;
+      else break;
+    }
+    const space = out.slice(cut);
+    out = out.slice(0, cut);
     while (open.length > depth) {
       const { mark, from, at } = open.pop()!;
       if (mark.type === 'link') {
@@ -324,7 +344,7 @@ function serializeInline(
         if (heading) continue;
         out += '&#32;';
       }
-      closeTo(0);
+      // Marks go on over the break: a link over two lines stays one.
       out = out.slice(0, out.length - trailingSpace(out));
       out += heading ? ' ' : '\\\n';
       continue;
@@ -414,7 +434,8 @@ function serializeInline(
     if (
       spans.length === 0 ||
       !/[*~]{3,}|\*~|~\*/.test(out) ||
-      visible(fromMarkdown(out)?.content) === visible(content)
+      visible(fromMarkdown(out)?.content, !heading) ===
+        visible([{ type: 'paragraph', content }], !heading)
     )
       return out;
     // Only the emphasis whose markers meet others is left out; any other
@@ -521,7 +542,8 @@ export function serializeBlock(node: DocNode, other = false): string {
  */
 export function writesBack(block: DocNode): boolean {
   return (
-    visible(fromMarkdown(serializeBlock(block))?.content) === visible([block])
+    visible(fromMarkdown(serializeBlock(block))?.content, true) ===
+    visible([block], true)
   );
 }
 

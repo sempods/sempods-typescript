@@ -54,26 +54,25 @@ const typedBreaks = () => (tree: unknown) => {
 /** Blocks whose text runs in lines. */
 const LINES = new Set(['paragraph', 'heading', 'tableCell']);
 
-/** Leading spaces of each line as no-break spaces, which do not collapse. */
-function indent(children: TreeNode[]) {
-  let start = true;
+/**
+ * Leading spaces of each line as no-break spaces, which do not collapse. A
+ * line starts with the block and after each break, also a break inside
+ * emphasis or a link.
+ */
+function indent(children: TreeNode[], line = { start: true }) {
   for (const child of children) {
-    if (child.type === 'break') {
-      start = true;
-      continue;
-    }
-    if (start) {
-      // The first text of the line, also inside emphasis or a link.
-      let first: TreeNode | undefined = child;
-      while (first && first.type !== 'text') first = first.children?.[0];
-      if (first?.value)
-        first.value = first.value.replace(/^[ \t]+/, (space) =>
+    if (child.type === 'break') line.start = true;
+    else if (child.type === 'text') {
+      if (line.start && child.value)
+        child.value = child.value.replace(/^[ \t]+/, (space) =>
           space.replace(/ /g, '\u00a0').replace(/\t/g, '\u00a0'.repeat(4)),
         );
-    }
-    start = false;
+      if (child.value) line.start = false;
+    } else if (child.children) indent(child.children, line);
+    else line.start = false;
   }
 }
+
 const remarkPlugins = [strikethrough, typedBreaks];
 
 function headings(base: number): Partial<Components> {

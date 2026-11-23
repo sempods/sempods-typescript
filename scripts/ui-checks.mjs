@@ -10134,6 +10134,46 @@ async function markdown({ browser, origin, engine }) {
           };
         }),
       );
+      results.push(
+        await attemptOn(errors, 'markdown-writer-shows-the-draft', async () => {
+          // Deleting the space after `**(optional)**`: the bold cannot stay
+          // in Markdown, so the writer drops it too.
+          await page.goto(address('&notes=boundary&write'));
+          await text(page).waitFor();
+          await select(page, 16, 16);
+          await page.keyboard.press('Backspace');
+          await settle(page);
+          const joined = (await draft(page)).draft;
+          const bold = await text(page).evaluate(
+            (el) => el.querySelectorAll('strong').length,
+          );
+          // A heading over a line break is one line, in the writer as well.
+          await page.goto(address('&notes=empty&write'));
+          await text(page).click();
+          await page.keyboard.type('First');
+          await page.keyboard.press('Shift+Enter');
+          await page.keyboard.type('Second');
+          await notes(page)
+            .getByRole('button', { name: 'Heading', exact: true })
+            .click();
+          await settle(page);
+          const heading = (await draft(page)).draft;
+          const lines = await text(page).evaluate(
+            (el) => el.querySelectorAll('h2 br').length,
+          );
+          return {
+            pass:
+              joined === 'Keep (optional)items' &&
+              bold === 0 &&
+              heading === '## First Second' &&
+              lines === 0,
+            joined,
+            bold,
+            heading,
+            lines,
+          };
+        }),
+      );
     } finally {
       results.push({
         id: 'markdown-keyboard-page-errors',

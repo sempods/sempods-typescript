@@ -14,6 +14,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import {
   EditorState,
   Plugin,
+  Selection,
   TextSelection,
   type Transaction,
 } from '@tiptap/pm/state';
@@ -36,6 +37,7 @@ import {
 import { Button } from '../components/button.js';
 import { Input } from '../components/input.js';
 import {
+  fromMarkdown,
   joinBlocks,
   serializeBlock,
   WEB,
@@ -127,14 +129,64 @@ function savable(tr: Transaction): boolean {
   return ok;
 }
 
+/** Marks a transaction that brought blocks in line with their Markdown. */
+const AGREED = 'markdownAgreed';
+
 /**
- * A formatting the field could not save, such as strikethrough on a bold
- * word between letters, is not made: the editor keeps what it shows and
- * the draft what it saves in step.
+ * After any other change, such as typing next to a bold word or a heading
+ * over a line break, each changed block that would not read back from its
+ * Markdown as it shows becomes what that Markdown reads as: the text the
+ * person typed stays, and the writer shows what the draft holds.
+ */
+function agree(
+  transactions: readonly Transaction[],
+  before: EditorState,
+  after: EditorState,
+): Transaction | null {
+  if (transactions.every((tr) => !tr.docChanged || tr.getMeta(AGREED)))
+    return null;
+  const blocks: { node: ProseMirrorNode; at: number; index: number }[] = [];
+  after.doc.forEach((node, at, index) => blocks.push({ node, at, index }));
+  let tr: Transaction | null = null;
+  // From the end, so the positions before each block stay.
+  for (const { node, at, index } of blocks.reverse()) {
+    if (before.doc.maybeChild(index) === node) continue;
+    const json = node.toJSON() as DocNode;
+    if (writesBack(json)) continue;
+    const read = fromMarkdown(serializeBlock(json))?.content ?? [];
+    if (read.length === 0) continue;
+    tr ??= after.tr;
+    tr.replaceWith(
+      at,
+      at + node.nodeSize,
+      read.map((block) => after.schema.nodeFromJSON(block)),
+    );
+  }
+  if (!tr) return null;
+  // The caret where it was: the text is as long as before.
+  const { anchor, head } = after.selection;
+  const size = tr.doc.content.size;
+  tr.setSelection(
+    anchor === head
+      ? Selection.near(tr.doc.resolve(Math.min(head, size)))
+      : TextSelection.between(
+          tr.doc.resolve(Math.min(anchor, size)),
+          tr.doc.resolve(Math.min(head, size)),
+        ),
+  );
+  return tr.setMeta(AGREED, true);
+}
+
+/**
+ * The editor shows what the field saves: a formatting it could not save,
+ * such as strikethrough on a bold word between letters, is not made, and
+ * any other change that would not save as shown is brought in line.
  */
 const Savable = Extension.create({
   name: 'savableFormatting',
-  addProseMirrorPlugins: () => [new Plugin({ filterTransaction: savable })],
+  addProseMirrorPlugins: () => [
+    new Plugin({ filterTransaction: savable, appendTransaction: agree }),
+  ],
 });
 
 /**
