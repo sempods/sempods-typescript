@@ -34,6 +34,7 @@ import {
   type SessionChange,
 } from '../sessions/transitions.js';
 import {
+  livePending,
   sessionBinding,
   type RefreshResend,
   type SessionRecord,
@@ -542,11 +543,14 @@ export function createBrowserRuntime(
     }
     // This page leaves for its re-authorization, which other tabs' renewals
     // keep pending: it stays leaving (see `watchReturn`).
+    const live =
+      value?.kind === 'ready' || value?.kind === 'claimed'
+        ? livePending(value.pending)
+        : undefined;
     if (
       s.kind === 'leaving' &&
-      (value?.kind === 'ready' || value?.kind === 'claimed') &&
-      value.pending?.kind === 'open' &&
-      value.pending.attempt.generation === e.generation
+      live?.kind === 'open' &&
+      live.attempt.generation === e.generation
     ) {
       e.revision = stored!.revision;
       return false;
@@ -562,6 +566,16 @@ export function createBrowserRuntime(
         sameBinding(e, value)
       ) {
         e.revision = stored!.revision;
+        // A re-authorization that ended without a new grant may still have
+        // changed what the Pod grants (a removed access, a narrower choice
+        // whose answer was lost): Context access is read again.
+        const ended = e.reauthorized && !value.pending;
+        if (value.pending) e.reauthorized = true;
+        else delete e.reauthorized;
+        if (ended) {
+          invalidateContexts(e);
+          void forbidden(e);
+        }
         return false;
       }
       // Its result follows here when this tab uses or restores the session;
@@ -578,6 +592,9 @@ export function createBrowserRuntime(
       // and takes its client.
       if (value.kind === 'ready' && sameBinding(e, value)) {
         e.revision = stored!.revision;
+        // Renewed elsewhere, with a re-authorization pending or not.
+        if (value.pending) e.reauthorized = true;
+        else delete e.reauthorized;
         if (e.lost) clearTimeout(e.lost.timer);
         delete e.lost;
         delete e.restorable;
@@ -653,7 +670,11 @@ export function createBrowserRuntime(
       e.view = { ...e.view, session: signedOut(value.reason) };
       return e;
     }
-    if (value.kind === 'authorizing' && value.silent) return e;
+    if (value.kind === 'authorizing' && value.silent) {
+      // Signed out, with the scopes its answer is checked against.
+      e.view = { ...e.view, requestedScopes: b.scopes };
+      return e;
+    }
     const problem = interruption(value);
     const restores =
       value.kind === 'ready' ||
@@ -1769,13 +1790,23 @@ export function createBrowserRuntime(
    * choice and catalogue; handles of the page's earlier lifetime stay
    * retired.
    */
-  function relist(e: Entry): Promise<void> {
+  function relist(
+    e: Entry,
+    /** The generation of the session the page showed; only its view is kept. */
+    leftFrom?: string,
+  ): Promise<void> {
     return serial(e, async () => {
       if (!sessions || disposed || entries.get(e.view.id) !== e) return;
       const stored = await sessions.read(e.view.id);
       if (entries.get(e.view.id) !== e || disposed) return;
       const value = stored?.value;
       if (value?.kind !== 'ready' || e.view.session.kind !== 'restoring') {
+        replace(e, stored);
+        return;
+      }
+      // Another grant replaced that session meanwhile (another account,
+      // other scopes): nothing of the page's view continues.
+      if (value.binding.generation !== leftFrom) {
         replace(e, stored);
         return;
       }
@@ -1820,6 +1851,8 @@ export function createBrowserRuntime(
     /** A silent first sign-in, a re-authorization or another first sign-in. */
     kind: 'silent' | 'reauthorize' | 'first',
     navigation: Navigation,
+    /** The generation of the session a re-authorization left from. */
+    leftFrom?: string,
   ) {
     const page = globalThis as {
       addEventListener?: (
@@ -1858,7 +1891,7 @@ export function createBrowserRuntime(
         ),
       };
       publish();
-      void relist(e);
+      void relist(e, leftFrom);
       return true;
     }
     function shown(event: Event) {
@@ -1935,7 +1968,8 @@ export function createBrowserRuntime(
     const waiting = new AbortController();
     const timer = setTimeout(
       () => waiting.abort(),
-      DISCOVERY_TIMEOUT + 2 * TOKEN_TIMEOUT,
+      // With a margin for the holder's own storage writes.
+      DISCOVERY_TIMEOUT + 2 * TOKEN_TIMEOUT + 5_000,
     );
     const signal = combineSignals(runtimeLifetime.signal, waiting.signal);
     type Outcome =
@@ -1952,7 +1986,11 @@ export function createBrowserRuntime(
         e,
         async () => {
           clearTimeout(timer);
-          const claim = await shared.claimPending(id, expected, location);
+          // A session that ended between the read and the claim handed the
+          // attempt over (`handOver`): claimed there on a second read.
+          let claim = await shared.claimPending(id, expected, location);
+          if (claim.kind === 'conflict')
+            claim = await shared.claimPending(id, expected, location);
           if (claim.kind === 'conflict') throw new RuntimeError('attempt');
           if (claim.kind === 'answered') {
             if (!claim.kept) throw claim.error;
@@ -2243,18 +2281,19 @@ export function createBrowserRuntime(
             ),
           };
           publish();
-          // Beside a session, which keeps working in the other tabs.
-          return (
-            change.kind === 'committed' &&
+          // Beside a session, which keeps working in the other tabs: its
+          // generation.
+          return change.kind === 'committed' &&
             change.record.value.kind !== 'authorizing'
-          );
+            ? sessionBinding(change.record.value).generation
+            : undefined;
         });
       // A session's record is changed under its refresh lock, so no refresh
       // of it is under way meanwhile (a refresh here or in another tab
       // finishes first), and a refresh claim found then is one no tab sends,
       // which the attempt is stored beside. Waited for until the runtime is
       // disposed: a session that ends meanwhile is signed in to again.
-      const reauthorizing =
+      const leftFrom =
         e.revision === null
           ? await commit()
           : await locked(
@@ -2263,9 +2302,13 @@ export function createBrowserRuntime(
               commit,
               runtimeLifetime.signal,
             );
-      return { generation, url, reauthorizing };
+      return { generation, url, leftFrom };
     };
-    let prepared: { generation: string; url: string; reauthorizing: boolean };
+    let prepared: {
+      generation: string;
+      url: string;
+      leftFrom: string | undefined;
+    };
     if ((e.revision === null || intent === 'silent') && lease?.store.watch) {
       // The first record for this Pod, decided under its lock: two tabs
       // preparing at once do not both create one. A silent sign-in decides
@@ -2276,7 +2319,7 @@ export function createBrowserRuntime(
             prepared: {
               generation: string;
               url: string;
-              reauthorizing: boolean;
+              leftFrom: string | undefined;
             };
           }
       >(`sempods:connect:${namespace}:${e.view.podUrl}`, e, async () => {
@@ -2342,7 +2385,7 @@ export function createBrowserRuntime(
       }
       prepared = outcome.prepared;
     } else prepared = await store();
-    const { generation, url, reauthorizing } = prepared;
+    const { generation, url, leftFrom } = prepared;
     current(e, generation);
     const navigation: Navigation = {
       controller: new AbortController(),
@@ -2353,8 +2396,13 @@ export function createBrowserRuntime(
     watchReturn(
       e,
       generation,
-      intent === 'silent' ? 'silent' : reauthorizing ? 'reauthorize' : 'first',
+      intent === 'silent'
+        ? 'silent'
+        : leftFrom !== undefined
+          ? 'reauthorize'
+          : 'first',
       navigation,
+      leftFrom,
     );
     let handled: unknown;
     try {
@@ -2567,7 +2615,8 @@ export function createBrowserRuntime(
           // Restored before the report, as any outcome but a new grant
           // leaves the session to restore.
           const listed = entries.get(pending.id);
-          if (outcome?.kind !== 'completed' && listed) await relist(listed);
+          if (outcome?.kind !== 'completed' && listed)
+            await relist(listed, listed.generation);
         }
         if (outcome.kind === 'completed')
           return {

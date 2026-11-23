@@ -793,15 +793,15 @@ to the app's other tabs with a `BroadcastChannel`. A renewal of the same
 session is used as it is; any other change lists the connection anew, as a
 reload would:
 
-| In one tab                             | The other tabs                                                              |
-| -------------------------------------- | --------------------------------------------------------------------------- |
-| Renews the credential                  | Send with the new credential; nothing of theirs is reset                    |
-| Signs out, or a session ends there     | `signed-out` (with `problem`), as a reload would list it                    |
-| Forgets the connection                 | The connection leaves their snapshot                                        |
-| Leaves for a first sign-in             | `ended { problem: 'interrupted' }` until stored; a silent one `signed-out`  |
-| Leaves for a re-authorization          | Keep using the session, which renews as usual                               |
-| Completes that sign-in                 | `restoring`, then `active` with the new session; its catalogue loads again  |
-| Closes while its refresh answer is out | The next tab that needs the session resends it once within the grace period |
+| In one tab                             | The other tabs                                                               |
+| -------------------------------------- | ---------------------------------------------------------------------------- |
+| Renews the credential                  | Send with the new credential; nothing of theirs is reset                     |
+| Signs out, or a session ends there     | `signed-out` (with `problem`), as a reload would list it                     |
+| Forgets the connection                 | The connection leaves their snapshot                                         |
+| Leaves for a first sign-in             | `ended { problem: 'interrupted' }` until stored; a silent one `signed-out`   |
+| Leaves for a re-authorization          | Keep using the session; read Context access again if it ends without a grant |
+| Completes that sign-in                 | `restoring`, then `active` with the new session; its catalogue loads again   |
+| Closes while its refresh answer is out | The next tab that needs the session resends it once within the grace period  |
 
 Context selection, bound views and drafts stay per tab: another tab's renewal
 keeps them, and a new sign-in in another tab resets them as in the signing-in

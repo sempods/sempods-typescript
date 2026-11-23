@@ -785,6 +785,52 @@ it('keeps the session under its own client while a re-authorization registers an
   expect(t.session(t.b)).toMatchObject({ kind: 'active' });
 });
 
+it('reads Context access again in tab b once a re-authorization ends without a new grant', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  t.a.dispose();
+  const catalogues = () =>
+    t.fetch.mock.calls.filter(([url]) => url.endsWith('/_system/contexts'))
+      .length;
+  const before = catalogues();
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ resumed: true });
+  // Tab b reads its catalogue again; the callback tab reads none.
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 1));
+  expect(t.session(t.b)).toMatchObject({ kind: 'active' });
+});
+
+it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  await t.a.loadContexts(t.id);
+  t.a.selectContext(t.id, work);
+  // Tab a's navigation did not leave; meanwhile the attempt completes
+  // elsewhere for another account, which tab a has not heard of.
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  freeze(true);
+  t.setToken(async () =>
+    Response.json({
+      access_token: jwt({ jti: 'other', sub: 'urn:other' }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-other',
+    }),
+  );
+  const back = t.returned();
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+  expect(t.a.cancelAuthorization(t.id)).toBe(true);
+  await vi.waitFor(() =>
+    expect(t.session(t.a)).toEqual({ kind: 'active', subject: 'urn:other' }),
+  );
+  expect(t.a.getSnapshot().find((c) => c.id === t.id)).toMatchObject({
+    selectedContext: null,
+    catalogue: { kind: 'unknown' },
+  });
+});
+
 describe('a re-authorization another tab is away for', () => {
   /** Tab a leaves for a re-authorization and is at the Pod; tab b is closed. */
   async function away(options: Partial<BrowserRuntimeOptions> = {}) {
