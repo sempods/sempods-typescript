@@ -275,11 +275,9 @@ function GuardedContent({ children }: { readonly children: ReactNode }) {
     (s) => ({
       changing: s.changing,
       confirmingLeave: s.confirmingLeave,
-      // The page is navigating to a sign-in: the content stays as it was, but
-      // its earlier session no longer dispatches.
-      leaving:
-        s.connections.find((c) => c.id === s.activeId)?.session.kind ===
-        'leaving',
+      // The page is navigating to a sign-in, the selected Pod's or
+      // another's: the content stays as it was, but starts nothing more.
+      leaving: s.connections.some((c) => c.session.kind === 'leaving'),
     }),
     shallowEqual,
   );

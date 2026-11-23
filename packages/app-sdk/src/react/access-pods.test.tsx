@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from 'react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -14,6 +15,7 @@ import { fields, text } from '@sempods/client-sdk/edit';
 import {
   AppAccess,
   SempodsProvider,
+  useContexts,
   useCreation,
   useDraftGuard,
 } from './index.js';
@@ -537,6 +539,47 @@ it('marks an unreachable Pod and offers its retry while the other Pod stays usab
       next.getSnapshot().find((entry) => entry.podUrl === bob)?.session.kind,
     ).toBe('active'),
   );
+});
+
+it('starts no second redirect from the app once management closed', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  function Page() {
+    const [open, setOpen] = useState(true);
+    const { share } = useContexts();
+    return (
+      <>
+        <AppAccess appName="Tasks" open={open} onClose={() => setOpen(false)} />
+        <button type="button" onClick={() => void share()}>
+          Share more
+        </button>
+      </>
+    );
+  }
+  render(
+    <SempodsProvider runtime={runtime}>
+      <Page />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  const navigations = f.navigate.mock.calls.length;
+  const sharing = await podAction('Change sharing', 'pod.example/alice');
+  await act(async () => sharing.click());
+  await waitFor(() =>
+    expect(f.navigate).toHaveBeenCalledTimes(navigations + 1),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Close', hidden: true }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  // Bob stays selected, but the page is on its way to Alice's Pod.
+  const shareMore = screen.getByRole('button', {
+    name: 'Share more',
+    hidden: true,
+  });
+  expect(shareMore.closest('[inert]')).not.toBeNull();
+  await act(async () => shareMore.click());
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(f.navigate).toHaveBeenCalledTimes(navigations + 1);
 });
 
 it('names Contexts apart in one pass over a large catalogue', () => {

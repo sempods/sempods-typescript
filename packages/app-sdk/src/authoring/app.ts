@@ -666,13 +666,22 @@ export function createAppController(
         g.blocked(),
     );
   }
+  /**
+   * The page is on its way to a Pod's sign-in, the selected one's or
+   * another's: no connection action may start, or replace, another redirect.
+   */
+  function navigating() {
+    return runtime
+      .getSnapshot()
+      .some((connection) => connection.session.kind === 'leaving');
+  }
   async function guard(
     action: () => void | Promise<void>,
     change: Change = 'connection',
     retained?: ReadonlySet<LeaveGuard>,
     available?: () => Availability,
   ): Promise<boolean> {
-    if (changing || pending || blocked(change)) return false;
+    if (changing || pending || navigating() || blocked(change)) return false;
     // The person acts: the startup choice no longer changes the connection.
     choosing = false;
     stopGrace();
@@ -836,7 +845,9 @@ export function createAppController(
     /**
      * Guarded actions: each asks first while a guard is dirty and resolves
      * `false`, discarding nothing, when a guard is blocked, the person declines,
-     * or the prompt is cancelled (see `AppSnapshot.confirmingLeave`).
+     * or the prompt is cancelled (see `AppSnapshot.confirmingLeave`). While
+     * any connection is `leaving`, the page is on its way to that Pod's
+     * sign-in: each resolves `false` at once, so none replaces the redirect.
      */
     selectConnection(id: string) {
       if (id === activeId) return Promise.resolve(true);
