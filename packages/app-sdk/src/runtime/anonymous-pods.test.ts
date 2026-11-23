@@ -444,6 +444,42 @@ describe('several tabs', () => {
     ]);
   });
 
+  it('restores the other tab’s address when this page forgets the Pod while its sign-in is saved there', async () => {
+    const saved = deferred<void>();
+    let saving = false;
+    const t = await tabs(undefined, (first) => ({
+      rememberPods: false,
+      // This tab's sign-in attempt waits before it is written.
+      openStore: async (namespace) => {
+        const store = await first.openStore!(namespace);
+        return {
+          ...store,
+          commit: async (...args: Parameters<SessionStore['commit']>) => {
+            if ((args[2] as { kind?: string }).kind === 'authorizing') {
+              saving = true;
+              await saved.promise;
+            }
+            return store.commit(...args);
+          },
+        };
+      },
+    }));
+    const local = await t.b.connect(bob);
+    const remembered = await t.a.connect(bob);
+    const pending = t.b.beginAuthorization(local.id);
+    await vi.waitFor(() => expect(saving).toBe(true));
+    const forgotten = t.b.forget(local.id);
+    saved.resolve();
+    expect(await forgotten).toEqual({ kind: 'disconnected' });
+    await expect(pending).rejects.toMatchObject({ problem: 'disconnected' });
+    expect(t.navigate).not.toHaveBeenCalled();
+    // No attempt or verifier is left: the other tab's address is back.
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: remembered.id, value: { kind: 'address', podUrl: bob } },
+    ]);
+    expect(t.b.getSnapshot().some((c) => c.podUrl === bob)).toBe(false);
+  });
+
   it('completes a sign-in pending in discovery with the session another tab stored meanwhile', async () => {
     const discovered = deferred<void>();
     let discovering = false;

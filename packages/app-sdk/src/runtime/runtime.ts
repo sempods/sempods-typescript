@@ -2248,6 +2248,8 @@ export function createBrowserRuntime(
     const store = async (
       t: Entry = e,
       check: () => void = () => current(t, before),
+      /** Takes back a stored attempt that `check` then refuses; see below. */
+      undo?: (revision: string) => Promise<void>,
     ) => {
       const generation = crypto.randomUUID();
       const { attempt, url } = await prepareSessionAuthorization(
@@ -2283,7 +2285,13 @@ export function createBrowserRuntime(
         accepted(t, change);
         // The revision is recorded first, so a disconnect that ran during the
         // commit retires the new attempt; this lifetime must not continue.
-        check();
+        try {
+          check();
+        } catch (error) {
+          if (undo && change.kind === 'committed')
+            await undo(change.record.revision);
+          throw error;
+        }
         // Committed durably: switch to the new lifetime in the same step, so no
         // queued refresh of the old one can act on the replaced record. The
         // facts stay for display until the page leaves; only the session says
@@ -2398,14 +2406,35 @@ export function createBrowserRuntime(
           // a failed preparation leaves it and its handles working.
           const target = fromRecord(saved);
           const local = e;
-          return {
-            prepared: await store(target, () => {
-              current(local, before);
-              if (target.lifetime.signal.aborted)
-                throw new RuntimeError('disconnected');
-            }),
+          const address = saved.value;
+          const shared = sessions!;
+          const saving = store(
             target,
-          };
+            () => {
+              current(local, before);
+              if (
+                disconnects.has(local.view.id) ||
+                target.lifetime.signal.aborted
+              )
+                throw new RuntimeError('disconnected');
+            },
+            // A sign-out or forget here won meanwhile: the address is
+            // restored in place of the attempt (and its verifier), as the
+            // other tab saved it. Best effort, like any retirement.
+            (revision) =>
+              shared
+                .remember(address.connectionId, address.podUrl, revision)
+                .then(
+                  () => {},
+                  () => {},
+                ),
+          );
+          // A sign-out or forget of this connection waits for that write.
+          local.persistence = Promise.all([local.persistence, saving]).then(
+            () => {},
+            () => {},
+          );
+          return { prepared: await saving, target };
         } else if (saved) {
           preparing.delete(id);
           admit(saved);

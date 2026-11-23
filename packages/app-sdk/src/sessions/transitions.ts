@@ -378,9 +378,14 @@ export function createSessionTransitions(
     },
     /**
      * Remembers the address of a Pod read without a token that was never
-     * signed in to, as a new record `id`; `conflict` when one exists.
+     * signed in to, as a new record `id` (`conflict` when one exists), or in
+     * place of the record at `revision`.
      */
-    async remember(id: string, podUrl: string): Promise<SessionChange> {
+    async remember(
+      id: string,
+      podUrl: string,
+      revision: string | null = null,
+    ): Promise<SessionChange> {
       const value: SessionRecord = {
         version: 1,
         kind: 'address',
@@ -392,7 +397,7 @@ export function createSessionTransitions(
       validate('configuration', () =>
         parseSessionRecord({ id, revision: '-', value }, config),
       );
-      return commit(id, null, value);
+      return commit(id, revision, value);
     },
     /**
      * Retires the record: only its binding (the Pod address) and why it ended
