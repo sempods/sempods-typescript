@@ -1280,6 +1280,38 @@ it('reads Context access again on a return from the back/forward cache, also wit
   );
 });
 
+it('reads Context access again once a page that stayed and missed its consent ending restores later', async () => {
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  await t.a.loadContexts(t.id);
+  t.a.selectContext(t.id, work);
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  freeze(true);
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ resumed: true });
+  t.setCatalogue(async () => catalogue([], []));
+  // The page stays while its Pod cannot be reached.
+  const reach = t.fetch.getMockImplementation()!;
+  let offline = true;
+  t.fetch.mockImplementation(async (url, init) => {
+    if (offline && url.endsWith('/.well-known/oauth-protected-resource'))
+      throw new TypeError('offline');
+    return reach(url, init);
+  });
+  expect(t.a.cancelAuthorization(t.id)).toBe(true);
+  await vi.waitFor(() =>
+    expect(t.session(t.a)).toMatchObject({ kind: 'ended', restorable: true }),
+  );
+  offline = false;
+  await t.a.retryRestore(t.id);
+  await vi.waitFor(() =>
+    expect(
+      t.a.getSnapshot().find((c) => c.id === t.id)?.catalogue,
+    ).toMatchObject({ kind: 'ready', contexts: [] }),
+  );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

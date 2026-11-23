@@ -1848,6 +1848,27 @@ export function createBrowserRuntime(
     e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
     publish();
     await restore(e, saved);
+    // Also a relisted page whose first restoration could not reach its Pod.
+    caughtUp(e, saved);
+  }
+  /**
+   * After a restoration that keeps a page's view (`relist`): what that view
+   * has not seen yet. A start's own view has seen nothing, so this does
+   * nothing there.
+   */
+  function caughtUp(
+    e: Entry,
+    value: Extract<SessionRecord, { kind: 'ready' }>,
+  ) {
+    if (!eligible(e) || e.view.session.kind !== 'active') return;
+    // A consent that ended meanwhile reads Context access again. A renewal
+    // installed instead (here or by another tab) already compared its own,
+    // newer record.
+    if (e.credentials === value.credentials) noteAttempt(e, value);
+    // A catalogue read the leaving page aborted starts again, keeping the
+    // contexts it already confirmed.
+    if (e.view.catalogue.kind === 'loading' && !e.catalogue)
+      void load(e).catch(() => {});
   }
   // Coming back online restores every session that could not reach its Pod.
   const page = globalThis as {
@@ -1933,13 +1954,7 @@ export function createBrowserRuntime(
         if (!restoring) return;
         const { next, value } = restoring;
         await restore(next, value, pod);
-        if (!eligible(next) || next.view.session.kind !== 'active') return;
-        // A consent that ended meanwhile reads Context access again.
-        noteAttempt(next, value);
-        // A catalogue read the leaving page aborted starts again, keeping
-        // the contexts it already confirmed.
-        if (next.view.catalogue.kind === 'loading' && !next.catalogue)
-          void load(next).catch(() => {});
+        caughtUp(next, value);
       })
       .catch(() => {
         // Unreadable now: shown as a storage problem the person can retry
