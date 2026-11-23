@@ -1219,6 +1219,26 @@ it('reads Context access again when a background tab hears of a renewal and a de
   );
 });
 
+it('reads Context access again when a page that stayed missed its consent ending', async () => {
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  await t.a.loadContexts(t.id);
+  t.a.selectContext(t.id, work);
+  // Tab a's navigation stays on the page; it hears nothing meanwhile.
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  freeze(true);
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ resumed: true });
+  t.setCatalogue(async () => catalogue([], []));
+  expect(t.a.cancelAuthorization(t.id)).toBe(true);
+  await vi.waitFor(() =>
+    expect(
+      t.a.getSnapshot().find((c) => c.id === t.id)?.catalogue,
+    ).toMatchObject({ kind: 'ready', contexts: [] }),
+  );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

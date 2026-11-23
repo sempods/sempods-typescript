@@ -1905,6 +1905,9 @@ export function createBrowserRuntime(
       const { selectedContext, catalogue } = e.view;
       const next = fromRecord(stored!);
       next.view = { ...next.view, selectedContext, catalogue };
+      // With the view, what that view has seen: an outcome it missed is
+      // compared once the session is restored.
+      next.attemptEnded = e.attemptEnded;
       swap(e, next);
       publish();
       return { next, value };
@@ -1913,14 +1916,12 @@ export function createBrowserRuntime(
         if (!restoring) return;
         const { next, value } = restoring;
         await restore(next, value, pod);
+        if (!eligible(next) || next.view.session.kind !== 'active') return;
+        // A consent that ended meanwhile reads Context access again.
+        noteAttempt(next, value);
         // A catalogue read the leaving page aborted starts again, keeping
         // the contexts it already confirmed.
-        if (
-          eligible(next) &&
-          next.view.session.kind === 'active' &&
-          next.view.catalogue.kind === 'loading' &&
-          !next.catalogue
-        )
+        if (next.view.catalogue.kind === 'loading' && !next.catalogue)
           void load(next).catch(() => {});
       })
       .catch(() => {
