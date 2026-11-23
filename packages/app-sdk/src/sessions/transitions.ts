@@ -238,9 +238,11 @@ export function createSessionTransitions(
       )
         throw new SessionTransitionError('state');
       const value = current?.value;
+      // An earlier attempt it replaces ended without a grant, also an
+      // expired one: every tab reads Context access again.
       if (beside(value))
         return commit(snapshot.connectionId, expectedRevision, {
-          ...value,
+          ...(value.pending ? ended(value) : value),
           pending: { kind: 'open', attempt: snapshot },
         });
       return commit(snapshot.connectionId, expectedRevision, {

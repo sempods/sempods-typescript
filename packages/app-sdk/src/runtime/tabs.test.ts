@@ -1312,6 +1312,61 @@ it('reads Context access again once a page that stayed and missed its consent en
   );
 });
 
+it('keeps the page’s Context when it comes back while another tab renews its session', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  // Tab b renews the session; its answer is held.
+  const held = deferred<Response>();
+  t.setToken(() => held.promise);
+  let refused = false;
+  t.setQuery(async () =>
+    refused ? Response.json([]) : ((refused = true), unauthorized()),
+  );
+  void t.b
+    .bindPod(t.id)
+    .sparql.construct(query)
+    .catch(() => {});
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  expect(t.a.cancelAuthorization(t.id)).toBe(true);
+  await quiet();
+  held.resolve(
+    Response.json({
+      access_token: jwt({ jti: 'renewed' }),
+      token_type: 'Bearer',
+      refresh_token: 'renewed',
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(t.session(t.a)).toMatchObject({ kind: 'active' }),
+  );
+  expect(t.a.getSnapshot().find((c) => c.id === t.id)).toMatchObject({
+    selectedContext: work,
+    catalogue: { kind: 'ready' },
+  });
+  expect(t.refreshes()).toHaveLength(1);
+});
+
+it('reads Context access again when a new attempt replaces an expired one', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  t.a.dispose();
+  t.setCatalogue(async () => catalogue([], []));
+  // That attempt expires without a callback; another tab starts a new one.
+  const now = Date.now();
+  vi.spyOn(Date, 'now').mockReturnValue(now + 11 * 60_000);
+  const c = createBrowserRuntime(t.options);
+  runtimes.push(c);
+  await c.initialize();
+  await restored(c);
+  await c.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await vi.waitFor(() =>
+    expect(
+      t.b.getSnapshot().find((x) => x.id === t.id)?.catalogue,
+    ).toMatchObject({ kind: 'ready', contexts: [] }),
+  );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

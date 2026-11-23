@@ -110,9 +110,10 @@ session as it is:
 | A sign-out or forget before or during the code exchange                                                  | It stays in effect; the callback fails with `attempt` (before) or `disconnected` (during) and no grant is stored                                      |
 | The session ends meanwhile, not by a sign-out (a refused renewal, an expired credential without renewal) | The attempt becomes the record, as a sign-in under way (`interrupted` elsewhere); its callback signs in as a first sign-in would, its failure ends it |
 
-`resumed: true` says that the session restored usable and is in use again
-(a session that expired while the person was at the Pod ends as usual,
-without it), not what it may access: `access_denied` may mean that the
+`resumed: true` says that the session is in use again (`active` or
+`renewing`; a session that expired while the person was at the Pod ends as
+usual, and one only `retryRestore(id)` may restore is `ended` with
+`restorable`, both without it), not what it may access: `access_denied` may mean that the
 person cancelled or removed this app's access at the Pod, and a Pod may
 accept a narrower choice before its code answer is lost. A removed grant
 shows at the next renewal, which the Pod refuses; the session then ends like
@@ -130,8 +131,9 @@ code again. A forged or malformed callback, a late callback of a replaced
 attempt and one with a wrong issuer leave the attempt for its genuine
 callback. An attempt claimed by a tab that closed during its exchange counts
 as spent: the next renewal drops it. Every tab reads Context access again
-once an attempt ends without a new grant, also a tab that missed it in the
-back/forward cache, and after any catalogue read that was under way then.
+once an attempt ends without a new grant (also one a newer attempt
+replaces, expired or not), also a tab that missed it in the back/forward
+cache, and after any catalogue read that was under way then.
 
 Records of SDK 0.6 to 0.9 kept the session as `previous` of its attempt; 0.10
 reads them as the session with the attempt pending and stores the new shape

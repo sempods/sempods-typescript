@@ -1933,7 +1933,13 @@ export function createBrowserRuntime(
       // Also one that started while the record was read.
       if (signedOutHere(e)) return;
       const value = stored?.value;
-      if (value?.kind !== 'ready' || e.view.session.kind !== 'restoring') {
+      // That session, or another tab's renewal of it under way.
+      const session =
+        value?.kind === 'ready' ||
+        (value?.kind === 'claimed' &&
+          value.operation === 'refresh' &&
+          value.resend !== undefined);
+      if (!session || e.view.session.kind !== 'restoring') {
         replace(e, stored);
         return;
       }
@@ -1956,8 +1962,15 @@ export function createBrowserRuntime(
       .then(async (restoring) => {
         if (!restoring) return;
         const { next, value } = restoring;
-        await restore(next, value, pod);
-        caughtUp(next, value);
+        if (value.kind === 'ready') {
+          await restore(next, value, pod);
+          caughtUp(next, value);
+          return;
+        }
+        // The renewal's result follows under the refresh lock, compared as
+        // the record it stores; one no tab finished is resent once.
+        await resumeLost(next);
+        caughtUp(next);
       })
       .catch(() => {
         // Unreadable now: shown as a storage problem the person can retry
@@ -2062,22 +2075,21 @@ export function createBrowserRuntime(
     const signal = combineSignals(runtimeLifetime.signal, timeout.signal);
     const send: NonNullable<typeof protocol.fetch> =
       protocol.fetch ?? ((url, init) => globalThis.fetch(url, init));
+    // Connected until the exchange settles, which reads the answer's body.
+    const requests: { dispose(): void }[] = [];
     try {
       return await waitFor(
         exchangeAuthorization(attempt, location, {
           ...protocol,
-          fetch: async (url, init) => {
+          fetch: (url, init) => {
             // The deadline aborts the request too, beside the library's own
             // signal.
             const both = combineSignals(
               init?.signal ?? undefined,
               signal.signal,
             );
-            try {
-              return await send(url, { ...init, signal: both.signal });
-            } finally {
-              both.dispose();
-            }
+            requests.push(both);
+            return send(url, { ...init, signal: both.signal });
           },
         }),
         signal.signal,
@@ -2089,6 +2101,7 @@ export function createBrowserRuntime(
       throw error;
     } finally {
       clearTimeout(timer);
+      for (const request of requests) request.dispose();
       signal.dispose();
     }
   }
@@ -2823,16 +2836,14 @@ export function createBrowserRuntime(
             connectionId: pending.id,
           };
         const problem = runtimeProblem(outcome.error);
-        // Only a session that restored usable (not one that expired while
-        // the person was at the Pod) is in use again.
+        // Only a session in use again: not one that expired while the
+        // person was at the Pod, nor one only a retry may restore.
         const kept = entries.get(pending.id)?.view.session;
         return {
           ...report,
           interaction: problem === 'denied' ? 'cancelled' : 'failed',
           attemptConnectionId: pending.id,
-          ...(kept?.kind === 'active' ||
-          kept?.kind === 'renewing' ||
-          (kept?.kind === 'ended' && kept.restorable)
+          ...(kept?.kind === 'active' || kept?.kind === 'renewing'
             ? { resumed: true as const }
             : {}),
           problem,

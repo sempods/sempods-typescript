@@ -1137,7 +1137,7 @@ it('reports the session kept when dropping a refused code’s attempt cannot be 
   expect(next.getSnapshot()[0]?.session.kind).toBe('active');
 });
 
-it('reports the session kept when its restoration after a denial can only be retried', async () => {
+it('does not report a session resumed that only a retry may restore after a denial', async () => {
   const factory = new IDBFactory();
   const failing = { claim: false };
   const f = fixture({
@@ -1171,13 +1171,47 @@ it('reports the session kept when its restoration after a denial can only be ret
   const report = await next.initialize();
   expect(report).toMatchObject({
     interaction: 'cancelled',
-    resumed: true,
+    attemptConnectionId: id,
   });
+  expect(report.resumed).toBeUndefined();
   expect(next.getSnapshot()[0]?.session).toMatchObject({
     kind: 'ended',
     restorable: true,
   });
-  expect(id).toBeTruthy();
+});
+
+it('aborts a code answer whose body stalls past its deadline', async () => {
+  const { f, authorization } = await reauthorizing();
+  let sent: AbortSignal | undefined;
+  let reading = false;
+  f.setToken(async (_url, init) => {
+    sent = init?.signal ?? undefined;
+    // The headers arrive; the body never ends.
+    return new Response(
+      new ReadableStream({
+        pull() {
+          reading = true;
+          return new Promise<void>(() => {});
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  });
+  const next = keep(f.returned(authorization));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const report = next.initialize();
+    await vi.waitFor(() => expect(reading).toBe(true));
+    expect(sent!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent!.aborted).toBe(true);
+    expect(await report).toMatchObject({
+      interaction: 'failed',
+      problem: 'interrupted',
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('aborts a code request that passes its deadline', async () => {
