@@ -237,6 +237,18 @@ export class LaneChannel {
 }
 
 /** Internal: the lane groups of one controller, by view, scope and definition. */
+/**
+ * Whether a group belongs to `origin`: bound to that connection, or with
+ * `undefined` one that follows the active connection.
+ */
+function ownedBy(
+  group: Pick<LaneGroup<unknown>, 'origin' | 'connection'>,
+  origin: string | undefined,
+) {
+  return group.origin === undefined
+    ? origin === undefined
+    : group.connection === origin;
+}
 export interface LaneStore {
   /**
    * With `origin`, an explicit group bound to that connection (the view's)
@@ -305,8 +317,7 @@ export function lanesOf(app: AppController): LaneStore {
           if (
             kept.view !== view &&
             sameTarget(kept.view, view) &&
-            (kept.origin !== undefined) === (origin !== undefined) &&
-            (origin === undefined || kept.connection === origin) &&
+            ownedBy(kept, origin) &&
             !kept.view.getSnapshot().current &&
             kept.holds()
           )
@@ -336,8 +347,7 @@ export function lanesOf(app: AppController): LaneStore {
       for (const group of channel(`${scope} ${key}`).groups)
         if (
           group.view.contextIri === context &&
-          (group.origin !== undefined) === (origin !== undefined) &&
-          (origin === undefined || group.connection === origin) &&
+          ownedBy(group, origin) &&
           !group.view.getSnapshot().current &&
           group.holds()
         )

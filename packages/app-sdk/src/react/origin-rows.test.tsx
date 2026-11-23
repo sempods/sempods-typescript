@@ -238,6 +238,45 @@ async function setup() {
 const stay = () => screen.getByRole('button', { name: 'Keep editing' }).click();
 const toggle = (where: string) =>
   screen.getByRole('button', { name: `Toggle ${where}` });
+/** Milk, not done, as a Pod returns it. */
+const milk = (iri: string) => ({
+  '@id': iri,
+  '@type': [schema + 'Action'],
+  [schema + 'name']: [{ '@value': 'Milk' }],
+  [schema + 'actionStatus']: [{ '@id': schema + 'PotentialActionStatus' }],
+});
+/** A Milk row (`urn:a`) read elsewhere: its snapshot needs no catalogue. */
+async function milkRows(connection: string, context: string) {
+  const listed = await listSubjects(
+    {
+      sparql: {
+        construct: async () => ({ kind: 'ok', body: [milk('urn:a')] }),
+      },
+    } as unknown as Parameters<typeof listSubjects>[0],
+    taskFields,
+  );
+  if (listed.kind !== 'ok') throw new Error(listed.kind);
+  return listed.body.items.map((snapshot): Row => ({
+    connection,
+    context,
+    snapshot,
+  }));
+}
+/** Opens a row in the editor and leaves a draft (`Oat milk`) there. */
+async function openWithDraft(target: {
+  subject: string;
+  context: string;
+  connection: string;
+}) {
+  await act(async () => {
+    expect(await edit.open(target)).toBe(true);
+  });
+  await waitFor(() => expect(edit.phase).toBe('ready'));
+  await act(async () => {
+    await edit.editor!.loaded;
+  });
+  act(() => edit.editor!.change({ title: 'Oat milk' }));
+}
 
 it('writes a row in the connection it was read from without selecting it', async () => {
   const { alice, bob, store, writes } = await setup();
@@ -315,25 +354,9 @@ it('runs a bulk removal one captured row at a time and stops on uncertainty', as
 
 it('edits a row in its own connection and keeps the draft across active Pod changes', async () => {
   const { alice, bob, writes } = await setup();
-  let opened: boolean | undefined;
-  await act(async () => {
-    opened = await edit.open({
-      subject: 'urn:a',
-      context: work,
-      connection: alice,
-    });
-  });
-  expect(opened).toBe(true);
-  await waitFor(() => expect(edit.phase).toBe('ready'));
-  expect(edit.target).toEqual({
-    subject: 'urn:a',
-    context: work,
-    connection: alice,
-  });
-  await act(async () => {
-    await edit.editor!.loaded;
-  });
-  act(() => edit.editor!.change({ title: 'Oat milk' }));
+  const alices = { subject: 'urn:a', context: work, connection: alice };
+  await openWithDraft(alices);
+  expect(edit.target).toEqual(alices);
   // Another active Pod, there and back, neither asks nor retires it.
   await act(async () => {
     expect(await app.selectConnection(alice)).toBe(true);
@@ -390,14 +413,7 @@ it('asks before leaving a live editor for a retained one of another connection',
   });
   await waitFor(() => expect(edit.phase).toBe('ready'));
   // Bob's idle editor stays retained once Alice's row opens.
-  await act(async () => {
-    expect(await edit.open(alices)).toBe(true);
-  });
-  await waitFor(() => expect(edit.phase).toBe('ready'));
-  await act(async () => {
-    await edit.editor!.loaded;
-  });
-  act(() => edit.editor!.change({ title: 'Oat milk' }));
+  await openWithDraft(alices);
   // Back to Bob's row: Alice's draft is left, so the SDK asks first.
   let back: Promise<boolean> | undefined;
   act(() => {
@@ -411,61 +427,37 @@ it('asks before leaving a live editor for a retained one of another connection',
   expect(writes).toEqual([]);
 });
 
-it('withdraws the question when the row to open loses its connection meanwhile', async () => {
-  const { runtime, alice, bob } = await setup();
-  const bobs = { subject: 'urn:s', context: home, connection: bob };
-  await act(async () => {
-    expect(await edit.open(bobs)).toBe(true);
-  });
-  await waitFor(() => expect(edit.phase).toBe('ready'));
-  await act(async () => {
-    await edit.editor!.loaded;
-  });
-  act(() => edit.editor!.change({ title: 'Oat milk' }));
-  let opening: Promise<boolean> | undefined;
-  act(() => {
-    opening = edit.open({ subject: 'urn:a', context: work, connection: alice });
-  });
-  await waitFor(() => expect(state.confirmingLeave).toBe(true));
-  // Alice's Pod is forgotten elsewhere (another tab) while the person is asked.
-  await act(async () => {
-    await runtime.forget(alice);
-  });
-  expect(await opening).toBe(false);
-  expect(state.confirmingLeave).toBe(false);
-  expect(edit.target).toEqual(bobs);
-  expect(edit.phase).toBe('ready');
-  expect(edit.editor!.state.draft?.title).toBe('Oat milk');
-});
-
-it('withdraws the question when the row to open is signed out meanwhile', async () => {
-  const { runtime, alice, bob } = await setup();
-  const bobs = { subject: 'urn:s', context: home, connection: bob };
-  await act(async () => {
-    expect(await edit.open(bobs)).toBe(true);
-  });
-  await waitFor(() => expect(edit.phase).toBe('ready'));
-  await act(async () => {
-    await edit.editor!.loaded;
-  });
-  act(() => edit.editor!.change({ title: 'Oat milk' }));
-  let opening: Promise<boolean> | undefined;
-  act(() => {
-    opening = edit.open({ subject: 'urn:a', context: work, connection: alice });
-  });
-  await waitFor(() => expect(state.confirmingLeave).toBe(true));
-  // Alice signs out elsewhere (another tab): her connection stays listed,
-  // but no longer reads.
-  await act(async () => {
-    await runtime.disconnect(alice);
-  });
-  expect(state.connections.some((c) => c.id === alice)).toBe(true);
-  expect(await opening).toBe(false);
-  expect(state.confirmingLeave).toBe(false);
-  expect(edit.target).toEqual(bobs);
-  expect(edit.phase).toBe('ready');
-  expect(edit.editor!.state.draft?.title).toBe('Oat milk');
-});
+// Elsewhere (another tab) while the person is asked: Alice's Pod is
+// forgotten, or she signs out and her connection stays listed but no longer
+// reads.
+it.each(['forget', 'disconnect'] as const)(
+  'withdraws the question when the row to open goes meanwhile (%s)',
+  async (leave) => {
+    const { runtime, alice, bob } = await setup();
+    const bobs = { subject: 'urn:s', context: home, connection: bob };
+    await openWithDraft(bobs);
+    let opening: Promise<boolean> | undefined;
+    act(() => {
+      opening = edit.open({
+        subject: 'urn:a',
+        context: work,
+        connection: alice,
+      });
+    });
+    await waitFor(() => expect(state.confirmingLeave).toBe(true));
+    await act(async () => {
+      await runtime[leave](alice);
+    });
+    expect(state.connections.some((c) => c.id === alice)).toBe(
+      leave === 'disconnect',
+    );
+    expect(await opening).toBe(false);
+    expect(state.confirmingLeave).toBe(false);
+    expect(edit.target).toEqual(bobs);
+    expect(edit.phase).toBe('ready');
+    expect(edit.editor!.state.draft?.title).toBe('Oat milk');
+  },
+);
 
 /** Rows the child shows from its own state; the parent only owns the hook. */
 let showRows: (rows: readonly Row[]) => void;
@@ -527,36 +519,8 @@ it("asks for an inactive Pod's catalogue when a row's own component first shows 
   await waitFor(() => expect(state.activeId).toBe(f.id));
   expect(bobs().catalogue.kind).toBe('unknown');
   // A row read elsewhere: its snapshot needs no catalogue to exist.
-  const listed = await listSubjects(
-    {
-      sparql: {
-        construct: async () => ({
-          kind: 'ok',
-          body: [
-            {
-              '@id': 'urn:a',
-              '@type': [schema + 'Action'],
-              [schema + 'name']: [{ '@value': 'Milk' }],
-              [schema + 'actionStatus']: [
-                { '@id': schema + 'PotentialActionStatus' },
-              ],
-            },
-          ],
-        }),
-      },
-    } as unknown as Parameters<typeof listSubjects>[0],
-    taskFields,
-  );
-  if (listed.kind !== 'ok') throw new Error(listed.kind);
-  act(() =>
-    showRows(
-      listed.body.items.map((snapshot) => ({
-        connection: bob,
-        context: home,
-        snapshot,
-      })),
-    ),
-  );
+  const rows = await milkRows(bob, home);
+  act(() => showRows(rows));
   await waitFor(() => expect(bobs().catalogue.kind).toBe('ready'));
   await waitFor(() =>
     expect(
@@ -576,17 +540,7 @@ it('retires an editor whose connection is forgotten and added again under its ID
   runtimes.push(f.runtime);
   f.setCatalogue(async () => catalogue([work], []));
   f.setResource(async (url) =>
-    Response.json(
-      {
-        '@id': resourceIri(url),
-        '@type': [schema + 'Action'],
-        [schema + 'name']: [{ '@value': 'Milk' }],
-        [schema + 'actionStatus']: [
-          { '@id': schema + 'PotentialActionStatus' },
-        ],
-      },
-      { headers: { etag: '"t1"' } },
-    ),
+    Response.json(milk(resourceIri(url)), { headers: { etag: '"t1"' } }),
   );
   render(
     <SempodsProvider runtime={f.runtime} contextSelection="on-demand">
@@ -637,32 +591,7 @@ it('asks for no catalogue of a connection added again once its rows are gone', a
   await waitFor(() => expect(state.activeId).toBe(bob));
   const defaults = () => state.connections.find((c) => c.id === pod)!;
   // A row of the default Pod asks for its catalogue.
-  const listed = await listSubjects(
-    {
-      sparql: {
-        construct: async () => ({
-          kind: 'ok',
-          body: [
-            {
-              '@id': 'urn:a',
-              '@type': [schema + 'Action'],
-              [schema + 'name']: [{ '@value': 'Milk' }],
-              [schema + 'actionStatus']: [
-                { '@id': schema + 'PotentialActionStatus' },
-              ],
-            },
-          ],
-        }),
-      },
-    } as unknown as Parameters<typeof listSubjects>[0],
-    taskFields,
-  );
-  if (listed.kind !== 'ok') throw new Error(listed.kind);
-  const rows = listed.body.items.map((snapshot): Row => ({
-    connection: pod,
-    context: work,
-    snapshot,
-  }));
+  const rows = await milkRows(pod, work);
   act(() => setRows(rows));
   await waitFor(() => expect(defaults().catalogue.kind).toBe('ready'));
   const before = asked.filter((a) => a === 'default').length;

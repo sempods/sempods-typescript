@@ -31,6 +31,7 @@ import { lanesOf, type LaneGroup } from '../authoring/lanes.js';
 import { originOf, sameConnection } from '../authoring/retention.js';
 import {
   activeCatalogue,
+  readingConnection,
   shallowEqual,
   useAppFacts,
   useContextDiscovery,
@@ -101,17 +102,6 @@ function bindOrRefuse(
     if (!(error instanceof RuntimeError)) throw error;
     return error.problem === 'configuration' ? 'refused' : null;
   }
-}
-/** Whether a connection reads (signed in, or without a token): it can bind. */
-function reads(app: ReturnType<typeof useController>, id: string) {
-  return Boolean(
-    app.getSnapshot().connections.find((c) => c.id === id)?.reading,
-  );
-}
-/** A reading connection's catalogue, as `activeCatalogue` gives the active one's. */
-function catalogueOf(app: ReturnType<typeof useController>, id: string) {
-  const connection = app.getSnapshot().connections.find((c) => c.id === id);
-  return connection?.reading ? connection.catalogue : undefined;
 }
 const sameList = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
@@ -227,35 +217,31 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
         queueMicrotask(noticed);
       }
     }
+    // The active connection, or the row's own, while it reads.
+    const own =
+      origin === undefined
+        ? { id: activeId, catalogue }
+        : readingConnection(app.getSnapshot(), origin);
+    const groupName = origin === undefined ? name : originName;
     // Without a current view (a session that ended), writes kept for their
     // recovery are found through their own view (`keepsWork`).
     const view =
-      origin === undefined
-        ? (bindOrRefuse(app, activeId, context) ??
-          store.kept(name, 'explicit', context) ??
-          null)
-        : ((reads(app, origin) ? bindOrRefuse(app, origin, context) : null) ??
-          store.kept(originName, 'explicit', context, origin) ??
-          null);
+      bindOrRefuse(app, own.id, context) ??
+      store.kept(groupName, 'explicit', context, origin) ??
+      null;
     const bound = view && view !== 'refused' ? view : null;
-    const problem = contextProblem(
-      origin === undefined ? catalogue : catalogueOf(app, origin),
-      context,
-      view === 'refused',
-    );
+    const problem = contextProblem(own.catalogue, context, view === 'refused');
     found = {
       view: bound,
       group: bound
-        ? origin === undefined
-          ? store.group(bound, name, definition, 'explicit')
-          : store.group(
-              bound,
-              originName,
-              definition,
-              'explicit',
-              undefined,
-              origin,
-            )
+        ? store.group(
+            bound,
+            groupName,
+            definition,
+            'explicit',
+            undefined,
+            origin,
+          )
         : null,
       problem,
       writable: Boolean(bound?.getSnapshot().write) && problem === null,

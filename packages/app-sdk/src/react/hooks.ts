@@ -49,6 +49,7 @@ import {
   useWorkflowAccess,
   useWriteGate,
 } from './app.js';
+import { reads } from './access-presentation.js';
 import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
@@ -631,6 +632,16 @@ const liveLane = (s: ContextLaneState | null, app: AppController) =>
     ? s.lane.connection === app.getSnapshot().activeId
     : sameConnection(app, s.lane.origin, s.lane.life!));
 /**
+ * Whether a lane follows its connection: another active connection ends a
+ * lane of the active one; an origin-bound lane ends only once its connection
+ * is gone (`connected`, the hook's fact for the open lane).
+ */
+const follows = (
+  l: ContextLane,
+  activeId: string | null,
+  connected: boolean,
+) => (l.origin === undefined ? l.connection === activeId : connected);
+/**
  * Edits one Pod-overview row in its own Context. The SELECT row is only a
  * pointer: the editor reads the subject fresh in that Context through
  * `runtime.bindContext` and saves with its version (If-Match). The connection's
@@ -741,9 +752,7 @@ export function useContextEditor<D>(
       // may still replace the active connection), as for the selected view.
       // `pod` exists while the active connection reads; an origin-bound
       // lane needs its own connection to read.
-      ready:
-        startupSettled(s) &&
-        (bound ? own !== undefined && own.reading !== null : s.pod !== null),
+      ready: startupSettled(s) && (bound ? reads(own) : s.pod !== null),
       // The live lane's catalogue only: its connection is the active one, or
       // the one it is bound to.
       catalogue:
@@ -763,9 +772,7 @@ export function useContextEditor<D>(
     () => bound?.getSnapshot().current ?? true,
   );
   const activated = state?.activated ?? false;
-  const live =
-    laneOpen !== null &&
-    (origin === undefined ? laneOpen.connection === activeId : connected);
+  const live = laneOpen !== null && follows(laneOpen, activeId, connected);
   // Only the originating connection may demand discovery for this target, and
   // only once the runtime accepted the binding: a refused target sends nothing.
   // Discovery only: an explicit target needs no selected Context, so AppAccess
@@ -816,9 +823,7 @@ export function useContextEditor<D>(
   );
   useEffect(() => {
     if (!lane) return;
-    // Another active connection retires a lane of the active one; an
-    // origin-bound lane retires only once its connection is gone.
-    if (lane.origin === undefined ? lane.connection !== activeId : !connected) {
+    if (!follows(lane, activeId, connected)) {
       update(lane, { retired: true });
       return;
     }
@@ -998,9 +1003,7 @@ export function useContextEditor<D>(
       // another tab): then the prompt is withdrawn and nothing open here is
       // discarded.
       const reading = () =>
-        Boolean(
-          app.getSnapshot().connections.find((c) => c.id === origin)?.reading,
-        );
+        reads(app.getSnapshot().connections.find((c) => c.id === origin));
       const readable = origin !== undefined && reading();
       const result = (
         origin !== undefined
