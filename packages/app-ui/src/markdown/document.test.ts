@@ -156,6 +156,55 @@ describe('marks', () => {
       expect(fromMarkdown(toMarkdown(doc)), toMarkdown(doc)).toEqual(doc);
   });
 
+  it('writes no markers around whitespace alone', () => {
+    expect(toMarkdown(paragraph(text(' ', { type: 'bold' })))).toBe('');
+    expect(
+      toMarkdown(
+        paragraph(text('a'), text('  ', { type: 'italic' }), text('b')),
+      ),
+    ).toBe('a  b');
+  });
+
+  it('leaves out emphasis whose markers would show, keeping the text', () => {
+    // `a**.**c`: the stars could neither open nor close.
+    const doc = paragraph(text('a'), text('.', { type: 'bold' }), text('c'));
+    expect(toMarkdown(doc)).toBe('a.c');
+    expect(
+      toMarkdown(
+        paragraph(text('a'), text('(b)', { type: 'strike' }), text('c')),
+      ),
+    ).toBe('a(b)c');
+    // Next to spaces or inside words they flank, and stay.
+    expect(
+      toMarkdown(
+        paragraph(text('a '), text('.', { type: 'bold' }), text(' c')),
+      ),
+    ).toBe('a **.** c');
+    expect(
+      toMarkdown(
+        paragraph(text('a'), text('b', { type: 'italic' }), text('c')),
+      ),
+    ).toBe('a*b*c');
+  });
+
+  it('keeps a `!` before a link text, not an image', () => {
+    const doc = paragraph(
+      text('see !'),
+      text('page', { type: 'link', attrs: { href: 'https://example.org' } }),
+    );
+    expect(toMarkdown(doc)).toBe('see \\![page](https://example.org)');
+    expect(fromMarkdown(toMarkdown(doc))).toEqual(doc);
+    expect(again('\\![page](https://example.org)')).toBe(
+      '\\![page](https://example.org)',
+    );
+  });
+
+  it('keeps hashes at the end of a heading', () => {
+    expect(again('## Title \\#')).toBe('## Title \\#');
+    expect(again('## \\#')).toBe('## \\#');
+    expect(again('## C#')).toBe('## C#');
+  });
+
   it('writes a break in a heading as a space', () => {
     expect(
       toMarkdown({

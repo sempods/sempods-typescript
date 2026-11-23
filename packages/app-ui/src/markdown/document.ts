@@ -155,9 +155,47 @@ const sameMark = (a: DocMark, b: DocMark) =>
 const destination = (href: string) =>
   /[\s()<>\\]/.test(href) ? '<' + href.replace(/[<>\\]/g, '\\$&') + '>' : href;
 
+/** How a character next to a delimiter run counts for CommonMark. */
+const side = (char: string | undefined) =>
+  !char || /\s/.test(char)
+    ? 'space'
+    : /[\p{P}\p{S}]/u.test(char)
+      ? 'punctuation'
+      : 'other';
+
+/**
+ * Whether the delimiter run at `[at, at + length)` of `out` opens or
+ * closes emphasis as meant: CommonMark's flanking rules, which GitHub's
+ * strikethrough follows as well.
+ */
+function flanks(out: string, at: number, length: number, opens: boolean) {
+  const char = out[at]!;
+  let start = at;
+  while (start > 0 && out[start - 1] === char && out[start - 2] !== '\\')
+    start--;
+  let end = at + length;
+  while (out[end] === char) end++;
+  const before = side(out[start - 1]);
+  const after = side(out[end]);
+  return opens
+    ? after !== 'space' && (after !== 'punctuation' || before !== 'other')
+    : before !== 'space' && (before !== 'punctuation' || after !== 'other');
+}
+
+/** A delimiter run written for a mark, and the nodes the mark spans. */
+interface Run {
+  readonly at: number;
+  readonly length: number;
+  readonly opens: boolean;
+  readonly type: string;
+  readonly from: number;
+  readonly to: number;
+}
+
 /**
  * Inline content as Markdown. In a heading, which is one line, a break is a
- * space.
+ * space. Emphasis whose markers would not flank its text, as around a `.`
+ * between letters, is left out rather than written as stars that show.
  */
 function serializeInline(
   content: readonly DocNode[] = [],
@@ -165,6 +203,10 @@ function serializeInline(
 ): string {
   let out = '';
   const open: DocMark[] = [];
+  // The node each open mark began at, and the last node written.
+  const began: number[] = [];
+  let last = -1;
+  const runs: Run[] = [];
   // Markers next to whitespace would neither open nor close: the whitespace
   // moves outside them.
   const closeTo = (depth: number) => {
@@ -172,10 +214,21 @@ function serializeInline(
     out = out.slice(0, out.length - space.length);
     while (open.length > depth) {
       const mark = open.pop()!;
-      out +=
-        mark.type === 'link'
-          ? `](${destination(mark.attrs?.href ?? '')})`
-          : DELIMITER[mark.type];
+      const from = began.pop()!;
+      if (mark.type === 'link') {
+        out += `](${destination(mark.attrs?.href ?? '')})`;
+        continue;
+      }
+      const delimiter = DELIMITER[mark.type]!;
+      runs.push({
+        at: out.length,
+        length: delimiter.length,
+        opens: false,
+        type: mark.type,
+        from,
+        to: last,
+      });
+      out += delimiter;
     }
     out += space;
   };
@@ -204,6 +257,7 @@ function serializeInline(
       closeTo(0);
       out += `<${href}>`;
       lineStart = false;
+      last = index;
       continue;
     }
     let keep = 0;
@@ -216,20 +270,57 @@ function serializeInline(
     closeTo(keep);
     let text = escapeText(node.text ?? '');
     if (lineStart) text = escapeLineStart(text);
-    if (keep < marks.length) {
+    // Whitespace alone takes no marks of its own: `** **` would be a rule.
+    if (keep < marks.length && /\S/.test(text)) {
       const lead = /^[ \t]*/.exec(text)![0];
       out += lead;
       text = text.slice(lead.length);
       for (const mark of marks.slice(keep)) {
-        out += mark.type === 'link' ? '[' : DELIMITER[mark.type];
+        if (mark.type === 'link') {
+          // A `!` before it would make the link an image.
+          if (/(^|[^\\])(\\\\)*!$/.test(out)) out = out.slice(0, -1) + '\\!';
+          out += '[';
+        } else {
+          runs.push({
+            at: out.length,
+            length: DELIMITER[mark.type]!.length,
+            opens: true,
+            type: mark.type,
+            from: index,
+            to: index,
+          });
+          out += DELIMITER[mark.type];
+        }
         open.push(mark);
+        began.push(index);
       }
     }
     out += text;
     lineStart = false;
+    last = index;
   }
   closeTo(0);
-  return out.replace(/[ \t]+$/, '');
+  out = out.replace(/[ \t]+$/, '');
+  const failed = runs.find(
+    (run) => !flanks(out, run.at, run.length, run.opens),
+  );
+  if (!failed) return out;
+  // The mark that cannot be written leaves the nodes it spans.
+  const span = failed.opens
+    ? runs.find(
+        (run) =>
+          !run.opens && run.type === failed.type && run.from === failed.from,
+      )
+    : failed;
+  const [from, to] = [span?.from ?? failed.from, span?.to ?? failed.to];
+  return serializeInline(
+    content.map((node, i) =>
+      i < from || i > to || !node.marks
+        ? node
+        : { ...node, marks: node.marks.filter((m) => m.type !== failed.type) },
+    ),
+    heading,
+  );
 }
 
 /** Lines after the first indented by `by`, as a list item's content is. */
@@ -242,7 +333,11 @@ function serializeBlock(node: DocNode, other = false): string {
     case 'paragraph':
       return serializeInline(node.content);
     case 'heading': {
-      const text = serializeInline(node.content, true);
+      // Hashes at its end would close the heading, and disappear.
+      const text = serializeInline(node.content, true).replace(
+        /(^|[ \t])(#+)([ \t]*)$/,
+        '$1\\$2$3',
+      );
       return '#'.repeat(node.attrs?.level ?? 2) + (text ? ' ' + text : '');
     }
     case 'bulletList':
