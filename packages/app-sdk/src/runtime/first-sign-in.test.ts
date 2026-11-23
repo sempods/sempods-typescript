@@ -503,6 +503,31 @@ it('still asks silently beside a Pod added without a sign-in (#372)', async () =
   expect(silentAttempts(f)).toBe(1);
 });
 
+it('keeps the saved address of its own default Pod: no silent attempt that could delete it (#372)', async () => {
+  const bob = 'https://pod.example/bob';
+  const f = silent({ signIn: 'optional', firstSignIn: 'click' });
+  await f.runtime.initialize();
+  const added = await f.runtime.connect(bob);
+  f.runtime.dispose();
+  await settleLease();
+  // The same app, now with Bob's Pod as its default one.
+  const tab = createBrowserRuntime({
+    ...f.options,
+    preset: { podUrl: bob },
+    firstSignIn: 'silent',
+    tabStorage: memoryStorage(),
+  });
+  keep(tab);
+  expect(await tab.initialize()).toMatchObject({ interaction: 'none' });
+  expect(silentAttempts(f)).toBe(0);
+  expect(tab.getSnapshot()).toMatchObject([
+    { id: added.id, podUrl: bob, reading: 'anonymous' },
+  ]);
+  expect(await savedRecords(f.factory)).toMatchObject([
+    { id: added.id, value: { kind: 'address', podUrl: bob } },
+  ]);
+});
+
 it('rejects silent without a default Pod or a did:web identity, before any I/O', () => {
   for (const options of [
     { identity, firstSignIn: 'silent' },

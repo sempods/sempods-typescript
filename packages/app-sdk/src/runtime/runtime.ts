@@ -2564,15 +2564,18 @@ export function createBrowserRuntime(
           // Nothing stored, judged by the durable listing: a record that an
           // app policy (`allowedPods`) hides is still an existing
           // installation. Only addresses this start deletes (`rememberPods:
-          // false`), the abandoned silent attempt and the addresses of Pods
-          // never signed in to are as if never stored.
+          // false`), the abandoned silent attempt and the addresses of other
+          // Pods never signed in to are as if never stored. The default
+          // Pod's own address (saved under another default) counts: a
+          // declined attempt would delete it.
           if (
             listing.unreadable.length === 0 &&
             listing.records.every(
               (saved) =>
                 abandonedSilent.has(saved.id) ||
                 forgotten.includes(saved) ||
-                saved.value.kind === 'address',
+                (saved.value.kind === 'address' &&
+                  saved.value.podUrl !== defaultPodUrl),
             )
           )
             await signInSilently();
