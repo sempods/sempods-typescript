@@ -417,8 +417,9 @@ export interface BrowserRuntime {
    * SdkError (invalid-pod-url). Under `'none'` only the default Pod connects.
    * Under `'optional'` and `rememberPods`, the address of a Pod other than
    * the default one is saved, so the next start and the app's other tabs
-   * list it too, until `forget(id)`; a write that fails lists it in this page
-   * only.
+   * list it too, until `forget(id)`; a write that fails, or another tab
+   * that holds that Pod's lock for more than three seconds, lists it in this
+   * page only.
    */
   connect(url?: string): Promise<Connection>;
   /**

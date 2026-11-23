@@ -8,7 +8,11 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBrowserRuntime } from './runtime.js';
-import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
+import type {
+  BrowserRuntime,
+  BrowserRuntimeOptions,
+  Connection,
+} from './types.js';
 import {
   catalogue,
   fixture,
@@ -356,6 +360,37 @@ describe('several tabs', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(t.b.getSnapshot()[1]).toMatchObject({ id: local.id, podUrl: bob });
     expect(pods.getSnapshot().current).toBe(true);
+  });
+
+  it('reads the Pod in this page only while another tab holds its lock too long', async () => {
+    const t = await tabs();
+    // Another tab holds the Pod's lock and never lets it go (suspended).
+    void t.options.locks!.request(
+      `sempods:connect:${fixtureNamespace}:${bob}`,
+      {},
+      () => new Promise<void>(() => {}),
+    );
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let added: Connection | undefined;
+      void t.b.connect(bob).then((c) => (added = c));
+      // Not before the wait is over; then without the other tab.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(added).toBeUndefined();
+      for (let i = 0; i < 20 && !added; i++) {
+        await vi.advanceTimersByTimeAsync(500);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(added).toBeDefined();
+      expect(t.b.getSnapshot()[1]).toMatchObject({
+        id: added!.id,
+        podUrl: bob,
+        reading: 'anonymous',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await savedRecords(t.factory)).toEqual([]);
   });
 
   it('saves one address when two tabs add the same Pod at once', async () => {

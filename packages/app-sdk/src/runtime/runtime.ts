@@ -112,6 +112,11 @@ function unanswered(status: number | undefined) {
     !((status >= 200 && status < 300) || status === 400 || status === 401)
   );
 }
+/**
+ * How long saving an added Pod's address waits for another tab holding that
+ * Pod's connect lock before the Pod is listed in this page only.
+ */
+const ADDRESS_LOCK_WAIT = 3_000;
 /** The longest delay `setTimeout` keeps; longer ones fire at once. */
 const MAX_DELAY = 2_147_483_647;
 function offline() {
@@ -551,8 +556,8 @@ export function createBrowserRuntime(
     name: string,
     e: Entry,
     work: () => Promise<T>,
+    signal: AbortSignal = e.lifetime.signal,
   ): Promise<T> {
-    const signal = e.lifetime.signal;
     return new Promise<T>((resolve, reject) => {
       if (!locks) {
         reject(new RuntimeError('coordination'));
@@ -1104,18 +1109,30 @@ export function createBrowserRuntime(
       if (change.kind === 'committed') e.revision = change.record.revision;
       return undefined;
     };
-    // Not listed yet, so `dispose` reaches it only through the runtime's
-    // lifetime: waiting for another tab's lock ends with it.
-    const stop = () => e.lifetime.abort(new RuntimeError('disconnected'));
-    runtimeLifetime.signal.addEventListener('abort', stop, { once: true });
+    if (!lease?.store.watch) return save().catch(() => undefined);
+    // Waiting for another tab's lock ends with the runtime (the connection
+    // is not listed yet, so `dispose` reaches it only that way) and after
+    // ADDRESS_LOCK_WAIT: a tab suspended while holding it does not keep this
+    // page from reading the Pod, which is then listed here only.
+    const patience = new AbortController();
+    const timer = setTimeout(() => patience.abort(), ADDRESS_LOCK_WAIT);
+    const waiting = combineSignals(
+      runtimeLifetime.signal,
+      e.lifetime.signal,
+      patience.signal,
+    );
     try {
-      return lease?.store.watch
-        ? await locked(`sempods:connect:${namespace}:${e.view.podUrl}`, e, save)
-        : await save();
+      return await locked(
+        `sempods:connect:${namespace}:${e.view.podUrl}`,
+        e,
+        save,
+        waiting.signal,
+      );
     } catch {
       return undefined;
     } finally {
-      runtimeLifetime.signal.removeEventListener('abort', stop);
+      clearTimeout(timer);
+      waiting.dispose();
     }
   }
   /** A connection without discovery or client that reads without a token. */
