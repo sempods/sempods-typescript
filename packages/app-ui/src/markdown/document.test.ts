@@ -49,6 +49,11 @@ describe('reading and writing back', () => {
   it('keeps two lists in a row apart', () => {
     expect(again('- a\n\n\n* b')).toBe('- a\n\n* b');
     expect(again('1. a\n\n\n1) b')).toBe('1. a\n\n1) b');
+    // Also inside a list item.
+    expect(again('- parent\n  1. first\n  1) restarted')).toBe(
+      '- parent\n  1. first\n  1) restarted',
+    );
+    expect(again('- parent\n  - a\n  * b')).toBe('- parent\n  - a\n  * b');
   });
 
   it('writes an address that is its own text as an autolink', () => {
@@ -281,6 +286,21 @@ describe('any document', () => {
       ).join('');
       return text(value, ...marks);
     });
+  const list = (depth: number): DocNode => ({
+    type: random() < 0.5 ? 'bulletList' : 'orderedList',
+    content: Array.from({ length: 1 + Math.floor(random() * 3) }, () => ({
+      type: 'listItem',
+      content: [
+        { type: 'paragraph', content: inline() },
+        // Lists inside an item, sometimes two in a row.
+        ...(depth < 2 && random() < 0.3
+          ? Array.from({ length: 1 + Math.floor(random() * 2) }, () =>
+              list(depth + 1),
+            )
+          : []),
+      ],
+    })),
+  });
   const block = (): DocNode => {
     const kind = random();
     if (kind < 0.5) return { type: 'paragraph', content: inline() };
@@ -290,13 +310,7 @@ describe('any document', () => {
         attrs: { level: 1 + Math.floor(random() * 6) },
         content: inline(),
       };
-    return {
-      type: random() < 0.5 ? 'bulletList' : 'orderedList',
-      content: Array.from({ length: 1 + Math.floor(random() * 3) }, () => ({
-        type: 'listItem',
-        content: [{ type: 'paragraph', content: inline() }],
-      })),
-    };
+    return list(0);
   };
   /** Each character a reader sees, but whitespace, with its marks. */
   const shown = (node: DocNode): [string, string][] =>

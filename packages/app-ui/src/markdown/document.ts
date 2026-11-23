@@ -309,6 +309,8 @@ function serializeInline(
   };
   for (const [index, node] of content.entries()) {
     if (node.type === 'hardBreak') {
+      // A break on a line with nothing yet is a `\` that shows.
+      if (out === '' || out.endsWith('\n')) continue;
       closeTo(0);
       out = out.slice(0, out.length - trailingSpace(out));
       out += heading ? ' ' : '\\\n';
@@ -428,14 +430,30 @@ export function serializeBlock(node: DocNode, other = false): string {
                 : '- '
               : `${start + i}${other ? ')' : '.'} `;
           // A nested list follows its item's text directly, so the list
-          // stays tight; paragraphs are apart.
-          const body = (item.content ?? [])
-            .map(
-              (child, j) =>
-                (j === 0 ? '' : /List$/.test(child.type) ? '\n' : '\n\n') +
-                serializeBlock(child),
-            )
-            .join('');
+          // stays tight; paragraphs are apart. Two lists in a row keep
+          // apart as at the top.
+          let previous: string | undefined;
+          let nested = false;
+          let body = '';
+          for (const child of item.content ?? []) {
+            const list = /List$/.test(child.type);
+            nested = previous === child.type && list && !nested;
+            const written = serializeBlock(child, nested);
+            // An empty paragraph adds nothing.
+            if (written === '') continue;
+            // A list interrupts its item's text only if it starts at 1 with
+            // an item that has text; any other needs a blank line.
+            const tight =
+              list &&
+              (previous !== 'paragraph' ||
+                ((child.attrs?.start ?? 1) === 1 &&
+                  /^(?:[-*]|\d+[.)]) \S/.test(written)));
+            // An item that starts with a list has its marker alone above it.
+            body +=
+              (body === '' ? (list ? '\n' : '') : tight ? '\n' : '\n\n') +
+              written;
+            previous = child.type;
+          }
           return (marker + indent(body, marker.length)).replace(/[ \t]+$/, '');
         })
         .join('\n');
