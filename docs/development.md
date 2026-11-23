@@ -332,8 +332,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     after a preview and back, the toolbar moves with the arrow keys and
     gives the focus back to the text, Ctrl/Cmd+K sets a link from its
     address, typed `*` and `[` stay text, `*urgent*` typed key by key stays
-    text, two Shift+Enter keep a blank line, and Tab leaves the text, also
-    from a list item; a touch on Bold keeps the focus in the text; a
+    text, two Shift+Enter keep a blank line, Tab leaves the text, also from
+    a list item, and a formatting Markdown could not hold between letters
+    is not made; a touch on Bold keeps the focus in the text; a
     400-heading draft switched twelve
     times keeps its place and draft; both writers follow the page colour in
     light and dark; and the README's `task-notes.tsx` in an SDK editor:

@@ -35,6 +35,21 @@ it('strikes text through between two tildes, not one', () => {
   expect(container.textContent).toBe('gone and ~one~ and ~~kept~~');
 });
 
+it('shows spaces at a line start, as the writer keeps them', () => {
+  const { container } = render(
+    <MarkdownView source={'&#32;&#32;&#32;&#32;test\\\n&#32;&#32;next'} />,
+  );
+  expect(container.querySelector('p')?.textContent).toBe(
+    '\u00a0\u00a0\u00a0\u00a0test\n\u00a0\u00a0next',
+  );
+});
+
+it('shows a link over a formatting boundary as one link', () => {
+  render(<MarkdownView source="**Visit** [**our** website](https://a.b)" />);
+  const links = screen.getAllByRole('link');
+  expect(links.map((link) => link.textContent)).toEqual(['our website']);
+});
+
 it('shows a hard line break as one break, as a typed one', () => {
   const { container } = render(
     <MarkdownView

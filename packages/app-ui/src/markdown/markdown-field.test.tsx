@@ -167,6 +167,18 @@ it('writes text in its set formatted and reports it as Markdown', async () => {
   ]);
 });
 
+it('gives back the source as loaded when undo returns to it', async () => {
+  render(<Notes initial="_milk_" defaultPresentation="write" />);
+  await editor();
+  fireEvent.click(button('Bulleted list'));
+  expect(draft()).toBe('- *milk*');
+  await waitFor(() =>
+    expect(button('Undo').hasAttribute('disabled')).toBe(false),
+  );
+  fireEvent.click(button('Undo'));
+  expect(draft()).toBe('_milk_');
+});
+
 it('writes nothing for opening and switching, though it would write it differently', async () => {
   const changed = vi.fn();
   const source = '_a_ and __b__\nc';

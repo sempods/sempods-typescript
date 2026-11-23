@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import {
   EditorContent,
+  Extension,
   useEditor,
   useEditorState,
   type ChainedCommands,
@@ -10,7 +11,13 @@ import {
   type UseEditorOptions,
 } from '@tiptap/react';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { EditorState, TextSelection } from '@tiptap/pm/state';
+import {
+  EditorState,
+  Plugin,
+  TextSelection,
+  type Transaction,
+} from '@tiptap/pm/state';
+import { AddMarkStep, RemoveMarkStep } from '@tiptap/pm/transform';
 import StarterKit from '@tiptap/starter-kit';
 import { Placeholder } from '@tiptap/extensions';
 import {
@@ -28,7 +35,13 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/button.js';
 import { Input } from '../components/input.js';
-import { joinBlocks, serializeBlock, WEB, type DocNode } from './document.js';
+import {
+  joinBlocks,
+  serializeBlock,
+  WEB,
+  writesBack,
+  type DocNode,
+} from './document.js';
 import type { MarkdownFieldLabels } from './texts.js';
 import { isCommand, ToolButton, ToolGroup } from './tools.js';
 
@@ -93,6 +106,36 @@ const ACTIONS = [
   { readonly level: number } | undefined,
   (chain: ChainedCommands) => ChainedCommands,
 ])[];
+
+/**
+ * Whether a formatting step leaves every block it changed writable as
+ * Markdown that reads back the same; typing is never held up.
+ */
+function savable(tr: Transaction): boolean {
+  if (
+    !tr.docChanged ||
+    !tr.steps.every(
+      (step) => step instanceof AddMarkStep || step instanceof RemoveMarkStep,
+    )
+  )
+    return true;
+  let ok = true;
+  tr.doc.forEach((node, _, index) => {
+    if (ok && tr.before.maybeChild(index) !== node)
+      ok = writesBack(node.toJSON() as DocNode);
+  });
+  return ok;
+}
+
+/**
+ * A formatting the field could not save, such as strikethrough on a bold
+ * word between letters, is not made: the editor keeps what it shows and
+ * the draft what it saves in step.
+ */
+const Savable = Extension.create({
+  name: 'savableFormatting',
+  addProseMirrorPlugins: () => [new Plugin({ filterTransaction: savable })],
+});
 
 /**
  * Each top-level block's Markdown, kept for the block it was written for:
@@ -280,6 +323,10 @@ export default function RichEditor({
   report.current = onChange;
   const [linking, setLinking] = useState(false);
   const first = useRef(doc);
+  const loaded = useRef<{
+    readonly doc: ProseMirrorNode;
+    readonly source: string;
+  } | null>(null);
   // Read on each update, so a new placeholder applies to this editor.
   const hint = useRef(placeholder ?? '');
   hint.current = placeholder ?? '';
@@ -307,6 +354,7 @@ export default function RichEditor({
           },
         }),
         Placeholder.configure({ placeholder: () => hint.current }),
+        Savable,
       ],
       content: first.current as JSONContent,
       editorProps: {
@@ -326,8 +374,15 @@ export default function RichEditor({
           return true;
         },
       },
+      // The text as loaded, which undo can return to: its own source then.
+      onCreate: ({ editor: created }) => {
+        loaded.current = { doc: created.state.doc, source: shown.current };
+      },
       onUpdate: ({ editor: changed }) => {
-        const next = markdownOf(changed.state.doc);
+        const { doc: now } = changed.state;
+        const next = loaded.current?.doc.eq(now)
+          ? loaded.current.source
+          : markdownOf(now);
         if (next === shown.current) return;
         shown.current = next;
         report.current(next);
@@ -365,6 +420,7 @@ export default function RichEditor({
     editor.view.updateState(
       EditorState.create({ schema, plugins, doc: schema.nodeFromJSON(doc) }),
     );
+    loaded.current = { doc: editor.state.doc, source: value };
     // A transaction that changes nothing, so the toolbar reads the new state.
     editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false));
   }, [editor, value, doc]);

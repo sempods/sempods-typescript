@@ -10106,6 +10106,34 @@ async function markdown({ browser, origin, engine }) {
           };
         }),
       );
+      results.push(
+        await attemptOn(errors, 'markdown-unsavable-formatting', async () => {
+          // Marks between letters that Markdown could not hold together.
+          await page.goto(address('&notes=marks&write'));
+          await text(page).waitFor();
+          await select(page, 1, 2);
+          await notes(page)
+            .getByRole('button', { name: 'Strikethrough' })
+            .click();
+          await select(page, 6, 7);
+          await notes(page).getByRole('button', { name: 'Bold' }).click();
+          await settle(page);
+          const state = await draft(page);
+          const shown = await text(page).evaluate((el) => ({
+            struck: el.querySelectorAll('s').length,
+            bold: el.querySelectorAll('strong').length,
+          }));
+          return {
+            pass:
+              state.draft === 'a**b**c ab~~c~~' &&
+              state.changes === 0 &&
+              shown.struck === 1 &&
+              shown.bold === 1,
+            ...state,
+            shown,
+          };
+        }),
+      );
     } finally {
       results.push({
         id: 'markdown-keyboard-page-errors',

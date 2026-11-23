@@ -359,11 +359,14 @@ function serializeInline(
       last = index;
       continue;
     }
-    // Open marks this node has too stay open, outermost first.
+    // Open marks this node has too stay open, outermost first; a link that
+    // starts here goes outside them, so it stays one link.
+    const link = marks.find((mark) => mark.type === 'link');
     let keep = 0;
     while (
       keep < open.length &&
-      marks.some((mark) => sameMark(mark, open[keep]!.mark))
+      marks.some((mark) => sameMark(mark, open[keep]!.mark)) &&
+      (!link || open.some((other) => sameMark(other.mark, link)))
     )
       keep++;
     closeTo(keep);
@@ -510,6 +513,16 @@ export function serializeBlock(node: DocNode, other = false): string {
     default:
       throw new Error(`The editor holds an unknown node: ${node.type}.`);
   }
+}
+
+/**
+ * Whether `block`, written as Markdown, reads back with the same text and
+ * marks: a formatting the field could not save is not made in the editor.
+ */
+export function writesBack(block: DocNode): boolean {
+  return (
+    visible(fromMarkdown(serializeBlock(block))?.content) === visible([block])
+  );
 }
 
 /**

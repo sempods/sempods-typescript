@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { fromMarkdown, toMarkdown, type DocNode } from './document.js';
+import {
+  fromMarkdown,
+  toMarkdown,
+  writesBack,
+  type DocNode,
+} from './document.js';
 
 /** The source as the editor writes it back after reading it. */
 const again = (source: string) => {
@@ -345,6 +350,45 @@ describe('marks', () => {
     expect(
       toMarkdown(paragraph(text('First'), hardBreak, hardBreak, hardBreak)),
     ).toBe('First');
+  });
+
+  it('keeps one link across a formatting boundary', () => {
+    const href = 'https://a.b';
+    // `**Visit our** website`, then a link over `our website`.
+    const doc = paragraph(
+      text('Visit ', { type: 'bold' }),
+      text('our', { type: 'bold' }, { type: 'link', attrs: { href } }),
+      text(' website', { type: 'link', attrs: { href } }),
+    );
+    expect(toMarkdown(doc)).toBe('**Visit** [**our** website](https://a.b)');
+    const links = fromMarkdown(toMarkdown(doc))!
+      .content![0]!.content!.filter((node) =>
+        node.marks?.some((mark) => mark.type === 'link'),
+      )
+      .map((node) => node.text);
+    expect(links).toEqual(['our', ' website']);
+  });
+
+  it('tells which formatting writes back as it is', () => {
+    const block = (...content: DocNode[]) => paragraph(...content).content![0]!;
+    expect(
+      writesBack(block(text('a'), text('b', { type: 'bold' }), text('c'))),
+    ).toBe(true);
+    // `a**b**c` with strikethrough on `b`, and `ab~~c~~` with bold on `c`.
+    expect(
+      writesBack(
+        block(
+          text('a'),
+          text('b', { type: 'bold' }, { type: 'strike' }),
+          text('c'),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      writesBack(
+        block(text('ab'), text('c', { type: 'strike' }, { type: 'bold' })),
+      ),
+    ).toBe(false);
   });
 
   it('writes a break in a heading as a space', () => {

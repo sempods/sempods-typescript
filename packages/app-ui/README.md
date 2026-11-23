@@ -1892,7 +1892,10 @@ was, such as `_a_` as `*a*`, a line break as a `\` at the line's end, or a
 list's markers. Any other text that looks like Markdown, such as
 `*urgent*` typed around a word or a `#` after a line break, is escaped, so
 it stays text; spaces at a line's start and a blank line made with two
-breaks stay as `&#32;`.
+breaks stay as `&#32;`, which the view shows. A formatting that Markdown
+could not hold, such as strikethrough on a bold letter between others, is
+not made, and undo back to the text as loaded reports its source as it
+was.
 
 **Written as Markdown.** A text with anything else, such as code, a quote,
 an image, HTML, a rule or a link with a title, which another app may have

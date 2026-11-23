@@ -30,7 +30,8 @@ interface TreeNode {
 /**
  * A line break typed in a paragraph shows as one, as a hard break does: each
  * becomes a `<br>`, so a hard break, whose source ends the line too, adds
- * no second one.
+ * no second one. Spaces at a line's start, which Markdown keeps only when
+ * written as `&#32;`, show as the indentation they are.
  */
 const typedBreaks = () => (tree: unknown) => {
   const visit = (node: TreeNode) => {
@@ -45,9 +46,34 @@ const typedBreaks = () => (tree: unknown) => {
           ...(line ? [{ type: 'text', value: line }] : []),
         ]);
     });
+    if (LINES.has(node.type)) indent(node.children);
   };
   visit(tree as TreeNode);
 };
+
+/** Blocks whose text runs in lines. */
+const LINES = new Set(['paragraph', 'heading', 'tableCell']);
+
+/** Leading spaces of each line as no-break spaces, which do not collapse. */
+function indent(children: TreeNode[]) {
+  let start = true;
+  for (const child of children) {
+    if (child.type === 'break') {
+      start = true;
+      continue;
+    }
+    if (start) {
+      // The first text of the line, also inside emphasis or a link.
+      let first: TreeNode | undefined = child;
+      while (first && first.type !== 'text') first = first.children?.[0];
+      if (first?.value)
+        first.value = first.value.replace(/^[ \t]+/, (space) =>
+          space.replace(/ /g, '\u00a0').replace(/\t/g, '\u00a0'.repeat(4)),
+        );
+    }
+    start = false;
+  }
+}
 const remarkPlugins = [strikethrough, typedBreaks];
 
 function headings(base: number): Partial<Components> {
