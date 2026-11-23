@@ -207,9 +207,9 @@ sign-in under way in one tab shows as interrupted in the others until its
 result is stored. A re-authorization stores its attempt beside the session
 instead (0.10.0): the session keeps working in every tab, under the refresh
 lock that also serializes the callback's code exchange, and only a
-validated, stored result replaces it. A tab uses another tab's renewal of the same session as it is; any
-other change makes it list that connection anew, as a reload would, so
-nothing of the earlier state continues. Context selection and drafts stay per tab. A store that cannot
+validated, stored result replaces it. A tab uses another tab's renewal of
+the same session as it is; any other change makes it list that connection
+anew, as a reload would, so nothing of the earlier state continues. Context selection and drafts stay per tab. A store that cannot
 announce changes keeps one active tab per app, and a second tab shows a clear
 notice. Renewal happens on demand: before a request whose credential is about to expire,
 or after a request refused with a Bearer challenge. There is no background timer.

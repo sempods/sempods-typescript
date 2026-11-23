@@ -112,24 +112,26 @@ session as it is:
 
 `resumed: true` says that the session restored usable and is in use again
 (a session that expired while the person was at the Pod ends as usual,
-without it), not what it may access: `access_denied` may mean that the person cancelled or removed this
-app's access at the Pod, and a Pod may accept a narrower choice before its code
-answer is lost. A removed grant shows at the next renewal, which the Pod
-refuses; the session then ends like any refused renewal. The SDK components
-therefore say neutrally that the change was not confirmed.
+without it), not what it may access: `access_denied` may mean that the
+person cancelled or removed this app's access at the Pod, and a Pod may
+accept a narrower choice before its code answer is lost. A removed grant
+shows at the next renewal, which the Pod refuses; the session then ends like
+any refused renewal. After `access_denied` the SDK components therefore say
+neutrally that the change was not confirmed; after a failure they name its
+cause.
 
 The callback claims and exchanges the code under the connection's refresh
 lock, so no renewal of the session overlaps it. It waits for a renewal under
 way at most as long as one with its discovery and one resend takes (the
-discovery deadline plus two token timeouts); past that it fails with
+discovery deadline plus two token timeouts and 5 seconds); past that it fails with
 `coordination` and leaves the attempt. The claim drops the verifier from the
 record, so a replayed callback fails with `attempt` and never exchanges the
 code again. A forged or malformed callback, a late callback of a replaced
 attempt and one with a wrong issuer leave the attempt for its genuine
 callback. An attempt claimed by a tab that closed during its exchange counts
-as spent: the next renewal drops it. Every tab reads Context access again once an attempt ends
-without a new grant, also a tab that missed it in the back/forward cache, and
-after any catalogue read that was under way then.
+as spent: the next renewal drops it. Every tab reads Context access again
+once an attempt ends without a new grant, also a tab that missed it in the
+back/forward cache, and after any catalogue read that was under way then.
 
 Records of SDK 0.6 to 0.9 kept the session as `previous` of its attempt; 0.10
 reads them as the session with the attempt pending and stores the new shape
@@ -152,8 +154,8 @@ credentials.
 Discovery only reads the Pod's metadata, so the runtime bounds it: a Pod whose
 discovery has not answered after 15 seconds counts as unreachable
 (`problem: 'network'`), also when its `fetch` ignores the abort signal. This
-applies to every discovery: restoration, the discovery before a refresh claim (which then spends
-nothing and stays signed in), rediscovery for a
+applies to every discovery: restoration, the discovery before a refresh
+claim (which then spends nothing and stays signed in), rediscovery for a
 [lost renewal answer](#lost-renewal-answers), `connect(url)` (rejects),
 `beginAuthorization(id)` (rejects, nothing reset) and a callback's code claim
 (fails before the attempt is claimed). A late answer is dropped: it publishes
@@ -826,10 +828,8 @@ blocked when another tab renews that session. Under `optional`, a connection
 reading without a token keeps doing so when another tab ends a session.
 
 A tab that starts, or reloads, while another tab is away at the Pod for a
-re-authorization restores the session at once, and so does that tab when it
-comes back without a callback (also from the back/forward cache), a reload of
-it and a tab opened from it: the attempt stays pending beside the session for
-its callback. Nothing is noted in the page's history or `history.state`.
+re-authorization restores the session at once, as does that tab coming back
+without a callback ([re-authorization outcomes](#configure-initialize-connect)).
 Announcements are best effort: a
 page restored from the back/forward cache reads every record again and lists
 connections added meanwhile, and a tab that missed one otherwise reads the
@@ -1005,8 +1005,9 @@ redirect takes a few seconds. After the session ended (for example a failed
 refresh), it prepares under a fresh lifetime in the same runtime, which a
 disconnect or dispose during preparation still cancels without navigating. A
 re-authorization stores its attempt under the session's refresh lock: it
-waits for a renewal under way, in this tab or another, and a session that
-ends meanwhile is signed in to again. A
+waits for a renewal under way, in this tab or another. If another tab ends
+the session meanwhile, the preparation stops without navigating and shows
+that change; the next sign-in is a first sign-in. A
 Pod that advertises no registration endpoint (optional, RFC 8414) still serves
 `did:web` clients; dynamic clients
 need one and are refused with `invalid-config`.

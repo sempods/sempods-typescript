@@ -874,9 +874,10 @@ export function ShareAnotherList({ connectionId }: { connectionId: string }) {
   again, and the remembered Context is selected while it stays readable.
 - Meanwhile the session keeps working in the app's other tabs, and coming
   back without consenting restores it at once. Cancelled, declined or failed,
-  the session stays in use (`startup.resumed`), and a notice says neutrally
-  that the change was not confirmed: the Pod may still have removed access,
-  which its next renewal shows.
+  the session stays in use (`startup.resumed`). After a cancel or decline a
+  notice says neutrally that the change was not confirmed: the Pod may still
+  have removed access, which its next renewal shows. A failure names its
+  cause.
 - Leaving for the Pod is real navigation. Drafts and other in-memory state do
   not survive it, which is why the leave policy asks. Going back may restore
   the page from the browser's back/forward cache; do not rely on it.
@@ -2325,9 +2326,9 @@ Read state with `useAppState`, `useConnections` and `useView`.
   inert. Selecting the Pod or Context that is already selected resolves
   `true` and changes nothing. A redirect still here after three seconds (the
   browser stopped it, or the person stayed in a leave prompt) asks whether
-  to **Stay on this page** or **Keep waiting**; staying abandons the attempt
-  (`cancelAuthorization(id)`), so the Pod's session restores (a
-  first sign-in ends `interrupted`) and the content works again. Each
+  to **Stay on this page** or **Keep waiting**; staying abandons the redirect
+  (`cancelAuthorization(id)`), so a re-authorized session restores (a first
+  sign-in ends `interrupted`) and the content works again. Each
   redirect waits its own three seconds. A custom surface can offer the same.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.
