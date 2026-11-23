@@ -558,20 +558,27 @@ it('sends no resend once recording it took it past the grace period', async () =
   expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
 });
 
-it('leaves a sign-in started during the refresh alone when the cancelled request settles', async () => {
+it('stores a sign-in started during a refresh once that refresh settled, without ending it', async () => {
   const { f, runtime, id } = await signedIn();
   const held = deferred<Response>();
   f.setToken(() => held.promise);
   const read = refusedRead(f, runtime, id);
   await vi.waitFor(() => expect(sentRefreshTokens(f)).toHaveLength(1));
-  await runtime.beginAuthorization(id);
-  const before = session(runtime);
+  const navigations = f.navigate.mock.calls.length;
+  // The sign-in waits for the refresh, which holds the session's record.
+  const begun = runtime.beginAuthorization(id);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(f.navigate.mock.calls.length).toBe(navigations);
   held.reject(new TypeError('Failed to fetch'));
-  expect(await read).toEqual({ kind: 'invalidated' });
+  await begun;
+  expect(f.navigate.mock.calls.length).toBe(navigations + 1);
+  expect(session(runtime)?.kind).toBe('leaving');
+  await read;
   await settleLease();
-  expect(session(runtime)).toEqual(before);
-  expect(session(runtime)?.kind).not.toBe('ended');
-  expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
+  expect(session(runtime)?.kind).toBe('leaving');
+  // The refresh's answer was lost twice: the session ended, and the sign-in
+  // is the record now.
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private', 'refresh-private']);
   expect(await record(f)).toMatchObject({ kind: 'authorizing' });
 });
 

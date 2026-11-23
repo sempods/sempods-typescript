@@ -53,6 +53,24 @@ export interface Entry {
   clientPod: Pod;
   /** `forget(id)` was asked; its record is deleted on every retry, also by `disconnect`. */
   forgetting?: true;
+  /**
+   * The latest sign-in this tab prepares: an earlier one stops once another
+   * starts, and a session that ends while it waits does not stop it.
+   */
+  preparation?: object;
+  /** The catalogue read a Context access recheck started (`recheckAccess`). */
+  rechecking?: Promise<unknown>;
+  /** Another consent outcome arrived during that read: it runs once more. */
+  recheckAgain?: true;
+  /** The record's `attemptEnded` marker as last seen (`noteAttempt`). */
+  attemptEnded?: string | undefined;
+  /** The session generation a page that left to re-authorize left from. */
+  leftFrom?: string;
+  /**
+   * A page that stayed, whose record could not be read: `retryRestore`
+   * lists it again, keeping its view for that session generation.
+   */
+  relisting?: { readonly leftFrom?: string };
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**

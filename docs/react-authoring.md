@@ -872,8 +872,12 @@ export function ShareAnotherList({ connectionId }: { connectionId: string }) {
   redirect. After consent the app returns to `returnTo`, the new grant
   replaces the old one and that Pod is the active one; the catalogue is read
   again, and the remembered Context is selected while it stays readable.
-- Cancelled or declined, the earlier session resumes with its access
-  (`startup.resumed`), and a notice says that sharing is unchanged.
+- Meanwhile the session keeps working in the app's other tabs, and coming
+  back without consenting restores it at once. Cancelled, declined or failed,
+  the session stays in use (`startup.resumed`). After a cancel or decline a
+  notice says neutrally that the change was not confirmed: the Pod may still
+  have removed access, which its next renewal shows. A failure names its
+  cause.
 - Leaving for the Pod is real navigation. Drafts and other in-memory state do
   not survive it, which is why the leave policy asks. Going back may restore
   the page from the browser's back/forward cache; do not rely on it.
@@ -2207,22 +2211,23 @@ from the guarded `useApp()` actions.
   credential is renewed while it restores, which can take up to 20 seconds
   more. With several Pods, a working one takes over from an active one that
   cannot work, or that still restores after 5 seconds
-  ([several Pods at startup](browser-runtime.md#several-pods-at-startup)). A resumed
-  re-authorization that times out ends without `restorable` and asks for a new
-  sign-in.
+  ([several Pods at startup](browser-runtime.md#several-pods-at-startup)). A
+  re-authorization's callback waits for a renewal of that session under way;
+  one that waits too long fails with `coordination` and keeps the session.
 - Read `useAppState().access` for what needs attention, or compose the
   [access parts](#access-prompts-and-your-own-placement). A failed or cancelled
   callback activates its connection; its prompt (or the deprecated
   `callbackNotice`) tells whether a `startup.interaction` outcome is current.
 - A `leaving` connection (navigating to the Pod) stays inert without a
   sign-in. `active` and `renewing` are authentication, not Context access. A
-  cancelled re-authorization keeps the session (`startup.resumed`); an
+  cancelled or failed re-authorization keeps the session (`startup.resumed`); an
   unreachable Pod at startup is `ended` with `restorable: true`, like a saved
   session that timed out.
 - `access_denied` cannot tell cancel from decline and its
   `error_description` is never shown: the notice says no access was granted
   (`controls.signInCancelled`) with **Sign in**, or after a declined
-  re-authorization that sharing is unchanged (`controls.sharingUnchanged`), an
+  re-authorization that the change was not confirmed
+  (`controls.sharingUnchanged`), an
   information that needs no action.
 - Select a readable Context explicitly; reloads reselect the last one while
   readable. Catalogue refresh and authorization never retry a write. A busy
@@ -2321,9 +2326,9 @@ Read state with `useAppState`, `useConnections` and `useView`.
   inert. Selecting the Pod or Context that is already selected resolves
   `true` and changes nothing. A redirect still here after three seconds (the
   browser stopped it, or the person stayed in a leave prompt) asks whether
-  to **Stay on this page** or **Keep waiting**; staying abandons the attempt
-  (`cancelAuthorization(id)`), so the Pod's earlier session resumes (a
-  first sign-in ends `interrupted`) and the content works again. Each
+  to **Stay on this page** or **Keep waiting**; staying abandons the redirect
+  (`cancelAuthorization(id)`), so a re-authorized session restores (a first
+  sign-in ends `interrupted`) and the content works again. Each
   redirect waits its own three seconds. A custom surface can offer the same.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.

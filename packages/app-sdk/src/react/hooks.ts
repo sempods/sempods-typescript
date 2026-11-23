@@ -1344,7 +1344,7 @@ function useExplicitView(context: string | undefined) {
   const current = binding?.key === key ? binding.view : null;
   const bound = current === 'refused' ? null : current;
   // A binding stays through access loss; a new authorization (for example a
-  // re-authorization resumed from the back/forward cache) retires it.
+  // re-authorization's new grant, also from another tab) retires it.
   const live = useSyncExternalStore(
     bound?.subscribe ?? noopSubscribe,
     () => bound?.getSnapshot().current ?? true,

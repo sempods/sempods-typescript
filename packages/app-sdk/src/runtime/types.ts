@@ -142,14 +142,21 @@ export interface StartupReport {
   readonly connectionId?: string;
   /**
    * Present only after a failed or cancelled callback that matched a stored
-   * attempt: the connection being signed in to. It stays listed, ended with
-   * the cause when the provider answered with an error.
+   * attempt: the connection being signed in to. It stays listed. A first
+   * sign-in ends with the cause when the provider answered with an error; a
+   * re-authorization leaves its session in use (`resumed`).
    */
   readonly attemptConnectionId?: string;
   /**
-   * The cancelled re-authorization (`interaction: 'cancelled'`) of
-   * `attemptConnectionId` resumed that connection's previous session: its
-   * access is unchanged. Absent when the connection ended instead.
+   * The cancelled or failed re-authorization of `attemptConnectionId`
+   * left that connection's earlier session in use again
+   * (`active` or `renewing`): not one that expired meanwhile, nor one only
+   * `retryRestore` may restore (`ended` with `restorable`). It says
+   * nothing about that session's permissions: the Pod may have removed or
+   * narrowed them meanwhile, which the next renewal or Context check shows.
+   * Absent when no session was kept, also for a callback that did not
+   * consume its attempt (forged, unmatched or waited for too long).
+   * Since 0.10.0 also for `failed`; before, only a denial kept the session.
    */
   readonly resumed?: true;
   /** The returning sign-in's outcome; `none` without a callback, even when startup fails. */
@@ -437,11 +444,13 @@ export interface BrowserRuntime {
    * kept the page from (a leave prompt's **Stay**), which leaves the
    * connection `leaving`. A navigation of this document still loading is
    * stopped first (`window.stop()`), unless `navigate` returned `'signal'`,
-   * and the `signal` given to `navigate` aborts. A re-authorization resumes the session it started from
-   * (`restoring`, then `active`, or `ended` if it cannot), as when the page
-   * comes back from the back/forward cache; a first sign-in ends
+   * and the `signal` given to `navigate` aborts. A re-authorization restores
+   * the session it is pending beside (`restoring`, then `active`, or `ended`
+   * if it cannot), as when the page comes back from the back/forward cache,
+   * and its attempt stays for its callback; a first sign-in ends
    * `interrupted` here, without a request, and its saved attempt is retired
-   * like a failed first sign-in; the silent first sign-in is signed out.
+   * like a failed first sign-in; the silent first sign-in is signed out,
+   * its attempt kept for its answer.
    * Returns whether such an attempt was abandoned; `false` changes nothing.
    */
   cancelAuthorization(id: string): boolean;
