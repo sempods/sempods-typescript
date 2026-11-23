@@ -1101,12 +1101,18 @@ export function createBrowserRuntime(
       if (change.kind === 'committed') e.revision = change.record.revision;
       return undefined;
     };
+    // Not listed yet, so `dispose` reaches it only through the runtime's
+    // lifetime: waiting for another tab's lock ends with it.
+    const stop = () => e.lifetime.abort(new RuntimeError('disconnected'));
+    runtimeLifetime.signal.addEventListener('abort', stop, { once: true });
     try {
       return lease?.store.watch
         ? await locked(`sempods:connect:${namespace}:${e.view.podUrl}`, e, save)
         : await save();
     } catch {
       return undefined;
+    } finally {
+      runtimeLifetime.signal.removeEventListener('abort', stop);
     }
   }
   /** A connection without discovery or client that reads without a token. */

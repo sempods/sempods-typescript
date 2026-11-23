@@ -271,6 +271,21 @@ describe('several tabs', () => {
     await vi.waitFor(() => expect(t.b.getSnapshot()).toHaveLength(1));
   });
 
+  it('stops waiting for another tab to save the address when disposed', async () => {
+    const t = await tabs();
+    // Another tab holds the Pod's lock and never lets it go (suspended).
+    const held = new Promise<void>(() => {});
+    void t.options.locks!.request(
+      `sempods:connect:${fixtureNamespace}:${bob}`,
+      {},
+      () => held,
+    );
+    const pending = t.b.connect(bob);
+    await settleLease();
+    t.b.dispose();
+    await expect(pending).rejects.toMatchObject({ problem: 'disconnected' });
+  });
+
   it('saves one address when two tabs add the same Pod at once', async () => {
     const t = await tabs();
     const [first, second] = await Promise.all([
