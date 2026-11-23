@@ -1832,7 +1832,8 @@ Long text fields, such as a task's notes in `schema:description`, can be
 read and written as Markdown with the opt-in entry `@sempods/app-ui/markdown`.
 It reads with [react-markdown](https://github.com/remarkjs/react-markdown)
 and writes with [Tiptap](https://tiptap.dev), optional peers that only an
-app using the entry installs, the Tiptap packages at one version:
+app using the entry installs, the Tiptap packages at one version, 3.33 or
+newer:
 
 ```sh
 npm install react-markdown @tiptap/core @tiptap/pm @tiptap/react @tiptap/starter-kit @tiptap/extensions
@@ -1866,9 +1867,9 @@ The field is a group named by its `label`. It starts with
 **Edit text** action, or only **Add text** while there is no text, as the
 body of a title-first form; `write` starts writing. One action at the
 field's top end switches between the two, so it stays in place: editing
-moves the focus into the text, **Preview** returns it to that action. The
-text is written where it was once written in and only hidden while reading,
-so its undo history survives a preview. `readOnly` shows the rendered text
+moves the focus into the text, **Preview** returns it to that action. Once
+written in, the writer stays and is only hidden while reading, so its undo
+history survives a preview. `readOnly` shows the rendered text
 without an action, and nothing when there is no text; a separate reading
 place, such as a task's details, uses `MarkdownView` with the same
 rendering. Texts follow the SDK provider's language (English or German);
@@ -1884,8 +1885,8 @@ Ctrl+Shift+S (Command on Apple systems) format as well, and Ctrl+K or
 **Link** asks for the address, which Enter sets and Escape leaves. As in a
 word processor, `- `, `1. ` or `## ` at a line's start begins a list or a
 heading, which undo turns back into the characters; Shift+Enter breaks a
-line. Tab leaves the text, except in a list item, which it indents. Each
-change reaches `onChange` as standard Markdown, CommonMark with
+line. Tab leaves the text; in a list item that can move in, it indents the
+item. Each change reaches `onChange` as standard Markdown, CommonMark with
 `~~strikethrough~~`, written one way: the first change also rewrites what
 the person left as it was, such as `_a_` as `*a*`, a line break as a `\` at
 the line's end, or a list's markers. Text that looks like Markdown, such as
@@ -1895,8 +1896,9 @@ a `*` or a `1.` at a line's start, is escaped, so it stays text.
 an image, HTML, a rule or a link with a title, which another app may have
 stored, or one the formatted writer would not write back as it reads, such
 as a heading over two lines, is written as Markdown in a text input, with a
-note why, so nothing in it is lost. `onChange` receives it exactly as typed, also indentation,
-trailing spaces of a hard line break and a text of only spaces; the text
+note why, so nothing in it is lost. `onChange` receives it exactly as
+typed, also indentation, trailing spaces of a hard line break and a text of
+only spaces; the text
 input shows exactly `value`, though the browser reports every line ending
 as `\n`, also on lines the person did not touch. Its toolbar acts on the
 selection: heading, bold, italic, bulleted and numbered list, and link (the
@@ -1921,9 +1923,9 @@ typing.
 For an SDK field, declare the text without `trim`, so Markdown keeps its
 indentation and line breaks, and as `optional`, mapping only an empty text
 to `null`, so the field is absent. The draft then holds exactly what the
-field reports: the four spaces that start an indented code block make it
-invalid only until the code follows. An app that saves a text of only
-spaces as no text converts it when it saves. The UI gate runs this file as
+field reports: in the Markdown writer, the four spaces that start an
+indented code block make it invalid only until the code follows. An app
+that saves a text of only spaces as no text converts it when it saves. The UI gate runs this file as
 written:
 
 ```tsx

@@ -31,7 +31,7 @@ import type { RichEditorProps } from './rich-editor.js';
 import { useMarkdownTexts, type MarkdownFieldLabels } from './texts.js';
 import { isCommand, ToolButton, ToolGroup } from './tools.js';
 
-/** How the field shows its text: rendered, or as source to write in. */
+/** How the field shows its text: rendered, or to write in. */
 export type MarkdownPresentation = 'read' | 'write';
 
 export interface MarkdownFieldProps {
@@ -54,7 +54,7 @@ export interface MarkdownFieldProps {
   /**
    * How the field starts: `read` (default) shows the rendered text with an
    * edit action, or only **Add text** while there is none; `write` starts
-   * with the text input.
+   * writing.
    */
   readonly defaultPresentation?: MarkdownPresentation;
   /**
@@ -62,7 +62,7 @@ export interface MarkdownFieldProps {
    * field renders nothing.
    */
   readonly readOnly?: boolean;
-  /** The text input's placeholder while it is empty. */
+  /** The placeholder while there is no text to write in. */
   readonly placeholder?: string;
   /** The heading level of a `#` heading in the rendered text. */
   readonly headingLevel?: MarkdownViewProps['headingLevel'];
