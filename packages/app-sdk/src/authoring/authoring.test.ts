@@ -642,6 +642,59 @@ it('signs out of another connection keeping the selected view, but asks about an
   expect(await leaving).toBe(false);
   expect(selected).not.toHaveBeenCalled();
 });
+const bobsClub = 'https://pod.example/bob/_system/contexts/club';
+const bobsHome = 'https://pod.example/bob/_system/contexts/home';
+/** Alice and Bob signed in, Bob active with his catalogue read. */
+async function bobSelected() {
+  const { f, runtime, other, otherUrl } = await twoPods((r) =>
+    cleanups.push(() => r.dispose()),
+  );
+  f.setCatalogue(async (url) =>
+    url.startsWith(otherUrl)
+      ? catalogue([bobsClub, bobsHome], [], otherUrl)
+      : catalogue(),
+  );
+  const app = createAppController(runtime);
+  app.start();
+  cleanups.push(() => app.stop());
+  await vi.waitFor(() => expect(app.getSnapshot().activeId).toBe(other.id));
+  await runtime.loadContexts(other.id);
+  runtime.selectContext(other.id, bobsClub);
+  return { f, runtime, app, bob: other.id };
+}
+it('withdraws a leave prompt once another Pod’s redirect starts', async () => {
+  const { f, runtime, app, bob } = await bobSelected();
+  const discard = vi.fn();
+  app.register({ dirty: () => true, blocked: () => false, discard });
+  const navigations = f.navigate.mock.calls.length;
+  const signIn = app.authorize(bob);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  // Alice's redirect starts while the person is asked about Bob's draft.
+  await runtime.beginAuthorization(f.id);
+  expect(f.navigate).toHaveBeenCalledTimes(navigations + 1);
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  expect(await signIn).toBe(false);
+  await app.confirmLeave();
+  expect(f.navigate).toHaveBeenCalledTimes(navigations + 1);
+  expect(discard).not.toHaveBeenCalled();
+});
+it('reports a Context switch during another Pod’s redirect as blocked', async () => {
+  const { f, runtime, app, bob } = await bobSelected();
+  const target = { connectionId: bob, contextIri: bobsHome };
+  // Asked first, then Alice's redirect starts.
+  app.register({ dirty: () => true, blocked: () => false, discard: vi.fn() });
+  const asked = app.selectTarget(target);
+  expect(app.getSnapshot().confirmingLeave).toBe(true);
+  await runtime.beginAuthorization(f.id);
+  expect(await asked).toEqual({ kind: 'blocked' });
+  // Already on its way: no prompt at all.
+  expect(await app.selectTarget(target)).toEqual({ kind: 'blocked' });
+  expect(app.getSnapshot().confirmingLeave).toBe(false);
+  expect(await app.selectContext(bobsHome)).toBe(false);
+  // Selecting the Pod that is already selected stays a successful no-op.
+  expect(await app.selectConnection(bob)).toBe(true);
+  expect(await app.selectConnection(f.id)).toBe(false);
+});
 it('signs out of another connection while the selected view saves, but not while that connection’s own work saves', async () => {
   const f = await connected();
   const bob = await f.runtime.connect('https://pod.example/bob');

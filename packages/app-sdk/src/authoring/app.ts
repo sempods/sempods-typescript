@@ -65,7 +65,9 @@ export interface ContextTarget {
  * - `selected`: that connection is active with that Context, also when it
  *   already was.
  * - `declined`: the person stayed, or the prompt was cancelled.
- * - `blocked`: a pending write, or another change preparing or asking.
+ * - `blocked`: a pending write, another change preparing or asking, or a
+ *   Pod's sign-in redirect (`leaving`), also one that started while the
+ *   person was asked.
  * - `unavailable`: the target cannot be selected, before asking or because it
  *   disappeared while the person was asked: no such `connection`, its
  *   `session` neither reads (`Connection.reading`) nor holds the required
@@ -518,12 +520,13 @@ export function createAppController(
     // stopping being active without a guarded action (a returning sign-in, a
     // removed or signed-out connection) cancels it: nothing runs and no guard
     // is discarded. A prompt asked without any active connection is not about
-    // one.
+    // one. A redirect that started meanwhile (`navigating`) cancels it too.
     if (
       pending &&
       ((pending.activeId !== null &&
         (pending.activeId !== activeId || signedOut)) ||
-        pending.available?.() === 'gone')
+        pending.available?.() === 'gone' ||
+        connections.some((c) => c.session.kind === 'leaving'))
     ) {
       pending.resolve(false);
       pending = undefined;
@@ -847,7 +850,11 @@ export function createAppController(
      * `false`, discarding nothing, when a guard is blocked, the person declines,
      * or the prompt is cancelled (see `AppSnapshot.confirmingLeave`). While
      * any connection is `leaving`, the page is on its way to that Pod's
-     * sign-in: each resolves `false` at once, so none replaces the redirect.
+     * sign-in: each resolves `false` at once, so none replaces the redirect,
+     * and a redirect that starts while the person is asked cancels the
+     * prompt. Selecting the connection that is already active, or its
+     * already selected Context, changes nothing and resolves `true`, also
+     * then.
      */
     selectConnection(id: string) {
       if (id === activeId) return Promise.resolve(true);
@@ -934,7 +941,9 @@ export function createAppController(
       const after = problem();
       return after
         ? { kind: 'unavailable', reason: after }
-        : { kind: 'declined' };
+        : navigating()
+          ? { kind: 'blocked' }
+          : { kind: 'declined' };
     },
     /**
      * Adds a Pod (or reuses its matching connection) and makes it
