@@ -321,11 +321,38 @@ export function livePending(
   return createdAt <= now && now < expiresAt ? pending : undefined;
 }
 
-/** The generation a pending attempt grants under. */
-export function pendingGeneration(pending: PendingAttempt): string {
-  return pending.kind === 'open'
-    ? pending.attempt.generation
-    : pending.binding.generation;
+/** A session record an attempt can be stored beside: `ready` or a refresh claim. */
+export function beside(
+  value: SessionRecord | undefined,
+): value is Extract<SessionRecord, { kind: 'ready' | 'claimed' }> {
+  return (
+    value?.kind === 'ready' ||
+    (value?.kind === 'claimed' && value.operation === 'refresh')
+  );
+}
+/** The re-authorization a session record carries. */
+export function pendingOf(
+  value: SessionRecord | undefined,
+): PendingAttempt | undefined {
+  return value?.kind === 'ready' || value?.kind === 'claimed'
+    ? value.pending
+    : undefined;
+}
+/** Its open attempt while unexpired: the one a callback may still answer. */
+export function openPending(
+  value: SessionRecord | undefined,
+  now = Date.now(),
+) {
+  const pending = livePending(pendingOf(value), now);
+  return pending?.kind === 'open' ? pending : undefined;
+}
+/** The attempt a record has out: its own, or one pending beside a session. */
+export function attemptOf(
+  value: SessionRecord | undefined,
+): SessionAttempt | undefined {
+  if (value?.kind === 'authorizing') return value.attempt;
+  const pending = pendingOf(value);
+  return pending?.kind === 'open' ? pending.attempt : undefined;
 }
 
 function parsePrevious(

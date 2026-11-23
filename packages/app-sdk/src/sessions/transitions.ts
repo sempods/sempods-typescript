@@ -12,9 +12,12 @@ import {
   parseStoredCredentials,
 } from '@sempods/client-sdk/oauth/host';
 import {
+  attemptOf,
+  beside,
   livePending,
+  openPending,
   parseSessionRecord,
-  pendingGeneration,
+  pendingOf,
   sessionBinding,
   SessionTransitionError,
   type PendingAttempt,
@@ -43,10 +46,7 @@ export type CodeClaim = Completion & {
  * provider answered this attempt with an error, which consumed it.
  */
 export type PendingClaim =
-  | (Completion & {
-      readonly kind: 'claimed';
-      readonly attempt: SessionAttempt;
-    })
+  | CodeClaim
   | {
       readonly kind: 'answered';
       readonly error: OAuthError;
@@ -238,10 +238,7 @@ export function createSessionTransitions(
       )
         throw new SessionTransitionError('state');
       const value = current?.value;
-      if (
-        value?.kind === 'ready' ||
-        (value?.kind === 'claimed' && value.operation === 'refresh')
-      )
+      if (beside(value))
         return commit(snapshot.connectionId, expectedRevision, {
           ...value,
           pending: { kind: 'open', attempt: snapshot },
@@ -279,16 +276,7 @@ export function createSessionTransitions(
       // The session ended meanwhile and handed the attempt over (`handOver`):
       // claimed as a first sign-in's.
       const handed = value?.kind === 'authorizing';
-      const session =
-        value?.kind === 'ready' || value?.kind === 'claimed'
-          ? value
-          : undefined;
-      const attempt =
-        value?.kind === 'authorizing'
-          ? value.attempt
-          : session?.pending?.kind === 'open'
-            ? session.pending.attempt
-            : undefined;
+      const attempt = attemptOf(value);
       if (
         !current ||
         !value ||
@@ -311,12 +299,7 @@ export function createSessionTransitions(
           id,
           current.revision,
           handed
-            ? {
-                version: 1,
-                kind: 'disconnected',
-                binding: sessionBinding(value),
-                reason: answer.problem,
-              }
+            ? retired(sessionBinding(value), answer.problem)
             : ended(value),
         );
         return change.kind === 'conflict'
@@ -336,7 +319,10 @@ export function createSessionTransitions(
               subject: null,
             }
           : {
-              ...session!,
+              ...(value as Extract<
+                SessionRecord,
+                { kind: 'ready' | 'claimed' }
+              >),
               pending: { kind: 'claimed', state: attempt.state, binding },
             },
       );
@@ -382,10 +368,12 @@ export function createSessionTransitions(
         if (!current || !value) return 'none';
         let next: SessionRecord;
         let outcome: 'kept' | 'ended';
+        const pending = pendingOf(value);
         if (
-          (value.kind === 'ready' || value.kind === 'claimed') &&
-          value.pending &&
-          pendingGeneration(value.pending) === generation
+          pending &&
+          (pending.kind === 'open'
+            ? pending.attempt.generation
+            : pending.binding.generation) === generation
         ) {
           next = ended(value);
           outcome = 'kept';
@@ -394,12 +382,7 @@ export function createSessionTransitions(
           value.operation === 'code' &&
           value.binding.generation === generation
         ) {
-          next = {
-            version: 1,
-            kind: 'disconnected',
-            binding: value.binding,
-            ...(reason === undefined ? {} : { reason }),
-          };
+          next = retired(value.binding, reason);
           outcome = 'ended';
         } else return 'none';
         if ((await commit(id, current.revision, next)).kind === 'committed')
@@ -410,9 +393,8 @@ export function createSessionTransitions(
     /**
      * A session that ended while a re-authorization of it was out (not by a
      * sign-out): the attempt becomes the record, so its callback still
-     * signs in as a first sign-in would. An open attempt is stored as
-     * `authorizing`, a claimed one as a code claim, which its exchange
-     * completes. Returns `undefined` when the record holds no such attempt.
+     * signs in as a first sign-in would. Returns `undefined` when the record
+     * holds no such attempt.
      */
     async handOver(
       id: string,
@@ -420,25 +402,8 @@ export function createSessionTransitions(
     ): Promise<SessionChange | undefined> {
       const current = await observed(id, revision);
       if (!current) return conflict;
-      const value = current.value;
-      const pending =
-        value.kind === 'ready' || value.kind === 'claimed'
-          ? livePending(value.pending)
-          : undefined;
-      if (!pending) return undefined;
-      return commit(
-        id,
-        revision,
-        pending.kind === 'open'
-          ? { version: 1, kind: 'authorizing', attempt: pending.attempt }
-          : {
-              version: 1,
-              kind: 'claimed',
-              binding: pending.binding,
-              operation: 'code',
-              subject: null,
-            },
-      );
+      const next = handedOver(current.value);
+      return next && commit(id, revision, next);
     },
     async claimCode(
       id: string,
@@ -550,15 +515,17 @@ export function createSessionTransitions(
       id: string,
       revision: string,
       reason?: string,
+      /** A session that ended, not a sign-out: an attempt out is handed over. */
+      handOver = false,
     ): Promise<SessionChange> {
       const current = await observed(id, revision);
       if (!current) return conflict;
-      return commit(id, revision, {
-        version: 1,
-        kind: 'disconnected',
-        binding: sessionBinding(current.value),
-        ...(reason === undefined ? {} : { reason }),
-      });
+      return commit(
+        id,
+        revision,
+        (handOver && handedOver(current.value)) ||
+          retired(sessionBinding(current.value), reason),
+      );
     },
     /** Deletes the record, whatever it holds, while it is still at `revision`. */
     async forget(
@@ -577,11 +544,33 @@ export function createSessionTransitions(
  * counts as spent, and it is dropped.
  */
 function carried(value: SessionRecord): PendingAttempt | undefined {
-  const pending =
-    value.kind === 'ready' || value.kind === 'claimed'
-      ? value.pending
-      : undefined;
-  return pending?.kind === 'open' ? livePending(pending) : undefined;
+  return openPending(value);
+}
+/** A retired record: only the address and why its session ended. */
+function retired(binding: SessionBinding, reason?: string): SessionRecord {
+  return {
+    version: 1,
+    kind: 'disconnected',
+    binding,
+    ...(reason === undefined ? {} : { reason }),
+  };
+}
+/**
+ * The record a session's attempt out becomes once that session ended (an
+ * open attempt `authorizing`, a claimed one a code claim), if it has one.
+ */
+function handedOver(value: SessionRecord): SessionRecord | undefined {
+  const pending = livePending(pendingOf(value));
+  if (!pending) return undefined;
+  return pending.kind === 'open'
+    ? { version: 1, kind: 'authorizing', attempt: pending.attempt }
+    : {
+        version: 1,
+        kind: 'claimed',
+        binding: pending.binding,
+        operation: 'code',
+        subject: null,
+      };
 }
 function withoutPending<T extends SessionRecord>(value: T): T {
   if (!('pending' in value)) return value;

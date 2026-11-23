@@ -70,7 +70,7 @@ export interface Entry {
    * A page that stayed, whose record could not be read: `retryRestore`
    * lists it again, keeping its view for that session generation.
    */
-  relisting?: string | undefined;
+  relisting?: { readonly leftFrom?: string };
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**
