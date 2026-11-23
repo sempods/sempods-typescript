@@ -149,7 +149,7 @@ export interface StartupReport {
   readonly attemptConnectionId?: string;
   /**
    * The cancelled or failed re-authorization of `attemptConnectionId`
-   * dropped its attempt and left that connection's session in use again
+   * left that connection's earlier session in use again
    * (`active` or `renewing`): not one that expired meanwhile, nor one only
    * `retryRestore` may restore (`ended` with `restorable`). It says
    * nothing about that session's permissions: the Pod may have removed or
