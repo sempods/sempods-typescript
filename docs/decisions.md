@@ -39,6 +39,29 @@ SDK's boundaries, and its calendar works on `CalendarDate`, which matches the
 SDK's `date` field; Radix blocked the SDK confirmations. The comparison is in
 the template's spike, sempods/sempods-apps-template#120.
 
+Markdown text is an opt-in entry of the kit, `@sempods/app-ui/markdown`,
+with `react-markdown` and Tiptap as optional peers, so apps that show plain
+text load nothing for it and install only the small parser extension for
+GitHub's strikethrough, a dependency of the kit. People who write notes
+mostly do not know Markdown, so the field writes text formatted, as it
+reads, and stores
+standard Markdown: Tiptap's headless editor with the kit's own toolbar for
+paragraphs, headings, bold, italic, strikethrough, web links and lists. A
+text with anything else, which another app may have stored, is written as
+Markdown in the kit's textarea, with the same preview. UIW's React
+Markdown Editor, which Focus used first, needed its own stylesheet and a
+dozen colour overrides, drew an overlay with its own type sizes and showed
+Markdown's characters to people who do not know them (#395).
+
+_Why:_ the stored text stays the format every app reads, and the person
+never sees its characters. The editor's document is read and written by the
+kit, not by Tiptap's Markdown extension, whose parser differs from the
+view's and which leaves a typed `1.` or `#` at a line's start unescaped: the
+field reads with react-markdown's parser, so writer and view agree, and a
+text it cannot represent is never rewritten in the editor, so nothing is
+lost. Writing is loaded after the first paint, which reading never waits
+for.
+
 ## The protocol stays pure; convenience lives in the SDK
 
 Pods speak RDF, JSON-LD and SPARQL with absolute IRIs. The SDK adds field

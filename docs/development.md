@@ -316,7 +316,33 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     its Sign in clear, and Escape on it keeps the focus inside the gate. The
     keyboard check shrinks the layout viewport; a visual viewport shrunk
     alone, as Chrome on Android and iOS do for the keyboard by default, is
-    covered only by the Chromium zoom.
+    covered only by the Chromium zoom;
+  - the Markdown entry (#395) on `?screen=markdown`, installed with its
+    optional `react-markdown` and Tiptap peers: the reading view is
+    formatted in its first state on the page, fetches none of the images in
+    Markdown or embedded HTML, shows that HTML as text, shows a hard and a
+    typed line break as one new line each, links only web addresses and
+    opens one in a new tab without an opener on a press; `MarkdownField`
+    switches between reading and writing in place at 1280 and 375px by
+    pointer and Enter, with the focus in the text and then back on the
+    action, and reports no change; a text with HTML is written as Markdown,
+    with the preview beside the source at 1280px only, and at 375 and 320px
+    the field fits with 44px targets; text in the editor's set is written
+    formatted: Ctrl/Cmd+B formats the selection and undo and redo work, also
+    after a preview and back, the toolbar moves with the arrow keys and
+    gives the focus back to the text, Ctrl/Cmd+K sets a link from its
+    address, typed `*` and `[` stay text, `*urgent*` typed key by key stays
+    text, two Shift+Enter keep a blank line, Tab leaves the text, also from
+    a list item, deleting a space next to bold keeps the bold, formatting
+    from an enabled action between letters saves and shows in the preview,
+    a new address changes a link over two lines whole, and a heading over a
+    line break shows as one line in the writer too; a touch on Bold keeps
+    the focus in the text; a 400-heading draft switched twelve
+    times keeps its place and draft; both writers follow the page colour in
+    light and dark; and the README's `task-notes.tsx` in an SDK editor:
+    switching writes nothing and leaves Save and Discard disabled, and a
+    text typed with a line break and a list is saved as standard Markdown
+    and opens again rendered.
 
   Sizes and contrast are measured with reduced motion, so a zoom or fade that
   headless WebKit on Linux stretches over seconds cannot catch an overlay

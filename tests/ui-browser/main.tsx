@@ -51,6 +51,9 @@
 // With `?screen=delete`, the page is the README's delete actions, a row's
 // RemoveButton with its default icon beside the bulk action's DeleteIcon,
 // and a RemoveButton whose children replace the icon (#389).
+// With `?screen=markdown`, the page is the Markdown entry: a reading view
+// and a form with a MarkdownField; with `&part=editor`, after sign-in, the
+// README's task notes (task-notes.tsx) in an SDK editor (#395).
 // Built with Vite and Tailwind 4 against the packed packages;
 // scripts/test-ui-consumer.mjs drives it. The task dialog, task-dialog.tsx,
 // the quick edit, quick-edit.tsx, the workspace, workspace.tsx, the view
@@ -124,6 +127,7 @@ import { NoticesGate } from './notices';
 import { ShoppingList } from './rename-row';
 import { RenameMenuGate } from './rename-menu';
 import { DateChoiceGate } from './date-choice';
+import { MarkdownGate } from './markdown';
 
 Object.assign(window, { checkTheme, readTheme });
 
@@ -296,6 +300,14 @@ const renameSettings =
 const renaming = renameSettings.get('screen') === 'rename';
 const dateChoice = settings.get('screen') === 'date-choice';
 const deletes = settings.get('screen') === 'delete';
+// The sign-in callback returns to the Markdown editor it started from.
+if (settings.get('screen') === 'markdown')
+  sessionStorage.setItem('markdown-gate', settings.toString());
+const markdownSettings =
+  location.pathname === '/callback'
+    ? new URLSearchParams(sessionStorage.getItem('markdown-gate') ?? '')
+    : settings;
+const markdown = markdownSettings.get('screen') === 'markdown';
 // Long translated editor actions, with `lang=de` (#401).
 const longLabels =
   settings.get('labels') === 'long'
@@ -458,6 +470,12 @@ function App() {
         />
       ) : dateChoice ? (
         <DateChoiceGate />
+      ) : markdown ? (
+        <MarkdownGate
+          part={markdownSettings.get('part')}
+          notes={markdownSettings.get('notes')}
+          write={markdownSettings.has('write')}
+        />
       ) : gateSettings ? (
         <GateSettingsScreen settings={appSettings} />
       ) : addPod ? (

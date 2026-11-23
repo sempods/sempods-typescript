@@ -23,8 +23,9 @@ Peers: React 19, `@sempods/app-sdk` and `@sempods/client-sdk` of the same minor
 version as this package, and Tailwind CSS 4.1 or newer (checked with 4.3.3).
 The package ships built JavaScript with TypeScript declarations;
 `react-aria-components`, `@internationalized/date`, `lucide-react` and the
-class utilities are its own dependencies. The `shadcn` CLI is not needed at
-runtime.
+class utilities are its own dependencies. `react-markdown` 10 and Tiptap 3
+are optional peers, needed only for the [Markdown entry](#markdown-text).
+The `shadcn` CLI is not needed at runtime.
 
 ## Set up Tailwind
 
@@ -1825,6 +1826,183 @@ suggestion field's announcements) follow the SDK provider's language
 (English or German); the menu's and the date chooser's can be passed as
 props.
 
+## Markdown text
+
+Long text fields, such as a task's notes in `schema:description`, can be
+read and written as Markdown with the opt-in entry `@sempods/app-ui/markdown`.
+It reads with [react-markdown](https://github.com/remarkjs/react-markdown)
+and writes with [Tiptap](https://tiptap.dev), optional peers that only an
+app using the entry installs, the Tiptap packages at one version, 3.33 or
+newer:
+
+```sh
+npm install react-markdown @tiptap/core @tiptap/pm @tiptap/react @tiptap/starter-kit @tiptap/extensions
+```
+
+An app that only shows plain text imports nothing from it and needs nothing
+more; the package's main entry never loads it. Import the entry statically,
+not with `lazy()`: a stored text shows formatted in the first paint, and the
+field loads its writer by itself after that paint, so reading loads none of
+it and writing usually finds it there. Where it cannot load, as offline
+without it cached, the field writes Markdown instead.
+
+- **`MarkdownView`** shows a `source` as read-only content: paragraphs (a
+  line break typed in one shows as one, as a hard break does), headings,
+  lists, emphasis, strikethrough (`~~text~~`), quotes, code and links. A `#`
+  heading is an `h3` below a dialog's `h2`, and `headingLevel` moves the
+  start; deeper ones follow down to `h6`. Text in a Pod may come from any
+  app, so the view runs and fetches nothing: embedded HTML shows as its
+  text, an image as its description only, and only `http:` and `https:`
+  addresses become links, which open in a new tab on the person's press
+  (`rel="noopener noreferrer"`); any other address stays text.
+- **`MarkdownField`** is the controlled field around it: the app passes
+  `value` (the source, `''` for none) and `onChange`, which receives every
+  change the person makes, as described below. Opening it, switching its
+  presentation or leaving it never calls `onChange`, so the draft and the
+  Pod stay untouched. The containing editor owns validation, save, cancel
+  and conflicts.
+
+The field is a group named by its `label`. It starts with
+`defaultPresentation`: `read` (default) shows the rendered text and an
+**Edit text** action, or only **Add text** while there is no text, as the
+body of a title-first form; `write` starts writing. One action at the
+field's top end switches between the two, so it stays in place: editing
+moves the focus into the text, **Preview** returns it to that action. Once
+written in, the writer stays and is only hidden while reading, so its undo
+history survives a preview. `readOnly` shows the rendered text
+without an action, and nothing when there is no text; a separate reading
+place, such as a task's details, uses `MarkdownView` with the same
+rendering. Texts follow the SDK provider's language (English or German);
+`labels` replaces any of them.
+
+**Written as it reads.** A text of paragraphs, headings, bold, italic,
+strikethrough, web links and bulleted or numbered lists, which is what
+people without Markdown write, is written formatted, without Markdown's
+characters. A toolbar of 44px actions formats the selection: heading,
+subheading, bold, italic, strikethrough, bulleted and numbered list, link,
+undo and redo; the arrow keys move along it. Ctrl+B, Ctrl+I and
+Ctrl+Shift+S (Command on Apple systems) format as well, and Ctrl+K or
+**Link** asks for the address, which Enter sets and Escape leaves. As in a
+word processor, `- `, `1. ` or `## ` at a line's start begins a list or a
+heading, which undo turns back into the characters; Shift+Enter breaks a
+line. Tab leaves the text, also in a list item. Each change reaches
+`onChange` as standard Markdown, CommonMark with `~~strikethrough~~`,
+written one way: the first change also rewrites what the person left as it
+was, such as `_a_` as `*a*`, a line break as a `\` at the line's end, or a
+list's markers. Any other text that looks like Markdown, such as
+`*urgent*` typed around a word or a `#` after a line break, is escaped, so
+it stays text; spaces at a line's start and a blank line made with two
+breaks stay as `&#32;`, which the view shows. Formatting between letters
+stays too: where a marker could not open or close next to a letter, the
+letter is written as a character reference, as `**(optional)**&#105;tems`.
+The writer always shows what the draft holds: an action whose result would
+not save as shown is disabled, and a change that leaves a block Markdown
+cannot hold, as a heading over a line break, shows as saved. Undo back to
+the text as loaded reports its source as it was.
+
+**Written as Markdown.** A text with anything else, such as code, a quote,
+an image, HTML, a rule or a link with a title, which another app may have
+stored, or one the formatted writer would not write back as it reads, such
+as a heading over two lines, is written as Markdown in a text input, with a
+note why, so nothing in it is lost. It has no formatting actions: the
+person writes the Markdown, and **Preview** shows it rendered. `onChange`
+receives it exactly as typed, also indentation, trailing spaces of a hard
+line break and a text of only spaces; the text input shows exactly `value`,
+though the browser reports every line ending as `\n`, also on lines the
+person did not touch. Tab moves to the next control instead of typing a
+tab. From 42rem of the field's own width, the preview is shown beside the
+source as it is typed; a narrower field writes at full width and parses
+nothing while typing.
+
+For an SDK field, declare the text without `trim`, so Markdown keeps its
+indentation and line breaks, and as `optional`, mapping only an empty text
+to `null`, so the field is absent. The draft then holds exactly what the
+field reports: in the Markdown writer, the four spaces that start an
+indented code block make it invalid only until the code follows. An app
+that saves a text of only spaces as no text converts it when it saves. The UI gate runs this file as
+written:
+
+```tsx
+// task-notes.tsx
+import { useEffect } from 'react';
+import {
+  ResourceEditor,
+  useAppState,
+  useContextEditor,
+  useMessages,
+} from '@sempods/app-sdk/react';
+import { fields, text } from '@sempods/client-sdk/edit';
+import { Input } from '@sempods/app-ui';
+import { MarkdownField } from '@sempods/app-ui/markdown';
+
+const schema = 'https://schema.org/';
+export const noteFields = fields(
+  {
+    title: text(schema + 'name', { language: null, trim: true }),
+    // Markdown as typed: no trim, so indentation and hard breaks stay.
+    notes: text(schema + 'description', { language: null, optional: true }),
+  },
+  { type: schema + 'Action' },
+);
+
+const texts = {
+  en: { title: 'Title', notes: 'Notes' },
+  de: { title: 'Titel', notes: 'Notizen' },
+};
+
+export function TaskNotes({
+  subject,
+  context,
+}: {
+  readonly subject: string;
+  readonly context: string;
+}) {
+  const t = useMessages(texts);
+  const edit = useContextEditor(noteFields);
+  const { open } = edit;
+  const { changing } = useAppState();
+  useEffect(() => {
+    if (!changing) void open({ subject, context });
+  }, [subject, context, changing, open]);
+  return (
+    <ResourceEditor
+      editor={edit.editor}
+      labels={{ title: t.title, notes: t.notes }}
+    >
+      {(draft, change) => (
+        <div className="grid gap-5">
+          <label className="grid gap-1.5">
+            {t.title}
+            <Input
+              value={draft.title}
+              onChange={(e) => change({ ...draft, title: e.target.value })}
+              required
+            />
+          </label>
+          <MarkdownField
+            label={t.notes}
+            value={draft.notes ?? ''}
+            // No text: the optional field stays absent.
+            onChange={(notes) =>
+              change({ ...draft, notes: notes === '' ? null : notes })
+            }
+          />
+        </div>
+      )}
+    </ResourceEditor>
+  );
+}
+```
+
+A text read in a preferred language variant
+([recipe](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant))
+passes that variant's text and replaces only it:
+`value={draft.notes.value ?? ''}` and
+`onChange={(notes) => change({ ...draft, notes: editTextVariant(draft.notes, notes === '' ? null : notes) })}`.
+Other languages stay as they are. While the variant is `ambiguous`, its
+`value` is `null`: show its `values` instead of the field until the person
+chooses to replace them.
+
 ## Router
 
 `useNav(model)` routes an app over its own address model: the app says which
@@ -2298,8 +2476,16 @@ the "Not today" `DateChoice` in a `ScreenDialog` with a preset, a typed day, an
 impossible and an early day, Enter in a form, Remove date, Escape after a
 picked day, reopening the date chooser during its exit, the
 focus trap and 44px targets without horizontal overflow at 375 and 360px
-wide; and the README's delete actions, where `RemoveButton`'s default icon
-and `DeleteIcon` draw the same outline at 1rem under two root font sizes. It
+wide; the README's delete actions, where `RemoveButton`'s default icon
+and `DeleteIcon` draw the same outline at 1rem under two root font sizes;
+and the Markdown entry: a reading view formatted from its first state that
+fetches and runs nothing, a link opened on a press, switching in place with
+the focus, formatted writing by pointer, touch and keyboard with undo, also
+after a preview, a link from Ctrl+K, typed Markdown characters kept as
+text, Tab leaving the text, a text with HTML written as Markdown with the
+preview beside it only when wide, 320px, light and dark, and
+`task-notes.tsx` in an SDK editor writing nothing until saved and saving
+standard Markdown. It
 uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 
