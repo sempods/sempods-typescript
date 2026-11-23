@@ -590,8 +590,9 @@ export interface ContextEditor<D, U = D> {
    * declined, a pending write blocks it, no connection is active (or its
    * `connection` is unknown), or another connection became active while it
    * asked (with `connection`: that connection went or stopped reading while
-   * it asked), or a Context listed as readable at the start was no longer
-   * listed (or was still being read) when it asked. Opening the same target
+   * it asked), or a Context listed as readable at the start was not in a
+   * freshly read catalogue (still being read, failed, or no longer listing
+   * it) when it asked. Opening the same target
    * again while that is under way shares its result.
    */
   open(target: ContextTarget): Promise<boolean>;
@@ -1005,19 +1006,21 @@ export function useContextEditor<D>(
       }
       // The row can go while the person is asked: its connection removed, or
       // no longer reading (signed out in another tab), or its Context, listed
-      // when it was opened, no longer listed (access revoked, or not in the
-      // catalogue read without a token). Then the prompt is withdrawn and
-      // nothing open here is discarded; while a catalogue is still being
-      // read, confirming runs nothing. Read from the runtime: the controller
-      // checks this while it publishes a change, before its own snapshot has
-      // it.
+      // when it was opened, not in a freshly read catalogue (access revoked,
+      // or not in the catalogue read without a token) or not known to be
+      // readable (a failed refresh). Then the prompt is withdrawn and nothing
+      // open here is discarded; while a catalogue is still being read, an
+      // earlier listing counts for nothing, and confirming runs nothing. Read
+      // from the runtime: the controller checks this while it publishes a
+      // change, before its own snapshot has it.
       const destination = () =>
         app.runtime.getSnapshot().find((c) => c.id === connection);
       const start = destination();
       const readable = reads(start);
-      const listed = start
-        ? catalogueLists(start.catalogue, target.context)
-        : false;
+      // Listed by a read catalogue, not only by the evidence a refresh keeps.
+      const listed =
+        start?.catalogue.kind === 'ready' &&
+        catalogueLists(start.catalogue, target.context);
       const available = (): Availability => {
         const now = destination();
         if (
@@ -1026,11 +1029,13 @@ export function useContextEditor<D>(
           (readable && !reads(now))
         )
           return 'gone';
-        if (!listed || catalogueLists(now.catalogue, target.context))
-          return 'yes';
-        return now.catalogue.kind === 'unknown' ||
-          now.catalogue.kind === 'loading'
-          ? 'later'
+        if (!listed) return 'yes';
+        const { catalogue } = now;
+        if (catalogue.kind === 'unknown' || catalogue.kind === 'loading')
+          return 'later';
+        return catalogue.kind === 'ready' &&
+          catalogueLists(catalogue, target.context)
+          ? 'yes'
           : 'gone';
       };
       // A row of another connection does not depend on the active one.

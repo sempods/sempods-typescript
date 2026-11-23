@@ -582,6 +582,61 @@ it.each(['revoked', 'signed out in another tab'] as const)(
   },
 );
 
+// Alice's catalogue is read again while the person is asked: an earlier
+// listing of her work Context does not count while that read is under way,
+// nor after it failed.
+it.each(['while refreshing', 'after a failed refresh'] as const)(
+  'keeps the draft when the destination listing is not fresh (%s)',
+  async (when) => {
+    const { f, alice, bob } = await setup();
+    const bobs = { subject: 'urn:s', context: home, connection: bob };
+    await openWithDraft(bobs);
+    let opening: Promise<boolean> | undefined;
+    act(() => {
+      opening = edit.open({
+        subject: 'urn:a',
+        context: work,
+        connection: alice,
+      });
+    });
+    await waitFor(() => expect(state.confirmingLeave).toBe(true));
+    let answer: (response: Response) => void = () => {};
+    f.setCatalogue(async (url) =>
+      url.startsWith(bobUrl)
+        ? catalogue([home], [home], bobUrl)
+        : when === 'while refreshing'
+          ? new Promise<Response>((resolve) => (answer = resolve))
+          : new Response(null, { status: 403 }),
+    );
+    let refreshed: Promise<unknown> | undefined;
+    act(() => {
+      refreshed = app.refreshContexts(alice).catch(() => {});
+    });
+    const alices = () => state.connections.find((c) => c.id === alice)!;
+    if (when === 'while refreshing') {
+      await waitFor(() => expect(alices().catalogue.kind).toBe('loading'));
+      // Confirmed before the answer: nothing runs.
+      act(() =>
+        screen.getByRole('button', { name: 'Discard and continue' }).click(),
+      );
+      expect(await opening).toBe(false);
+      await act(async () => {
+        answer(catalogue([personal], [personal]));
+        await refreshed;
+      });
+    } else {
+      await act(async () => {
+        await refreshed;
+      });
+      expect(alices().catalogue.kind).toBe('failed');
+      expect(await opening).toBe(false);
+    }
+    expect(state.confirmingLeave).toBe(false);
+    expect(edit.target).toEqual(bobs);
+    expect(edit.editor!.state.draft?.title).toBe('Oat milk');
+  },
+);
+
 /** Rows the child shows from its own state; the parent only owns the hook. */
 let showRows: (rows: readonly Row[]) => void;
 function Revealing({

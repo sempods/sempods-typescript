@@ -319,7 +319,7 @@ export function navigateWhile(
 ): Promise<boolean> {
   const navigate = checkedNavigation.get(app);
   if (navigate) return navigate(action, available, followsActive);
-  return available() === 'yes' ? app.navigate(action) : Promise.resolve(false);
+  return available() !== 'gone' ? app.navigate(action) : Promise.resolve(false);
 }
 /**
  * Selection/leave policy, the active Pod reader and the Context-discovery policy
@@ -1130,8 +1130,10 @@ export function createAppController(
   retainedNavigation.set(controller, (action, retained) =>
     guard(action, 'navigate', retained),
   );
+  // A destination still being read (`later`) opens when nothing asks; a
+  // confirmation then runs nothing until it is known.
   checkedNavigation.set(controller, (action, available, followsActive) =>
-    available() === 'yes'
+    available() !== 'gone'
       ? guard(action, 'navigate', undefined, available, followsActive)
       : Promise.resolve(false),
   );
