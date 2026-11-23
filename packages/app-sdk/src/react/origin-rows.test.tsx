@@ -21,6 +21,7 @@ import {
 import { taskFields, type Task } from '../../../../examples/todo/src/domain.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
+import { useDiscoveryDemand } from './app.js';
 import { browserChannel, openSessionStore } from '../sessions/store.js';
 import {
   catalogue,
@@ -130,18 +131,21 @@ function Overview({ names }: { readonly names: Record<string, string> }) {
  * sign-in. `lose` names a resource (`<pod> <iri>`) whose next write the Pod
  * applies while its response is lost.
  */
-async function setup({ tabs = false } = {}) {
+async function setup({
+  tabs = false,
+  signIn,
+}: { tabs?: boolean; signIn?: 'optional' } = {}) {
   // With `tabs`, a store whose changes reach other tabs (`BroadcastChannel`).
   const factory = new IDBFactory();
-  const { f, runtime, other } = await twoPods(
-    (r) => void runtimes.push(r),
-    tabs
+  const { f, runtime, other } = await twoPods((r) => void runtimes.push(r), {
+    ...(tabs
       ? {
           openStore: (namespace) =>
             openSessionStore(namespace, factory, browserChannel),
         }
-      : {},
-  );
+      : {}),
+    ...(signIn ? { signIn } : {}),
+  });
   const alice = f.id;
   const bob = other.id;
   f.setCatalogue(async (url) =>
@@ -493,6 +497,36 @@ it.each(['forget', 'disconnect', 'disconnect in another tab'] as const)(
   },
 );
 
+it('keeps the question about a row of another connection while the active one changes', async () => {
+  const { f, alice, bob } = await setup({ tabs: true });
+  const other = createBrowserRuntime({
+    ...f.options,
+    location: () => 'https://app.example/',
+  });
+  runtimes.push(other);
+  await other.initialize();
+  await restored(other);
+  await openWithDraft({ subject: 'urn:s', context: home, connection: bob });
+  const alices = { subject: 'urn:a', context: work, connection: alice };
+  let opening: Promise<boolean> | undefined;
+  act(() => {
+    opening = edit.open(alices);
+  });
+  await waitFor(() => expect(state.confirmingLeave).toBe(true));
+  // Bob signs out in another tab: Alice becomes active. Her row does not
+  // depend on that, so the question stays.
+  await act(async () => {
+    await other.disconnect(bob);
+  });
+  await waitFor(() => expect(state.activeId).toBe(alice));
+  expect(state.confirmingLeave).toBe(true);
+  act(() =>
+    screen.getByRole('button', { name: 'Discard and continue' }).click(),
+  );
+  expect(await opening).toBe(true);
+  expect(edit.target).toEqual(alices);
+});
+
 /** Rows the child shows from its own state; the parent only owns the hook. */
 let showRows: (rows: readonly Row[]) => void;
 function Revealing({
@@ -596,6 +630,35 @@ it('retires an editor whose connection is forgotten and added again under its ID
   await waitFor(() => expect(edit.phase).toBe('retired'));
 });
 
+it('asks for no catalogue of a connection once its rows are gone, also when it needs one again', async () => {
+  const { f, runtime, alice, rows } = await setup({ signIn: 'optional' });
+  const aliceState = () => state.connections.find((c) => c.id === alice)!;
+  expect(aliceState().catalogue.kind).toBe('ready');
+  let asked = 0;
+  f.setCatalogue(async (url) => {
+    if (url.startsWith(bobUrl)) return catalogue([home], [home], bobUrl);
+    asked++;
+    return catalogue([work, personal], [work, personal]);
+  });
+  // Alice's rows are filtered out, then she signs out: under optional
+  // sign-in her connection reads without a token, with no catalogue yet.
+  act(() => setRows(rows.filter((row) => row.connection !== alice)));
+  await act(async () => {
+    await runtime.disconnect(alice);
+  });
+  await waitFor(() => expect(aliceState().reading).toBe('anonymous'));
+  expect(aliceState().catalogue.kind).toBe('unknown');
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(asked).toBe(0);
+  expect(aliceState().catalogue.kind).toBe('unknown');
+  // A row of hers shown again asks for it.
+  act(() => setRows(rows));
+  await waitFor(() => expect(aliceState().catalogue.kind).toBe('ready'));
+  expect(asked).toBe(1);
+});
+
 it('asks for no catalogue of a connection added again once its rows are gone', async () => {
   const f = fixture({
     preferences: null,
@@ -645,4 +708,42 @@ it('asks for no catalogue of a connection added again once its rows are gone', a
   act(() => setRows(rows));
   await waitFor(() => expect(defaults().catalogue.kind).toBe('ready'));
   expect(asked.filter((a) => a === 'default').length).toBe(before + 1);
+});
+
+/** Only an editor, and whether anything demands catalogue discovery. */
+let demanded = false;
+function EditorOnly() {
+  state = useAppState();
+  edit = useContextEditor(taskFields);
+  demanded = useDiscoveryDemand();
+  return null;
+}
+
+it('demands discovery for a row of the active connection opened with its connection', async () => {
+  const { f, runtime, other } = await twoPods((r) => void runtimes.push(r));
+  const bob = other.id;
+  f.setCatalogue(async (url) =>
+    url.startsWith(bobUrl)
+      ? catalogue([home], [home], bobUrl)
+      : catalogue([work, personal], [work, personal]),
+  );
+  f.setResource(async (url) =>
+    Response.json(milk(resourceIri(url)), { headers: { etag: '"t1"' } }),
+  );
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <EditorOnly />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(state.activeId).toBe(bob));
+  expect(demanded).toBe(false);
+  // Bob's own row, with its connection, as an overview across Pods opens it:
+  // AppAccess presents his catalogue as for a row without `connection`.
+  await act(async () => {
+    expect(
+      await edit.open({ subject: 'urn:s', context: home, connection: bob }),
+    ).toBe(true);
+  });
+  await waitFor(() => expect(edit.phase).toBe('ready'));
+  expect(demanded).toBe(true);
 });

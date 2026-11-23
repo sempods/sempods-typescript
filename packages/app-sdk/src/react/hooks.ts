@@ -588,8 +588,9 @@ export interface ContextEditor<D, U = D> {
    * it becomes `ready` is reported through `phase`. `false` if the person
    * declined, a pending write blocks it, no connection is active (or its
    * `connection` is unknown), or another connection became active while it
-   * asked. Opening the same target again while that is under way shares its
-   * result.
+   * asked (with `connection`: that connection went or stopped reading while
+   * it asked). Opening the same target again while that is under way shares
+   * its result.
    */
   open(target: ContextTarget): Promise<boolean>;
   /**
@@ -773,16 +774,18 @@ export function useContextEditor<D>(
   );
   const activated = state?.activated ?? false;
   const live = laneOpen !== null && follows(laneOpen, activeId, connected);
+  // An origin-bound target of a connection that is not active asks for that
+  // connection's catalogue itself, without a demand on the active one.
+  const elsewhere = origin !== undefined && origin !== activeId;
   // Only the originating connection may demand discovery for this target, and
   // only once the runtime accepted the binding: a refused target sends nothing.
   // Discovery only: an explicit target needs no selected Context, so AppAccess
-  // offers no chooser for it.
-  useContextDiscovery(live && bound !== null && origin === undefined);
-  // An origin-bound target asks for its own connection's catalogue under
-  // `on-demand` (`required` loads every connection's), without a demand on
-  // the active one.
+  // offers no chooser for it. An origin-bound target of the active connection
+  // demands it as one without `connection` does, so AppAccess presents it.
+  useContextDiscovery(live && bound !== null && !elsewhere);
+  // Under `on-demand` (`required` loads every connection's).
   const undiscovered =
-    live && bound !== null && origin !== undefined && mode === 'on-demand'
+    live && bound !== null && elsewhere && mode === 'on-demand'
       ? catalogue?.kind === 'unknown' && ready
       : false;
   useEffect(() => {

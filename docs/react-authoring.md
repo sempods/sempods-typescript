@@ -1091,7 +1091,10 @@ rows.map((item) => {
   default Pod read without a token after `forget`). Opening another row or
   `close()` asks first, as for the active connection. A row whose
   connection goes, or stops reading (signed out in another tab), while the
-  person is asked withdraws the question and keeps the open editor.
+  person is asked withdraws the question and keeps the open editor; another
+  active Pod keeps the question. An editor of the active connection opened
+  with `connection` demands discovery as one without it, so `AppAccess`
+  presents its catalogue.
 - A bulk action captures the shown rows' commands and runs them one after
   the other, as [several rows from one decision](#several-rows-from-one-decision)
   describes, stopping at the first result that is not `removed`.

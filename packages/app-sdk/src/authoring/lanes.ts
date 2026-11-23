@@ -236,7 +236,6 @@ export class LaneChannel {
   }
 }
 
-/** Internal: the lane groups of one controller, by view, scope and definition. */
 /**
  * Whether a group belongs to `origin`: bound to that connection, or with
  * `undefined` one that follows the active connection.
@@ -249,6 +248,7 @@ function ownedBy(
     ? origin === undefined
     : group.connection === origin;
 }
+/** Internal: the lane groups of one controller, by view, scope and definition. */
 export interface LaneStore {
   /**
    * With `origin`, an explicit group bound to that connection (the view's)

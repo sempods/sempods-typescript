@@ -131,10 +131,10 @@ const sameList = (a: readonly unknown[], b: readonly unknown[]) =>
  * leave guard stay with that connection: another active connection neither
  * retires nor asks about them, while signing that connection out, removing
  * it and any sign-in (which leaves the page) ask first, and a new
- * authorization of it retires them as for the active one. Its `unresolved` entry carries the
- * `connection`, so the same subject in two Pods stays two resources. Write a
- * resource through one form only: a row with and without `connection` has
- * separate lanes.
+ * authorization of it retires them as for the active one. Its `unresolved`
+ * entry carries the `connection`, so the same subject in two Pods stays two
+ * resources. Write a resource through one form only: a row with and without
+ * `connection` has separate lanes.
  */
 export function useContextUpdate<D>(input: FieldDefinition<D>) {
   const { key, definition } = useDefinition(input, 'useContextUpdate');
@@ -176,29 +176,34 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   // (catalogue, session, scopes) render again, as the active one's do. It
   // only grows, up to the connections there are.
   const origins = useRef(new Map<string, number>()).current;
-  // A connection first bound while a row's own component renders (not this
-  // hook's) renders this hook again, after that render, so the effect below
-  // asks for its catalogue.
+  // The connections rows were bound to since the effect below last ran: only
+  // they ask for a catalogue, so the demand ends with their last shown row.
+  const wanted = useRef(new Set<string>()).current;
+  // A connection bound while a row's own component renders (not this hook's)
+  // renders this hook again, after that render, so the effect below runs: on
+  // first sight, and while its catalogue is still to be asked for.
   const [, noticed] = useReducer((n: number) => n + 1, 0);
   useAppFacts(
     (s) =>
       [...origins.keys()].map((id) => s.connections.find((c) => c.id === id)),
     sameList,
   );
-  // Under `on-demand`, each of them asks for its own catalogue while it has
-  // none (`required` loads every connection's). After every commit, so a
-  // connection first bound while rendering is asked for at once; a started
-  // load is no longer `unknown`. A connection removed since (also when added
-  // again under its ID) waits until a row of its own is bound.
+  // Under `on-demand`, each connection a row was bound to since the last
+  // commit asks for its own catalogue while it has none (`required` loads
+  // every connection's); a started load is no longer `unknown`. A connection
+  // whose rows are no longer shown, or that was removed since (also when
+  // added again under its ID), waits until a row of its own is bound.
   useEffect(() => {
+    const ids = [...wanted];
+    wanted.clear();
     const s = app.getSnapshot();
     if (s.contextSelection !== 'on-demand') return;
-    for (const [id, life] of origins) {
+    for (const id of ids) {
       const c = s.connections.find((entry) => entry.id === id);
       if (
         c?.reading &&
         c.catalogue.kind === 'unknown' &&
-        sameConnection(app, id, life)
+        sameConnection(app, id, origins.get(id)!)
       )
         void app.runtime.loadContexts(id).catch(() => {});
     }
@@ -210,18 +215,20 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
     const cached = `${origin ?? ''}\n${context}`;
     let found = contexts.get(cached);
     if (found) return found;
-    if (origin !== undefined) {
-      const life = originOf(app, origin);
-      if (origins.get(origin) !== life) {
-        origins.set(origin, life);
-        queueMicrotask(noticed);
-      }
-    }
     // The active connection, or the row's own, while it reads.
     const own =
       origin === undefined
         ? { id: activeId, catalogue }
         : readingConnection(app.getSnapshot(), origin);
+    if (origin !== undefined) {
+      const life = originOf(app, origin);
+      const first = origins.get(origin) !== life;
+      origins.set(origin, life);
+      if (!wanted.has(origin)) {
+        wanted.add(origin);
+        if (first || own.catalogue?.kind === 'unknown') queueMicrotask(noticed);
+      }
+    }
     const groupName = origin === undefined ? name : originName;
     // Without a current view (a session that ended), writes kept for their
     // recovery are found through their own view (`keepsWork`).

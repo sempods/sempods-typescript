@@ -301,7 +301,8 @@ const checkedNavigation = new WeakMap<
  * Internal: row navigation to a destination that can go away while the
  * person is asked, such as a row of another connection (#408). Losing it
  * withdraws the prompt, as for `selectTarget`: nothing runs and no guard is
- * discarded. No public API.
+ * discarded. Another active connection keeps the prompt: the destination
+ * does not depend on it. No public API.
  */
 export function navigateWhile(
   app: AppController,
@@ -374,7 +375,10 @@ export function createAppController(
         action: () => void | Promise<void>;
         change: Change;
         resolve: (accepted: boolean) => void;
-        /** The connection that was active when the person was asked. */
+        /**
+         * The connection that was active when the person was asked; `null`
+         * for a prompt that is not about the active one.
+         */
         activeId: string | null;
         retained?: ReadonlySet<LeaveGuard>;
         /**
@@ -708,6 +712,12 @@ export function createAppController(
     change: Change,
     retained?: ReadonlySet<LeaveGuard>,
     available?: () => Availability,
+    /**
+     * Whether the action is about the active connection, so that its prompt
+     * ends once another one becomes active; `false` for a destination of its
+     * own, which `available` follows instead.
+     */
+    followsActive = true,
   ): Promise<boolean> {
     if (changing || pending || blocked(change)) return false;
     // The person acts: the startup choice no longer changes the connection.
@@ -729,7 +739,7 @@ export function createAppController(
         action,
         resolve,
         change,
-        activeId,
+        activeId: followsActive ? activeId : null,
         ...(retained ? { retained } : {}),
         ...(available ? { available } : {}),
       };
@@ -1112,10 +1122,16 @@ export function createAppController(
   retainedNavigation.set(controller, (action, retained) =>
     guard(action, 'navigate', retained),
   );
+  // Its destination is not the active connection's: another active one
+  // keeps the prompt, and only losing the destination withdraws it.
   checkedNavigation.set(controller, (action, available) =>
     available()
-      ? guard(action, 'navigate', undefined, () =>
-          available() ? 'yes' : 'gone',
+      ? guard(
+          action,
+          'navigate',
+          undefined,
+          () => (available() ? 'yes' : 'gone'),
+          false,
         )
       : Promise.resolve(false),
   );
