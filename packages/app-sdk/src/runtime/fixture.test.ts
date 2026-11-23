@@ -40,6 +40,29 @@ export function storeWith(
     return { ...store, ...overrides(store) };
   };
 }
+/** A request's `authorization` header: `null` when it carried no token. */
+export const authorization = (init?: RequestInit) =>
+  new Headers(init?.headers).get('authorization');
+/**
+ * A `fetch` around `inner` whose discovery of the Pod at `base` waits until
+ * `release()`; `discovering()` tells whether it has started.
+ */
+export function heldDiscovery(inner: PodFetch, base: string) {
+  const released = deferred<void>();
+  let started = false;
+  const fetch: PodFetch = async (url, init) => {
+    if (url.startsWith(base + '/.well-known/')) {
+      started = true;
+      await released.promise;
+    }
+    return inner(url, init);
+  };
+  return {
+    fetch,
+    discovering: () => started,
+    release: () => released.resolve(),
+  };
+}
 /** Startup no longer waits for restoration; tests wait for each saved Pod to settle. */
 export async function restored(runtime: BrowserRuntime) {
   await vi.waitFor(() => {

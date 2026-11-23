@@ -5,8 +5,8 @@ import { openSessionStore } from '../sessions/store.js';
 import { IDBFactory } from 'fake-indexeddb';
 import {
   callback,
-  deferred,
   fixture,
+  heldDiscovery,
   jwt,
   memoryChannels,
   memoryHistory,
@@ -542,27 +542,20 @@ it('leaves the address another tab saves while the silent sign-in discovers that
   await f.runtime.initialize();
   // Another tab with Bob's Pod as its default one finds nothing stored and
   // asks it silently; its discovery waits.
-  const discovered = deferred<void>();
-  let discovering = false;
+  const held = heldDiscovery(f.fetch, bob);
   const tab = createBrowserRuntime({
     ...f.options,
     preset: { podUrl: bob },
     firstSignIn: 'silent',
     tabStorage: memoryStorage(),
-    fetch: async (url, init) => {
-      if (url.startsWith(bob + '/.well-known/')) {
-        discovering = true;
-        await discovered.promise;
-      }
-      return f.fetch(url, init);
-    },
+    fetch: held.fetch,
   });
   keep(tab);
   const started = tab.initialize();
-  await vi.waitFor(() => expect(discovering).toBe(true));
+  await vi.waitFor(() => expect(held.discovering()).toBe(true));
   // Meanwhile the first tab adds Bob's Pod and saves its address.
   const added = await f.runtime.connect(bob);
-  discovered.resolve();
+  held.release();
   await started;
   expect(silentAttempts(f)).toBe(0);
   expect(await savedRecords(factory)).toMatchObject([

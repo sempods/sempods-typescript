@@ -1,6 +1,19 @@
 import type { AppSnapshot } from '../authoring/app.js';
 import type { CatalogueFact, Connection } from '../runtime/types.js';
 
+/**
+ * The Pod the configuration fixes as the default one, as the runtime decides
+ * it: the `preset`, or the sole allowed Pod.
+ */
+export function defaultPod(
+  state: Pick<AppSnapshot, 'preset' | 'allowedPods'>,
+): string | undefined {
+  return (
+    state.preset?.podUrl ??
+    (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined)
+  );
+}
+
 /** Whether a connection reads: signed in, or without a token. */
 export function reads(c: Connection | undefined): c is Connection {
   return c !== undefined && c.reading !== null;

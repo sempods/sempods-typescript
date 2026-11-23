@@ -6,6 +6,7 @@ import { distinctName, podName } from './names.js';
 import { PodAddressField } from './pod-address-field.js';
 import type { ConnectionsProps } from './access.js';
 import type { Connection } from '../runtime/types.js';
+import { defaultPod } from './access-presentation.js';
 
 /** Presentation convenience only; canonical/security validation stays in the runtime. */
 export function enteredPod(value: string) {
@@ -48,9 +49,7 @@ export function SignInConnections({
   // The Pod an adding chooser submitted: kept by address, since connecting
   // it changes its option's key and the start falls to the next free Pod.
   const [pinned, setPinned] = useState<string | null>(null);
-  const defaultUrl =
-    state.preset?.podUrl ??
-    (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
+  const defaultUrl = defaultPod(state);
   const connections = state.connections;
   const canAdd =
     adding ||

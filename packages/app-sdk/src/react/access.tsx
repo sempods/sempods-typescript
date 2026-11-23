@@ -31,6 +31,7 @@ import { GateNotices } from './notices.js';
 import { podName, distinctName } from './names.js';
 import type { Connection } from '../runtime/types.js';
 import {
+  defaultPod,
   isRemembered,
   knownContexts,
   presentAccess,
@@ -1042,9 +1043,7 @@ function AccessConnections({
     state.signIn === 'required'
       ? m.controls.signIn
       : (m.controls.open ?? m.controls.signIn);
-  const defaultUrl =
-    state.preset?.podUrl ??
-    (state.allowedPods?.length === 1 ? state.allowedPods[0] : undefined);
+  const defaultUrl = defaultPod(state);
   // With exactly one permitted Pod the configuration fixes the destination, so
   // sign-in may omit its address.
   const addressHidden =
