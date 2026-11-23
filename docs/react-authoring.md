@@ -1198,8 +1198,9 @@ function Notes() {
   target is open. `AppAccess` stays hidden while the catalogue loads but shows
   a failure with **Check access**; for `unreadable`, management offers
   **Change sharing**.
-- A Context that a read catalogue listed as readable when the row was opened
-  must still be listed by a freshly read catalogue when the person confirms. Not listed there
+- A Context listed as readable when the row was opened (by a read
+  catalogue, or one being read again) must still be listed by a freshly read
+  catalogue when the person confirms. Not listed there
   (access revoked, or a sign-out that leaves reading without a token), or a
   failed refresh, withdraws the question: `open` resolves `false` and the
   open editor keeps its draft. While that catalogue is still being read,

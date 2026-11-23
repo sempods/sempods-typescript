@@ -1017,9 +1017,12 @@ export function useContextEditor<D>(
         app.runtime.getSnapshot().find((c) => c.id === connection);
       const start = destination();
       const readable = reads(start);
-      // Listed by a read catalogue, not only by the evidence a refresh keeps.
+      // Listed by a read catalogue, or by the one a refresh under way keeps
+      // (its answer decides); not by what a failed refresh keeps, which
+      // never counted as readable for a newly opened row.
       const listed =
-        start?.catalogue.kind === 'ready' &&
+        (start?.catalogue.kind === 'ready' ||
+          start?.catalogue.kind === 'loading') &&
         catalogueLists(start.catalogue, target.context);
       const available = (): Availability => {
         const now = destination();

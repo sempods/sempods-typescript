@@ -637,6 +637,60 @@ it.each(['while refreshing', 'after a failed refresh'] as const)(
   },
 );
 
+// Alice's catalogue is already being read again when her row is opened: its
+// answer decides, so a revoked Context keeps the draft, and one still listed
+// opens after confirming.
+it.each(['revoked', 'still listed'] as const)(
+  'waits for a refresh under way at open before leaving the draft (%s)',
+  async (answer) => {
+    const { f, alice, bob } = await setup();
+    const bobs = { subject: 'urn:s', context: home, connection: bob };
+    const alices = { subject: 'urn:a', context: work, connection: alice };
+    await openWithDraft(bobs);
+    let respond: (response: Response) => void = () => {};
+    f.setCatalogue(async (url) =>
+      url.startsWith(bobUrl)
+        ? catalogue([home], [home], bobUrl)
+        : new Promise<Response>((resolve) => (respond = resolve)),
+    );
+    let refreshed: Promise<unknown> | undefined;
+    act(() => {
+      refreshed = app.refreshContexts(alice).catch(() => {});
+    });
+    await waitFor(() =>
+      expect(
+        state.connections.find((c) => c.id === alice)?.catalogue.kind,
+      ).toBe('loading'),
+    );
+    let opening: Promise<boolean> | undefined;
+    act(() => {
+      opening = edit.open(alices);
+    });
+    await waitFor(() => expect(state.confirmingLeave).toBe(true));
+    await act(async () => {
+      respond(
+        answer === 'revoked'
+          ? catalogue([personal], [personal])
+          : catalogue([work, personal], [work, personal]),
+      );
+      await refreshed;
+    });
+    if (answer === 'revoked') {
+      expect(await opening).toBe(false);
+      expect(state.confirmingLeave).toBe(false);
+      expect(edit.target).toEqual(bobs);
+      expect(edit.editor!.state.draft?.title).toBe('Oat milk');
+    } else {
+      expect(state.confirmingLeave).toBe(true);
+      act(() =>
+        screen.getByRole('button', { name: 'Discard and continue' }).click(),
+      );
+      expect(await opening).toBe(true);
+      expect(edit.target).toEqual(alices);
+    }
+  },
+);
+
 /** Rows the child shows from its own state; the parent only owns the hook. */
 let showRows: (rows: readonly Row[]) => void;
 function Revealing({
