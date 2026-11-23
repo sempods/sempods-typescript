@@ -199,6 +199,20 @@ describe('marks', () => {
     );
   });
 
+  it('keeps a character reference in a link address as it is', () => {
+    for (const href of [
+      'https://example.org/?x=1&copy;=2',
+      'https://example.org/a(b)?x=1&amp;y',
+    ])
+      for (const label of ['page', href]) {
+        const doc = paragraph(text(label, { type: 'link', attrs: { href } }));
+        expect(fromMarkdown(toMarkdown(doc)), toMarkdown(doc)).toEqual(doc);
+      }
+    expect(again('[page](https://example.org/?x=1&amp;copy;=2)')).toBe(
+      '[page](https://example.org/?x=1\\&copy;=2)',
+    );
+  });
+
   it('keeps hashes at the end of a heading', () => {
     expect(again('## Title \\#')).toBe('## Title \\#');
     expect(again('## \\#')).toBe('## \\#');

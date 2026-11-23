@@ -152,8 +152,20 @@ const DELIMITER: Readonly<Record<string, string>> = {
 const sameMark = (a: DocMark, b: DocMark) =>
   a.type === b.type && (a.type !== 'link' || a.attrs?.href === b.attrs?.href);
 
-const destination = (href: string) =>
-  /[\s()<>\\]/.test(href) ? '<' + href.replace(/[<>\\]/g, '\\$&') + '>' : href;
+/** An `&` that would start a character reference, which Markdown decodes. */
+const REFERENCE = /&(?=#?[0-9A-Za-z]+;)/g;
+
+/**
+ * An address as a link destination: in angle brackets where it holds
+ * characters that would end a plain one, and with an `&` escaped where it
+ * would start a character reference, so it reads back as it was.
+ */
+const destination = (href: string) => {
+  const escaped = /[\s()<>\\]/.test(href)
+    ? '<' + href.replace(/[<>\\]/g, '\\$&') + '>'
+    : href;
+  return escaped.replace(REFERENCE, '\\&');
+};
 
 /** How a character next to a delimiter run counts for CommonMark. */
 const side = (char: string | undefined) =>
@@ -250,7 +262,9 @@ function serializeInline(
     if (
       href &&
       node.text === href &&
-      !/[<>]/.test(href) &&
+      // An autolink takes no escapes.
+      !/[<>\\]/.test(href) &&
+      !new RegExp(REFERENCE.source).test(href) &&
       !open.some((mark) => sameMark(mark, marks[0]!)) &&
       !sameMark(marks[0]!, content[index + 1]?.marks?.[0] ?? { type: '' })
     ) {
