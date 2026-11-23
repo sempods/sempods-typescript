@@ -803,13 +803,12 @@ export function createBrowserRuntime(
    * record of its own and without a session gives way to it. With
    * `rememberPods: false` this tab lists no address another tab remembers,
    * as its start deletes them: its own connection to that Pod stays in this
-   * page, until it is `asked` to sign in to that Pod. Returns whether the
-   * record is listed now.
+   * page; a sign-in to that Pod there saves its attempt on that address
+   * (`prepareAuthorization`). Returns whether the record is listed now.
    */
-  function admit(stored: SessionSnapshot, asked = false): boolean {
+  function admit(stored: SessionSnapshot): boolean {
     if (disposed || !initialized || entries.has(stored.id)) return false;
-    if (!rememberPods && !asked && stored.value.kind === 'address')
-      return false;
+    if (!rememberPods && stored.value.kind === 'address') return false;
     const podUrl = recordPodUrl(stored.value);
     if (!allows(podUrl)) return false;
     const same = [...entries.values()].filter((x) => x.view.podUrl === podUrl);
@@ -1902,7 +1901,7 @@ export function createBrowserRuntime(
     if (lease?.store.watch)
       void synced
         .then(() => sessions?.list())
-        .then((listing) => listing?.records.forEach((saved) => admit(saved)))
+        .then((listing) => listing?.records.forEach(admit))
         .catch(() => {
           // Listed by the next start.
         });
@@ -2201,8 +2200,12 @@ export function createBrowserRuntime(
   async function prepareAuthorization(
     id: string,
     intent: AuthorizationIntent | 'silent',
+    replaced = false,
   ): Promise<void> {
-    const e = get(id);
+    let e = get(id);
+    // A first sign-in: the Pod was never discovered here, or another tab's
+    // record replaced this connection while it was (`replaced`).
+    const first = replaced || e.pod === undefined;
     // An ended session has no live lifetime left. Preparing needs a fresh
     // one (and generation, so no operation of the ended one revives), which
     // a later disconnect or dispose cancels like any other.
@@ -2217,17 +2220,40 @@ export function createBrowserRuntime(
     // registration or persisting the attempt fails, nothing was reset.
     const before = e.generation;
     const signal = e.lifetime.signal;
-    const pod = await discover(e.view.podUrl, signal);
-    current(e, before);
-    const client = await registry.resolve(pod, identity!, { signal });
-    current(e, before);
-    /** Prepares and stores the attempt; nothing changes before it is stored. */
-    const store = async () => {
+    let pod: PodDiscovery;
+    let client: OAuthClient;
+    try {
+      pod = await discover(e.view.podUrl, signal);
+      current(e, before);
+      client = await registry.resolve(pod, identity!, { signal });
+      current(e, before);
+    } catch (error) {
+      // Another tab signed in, or began to, on the address both list (#372):
+      // its record replaced this connection. A session it stored is the
+      // result of the sign-in asked for here; otherwise the sign-in goes on
+      // on the replacing connection, as it would on another tab's record it
+      // found (see below). A sign-out or forget here still cancels it.
+      const now = entries.get(id);
+      if (!first || now === undefined || now === e || disconnects.has(id))
+        throw error;
+      const s = now.view.session.kind;
+      if (s === 'restoring' || s === 'active' || s === 'renewing') return;
+      return prepareAuthorization(id, intent, true);
+    }
+    /**
+     * Prepares and stores the attempt on `t`, this connection unless it is
+     * another tab's address for the Pod (not listed until it is stored,
+     * so `check` asks this connection); nothing changes before it is stored.
+     */
+    const store = async (
+      t: Entry = e,
+      check: () => void = () => current(t, before),
+    ) => {
       const generation = crypto.randomUUID();
       const { attempt, url } = await prepareSessionAuthorization(
         {
           configKey: namespace,
-          connectionId: e.view.id,
+          connectionId: t.view.id,
           generation,
           pod,
           client,
@@ -2249,32 +2275,32 @@ export function createBrowserRuntime(
       // sign-in: nothing is stored or started.
       if (intent === 'silent' && !noteSilent(`attempt:${attempt.state}`))
         throw new RuntimeError('storage');
-      const reauthorizing = await serial(e, async () => {
-        current(e, before);
+      const reauthorizing = await serial(t, async () => {
+        check();
         // Another tab changed the record first: shown here, and a retry
         // prepares on it.
-        const change = await sessions!.prepare(attempt, e.revision);
-        accepted(e, change);
+        const change = await sessions!.prepare(attempt, t.revision);
+        accepted(t, change);
         // The revision is recorded first, so a disconnect that ran during the
         // commit retires the new attempt; this lifetime must not continue.
-        current(e, before);
+        check();
         // Committed durably: switch to the new lifetime in the same step, so no
         // queued refresh of the old one can act on the replaced record. The
         // facts stay for display until the page leaves; only the session says
         // that nothing of the earlier one dispatches any more.
-        const shown = e.view;
+        const shown = t.view;
         const subject =
           shown.session.kind === 'active' ||
           shown.session.kind === 'renewing' ||
           shown.session.kind === 'leaving'
             ? shown.session.subject
             : undefined;
-        renewLifetime(e, generation);
-        e.pod = pod;
-        e.client = client;
+        renewLifetime(t, generation);
+        t.pod = pod;
+        t.client = client;
         // Signing in again replaces a forget that could not be saved.
-        delete e.forgetting;
-        e.view = {
+        delete t.forgetting;
+        t.view = {
           ...shown,
           session: Object.freeze(
             subject === undefined
@@ -2314,6 +2340,7 @@ export function createBrowserRuntime(
               url: string;
               reauthorizing: boolean;
             };
+            target?: Entry;
           }
       >(`sempods:connect:${namespace}:${e.view.podUrl}`, e, async () => {
         let saved = await savedFor(e.view.podUrl);
@@ -2363,11 +2390,25 @@ export function createBrowserRuntime(
             if (joined) return { joined, session: true };
           }
           e.revision = saved.revision;
+        } else if (saved?.value.kind === 'address' && !kept) {
+          // The address another tab saved for this Pod (#372), not listed
+          // here (its announcement is under way, or this tab does not
+          // remember Pods): the attempt is saved on it, so the Pod keeps one
+          // record, and this connection gives way only once it is saved, so
+          // a failed preparation leaves it and its handles working.
+          const target = fromRecord(saved);
+          const local = e;
+          return {
+            prepared: await store(target, () => {
+              current(local, before);
+              if (target.lifetime.signal.aborted)
+                throw new RuntimeError('disconnected');
+            }),
+            target,
+          };
         } else if (saved) {
           preparing.delete(id);
-          // Asked to sign in, also a tab with `rememberPods: false` signs in
-          // on the address another tab saved, so the Pod keeps one record.
-          admit(saved, !kept);
+          admit(saved);
           const joined = entries.get(saved.id);
           if (joined)
             return {
@@ -2390,6 +2431,16 @@ export function createBrowserRuntime(
         return authorize(outcome.joined.view.id, intent);
       }
       prepared = outcome.prepared;
+      const target = outcome.target;
+      if (target) {
+        // Saved on the other tab's address: this connection gives way to it.
+        const local = e;
+        dropEntry(id);
+        stop(local, { kind: 'signed-out' });
+        entries.set(target.view.id, target);
+        publish();
+        e = target;
+      }
     } else prepared = await store();
     const { generation, url, reauthorizing } = prepared;
     current(e, generation);

@@ -15,6 +15,7 @@ import type {
 } from './types.js';
 import {
   catalogue,
+  deferred,
   fixture,
   fixtureNamespace,
   jwt,
@@ -28,6 +29,7 @@ import {
   work,
 } from './fixture.test.js';
 import { openSessionStore } from '../sessions/store.js';
+import type { SessionStore } from '../sessions/types.js';
 
 const runtimes: BrowserRuntime[] = [];
 afterEach(() => runtimes.splice(0).forEach((runtime) => runtime.dispose()));
@@ -246,7 +248,9 @@ describe('several tabs', () => {
   /** Two tabs on one IndexedDB, Web Locks and channel, under `optional`. */
   async function tabs(
     deliver?: Parameters<typeof memoryChannels>[0],
-    second: Partial<BrowserRuntimeOptions> = {},
+    second:
+      | Partial<BrowserRuntimeOptions>
+      | ((first: BrowserRuntimeOptions) => Partial<BrowserRuntimeOptions>) = {},
   ) {
     const factory = new IDBFactory();
     const channels = memoryChannels(deliver);
@@ -255,7 +259,12 @@ describe('several tabs', () => {
       openStore: (namespace) => openSessionStore(namespace, factory, channels),
     });
     const a = f.runtime;
-    const b = keep(createBrowserRuntime({ ...f.options, ...second }));
+    const b = keep(
+      createBrowserRuntime({
+        ...f.options,
+        ...(typeof second === 'function' ? second(f.options) : second),
+      }),
+    );
     await a.initialize();
     await b.initialize();
     await restored(b);
@@ -403,6 +412,112 @@ describe('several tabs', () => {
     expect(await savedRecords(t.factory)).toMatchObject([
       { id: remembered.id, value: { kind: 'authorizing' } },
     ]);
+  });
+
+  it('keeps this page’s reader when the sign-in on another tab’s address cannot be saved', async () => {
+    const t = await tabs(undefined, (first) => ({
+      rememberPods: false,
+      // This tab cannot save a sign-in attempt.
+      openStore: async (namespace) => {
+        const store = await first.openStore!(namespace);
+        return {
+          ...store,
+          commit: (...args: Parameters<SessionStore['commit']>) =>
+            (args[2] as { kind?: string }).kind === 'authorizing'
+              ? Promise.reject(new Error('quota'))
+              : store.commit(...args),
+        };
+      },
+    }));
+    const local = await t.b.connect(bob);
+    const pods = t.b.bindPod(local.id);
+    const remembered = await t.a.connect(bob);
+    await expect(t.b.beginAuthorization(local.id)).rejects.toBeDefined();
+    expect(t.navigate).not.toHaveBeenCalled();
+    expect(t.b.getSnapshot()[1]).toMatchObject({
+      id: local.id,
+      reading: 'anonymous',
+    });
+    expect(pods.getSnapshot().current).toBe(true);
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: remembered.id, value: { kind: 'address' } },
+    ]);
+  });
+
+  it('completes a sign-in pending in discovery with the session another tab stored meanwhile', async () => {
+    const discovered = deferred<void>();
+    let discovering = false;
+    const t = await tabs(undefined, (first) => ({
+      // This tab's discovery of Bob's Pod waits.
+      fetch: async (url, init) => {
+        if (url.startsWith(bob + '/.well-known/')) {
+          discovering = true;
+          await discovered.promise;
+        }
+        return first.fetch!(url, init);
+      },
+    }));
+    const added = await t.a.connect(bob);
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({ id: added.id }),
+    );
+    t.setToken(async () =>
+      Response.json({
+        access_token: jwt({ iss: bob }),
+        token_type: 'Bearer',
+        refresh_token: 'refresh-bob',
+      }),
+    );
+    const pending = t.b.beginAuthorization(added.id);
+    await vi.waitFor(() => expect(discovering).toBe(true));
+    // The first tab signs in to Bob's Pod meanwhile; the other one adopts it.
+    await t.a.beginAuthorization(added.id);
+    t.a.dispose();
+    await settleLease();
+    const back = keep(t.returned());
+    expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+    // Restored there (its restoration waits for the same discovery).
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({
+        id: added.id,
+        session: { kind: 'restoring' },
+      }),
+    );
+    discovered.resolve();
+    await expect(pending).resolves.toBeUndefined();
+    expect(t.navigate).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({
+        id: added.id,
+        session: { kind: 'active' },
+        reading: 'session',
+      }),
+    );
+  });
+
+  it('cancels a sign-in pending in discovery when another tab forgets the Pod', async () => {
+    const discovered = deferred<void>();
+    let discovering = false;
+    const t = await tabs(undefined, (first) => ({
+      fetch: async (url, init) => {
+        if (url.startsWith(bob + '/.well-known/')) {
+          discovering = true;
+          await discovered.promise;
+        }
+        return first.fetch!(url, init);
+      },
+    }));
+    const added = await t.a.connect(bob);
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({ id: added.id }),
+    );
+    const pending = t.b.beginAuthorization(added.id);
+    await vi.waitFor(() => expect(discovering).toBe(true));
+    expect(await t.a.forget(added.id)).toEqual({ kind: 'disconnected' });
+    await expect(pending).rejects.toMatchObject({ problem: 'disconnected' });
+    discovered.resolve();
+    expect(t.navigate).not.toHaveBeenCalled();
+    expect(t.b.getSnapshot()).toHaveLength(1);
   });
 
   it('saves one address when two tabs add the same Pod at once', async () => {
