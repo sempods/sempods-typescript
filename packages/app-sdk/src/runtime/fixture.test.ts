@@ -247,7 +247,8 @@ export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
     if (url.includes('/_system/resources/')) return resource(url, init);
     throw new Error('Unexpected fixture route.');
   });
-  const navigate = vi.fn<(url: string) => void>();
+  const navigate =
+    vi.fn<(url: string, options?: { readonly signal: AbortSignal }) => void>();
   const replaceUrl = vi.fn<(url: string) => void>();
   const options: BrowserRuntimeOptions = {
     identity: { kind: 'dynamic', name: 'Test', redirectUri: callback },

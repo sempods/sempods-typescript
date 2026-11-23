@@ -26,6 +26,8 @@ const mode = new URL(location.href).searchParams.get('identity') ?? 'dynamic';
 const redirectUri = location.origin + '/callback?identity=' + mode;
 // The harness changes deployment policy across reloads without changing identity.
 const policy = sessionStorage.getItem('fixture-policy');
+// An app's own navigation to the Pod, which ignores the abort signal.
+const appNavigation = sessionStorage.getItem('fixture-navigate') === 'assign';
 const create = () =>
   createBrowserRuntime({
     identity:
@@ -39,6 +41,9 @@ const create = () =>
     scopes: { required: ['tasks'], optional: ['ai'] },
     returnTo: '/app?identity=' + mode,
     development: 'loopback-http',
+    ...(appNavigation
+      ? { navigate: (url: string) => window.location.assign(url) }
+      : {}),
     ...(policy === 'one'
       ? { allowedPods: [location.origin + '/alice'] }
       : policy === 'set'

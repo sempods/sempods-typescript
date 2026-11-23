@@ -544,15 +544,25 @@ it('stays on the page when its redirect did not leave', async () => {
   // A later return from the back/forward cache resumes nothing again.
   page.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
   expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
-  // A first sign-in that did not leave has no session to resume.
+  // A first sign-in that did not leave has no session to resume: it ends
+  // here, also with its Pod offline, and its attempt is retired.
   const other = await runtime.connect('https://pod.example/bob');
   await runtime.beginAuthorization(other.id);
+  expect(await stored(f, other.id)).toMatchObject({ kind: 'authorizing' });
+  const navigation = f.navigate.mock.calls.at(-1)![1]!;
+  expect(navigation.signal.aborted).toBe(false);
+  f.fetch.mockRejectedValue(new TypeError('offline'));
+  const requests = f.fetch.mock.calls.length;
   expect(runtime.cancelAuthorization(other.id)).toBe(true);
-  await vi.waitFor(() =>
-    expect(
-      runtime.getSnapshot().find((c) => c.id === other.id)?.session,
-    ).toMatchObject({ kind: 'ended', problem: 'interrupted' }),
+  // The app's own navigation is told to stop.
+  expect(navigation.signal.aborted).toBe(true);
+  expect(
+    runtime.getSnapshot().find((c) => c.id === other.id)?.session,
+  ).toMatchObject({ kind: 'ended', problem: 'interrupted' });
+  await vi.waitFor(async () =>
+    expect((await stored(f, other.id))?.kind).not.toBe('authorizing'),
   );
+  expect(f.fetch.mock.calls.length).toBe(requests);
 });
 
 it('restarts a catalogue read the leaving page aborted when it resumes', async () => {

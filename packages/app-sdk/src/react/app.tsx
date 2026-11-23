@@ -858,6 +858,9 @@ function SlowRedirect() {
   // The redirect the question is about, and how often the person waited on.
   const [asked, setAsked] = useState<string | null>(null);
   const [waits, setWaits] = useState(0);
+  // A redirect that ended (it left, came back or stayed) is no longer asked
+  // about: the next one waits its own while.
+  if (!leaving && asked !== null) setAsked(null);
   useEffect(() => {
     if (!leaving) return;
     const timer = setTimeout(() => setAsked(leaving), SLOW_REDIRECT);

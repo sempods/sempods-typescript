@@ -2216,8 +2216,9 @@ Read state with `useAppState`, `useConnections` and `useView`.
   `true` and changes nothing. A redirect still here after three seconds (the
   browser stopped it, or the person stayed in a leave prompt) asks whether
   to **Stay on this page** or **Keep waiting**; staying abandons the attempt
-  (`cancelAuthorization(id)`), so the Pod's earlier session resumes and the
-  content works again. A custom surface can offer the same.
+  (`cancelAuthorization(id)`), so the Pod's earlier session resumes (a
+  first sign-in ends `interrupted`) and the content works again. Each
+  redirect waits its own three seconds. A custom surface can offer the same.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.
 - Leaving the document (reload, closing the tab, typing an address, Back past

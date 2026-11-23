@@ -1162,41 +1162,56 @@ try {
   );
   assert.deepEqual({ exchanges, refreshes }, beforeCancel);
   // A navigation to the Pod that does not leave (#386): staying on the page
-  // stops it and resumes the session, without a token request.
-  consent = 'hang';
-  const stayed = await page.evaluate(async () => {
-    const r = window.fixture.runtime;
-    const id = r.getSnapshot()[0].id;
-    const start = window.location.href;
-    await r.beginAuthorization(id);
-    const leaving = r.getSnapshot()[0].session.kind;
-    // Still loading the Pod's page.
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return {
-      leaving,
-      cancelled: r.cancelAuthorization(id),
-      again: r.cancelAuthorization(id),
-      same: window.location.href === start,
-    };
-  });
-  assert.deepEqual(stayed, {
-    leaving: 'leaving',
-    cancelled: true,
-    again: false,
-    same: true,
-  });
-  assert.equal(hanging.length, 1);
-  await page.waitForFunction(
-    () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+  // stops it and resumes the session, without a token request, with the
+  // runtime's navigation and with an app's own `location.assign`.
+  const stayWhileLoading = async () => {
+    consent = 'hang';
+    const stayed = await page.evaluate(async () => {
+      const r = window.fixture.runtime;
+      const id = r.getSnapshot()[0].id;
+      const start = window.location.href;
+      await r.beginAuthorization(id);
+      const leaving = r.getSnapshot()[0].session.kind;
+      // Still loading the Pod's page.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return {
+        leaving,
+        cancelled: r.cancelAuthorization(id),
+        again: r.cancelAuthorization(id),
+        same: window.location.href === start,
+      };
+    });
+    assert.deepEqual(stayed, {
+      leaving: 'leaving',
+      cancelled: true,
+      again: false,
+      same: true,
+    });
+    assert.equal(hanging.length, 1);
+    await page.waitForFunction(
+      () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+    );
+    // The Pod's page answers late: the stopped navigation does not go there.
+    for (const res of hanging.splice(0)) {
+      if (res.destroyed) continue;
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<p>Consent</p>');
+    }
+    await page.waitForTimeout(500);
+    assert.match(page.url(), /\/app\?identity=dynamic$/);
+  };
+  await stayWhileLoading();
+  await page.evaluate(() =>
+    sessionStorage.setItem('fixture-navigate', 'assign'),
   );
-  // The Pod's page answers late: the stopped navigation does not go there.
-  for (const res of hanging.splice(0)) {
-    if (res.destroyed) continue;
-    res.writeHead(200, { 'content-type': 'text/html' });
-    res.end('<p>Consent</p>');
-  }
-  await page.waitForTimeout(500);
-  assert.match(page.url(), /\/app\?identity=dynamic$/);
+  await page.reload();
+  await ready();
+  await restored();
+  await stayWhileLoading();
+  await page.evaluate(() => sessionStorage.removeItem('fixture-navigate'));
+  await page.reload();
+  await ready();
+  await restored();
   assert.deepEqual({ exchanges, refreshes }, beforeCancel);
   // A tab opened from the one at the Pod copies its session storage (#374):
   // it does not take the attempt, and the callback completes it.

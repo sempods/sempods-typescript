@@ -646,6 +646,52 @@ it('stays on the page when another Pod’s redirect did not leave', async () => 
   expect(await podActionNames('pod.example/alice')).toContain('Change sharing');
 });
 
+it('asks about each Pod redirect after its own while', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  cleanups.push(() => vi.useRealTimers());
+  const alice = () =>
+    runtime.getSnapshot().find((entry) => entry.podUrl === pod)!;
+  const navigations = f.navigate.mock.calls.length;
+  const share = async () => {
+    const sharing = await podAction('Change sharing', 'pod.example/alice');
+    await act(async () => sharing.click());
+    await waitFor(() => expect(alice().session.kind).toBe('leaving'));
+  };
+  await share();
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  await screen.findByRole('alertdialog', {
+    name: 'Opening your Pod’s sign-in…',
+  });
+  // The redirect ends while the question is open (here: the page stays
+  // through the app's own control), and the session comes back.
+  act(() => {
+    runtime.cancelAuthorization(alice().id);
+  });
+  await waitFor(() => expect(alice().session.kind).toBe('active'));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  // A new redirect of the same Pod waits its own while before asking.
+  await share();
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  expect(
+    await screen.findByRole('alertdialog', {
+      name: 'Opening your Pod’s sign-in…',
+    }),
+  ).toBeTruthy();
+  expect(f.navigate).toHaveBeenCalledTimes(navigations + 2);
+});
+
 it('names Contexts apart in one pass over a large catalogue', () => {
   const iris = Array.from(
     { length: 1000 },

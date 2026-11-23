@@ -430,7 +430,9 @@ top-level `podActions(pod)`. See
 [Pods & sharing management](react-authoring.md#pods--sharing-management).
 
 `BrowserRuntime` and `useApp()` add `cancelAuthorization(id)`; a test double
-that implements `BrowserRuntime` itself adds it too. While a Pod's redirect
+that implements `BrowserRuntime` itself adds it too. The runtime's `navigate`
+option now also receives `{ signal }`, which aborts when the page stays; an
+app navigation that does not use `window.location` should cancel on it. While a Pod's redirect
 is pending, the app content is inert, and after three seconds a dialog
 offers **Stay on this page**: an end-to-end test whose `navigate` does not
 leave the page sees it
