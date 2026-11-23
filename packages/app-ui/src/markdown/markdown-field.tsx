@@ -138,18 +138,14 @@ export function MarkdownField({
   const check = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Where the focus goes after a switch the person made.
   const moved = useRef<'text' | 'toggle' | null>(null);
-  // The value the field reported last: the app's own value is any other.
-  const emitted = useRef<string | null>(null);
-  // Whether the text is written formatted, decided for each value the app
-  // passes, not for the person's own changes.
+  // Whether the text is written formatted, and the value that holds for: the
+  // field's own last change, or the app's value it was decided for. Any
+  // other value from the app is decided again.
   const [syntax, setSyntax] = useState<{
     readonly value: string;
     readonly rich: boolean;
   } | null>(null);
-  if (
-    written &&
-    (!syntax || (syntax.value !== value && value !== emitted.current))
-  )
+  if (written && syntax?.value !== value)
     setSyntax({ value, rich: fromMarkdown(value) !== null });
   const rich = syntax?.rich ?? false;
   // The rich editor's focus, once it is there, and a focus asked for before.
@@ -231,7 +227,7 @@ export function MarkdownField({
   useEffect(() => () => clearTimeout(check.current), []);
 
   const emit = (next: string) => {
-    emitted.current = next;
+    setSyntax((now) => now && { ...now, value: next });
     onChange(next);
   };
   const format = (kind: MarkdownFormat) => {

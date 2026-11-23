@@ -225,6 +225,25 @@ it('sets a link from Ctrl+K without submitting the form around the field', async
   expect(screen.queryByRole('textbox', { name: 'Link address' })).toBeNull();
 });
 
+it('decides the writer again for a value the app restores', async () => {
+  const field = (value: string) => (
+    <MarkdownField
+      label="Notes"
+      value={value}
+      onChange={() => {}}
+      defaultPresentation="write"
+    />
+  );
+  const { rerender } = render(field('`x`'));
+  fireEvent.change(text(), { target: { value: '`y`' } });
+  rerender(field('`y`'));
+  // Another draft, then the field's own last value again.
+  rerender(field('plain'));
+  expect((await editor()).textContent).toBe('plain');
+  rerender(field('`y`'));
+  expect(text().value).toBe('`y`');
+});
+
 it('starts writing Markdown with its actions for a text with code', () => {
   render(
     <Notes
