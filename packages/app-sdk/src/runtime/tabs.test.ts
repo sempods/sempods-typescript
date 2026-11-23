@@ -1239,6 +1239,47 @@ it('reads Context access again when a page that stayed missed its consent ending
   );
 });
 
+it('keeps an explicit Context read in flight when a consent elsewhere ends without changing its access', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  t.a.dispose();
+  const held = deferred<Response>();
+  t.setResource(() => held.promise);
+  const read = t.b.bindContext(t.id, work).subjects.get('urn:item');
+  await vi.waitFor(() =>
+    expect(
+      t.fetch.mock.calls.some(([url]) => url.includes('/_system/resources/')),
+    ).toBe(true),
+  );
+  const catalogues = () =>
+    t.fetch.mock.calls.filter(([url]) => url.endsWith('/_system/contexts'))
+      .length;
+  const before = catalogues();
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  await back.initialize();
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 1));
+  held.resolve(
+    Response.json({ '@id': 'urn:item' }, { headers: { etag: '"v1"' } }),
+  );
+  expect(await read).toMatchObject({ kind: 'ok' });
+});
+
+it('reads Context access again on a return from the back/forward cache, also without a recorded change', async () => {
+  const pageshow = bfcache();
+  const t = await tabs();
+  // The Pod removed this app's access; no record shows it.
+  t.setCatalogue(async () => catalogue([], []));
+  pageshow();
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()[0]?.catalogue).toMatchObject({
+      kind: 'ready',
+      contexts: [],
+    }),
+  );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

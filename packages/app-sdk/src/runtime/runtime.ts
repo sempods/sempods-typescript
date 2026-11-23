@@ -1661,14 +1661,21 @@ export function createBrowserRuntime(
    * read under way settled, as it may describe the access from before. Only
    * for a connection whose catalogue the app read.
    */
-  function recheckAccess(e: Entry) {
+  function recheckAccess(
+    e: Entry,
+    /**
+     * A catch-up without an outcome of its own (a page back from the
+     * back/forward cache): a recheck read under way answers it.
+     */
+    join = false,
+  ) {
     if (e.view.catalogue.kind === 'unknown') return;
     if (e.catalogue && e.catalogue === e.rechecking) {
       // A new consent outcome during a recheck read: once more after it.
-      e.recheckAgain = true;
+      if (!join) e.recheckAgain = true;
       return;
     }
-    invalidateContexts(e);
+    // The read itself invalidates exactly the Contexts whose access changed.
     const generation = e.generation;
     const again = () => {
       if (!eligible(e, generation)) return;
@@ -1858,8 +1865,18 @@ export function createBrowserRuntime(
   // another tab forgot meanwhile no longer keeps its Pod's new one out.
   const shown = (event?: unknown) => {
     if (!(event as { persisted?: boolean } | undefined)?.persisted) return;
-    // A consent round trip it missed shows as a changed `attemptEnded`.
     const synced = Promise.all([...entries.values()].map(sync));
+    // A consent round trip it missed usually shows as a changed
+    // `attemptEnded`; what no record shows (an SDK 0.9 tab dropping an
+    // attempt, a change at the Pod) is read again here as well.
+    void synced.then(() => {
+      for (const e of entries.values())
+        if (
+          e.view.session.kind === 'active' ||
+          e.view.session.kind === 'renewing'
+        )
+          recheckAccess(e, true);
+    });
     if (lease?.store.watch)
       void synced
         .then(() => sessions?.list())
@@ -2031,8 +2048,19 @@ export function createBrowserRuntime(
       return await waitFor(
         exchangeAuthorization(attempt, location, {
           ...protocol,
-          fetch: (url, init) =>
-            send(url, { ...init, signal: init?.signal ?? signal.signal }),
+          fetch: async (url, init) => {
+            // The deadline aborts the request too, beside the library's own
+            // signal.
+            const both = combineSignals(
+              init?.signal ?? undefined,
+              signal.signal,
+            );
+            try {
+              return await send(url, { ...init, signal: both.signal });
+            } finally {
+              both.dispose();
+            }
+          },
         }),
         signal.signal,
       );
@@ -2133,6 +2161,12 @@ export function createBrowserRuntime(
               .discardPending(id, attempt.generation, runtimeProblem(error))
               .catch(() => 'none' as const);
             if (left === 'kept') return { kind: 'kept', error };
+            // Not dropped here (storage, a newer attempt): the session stays
+            // all the same while the record holds one.
+            if (left === 'none') {
+              const now = await shared.read(id).catch(() => undefined);
+              if (beside(now?.value)) return { kind: 'kept', error };
+            }
             throw error;
           }
         },
@@ -2773,12 +2807,14 @@ export function createBrowserRuntime(
         const problem = runtimeProblem(outcome.error);
         // Only a session that restored usable (not one that expired while
         // the person was at the Pod) is in use again.
-        const kept = entries.get(pending.id)?.view.session.kind;
+        const kept = entries.get(pending.id)?.view.session;
         return {
           ...report,
           interaction: problem === 'denied' ? 'cancelled' : 'failed',
           attemptConnectionId: pending.id,
-          ...(kept === 'active' || kept === 'renewing'
+          ...(kept?.kind === 'active' ||
+          kept?.kind === 'renewing' ||
+          (kept?.kind === 'ended' && kept.restorable)
             ? { resumed: true as const }
             : {}),
           problem,

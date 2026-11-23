@@ -7,7 +7,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { createBrowserRuntime } from './runtime.js';
-import { openSessionStore } from '../sessions/store.js';
+import { openSessionStore, SessionStorageError } from '../sessions/store.js';
 import type { BrowserRuntime } from './types.js';
 import {
   callback,
@@ -1050,4 +1050,98 @@ it('offers a retry when the page that stayed cannot read its record', async () =
     kind: 'active',
     subject: me,
   });
+});
+
+it('reports the session kept when dropping a refused code’s attempt cannot be stored', async () => {
+  const factory = new IDBFactory();
+  const failing = { discard: false };
+  const f = fixture({
+    scopes: { required: ['tasks'], optional: ['share'] },
+    openStore: storeWith(factory, (store) => ({
+      commit(id, revision, value) {
+        const v = value as { kind?: string; pending?: unknown };
+        if (failing.discard && v.kind === 'ready' && !v.pending) {
+          failing.discard = false;
+          return Promise.reject(new Error('disk full'));
+        }
+        return store.commit(id, revision, value);
+      },
+    })),
+  });
+  const { id, authorization } = await reauthorizing(f);
+  f.setToken(async () =>
+    Response.json({ error: 'invalid_grant' }, { status: 400 }),
+  );
+  failing.discard = true;
+  const next = keep(f.returned(authorization));
+  expect(await next.initialize()).toMatchObject({
+    interaction: 'failed',
+    attemptConnectionId: id,
+    resumed: true,
+  });
+  expect(next.getSnapshot()[0]?.session.kind).toBe('active');
+});
+
+it('reports the session kept when its restoration after a denial can only be retried', async () => {
+  const factory = new IDBFactory();
+  const failing = { claim: false };
+  const f = fixture({
+    openStore: storeWith(factory, (store) => ({
+      commit(id, revision, value) {
+        const v = value as { kind?: string; operation?: string };
+        if (failing.claim && v.kind === 'claimed' && v.operation === 'refresh')
+          return Promise.reject(new SessionStorageError('unavailable'));
+        return store.commit(id, revision, value);
+      },
+    })),
+  });
+  keep(f.runtime);
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 120 }),
+      token_type: 'Bearer',
+      refresh_token: 'short',
+    }),
+  );
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  await runtime.beginAuthorization(id);
+  const authorization = new URL(f.navigate.mock.calls.at(-1)![0]);
+  runtime.dispose();
+  await settleLease();
+  // Due for renewal, which cannot be stored now.
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 90_000);
+  failing.claim = true;
+  const next = denial(f, authorization);
+  const report = await next.initialize();
+  expect(report).toMatchObject({
+    interaction: 'cancelled',
+    resumed: true,
+  });
+  expect(next.getSnapshot()[0]?.session).toMatchObject({
+    kind: 'ended',
+    restorable: true,
+  });
+  expect(id).toBeTruthy();
+});
+
+it('aborts a code request that passes its deadline', async () => {
+  const { f, authorization } = await reauthorizing();
+  let sent: AbortSignal | undefined;
+  f.setToken(async (_url, init) => {
+    sent = init?.signal ?? undefined;
+    return new Promise<Response>(() => {});
+  });
+  const next = keep(f.returned(authorization));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const report = next.initialize();
+    await vi.waitFor(() => expect(sent).toBeDefined());
+    expect(sent!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent!.aborted).toBe(true);
+    expect(await report).toMatchObject({ problem: 'interrupted' });
+  } finally {
+    vi.useRealTimers();
+  }
 });
