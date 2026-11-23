@@ -9,7 +9,10 @@ import { IDBFactory } from 'fake-indexeddb';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
-import { sessionBinding, type BoundSessionRecord } from '../sessions/records.js';
+import {
+  sessionBinding,
+  type BoundSessionRecord,
+} from '../sessions/records.js';
 import {
   deferred,
   fixture,
