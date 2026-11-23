@@ -934,6 +934,155 @@ it('stores the attempt beside a renewal whose announcement has not arrived yet',
   ]);
 });
 
+it('keeps a sign-out that could not be saved blocked while another tab renews the grant stored meanwhile', async () => {
+  const channels = memoryChannels();
+  const t = await tabs(channels);
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  const state = new URL(t.navigate.mock.calls.at(-1)![0]).searchParams.get(
+    'state',
+  );
+  t.a.dispose();
+  const gate: { held?: ReturnType<typeof deferred<void>>; reached?: boolean } =
+    { held: deferred<void>() };
+  const c = createBrowserRuntime({
+    ...t.options,
+    location: () => `${callback}?code=fixture-code&state=${state}`,
+    openStore: storeWith(
+      t.factory,
+      (store) => ({
+        async commit(id, revision, value) {
+          const v = value as { kind?: string; pending?: unknown };
+          if (gate.reached && v.kind === 'disconnected')
+            throw new Error('disk full');
+          const result = await store.commit(id, revision, value);
+          if (gate.held && v.kind === 'ready' && v.pending === undefined) {
+            gate.reached = true;
+            await gate.held.promise;
+          }
+          return result;
+        },
+      }),
+      channels,
+    ),
+  });
+  runtimes.push(c);
+  const report = c.initialize();
+  await vi.waitFor(() => expect(gate.reached).toBe(true));
+  const signOut = c.disconnect(t.id);
+  const held = gate.held!;
+  delete gate.held;
+  held.resolve();
+  expect(await signOut).toEqual({ kind: 'blocked-locally' });
+  expect(await report).toMatchObject({ problem: 'disconnected' });
+  // Tab b uses the stored grant and renews it.
+  await vi.waitFor(() =>
+    expect(t.session(t.b)).toMatchObject({ kind: 'active' }),
+  );
+  await t.b.loadContexts(t.id);
+  t.b.selectContext(t.id, work);
+  advance(3600_000);
+  expect(await t.b.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes()).toHaveLength(1);
+  await quiet();
+  expect(t.session(c)).toMatchObject({
+    kind: 'ended',
+    problem: 'disconnected',
+    saved: false,
+  });
+});
+
+it('sends no spent refresh token when storing the attempt beside an unannounced renewal fails', async () => {
+  const { channels, freeze } = freezable();
+  const factory = new IDBFactory();
+  let failing = false;
+  const t = await tabs(channels, {
+    factory,
+    options: {
+      openStore: storeWith(
+        factory,
+        (store) => ({
+          commit: (id, revision, value) =>
+            failing && (value as { pending?: unknown }).pending
+              ? Promise.reject(new Error('disk full'))
+              : store.commit(id, revision, value),
+        }),
+        channels,
+      ),
+    },
+  });
+  const held = deferred<Response>();
+  t.setToken(() => held.promise);
+  let refused = true;
+  t.setQuery(async (_url, init) => {
+    t.sent.push(new Headers(init?.headers).get('authorization')!);
+    if (refused) {
+      refused = false;
+      return unauthorized();
+    }
+    return Response.json([]);
+  });
+  void t.b.bind(t.id).sparql.construct(query);
+  await vi.waitFor(() => expect(t.refreshes()).toHaveLength(1));
+  freeze(true);
+  failing = true;
+  const begun = t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  held.resolve(
+    Response.json({
+      access_token: mint('renewed'),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-renewed',
+    }),
+  );
+  await expect(begun).rejects.toBeDefined();
+  failing = false;
+  // Tab a's own request after it: refused once, it renews from the record
+  // as it is, never with the token tab b spent.
+  refused = true;
+  await vi.waitFor(() =>
+    expect(t.session(t.a)).toMatchObject({ kind: 'active' }),
+  );
+  await t.a.loadContexts(t.id);
+  t.a.selectContext(t.id, work);
+  expect(await t.a.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  const tokens = t.refreshes().map((body) => body.get('refresh_token'));
+  expect(new Set(tokens).size).toBe(tokens.length);
+});
+
+it('reads Context access again after a renewal and a consent round trip a cached page missed', async () => {
+  const pageshow = bfcache();
+  const { channels, freeze } = freezable();
+  const t = await tabs(channels);
+  freeze(true);
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ resumed: true });
+  // That tab renews the session too.
+  await back.loadContexts(t.id);
+  back.selectContext(t.id, work);
+  advance(3600_000);
+  expect(await back.bind(t.id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+  expect(t.refreshes()).toHaveLength(1);
+  // Meanwhile the Pod removed this app's access.
+  t.setCatalogue(async () => catalogue([], []));
+  freeze(false);
+  pageshow();
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()[0]?.catalogue).toMatchObject({
+      kind: 'ready',
+      contexts: [],
+    }),
+  );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

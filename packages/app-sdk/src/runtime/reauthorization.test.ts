@@ -983,3 +983,37 @@ it('uses the stored grant when the record cannot be read right after it', async 
   });
   expect(t.next.getSnapshot()[0]?.session.kind).toBe('active');
 });
+
+it('keeps a sign-out that starts while a page that stayed reads its record', async () => {
+  const factory = new IDBFactory();
+  const gate: { held?: ReturnType<typeof deferred<void>>; reached?: boolean } =
+    {};
+  const f = fixture({
+    openStore: storeWith(factory, (store) => ({
+      async read(id) {
+        if (gate.held) {
+          gate.reached = true;
+          await gate.held.promise;
+        }
+        return store.read(id);
+      },
+    })),
+  });
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  await runtime.beginAuthorization(id);
+  gate.held = deferred<void>();
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  await vi.waitFor(() => expect(gate.reached).toBe(true));
+  const signOut = runtime.disconnect(id);
+  const held = gate.held;
+  delete gate.held;
+  held.resolve();
+  expect(await signOut).toEqual({ kind: 'disconnected' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(runtime.getSnapshot()).toMatchObject([
+    { id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
+  expect(() => runtime.bindPod(id)).toThrow();
+});

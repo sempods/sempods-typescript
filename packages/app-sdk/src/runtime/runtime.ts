@@ -1639,10 +1639,19 @@ export function createBrowserRuntime(
    */
   function recheckAccess(e: Entry) {
     if (e.view.catalogue.kind === 'unknown') return;
+    // A read this recheck started already answers a later one.
+    if (e.catalogue && e.catalogue === e.rechecking) return;
     invalidateContexts(e);
     const generation = e.generation;
     const again = () => {
-      if (eligible(e, generation)) void load(e).catch(() => {});
+      if (!eligible(e, generation)) return;
+      const read = load(e);
+      e.rechecking = read;
+      void read
+        .catch(() => {})
+        .finally(() => {
+          if (e.rechecking === read) delete e.rechecking;
+        });
     };
     if (e.catalogue) void e.catalogue.then(again, again);
     else again();
@@ -1794,6 +1803,16 @@ export function createBrowserRuntime(
   const shown = (event?: unknown) => {
     if (!(event as { persisted?: boolean } | undefined)?.persisted) return;
     const synced = Promise.all([...entries.values()].map(sync));
+    // Changes it missed may include a consent round trip: Context access is
+    // read again, also where the credentials were renewed meanwhile.
+    void synced.then(() => {
+      for (const e of entries.values())
+        if (
+          e.view.session.kind === 'active' ||
+          e.view.session.kind === 'renewing'
+        )
+          recheckAccess(e);
+    });
     if (lease?.store.watch)
       void synced
         .then(() => sessions?.list())
@@ -1821,6 +1840,8 @@ export function createBrowserRuntime(
       if (signedOutHere(e)) return;
       const stored = await sessions.read(e.view.id);
       if (entries.get(e.view.id) !== e || disposed) return;
+      // Also one that started while the record was read.
+      if (signedOutHere(e)) return;
       const value = stored?.value;
       if (value?.kind !== 'ready' || e.view.session.kind !== 'restoring') {
         replace(e, stored);
@@ -2068,11 +2089,13 @@ export function createBrowserRuntime(
     }
     if (disposed) throw new RuntimeError('disconnected');
     const old = entries.get(id);
-    if (
-      !old ||
-      signedOutHere(old) ||
-      (read && (!now || now.value.kind === 'disconnected'))
-    )
+    if (old && signedOutHere(old)) {
+      // That sign-out covers the stored grant: renewals of it elsewhere keep
+      // this connection blocked (see `adopt`), and its retry retires it.
+      old.generation = sessionBinding(outcome.record.value).generation;
+      throw new RuntimeError('disconnected');
+    }
+    if (!old || (read && (!now || now.value.kind === 'disconnected')))
       throw new RuntimeError('disconnected');
     if (old !== e || (read && now!.revision !== outcome.record.revision)) {
       // Changed meanwhile: the connection follows the record as it is now.
@@ -2290,6 +2313,8 @@ export function createBrowserRuntime(
       const commit = (locking = false) =>
         serial(e, async () => {
           if (!still()) throw new RuntimeError('disconnected');
+          // Kept local until the attempt is stored: the record it expects.
+          let expected = e.revision;
           if (locking) {
             // A renewal of this session that finished before the lock was
             // granted, whose announcement has not arrived yet: the attempt
@@ -2303,13 +2328,15 @@ export function createBrowserRuntime(
                 (value.kind === 'claimed' && value.operation === 'refresh')) &&
               sessionBinding(value).generation === before
             )
-              e.revision = stored.revision;
+              // Only for this commit: if it fails, the connection still
+              // reads that renewal (and its rotated token) as new.
+              expected = stored.revision;
           }
           // Another tab changed the record first: shown here, and a retry
           // prepares on it.
           const change = await sessions!.prepare(
             attempt,
-            e.revision,
+            expected,
             intent === 'silent',
           );
           accepted(e, change);

@@ -58,6 +58,8 @@ export interface Entry {
    * starts, and a session that ends while it waits does not stop it.
    */
   preparation?: object;
+  /** The catalogue read a Context access recheck started (`recheckAccess`). */
+  rechecking?: Promise<unknown>;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**
