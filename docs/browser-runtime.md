@@ -340,8 +340,8 @@ const runtime = createBrowserRuntime({
 
 When nothing is stored for the app on this device (no session, no remembered
 Pod, no unreadable record, also none of a Pod that `allowedPods` now
-excludes; the address of another Pod only read without a token does not count),
-`initialize()` connects the default Pod and
+excludes; the address of a Pod other than the default one, only read without
+a token, does not count), `initialize()` connects the default Pod and
 navigates to its provider once with `prompt=none`, instead of resolving. The
 Pod answers at once, without showing anything:
 
@@ -478,17 +478,25 @@ const pods = runtime.bindPod(added.id); // reads across Bob's public Contexts
 ```
 
 Each connection has its own catalogue, labels, handles and `reading`, and a
-sign-in to one Pod leaves the others reading without a token. With the default
-`rememberPods: true`, the address of a Pod other than the default one is saved
-when it is added, without discovery, client or token, so the next start and
-the app's other tabs list it as `signed-out` (without a `problem`) and reading
-without a token, until `forget(id)`. Signing in replaces that address with the
-session. With `rememberPods: false` such a Pod is listed in this page only,
-also when another tab remembers it; signing in to it there continues on the
-address that tab saved, so the Pod keeps one record. A failed write, or another tab that holds
-the Pod's lock for more than three seconds (a suspended tab), lists it in
-this page only too. SDKs up to 0.9.0-dev.3 report such an
-address in `StartupReport.unreadable` and leave it untouched.
+sign-in to one Pod leaves the others reading without a token.
+
+- **The address is saved.** With the default `rememberPods: true`, the address
+  of a Pod other than the default one is saved when it is added, without
+  discovery, client or token. The next start and the app's other tabs list it
+  as `signed-out` (without a `problem`), reading without a token, until
+  `forget(id)`.
+- **Signing in replaces it** with the session. A first sign-in that fails, or
+  is signed out of before it completes, puts the address back.
+- **Some Pods are listed in this page only.** With `rememberPods: false`, such
+  a Pod is listed in this page only, also when another tab remembers it;
+  signing in to it there continues on the address that tab saved, so the Pod
+  keeps one record. A failed write, or another tab that holds the Pod's lock
+  for more than three seconds (a suspended tab), lists it in this page only
+  too. Such a connection gives way when another tab saves a record for the Pod
+  later: that record's connection is listed instead, and handles taken from
+  the earlier one are no longer current.
+- **Older SDKs leave it untouched.** SDKs that do not know this record kind
+  (such as 0.9.0-dev.3) report such an address in `StartupReport.unreadable`.
 
 The SDK reads public data with plain requests without a token. It does not use
 the anonymous `scope=public-read&prompt=none` token some Pods offer
@@ -1052,8 +1060,8 @@ renewal, an expired token without a refresh token, a failed sign-in) keep the
 connection's record with only its address (the Pod binding) and why the
 session ended: no token and no verifier. Under `signIn: 'optional'`, a Pod
 added and only read without a token is remembered too, by its address alone
-([apps without sign-in](#apps-without-sign-in)). The connection stays in the snapshot,
-and the next start lists it again, as
+([apps without sign-in](#apps-without-sign-in)). The connection stays in the
+snapshot, and the next start lists it again, as
 
 ```ts
 { kind: 'signed-out', problem?: RuntimeProblem }
