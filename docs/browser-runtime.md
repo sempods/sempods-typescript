@@ -414,10 +414,11 @@ if (pod) await runtime.loadContexts(pod.id);
   reads only with a session.
 - **`optional`**: a connection without a session reads the Pod's public
   Contexts without a token. Startup connects the default Pod (the `preset`, or
-  the sole allowed Pod), and `connect(url)` adds another Pod without discovery
-  or sign-in. `beginAuthorization(id)` signs in when the person asks for it;
-  only then is the Pod discovered and the client resolved. A session that
-  ends, or signing out, returns to reading without a token.
+  the sole allowed Pod), and `connect(url)` adds further Pods without discovery
+  or sign-in, each read without a token on its own. `beginAuthorization(id)`
+  signs in to one Pod when the person asks for it; only then is that Pod
+  discovered and the client resolved. A session that ends, or signing out,
+  returns to reading without a token.
 - **`none`**: only an anonymous connection to the default Pod, which is
   required. No session store and no Web Lock are used, so several tabs and an
   installed PWA beside a browser tab work. `identity` may be omitted;
@@ -465,6 +466,25 @@ with `rememberPods: false`, which then only keeps the address from the next
 start. `forget(id)` removes the connection; a forgotten default Pod is listed
 again as a new connection that was never signed in. Under `optional` the tabs
 share their sessions as under `required`.
+
+Under `optional` an app can read several Pods without signing in to any, for
+example public Pods a person adds by address:
+
+```ts
+const added = await runtime.connect('https://pods.example/bob');
+await runtime.loadContexts(added.id); // Bob's public Contexts, without a token
+const pods = runtime.bindPod(added.id); // reads across Bob's public Contexts
+```
+
+Each connection has its own catalogue, labels, handles and `reading`, and a
+sign-in to one Pod leaves the others reading without a token. With the default
+`rememberPods: true`, the address of a Pod other than the default one is saved
+when it is added, without discovery, client or token, so the next start and
+the app's other tabs list it as `signed-out` (without a `problem`) and reading
+without a token, until `forget(id)`. Signing in replaces that address with the
+session. With `rememberPods: false` such a Pod is listed in this page only,
+and a failed write lists it so too. SDKs up to 0.9.0-dev.3 report such an
+address in `StartupReport.unreadable` and leave it untouched.
 
 The SDK reads public data with plain requests without a token. It does not use
 the anonymous `scope=public-read&prompt=none` token some Pods offer

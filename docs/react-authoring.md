@@ -2027,7 +2027,10 @@ const runtime = createBrowserRuntime({
 - `useAppState().signIn` tells custom controls which mode applies;
   `connection.reading` (`'session'`, `'anonymous'` or `null`) tells how the
   active connection reads. `useApp().connect(url)` opens a Pod without
-  signing in under `optional` and `none`; `authorize(id)` signs in.
+  signing in under `optional` and `none`; `authorize(id)` signs in. Under
+  `optional` that also opens further Pods, each read without a token and
+  remembered like a signed-out Pod
+  ([several Pods](browser-runtime.md#apps-without-sign-in)).
 
 The [runtime guide](browser-runtime.md#apps-without-sign-in) covers requests,
 handles, scopes and the specification rules behind them.

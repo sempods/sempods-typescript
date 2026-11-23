@@ -1048,3 +1048,61 @@ describe('re-authorization keeps and resumes the earlier session', () => {
     ).rejects.toMatchObject({ problem: 'state' });
   });
 });
+
+describe('the address of a Pod never signed in to (#372)', () => {
+  it('is saved once, kept by a sign-out and replaced by a sign-in', async () => {
+    const s = await setup();
+    const saved = committed(await s.transitions.remember('connection', pod));
+    expect(saved.value).toEqual({
+      version: 1,
+      kind: 'address',
+      configKey: 'app',
+      connectionId: 'connection',
+      podUrl: pod,
+    });
+    expect(await s.transitions.remember('connection', pod)).toEqual({
+      kind: 'conflict',
+    });
+    // Nothing to retire: the address stays as it is.
+    expect(
+      committed(await s.transitions.disconnect(saved.id, saved.revision)),
+    ).toEqual(saved);
+    // Neither a code nor a refresh is claimed on it.
+    await expect(
+      s.transitions.claimRefresh(saved.id, saved.revision, s.attempt),
+    ).rejects.toMatchObject({ problem: 'state' });
+    const attempt = committed(
+      await s.transitions.prepare(s.attempt, saved.revision),
+    );
+    expect(attempt.value).toMatchObject({ kind: 'authorizing' });
+    expect(attempt.value).not.toHaveProperty('previous');
+  });
+
+  it('refuses a non-canonical address and lists a malformed one as corrupt', async () => {
+    const s = await setup();
+    await expect(
+      s.transitions.remember('connection', pod + '/'),
+    ).rejects.toMatchObject({ problem: 'configuration' });
+    for (const [id, value] of [
+      ['slash', { podUrl: pod + '/' }],
+      ['foreign', { configKey: 'other' }],
+      ['moved', { connectionId: 'elsewhere' }],
+    ] as const)
+      await s.store.commit(id, null, {
+        version: 1,
+        kind: 'address',
+        configKey: 'app',
+        connectionId: id,
+        podUrl: pod,
+        ...value,
+      });
+    expect(await s.transitions.list()).toEqual({
+      records: [],
+      unreadable: [
+        { id: 'foreign', problem: 'corrupt' },
+        { id: 'moved', problem: 'corrupt' },
+        { id: 'slash', problem: 'corrupt' },
+      ],
+    });
+  });
+});

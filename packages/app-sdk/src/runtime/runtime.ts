@@ -33,9 +33,12 @@ import {
   type SessionChange,
 } from '../sessions/transitions.js';
 import {
+  recordGeneration,
+  recordPodUrl,
   sessionBinding,
   SessionTransitionError,
   type RefreshResend,
+  type BoundSessionRecord,
   type SessionRecord,
   type SessionSnapshot,
 } from '../sessions/records.js';
@@ -607,7 +610,7 @@ export function createBrowserRuntime(
       return false;
     }
     const value = stored?.value;
-    const same = value && sessionBinding(value).generation === e.generation;
+    const same = value && recordGeneration(value) === e.generation;
     // A sign-out or forget here that could not be saved keeps this session
     // blocked, and a retry applies to the newer record; only a new sign-in
     // elsewhere, or a sign-out there that saves a sign-out, replaces it.
@@ -658,7 +661,7 @@ export function createBrowserRuntime(
     return !!resend && !resend.resent && withinGrace(resend.sentAt);
   }
   /** Whether `value` binds the client and scopes this connection uses. */
-  function sameBinding(e: Entry, value: SessionRecord) {
+  function sameBinding(e: Entry, value: BoundSessionRecord) {
     const b = sessionBinding(value);
     return (
       e.client?.clientId === b.client.clientId &&
@@ -703,6 +706,12 @@ export function createBrowserRuntime(
    */
   function fromRecord(saved: SessionSnapshot, resumes = false): Entry {
     const value = saved.value;
+    if (value.kind === 'address') {
+      // A Pod never signed in to: neither discovered nor bound to a client.
+      const e = createEntry(value.podUrl, undefined, undefined, saved.id);
+      e.revision = saved.revision;
+      return e;
+    }
     const b = sessionBinding(value);
     const e = createEntry(
       b.pod.podUrl,
@@ -791,11 +800,9 @@ export function createBrowserRuntime(
    */
   function admit(stored: SessionSnapshot): boolean {
     if (disposed || !initialized || entries.has(stored.id)) return false;
-    const b = sessionBinding(stored.value);
-    if (!allows(b.pod.podUrl)) return false;
-    const same = [...entries.values()].filter(
-      (x) => x.view.podUrl === b.pod.podUrl,
-    );
+    const podUrl = recordPodUrl(stored.value);
+    if (!allows(podUrl)) return false;
+    const same = [...entries.values()].filter((x) => x.view.podUrl === podUrl);
     if (
       same.some(
         (x) =>
@@ -820,7 +827,8 @@ export function createBrowserRuntime(
   }
   /**
    * The record another tab saved for `podUrl`, with a shared store: a
-   * session first, then a remembered address, then a sign-in under way.
+   * session first, then a remembered address, then a sign-in under way, then
+   * the address of a Pod never signed in to.
    * Rejects with `storage` when the records cannot be listed.
    */
   async function savedFor(podUrl: string) {
@@ -831,12 +839,11 @@ export function createBrowserRuntime(
     } catch {
       throw new RuntimeError('storage');
     }
-    const saved = records.filter(
-      (r) => sessionBinding(r.value).pod.podUrl === podUrl,
-    );
+    const saved = records.filter((r) => recordPodUrl(r.value) === podUrl);
     return (
       saved.find((r) => r.value.kind === 'ready') ??
       saved.find((r) => r.value.kind === 'disconnected') ??
+      saved.find((r) => r.value.kind !== 'address') ??
       saved[0]
     );
   }
@@ -1072,6 +1079,36 @@ export function createBrowserRuntime(
     resetLabels(e);
     e.selectedVersion++;
   }
+  /**
+   * Under `rememberPods`, saves the address of `e`, a Pod other than the
+   * default one read without a token and not listed yet, so the next start
+   * lists it again; with a shared store, under the Pod's lock, so two tabs do
+   * not both save one. Returns the record another tab saved for the Pod
+   * meanwhile instead. Best effort: unsaved, the Pod is listed in this page
+   * only.
+   */
+  async function rememberAddress(
+    e: Entry,
+  ): Promise<SessionSnapshot | undefined> {
+    const shared = sessions;
+    // The default Pod is listed on every start anyway.
+    if (!rememberPods || !shared || e.view.podUrl === defaultPodUrl)
+      return undefined;
+    const save = async () => {
+      const saved = await savedFor(e.view.podUrl);
+      if (saved) return saved;
+      const change = await shared.remember(e.view.id, e.view.podUrl);
+      if (change.kind === 'committed') e.revision = change.record.revision;
+      return undefined;
+    };
+    try {
+      return lease?.store.watch
+        ? await locked(`sempods:connect:${namespace}:${e.view.podUrl}`, e, save)
+        : await save();
+    } catch {
+      return undefined;
+    }
+  }
   /** A connection without discovery or client that reads without a token. */
   function addAnonymous(podUrl: string, id?: string) {
     const e = createEntry(podUrl, undefined, undefined, id);
@@ -1107,8 +1144,8 @@ export function createBrowserRuntime(
   }
   /**
    * Retires the saved session: keeps only the address and why it ended
-   * (`reason`), or deletes the record (`deleting`). Resolves whether a record
-   * stays; without one, nothing is remembered.
+   * (`reason`), or deletes the record (`deleting`). Resolves the kind of the
+   * record that stays; without one, nothing is remembered.
    */
   function retire(
     e: Entry,
@@ -1120,12 +1157,12 @@ export function createBrowserRuntime(
      * that record instead.
      */
     insist = false,
-  ) {
+  ): Promise<SessionRecord['kind'] | undefined> {
     return serial(e, async () => {
       for (let round = 0; ; round++) {
         if (!sessions || !e.revision) {
           contexts.forget(e.view.id);
-          return false;
+          return undefined;
         }
         if (!deleting) {
           const change = await sessions.disconnect(
@@ -1135,16 +1172,16 @@ export function createBrowserRuntime(
           );
           if (change.kind === 'committed') {
             e.revision = change.record.revision;
-            return true;
+            return change.record.value.kind;
           }
         } else if (await remove(e.view.id, e.revision)) {
           e.revision = null;
-          return false;
+          return undefined;
         }
         const stored = await sessions.read(e.view.id);
         if (!insist) {
           adopt(e, stored);
-          return stored !== undefined;
+          return stored?.value.kind;
         }
         if (round >= 2) throw new RuntimeError('disconnected');
         e.revision = stored?.revision ?? null;
@@ -2414,13 +2451,20 @@ export function createBrowserRuntime(
       // Old SDKs could save several connections for one address. Retire only
       // redundant address-only records, under the namespace lease and revision
       // check. Never merge sessions, attempts, or different exact Pod URLs.
+      // An address of a Pod never signed in to gives way to any other record.
+      const addressOnly = (saved: SessionSnapshot) =>
+        saved.value.kind === 'disconnected' || saved.value.kind === 'address';
       const represented = new Set(
         listing.records
-          .filter((saved) => saved.value.kind !== 'disconnected')
-          .map((saved) => sessionBinding(saved.value).pod.podUrl),
+          .filter((saved) => !addressOnly(saved))
+          .map((saved) => recordPodUrl(saved.value)),
       );
-      for (const saved of listing.records) {
-        const b = sessionBinding(saved.value);
+      const ordered = [
+        ...listing.records.filter((saved) => saved.value.kind !== 'address'),
+        ...listing.records.filter((saved) => saved.value.kind === 'address'),
+      ];
+      for (const saved of ordered) {
+        const podUrl = recordPodUrl(saved.value);
         // Find the callback even when its Pod is excluded. Reject it below without
         // discovery, code claim or mutation of the foreign durable record.
         if (
@@ -2451,13 +2495,13 @@ export function createBrowserRuntime(
             // Listed as an interrupted attempt; deleted by signing out.
           }
         }
-        if (!allows(b.pod.podUrl)) continue;
-        if (saved.value.kind === 'disconnected' && !rememberPods) {
+        if (!allows(podUrl)) continue;
+        if (addressOnly(saved) && !rememberPods) {
           forgotten.push(saved);
           continue;
         }
-        if (saved.value.kind === 'disconnected') {
-          if (represented.has(b.pod.podUrl)) {
+        if (addressOnly(saved)) {
+          if (represented.has(podUrl)) {
             try {
               await erase(saved.id, saved.revision);
               continue;
@@ -2465,7 +2509,7 @@ export function createBrowserRuntime(
               // Keep it visible and forgettable if cleanup could not be saved.
             }
           }
-          represented.add(b.pod.podUrl);
+          represented.add(podUrl);
         }
         if (disposed) throw new RuntimeError('disconnected');
         // A re-authorization this tab left without a callback (back
@@ -2668,11 +2712,12 @@ export function createBrowserRuntime(
             // without a token, also when its address is not remembered.
             if (kept || (readsAnonymously && !forget)) {
               // Only a remembered address keeps why it was signed out: one
-              // not kept (`rememberPods: false`) is as if never signed in.
+              // not kept (`rememberPods: false`), or a Pod never signed in
+              // to, is as if never signed in.
               e.view = {
                 ...e.view,
                 session: Object.freeze(
-                  kept
+                  kept && kept !== 'address'
                     ? { kind: 'signed-out', problem: 'disconnected' }
                     : { kind: 'signed-out' },
                 ),
@@ -2809,7 +2854,19 @@ export function createBrowserRuntime(
           // Reading needs neither discovery nor a client: a sign-in
           // discovers the Pod and resolves the client itself. Creating the
           // client validates the address.
-          const e = addAnonymous(url);
+          const e = createEntry(url, undefined, undefined);
+          e.anonymous = true;
+          const saved = await rememberAddress(e);
+          if (disposed) throw new RuntimeError('disconnected');
+          // Another tab saved this Pod meanwhile: its connection is this
+          // tab's too.
+          if (saved) admit(saved);
+          const meanwhile = listed();
+          if (meanwhile) {
+            if (e.revision) void remove(e.view.id, e.revision).catch(() => {});
+            return meanwhile;
+          }
+          entries.set(e.view.id, e);
           publish();
           return e.view;
         }

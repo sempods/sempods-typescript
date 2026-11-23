@@ -13,6 +13,7 @@ import {
 } from '@sempods/client-sdk/oauth/host';
 import {
   parseSessionRecord,
+  recordGeneration,
   sessionBinding,
   SessionTransitionError,
   type RefreshResend,
@@ -138,6 +139,8 @@ export function createSessionTransitions(
     operation: 'code' | 'refresh',
     expected: SessionBinding,
   ) {
+    if (current.value.kind === 'address')
+      throw new SessionTransitionError('state');
     const binding = sessionBinding(current.value);
     assertSessionBinding(binding, expected);
     if (operation === 'refresh' && !expected.pod.supportsRefreshToken)
@@ -200,10 +203,7 @@ export function createSessionTransitions(
       );
       const current = await read(snapshot.connectionId);
       if ((current?.revision ?? null) !== expectedRevision) return conflict;
-      if (
-        current &&
-        sessionBinding(current.value).generation === snapshot.generation
-      )
+      if (current && recordGeneration(current.value) === snapshot.generation)
         throw new SessionTransitionError('state');
       // A working session is kept beside the attempt (also across a replaced
       // attempt), so a denied or abandoned re-authorization can resume it. A
@@ -377,8 +377,26 @@ export function createSessionTransitions(
       };
     },
     /**
+     * Remembers the address of a Pod read without a token that was never
+     * signed in to, as a new record `id`; `conflict` when one exists.
+     */
+    async remember(id: string, podUrl: string): Promise<SessionChange> {
+      const value: SessionRecord = {
+        version: 1,
+        kind: 'address',
+        configKey: config.configKey,
+        connectionId: id,
+        podUrl,
+      };
+      // Validated as a start would read it, before anything is stored.
+      validate('configuration', () =>
+        parseSessionRecord({ id, revision: '-', value }, config),
+      );
+      return commit(id, null, value);
+    },
+    /**
      * Retires the record: only its binding (the Pod address) and why it ended
-     * stay, without token or verifier.
+     * stay, without token or verifier. An address stays as it is.
      */
     async disconnect(
       id: string,
@@ -387,6 +405,8 @@ export function createSessionTransitions(
     ): Promise<SessionChange> {
       const current = await observed(id, revision);
       if (!current) return conflict;
+      if (current.value.kind === 'address')
+        return { kind: 'committed', record: current };
       return commit(id, revision, {
         version: 1,
         kind: 'disconnected',

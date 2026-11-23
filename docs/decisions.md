@@ -414,8 +414,11 @@ controller treats the switch as same-target access loss
 ([captured work](#captured-work-outlives-access-not-authorization)): while a
 guard holds a draft or an unresolved write, the selected view stays (without
 access) until that work is resolved or discarded. Writes
-follow the anonymous catalogue, which lists nothing as writable. `none` uses
-no session store or lock and needs one default Pod. Under `optional`, signing
+follow the anonymous catalogue, which lists nothing as writable. Under
+`optional` a runtime reads several Pods that way, each its own connection,
+and remembers the address of an added one as a record without discovery or
+client (#372), so the next start and other tabs list it like any remembered
+Pod. `none` uses no session store or lock and needs one default Pod. Under `optional`, signing
 in adds `public-read` to the optional scopes, and required scopes are a
 configuration error.
 
@@ -427,11 +430,14 @@ without a token read exactly what the anonymous `scope=public-read&prompt=none`
 token would, without its redirect, client identity and expiry without a refresh
 token. A separate session state would duplicate `signed-out` and its reasons,
 and break every app that switches over `session.kind`. Discovery and client
-resolution wait for an actual sign-in. The analysis is in
+resolution wait for an actual sign-in, so an added Pod's address is saved
+without them: in the one session store, forgetting, `rememberPods` and tab
+sharing stay one mechanism, and SDKs without that record kind leave it
+untouched. The analysis is in
 [#240](https://github.com/sempods/sempods-typescript/issues/240#issuecomment-6751445738).
 
 ## Not implemented yet
 
-Preferred-language editing and multi-language maps, an anonymous choice among several Pods, DPoP, revocation, server-side
+Preferred-language editing and multi-language maps, DPoP, revocation, server-side
 rendering, and a browser-hosted Pod. Each can be added behind the existing
 boundaries.

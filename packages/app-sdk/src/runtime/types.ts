@@ -221,8 +221,9 @@ export interface BrowserRuntimeOptions {
    * - `optional`: a connection without a session reads the Pod's public
    *   Contexts without a token (`Connection.reading: 'anonymous'`). Startup
    *   connects the default Pod (the `preset`, or the sole allowed Pod), and
-   *   `connect(url)` adds a Pod without discovery or sign-in. Signing in is
-   *   offered, never demanded. A session that ends, or signing out, returns
+   *   `connect(url)` adds further Pods without discovery or sign-in, each
+   *   remembered under `rememberPods`. Signing in to one is offered, never
+   *   demanded. A session that ends, or signing out, returns
    *   to reading without a token. `scopes.required` is a configuration
    *   error; `public-read` is added to the optional scopes, so signing in
    *   does not hide the public Contexts.
@@ -286,12 +287,15 @@ export interface BrowserRuntimeOptions {
    * (`disconnect`) or a session that ends (a refused renewal, an expired
    * token) then keeps the address on this device, without token or
    * verifier, and the next start lists the connection as `signed-out`, so
-   * signing in again is one action. `forget(id)` deletes it.
+   * signing in again is one action. `forget(id)` deletes it. Under
+   * `signIn: 'optional'`, a Pod added with `connect(url)` and read without a
+   * token is remembered the same way, without a sign-in.
    *
    * `false` forgets the address and the remembered Context on sign-out and
    * session end, for shared devices or privacy-sensitive apps: a signed-out
    * connection leaves the snapshot, an ended one stays listed only until the
-   * page unloads, and startup deletes addresses an earlier start remembered.
+   * page unloads, a Pod read without a token is listed in this page only,
+   * and startup deletes addresses an earlier start remembered.
    */
   readonly rememberPods?: boolean;
   /**
@@ -410,6 +414,10 @@ export interface BrowserRuntime {
    * resolves a client: the connection reads without a token at once, and a
    * sign-in discovers the Pod itself. An invalid address rejects with
    * SdkError (invalid-pod-url). Under `'none'` only the default Pod connects.
+   * Under `'optional'` and `rememberPods`, the address of a Pod other than
+   * the default one is saved, so the next start and the app's other tabs
+   * list it too, until `forget(id)`; a write that fails lists it in this page
+   * only.
    */
   connect(url?: string): Promise<Connection>;
   /**
