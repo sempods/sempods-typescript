@@ -1493,7 +1493,8 @@ function AppContent() {
   such as an app's own `useDraftGuard` with the `connection` or `explicit`
   scope (`useApp().disconnect`). Its **Try again** holds only that Pod's
   row. After a sign-out that could not be saved, **Try again** repeats it,
-  also from its notice, and its failure shows in the row.
+  also from its notice. A Pod action that fails, such as **Change sharing**
+  while that Pod cannot be reached, shows its error in that Pod's row.
 - Open, a row shows the Pod's address beside a display name, then its
   readable Contexts with **Read only** or **Can edit**, or that they are
   loading, unavailable (with **Check access**) or none. For the selected Pod

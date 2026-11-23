@@ -18,7 +18,8 @@ import type { Connection } from '../runtime/types.js';
  * unavailable (a guarded change, its prompt, startup or storage). An
  * unguarded action for one connection (a retry, a catalogue check) passes
  * that connection as `scope`: it holds only that connection's controls
- * (`holds`) and reports its failure apart (`failureOf`). The control that
+ * (`holds`) and reports its failure apart (`failureOf`), as does a guarded
+ * action of one connection that holds them all (`row`). The control that
  * started an action gets the focus back once it is enabled again: a disabled
  * control loses the focus in WebKit (the focus fixup rule), which stays on
  * the body otherwise (#332).
@@ -64,8 +65,18 @@ export function useAccessAction() {
       else next.delete(key);
       return next;
     });
-  async function act(task: () => Promise<unknown>, scope?: string) {
+  /**
+   * Runs `task`, holding the actions of `scope` (all of them without one).
+   * Its failure shows for `row` when given, else for that scope: an action of
+   * one Pod that holds the whole view still reports in that Pod's row.
+   */
+  async function act(
+    task: () => Promise<unknown>,
+    scope?: string,
+    row?: string,
+  ) {
     const key = scope ?? null;
+    const reported = row ?? key;
     const flights = inFlight.current;
     if (unavailable || flights.has(key)) return;
     const focused = document.activeElement;
@@ -74,11 +85,11 @@ export function useAccessAction() {
     else actionFocus.current.delete(key);
     flights.add(key);
     setRunning(new Set(flights));
-    report(key, null);
+    report(reported, null);
     try {
       await task();
     } catch (cause) {
-      report(key, { cause });
+      report(reported, { cause });
     } finally {
       flights.delete(key);
       setRunning(new Set(flights));
@@ -86,7 +97,7 @@ export function useAccessAction() {
   }
   /** Whether an action scoped to this connection runs. */
   const holds = (scope: string) => running.has(scope);
-  /** The failure of the last action scoped to this connection. */
+  /** The failure of the last action of this connection (its `row`). */
   const failureOf = (scope: string) => failures.get(scope) ?? null;
   return {
     act,
@@ -521,7 +532,11 @@ export function PodManagement({
                     disabled={held}
                     onRun={(action) => {
                       closeMenu();
-                      void act(action.run, action.own ? entry.id : undefined);
+                      void act(
+                        action.run,
+                        action.own ? entry.id : undefined,
+                        entry.id,
+                      );
                     }}
                   />
                 )}
@@ -534,7 +549,7 @@ export function PodManagement({
                     : m.controls.disconnectFailed}
                 </p>
               )}
-              {/* A failed retry or access check of this Pod. */}
+              {/* A failed action of this Pod, also one that held the view. */}
               {ownFailure && <p role="alert">{error(ownFailure.cause)}</p>}
               <div
                 id={`${rowId}-details`}

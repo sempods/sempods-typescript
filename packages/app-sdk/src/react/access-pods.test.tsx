@@ -788,6 +788,32 @@ it('shows a failed retry in its Pod’s row, apart from the other Pod', async ()
   expect(within(dialog).getAllByRole('alert')).toHaveLength(1);
 });
 
+it('shows a failed Change sharing in its Pod’s row', async () => {
+  const { f, runtime } = await alicesAndBobs();
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  const dialog = await screen.findByRole('dialog', { name: 'Pods & sharing' });
+  // Bob is selected; Alice's Pod cannot be reached to change her sharing.
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation((url, init) =>
+    url.startsWith(pod + '/.well-known')
+      ? Promise.reject(new TypeError('offline'))
+      : original(url, init),
+  );
+  const navigations = f.navigate.mock.calls.length;
+  const sharing = await podAction('Change sharing', 'pod.example/alice');
+  await act(async () => sharing.click());
+  await waitFor(() =>
+    expect(within(row('pod.example/alice')).getByRole('alert')).toBeTruthy(),
+  );
+  expect(within(row('pod.example/bob')).queryByRole('alert')).toBeNull();
+  expect(within(dialog).getAllByRole('alert')).toHaveLength(1);
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+});
+
 it('leaves the focus alone when another Pod’s row goes', async () => {
   const { f, runtime } = await alicesAndBobs();
   render(
