@@ -482,10 +482,12 @@ export function serializeBlock(node: DocNode, other = false): string {
           let body = '';
           for (const child of item.content ?? []) {
             const list = /List$/.test(child.type);
-            nested = previous === child.type && list && !nested;
-            const written = serializeBlock(child, nested);
+            // Only what is written counts for the lists around it.
+            const turn: boolean = previous === child.type && list && !nested;
+            const written = serializeBlock(child, turn);
             // An empty paragraph adds nothing.
             if (written === '') continue;
+            nested = turn;
             // A list interrupts its item's text only if it starts at 1 with
             // an item that has text; any other needs a blank line.
             const tight =
@@ -523,11 +525,14 @@ export function joinBlocks<Block extends { readonly type: string }>(
   let previous: string | undefined;
   let other = false;
   for (const block of blocks) {
-    other = previous === block.type && /List$/.test(block.type) && !other;
-    const text = write(block, other);
+    // Only what is written counts for the lists around it.
+    const turn: boolean =
+      previous === block.type && /List$/.test(block.type) && !other;
+    const text = write(block, turn);
     if (text === '') continue;
     out.push(text);
     previous = block.type;
+    other = turn;
   }
   return out.join('\n\n');
 }

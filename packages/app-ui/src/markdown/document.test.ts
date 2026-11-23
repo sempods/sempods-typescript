@@ -87,6 +87,48 @@ describe('reading and writing back', () => {
     expect(again('- ## Title')).toBe('- ## Title');
   });
 
+  it('keeps lists apart across an empty paragraph between them', () => {
+    const list = (word: string): DocNode => ({
+      type: 'orderedList',
+      attrs: { start: 1 },
+      content: [
+        {
+          type: 'listItem',
+          content: [{ type: 'paragraph', content: [text(word)] }],
+        },
+      ],
+    });
+    const lists = [
+      list('first'),
+      list('second'),
+      { type: 'paragraph' },
+      list('third'),
+    ];
+    expect(toMarkdown({ type: 'doc', content: lists })).toBe(
+      '1. first\n\n1) second\n\n1. third',
+    );
+    // Inside a list item too.
+    expect(
+      toMarkdown({
+        type: 'doc',
+        content: [
+          {
+            type: 'bulletList',
+            content: [
+              {
+                type: 'listItem',
+                content: [
+                  { type: 'paragraph', content: [text('parent')] },
+                  ...lists,
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBe('- parent\n  1. first\n  1) second\n  1. third');
+  });
+
   it('writes an address that is its own text as an autolink', () => {
     expect(again('<https://example.org>')).toBe('<https://example.org>');
     expect(again('[https://example.org](https://example.org)')).toBe(
