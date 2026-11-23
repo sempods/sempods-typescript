@@ -1842,7 +1842,8 @@ An app that only shows plain text imports nothing from it and needs nothing
 more; the package's main entry never loads it. Import the entry statically,
 not with `lazy()`: a stored text shows formatted in the first paint, and the
 field loads its writer by itself after that paint, so reading loads none of
-it and writing usually finds it there.
+it and writing usually finds it there. Where it cannot load, as offline
+without it cached, the field writes Markdown instead.
 
 - **`MarkdownView`** shows a `source` as read-only content: paragraphs (a
   line break typed in one shows as one, as a hard break does), headings,

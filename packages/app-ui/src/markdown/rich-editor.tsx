@@ -128,6 +128,8 @@ export interface RichEditorProps {
   readonly onChange: (value: string) => void;
   /** Moves the focus into the text, once the editor is there. */
   readonly onReady: (focus: () => void) => void;
+  /** Called instead when the editor could not be loaded. */
+  readonly onUnavailable: () => void;
 }
 
 /** The address of the link at the selection, set, changed or removed. */
@@ -243,6 +245,9 @@ export default function RichEditor({
   report.current = onChange;
   const [linking, setLinking] = useState(false);
   const first = useRef(doc);
+  // Read on each update, so a new placeholder applies to this editor.
+  const hint = useRef(placeholder ?? '');
+  hint.current = placeholder ?? '';
   // The same options on every render: new ones would update the editor.
   const options = useMemo<UseEditorOptions>(
     () => ({
@@ -266,7 +271,7 @@ export default function RichEditor({
             isAllowedUri: (url) => WEB.test(url),
           },
         }),
-        Placeholder.configure({ placeholder: placeholder ?? '' }),
+        Placeholder.configure({ placeholder: () => hint.current }),
       ],
       content: first.current as JSONContent,
       editorProps: {
@@ -293,7 +298,7 @@ export default function RichEditor({
         report.current(next);
       },
     }),
-    [label, placeholder],
+    [label],
   );
   const editor = useEditor(options);
   const state = useEditorState({
@@ -321,6 +326,11 @@ export default function RichEditor({
     // A transaction that changes nothing, so the toolbar reads the new state.
     editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false));
   }, [editor, value, doc]);
+  // A new placeholder shows at once, not only after the next change.
+  useEffect(() => {
+    if (editor.isInitialized)
+      editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false));
+  }, [editor, placeholder]);
   // Ready once its view is there, which can be after this first effect.
   useEffect(() => {
     const ready = () => onReady(() => editor.chain().focus().run());

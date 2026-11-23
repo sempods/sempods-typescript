@@ -286,6 +286,33 @@ it('leaves nothing to undo or link of a draft the app replaced', async () => {
   expect(changed).toHaveBeenCalledTimes(1);
 });
 
+it('edits a list item that starts with a list', async () => {
+  render(<Notes initial={'-\n  1. x\n- y'} defaultPresentation="write" />);
+  await editor();
+  fireEvent.click(button('Bold'));
+  fireEvent.click(button('Bulleted list'));
+  expect(draft()).not.toBe('-\n  1. x\n- y');
+});
+
+it('shows a new placeholder in the editor', async () => {
+  const field = (placeholder: string) => (
+    <MarkdownField
+      label="Notes"
+      value=""
+      onChange={() => {}}
+      placeholder={placeholder}
+      defaultPresentation="write"
+    />
+  );
+  const { rerender } = render(field('Notes …'));
+  const input = await editor();
+  const shown = () =>
+    input.querySelector('[data-placeholder]')?.getAttribute('data-placeholder');
+  expect(shown()).toBe('Notes …');
+  rerender(field('Notizen …'));
+  await waitFor(() => expect(shown()).toBe('Notizen …'));
+});
+
 it('writes as Markdown a text it would not write back as it reads', () => {
   // A heading over two lines: written formatted, it would become one line.
   render(<Notes initial={'Title\nmore\n==='} defaultPresentation="write" />);

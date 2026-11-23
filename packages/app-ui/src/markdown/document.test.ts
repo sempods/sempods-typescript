@@ -56,6 +56,37 @@ describe('reading and writing back', () => {
     expect(again('- parent\n  - a\n  * b')).toBe('- parent\n  - a\n  * b');
   });
 
+  it('starts every list item with a paragraph, as the editor needs', () => {
+    expect(fromMarkdown('-\n  1. x')).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                { type: 'paragraph' },
+                {
+                  type: 'orderedList',
+                  attrs: { start: 1 },
+                  content: [
+                    {
+                      type: 'listItem',
+                      content: [{ type: 'paragraph', content: [text('x')] }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(again('-\n  1. x')).toBe('-\n  1. x');
+    expect(again('- ## Title')).toBe('- ## Title');
+  });
+
   it('writes an address that is its own text as an autolink', () => {
     expect(again('<https://example.org>')).toBe('<https://example.org>');
     expect(again('[https://example.org](https://example.org)')).toBe(

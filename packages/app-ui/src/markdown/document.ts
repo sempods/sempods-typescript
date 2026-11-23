@@ -91,10 +91,14 @@ function block(node: MarkdownNode): DocNode {
         ...(node.ordered ? { attrs: { start: node.start ?? 1 } } : {}),
         content: (node.children ?? []).map((item) => {
           const content = (item.children ?? []).map(block);
-          // An empty item still holds a paragraph in the editor.
+          // An item in the editor starts with a paragraph, empty for an
+          // empty item or one that starts with a list, as written back.
           return {
             type: 'listItem',
-            content: content.length > 0 ? content : [{ type: 'paragraph' }],
+            content:
+              content[0]?.type === 'paragraph'
+                ? content
+                : [{ type: 'paragraph' }, ...content],
           };
         }),
       };
@@ -455,7 +459,9 @@ export function serializeBlock(node: DocNode, other = false): string {
               written;
             previous = child.type;
           }
-          return (marker + indent(body, marker.length)).replace(/[ \t]+$/, '');
+          // A marker alone on its line ends there.
+          const head = body.startsWith('\n') ? marker.trimEnd() : marker;
+          return (head + indent(body, marker.length)).replace(/[ \t]+$/, '');
         })
         .join('\n');
     }

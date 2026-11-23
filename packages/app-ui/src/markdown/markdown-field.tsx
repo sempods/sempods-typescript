@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentType,
   type KeyboardEvent,
 } from 'react';
 import {
@@ -26,6 +27,7 @@ import { Textarea } from '../components/textarea.js';
 import { fromMarkdown, toMarkdown, type DocNode } from './document.js';
 import { applyEdit, formatMarkdown, type MarkdownFormat } from './format.js';
 import { MarkdownView, type MarkdownViewProps } from './markdown-view.js';
+import type { RichEditorProps } from './rich-editor.js';
 import { useMarkdownTexts, type MarkdownFieldLabels } from './texts.js';
 import { isCommand, ToolButton, ToolGroup } from './tools.js';
 
@@ -41,10 +43,12 @@ export interface MarkdownFieldProps {
   /** The Markdown source, owned by the app; `''` for none. */
   readonly value: string;
   /**
-   * Every change the person makes, with the source exactly as typed: the
-   * field neither trims nor normalizes it, though the browser's text input
-   * reports its line endings as `\n`, including on untouched lines. Opening,
-   * switching the presentation and leaving never call it.
+   * Every change the person makes. Written formatted, the text arrives as
+   * standard Markdown, the whole text written one way from the first change;
+   * written as Markdown, it arrives exactly as typed, neither trimmed nor
+   * normalized, though the browser's text input reports its line endings as
+   * `\n`, including on untouched lines. Opening, switching the presentation
+   * and leaving never call it.
    */
   readonly onChange: (value: string) => void;
   /**
@@ -87,7 +91,19 @@ const kinds = actions.map(([kind]) => kind);
 
 /** The writer for text in its set, loaded once the field may need it. */
 const loadRichEditor = () => import('./rich-editor.js');
-const RichEditor = lazy(loadRichEditor);
+
+/** Where the writer cannot load, as offline: the field writes Markdown. */
+function Unavailable({
+  onUnavailable,
+}: {
+  readonly onUnavailable: () => void;
+}) {
+  useEffect(onUnavailable, [onUnavailable]);
+  return null;
+}
+const RichEditor = lazy<ComponentType<RichEditorProps>>(() =>
+  loadRichEditor().catch(() => ({ default: Unavailable })),
+);
 
 /** The field's width from which the preview stands beside the source. */
 const WIDE_REM = 42;
@@ -156,7 +172,9 @@ export function MarkdownField({
   if (written && syntax?.value !== value)
     setSyntax({ value, doc: writable(value) });
   const doc = syntax?.doc ?? null;
-  const rich = doc !== null;
+  // Whether the rich writer failed to load: the Markdown writer stands in.
+  const [failed, setFailed] = useState(false);
+  const rich = doc !== null && !failed;
   // The rich editor's focus, once it is there, and a focus asked for before.
   const focusRich = useRef<(() => void) | null>(null);
   const focusWaits = useRef(false);
@@ -165,6 +183,12 @@ export function MarkdownField({
     if (!focusWaits.current) return;
     focusWaits.current = false;
     focus();
+  }, []);
+  const onRichUnavailable = useCallback(() => {
+    // A focus that waited for the rich writer goes to the text input.
+    if (focusWaits.current) moved.current = 'text';
+    focusWaits.current = false;
+    setFailed(true);
   }, []);
   // Where the rich editor's toolbar goes.
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
@@ -183,7 +207,7 @@ export function MarkdownField({
   // Loaded after the first paint, so pressing Edit text finds it there.
   useEffect(() => {
     if (readOnly) return;
-    const load = () => void loadRichEditor();
+    const load = () => void loadRichEditor().catch(() => {});
     if (typeof requestIdleCallback === 'undefined') {
       const timer = setTimeout(load, 1000);
       return () => clearTimeout(timer);
@@ -378,6 +402,7 @@ export function MarkdownField({
                   toolbar={slot}
                   onChange={emit}
                   onReady={onRichReady}
+                  onUnavailable={onRichUnavailable}
                 />
               </Suspense>
             ) : (
