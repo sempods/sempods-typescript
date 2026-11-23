@@ -240,7 +240,10 @@ describe('a second Pod without a token', () => {
 
 describe('several tabs', () => {
   /** Two tabs on one IndexedDB, Web Locks and channel, under `optional`. */
-  async function tabs(deliver?: Parameters<typeof memoryChannels>[0]) {
+  async function tabs(
+    deliver?: Parameters<typeof memoryChannels>[0],
+    second: Partial<BrowserRuntimeOptions> = {},
+  ) {
     const factory = new IDBFactory();
     const channels = memoryChannels(deliver);
     const f = optional({
@@ -248,7 +251,7 @@ describe('several tabs', () => {
       openStore: (namespace) => openSessionStore(namespace, factory, channels),
     });
     const a = f.runtime;
-    const b = keep(createBrowserRuntime(f.options));
+    const b = keep(createBrowserRuntime({ ...f.options, ...second }));
     await a.initialize();
     await b.initialize();
     await restored(b);
@@ -325,6 +328,34 @@ describe('several tabs', () => {
     );
     held.splice(0).forEach((send) => send());
     held = null;
+  });
+
+  it('keeps a Pod added in a tab with rememberPods: false in that page only', async () => {
+    let delivered = 0;
+    const t = await tabs(
+      (send) =>
+        void setTimeout(() => {
+          send();
+          delivered++;
+        }),
+      { rememberPods: false },
+    );
+    const local = await t.b.connect(bob);
+    const pods = t.b.bindPod(local.id);
+    // The other tab remembers Bob's Pod; this one does not list its address.
+    const remembered = await t.a.connect(bob);
+    expect(remembered.id).not.toBe(local.id);
+    await vi.waitFor(() => expect(delivered).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(t.b.getSnapshot()[1]).toMatchObject({ id: local.id, podUrl: bob });
+    expect(pods.getSnapshot().current).toBe(true);
+    // Forgetting it there leaves this page's connection.
+    expect(await t.a.forget(remembered.id)).toEqual({ kind: 'disconnected' });
+    const before = delivered;
+    await vi.waitFor(() => expect(delivered).toBeGreaterThan(before));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(t.b.getSnapshot()[1]).toMatchObject({ id: local.id, podUrl: bob });
+    expect(pods.getSnapshot().current).toBe(true);
   });
 
   it('saves one address when two tabs add the same Pod at once', async () => {

@@ -795,11 +795,14 @@ export function createBrowserRuntime(
    * Lists a connection another tab saved, which this tab does not list yet
    * (a sign-in there, or a Pod remembered there), so one Pod address keeps
    * one saved connection. A connection of this tab to the same Pod without a
-   * record of its own and without a session gives way to it. Returns whether
-   * the record is listed now.
+   * record of its own and without a session gives way to it. With
+   * `rememberPods: false` this tab lists no address another tab remembers,
+   * as its start deletes them: its own connection to that Pod stays in this
+   * page. Returns whether the record is listed now.
    */
   function admit(stored: SessionSnapshot): boolean {
     if (disposed || !initialized || entries.has(stored.id)) return false;
+    if (!rememberPods && stored.value.kind === 'address') return false;
     const podUrl = recordPodUrl(stored.value);
     if (!allows(podUrl)) return false;
     const same = [...entries.values()].filter((x) => x.view.podUrl === podUrl);
