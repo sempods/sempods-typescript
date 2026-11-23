@@ -37,6 +37,7 @@ import {
   startupSettled,
   type AppController,
   type AppSnapshot,
+  type Availability,
 } from '../authoring/app.js';
 import { createLoader } from '../authoring/load.js';
 import { catalogueLists } from '../runtime/binding.js';
@@ -589,8 +590,9 @@ export interface ContextEditor<D, U = D> {
    * declined, a pending write blocks it, no connection is active (or its
    * `connection` is unknown), or another connection became active while it
    * asked (with `connection`: that connection went or stopped reading while
-   * it asked). Opening the same target again while that is under way shares
-   * its result.
+   * it asked), or a Context listed as readable at the start was no longer
+   * listed (or was still being read) when it asked. Opening the same target
+   * again while that is under way shares its result.
    */
   open(target: ContextTarget): Promise<boolean>;
   /**
@@ -1001,29 +1003,42 @@ export function useContextEditor<D>(
         apply(opened);
         return Promise.resolve(true);
       }
-      // A row of another connection can go while the person is asked, also
-      // when its connection stays listed but no longer reads (signed out in
-      // another tab): then the prompt is withdrawn and nothing open here is
-      // discarded. Read from the runtime: the controller checks this while
-      // it publishes a change, before its own snapshot has it.
+      // The row can go while the person is asked: its connection removed, or
+      // no longer reading (signed out in another tab), or its Context, listed
+      // when it was opened, no longer listed (access revoked, or not in the
+      // catalogue read without a token). Then the prompt is withdrawn and
+      // nothing open here is discarded; while a catalogue is still being
+      // read, confirming runs nothing. Read from the runtime: the controller
+      // checks this while it publishes a change, before its own snapshot has
+      // it.
       const destination = () =>
-        app.runtime.getSnapshot().find((c) => c.id === origin);
-      const readable = origin !== undefined && reads(destination());
-      const result = (
-        origin !== undefined
-          ? navigateWhile(
-              app,
-              () => apply(opened),
-              () => {
-                const now = destination();
-                return (
-                  now !== undefined &&
-                  originOf(app, origin) === life &&
-                  (!readable || reads(now))
-                );
-              },
-            )
-          : app.navigate(() => apply(opened))
+        app.runtime.getSnapshot().find((c) => c.id === connection);
+      const start = destination();
+      const readable = reads(start);
+      const listed = start
+        ? catalogueLists(start.catalogue, target.context)
+        : false;
+      const available = (): Availability => {
+        const now = destination();
+        if (
+          !now ||
+          (origin !== undefined && originOf(app, origin) !== life) ||
+          (readable && !reads(now))
+        )
+          return 'gone';
+        if (!listed || catalogueLists(now.catalogue, target.context))
+          return 'yes';
+        return now.catalogue.kind === 'unknown' ||
+          now.catalogue.kind === 'loading'
+          ? 'later'
+          : 'gone';
+      };
+      // A row of another connection does not depend on the active one.
+      const result = navigateWhile(
+        app,
+        () => apply(opened),
+        available,
+        origin === undefined,
       ).finally(() => {
         if (opening.current?.result === result) opening.current = null;
       });

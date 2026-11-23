@@ -87,7 +87,11 @@ export type TargetSelection =
         'connection' | 'session' | 'catalogue' | 'unlisted' | 'preset';
     };
 type Unavailable = Extract<TargetSelection, { kind: 'unavailable' }>['reason'];
-type Availability = 'yes' | 'later' | 'gone';
+/**
+ * Internal: whether a prompt's target is there: `gone` withdraws the prompt,
+ * `later` (a catalogue being read) keeps it, but confirming runs nothing.
+ */
+export type Availability = 'yes' | 'later' | 'gone';
 
 /** Why a target cannot be selected now, from the runtime's own facts. */
 export function targetProblem(
@@ -294,24 +298,28 @@ const checkedNavigation = new WeakMap<
   object,
   (
     action: () => void | Promise<void>,
-    available: () => boolean,
+    available: () => Availability,
+    followsActive: boolean,
   ) => Promise<boolean>
 >();
 /**
  * Internal: row navigation to a destination that can go away while the
- * person is asked, such as a row of another connection (#408). Losing it
- * withdraws the prompt, as for `selectTarget`: nothing runs and no guard is
- * discarded. Another active connection keeps the prompt: the destination
- * does not depend on it. No public API.
+ * person is asked, such as a row whose Context loses access or a row of
+ * another connection (#408). Losing it withdraws the prompt, as for
+ * `selectTarget`: nothing runs and no guard is discarded; while it is
+ * `later`, confirming runs nothing either. With `followsActive` false
+ * another active connection keeps the prompt: the destination does not
+ * depend on it. No public API.
  */
 export function navigateWhile(
   app: AppController,
   action: () => void | Promise<void>,
-  available: () => boolean,
+  available: () => Availability,
+  followsActive: boolean,
 ): Promise<boolean> {
   const navigate = checkedNavigation.get(app);
-  if (navigate) return navigate(action, available);
-  return available() ? app.navigate(action) : Promise.resolve(false);
+  if (navigate) return navigate(action, available, followsActive);
+  return available() === 'yes' ? app.navigate(action) : Promise.resolve(false);
 }
 /**
  * Selection/leave policy, the active Pod reader and the Context-discovery policy
@@ -1122,17 +1130,9 @@ export function createAppController(
   retainedNavigation.set(controller, (action, retained) =>
     guard(action, 'navigate', retained),
   );
-  // Its destination is not the active connection's: another active one
-  // keeps the prompt, and only losing the destination withdraws it.
-  checkedNavigation.set(controller, (action, available) =>
-    available()
-      ? guard(
-          action,
-          'navigate',
-          undefined,
-          () => (available() ? 'yes' : 'gone'),
-          false,
-        )
+  checkedNavigation.set(controller, (action, available, followsActive) =>
+    available() === 'yes'
+      ? guard(action, 'navigate', undefined, available, followsActive)
       : Promise.resolve(false),
   );
   selectionDemands.set(controller, (demanded) => {

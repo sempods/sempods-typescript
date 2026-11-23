@@ -1090,7 +1090,8 @@ rows.map((item) => {
   `close()` asks first, as for the active connection.
 - While the person is asked, a row whose connection goes or stops reading
   (signed out in another tab) withdraws the question and keeps the open
-  editor. Another active Pod keeps the question.
+  editor, as a Context that loses its access does. Another active Pod keeps
+  the question.
 - A bulk action captures the shown rows' commands and runs them one after
   the other, as [several rows from one decision](#several-rows-from-one-decision)
   describes, stopping at the first result that is not `removed`.
@@ -1197,6 +1198,11 @@ function Notes() {
   target is open. `AppAccess` stays hidden while the catalogue loads but shows
   a failure with **Check access**; for `unreadable`, management offers
   **Change sharing**.
+- A Context listed as readable when the row was opened and no longer listed
+  while the person is asked (access revoked, or a sign-out that leaves
+  reading without a token) withdraws the question: `open` resolves `false`
+  and the open editor keeps its draft. While that catalogue is still being
+  read, confirming changes nothing.
 - Activation needs a successful catalogue listing the Context as readable,
   also on reopening (after a failed refresh: `discovery-failed`). Afterwards,
   lost access or an ended session keep the draft and any unconfirmed review,

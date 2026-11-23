@@ -176,12 +176,13 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
   // (catalogue, session, scopes) render again, as the active one's do. It
   // only grows, up to the connections there are.
   const origins = useRef(new Map<string, number>()).current;
-  // The connections rows were bound to since the effect below last ran: only
-  // they ask for a catalogue, so the demand ends with their last shown row.
+  // The connections a row was bound to, without a catalogue, since the effect
+  // below last ran: only they ask for one, so the demand ends with their last
+  // shown row and is never carried for a catalogue that is there.
   const wanted = useRef(new Set<string>()).current;
   // A connection bound while a row's own component renders (not this hook's)
   // renders this hook again, after that render, so the effect below runs: on
-  // first sight, and while its catalogue is still to be asked for.
+  // first sight, and once its catalogue is to be asked for.
   const [, noticed] = useReducer((n: number) => n + 1, 0);
   useAppFacts(
     (s) =>
@@ -224,10 +225,10 @@ export function useContextUpdate<D>(input: FieldDefinition<D>) {
       const life = originOf(app, origin);
       const first = origins.get(origin) !== life;
       origins.set(origin, life);
-      if (!wanted.has(origin)) {
-        wanted.add(origin);
-        if (first || own.catalogue?.kind === 'unknown') queueMicrotask(noticed);
-      }
+      // Its catalogue still to be asked for: carried to the effect below.
+      const missing = own.catalogue?.kind === 'unknown' && !wanted.has(origin);
+      if (missing) wanted.add(origin);
+      if (first || missing) queueMicrotask(noticed);
     }
     const groupName = origin === undefined ? name : originName;
     // Without a current view (a session that ended), writes kept for their

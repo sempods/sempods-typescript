@@ -527,6 +527,61 @@ it('keeps the question about a row of another connection while the active one ch
   expect(edit.target).toEqual(alices);
 });
 
+// Alice's work Context, listed when her row is opened, loses its access
+// while the person is asked: revoked while she stays signed in, or not in the
+// catalogue she reads without a token after signing out in another tab
+// (optional sign-in).
+it.each(['revoked', 'signed out in another tab'] as const)(
+  'withdraws the question when the Context to open loses its access meanwhile (%s)',
+  async (how) => {
+    const tab = how === 'signed out in another tab';
+    const { f, alice, bob } = await setup(
+      tab ? { tabs: true, signIn: 'optional' } : {},
+    );
+    const other = tab
+      ? createBrowserRuntime({
+          ...f.options,
+          location: () => 'https://app.example/',
+        })
+      : null;
+    if (other) {
+      runtimes.push(other);
+      await other.initialize();
+      await restored(other);
+    }
+    const bobs = { subject: 'urn:s', context: home, connection: bob };
+    await openWithDraft(bobs);
+    let opening: Promise<boolean> | undefined;
+    act(() => {
+      opening = edit.open({
+        subject: 'urn:a',
+        context: work,
+        connection: alice,
+      });
+    });
+    await waitFor(() => expect(state.confirmingLeave).toBe(true));
+    f.setCatalogue(async (url) =>
+      url.startsWith(bobUrl)
+        ? catalogue([home], [home], bobUrl)
+        : catalogue([personal], [personal]),
+    );
+    await act(async () => {
+      if (other) await other.disconnect(alice);
+      else await app.refreshContexts(alice);
+    });
+    // Her shown rows ask for the catalogue she reads now.
+    await waitFor(() =>
+      expect(
+        state.connections.find((c) => c.id === alice)?.catalogue.kind,
+      ).toBe('ready'),
+    );
+    expect(await opening).toBe(false);
+    expect(state.confirmingLeave).toBe(false);
+    expect(edit.target).toEqual(bobs);
+    expect(edit.editor!.state.draft?.title).toBe('Oat milk');
+  },
+);
+
 /** Rows the child shows from its own state; the parent only owns the hook. */
 let showRows: (rows: readonly Row[]) => void;
 function Revealing({
@@ -597,6 +652,65 @@ it("asks for an inactive Pod's catalogue when a row's own component first shows 
         .hasAttribute('disabled'),
     ).toBe(false),
   );
+});
+
+it("drops catalogue demand once a row's own component hides its last row", async () => {
+  const factory = new IDBFactory();
+  const { f, runtime, other } = await twoPods((r) => void runtimes.push(r), {
+    signIn: 'optional',
+    openStore: (namespace) =>
+      openSessionStore(namespace, factory, browserChannel),
+  });
+  const tab = createBrowserRuntime({
+    ...f.options,
+    location: () => 'https://app.example/',
+  });
+  runtimes.push(tab);
+  await tab.initialize();
+  await restored(tab);
+  const alice = f.id;
+  const bob = other.id;
+  let asked = 0;
+  f.setCatalogue(async (url) => {
+    if (url.startsWith(bobUrl)) return catalogue([home], [home], bobUrl);
+    asked++;
+    return catalogue([work, personal], [work, personal]);
+  });
+  render(
+    <SempodsProvider runtime={runtime} contextSelection="on-demand">
+      <Owner />
+    </SempodsProvider>,
+  );
+  await waitFor(() => expect(showRows).toBeDefined());
+  await waitFor(() => expect(state.activeId).toBe(bob));
+  await act(async () => {
+    await runtime.loadContexts(alice);
+  });
+  const alices = () => state.connections.find((c) => c.id === alice)!;
+  await waitFor(() => expect(alices().catalogue.kind).toBe('ready'));
+  // The child switches from Alice's row in one Context to one in another,
+  // then hides them all; her catalogue is there throughout.
+  const inWork = await milkRows(alice, work);
+  const inPersonal = await milkRows(alice, personal);
+  // The first shown row renders the hook's owner again, before the switch.
+  await act(async () => {
+    showRows(inWork);
+    await Promise.resolve();
+  });
+  act(() => showRows(inPersonal));
+  act(() => showRows([]));
+  asked = 0;
+  // Signed out in another tab under optional sign-in, she reads without a
+  // token, with no catalogue yet: no row of hers asks for one.
+  await act(async () => {
+    await tab.disconnect(alice);
+  });
+  await waitFor(() => expect(alices().reading).toBe('anonymous'));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(asked).toBe(0);
+  expect(alices().catalogue.kind).toBe('unknown');
 });
 
 it('retires an editor whose connection is forgotten and added again under its ID', async () => {
