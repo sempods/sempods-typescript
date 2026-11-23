@@ -1083,6 +1083,44 @@ it('reads Context access again after a renewal and a consent round trip a cached
   );
 });
 
+it('reads Context access once more when a second consent ends during that read', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  await quiet();
+  t.a.dispose();
+  const held = deferred<Response>();
+  let first = true;
+  t.setCatalogue(async () => {
+    if (!first) return catalogue([], []);
+    first = false;
+    return held.promise;
+  });
+  const catalogues = () =>
+    t.fetch.mock.calls.filter(([url]) => url.endsWith('/_system/contexts'))
+      .length;
+  const before = catalogues();
+  const one = t.returned(undefined, 'error=access_denied');
+  runtimes.push(one);
+  await one.initialize();
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 1));
+  // A second consent ends while tab b's recheck read is out.
+  await one.beginAuthorization(t.id, { intent: 'change-sharing' });
+  one.dispose();
+  const two = t.returned(undefined, 'error=access_denied');
+  runtimes.push(two);
+  await two.initialize();
+  await quiet();
+  expect(catalogues()).toBe(before + 1);
+  held.resolve(catalogue());
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 2));
+  await vi.waitFor(() =>
+    expect(t.b.getSnapshot()[0]?.catalogue).toMatchObject({
+      kind: 'ready',
+      contexts: [],
+    }),
+  );
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

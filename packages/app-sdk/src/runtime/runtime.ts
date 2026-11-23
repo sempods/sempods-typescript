@@ -1637,10 +1637,20 @@ export function createBrowserRuntime(
    * read under way settled, as it may describe the access from before. Only
    * for a connection whose catalogue the app read.
    */
-  function recheckAccess(e: Entry) {
+  function recheckAccess(
+    e: Entry,
+    /**
+     * A catch-up without a new outcome of its own (a page back from the
+     * back/forward cache): a recheck read under way answers it.
+     */
+    join = false,
+  ) {
     if (e.view.catalogue.kind === 'unknown') return;
-    // A read this recheck started already answers a later one.
-    if (e.catalogue && e.catalogue === e.rechecking) return;
+    if (e.catalogue && e.catalogue === e.rechecking) {
+      // A new consent outcome during a recheck read: once more after it.
+      if (!join) e.recheckAgain = true;
+      return;
+    }
     invalidateContexts(e);
     const generation = e.generation;
     const again = () => {
@@ -1650,7 +1660,12 @@ export function createBrowserRuntime(
       void read
         .catch(() => {})
         .finally(() => {
-          if (e.rechecking === read) delete e.rechecking;
+          if (e.rechecking !== read) return;
+          delete e.rechecking;
+          if (e.recheckAgain) {
+            delete e.recheckAgain;
+            recheckAccess(e);
+          }
         });
     };
     if (e.catalogue) void e.catalogue.then(again, again);
@@ -1811,7 +1826,7 @@ export function createBrowserRuntime(
           e.view.session.kind === 'active' ||
           e.view.session.kind === 'renewing'
         )
-          recheckAccess(e);
+          recheckAccess(e, true);
     });
     if (lease?.store.watch)
       void synced

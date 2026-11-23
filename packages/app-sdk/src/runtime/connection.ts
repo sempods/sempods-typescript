@@ -60,6 +60,8 @@ export interface Entry {
   preparation?: object;
   /** The catalogue read a Context access recheck started (`recheckAccess`). */
   rechecking?: Promise<unknown>;
+  /** Another consent outcome arrived during that read: it runs once more. */
+  recheckAgain?: true;
   /** The saved session a restoration could not reach yet; tried again on demand. */
   restorable?: Extract<SessionRecord, { kind: 'ready' }>;
   /**
