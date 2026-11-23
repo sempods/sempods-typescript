@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import {
   EditorContent,
   useEditor,
   useEditorState,
+  type ChainedCommands,
   type Editor,
   type JSONContent,
+  type UseEditorOptions,
 } from '@tiptap/react';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import { Placeholder } from '@tiptap/extensions';
@@ -23,13 +26,11 @@ import {
   Undo2Icon,
   type LucideIcon,
 } from 'lucide-react';
-import { Toolbar } from 'react-aria-components';
 import { Button } from '../components/button.js';
 import { Input } from '../components/input.js';
-import { fromMarkdown, toMarkdown, type DocNode } from './document.js';
+import { joinBlocks, serializeBlock, WEB, type DocNode } from './document.js';
 import type { MarkdownFieldLabels } from './texts.js';
-
-const WEB = /^https?:\/\/\S+$/i;
+import { isCommand, ToolButton, ToolGroup } from './tools.js';
 
 /**
  * The text as `MarkdownView` draws it, in a box like the kit's text input:
@@ -43,70 +44,82 @@ const CONTENT =
   '[&_a]:underline [&_a]:underline-offset-2 ' +
   '[&_p.is-editor-empty:first-child]:before:pointer-events-none [&_p.is-editor-empty:first-child]:before:float-start [&_p.is-editor-empty:first-child]:before:h-0 [&_p.is-editor-empty:first-child]:before:text-muted-foreground [&_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]';
 
-type Kind =
-  | 'heading'
-  | 'subheading'
-  | 'bold'
-  | 'italic'
-  | 'strikethrough'
-  | 'bulletList'
-  | 'numberedList';
-
-/** The formatting actions in toolbar order: whether each is on, and its toggle. */
-const ACTIONS: readonly (readonly [
-  Kind,
-  LucideIcon,
-  (editor: Editor) => boolean,
-  (editor: Editor) => void,
-])[] = [
+/**
+ * The formatting actions in toolbar order: the node or mark each turns on,
+ * and its toggle.
+ */
+const ACTIONS = [
   [
     'heading',
     Heading2Icon,
-    (e) => e.isActive('heading', { level: 2 }),
-    (e) => e.chain().focus().toggleHeading({ level: 2 }).run(),
+    'heading',
+    { level: 2 },
+    (c) => c.toggleHeading({ level: 2 }),
   ],
   [
     'subheading',
     Heading3Icon,
-    (e) => e.isActive('heading', { level: 3 }),
-    (e) => e.chain().focus().toggleHeading({ level: 3 }).run(),
+    'heading',
+    { level: 3 },
+    (c) => c.toggleHeading({ level: 3 }),
   ],
-  [
-    'bold',
-    BoldIcon,
-    (e) => e.isActive('bold'),
-    (e) => e.chain().focus().toggleBold().run(),
-  ],
-  [
-    'italic',
-    ItalicIcon,
-    (e) => e.isActive('italic'),
-    (e) => e.chain().focus().toggleItalic().run(),
-  ],
+  ['bold', BoldIcon, 'bold', undefined, (c) => c.toggleBold()],
+  ['italic', ItalicIcon, 'italic', undefined, (c) => c.toggleItalic()],
   [
     'strikethrough',
     StrikethroughIcon,
-    (e) => e.isActive('strike'),
-    (e) => e.chain().focus().toggleStrike().run(),
+    'strike',
+    undefined,
+    (c) => c.toggleStrike(),
   ],
   [
     'bulletList',
     ListIcon,
-    (e) => e.isActive('bulletList'),
-    (e) => e.chain().focus().toggleBulletList().run(),
+    'bulletList',
+    undefined,
+    (c) => c.toggleBulletList(),
   ],
   [
     'numberedList',
     ListOrderedIcon,
-    (e) => e.isActive('orderedList'),
-    (e) => e.chain().focus().toggleOrderedList().run(),
+    'orderedList',
+    undefined,
+    (c) => c.toggleOrderedList(),
   ],
-];
+] as const satisfies readonly (readonly [
+  keyof MarkdownFieldLabels,
+  LucideIcon,
+  string,
+  { readonly level: number } | undefined,
+  (chain: ChainedCommands) => ChainedCommands,
+])[];
+
+/**
+ * Each top-level block's Markdown, kept for the block it was written for:
+ * ProseMirror's nodes never change, so a change writes only its block anew.
+ */
+const written = new WeakMap<ProseMirrorNode, (string | undefined)[]>();
+
+/** The editor's document as standard Markdown. */
+function markdownOf(doc: ProseMirrorNode): string {
+  const blocks: { readonly type: string; readonly node: ProseMirrorNode }[] =
+    [];
+  doc.forEach((node) => blocks.push({ type: node.type.name, node }));
+  return joinBlocks(blocks, ({ node }, other) => {
+    const kept = written.get(node) ?? [];
+    const slot = other ? 1 : 0;
+    kept[slot] ??= serializeBlock(node.toJSON() as DocNode, other);
+    written.set(node, kept);
+    return kept[slot]!;
+  });
+}
 
 export interface RichEditorProps {
   readonly label: string;
   /** The source; a new one from the app replaces the editor's text. */
   readonly value: string;
+  /** The source as the editor's document, read by the field. */
+  readonly doc: DocNode;
   readonly placeholder?: string;
   readonly texts: MarkdownFieldLabels;
   /** Where the toolbar goes: the field's top row. */
@@ -115,40 +128,6 @@ export interface RichEditorProps {
   readonly onChange: (value: string) => void;
   /** Moves the focus into the text, once the editor is there. */
   readonly onReady: (focus: () => void) => void;
-}
-
-function ToolButton({
-  label,
-  Icon,
-  pressed,
-  disabled,
-  onPress,
-}: {
-  readonly label: string;
-  readonly Icon: LucideIcon;
-  readonly pressed?: boolean;
-  readonly disabled?: boolean;
-  readonly onPress: () => void;
-}) {
-  return (
-    <Button
-      variant="ghost"
-      className={
-        pressed
-          ? 'size-11 bg-accent text-foreground hover:text-foreground'
-          : 'size-11 text-muted-foreground hover:text-foreground'
-      }
-      aria-label={label}
-      aria-pressed={pressed}
-      isDisabled={disabled}
-      preventFocusOnPress
-      onPress={onPress}
-    >
-      <span aria-hidden="true" className="contents">
-        <Icon />
-      </span>
-    </Button>
-  );
 }
 
 /** The address of the link at the selection, set, changed or removed. */
@@ -251,6 +230,7 @@ function LinkRow({
 export default function RichEditor({
   label,
   value,
+  doc,
   placeholder,
   texts,
   toolbar,
@@ -262,60 +242,64 @@ export default function RichEditor({
   const report = useRef(onChange);
   report.current = onChange;
   const [linking, setLinking] = useState(false);
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        blockquote: false,
-        code: false,
-        codeBlock: false,
-        horizontalRule: false,
-        underline: false,
-        // Nothing the person did not do: no paragraph added after a list.
-        trailingNode: false,
-        heading: { levels: [1, 2, 3, 4, 5, 6] },
-        link: {
-          openOnClick: false,
-          // A typed address stays text, and typing at a link's end does not
-          // extend it.
-          autolink: false,
-          linkOnPaste: true,
-          markdownLinks: false,
-          defaultProtocol: 'https',
-          isAllowedUri: (url) => WEB.test(url),
+  const first = useRef(doc);
+  // The same options on every render: new ones would update the editor.
+  const options = useMemo<UseEditorOptions>(
+    () => ({
+      extensions: [
+        StarterKit.configure({
+          blockquote: false,
+          code: false,
+          codeBlock: false,
+          horizontalRule: false,
+          underline: false,
+          // Nothing the person did not do: no paragraph added after a list.
+          trailingNode: false,
+          link: {
+            openOnClick: false,
+            // A typed address stays text, and typing at a link's end does
+            // not extend it.
+            autolink: false,
+            linkOnPaste: true,
+            markdownLinks: false,
+            defaultProtocol: 'https',
+            isAllowedUri: (url) => WEB.test(url),
+          },
+        }),
+        Placeholder.configure({ placeholder: placeholder ?? '' }),
+      ],
+      content: first.current as JSONContent,
+      editorProps: {
+        attributes: {
+          class: CONTENT,
+          role: 'textbox',
+          'aria-multiline': 'true',
+          'aria-label': label,
+          spellcheck: 'true',
         },
-      }),
-      Placeholder.configure({ placeholder: placeholder ?? '' }),
-    ],
-    content: (fromMarkdown(value) ?? { type: 'doc' }) as JSONContent,
-    editorProps: {
-      attributes: {
-        class: CONTENT,
-        role: 'textbox',
-        'aria-multiline': 'true',
-        'aria-label': label,
-        spellcheck: 'true',
+        handleKeyDown: (_, event) => {
+          if (!isCommand(event) || event.key.toLowerCase() !== 'k')
+            return false;
+          event.preventDefault();
+          // At once, so the address typed next goes into its input.
+          flushSync(() => setLinking(true));
+          return true;
+        },
       },
-      handleKeyDown: (_, event) => {
-        const command =
-          (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
-        if (!command || event.key.toLowerCase() !== 'k') return false;
-        event.preventDefault();
-        // At once, so the address typed next goes into its input.
-        flushSync(() => setLinking(true));
-        return true;
+      onUpdate: ({ editor: changed }) => {
+        const next = markdownOf(changed.state.doc);
+        if (next === shown.current) return;
+        shown.current = next;
+        report.current(next);
       },
-    },
-    onUpdate: ({ editor: changed }) => {
-      const next = toMarkdown(changed.getJSON() as DocNode);
-      if (next === shown.current) return;
-      shown.current = next;
-      report.current(next);
-    },
-  });
+    }),
+    [label, placeholder],
+  );
+  const editor = useEditor(options);
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
-      active: ACTIONS.map(([, , isActive]) => isActive(e)),
+      active: ACTIONS.map(([, , name, attrs]) => e.isActive(name, attrs)),
       link: e.isActive('link'),
       undo: e.can().undo(),
       redo: e.can().redo(),
@@ -325,14 +309,12 @@ export default function RichEditor({
   // A new source from the app, such as a discarded draft, replaces the text.
   useEffect(() => {
     if (value === shown.current) return;
-    const doc = fromMarkdown(value);
-    if (!doc) return;
     shown.current = value;
     editor
       .chain()
       .setContent(doc as JSONContent, { emitUpdate: false })
       .run();
-  }, [editor, value]);
+  }, [editor, value, doc]);
   // Ready once its view is there, which can be after this first effect.
   useEffect(() => {
     const ready = () => onReady(() => editor.chain().focus().run());
@@ -347,17 +329,14 @@ export default function RichEditor({
   }, [editor, onReady]);
 
   const bar = (
-    <Toolbar
-      aria-label={texts.formatting}
-      className="flex min-w-0 flex-1 flex-wrap gap-0.5"
-    >
-      {ACTIONS.map(([kind, Icon, , run], i) => (
+    <ToolGroup label={texts.formatting}>
+      {ACTIONS.map(([kind, Icon, , , toggle], i) => (
         <ToolButton
           key={kind}
           label={texts[kind]}
           Icon={Icon}
           pressed={state.active[i]}
-          onPress={() => run(editor)}
+          onPress={() => toggle(editor.chain().focus()).run()}
         />
       ))}
       <ToolButton
@@ -378,7 +357,7 @@ export default function RichEditor({
         disabled={!state.redo}
         onPress={() => editor.chain().focus().redo().run()}
       />
-    </Toolbar>
+    </ToolGroup>
   );
   return (
     <div className="grid min-w-0 gap-2">

@@ -247,3 +247,90 @@ describe('marks', () => {
     ).toBe('a\n\nb');
   });
 });
+
+describe('any document', () => {
+  // A small, seeded generator: the same documents on every run.
+  let seed = 395;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = <T>(items: readonly T[]) =>
+    items[Math.floor(random() * items.length)]!;
+  const CHARS = 'ab xy 12 *_~[]()!#&;<>`\\-+.=:/é';
+  const HREFS = [
+    'https://a.b/x',
+    'https://a.b/?x=1&copy;=2',
+    'https://a.b/(c)',
+  ];
+  const inline = (): DocNode[] =>
+    Array.from({ length: 1 + Math.floor(random() * 5) }, () => {
+      if (random() < 0.15) return hardBreak;
+      const marks = [
+        ...(['bold', 'italic', 'strike'] as const)
+          .filter(() => random() < 0.3)
+          .map((type) => ({ type })),
+        ...(random() < 0.2
+          ? [{ type: 'link', attrs: { href: pick(HREFS) } }]
+          : []),
+      ];
+      const value = Array.from({ length: 1 + Math.floor(random() * 8) }, () =>
+        pick([...CHARS]),
+      ).join('');
+      return text(value, ...marks);
+    });
+  const block = (): DocNode => {
+    const kind = random();
+    if (kind < 0.5) return { type: 'paragraph', content: inline() };
+    if (kind < 0.7)
+      return {
+        type: 'heading',
+        attrs: { level: 1 + Math.floor(random() * 6) },
+        content: inline(),
+      };
+    return {
+      type: random() < 0.5 ? 'bulletList' : 'orderedList',
+      content: Array.from({ length: 1 + Math.floor(random() * 3) }, () => ({
+        type: 'listItem',
+        content: [{ type: 'paragraph', content: inline() }],
+      })),
+    };
+  };
+  /** Each character a reader sees, but whitespace, with its marks. */
+  const shown = (node: DocNode): [string, string][] =>
+    node.type === 'text'
+      ? [...(node.text ?? '')]
+          .filter((char) => /\S/.test(char))
+          .map((char) => [
+            char,
+            (node.marks ?? [])
+              .map((m) => m.type + (m.attrs?.href ?? ''))
+              .sort()
+              .join(' '),
+          ])
+      : (node.content ?? []).flatMap(shown);
+
+  it('reads back its text, and no mark it did not have', () => {
+    for (let i = 0; i < 500; i++) {
+      const doc: DocNode = {
+        type: 'doc',
+        content: Array.from({ length: 1 + Math.floor(random() * 3) }, block),
+      };
+      const written = toMarkdown(doc);
+      const back = fromMarkdown(written);
+      expect(back, written).not.toBeNull();
+      const before = shown(doc);
+      const after = shown(back!);
+      expect(after.map(([char]) => char).join(''), written).toBe(
+        before.map(([char]) => char).join(''),
+      );
+      after.forEach(([, marks], j) => {
+        const had = before[j]![1].split(' ');
+        for (const mark of marks.split(' ').filter(Boolean))
+          expect(had, written).toContain(mark);
+      });
+    }
+  });
+});

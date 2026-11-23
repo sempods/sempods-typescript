@@ -10,6 +10,7 @@
  * edit is `null`. Every edit is checked by parsing its result: text, code
  * and addresses stay as they were.
  */
+import { destination, WEB } from './document.js';
 import { parseMarkdown, type MarkdownNode } from './parse.js';
 
 /** The formatting actions the field's toolbar offers. */
@@ -528,18 +529,6 @@ function linePrefix(
   return { from, to, insert, select: [at, at + body.length] };
 }
 
-const URL_ONLY = /^https?:\/\/\S+$/i;
-
-/**
- * An address as a link destination: in angle brackets, with `<`, `>` and
- * `\\` escaped, when it holds characters that would end or change a plain
- * one, such as an unbalanced `)`.
- */
-const destination = (address: string) =>
-  /[()<>\\]/.test(address)
-    ? '<' + address.replace(/[<>\\]/g, '\\$&') + '>'
-    : address;
-
 /**
  * Text as a link's label: a `[` or `]` without its partner would end the
  * label early or move its start, and a backslash at its end would escape
@@ -592,7 +581,7 @@ function link(source: string, start: number, end: number): MarkdownEdit | null {
   for (const [block, a, b] of stretches(source, root, start, end)) {
     if (!read(block, a, b, 'link')) return null;
     const text = source.slice(a, b);
-    if (URL_ONLY.test(text)) {
+    if (WEB.test(text)) {
       const edit: MarkdownEdit = {
         from: a,
         to: b,
@@ -758,9 +747,12 @@ function checked(
   if (before.marks !== after.marks) return null;
   if (expect.typed) {
     // Typed alone between the markers, not joined to stars shown as text.
-    const alone = [...below(result)].some(
-      (node) => node.type === 'text' && node.value === expect.typed,
-    );
+    let alone = false;
+    for (const node of below(result))
+      if (node.type === 'text' && node.value === expect.typed) {
+        alone = true;
+        break;
+      }
     if (!alone) return null;
   } else if (expect.text !== false && before.text !== after.text) return null;
   for (const target of targets) {

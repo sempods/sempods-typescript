@@ -20,14 +20,14 @@ import {
   PencilIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { Toolbar } from 'react-aria-components';
 import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Textarea } from '../components/textarea.js';
-import { fromMarkdown } from './document.js';
+import { fromMarkdown, toMarkdown, type DocNode } from './document.js';
 import { applyEdit, formatMarkdown, type MarkdownFormat } from './format.js';
 import { MarkdownView, type MarkdownViewProps } from './markdown-view.js';
 import { useMarkdownTexts, type MarkdownFieldLabels } from './texts.js';
+import { isCommand, ToolButton, ToolGroup } from './tools.js';
 
 /** How the field shows its text: rendered, or as source to write in. */
 export type MarkdownPresentation = 'read' | 'write';
@@ -92,9 +92,16 @@ const RichEditor = lazy(loadRichEditor);
 /** The field's width from which the preview stands beside the source. */
 const WIDE_REM = 42;
 
-const apple = () =>
-  typeof navigator !== 'undefined' &&
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+/**
+ * The rich editor's document for `value`, or `null` when the text holds
+ * more than it edits, or something it would not write back as it reads.
+ */
+function writable(value: string): DocNode | null {
+  const doc = fromMarkdown(value);
+  if (!doc) return null;
+  const again = fromMarkdown(toMarkdown(doc));
+  return JSON.stringify(again) === JSON.stringify(doc) ? doc : null;
+}
 
 /**
  * A Markdown text, controlled by the app: rendered for reading, and written
@@ -143,11 +150,13 @@ export function MarkdownField({
   // other value from the app is decided again.
   const [syntax, setSyntax] = useState<{
     readonly value: string;
-    readonly rich: boolean;
+    /** The rich editor's document, or `null` for the Markdown writer. */
+    readonly doc: DocNode | null;
   } | null>(null);
   if (written && syntax?.value !== value)
-    setSyntax({ value, rich: fromMarkdown(value) !== null });
-  const rich = syntax?.rich ?? false;
+    setSyntax({ value, doc: writable(value) });
+  const doc = syntax?.doc ?? null;
+  const rich = doc !== null;
   // The rich editor's focus, once it is there, and a focus asked for before.
   const focusRich = useRef<(() => void) | null>(null);
   const focusWaits = useRef(false);
@@ -190,7 +199,8 @@ export function MarkdownField({
   }, [value]);
   useLayoutEffect(() => {
     const field = root.current;
-    if (!writing || !field) return;
+    // Only the Markdown writer shows a preview beside it.
+    if (!writing || rich || !field) return;
     const measure = () => {
       const rem =
         parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
@@ -201,7 +211,7 @@ export function MarkdownField({
     const observer = new ResizeObserver(measure);
     observer.observe(field);
     return () => observer.disconnect();
-  }, [writing]);
+  }, [writing, rich]);
 
   // Reads the source again once the selection rests, not on every key.
   const recheck = () => {
@@ -264,11 +274,8 @@ export function MarkdownField({
     emit(next);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent.isComposing || event.altKey || event.shiftKey) return;
-    const command = apple()
-      ? event.metaKey && !event.ctrlKey
-      : event.ctrlKey && !event.metaKey;
-    const kind = command ? shortcuts[event.key.toLowerCase()] : undefined;
+    if (event.nativeEvent.isComposing || !isCommand(event)) return;
+    const kind = shortcuts[event.key.toLowerCase()];
     if (!kind) return;
     event.preventDefault();
     format(kind);
@@ -295,26 +302,17 @@ export function MarkdownField({
         {writing && rich ? (
           <div ref={setSlot} className="flex min-w-0 flex-1" />
         ) : writing ? (
-          <Toolbar
-            aria-label={t.formatting}
-            className="flex min-w-0 flex-1 flex-wrap gap-0.5"
-          >
+          <ToolGroup label={t.formatting}>
             {actions.map(([kind, Icon]) => (
-              <Button
+              <ToolButton
                 key={kind}
-                variant="ghost"
-                className="size-11 text-muted-foreground hover:text-foreground"
-                aria-label={t[kind]}
-                isDisabled={unavailable.includes(kind)}
-                preventFocusOnPress
+                label={t[kind]}
+                Icon={Icon}
+                disabled={unavailable.includes(kind)}
                 onPress={() => format(kind)}
-              >
-                <span aria-hidden="true" className="contents">
-                  <Icon />
-                </span>
-              </Button>
+              />
             ))}
-          </Toolbar>
+          </ToolGroup>
         ) : (
           <span className="flex-1" />
         )}
@@ -374,6 +372,7 @@ export function MarkdownField({
                 <RichEditor
                   label={label}
                   value={value}
+                  doc={doc}
                   placeholder={placeholder}
                   texts={t}
                   toolbar={slot}

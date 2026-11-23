@@ -1892,8 +1892,9 @@ a `*` or a `1.` at a line's start, is escaped, so it stays text.
 
 **Written as Markdown.** A text with anything else, such as code, a quote,
 an image, HTML, a rule or a link with a title, which another app may have
-stored, is written as Markdown in a text input, with a note why, so nothing
-in it is lost. `onChange` receives it exactly as typed, also indentation,
+stored, or one the formatted writer would not write back as it reads, such
+as a heading over two lines, is written as Markdown in a text input, with a
+note why, so nothing in it is lost. `onChange` receives it exactly as typed, also indentation,
 trailing spaces of a hard line break and a text of only spaces; the text
 input shows exactly `value`, though the browser reports every line ending
 as `\n`, also on lines the person did not touch. Its toolbar acts on the

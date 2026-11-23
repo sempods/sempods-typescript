@@ -244,6 +244,12 @@ it('decides the writer again for a value the app restores', async () => {
   expect(text().value).toBe('`y`');
 });
 
+it('writes as Markdown a text it would not write back as it reads', () => {
+  // A heading over two lines: written formatted, it would become one line.
+  render(<Notes initial={'Title\nmore\n==='} defaultPresentation="write" />);
+  expect(text().value).toBe('Title\nmore\n===');
+});
+
 it('starts writing Markdown with its actions for a text with code', () => {
   render(
     <Notes
