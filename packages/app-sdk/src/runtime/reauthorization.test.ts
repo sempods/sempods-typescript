@@ -5,7 +5,7 @@
  * leave the session as it is.
  */
 import { afterEach, expect, it, vi } from 'vitest';
-import { IDBObjectStore } from 'fake-indexeddb';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { createBrowserRuntime } from './runtime.js';
 import { openSessionStore } from '../sessions/store.js';
 import type { BrowserRuntime } from './types.js';
@@ -17,6 +17,7 @@ import {
   jwt,
   restored,
   settleLease,
+  storeWith,
   unauthorized,
   work,
 } from './fixture.test.js';
@@ -812,4 +813,46 @@ it('leaves a newer attempt for its own callback when a replaced one answers late
     interaction: 'completed',
     connectionId: id,
   });
+});
+
+it('lets a sign-out after the new grant was stored, before this tab uses it, stay in effect', async () => {
+  const factory = new IDBFactory();
+  const gate: { held?: ReturnType<typeof deferred<void>>; reached?: boolean } =
+    {};
+  const f = fixture({
+    scopes: { required: ['tasks'], optional: ['share'] },
+    openStore: storeWith(factory, (store) => ({
+      async commit(id, revision, value) {
+        const result = await store.commit(id, revision, value);
+        const v = value as { kind?: string; pending?: unknown };
+        if (gate.held && v.kind === 'ready' && v.pending === undefined) {
+          gate.reached = true;
+          await gate.held.promise;
+        }
+        return result;
+      },
+    })),
+  });
+  const { id, authorization } = await reauthorizing(f);
+  gate.held = deferred<void>();
+  const next = keep(f.returned(authorization));
+  const report = next.initialize();
+  await vi.waitFor(() => expect(gate.reached).toBe(true));
+  const held = gate.held;
+  delete gate.held;
+  expect(await next.disconnect(id)).toEqual({ kind: 'disconnected' });
+  held.resolve();
+  expect(await report).toMatchObject({
+    interaction: 'failed',
+    problem: 'disconnected',
+  });
+  expect(next.getSnapshot()).toMatchObject([
+    { id, session: { kind: 'signed-out', problem: 'disconnected' } },
+  ]);
+  const store = await openSessionStore(namespace, factory);
+  expect((await store.read(id))?.value).toMatchObject({
+    kind: 'disconnected',
+    reason: 'disconnected',
+  });
+  store.close();
 });

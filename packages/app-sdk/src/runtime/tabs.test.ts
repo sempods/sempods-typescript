@@ -802,6 +802,27 @@ it('reads Context access again in tab b once a re-authorization ends without a n
   expect(t.session(t.b)).toMatchObject({ kind: 'active' });
 });
 
+it('reads Context access again in a tab that started while the re-authorization was out', async () => {
+  const t = await tabs();
+  await t.a.beginAuthorization(t.id, { intent: 'change-sharing' });
+  t.a.dispose();
+  t.b.dispose();
+  const c = createBrowserRuntime({ ...t.options, tabStorage: memoryStorage() });
+  runtimes.push(c);
+  await c.initialize();
+  await restored(c);
+  expect(await c.loadContexts(t.id)).toMatchObject({ kind: 'ok' });
+  const catalogues = () =>
+    t.fetch.mock.calls.filter(([url]) => url.endsWith('/_system/contexts'))
+      .length;
+  const before = catalogues();
+  const back = t.returned(undefined, 'error=access_denied');
+  runtimes.push(back);
+  expect(await back.initialize()).toMatchObject({ resumed: true });
+  await vi.waitFor(() => expect(catalogues()).toBe(before + 1));
+  expect(t.session(c)).toMatchObject({ kind: 'active' });
+});
+
 it('does not carry the page’s Context onto a grant that replaced its session while it stayed', async () => {
   const { channels, freeze } = freezable();
   const t = await tabs(channels);

@@ -675,6 +675,10 @@ export function createBrowserRuntime(
       e.view = { ...e.view, requestedScopes: b.scopes };
       return e;
     }
+    // Another tab's re-authorization of this session is out: once it ends
+    // without a grant, Context access is read again (see `adopt`).
+    if ((value.kind === 'ready' || value.kind === 'claimed') && value.pending)
+      e.reauthorized = true;
     const problem = interruption(value);
     const restores =
       value.kind === 'ready' ||
@@ -2033,8 +2037,24 @@ export function createBrowserRuntime(
     }
     if (disposed) throw new RuntimeError('disconnected');
     if (outcome.kind === 'kept') return outcome;
-    // The new grant: nothing of the earlier session's connection continues.
+    // A sign-out or forget after the grant was stored stays in effect: the
+    // grant is used only while the record still holds it.
+    const now = await shared.read(id).catch(() => undefined);
+    if (disposed) throw new RuntimeError('disconnected');
     const old = entries.get(id);
+    if (
+      disconnects.has(id) ||
+      !old ||
+      !now ||
+      now.value.kind === 'disconnected'
+    )
+      throw new RuntimeError('disconnected');
+    if (old !== e || now.revision !== outcome.record.revision) {
+      // Changed meanwhile: the connection follows the record as it is now.
+      void sync(old);
+      return { kind: 'completed' };
+    }
+    // The new grant: nothing of the earlier session's connection continues.
     const next = fromRecord(outcome.record);
     next.pod = pod;
     entries.set(id, next);
