@@ -793,9 +793,10 @@ contract below; the standard component already does so.
   preset) can be selected. Labels are read once per Pod, not again on token
   renewal.
 - `select` resolves a `TargetSelection`: `selected`, `declined`, `blocked`
-  (a pending write or another change) or `unavailable` with a `reason`. It asks
-  at most once about drafts and unconfirmed writes; a Pod change leaves guards
-  as `selectConnection` does, the same Pod as `selectContext`. The Context is
+  (a pending write, another change or a Pod's pending sign-in redirect) or
+  `unavailable` with a `reason`. It asks at most once about drafts and
+  unconfirmed writes; a Pod change leaves guards as `selectConnection` does,
+  the same Pod as `selectContext`. The Context is
   selected on the target Pod before it becomes active, so no screen ever sees
   that Pod with its previous, possibly writable, Context. A target whose Pod,
   sign-in or listing disappears while the person is asked withdraws the
@@ -865,7 +866,9 @@ export function ShareAnotherList({ connectionId }: { connectionId: string }) {
   `useSdkLocale().error`. After a confirmed leave question it resolves
   `false` instead, and the SDK's confirmation reports the failure.
 - Otherwise the page leaves for the Pod: the connection is `leaving` and the
-  content inert. After consent the app returns to `returnTo`, the new grant
+  content inert. Until the page has left, `share` and the other connection
+  actions resolve `false`, also for another Pod, so none replaces that
+  redirect. After consent the app returns to `returnTo`, the new grant
   replaces the old one and that Pod is the active one; the catalogue is read
   again, and the remembered Context is selected while it stays readable.
 - Cancelled or declined, the earlier session resumes with its access
@@ -2199,11 +2202,17 @@ Read state with `useAppState`, `useConnections` and `useView`.
   guard, which may be bound to that Pod, is asked about too.
 - A pending write blocks every change, except that a saving `connection` or
   `explicit` draft does not block a Context selection, and signing out of or
-  removing another Pod waits only for the writes it would leave. A confirmation names
-  unconfirmed writes it leaves and warns that discarding does not undo them.
+  removing another Pod waits only for the writes it would leave. A
+  confirmation names unconfirmed writes it leaves and warns that discarding
+  does not undo them.
 - A declined change discards nothing; the target stays when its replacement is
   gone. A prompt whose connection stops being active (a returning sign-in, a
   removal, a sign-out) is cancelled: the action resolves `false`, nothing runs.
+- While any Pod's sign-in or **Change sharing** redirect is pending, not only
+  the selected Pod's, the page is leaving: every guarded change resolves
+  `false` at once, a prompt still open is cancelled, and the content is
+  inert. Selecting the Pod or Context that is already selected resolves
+  `true` and changes nothing.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.
 - Leaving the document (reload, closing the tab, typing an address, Back past
