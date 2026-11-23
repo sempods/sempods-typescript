@@ -37,6 +37,12 @@ export type SessionRecord = { readonly version: 1 } & (
        * denied or abandoned attempt may resume it; any other outcome drops it.
        */
       readonly previous?: PreviousSession;
+      /**
+       * The first sign-in replaced the address of a Pod never signed in to
+       * (#372): a sign-in that fails, or a sign-out of it, puts the address
+       * back. Absent in records of SDKs that do not save addresses.
+       */
+      readonly address?: true;
     }
   | {
       readonly kind: 'ready';
@@ -54,6 +60,8 @@ export type SessionRecord = { readonly version: 1 } & (
        * of SDK 0.7 and earlier, which are never sent again.
        */
       readonly resend?: RefreshResend;
+      /** A code claim of an attempt that replaced an address; see `authorizing`. */
+      readonly address?: true;
     }
   | {
       readonly kind: 'disconnected';
@@ -69,7 +77,7 @@ export type SessionRecord = { readonly version: 1 } & (
       /**
        * A Pod read without a token that was never signed in to (`signIn:
        * 'optional'`): only its address, neither discovered nor bound to a
-       * client. A sign-in replaces it. SDKs up to 0.9.0-dev.3 list it as
+       * client. A sign-in replaces it. SDKs without this kind (such as 0.9.0-dev.3) list it as
        * unreadable and leave it untouched.
        */
       readonly kind: 'address';
@@ -112,6 +120,16 @@ export function sessionBinding(value: BoundSessionRecord): SessionBinding {
 }
 
 /** The exact Pod URL a record is for. */
+/**
+ * Whether a first sign-in under way replaced the address of a Pod never
+ * signed in to, which its failure or sign-out puts back (#372).
+ */
+export function replacesAddress(value: SessionRecord): boolean {
+  return (
+    (value.kind === 'authorizing' || value.kind === 'claimed') &&
+    value.address === true
+  );
+}
 export function recordPodUrl(value: SessionRecord): string {
   return value.kind === 'address'
     ? value.podUrl
@@ -179,6 +197,7 @@ export function parseSessionRecord(
         ...(value.previous === undefined
           ? {}
           : { previous: parsePrevious(value.previous, config) }),
+        ...(value.address === true ? { address: true as const } : {}),
       };
       if (
         parsed.previous &&
@@ -227,6 +246,9 @@ export function parseSessionRecord(
             ...(value.resend === undefined || value.operation !== 'refresh'
               ? {}
               : { resend: parseResend(value.resend) }),
+            ...(value.address === true && value.operation === 'code'
+              ? { address: true as const }
+              : {}),
           };
           break;
         case 'disconnected':

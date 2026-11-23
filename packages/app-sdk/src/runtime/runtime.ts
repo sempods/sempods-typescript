@@ -35,6 +35,7 @@ import {
 import {
   recordGeneration,
   recordPodUrl,
+  replacesAddress,
   sessionBinding,
   SessionTransitionError,
   type RefreshResend,
@@ -700,6 +701,14 @@ export function createBrowserRuntime(
     } else {
       contexts.forget(id);
       ensureDefault();
+      // Another record for the Pod may remain, as when a start removed this
+      // one as a duplicate: it is listed instead.
+      if (lease?.store.watch)
+        void savedFor(e.view.podUrl)
+          .then((saved) => saved && admit(saved))
+          .catch(() => {
+            // Listed by the next start.
+          });
     }
     publish();
   }
@@ -1137,10 +1146,9 @@ export function createBrowserRuntime(
     }
   }
   /** A connection without discovery or client that reads without a token. */
-  function addAnonymous(podUrl: string, id?: string) {
+  function anonymousEntry(podUrl: string, id?: string) {
     const e = createEntry(podUrl, undefined, undefined, id);
     e.anonymous = true;
-    entries.set(e.view.id, e);
     return e;
   }
   /**
@@ -1153,7 +1161,7 @@ export function createBrowserRuntime(
     for (const e of entries.values())
       if (e.view.podUrl === defaultPodUrl) return false;
     // A stable id keeps the remembered Context of a Pod never signed in to.
-    addAnonymous(defaultPodUrl, defaultPodUrl);
+    entries.set(defaultPodUrl, anonymousEntry(defaultPodUrl, defaultPodUrl));
     return true;
   }
   /**
@@ -1168,6 +1176,11 @@ export function createBrowserRuntime(
   }
   async function erase(id: string, revision: string) {
     if (!(await remove(id, revision))) throw new RuntimeError('disconnected');
+  }
+  /** Whether `e`'s record is a first sign-in that replaced an address. */
+  async function replacingAddress(e: Entry) {
+    const stored = await sessions!.read(e.view.id);
+    return stored?.revision === e.revision && replacesAddress(stored.value);
   }
   /**
    * Retires the saved session: keeps only the address and why it ended
@@ -1191,7 +1204,9 @@ export function createBrowserRuntime(
           contexts.forget(e.view.id);
           return undefined;
         }
-        if (!deleting) {
+        // A first sign-in that replaced another tab's address (#372) puts
+        // it back rather than delete it, unless it is forgotten.
+        if (!deleting || (!e.forgetting && (await replacingAddress(e)))) {
           const change = await sessions.disconnect(
             e.view.id,
             e.revision,
@@ -2230,27 +2245,40 @@ export function createBrowserRuntime(
     } catch (error) {
       // Another tab signed in, or began to, on the address both list (#372):
       // its record replaced this connection. A session it stored is the
-      // result of the sign-in asked for here; otherwise the sign-in goes on
-      // on the replacing connection, as it would on another tab's record it
-      // found (see below). A sign-out or forget here still cancels it.
+      // result of the sign-in asked for here, and a sign-in under way there
+      // is followed rather than replaced: its session reaches this tab when
+      // it completes. Otherwise (an expired attempt, a sign-out there) the
+      // sign-in goes on on the replacing connection. A sign-out or forget
+      // here still cancels it.
       const now = entries.get(id);
       if (!first || now === undefined || now === e || disconnects.has(id))
         throw error;
-      const s = now.view.session.kind;
-      if (s === 'restoring' || s === 'active' || s === 'renewing') return;
+      const s = now.view.session;
+      if (
+        s.kind === 'restoring' ||
+        s.kind === 'active' ||
+        s.kind === 'renewing' ||
+        (s.kind === 'ended' && s.problem === 'interrupted')
+      )
+        return;
       return prepareAuthorization(id, intent, true);
     }
     /**
-     * Prepares and stores the attempt on `t`, this connection unless it is
-     * another tab's address for the Pod (not listed until it is stored,
-     * so `check` asks this connection); nothing changes before it is stored.
+     * Prepares and stores the attempt on `t`: this connection, or another
+     * tab's address for the Pod, not listed until the attempt is stored (see
+     * below). Nothing changes before it is stored.
      */
-    const store = async (
-      t: Entry = e,
-      check: () => void = () => current(t, before),
-      /** Takes back a stored attempt that `check` then refuses; see below. */
-      undo?: (revision: string) => Promise<void>,
-    ) => {
+    const store = async (t: Entry = e) => {
+      // `t` is current while this connection is; another tab's address also
+      // while this connection is not being signed out or forgotten.
+      const check = () => {
+        current(e, before);
+        if (
+          t !== e &&
+          (disconnects.has(e.view.id) || t.lifetime.signal.aborted)
+        )
+          throw new RuntimeError('disconnected');
+      };
       const generation = crypto.randomUUID();
       const { attempt, url } = await prepareSessionAuthorization(
         {
@@ -2288,8 +2316,13 @@ export function createBrowserRuntime(
         try {
           check();
         } catch (error) {
-          if (undo && change.kind === 'committed')
-            await undo(change.record.revision);
+          // A sign-out or forget here won over the attempt on another tab's
+          // address: the address is restored in its place (and in place of
+          // its verifier), as that tab saved it. Best effort.
+          if (t !== e && change.kind === 'committed')
+            await sessions!
+              .remember(t.view.id, t.view.podUrl, change.record.revision)
+              .catch(() => {});
           throw error;
         }
         // Committed durably: switch to the new lifetime in the same step, so no
@@ -2405,35 +2438,9 @@ export function createBrowserRuntime(
           // record, and this connection gives way only once it is saved, so
           // a failed preparation leaves it and its handles working.
           const target = fromRecord(saved);
-          const local = e;
-          const address = saved.value;
-          const shared = sessions!;
-          const saving = store(
-            target,
-            () => {
-              current(local, before);
-              if (
-                disconnects.has(local.view.id) ||
-                target.lifetime.signal.aborted
-              )
-                throw new RuntimeError('disconnected');
-            },
-            // A sign-out or forget here won meanwhile: the address is
-            // restored in place of the attempt (and its verifier), as the
-            // other tab saved it. Best effort, like any retirement.
-            (revision) =>
-              shared
-                .remember(address.connectionId, address.podUrl, revision)
-                .then(
-                  () => {},
-                  () => {},
-                ),
-          );
+          const saving = store(target);
           // A sign-out or forget of this connection waits for that write.
-          local.persistence = Promise.all([local.persistence, saving]).then(
-            () => {},
-            () => {},
-          );
+          void serial(e, () => saving).catch(() => {});
           return { prepared: await saving, target };
         } else if (saved) {
           preparing.delete(id);
@@ -2463,9 +2470,8 @@ export function createBrowserRuntime(
       const target = outcome.target;
       if (target) {
         // Saved on the other tab's address: this connection gives way to it.
-        const local = e;
         dropEntry(id);
-        stop(local, { kind: 'signed-out' });
+        stop(e, { kind: 'signed-out' });
         entries.set(target.view.id, target);
         publish();
         e = target;
@@ -2987,8 +2993,7 @@ export function createBrowserRuntime(
           // Reading needs neither discovery nor a client: a sign-in
           // discovers the Pod and resolves the client itself. Creating the
           // client validates the address.
-          const e = createEntry(url, undefined, undefined);
-          e.anonymous = true;
+          const e = anonymousEntry(url);
           const saved = await rememberAddress(e);
           if (disposed) throw new RuntimeError('disconnected');
           // Another tab saved this Pod meanwhile: its connection is this

@@ -105,6 +105,13 @@ export type CatalogueFact =
       readonly labels?: ContextLabels;
     };
 export interface Connection {
+  /**
+   * Stable for the connection's saved record. The connection that
+   * `signIn: 'optional'` or `'none'` lists for the default Pod without a
+   * saved record (the `preset`, or the sole allowed Pod) has that Pod's
+   * address as its ID; any other connection, also a saved address of the
+   * same Pod, has an ID of its own.
+   */
   readonly id: string;
   readonly podUrl: string;
   /** `null` only under `signIn: 'none'` without an `identity`. */
@@ -306,8 +313,9 @@ export interface BrowserRuntimeOptions {
    * `preset`, or a single `allowedPods` entry) where people usually have a
    * session at that Pod already (single sign-on). When nothing is stored
    * for this app on the device (no session, no remembered Pod, also none
-   * that `allowedPods` excludes now; the address of another Pod only read without
-   * a token does not count), `initialize()` connects the
+   * that `allowedPods` excludes now; the address of a Pod other than the
+   * default one, only read without a token, does not count), `initialize()`
+   * connects the
    * default Pod and navigates to its provider once with `prompt=none`
    * instead of resolving: signed in there with a grant for this app, the
    * person returns signed in without a click. Otherwise the Pod answers
@@ -419,7 +427,8 @@ export interface BrowserRuntime {
    * the default one is saved, so the next start and the app's other tabs
    * list it too, until `forget(id)`; a write that fails, or another tab
    * that holds that Pod's lock for more than three seconds, lists it in this
-   * page only.
+   * page only, until another tab saves a record for the Pod: that record's
+   * connection replaces it then, and its handles are no longer current.
    */
   connect(url?: string): Promise<Connection>;
   /**

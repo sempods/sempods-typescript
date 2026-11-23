@@ -1078,6 +1078,43 @@ describe('the address of a Pod never signed in to (#372)', () => {
     expect(attempt.value).not.toHaveProperty('previous');
   });
 
+  it('marks a first sign-in over it, which a failure or sign-out puts back', async () => {
+    const s = await setup();
+    const saved = committed(await s.transitions.remember('connection', pod));
+    const attempt = committed(
+      await s.transitions.prepare(s.attempt, saved.revision),
+    );
+    expect(attempt.value).toMatchObject({ kind: 'authorizing', address: true });
+    // Signed out of (or failed): the address is back, nothing else.
+    expect(
+      committed(await s.transitions.disconnect(attempt.id, attempt.revision))
+        .value,
+    ).toEqual(saved.value);
+    // A code claim keeps the mark, so a failed exchange puts it back too.
+    const again = committed(
+      await s.transitions.prepare(
+        s.attempt,
+        (await s.transitions.read(saved.id))!.revision,
+      ),
+    );
+    const claim = claimed(
+      await s.transitions.claimCode(
+        again.id,
+        again.revision,
+        s.attempt,
+        returned(s.attempt),
+      ),
+    );
+    const stored = (await s.transitions.read(saved.id))!;
+    expect(stored.value).toMatchObject({ kind: 'claimed', address: true });
+    expect(
+      committed(
+        await s.transitions.disconnect(saved.id, stored.revision, 'expired'),
+      ).value,
+    ).toEqual(saved.value);
+    expect(claim.kind).toBe('claimed');
+  });
+
   it('refuses a non-canonical address and lists a malformed one as corrupt', async () => {
     const s = await setup();
     await expect(

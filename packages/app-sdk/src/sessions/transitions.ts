@@ -14,6 +14,7 @@ import {
 import {
   parseSessionRecord,
   recordGeneration,
+  replacesAddress,
   sessionBinding,
   SessionTransitionError,
   type RefreshResend,
@@ -84,6 +85,16 @@ export function createSessionTransitions(
     return stored === undefined
       ? undefined
       : parseSessionRecord(stored, config);
+  }
+  /** The record of a Pod never signed in to, by its address alone. */
+  function addressRecord(id: string, podUrl: string): SessionRecord {
+    return {
+      version: 1,
+      kind: 'address',
+      configKey: config.configKey,
+      connectionId: id,
+      podUrl,
+    };
   }
   async function commit(
     id: string,
@@ -165,6 +176,9 @@ export function createSessionTransitions(
             },
           }
         : {}),
+      ...(operation === 'code' && replacesAddress(current.value)
+        ? { address: true as const }
+        : {}),
     });
   }
   return {
@@ -222,6 +236,11 @@ export function createSessionTransitions(
           : current?.value.kind === 'authorizing' && current.value.previous
             ? { previous: current.value.previous }
             : {}),
+        // Over an address (#372), also over an attempt that replaced one.
+        ...(current &&
+        (current.value.kind === 'address' || replacesAddress(current.value))
+          ? { address: true as const }
+          : {}),
       });
     },
     /**
@@ -386,13 +405,7 @@ export function createSessionTransitions(
       podUrl: string,
       revision: string | null = null,
     ): Promise<SessionChange> {
-      const value: SessionRecord = {
-        version: 1,
-        kind: 'address',
-        configKey: config.configKey,
-        connectionId: id,
-        podUrl,
-      };
+      const value = addressRecord(id, podUrl);
       // Validated as a start would read it, before anything is stored.
       validate('configuration', () =>
         parseSessionRecord({ id, revision: '-', value }, config),
@@ -412,6 +425,14 @@ export function createSessionTransitions(
       if (!current) return conflict;
       if (current.value.kind === 'address')
         return { kind: 'committed', record: current };
+      // A first sign-in over an address that failed or is signed out of:
+      // the Pod was never signed in to, so its address is put back.
+      if (replacesAddress(current.value))
+        return commit(
+          id,
+          revision,
+          addressRecord(id, sessionBinding(current.value).pod.podUrl),
+        );
       return commit(id, revision, {
         version: 1,
         kind: 'disconnected',
