@@ -151,9 +151,8 @@ Context pickers use immediate derived-name/IRI fallbacks. Only the selected,
 validated Context's label is fetched automatically; `loadContextLabels(id, iris)`
 on the runtime or `useApp()` reads up to 20 more on demand. Labels never gate
 selection or reads. `useContextEditor` edits an overview row in the Context its `GRAPH`
-binding names, without changing the selection, and with the row's
-`connection` also in a Pod that is not active, as `useContextUpdate` writes
-such rows; the
+binding names, without changing the selection; given the row's `connection`,
+also in a Pod that is not active, as `useContextUpdate` writes such rows. The
 [copyable Pod overview](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/examples/todo/recipes/pod-overview.tsx)
 shows it.
 

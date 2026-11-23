@@ -1065,36 +1065,32 @@ rows.map((item) => {
   recovery, spent snapshots, drafts and reviews as for the active
   connection. Nothing selects that connection, changes its Context or the
   destination of a creation, or switches the active Pod.
-- Its work stays with its connection. Switching the active Pod
-  (`selectConnection`, `selectTarget`) neither asks about it nor retires it,
-  and its pending write does not block that. Signing out or removing that
-  connection asks first. So does any sign-in (`authorize` of any connection,
-  `connect` under `signIn: 'required'`), because it leaves the page; its
-  pending write blocks these. A new sign-in or removing the connection ends
-  that work, also an editor on screen, as a new sign-in ends work of the
-  active connection. A session
-  that ends by itself keeps it, as for the active connection.
+- Its work stays with its connection. Switching the active Pod neither asks
+  about it nor retires it, and its pending write does not block that.
+  Signing out or removing that connection, and any sign-in, ask first
+  ([which actions](#selection-and-draft-lifetime)). A new sign-in or removing
+  the connection ends that work, also an editor on screen; a session that
+  ends by itself keeps it, as for the active connection.
 - `unresolved` lists such resources with their `connection`
   (`{ connection, context, iri }`), and `for` of that entry gives its notice.
   The same subject IRI read from two connections is two resources; key rows
   by connection, Context and IRI, and pass `connection` in `shown` too.
 - `row.problem` and the editor's `problem` use that connection's catalogue.
   Under `contextSelection="on-demand"` the SDK asks for that catalogue once
-  a row or editor of the connection is rendered. A connection added again
-  under the same ID waits for a row of its own. `AppAccess` keeps
-  presenting the active connection only. After a failed catalogue the app
+  a row or editor of the connection is rendered, and not once none is. A
+  connection added again under the same ID waits for a row of its own.
+  `AppAccess` keeps presenting the active connection only, also for its rows
+  and editors opened with `connection`. After a failed catalogue the app
   offers its own retry, `useApp().refreshContexts(connection)`, or a
   `usePodContexts` group's `retry()`.
 - `useContextEditor().open({ subject, context, connection })` opens the
   editor in that connection. It is `retired` only once the connection is
   removed, also when the runtime adds one under the same ID again (the
   default Pod read without a token after `forget`). Opening another row or
-  `close()` asks first, as for the active connection. A row whose
-  connection goes, or stops reading (signed out in another tab), while the
-  person is asked withdraws the question and keeps the open editor; another
-  active Pod keeps the question. An editor of the active connection opened
-  with `connection` demands discovery as one without it, so `AppAccess`
-  presents its catalogue.
+  `close()` asks first, as for the active connection.
+- While the person is asked, a row whose connection goes or stops reading
+  (signed out in another tab) withdraws the question and keeps the open
+  editor. Another active Pod keeps the question.
 - A bulk action captures the shown rows' commands and runs them one after
   the other, as [several rows from one decision](#several-rows-from-one-decision)
   describes, stopping at the first result that is not `removed`.
@@ -2252,7 +2248,7 @@ Read state with `useAppState`, `useConnections` and `useView`.
 | ------------------------------------------------------------------ | --------------------------------------------- |
 | Row navigation (`navigate`, `useSelection().select`)               | `local` (or unscoped) and `connection` guards |
 | Context selection (`selectContext`)                                | `local` (or unscoped) and `target` guards     |
-| `selectConnection`, `connect`, `authorize`, `disconnect`, `forget` | every guard                                   |
+| `selectConnection`, `connect`, `authorize`, `disconnect`, `forget` | every guard, except as below                  |
 
 - Work bound to its own connection
   ([rows of several connected Pods](#rows-of-several-connected-pods),
@@ -2264,11 +2260,14 @@ Read state with `useAppState`, `useConnections` and `useView`.
   sign-in leave it alone.
 - A pending write blocks every change, except that a saving `connection` or
   `explicit` draft does not block a Context selection, and work bound to its
-  own connection blocks only the connection actions that leave it. A confirmation names
-  unconfirmed writes it leaves and warns that discarding does not undo them.
+  own connection blocks only the connection actions that leave it. A
+  confirmation names unconfirmed writes it leaves and warns that discarding
+  does not undo them.
 - A declined change discards nothing; the target stays when its replacement is
   gone. A prompt whose connection stops being active (a returning sign-in, a
   removal, a sign-out) is cancelled: the action resolves `false`, nothing runs.
+  A prompt to open a row bound to its own connection follows that connection
+  instead: it is cancelled once that connection goes or stops reading.
 - Content is inert during confirmation and action preparation. The policy
   does not cover direct runtime calls.
 - Leaving the document (reload, closing the tab, typing an address, Back past
