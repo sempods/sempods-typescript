@@ -130,17 +130,66 @@ function savable(tr: Transaction): boolean {
 }
 
 /**
+ * Whether a whole block saves with the mark `name` toggled over all of it,
+ * kept for the block it was found for: ProseMirror's nodes never change,
+ * so moving one end of a long selection checks only the blocks at its ends.
+ */
+const wholeBlocks = new WeakMap<ProseMirrorNode, Map<string, boolean>>();
+
+/** Whether one block saves with the mark toggled on `[from, to)` of it. */
+function blockSaves(
+  state: EditorState,
+  at: number,
+  block: ProseMirrorNode,
+  from: number,
+  to: number,
+  name: string,
+  on: boolean,
+): boolean {
+  const whole = from <= at + 1 && to >= at + block.nodeSize - 1;
+  const key = `${name} ${on}`;
+  const known = whole ? wholeBlocks.get(block)?.get(key) : undefined;
+  if (known !== undefined) return known;
+  const type = state.schema.marks[name]!;
+  const tr = state.tr;
+  if (on) tr.removeMark(from, to, type);
+  else tr.addMark(from, to, type.create());
+  const changed = tr.doc.nodeAt(at);
+  const saves =
+    !changed || changed === block || writesBack(changed.toJSON() as DocNode);
+  if (whole) {
+    const results = wholeBlocks.get(block) ?? new Map<string, boolean>();
+    results.set(key, saves);
+    wholeBlocks.set(block, results);
+  }
+  return saves;
+}
+
+/**
  * Whether toggling the mark `name` on the selection would save as shown;
  * an action that would not is disabled, so no enabled one does nothing.
  */
 function wouldSave(state: EditorState, name: string, on: boolean): boolean {
-  const type = state.schema.marks[name];
-  if (!type || state.selection.empty) return true;
-  const tr = state.tr;
-  for (const { $from, $to } of state.selection.ranges)
-    if (on) tr.removeMark($from.pos, $to.pos, type);
-    else tr.addMark($from.pos, $to.pos, type.create());
-  return savable(tr);
+  if (!state.schema.marks[name] || state.selection.empty) return true;
+  for (const { $from, $to } of state.selection.ranges) {
+    let saves = true;
+    state.doc.nodesBetween($from.pos, $to.pos, (block, at) => {
+      if (!saves) return false;
+      saves = blockSaves(
+        state,
+        at,
+        block,
+        Math.max($from.pos, at),
+        Math.min($to.pos, at + block.nodeSize),
+        name,
+        on,
+      );
+      // Top-level blocks only: each is written as a whole.
+      return false;
+    });
+    if (!saves) return false;
+  }
+  return true;
 }
 
 /** Marks a transaction that brought blocks in line with their Markdown. */
