@@ -25,6 +25,16 @@ it('renders paragraphs, headings, lists and emphasis', () => {
   expect(container.querySelectorAll('ol > li')).toHaveLength(2);
 });
 
+it('strikes text through between two tildes, not one', () => {
+  const { container } = render(
+    <MarkdownView source={'~~gone~~ and ~one~ and \\~~kept~~'} />,
+  );
+  expect(
+    [...container.querySelectorAll('del')].map((d) => d.textContent),
+  ).toEqual(['gone']);
+  expect(container.textContent).toBe('gone and ~one~ and ~~kept~~');
+});
+
 it('shows a hard line break as one break, as a typed one', () => {
   const { container } = render(
     <MarkdownView

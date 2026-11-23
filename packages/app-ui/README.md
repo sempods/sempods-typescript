@@ -23,9 +23,9 @@ Peers: React 19, `@sempods/app-sdk` and `@sempods/client-sdk` of the same minor
 version as this package, and Tailwind CSS 4.1 or newer (checked with 4.3.3).
 The package ships built JavaScript with TypeScript declarations;
 `react-aria-components`, `@internationalized/date`, `lucide-react` and the
-class utilities are its own dependencies. `react-markdown` 10 is an optional
-peer, needed only for the [Markdown entry](#markdown-text). The `shadcn` CLI
-is not needed at runtime.
+class utilities are its own dependencies. `react-markdown` 10 and Tiptap 3
+are optional peers, needed only for the [Markdown entry](#markdown-text).
+The `shadcn` CLI is not needed at runtime.
 
 ## Set up Tailwind
 
@@ -1830,76 +1830,96 @@ props.
 
 Long text fields, such as a task's notes in `schema:description`, can be
 read and written as Markdown with the opt-in entry `@sempods/app-ui/markdown`.
-It renders with [react-markdown](https://github.com/remarkjs/react-markdown),
-an optional peer that only an app using the entry installs:
+It reads with [react-markdown](https://github.com/remarkjs/react-markdown)
+and writes with [Tiptap](https://tiptap.dev), optional peers that only an
+app using the entry installs, the Tiptap packages at one version:
 
 ```sh
-npm install react-markdown
+npm install react-markdown @tiptap/core @tiptap/pm @tiptap/react @tiptap/starter-kit @tiptap/extensions
 ```
 
 An app that only shows plain text imports nothing from it and needs nothing
 more; the package's main entry never loads it. Import the entry statically,
-not with `lazy()`: the view and the field are one small module, so a stored
-text shows formatted in the first paint and writing needs no loading state.
+not with `lazy()`: a stored text shows formatted in the first paint, and the
+field loads its writer by itself after that paint, so reading loads none of
+it and writing usually finds it there.
 
 - **`MarkdownView`** shows a `source` as read-only content: paragraphs (a
-  line break typed in one shows as one, as a hard break does), headings, lists, emphasis, quotes,
-  code and links. A `#` heading is an `h3` below a dialog's `h2`, and
-  `headingLevel` moves the start; deeper ones follow down to `h6`. Text in a
-  Pod may come from any app, so the view runs and fetches nothing: embedded
-  HTML shows as its text, an image as its description only, and only
-  `http:` and `https:` addresses become links, which open in a new tab on
-  the person's press (`rel="noopener noreferrer"`); any other address stays
-  text.
+  line break typed in one shows as one, as a hard break does), headings,
+  lists, emphasis, strikethrough (`~~text~~`), quotes, code and links. A `#`
+  heading is an `h3` below a dialog's `h2`, and `headingLevel` moves the
+  start; deeper ones follow down to `h6`. Text in a Pod may come from any
+  app, so the view runs and fetches nothing: embedded HTML shows as its
+  text, an image as its description only, and only `http:` and `https:`
+  addresses become links, which open in a new tab on the person's press
+  (`rel="noopener noreferrer"`); any other address stays text.
 - **`MarkdownField`** is the controlled field around it: the app passes
   `value` (the source, `''` for none) and `onChange`, which receives every
-  change exactly as typed, also indentation, trailing spaces of a hard line
-  break and a text of only spaces. It never trims or normalizes, and the
-  text input shows exactly `value`. Opening it, switching its presentation
-  or leaving it never calls `onChange`, so the draft and the Pod stay
-  untouched. Once the person edits, the browser's text input reports every
-  line ending as `\n`, also on lines they did not touch: a text stored with
-  `\r\n` is saved with `\n` after an edit. The containing editor owns
-  validation, save, cancel and conflicts.
+  change the person makes, as described below. Opening it, switching its
+  presentation or leaving it never calls `onChange`, so the draft and the
+  Pod stay untouched. The containing editor owns validation, save, cancel
+  and conflicts.
 
 The field is a group named by its `label`. It starts with
 `defaultPresentation`: `read` (default) shows the rendered text and an
 **Edit text** action, or only **Add text** while there is no text, as the
-body of a title-first form; `write` starts with the text input. One action
-at the field's top end switches between the two, so it stays in place:
-editing moves the focus into the text input, **Preview** returns it to that
-action. Writing adds a toolbar of 44px actions that act on the selection:
-heading, bold, italic, bulleted and numbered list, and link (the link's
-address is selected to type over). The actions read the source with the
-parser that renders it, so they agree with the preview: a selection inside a
-bold or italic span, or a caret in it, takes that span's emphasis off, as
-the preview shows it, whether marked with `*` or `_`; any other selection
-gets it, its own spans of that kind merged into one. Bold and italic apply
-to each selected paragraph, list item or heading on its own, after its list
-marker, heading or quote, and leave code blocks out. A link takes the first
-selected stretch of text, without a list marker or the blocks after it.
-Lines taken out of a list become a paragraph of their own.
-Where an action's effect would not be predictable, it is disabled: inside
-code or a link's address, across part of a link or code, or a link inside a
-link. Each edit is checked by parsing its result, so text, code and
-addresses stay as they were. Pressing one keeps the focus and the
-on-screen keyboard in the text; from the keyboard, the arrow keys move along
-the toolbar and Tab leaves it. In the text input, Ctrl+B, Ctrl+I and Ctrl+K
-(Command on Apple systems) do the same, and the browser's undo reverts a
-formatting step (WebKit on macOS takes it back together with typing just
-before it, as it groups typing). The text input stays mounted once written in and is only hidden
-while reading, so its undo history survives a preview. Tab moves to the next control instead of typing a tab.
-From 42rem of the field's own width, the preview is shown beside the source
-as it is typed; a narrower field writes at full width, parses nothing while
-typing and previews on demand. `readOnly` shows the rendered text without an action, and nothing
-when there is no text; a separate reading place, such as a task's details,
-uses `MarkdownView` with the same rendering. Texts follow the SDK provider's
-language (English or German); `labels` replaces any of them.
+body of a title-first form; `write` starts writing. One action at the
+field's top end switches between the two, so it stays in place: editing
+moves the focus into the text, **Preview** returns it to that action. The
+text is written where it was once written in and only hidden while reading,
+so its undo history survives a preview. `readOnly` shows the rendered text
+without an action, and nothing when there is no text; a separate reading
+place, such as a task's details, uses `MarkdownView` with the same
+rendering. Texts follow the SDK provider's language (English or German);
+`labels` replaces any of them.
+
+**Written as it reads.** A text of paragraphs, headings, bold, italic,
+strikethrough, web links and bulleted or numbered lists, which is what
+people without Markdown write, is written formatted, without Markdown's
+characters. A toolbar of 44px actions formats the selection: heading,
+subheading, bold, italic, strikethrough, bulleted and numbered list, link,
+undo and redo; the arrow keys move along it. Ctrl+B, Ctrl+I and
+Ctrl+Shift+S (Command on Apple systems) format as well, and Ctrl+K or
+**Link** asks for the address, which Enter sets and Escape leaves. As in a
+word processor, `- `, `1. ` or `## ` at a line's start begins a list or a
+heading, which undo turns back into the characters; Shift+Enter breaks a
+line. Tab leaves the text, except in a list item, which it indents. Each
+change reaches `onChange` as standard Markdown, CommonMark with
+`~~strikethrough~~`, written one way: the first change also rewrites what
+the person left as it was, such as `_a_` as `*a*`, a line break as a `\` at
+the line's end, or a list's markers. Text that looks like Markdown, such as
+a `*` or a `1.` at a line's start, is escaped, so it stays text.
+
+**Written as Markdown.** A text with anything else, such as code, a quote,
+an image, HTML, a rule or a link with a title, which another app may have
+stored, is written as Markdown in a text input, with a note why, so nothing
+in it is lost. `onChange` receives it exactly as typed, also indentation,
+trailing spaces of a hard line break and a text of only spaces; the text
+input shows exactly `value`, though the browser reports every line ending
+as `\n`, also on lines the person did not touch. Its toolbar acts on the
+selection: heading, bold, italic, bulleted and numbered list, and link (the
+link's address is selected to type over). The actions read the source with
+the parser that renders it, so they agree with the preview: a selection
+inside a bold or italic span, or a caret in it, takes that span's emphasis
+off, whether marked with `*` or `_`; any other selection gets it, its own
+spans of that kind merged into one. Bold and italic apply to each selected
+paragraph, list item or heading on its own and leave code blocks out. A
+link takes the first selected stretch of text. Lines taken out of a list
+become a paragraph of their own. Where an action's effect would not be
+predictable, it is disabled: inside code or a link's address, across part
+of a link or code, or a link inside a link; each edit is checked by parsing
+its result, so text, code and addresses stay as they were. Ctrl+B, Ctrl+I
+and Ctrl+K do the same, and the browser's undo reverts a formatting step
+(WebKit on macOS takes it back together with typing just before it, as it
+groups typing). Tab moves to the next control instead of typing a tab. From
+42rem of the field's own width, the preview is shown beside the source as
+it is typed; a narrower field writes at full width and parses nothing while
+typing.
 
 For an SDK field, declare the text without `trim`, so Markdown keeps its
 indentation and line breaks, and as `optional`, mapping only an empty text
 to `null`, so the field is absent. The draft then holds exactly what the
-field shows: the four spaces that start an indented code block make it
+field reports: the four spaces that start an indented code block make it
 invalid only until the code follows. An app that saves a text of only
 spaces as no text converts it when it saves. The UI gate runs this file as
 written:
@@ -2462,10 +2482,12 @@ wide; the README's delete actions, where `RemoveButton`'s default icon
 and `DeleteIcon` draw the same outline at 1rem under two root font sizes;
 and the Markdown entry: a reading view formatted from its first state that
 fetches and runs nothing, a link opened on a press, switching in place with
-the focus, formatting by pointer, touch and keyboard with undo, Tab leaving
-the text, the preview beside the source only when wide, 320px, light and
-dark, and `task-notes.tsx` in an SDK editor writing nothing until saved and
-saving the text as typed. It
+the focus, formatted writing by pointer, touch and keyboard with undo, also
+after a preview, a link from Ctrl+K, typed Markdown characters kept as
+text, Tab leaving the text, a text with HTML written as Markdown with the
+preview beside it only when wide, 320px, light and dark, and
+`task-notes.tsx` in an SDK editor writing nothing until saved and saving
+standard Markdown. It
 uses a loopback fixture Pod: it is not
 evidence from a real Pod, an installed PWA, iOS or a human test.
 

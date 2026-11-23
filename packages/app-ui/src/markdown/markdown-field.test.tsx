@@ -42,6 +42,18 @@ function Notes(
 const draft = () => JSON.parse(screen.getByTestId('draft').textContent ?? '');
 const text = () => screen.getByRole<HTMLTextAreaElement>('textbox');
 const button = (name: string) => screen.getByRole('button', { name });
+/** The rich editor, once it is loaded. */
+const editor = () => screen.findByRole('textbox', {}, { timeout: 5000 });
+
+// jsdom lays nothing out; ProseMirror measures the selection to scroll to it.
+Range.prototype.getClientRects = () =>
+  ({
+    length: 0,
+    item: () => null,
+    [Symbol.iterator]: [][Symbol.iterator],
+  }) as unknown as DOMRectList;
+Range.prototype.getBoundingClientRect = () => new DOMRect();
+document.elementFromPoint = () => null;
 
 it('opens populated text rendered, with a labelled edit action', () => {
   const changed = vi.fn();
@@ -55,7 +67,8 @@ it('opens populated text rendered, with a labelled edit action', () => {
 
 it('moves the focus into the text to edit and back to its action to preview', () => {
   const changed = vi.fn();
-  const source = '  indented\n\nline with a hard break  \nnext';
+  // Code: written as Markdown, in the text input.
+  const source = '    code\n\nline with a hard break  \nnext';
   render(<Notes initial={source} changed={changed} />);
   const toggle = button('Edit text');
   fireEvent.click(toggle);
@@ -73,7 +86,7 @@ it('moves the focus into the text to edit and back to its action to preview', ()
 });
 
 it('keeps the same text input across a preview, so undo survives it', () => {
-  render(<Notes initial="Some text" />);
+  render(<Notes initial="Run `npm test`" />);
   const toggle = button('Edit text');
   fireEvent.click(toggle);
   const input = text();
@@ -87,20 +100,141 @@ it('keeps the same text input across a preview, so undo survives it', () => {
   expect(document.activeElement).toBe(input);
 });
 
-it('offers Add text for an empty field and starts writing there', () => {
+it('offers Add text for an empty field and starts writing there', async () => {
   render(<Notes />);
   const add = button('Add text');
   expect(add.textContent).toBe('Add text');
   fireEvent.click(add);
-  expect(document.activeElement).toBe(text());
+  const input = await editor();
+  await waitFor(() =>
+    expect(input.contains(document.activeElement)).toBe(true),
+  );
   expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeTruthy();
 });
 
-it('starts writing when asked to', () => {
+it('starts writing when asked to', async () => {
   render(<Notes defaultPresentation="write" placeholder="Details …" />);
+  const input = await editor();
+  expect(input.getAttribute('aria-label')).toBe('Notes');
+  expect(
+    input.querySelector('[data-placeholder]')?.getAttribute('data-placeholder'),
+  ).toBe('Details …');
+  expect(input.contains(document.activeElement)).toBe(false);
+  const actions = screen
+    .getAllByRole('button')
+    .map((b) => b.getAttribute('aria-label'));
+  expect(actions).toEqual([
+    'Heading',
+    'Subheading',
+    'Bold',
+    'Italic',
+    'Strikethrough',
+    'Bulleted list',
+    'Numbered list',
+    'Link',
+    'Undo',
+    'Redo',
+    'Preview',
+  ]);
+});
+
+it('writes text in its set formatted and reports it as Markdown', async () => {
+  const changed = vi.fn();
+  render(
+    <Notes
+      initial="Buy **milk**"
+      defaultPresentation="write"
+      changed={changed}
+    />,
+  );
+  const input = await editor();
+  expect(input.querySelector('strong')?.textContent).toBe('milk');
+  expect(input.textContent).not.toContain('*');
+  await waitFor(() =>
+    expect(button('Undo').hasAttribute('disabled')).toBe(true),
+  );
+  fireEvent.click(button('Bulleted list'));
+  expect(draft()).toBe('- Buy **milk**');
+  expect(button('Bulleted list').getAttribute('aria-pressed')).toBe('true');
+  await waitFor(() =>
+    expect(button('Undo').hasAttribute('disabled')).toBe(false),
+  );
+  fireEvent.click(button('Undo'));
+  expect(draft()).toBe('Buy **milk**');
+  expect(changed.mock.calls.map(([v]) => v)).toEqual([
+    '- Buy **milk**',
+    'Buy **milk**',
+  ]);
+});
+
+it('writes nothing for opening and switching, though it would write it differently', async () => {
+  const changed = vi.fn();
+  const source = '_a_ and __b__\nc';
+  render(<Notes initial={source} changed={changed} />);
+  fireEvent.click(button('Edit text'));
+  await editor();
+  for (let i = 0; i < 4; i++)
+    fireEvent.click(
+      screen.getByRole('button', { name: /^(Preview|Edit text)$/ }),
+    );
+  expect(changed).not.toHaveBeenCalled();
+  expect(draft()).toBe(source);
+});
+
+it('takes a new value from the app into the editor, or to Markdown', async () => {
+  const changed = vi.fn();
+  const field = (value: string) => (
+    <MarkdownField
+      label="Notes"
+      value={value}
+      onChange={changed}
+      defaultPresentation="write"
+    />
+  );
+  const { rerender } = render(field('First'));
+  const input = await editor();
+  rerender(field('Other **text**'));
+  await waitFor(() =>
+    expect(input.querySelector('strong')?.textContent).toBe('text'),
+  );
+  // A text with code from now on: the text input, with a note why.
+  rerender(field('Run `npm test`'));
+  expect(text().value).toBe('Run `npm test`');
+  expect(screen.getByText(/so you edit it as Markdown/)).toBeTruthy();
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it('sets a link from Ctrl+K without submitting the form around the field', async () => {
+  const submit = vi.fn((event: { preventDefault(): void }) =>
+    event.preventDefault(),
+  );
+  render(
+    <form onSubmit={submit}>
+      <Notes initial="Buy milk" defaultPresentation="write" />
+    </form>,
+  );
+  const input = await editor();
+  fireEvent.keyDown(input, { key: 'k', ctrlKey: true });
+  const address = screen.getByRole('textbox', { name: 'Link address' });
+  expect(document.activeElement).toBe(address);
+  expect(address.closest('form')).toBe(input.closest('form'));
+  fireEvent.change(address, { target: { value: 'https://shop.example' } });
+  fireEvent.keyDown(address, { key: 'Enter' });
+  expect(submit).not.toHaveBeenCalled();
+  expect(draft()).toBe('<https://shop.example>Buy milk');
+  expect(screen.queryByRole('textbox', { name: 'Link address' })).toBeNull();
+});
+
+it('starts writing Markdown with its actions for a text with code', () => {
+  render(
+    <Notes
+      initial="Run `npm test`"
+      defaultPresentation="write"
+      placeholder="Details …"
+    />,
+  );
   expect(text().getAttribute('aria-label')).toBe('Notes');
   expect(text().placeholder).toBe('Details …');
-  expect(document.activeElement).not.toBe(text());
   const actions = screen
     .getAllByRole('button')
     .map((b) => b.getAttribute('aria-label'));
@@ -134,9 +268,9 @@ it('shows read-only text without an action, and nothing without text', () => {
   expect(screen.queryByRole('group')).toBeNull();
 });
 
-it('passes the source as typed and shows the value it gets', () => {
+it('passes the Markdown as typed and shows the value it gets', () => {
   const changed = vi.fn();
-  render(<Notes defaultPresentation="write" changed={changed} />);
+  render(<Notes initial="`x`" defaultPresentation="write" changed={changed} />);
   fireEvent.change(text(), { target: { value: '    ' } });
   expect(draft()).toBe('    ');
   fireEvent.change(text(), { target: { value: '    code\n' } });
@@ -144,19 +278,19 @@ it('passes the source as typed and shows the value it gets', () => {
   expect(changed.mock.calls.map(([v]) => v)).toEqual(['    ', '    code\n']);
 });
 
-it('shows exactly the value when the app replaces the draft', () => {
+it('shows exactly the value when the app replaces the Markdown', () => {
   const { rerender } = render(
     <MarkdownField
       label="Notes"
-      value=""
+      value="`x`"
       onChange={() => {}}
       defaultPresentation="write"
     />,
   );
   fireEvent.change(text(), { target: { value: '    ' } });
-  // The app keeps no text for spaces, then loads another draft and clears it.
-  expect(text().value).toBe('');
-  for (const value of ['loaded', ''])
+  // The app keeps the text, then loads another draft and the first again.
+  expect(text().value).toBe('`x`');
+  for (const value of ['`loaded`', '`x`'])
     rerender(
       <MarkdownField
         label="Notes"
@@ -165,7 +299,7 @@ it('shows exactly the value when the app replaces the draft', () => {
         defaultPresentation="write"
       />,
     );
-  expect(text().value).toBe('');
+  expect(text().value).toBe('`x`');
 });
 
 it('disables an action whose effect the selection makes unpredictable', async () => {
@@ -206,8 +340,8 @@ it('keeps link addresses and code as the preview shows them', () => {
   expect(before.links).toEqual(['https://example.org/a*b*c']);
 });
 
-it('shows the preview beside the source only in a wide field', () => {
-  render(<Notes initial="Some **text**" defaultPresentation="write" />);
+it('shows the preview beside the Markdown only in a wide field', () => {
+  render(<Notes initial="Some **text** `x`" defaultPresentation="write" />);
   // jsdom lays nothing out: the field has no width.
   expect(screen.queryByRole('region', { name: 'Preview' })).toBeNull();
   cleanup();
@@ -215,7 +349,7 @@ it('shows the preview beside the source only in a wide field', () => {
     .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
     .mockReturnValue({ width: 800 } as DOMRect);
   try {
-    render(<Notes initial="Some **text**" defaultPresentation="write" />);
+    render(<Notes initial="Some **text** `x`" defaultPresentation="write" />);
     const preview = screen.getByRole('region', { name: 'Preview' });
     expect(preview.querySelector('strong')?.textContent).toBe('text');
     act(() => fireEvent.click(button('Preview')));
@@ -225,27 +359,27 @@ it('shows the preview beside the source only in a wide field', () => {
   }
 });
 
-it('formats the selection from the toolbar and keeps it selected', () => {
-  render(<Notes initial="Buy milk today" defaultPresentation="write" />);
+it('formats the Markdown selection from the toolbar and keeps it selected', () => {
+  render(<Notes initial="Buy milk today `x`" defaultPresentation="write" />);
   text().setSelectionRange(4, 8);
   fireEvent.click(button('Bold'));
-  expect(draft()).toBe('Buy **milk** today');
+  expect(draft()).toBe('Buy **milk** today `x`');
   expect([text().selectionStart, text().selectionEnd]).toEqual([6, 10]);
   expect(document.activeElement).toBe(text());
   fireEvent.click(button('Bold'));
-  expect(draft()).toBe('Buy milk today');
+  expect(draft()).toBe('Buy milk today `x`');
   text().setSelectionRange(0, 0);
   fireEvent.click(button('Bulleted list'));
-  expect(draft()).toBe('- Buy milk today');
+  expect(draft()).toBe('- Buy milk today `x`');
 });
 
-it('formats with Ctrl+B, I and K and leaves other keys to the input', () => {
-  render(<Notes initial="a word" defaultPresentation="write" />);
+it('formats Markdown with Ctrl+B, I and K and leaves other keys to the input', () => {
+  render(<Notes initial="a word `x`" defaultPresentation="write" />);
   text().setSelectionRange(2, 6);
   fireEvent.keyDown(text(), { key: 'b', ctrlKey: true });
-  expect(draft()).toBe('a **word**');
+  expect(draft()).toBe('a **word** `x`');
   fireEvent.keyDown(text(), { key: 'i', ctrlKey: true });
-  expect(draft()).toBe('a ***word***');
+  expect(draft()).toBe('a ***word*** `x`');
   // Shift or Alt with the key, and Tab, are not the field's.
   for (const key of [
     { key: 'B', ctrlKey: true, shiftKey: true },
@@ -253,19 +387,22 @@ it('formats with Ctrl+B, I and K and leaves other keys to the input', () => {
     { key: 'Tab' },
   ])
     expect(fireEvent.keyDown(text(), key)).toBe(true);
-  expect(draft()).toBe('a ***word***');
+  expect(draft()).toBe('a ***word*** `x`');
   fireEvent.keyDown(text(), { key: 'k', ctrlKey: true });
-  expect(draft()).toBe('a ***[word](https://)***');
+  expect(draft()).toBe('a ***[word](https://)*** `x`');
 });
 
-it('names its actions in the provider language, and takes the app’s labels', () => {
+it('names its actions in the provider language, and takes the app’s labels', async () => {
   render(
     <SdkLocaleProvider locale="de-DE" timeZone="Europe/Berlin">
       <Notes initial="Text" labels={{ edit: 'Notiz bearbeiten' }} />
     </SdkLocaleProvider>,
   );
   fireEvent.click(button('Notiz bearbeiten'));
-  expect(screen.getByRole('toolbar', { name: 'Formatierung' })).toBeTruthy();
+  expect(
+    await screen.findByRole('toolbar', { name: 'Formatierung' }),
+  ).toBeTruthy();
+  expect(button('Durchgestrichen')).toBeTruthy();
   expect(button('Fett')).toBeTruthy();
   expect(button('Vorschau')).toBeTruthy();
 });

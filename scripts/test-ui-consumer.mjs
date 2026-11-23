@@ -78,10 +78,12 @@ try {
     await readFile(join(root, 'package.json'), 'utf8'),
   ).devDependencies;
   const dependencies = { react: tools.react, 'react-dom': tools['react-dom'] };
-  // The Markdown entry's optional peer, as an app that uses it installs it.
-  dependencies['react-markdown'] = JSON.parse(
+  // The Markdown entry's optional peers, as an app that uses it installs them.
+  const uiManifest = JSON.parse(
     await readFile(join(root, 'packages/app-ui/package.json'), 'utf8'),
-  ).devDependencies['react-markdown'];
+  );
+  for (const name of Object.keys(uiManifest.peerDependenciesMeta))
+    dependencies[name] = uiManifest.devDependencies[name];
   for (const name of await readdir(temp)) {
     if (!name.endsWith('.tgz')) continue;
     const manifest = JSON.parse(
@@ -115,6 +117,11 @@ try {
       assert.equal(manifest.license, 'Apache-2.0');
       // Optional: an app that only shows plain text installs no Markdown.
       assert.deepEqual(manifest.peerDependenciesMeta, {
+        '@tiptap/core': { optional: true },
+        '@tiptap/extensions': { optional: true },
+        '@tiptap/pm': { optional: true },
+        '@tiptap/react': { optional: true },
+        '@tiptap/starter-kit': { optional: true },
         'react-markdown': { optional: true },
       });
       assert.deepEqual(

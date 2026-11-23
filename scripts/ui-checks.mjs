@@ -9591,13 +9591,14 @@ async function deleteIcon({ browser, origin }) {
 /**
  * The Markdown entry (`?screen=markdown`, #395): the reading view renders in
  * the first paint and fetches nothing, shows each line break once, links
- * open on a press; the field
- * switches presentation in place with the focus, keeps the draft, formats
- * the selection by pointer, touch and keyboard with the browser's undo,
- * lets Tab leave the text, shows the preview beside the source only when
- * wide, fits 320px, follows light and dark; and in an SDK editor, opening
- * and switching write nothing while a saved text keeps its indentation and
- * hard line breaks.
+ * open on a press; the field switches presentation in place with the focus
+ * and keeps the draft; text in the rich editor's set is written formatted,
+ * by pointer, touch and keyboard with undo, also after a preview, a link
+ * from Ctrl+K, and typed Markdown characters stay text; Tab leaves the text;
+ * a text with HTML is written as Markdown with the preview beside it only
+ * when wide; the field fits 320px and follows light and dark; and in an SDK
+ * editor, opening and switching write nothing while a saved text is
+ * standard Markdown that opens again rendered.
  */
 async function markdown({ browser, origin, engine }) {
   const results = [];
@@ -9619,6 +9620,41 @@ async function markdown({ browser, origin, engine }) {
     return b && [b.x, b.y, b.width, b.height].map((n) => Math.round(n));
   };
   const SAMPLE_START = '# Plan\n\nCall **before noon**';
+  /** Selects characters `[from, to)` of the rich editor's text. */
+  const select = (page, from, to) =>
+    text(page).evaluate(
+      (el, [a, b]) => {
+        const walker = document.createTreeWalker(
+          el,
+          window.NodeFilter.SHOW_TEXT,
+        );
+        const range = document.createRange();
+        let seen = 0;
+        for (let node; (node = walker.nextNode());) {
+          const end = seen + node.textContent.length;
+          if (a >= seen && a <= end) range.setStart(node, a - seen);
+          if (b >= seen && b <= end) {
+            range.setEnd(node, b - seen);
+            break;
+          }
+          seen = end;
+        }
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      },
+      [from, to],
+    );
+  /** The focus in the rich editor, which arrives once it is loaded. */
+  const inText = (page) =>
+    page
+      .waitForFunction(
+        () => document.activeElement?.getAttribute('role') === 'textbox',
+        null,
+        { timeout: 5000 },
+      )
+      .catch(() => {})
+      .then(() => focused(page));
 
   {
     const { context, page, errors } = await newPage(browser);
@@ -9883,15 +9919,10 @@ async function markdown({ browser, origin, engine }) {
   {
     const { context, page, errors } = await newPage(browser);
     try {
-      const select = (from, to) =>
-        text(page).evaluate(
-          (el, [a, b]) => el.setSelectionRange(a, b),
-          [from, to],
-        );
       results.push(
         await attemptOn(errors, 'markdown-shortcuts-and-undo', async () => {
           // Text the page starts with, so nothing typed shares the undo
-          // step: WebKit on macOS groups typing with a formatting after it.
+          // step.
           await page.goto(address('&notes=short&write'));
           await text(page).click();
           await page.keyboard.press('End');
@@ -9899,8 +9930,11 @@ async function markdown({ browser, origin, engine }) {
             await page.keyboard.press('Shift+ArrowLeft');
           await page.keyboard.press('ControlOrMeta+B');
           const bold = (await draft(page)).draft;
-          const selected = await text(page).evaluate((el) =>
-            el.value.slice(el.selectionStart, el.selectionEnd),
+          const shown = await text(page).evaluate(
+            (el) => el.querySelector('strong')?.textContent ?? null,
+          );
+          const selected = await page.evaluate(() =>
+            window.getSelection().toString(),
           );
           await page.keyboard.press('ControlOrMeta+Z');
           await settle(page);
@@ -9908,13 +9942,19 @@ async function markdown({ browser, origin, engine }) {
           await page.keyboard.press('ControlOrMeta+Shift+Z');
           await settle(page);
           const redone = (await draft(page)).draft;
+          const raw = await text(page).evaluate((el) =>
+            el.textContent.includes('*'),
+          );
           return {
             pass:
               bold === 'Buy **milk**' &&
+              shown === 'milk' &&
               selected === 'milk' &&
               undone === 'Buy milk' &&
-              redone === 'Buy **milk**',
+              redone === 'Buy **milk**' &&
+              !raw,
             bold,
+            shown,
             selected,
             undone,
             redone,
@@ -9924,23 +9964,55 @@ async function markdown({ browser, origin, engine }) {
       results.push(
         await attemptOn(errors, 'markdown-toolbar-keyboard', async () => {
           await text(page).fill('Buy milk');
-          await select(4, 8);
-          const heading = notes(page).getByRole('button', { name: 'Heading' });
-          await heading.focus();
+          await select(page, 4, 8);
+          const bold = notes(page).getByRole('button', { name: 'Bold' });
+          await bold.focus();
           await page.keyboard.press('ArrowRight');
           const arrow = await focused(page);
-          await page.keyboard.press('ArrowRight');
           await page.keyboard.press('Enter');
           const italic = (await draft(page)).draft;
-          const back = await focused(page);
+          const back = await inText(page);
+          const pressed = await notes(page)
+            .getByRole('button', { name: 'Italic' })
+            .getAttribute('aria-pressed');
           return {
             pass:
-              arrow === 'button "Bold"' &&
+              arrow === 'button "Italic"' &&
               italic === 'Buy *milk*' &&
-              back === 'textarea "Notes"',
+              back === 'textbox "Notes"' &&
+              pressed === 'true',
             arrow,
             italic,
             back,
+            pressed,
+          };
+        }),
+      );
+      results.push(
+        await attemptOn(errors, 'markdown-link-and-text', async () => {
+          await text(page).fill('Buy milk');
+          await select(page, 4, 8);
+          await page.keyboard.press('ControlOrMeta+K');
+          const address = await focused(page);
+          await page.keyboard.type('https://shop.example/milk');
+          await page.keyboard.press('Enter');
+          const linked = (await draft(page)).draft;
+          const back = await inText(page);
+          // Markdown's characters typed as text stay text.
+          await page.keyboard.press('End');
+          await page.keyboard.type(' for 2 * 3 [net]');
+          const typed = (await draft(page)).draft;
+          return {
+            pass:
+              address === 'input "Link address"' &&
+              linked === 'Buy [milk](https://shop.example/milk)' &&
+              back === 'textbox "Notes"' &&
+              typed ===
+                'Buy [milk](https://shop.example/milk) for 2 \\* 3 \\[net\\]',
+            address,
+            linked,
+            back,
+            typed,
           };
         }),
       );
@@ -9949,21 +10021,22 @@ async function markdown({ browser, origin, engine }) {
           // A fresh page: the undo history holds only this check's steps.
           await page.goto(address('&notes=short&write'));
           await text(page).focus();
-          await select(4, 8);
+          await select(page, 4, 8);
           await page.keyboard.press('ControlOrMeta+B');
           const bold = (await draft(page)).draft;
-          // Preview and back: the same text input, with its history.
+          // Preview and back: the same editor, with its history.
           await toggle(page).click();
           await text(page).waitFor({ state: 'hidden' });
           // Kept while reading, but taking no room and out of reach.
           const kept = await notes(page)
-            .locator('textarea')
+            .locator('[contenteditable]')
             .evaluate((el) => ({
               height: el.closest('[inert]')?.getBoundingClientRect().height,
-              focused: document.activeElement === el,
+              focused: el.contains(document.activeElement),
             }));
           await toggle(page).click();
           await text(page).waitFor();
+          const again = await inText(page);
           await page.keyboard.press('ControlOrMeta+Z');
           await settle(page);
           const undone = (await draft(page)).draft;
@@ -9971,10 +10044,12 @@ async function markdown({ browser, origin, engine }) {
             pass:
               bold === 'Buy **milk**' &&
               undone === 'Buy milk' &&
+              again === 'textbox "Notes"' &&
               kept.height === 0 &&
               !kept.focused,
             bold,
             undone,
+            again,
             kept,
           };
         }),
@@ -9984,14 +10059,14 @@ async function markdown({ browser, origin, engine }) {
           await text(page).focus();
           await page.keyboard.press(tab);
           const next = await focused(page);
-          const value = await text(page).inputValue();
+          const value = (await draft(page)).draft;
           await page.keyboard.press('Shift+' + tab);
           const previous = await focused(page);
           return {
             pass:
               next === 'button "After the notes"' &&
               !value.includes('\t') &&
-              previous === 'textarea "Notes"',
+              previous === 'textbox "Notes"',
             next,
             previous,
           };
@@ -10018,25 +10093,27 @@ async function markdown({ browser, origin, engine }) {
         await attemptOn(errors, 'markdown-touch', async () => {
           await toggle(page).tap();
           await text(page).waitFor();
-          const add = await focused(page);
+          const add = await inText(page);
           await page.keyboard.type('Buy milk');
-          await text(page).evaluate((el) => el.setSelectionRange(4, 8));
+          await select(page, 4, 8);
           await notes(page).getByRole('button', { name: 'Bold' }).tap();
           const kept = await focused(page);
           const bold = (await draft(page)).draft;
           await toggle(page).tap();
           await text(page).waitFor({ state: 'hidden' });
-          const rendered = await notes(page).locator('strong').textContent();
+          const rendered = await notes(page)
+            .locator('[data-slot=markdown-view] strong')
+            .textContent();
           await toggle(page).tap();
           await text(page).waitFor();
-          const again = await focused(page);
+          const again = await inText(page);
           return {
             pass:
-              add === 'textarea "Notes"' &&
-              kept === 'textarea "Notes"' &&
+              add === 'textbox "Notes"' &&
+              kept === 'textbox "Notes"' &&
               bold === 'Buy **milk**' &&
               rendered === 'milk' &&
-              again === 'textarea "Notes"',
+              again === 'textbox "Notes"',
             add,
             kept,
             bold,
@@ -10108,7 +10185,7 @@ async function markdown({ browser, origin, engine }) {
         try {
           await page.goto(address('&write'));
           await text(page).waitFor();
-          schemes[colorScheme] = await page.evaluate(() => {
+          const source = await page.evaluate(() => {
             const color = (el) => getComputedStyle(el).color;
             const field = document.querySelector('[data-slot=markdown-field]');
             return {
@@ -10125,6 +10202,14 @@ async function markdown({ browser, origin, engine }) {
               ),
             };
           });
+          await page.goto(address('&notes=short&write'));
+          await text(page).waitFor();
+          const rich = await page.evaluate(
+            () =>
+              getComputedStyle(document.querySelector('[contenteditable] p'))
+                .color,
+          );
+          schemes[colorScheme] = { ...source, rich };
         } finally {
           await context.close();
         }
@@ -10135,7 +10220,10 @@ async function markdown({ browser, origin, engine }) {
           light.background !== dark.background &&
           [light, dark].every(
             (s) =>
-              s.view === s.page && s.text === s.page && s.preview === s.page,
+              s.view === s.page &&
+              s.text === s.page &&
+              s.preview === s.page &&
+              s.rich === s.page,
           ),
         schemes,
       };
@@ -10153,8 +10241,8 @@ async function markdown({ browser, origin, engine }) {
       (await storedTasks(origin)).find(
         (t) => t.context === work && t.body['@id'] === iri,
       );
-    const SOURCE =
-      '    code first\n\nA line with a hard break  \nnext line\n\n- item';
+    // Typed in the rich editor: a line break, then a list from "- ".
+    const SAVED = 'Bring the key\\\nand the ladder\n\n- Shut off the water';
     try {
       await signIn(page, origin, '/?screen=markdown&part=editor', {
         choose: false,
@@ -10190,9 +10278,14 @@ async function markdown({ browser, origin, engine }) {
         ),
       );
       results.push(
-        await attemptOn(errors, 'markdown-editor-saves-as-typed', async () => {
+        await attemptOn(errors, 'markdown-editor-saves-markdown', async () => {
           await toggle(page).click();
-          await text(page).fill(SOURCE);
+          await inText(page);
+          await page.keyboard.type('Bring the key');
+          await page.keyboard.press('Shift+Enter');
+          await page.keyboard.type('and the ladder');
+          await page.keyboard.press('Enter');
+          await page.keyboard.type('- Shut off the water');
           // Waiting from before the press: the answer can come first.
           await Promise.all([
             page.waitForResponse((r) => r.request().method() === 'PATCH'),
@@ -10206,19 +10299,25 @@ async function markdown({ browser, origin, engine }) {
           await page.goto(address('&part=editor'));
           await toggle(page).waitFor({ timeout: 15000 });
           const reopened = await toggle(page).getAttribute('aria-label');
-          const code = await notes(page).locator('pre').textContent();
+          const rendered = await notes(page)
+            .locator('[data-slot=markdown-view]')
+            .evaluate((el) => ({
+              breaks: el.querySelectorAll('p br').length,
+              item: el.querySelector('li')?.textContent ?? null,
+            }));
           await settle(page);
           const later = await description();
           return {
             pass:
-              value === SOURCE &&
+              value === SAVED &&
               reopened === 'Edit text' &&
-              code === 'code first\n' &&
+              rendered.breaks === 1 &&
+              rendered.item === 'Shut off the water' &&
               later.version === saved.version &&
               patches.length === 1,
             value,
             reopened,
-            code,
+            rendered,
             patches: patches.length,
           };
         }),

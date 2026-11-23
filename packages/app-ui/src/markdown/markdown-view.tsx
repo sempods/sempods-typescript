@@ -1,6 +1,7 @@
 import { memo, useMemo, type ReactNode } from 'react';
 import Markdown, { type Components, type ExtraProps } from 'react-markdown';
 import { cn } from 'cn';
+import { strikethrough } from './parse.js';
 
 /** Only these addresses become links; any other stays its text. */
 const WEB = /^https?:\/\//i;
@@ -47,7 +48,7 @@ const typedBreaks = () => (tree: unknown) => {
   };
   visit(tree as TreeNode);
 };
-const remarkPlugins = [typedBreaks];
+const remarkPlugins = [strikethrough, typedBreaks];
 
 function headings(base: number): Partial<Components> {
   const heading =
@@ -128,11 +129,11 @@ const elements: Partial<Components> = {
 
 /**
  * Markdown as read-only content: paragraphs, headings, lists, emphasis,
- * quotes, code and links that open on a press. Embedded HTML shows as its
- * text and images as their description, so displaying text from a Pod
- * neither runs nor fetches anything. It renders in the first paint, without
- * loading anything first. It parses again only for a new source or heading
- * level, not when its parent renders again.
+ * strikethrough (`~~text~~`), quotes, code and links that open on a press.
+ * Embedded HTML shows as its text and images as their description, so
+ * displaying text from a Pod neither runs nor fetches anything. It renders
+ * in the first paint, without loading anything first. It parses again only
+ * for a new source or heading level, not when its parent renders again.
  */
 export const MarkdownView = memo(function MarkdownView({
   source,

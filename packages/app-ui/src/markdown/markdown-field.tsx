@@ -1,4 +1,7 @@
 import {
+  lazy,
+  Suspense,
+  useCallback,
   useDeferredValue,
   useEffect,
   useLayoutEffect,
@@ -21,6 +24,7 @@ import { Toolbar } from 'react-aria-components';
 import { cn } from 'cn';
 import { Button } from '../components/button.js';
 import { Textarea } from '../components/textarea.js';
+import { fromMarkdown } from './document.js';
 import { applyEdit, formatMarkdown, type MarkdownFormat } from './format.js';
 import { MarkdownView, type MarkdownViewProps } from './markdown-view.js';
 import { useMarkdownTexts, type MarkdownFieldLabels } from './texts.js';
@@ -81,6 +85,10 @@ const actions = [
 ] as const satisfies readonly (readonly [MarkdownFormat, LucideIcon])[];
 const kinds = actions.map(([kind]) => kind);
 
+/** The writer for text in its set, loaded once the field may need it. */
+const loadRichEditor = () => import('./rich-editor.js');
+const RichEditor = lazy(loadRichEditor);
+
 /** The field's width from which the preview stands beside the source. */
 const WIDE_REM = 42;
 
@@ -90,14 +98,15 @@ const apple = () =>
 
 /**
  * A Markdown text, controlled by the app: rendered for reading, and written
- * as source with a preview. Writing offers formatting actions that act on
- * the selection (heading, bold, italic, lists, link), with Ctrl or Command
- * + B, I and K; an action whose effect would not be predictable there, such
- * as bold inside code, is disabled. Tab leaves the text input for the next
- * control. One action at the field's top end switches between reading and
- * writing, so it stays in place: editing moves the focus into the text,
- * preview back to that action. A wide field shows the preview beside the source as it is typed.
- * The containing editor owns validation, save, cancel and conflicts.
+ * as it reads. Text of paragraphs, headings, bold, italic, strikethrough,
+ * web links and lists is written formatted, without Markdown's characters,
+ * and reported as standard Markdown; a toolbar and Ctrl or Command + B, I
+ * and K format the selection. A text with anything else, such as code or a
+ * quote from another app, is written as Markdown source with a preview, so
+ * nothing in it is lost. One action at the field's top end switches between
+ * reading and writing, so it stays in place: editing moves the focus into
+ * the text, preview back to that action. The containing editor owns
+ * validation, save, cancel and conflicts.
  */
 export function MarkdownField({
   label,
@@ -129,15 +138,54 @@ export function MarkdownField({
   const check = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Where the focus goes after a switch the person made.
   const moved = useRef<'text' | 'toggle' | null>(null);
+  // The value the field reported last: the app's own value is any other.
+  const emitted = useRef<string | null>(null);
+  // Whether the text is written formatted, decided for each value the app
+  // passes, not for the person's own changes.
+  const [syntax, setSyntax] = useState<{
+    readonly value: string;
+    readonly rich: boolean;
+  } | null>(null);
+  if (
+    written &&
+    (!syntax || (syntax.value !== value && value !== emitted.current))
+  )
+    setSyntax({ value, rich: fromMarkdown(value) !== null });
+  const rich = syntax?.rich ?? false;
+  // The rich editor's focus, once it is there, and a focus asked for before.
+  const focusRich = useRef<(() => void) | null>(null);
+  const focusWaits = useRef(false);
+  const onRichReady = useCallback((focus: () => void) => {
+    focusRich.current = focus;
+    if (!focusWaits.current) return;
+    focusWaits.current = false;
+    focus();
+  }, []);
+  // Where the rich editor's toolbar goes.
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   // The selection after an edit that the browser could not apply itself.
   const pending = useRef<readonly [number, number] | null>(null);
 
   useLayoutEffect(() => {
     const target = moved.current;
     moved.current = null;
-    if (target === 'text') textarea.current?.focus();
-    else if (target === 'toggle') toggle.current?.focus();
-  }, [writing]);
+    if (target === 'toggle') toggle.current?.focus();
+    if (target !== 'text') return;
+    if (!rich) textarea.current?.focus();
+    else if (focusRich.current) focusRich.current();
+    else focusWaits.current = true;
+  }, [writing, rich]);
+  // Loaded after the first paint, so pressing Edit text finds it there.
+  useEffect(() => {
+    if (readOnly) return;
+    const load = () => void loadRichEditor();
+    if (typeof requestIdleCallback === 'undefined') {
+      const timer = setTimeout(load, 1000);
+      return () => clearTimeout(timer);
+    }
+    const idle = requestIdleCallback(load);
+    return () => cancelIdleCallback(idle);
+  }, [readOnly]);
   useLayoutEffect(() => {
     const selection = pending.current;
     if (!selection || !textarea.current) return;
@@ -178,10 +226,14 @@ export function MarkdownField({
     }, 150);
   };
   useEffect(() => {
-    if (writing) recheck();
-  }, [value, writing]);
+    if (writing && !rich) recheck();
+  }, [value, writing, rich]);
   useEffect(() => () => clearTimeout(check.current), []);
 
+  const emit = (next: string) => {
+    emitted.current = next;
+    onChange(next);
+  };
   const format = (kind: MarkdownFormat) => {
     const input = textarea.current;
     if (!input) return;
@@ -213,7 +265,7 @@ export function MarkdownField({
     }
     if (input.value !== source) return;
     pending.current = edit.select;
-    onChange(next);
+    emit(next);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || event.altKey || event.shiftKey) return;
@@ -232,7 +284,7 @@ export function MarkdownField({
 
   if (readOnly && !filled) return null;
   // The preview stands beside the source.
-  const beside = writing && wide;
+  const beside = writing && wide && !rich;
   const switchLabel = writing ? t.preview : filled ? t.edit : t.addText;
   return (
     <div
@@ -244,7 +296,9 @@ export function MarkdownField({
       className={cn('grid min-w-0', className)}
     >
       <div className="flex min-h-11 items-start gap-1">
-        {writing ? (
+        {writing && rich ? (
+          <div ref={setSlot} className="flex min-w-0 flex-1" />
+        ) : writing ? (
           <Toolbar
             aria-label={t.formatting}
             className="flex min-w-0 flex-1 flex-wrap gap-0.5"
@@ -310,37 +364,69 @@ export function MarkdownField({
               margin: '-0.25rem',
             }}
           >
-            <div
-              className="grid min-w-0 gap-4"
-              style={
-                beside
-                  ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }
-                  : undefined
-              }
-            >
-              <Textarea
-                ref={textarea}
-                aria-label={label}
-                placeholder={placeholder}
-                value={value}
-                spellCheck
-                onChange={(event) => onChange(event.target.value)}
-                onSelect={recheck}
-                onKeyDown={onKeyDown}
-                className="min-h-40 text-base leading-relaxed md:text-base"
-              />
-              {/* Wide: the preview beside the source, as it is typed; only
-                  there, so a narrow field parses nothing while typing. */}
-              {beside && (
+            {rich ? (
+              <Suspense
+                fallback={
+                  <div
+                    aria-busy="true"
+                    className="min-h-40 rounded-lg border border-input px-2.5 py-2"
+                  >
+                    <MarkdownView source={value} headingLevel={headingLevel} />
+                  </div>
+                }
+              >
+                <RichEditor
+                  label={label}
+                  value={value}
+                  placeholder={placeholder}
+                  texts={t}
+                  toolbar={slot}
+                  onChange={emit}
+                  onReady={onRichReady}
+                />
+              </Suspense>
+            ) : (
+              <div className="grid min-w-0 gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {t.markdownOnly}
+                </p>
                 <div
-                  role="region"
-                  aria-label={t.preview}
-                  className="min-w-0 px-1"
+                  className="grid min-w-0 gap-4"
+                  style={
+                    beside
+                      ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }
+                      : undefined
+                  }
                 >
-                  <MarkdownView source={preview} headingLevel={headingLevel} />
+                  <Textarea
+                    ref={textarea}
+                    aria-label={label}
+                    placeholder={placeholder}
+                    value={value}
+                    spellCheck
+                    onChange={(event) => emit(event.target.value)}
+                    onSelect={recheck}
+                    onKeyDown={onKeyDown}
+                    className="min-h-40 text-base leading-relaxed md:text-base"
+                  />
+                  {/* Wide: the preview beside the source, as it is typed;
+                      only there, so a narrow field parses nothing while
+                      typing. */}
+                  {beside && (
+                    <div
+                      role="region"
+                      aria-label={t.preview}
+                      className="min-w-0 px-1"
+                    >
+                      <MarkdownView
+                        source={preview}
+                        headingLevel={headingLevel}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}
