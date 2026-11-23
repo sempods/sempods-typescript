@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /** Overview rows and editors bound to the connection they were read from (#408). */
 import { webcrypto } from 'node:crypto';
+import { IDBFactory } from 'fake-indexeddb';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -20,6 +21,7 @@ import {
 import { taskFields, type Task } from '../../../../examples/todo/src/domain.js';
 import type { BrowserRuntime } from '../runtime/types.js';
 import { createBrowserRuntime } from '../runtime/runtime.js';
+import { browserChannel, openSessionStore } from '../sessions/store.js';
 import {
   catalogue,
   fixture,
@@ -128,8 +130,18 @@ function Overview({ names }: { readonly names: Record<string, string> }) {
  * sign-in. `lose` names a resource (`<pod> <iri>`) whose next write the Pod
  * applies while its response is lost.
  */
-async function setup() {
-  const { f, runtime, other } = await twoPods((r) => void runtimes.push(r));
+async function setup({ tabs = false } = {}) {
+  // With `tabs`, a store whose changes reach other tabs (`BroadcastChannel`).
+  const factory = new IDBFactory();
+  const { f, runtime, other } = await twoPods(
+    (r) => void runtimes.push(r),
+    tabs
+      ? {
+          openStore: (namespace) =>
+            openSessionStore(namespace, factory, browserChannel),
+        }
+      : {},
+  );
   const alice = f.id;
   const bob = other.id;
   f.setCatalogue(async (url) =>
@@ -427,13 +439,27 @@ it('asks before leaving a live editor for a retained one of another connection',
   expect(writes).toEqual([]);
 });
 
-// Elsewhere (another tab) while the person is asked: Alice's Pod is
-// forgotten, or she signs out and her connection stays listed but no longer
-// reads.
-it.each(['forget', 'disconnect'] as const)(
+// While the person is asked: Alice's Pod is forgotten, or she signs out and
+// her connection stays listed but no longer reads, also in another tab (one
+// publication of the change).
+it.each(['forget', 'disconnect', 'disconnect in another tab'] as const)(
   'withdraws the question when the row to open goes meanwhile (%s)',
   async (leave) => {
-    const { runtime, alice, bob } = await setup();
+    const { f, runtime, alice, bob } = await setup({
+      tabs: leave === 'disconnect in another tab',
+    });
+    const other =
+      leave === 'disconnect in another tab'
+        ? createBrowserRuntime({
+            ...f.options,
+            location: () => 'https://app.example/',
+          })
+        : null;
+    if (other) {
+      runtimes.push(other);
+      await other.initialize();
+      await restored(other);
+    }
     const bobs = { subject: 'urn:s', context: home, connection: bob };
     await openWithDraft(bobs);
     let opening: Promise<boolean> | undefined;
@@ -446,10 +472,18 @@ it.each(['forget', 'disconnect'] as const)(
     });
     await waitFor(() => expect(state.confirmingLeave).toBe(true));
     await act(async () => {
-      await runtime[leave](alice);
+      if (other) await other.disconnect(alice);
+      else if (leave === 'forget') await runtime.forget(alice);
+      else await runtime.disconnect(alice);
     });
+    if (other)
+      await waitFor(() =>
+        expect(
+          state.connections.find((c) => c.id === alice)?.reading ?? null,
+        ).toBeNull(),
+      );
     expect(state.connections.some((c) => c.id === alice)).toBe(
-      leave === 'disconnect',
+      leave !== 'forget',
     );
     expect(await opening).toBe(false);
     expect(state.confirmingLeave).toBe(false);

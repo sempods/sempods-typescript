@@ -1001,17 +1001,24 @@ export function useContextEditor<D>(
       // A row of another connection can go while the person is asked, also
       // when its connection stays listed but no longer reads (signed out in
       // another tab): then the prompt is withdrawn and nothing open here is
-      // discarded.
-      const reading = () =>
-        reads(app.getSnapshot().connections.find((c) => c.id === origin));
-      const readable = origin !== undefined && reading();
+      // discarded. Read from the runtime: the controller checks this while
+      // it publishes a change, before its own snapshot has it.
+      const destination = () =>
+        app.runtime.getSnapshot().find((c) => c.id === origin);
+      const readable = origin !== undefined && reads(destination());
       const result = (
         origin !== undefined
           ? navigateWhile(
               app,
               () => apply(opened),
-              () =>
-                sameConnection(app, origin, life!) && (!readable || reading()),
+              () => {
+                const now = destination();
+                return (
+                  now !== undefined &&
+                  originOf(app, origin) === life &&
+                  (!readable || reads(now))
+                );
+              },
             )
           : app.navigate(() => apply(opened))
       ).finally(() => {
