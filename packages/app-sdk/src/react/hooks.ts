@@ -32,7 +32,13 @@ import {
   type RemoveSnapshotOutcome,
   type CreateOutcome,
 } from '@sempods/client-sdk/edit';
-import { startupSettled, type AppSnapshot } from '../authoring/app.js';
+import {
+  navigateWhile,
+  startupSettled,
+  type AppController,
+  type AppSnapshot,
+  type Availability,
+} from '../authoring/app.js';
 import { createLoader } from '../authoring/load.js';
 import { catalogueLists } from '../runtime/binding.js';
 import {
@@ -44,6 +50,7 @@ import {
   useWorkflowAccess,
   useWriteGate,
 } from './app.js';
+import { reads } from './access-presentation.js';
 import { shownData } from '../authoring/load.js';
 import { useCommands } from './commands.js';
 import {
@@ -60,6 +67,8 @@ import type { ContextEditorProblem } from '../authoring/contexts.js';
 import { editorsOf } from '../authoring/editors.js';
 import { lanesOf, type LaneKind, type LaneScope } from '../authoring/lanes.js';
 import {
+  originOf,
+  sameConnection,
   sameTarget as sameViewTarget,
   sessionsOf,
 } from '../authoring/retention.js';
@@ -469,7 +478,8 @@ export function useResourceEditor<D>(
 /**
  * The editor lifetime behind `useResourceEditor` and `useContextEditor`: one
  * editor per view, subject and definition, registered as a leave guard with
- * `scope`. `hook` names the caller in warnings.
+ * `scope`, and with `origin` bound to that connection rather than the active
+ * one (see `EditorStore`). `hook` names the caller in warnings.
  */
 function useBoundEditor<D>(
   view: BoundView | null,
@@ -477,6 +487,7 @@ function useBoundEditor<D>(
   definition: EditDefinition<D>,
   hook: string,
   scope: 'local' | 'connection',
+  origin?: string,
 ) {
   const app = useController();
   const { key, latest } = useDefinition(definition, hook);
@@ -484,6 +495,7 @@ function useBoundEditor<D>(
     view: BoundView;
     iri: string;
     key: string;
+    origin: string | undefined;
     editor: ResourceEditor<D>;
   } | null>(null);
   const previous = useRef<typeof active>(null);
@@ -522,17 +534,21 @@ function useBoundEditor<D>(
       latest.current,
       scope,
       scope === 'connection' ? 'explicit' : 'selected',
+      origin,
     );
-    const next = { view, iri, key, editor };
+    const next = { view, iri, key, origin, editor };
     previous.current = next;
     setActive(next);
     discarding.current = release;
     return () => release();
     // `key` stands for the definition (see useDefinition); `latest` is its ref.
     // `hook` only names the caller in a warning.
-  }, [view, iri, key, app, latest, hook, scope]);
+  }, [view, iri, key, app, latest, hook, scope, origin]);
   const editor =
-    active?.view === view && active.iri === iri && active.key === key
+    active?.view === view &&
+    active.iri === iri &&
+    active.key === key &&
+    active.origin === origin
       ? active.editor
       : null;
   useSyncExternalStore(
@@ -546,6 +562,12 @@ function useBoundEditor<D>(
 export interface ContextTarget {
   readonly subject: string;
   readonly context: string;
+  /**
+   * The connection the row was read from, for an overview across connected
+   * Pods (#408): the target is bound to it whether or not it is active.
+   * Omitted, the target belongs to the connection active when it is opened.
+   */
+  readonly connection?: string;
 }
 /** Where `useContextEditor` stands; see the hook for each phase. */
 export type ContextEditorPhase =
@@ -562,12 +584,16 @@ export interface ContextEditor<D, U = D> {
   /** Present only while `phase` is `'ready'`; render it with `ResourceEditor`. */
   readonly editor: ResourceEditor<D, U> | null;
   /**
-   * Opens another target under the leave policy, for the connection active
-   * now. `true` once the target is open; whether it becomes `ready` is
-   * reported through `phase`. `false` if the person declined, a pending write
-   * blocks it, no connection is active, or another connection became active
-   * while it asked. Opening the same target again while that is under way
-   * shares its result.
+   * Opens another target under the leave policy, for its `connection`, else
+   * for the connection active now. `true` once the target is open; whether
+   * it becomes `ready` is reported through `phase`. `false` if the person
+   * declined, a pending write blocks it, no connection is active (or its
+   * `connection` is unknown), or another connection became active while it
+   * asked (with `connection`: that connection went or stopped reading while
+   * it asked), or a Context listed as readable at the start was not in a
+   * freshly read catalogue (still being read, failed, or no longer listing
+   * it) when it asked. Opening the same target
+   * again while that is under way shares its result.
    */
   open(target: ContextTarget): Promise<boolean>;
   /**
@@ -580,6 +606,10 @@ export interface ContextEditor<D, U = D> {
 interface ContextLane {
   readonly target: ContextTarget;
   readonly connection: string;
+  /** Bound to `connection` whether or not it is active (`target.connection`). */
+  readonly origin: string | undefined;
+  /** That connection's identity when it was opened (`originOf`). */
+  readonly life: number | undefined;
 }
 interface ContextLaneState {
   readonly lane: ContextLane;
@@ -591,10 +621,30 @@ interface ContextLaneState {
   readonly retired: boolean;
 }
 const sameTarget = (a: ContextTarget, b: ContextTarget) =>
-  a.subject === b.subject && a.context === b.context;
-/** Whether a lane is still live: not retired and its connection active. */
-const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
-  s !== null && !s.retired && s.lane.connection === activeId;
+  a.subject === b.subject &&
+  a.context === b.context &&
+  a.connection === b.connection;
+/**
+ * Whether a lane is still live: not retired, and its connection active, or
+ * for an origin-bound lane still the connection it was opened in (not
+ * removed, also when one was added again under its ID).
+ */
+const liveLane = (s: ContextLaneState | null, app: AppController) =>
+  s !== null &&
+  !s.retired &&
+  (s.lane.origin === undefined
+    ? s.lane.connection === app.getSnapshot().activeId
+    : sameConnection(app, s.lane.origin, s.lane.life!));
+/**
+ * Whether a lane follows its connection: another active connection ends a
+ * lane of the active one; an origin-bound lane ends only once its connection
+ * is gone (`connected`, the hook's fact for the open lane).
+ */
+const follows = (
+  l: ContextLane,
+  activeId: string | null,
+  connected: boolean,
+) => (l.origin === undefined ? l.connection === activeId : connected);
 /**
  * Edits one Pod-overview row in its own Context. The SELECT row is only a
  * pointer: the editor reads the subject fresh in that Context through
@@ -603,7 +653,11 @@ const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
  * they are, so a creation form elsewhere keeps its target.
  *
  * `open(target)` records the active connection and demands its catalogue; the
- * editor needs no `TargetScreen`. Unlike a `TargetScreen` it asks for no
+ * editor needs no `TargetScreen`. With `target.connection` (#408) it records
+ * that connection instead and asks for its catalogue under `on-demand`: the
+ * editor edits there whichever connection is active, and its guard carries
+ * that connection (`LeaveGuard.connection`), so switching the active one
+ * neither asks about nor retires it. Unlike a `TargetScreen` it asks for no
  * selected Context, so `AppAccess` shows no Context chooser for it; a failed
  * catalogue still appears there with "Check access".
  *
@@ -616,8 +670,10 @@ const liveLane = (s: ContextLaneState | null, activeId: string | null) =>
  * - `ready`: the binding and its resource editor exist. That does not mean the
  *   resource exists or saving is permitted: loading, `404`, offline failures,
  *   blocked access and review are states of that editor, with its retry.
- * - `retired`: another connection became active. The editor is gone and the
- *   target is never revived; close it, or open the row again.
+ * - `retired`: another connection became active (with `target.connection`:
+ *   that connection was removed, also when the runtime added one under its
+ *   ID again). The editor is gone and the target is never revived; close
+ *   it, or open the row again.
  *
  * Once an editor exists, losing read access, a failed catalogue refresh or the
  * session ending keep it with its draft and any unconfirmed-write review, also
@@ -679,24 +735,37 @@ export function useContextEditor<D>(
     readonly result: Promise<boolean>;
   } | null>(null);
   const lane = state?.lane ?? null;
+  // An origin-bound target (`target.connection`) stays with its connection.
+  const origin = lane?.origin;
   // Only the facts this hook uses: a token renewal or another connection's
   // catalogue does not re-render the host.
-  const laneConnection = state && !state.retired ? state.lane.connection : null;
-  const { activeId, ready, catalogue } = useAppFacts(
-    (s) => ({
+  const laneOpen = state && !state.retired ? state.lane : null;
+  const { activeId, connected, ready, catalogue, mode } = useAppFacts((s) => {
+    const own = laneOpen
+      ? s.connections.find((c) => c.id === laneOpen.connection)
+      : undefined;
+    const bound = laneOpen?.origin !== undefined;
+    return {
       activeId: s.activeId,
+      // An origin-bound lane lives while its connection is the one it was
+      // opened in.
+      connected:
+        own !== undefined &&
+        (!bound || sameConnection(app, laneOpen.connection, laneOpen.life!)),
       // No Context-bound editor before startup settles (a returning sign-in
       // may still replace the active connection), as for the selected view.
-      // `pod` exists while the active connection is signed in.
-      ready: startupSettled(s) && s.pod !== null,
-      // The live lane's catalogue only: its connection is the active one.
+      // `pod` exists while the active connection reads; an origin-bound
+      // lane needs its own connection to read.
+      ready: startupSettled(s) && (bound ? reads(own) : s.pod !== null),
+      // The live lane's catalogue only: its connection is the active one, or
+      // the one it is bound to.
       catalogue:
-        laneConnection !== null && laneConnection === s.activeId
-          ? s.connections.find((c) => c.id === laneConnection)?.catalogue
+        laneOpen && (bound || laneOpen.connection === s.activeId)
+          ? own?.catalogue
           : undefined,
-    }),
-    shallowEqual,
-  );
+      mode: s.contextSelection,
+    };
+  }, shallowEqual);
   const binding = state?.binding ?? null;
   const bound = binding === 'refused' ? null : binding;
   // Whether the binding still has its authorization (a session that ended or
@@ -707,12 +776,25 @@ export function useContextEditor<D>(
     () => bound?.getSnapshot().current ?? true,
   );
   const activated = state?.activated ?? false;
-  const live = liveLane(state, activeId);
+  const live = laneOpen !== null && follows(laneOpen, activeId, connected);
+  // An origin-bound target of a connection that is not active asks for that
+  // connection's catalogue itself, without a demand on the active one.
+  const elsewhere = origin !== undefined && origin !== activeId;
   // Only the originating connection may demand discovery for this target, and
   // only once the runtime accepted the binding: a refused target sends nothing.
   // Discovery only: an explicit target needs no selected Context, so AppAccess
-  // offers no chooser for it.
-  useContextDiscovery(live && bound !== null);
+  // offers no chooser for it. An origin-bound target of the active connection
+  // demands it as one without `connection` does, so AppAccess presents it.
+  useContextDiscovery(live && bound !== null && !elsewhere);
+  // Under `on-demand` (`required` loads every connection's).
+  const undiscovered =
+    live && bound !== null && elsewhere && mode === 'on-demand'
+      ? catalogue?.kind === 'unknown' && ready
+      : false;
+  useEffect(() => {
+    if (undiscovered && origin !== undefined)
+      void app.runtime.loadContexts(origin).catch(() => {});
+  }, [app, undiscovered, origin]);
   // The binding's own rule for catalogue evidence, without its required-scope
   // check: a target missing scopes would otherwise stay loading with no problem
   // to present. A newly opened row needs a successful listing, not retained
@@ -734,6 +816,7 @@ export function useContextEditor<D>(
       'connection',
       editorKey,
       editorDefinition,
+      lane.origin,
     ) &&
     !editorsOf(app).kept(
       lane.target.context,
@@ -741,11 +824,12 @@ export function useContextEditor<D>(
       'connection',
       editorKey,
       editorDefinition,
+      lane.origin,
     ),
   );
   useEffect(() => {
     if (!lane) return;
-    if (lane.connection !== activeId) {
+    if (!follows(lane, activeId, connected)) {
       update(lane, { retired: true });
       return;
     }
@@ -782,6 +866,7 @@ export function useContextEditor<D>(
       'connection',
       shape.current.key,
       shape.current.definition,
+      lane.origin,
     );
     if (kept) {
       update(lane, { binding: kept, activated: true });
@@ -807,6 +892,7 @@ export function useContextEditor<D>(
     app,
     lane,
     activeId,
+    connected,
     binding,
     bound,
     stale,
@@ -822,6 +908,7 @@ export function useContextEditor<D>(
     definition,
     'useContextEditor',
     'connection',
+    origin,
   );
   const problem: ContextEditorProblem | null =
     !live || editor
@@ -847,7 +934,7 @@ export function useContextEditor<D>(
       const now = latest.current;
       const binding = now?.binding;
       if (
-        liveLane(now, app.getSnapshot().activeId) &&
+        liveLane(now, app) &&
         sameTarget(now!.lane.target, target) &&
         // A binding that can never become valid again (session end, another
         // subject) is replaced by a fresh lane, after the leave policy asks,
@@ -863,6 +950,7 @@ export function useContextEditor<D>(
             'connection',
             shape.current.key,
             shape.current.definition,
+            target.connection,
           )
         )
       )
@@ -870,14 +958,31 @@ export function useContextEditor<D>(
       // Repeated before a re-render (a double click): share the first call.
       const pending = opening.current;
       if (pending && sameTarget(pending.target, target)) return pending.result;
-      // The row belongs to the connection active when it is opened. The
-      // controller cancels the prompt if another one becomes active meanwhile.
-      const connection = app.getSnapshot().activeId;
-      if (!connection) return Promise.resolve(false);
+      // The row belongs to its own connection (`target.connection`), else
+      // to the one active when it is opened. The controller cancels the
+      // prompt if another one becomes active meanwhile.
+      const snapshot = app.getSnapshot();
+      const origin = target.connection;
+      const connection = origin ?? snapshot.activeId;
+      if (
+        !connection ||
+        (origin !== undefined &&
+          !snapshot.connections.some((c) => c.id === origin))
+      )
+        return Promise.resolve(false);
+      // The connection as it is now: removed meanwhile (also when added
+      // again under its ID), the row is gone.
+      const life = origin !== undefined ? originOf(app, origin) : undefined;
       const opened = (): ContextLaneState => ({
         lane: {
-          target: { subject: target.subject, context: target.context },
+          target: {
+            subject: target.subject,
+            context: target.context,
+            ...(origin !== undefined ? { connection: origin } : {}),
+          },
           connection,
+          origin,
+          life,
         },
         binding: null,
         activated: false,
@@ -887,17 +992,64 @@ export function useContextEditor<D>(
       // (this hook remounted): returning to it leaves nothing, so it does not
       // ask, and a pending save does not block it.
       if (
-        !liveLane(now, connection) &&
-        editorsOf(app).retains(target.context, target.subject, 'connection')
+        // Any live target, also of another connection, is left: ask first.
+        !liveLane(now, app) &&
+        editorsOf(app).retains(
+          target.context,
+          target.subject,
+          'connection',
+          origin,
+        )
       ) {
         apply(opened);
         return Promise.resolve(true);
       }
-      const result = app
-        .navigate(() => apply(opened))
-        .finally(() => {
-          if (opening.current?.result === result) opening.current = null;
-        });
+      // The row can go while the person is asked: its connection removed, or
+      // no longer reading (signed out in another tab), or its Context, listed
+      // when it was opened, not in a freshly read catalogue (access revoked,
+      // or not in the catalogue read without a token) or not known to be
+      // readable (a failed refresh). Then the prompt is withdrawn and nothing
+      // open here is discarded; while a catalogue is still being read, an
+      // earlier listing counts for nothing, and confirming runs nothing. Read
+      // from the runtime: the controller checks this while it publishes a
+      // change, before its own snapshot has it.
+      const destination = () =>
+        app.runtime.getSnapshot().find((c) => c.id === connection);
+      const start = destination();
+      const readable = reads(start);
+      // Listed by a read catalogue, or by the one a refresh under way keeps
+      // (its answer decides); not by what a failed refresh keeps, which
+      // never counted as readable for a newly opened row.
+      const listed =
+        (start?.catalogue.kind === 'ready' ||
+          start?.catalogue.kind === 'loading') &&
+        catalogueLists(start.catalogue, target.context);
+      const available = (): Availability => {
+        const now = destination();
+        if (
+          !now ||
+          (origin !== undefined && originOf(app, origin) !== life) ||
+          (readable && !reads(now))
+        )
+          return 'gone';
+        if (!listed) return 'yes';
+        const { catalogue } = now;
+        if (catalogue.kind === 'unknown' || catalogue.kind === 'loading')
+          return 'later';
+        return catalogue.kind === 'ready' &&
+          catalogueLists(catalogue, target.context)
+          ? 'yes'
+          : 'gone';
+      };
+      // A row of another connection does not depend on the active one.
+      const result = navigateWhile(
+        app,
+        () => apply(opened),
+        available,
+        origin === undefined,
+      ).finally(() => {
+        if (opening.current?.result === result) opening.current = null;
+      });
       opening.current = { target, result };
       return result;
     },
@@ -909,7 +1061,7 @@ export function useContextEditor<D>(
     const clear = () => apply(() => null);
     // A retired target has no guard left; clearing it at once also keeps an
     // unrelated pending prompt from blocking the close.
-    if (!liveLane(now, app.getSnapshot().activeId)) {
+    if (!liveLane(now, app)) {
       clear();
       return Promise.resolve(true);
     }

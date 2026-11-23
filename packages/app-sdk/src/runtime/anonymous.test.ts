@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PodFetch } from '@sempods/client-sdk';
 import { createBrowserRuntime } from './runtime.js';
 import { RuntimeError } from './errors.js';
+import { removalsOf } from './removals.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
   catalogue,
@@ -329,7 +330,12 @@ describe('signIn: optional', () => {
 
   it('adds the default Pod again after it was forgotten', async () => {
     const f = await signedIn();
+    expect(removalsOf(f.runtime, f.id)).toBe(0);
     expect(await f.runtime.forget(f.id)).toEqual({ kind: 'disconnected' });
+    // Work bound to the forgotten connection tells it from the one added
+    // again (#408), also under the same ID.
+    expect(removalsOf(f.runtime, f.id)).toBe(1);
+    expect(removalsOf(f.runtime, pod)).toBe(f.id === pod ? 1 : 0);
     expect(f.runtime.getSnapshot()).toMatchObject([
       { id: pod, session: { kind: 'signed-out' }, reading: 'anonymous' },
     ]);

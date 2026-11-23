@@ -74,6 +74,7 @@ export { useContextUpdate } from './context-update.js';
 export type {
   ContextResource,
   ContextUpdate,
+  ContextUpdateItem,
   ContextUpdateRow,
   ContextUpdateState,
 } from './context-update.js';
