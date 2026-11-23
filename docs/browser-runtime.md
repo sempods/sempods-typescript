@@ -484,7 +484,8 @@ when it is added, without discovery, client or token, so the next start and
 the app's other tabs list it as `signed-out` (without a `problem`) and reading
 without a token, until `forget(id)`. Signing in replaces that address with the
 session. With `rememberPods: false` such a Pod is listed in this page only,
-also when another tab remembers it. A failed write, or another tab that holds
+also when another tab remembers it; signing in to it there continues on the
+address that tab saved, so the Pod keeps one record. A failed write, or another tab that holds
 the Pod's lock for more than three seconds (a suspended tab), lists it in
 this page only too. SDKs up to 0.9.0-dev.3 report such an
 address in `StartupReport.unreadable` and leave it untouched.

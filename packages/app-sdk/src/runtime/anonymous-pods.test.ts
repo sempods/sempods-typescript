@@ -393,6 +393,18 @@ describe('several tabs', () => {
     expect(await savedRecords(t.factory)).toEqual([]);
   });
 
+  it('signs in on the address another tab saved, also with rememberPods: false', async () => {
+    const t = await tabs(undefined, { rememberPods: false });
+    const local = await t.b.connect(bob);
+    const remembered = await t.a.connect(bob);
+    // Asked to sign in, the opted-out tab uses the saved record: one per Pod.
+    await t.b.beginAuthorization(local.id);
+    expect(t.navigate).toHaveBeenCalledTimes(1);
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: remembered.id, value: { kind: 'authorizing' } },
+    ]);
+  });
+
   it('saves one address when two tabs add the same Pod at once', async () => {
     const t = await tabs();
     const [first, second] = await Promise.all([

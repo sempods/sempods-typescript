@@ -803,11 +803,13 @@ export function createBrowserRuntime(
    * record of its own and without a session gives way to it. With
    * `rememberPods: false` this tab lists no address another tab remembers,
    * as its start deletes them: its own connection to that Pod stays in this
-   * page. Returns whether the record is listed now.
+   * page, until it is `asked` to sign in to that Pod. Returns whether the
+   * record is listed now.
    */
-  function admit(stored: SessionSnapshot): boolean {
+  function admit(stored: SessionSnapshot, asked = false): boolean {
     if (disposed || !initialized || entries.has(stored.id)) return false;
-    if (!rememberPods && stored.value.kind === 'address') return false;
+    if (!rememberPods && !asked && stored.value.kind === 'address')
+      return false;
     const podUrl = recordPodUrl(stored.value);
     if (!allows(podUrl)) return false;
     const same = [...entries.values()].filter((x) => x.view.podUrl === podUrl);
@@ -1900,7 +1902,7 @@ export function createBrowserRuntime(
     if (lease?.store.watch)
       void synced
         .then(() => sessions?.list())
-        .then((listing) => listing?.records.forEach(admit))
+        .then((listing) => listing?.records.forEach((saved) => admit(saved)))
         .catch(() => {
           // Listed by the next start.
         });
@@ -2342,7 +2344,13 @@ export function createBrowserRuntime(
             saved.value.attempt.expiresAt > Date.now()) ||
             (saved?.value.kind === 'claimed' &&
               saved.value.operation === 'code'));
+        // The default Pod's address, which another tab saved after this
+        // start listed nothing (#372): the silent first sign-in leaves it, as
+        // a start that finds it does, since a declined answer would delete
+        // it. The address is listed, read without a token.
+        const kept = intent === 'silent' && saved?.value.kind === 'address';
         if (saved?.id === id) {
+          if (kept) return { joined: e, session: true };
           // This connection's own record, which an announcement did not
           // bring yet (the default Pod's stable id): a session another tab
           // stored is this tab's too; otherwise the attempt replaces it, as
@@ -2357,17 +2365,24 @@ export function createBrowserRuntime(
           e.revision = saved.revision;
         } else if (saved) {
           preparing.delete(id);
-          admit(saved);
+          // Asked to sign in, also a tab with `rememberPods: false` signs in
+          // on the address another tab saved, so the Pod keeps one record.
+          admit(saved, !kept);
           const joined = entries.get(saved.id);
           if (joined)
-            return { joined, session: follows || holdsSession(saved.value) };
+            return {
+              joined,
+              session: kept || follows || holdsSession(saved.value),
+            };
+          if (kept) throw new RuntimeError('disconnected');
         }
         return { prepared: await store() };
       });
       if ('joined' in outcome) {
         // Another tab signed in to this Pod meanwhile (or is renewing that
         // session, or signing in while this one would sign in silently): it
-        // is this tab's too, without leaving for the Pod.
+        // is this tab's too, without leaving for the Pod. A silent sign-in
+        // that met the default Pod's address ends here too.
         if (outcome.session) return;
         // A remembered address, or a sign-in under way or interrupted in
         // another tab: this sign-in continues on that connection, replacing

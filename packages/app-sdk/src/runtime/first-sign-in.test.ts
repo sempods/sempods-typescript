@@ -5,8 +5,10 @@ import { openSessionStore } from '../sessions/store.js';
 import { IDBFactory } from 'fake-indexeddb';
 import {
   callback,
+  deferred,
   fixture,
   jwt,
+  memoryChannels,
   memoryHistory,
   memoryStorage,
   pod,
@@ -526,6 +528,51 @@ it('keeps the saved address of its own default Pod: no silent attempt that could
   expect(await savedRecords(f.factory)).toMatchObject([
     { id: added.id, value: { kind: 'address', podUrl: bob } },
   ]);
+});
+
+it('leaves the address another tab saves while the silent sign-in discovers that Pod (#372)', async () => {
+  const bob = 'https://pod.example/bob';
+  const factory = new IDBFactory();
+  const channels = memoryChannels();
+  const f = silent({
+    signIn: 'optional',
+    firstSignIn: 'click',
+    openStore: (namespace) => openSessionStore(namespace, factory, channels),
+  });
+  await f.runtime.initialize();
+  // Another tab with Bob's Pod as its default one finds nothing stored and
+  // asks it silently; its discovery waits.
+  const discovered = deferred<void>();
+  let discovering = false;
+  const tab = createBrowserRuntime({
+    ...f.options,
+    preset: { podUrl: bob },
+    firstSignIn: 'silent',
+    tabStorage: memoryStorage(),
+    fetch: async (url, init) => {
+      if (url.startsWith(bob + '/.well-known/')) {
+        discovering = true;
+        await discovered.promise;
+      }
+      return f.fetch(url, init);
+    },
+  });
+  keep(tab);
+  const started = tab.initialize();
+  await vi.waitFor(() => expect(discovering).toBe(true));
+  // Meanwhile the first tab adds Bob's Pod and saves its address.
+  const added = await f.runtime.connect(bob);
+  discovered.resolve();
+  await started;
+  expect(silentAttempts(f)).toBe(0);
+  expect(await savedRecords(factory)).toMatchObject([
+    { id: added.id, value: { kind: 'address', podUrl: bob } },
+  ]);
+  await vi.waitFor(() =>
+    expect(tab.getSnapshot()).toMatchObject([
+      { id: added.id, podUrl: bob, reading: 'anonymous' },
+    ]),
+  );
 });
 
 it('rejects silent without a default Pod or a did:web identity, before any I/O', () => {
