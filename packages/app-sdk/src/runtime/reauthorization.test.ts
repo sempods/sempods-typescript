@@ -583,6 +583,26 @@ it('stops the document only for a navigation that does not cancel itself', async
   expect(runtime.cancelAuthorization(id)).toBe(true);
   expect(signal.aborted).toBe(true);
   expect(stop).toHaveBeenCalledTimes(1);
+  await restored(runtime);
+  // Staying from within `navigate` waits for its answer: a host-managed one
+  // that could not open its sign-in stops nothing.
+  f.navigate.mockImplementationOnce((_url, options) => {
+    expect(runtime.cancelAuthorization(id)).toBe(true);
+    expect(options?.signal.aborted).toBe(true);
+    return 'signal';
+  });
+  await runtime.beginAuthorization(id);
+  expect(stop).toHaveBeenCalledTimes(1);
+  await restored(runtime);
+  // One that navigates this document is stopped once it returns.
+  f.navigate.mockImplementationOnce(() => {
+    runtime.cancelAuthorization(id);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+  await runtime.beginAuthorization(id);
+  expect(stop).toHaveBeenCalledTimes(2);
+  await restored(runtime);
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
 });
 
 it('restarts a catalogue read the leaving page aborted when it resumes', async () => {

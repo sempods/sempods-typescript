@@ -257,13 +257,14 @@ export interface BrowserRuntimeOptions {
    * calls `window.stop()` to stop a navigation of this document still
    * loading; that also stops the page's other loads in flight. A navigation
    * that does not go through this document (a host-managed sign-in) cancels
-   * on `signal` and returns `'signal'`: the page then stays without
-   * `window.stop()`.
+   * on `signal` and returns exactly `'signal'`: the page then stays without
+   * `window.stop()`, also when it calls `cancelAuthorization` before it
+   * returns. Any other return value is ignored.
    */
   readonly navigate?: (
     url: string,
     options: { readonly signal: AbortSignal },
-  ) => void | 'signal';
+  ) => unknown;
   readonly replaceUrl?: (url: string) => void;
   /**
    * Advanced/test storage adapters; omitted adapters use IndexedDB with a

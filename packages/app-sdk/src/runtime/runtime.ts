@@ -139,13 +139,24 @@ function signedOut(reason: string | undefined): SessionFact {
   );
 }
 
-/** Creates no storage, request or navigation until initialize/connect is called. */
-/** One redirect to a Pod's sign-in, and whether its `navigate` cancels it. */
+/**
+ * One redirect to a Pod's sign-in: whether its `navigate` cancels it on the
+ * signal itself (`owned`), whether that call is still running (`calling`),
+ * and whether the page stayed meanwhile (`stayed`), so the document stop
+ * waits for its answer.
+ */
 interface Navigation {
   readonly controller: AbortController;
   owned: boolean;
+  calling: boolean;
+  stayed: boolean;
+}
+/** Stops a navigation of this document still loading. */
+function stopDocument() {
+  (globalThis as { stop?: () => void }).stop?.();
 }
 
+/** Creates no storage, request or navigation until initialize/connect is called. */
 export function createBrowserRuntime(
   options: BrowserRuntimeOptions,
 ): BrowserRuntime {
@@ -2301,6 +2312,8 @@ export function createBrowserRuntime(
     const navigation: Navigation = {
       controller: new AbortController(),
       owned: false,
+      calling: true,
+      stayed: false,
     };
     watchReturn(
       e,
@@ -2308,10 +2321,19 @@ export function createBrowserRuntime(
       intent === 'silent' ? 'silent' : reauthorizing ? 'resume' : 'first',
       navigation,
     );
-    const handled = (
-      options.navigate ?? ((url) => window.location.assign(url))
-    )(url, { signal: navigation.controller.signal });
-    navigation.owned = handled === 'signal';
+    let handled: unknown;
+    try {
+      handled = (options.navigate ?? ((url) => window.location.assign(url)))(
+        url,
+        { signal: navigation.controller.signal },
+      );
+    } finally {
+      navigation.calling = false;
+      navigation.owned = handled === 'signal';
+      // Staying from within `navigate` (it could not open its sign-in): the
+      // document stops only for a navigation that does not cancel itself.
+      if (navigation.stayed && !navigation.owned) stopDocument();
+    }
   }
   async function bootstrap(): Promise<StartupReport> {
     let report: StartupReport = {
@@ -2823,9 +2845,11 @@ export function createBrowserRuntime(
       if (!attempt) return false;
       // A navigation of this document still loading stops here, whichever
       // `navigate` started it, unless that one cancels on its `signal`
-      // itself; `abandon` aborts the signal.
-      if (!attempt.navigation.owned)
-        (globalThis as { stop?: () => void }).stop?.();
+      // itself; `abandon` aborts the signal. While `navigate` still runs,
+      // its answer decides once it returns.
+      const navigation = attempt.navigation;
+      if (navigation.calling) navigation.stayed = true;
+      else if (!navigation.owned) stopDocument();
       return attempt.abandon(true);
     },
     disconnect(id) {

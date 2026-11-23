@@ -60,7 +60,17 @@ const create = () =>
               return 'signal' as const;
             },
           }
-        : {}),
+        : appNavigation === 'host-unavailable'
+          ? {
+              // A host that cannot open its sign-in stays at once, from
+              // within its navigation.
+              navigate: () => {
+                const r = window.fixture.runtime;
+                r.cancelAuthorization(r.getSnapshot()[0]!.id);
+                return 'signal' as const;
+              },
+            }
+          : {}),
     ...(policy === 'one'
       ? { allowedPods: [location.origin + '/alice'] }
       : policy === 'set'

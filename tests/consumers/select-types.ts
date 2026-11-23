@@ -74,6 +74,24 @@ export async function read(pod: Pod) {
 }
 
 // The opt-in bound for explicit Pod reads is a runtime option.
+// Existing navigation callbacks keep compiling, whatever they return; only
+// the exact `'signal'` opts into cancelling on the signal. (No DOM types here:
+// a stand-in for `window.location`.)
+declare const page: {
+  location: { href: string; assign(url: string): void };
+};
+export const navigations: readonly NonNullable<
+  BrowserRuntimeOptions['navigate']
+>[] = [
+  (url) => page.location.assign(url),
+  (url) => (page.location.href = url),
+  async (url) => page.location.assign(url),
+  (url, { signal }) => {
+    signal.addEventListener('abort', () => {});
+    void url;
+    return 'signal' as const;
+  },
+];
 export const readLimit: BrowserRuntimeOptions['podReadLimit'] = {
   perPod: 4,
   total: 8,

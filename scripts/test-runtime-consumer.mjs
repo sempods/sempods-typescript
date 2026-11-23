@@ -261,7 +261,7 @@ try {
       };
       // A page request that answers late, in flight while the page stays.
       if (url.pathname === '/slow') {
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         json({ slow: true });
         return;
       }
@@ -1244,6 +1244,31 @@ try {
     aborted: true,
     slow: { slow: true },
   });
+  await page.waitForFunction(
+    () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
+  );
+  // A host that cannot open its sign-in stays from within its navigation:
+  // the page's other requests keep running there too.
+  await page.evaluate(() =>
+    sessionStorage.setItem('fixture-navigate', 'host-unavailable'),
+  );
+  await page.reload();
+  await ready();
+  await restored();
+  const unavailable = await page.evaluate(async () => {
+    const r = window.fixture.runtime;
+    const slow = fetch('/slow').then(
+      (response) => response.json(),
+      (error) => ({ failed: String(error) }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await r.beginAuthorization(r.getSnapshot()[0].id);
+    return {
+      leaving: r.getSnapshot()[0].session.kind === 'leaving',
+      slow: await slow,
+    };
+  });
+  assert.deepEqual(unavailable, { leaving: false, slow: { slow: true } });
   await page.waitForFunction(
     () => window.fixture.runtime.getSnapshot()[0].session.kind === 'active',
   );
