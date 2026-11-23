@@ -1841,6 +1841,8 @@ export function createBrowserRuntime(
       e.view = { ...e.view, session: Object.freeze({ kind: 'restoring' }) };
       publish();
       await resumeLost(e, lost.pod);
+      // Its renewal compared the marker; a catalogue the page kept may wait.
+      caughtUp(e);
       return;
     }
     if (!saved) return;
@@ -1854,17 +1856,18 @@ export function createBrowserRuntime(
   /**
    * After a restoration that keeps a page's view (`relist`): what that view
    * has not seen yet. A start's own view has seen nothing, so this does
-   * nothing there.
+   * nothing there. `value` is the record restored, absent after a resent
+   * renewal, which compared its own.
    */
   function caughtUp(
     e: Entry,
-    value: Extract<SessionRecord, { kind: 'ready' }>,
+    value?: Extract<SessionRecord, { kind: 'ready' }>,
   ) {
     if (!eligible(e) || e.view.session.kind !== 'active') return;
     // A consent that ended meanwhile reads Context access again. A renewal
     // installed instead (here or by another tab) already compared its own,
     // newer record.
-    if (e.credentials === value.credentials) noteAttempt(e, value);
+    if (value && e.credentials === value.credentials) noteAttempt(e, value);
     // A catalogue read the leaving page aborted starts again, keeping the
     // contexts it already confirmed.
     if (e.view.catalogue.kind === 'loading' && !e.catalogue)

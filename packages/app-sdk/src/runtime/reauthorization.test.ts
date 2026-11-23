@@ -683,6 +683,61 @@ it('restarts a catalogue read the leaving page aborted when it resumes', async (
   );
 });
 
+it('restarts a catalogue read the leaving page aborted once its lost renewal is resent', async () => {
+  const f = fixture();
+  keep(f.runtime);
+  // A credential of five minutes, due well before the attempt expires.
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 300 }),
+      token_type: 'Bearer',
+      refresh_token: 'refresh-private',
+    }),
+  );
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  f.setCatalogue(() => new Promise<Response>(() => {}));
+  void runtime.loadContexts(id).catch(() => {});
+  await runtime.beginAuthorization(id);
+  // The page stays once its credential is due, and the renewal's answer is
+  // lost while offline.
+  const now = Date.now();
+  vi.spyOn(Date, 'now').mockReturnValue(now + 4.5 * 60_000);
+  const network = { onLine: true };
+  vi.stubGlobal('navigator', network);
+  f.setToken(() => {
+    network.onLine = false;
+    return Promise.reject(new TypeError('Failed to fetch'));
+  });
+  expect(runtime.cancelAuthorization(id)).toBe(true);
+  await vi.waitFor(() =>
+    expect(runtime.getSnapshot()[0]?.session).toMatchObject({
+      kind: 'ended',
+      restorable: true,
+    }),
+  );
+  // Its answer was lost: the one resend waits for the network.
+  const sent = f.count('/token');
+  expect(sent).toBeGreaterThan(1);
+  network.onLine = true;
+  f.setToken(async () =>
+    Response.json({
+      access_token: jwt(),
+      token_type: 'Bearer',
+      refresh_token: 'rotated',
+    }),
+  );
+  f.setCatalogue(async () => catalogue([work], [work]));
+  await runtime.retryRestore(id);
+  expect(f.count('/token')).toBe(sent + 1);
+  await vi.waitFor(() =>
+    expect(runtime.getSnapshot()[0]?.catalogue).toMatchObject({
+      kind: 'ready',
+      contexts: [{ iri: work }],
+    }),
+  );
+});
+
 it('publishes nothing from a callback that settles after dispose', async () => {
   const { f, authorization } = await reauthorizing();
   const original = f.fetch.getMockImplementation()!;
