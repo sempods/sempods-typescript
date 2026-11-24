@@ -339,11 +339,12 @@ describe('a replacement runtime in the same page (#419)', () => {
       createBrowserRuntime({ ...f.options, openStore: together }),
     );
     const starting = next.initialize();
+    // B's start ends at its dispose, while A's write still stalls.
+    expect(await abandoned).toMatchObject({ problem: 'disconnected' });
     // A B that opens no store does not hold C back.
-    void abandoned.then(() => opened.resolve());
+    opened.resolve();
     store.hold.resolve();
     expect(await starting).toMatchObject({ storage: 'durable' });
-    expect(await abandoned).toMatchObject({ problem: 'disconnected' });
     expect(await signing).toMatchObject({ problem: 'disconnected' });
     expect(next.getSnapshot().find((c) => c.id === f.id)?.session).toEqual({
       kind: 'signed-out',
