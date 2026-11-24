@@ -388,6 +388,28 @@ export function createBrowserRuntime(
    * unchanged, before it closes the store.
    */
   const owed = new Set<OwedWrite>();
+  /** The owed cleanup still running, which every close of the store waits for. */
+  let cleanup: Promise<unknown> = Promise.resolve();
+  /**
+   * Closes `closing` once every owed attempt write has settled and the
+   * address it replaced is back (#372). Every close goes through here, so a
+   * second `dispose()` or a failed start's own close waits for the first.
+   */
+  function closeStore(closing: SessionLease | undefined) {
+    if (!closing) return;
+    const writes = [...owed];
+    owed.clear();
+    const shared = sessions;
+    const run = Promise.allSettled(
+      writes.map(async (w) => {
+        const revision = await w.settled;
+        if (revision !== undefined && shared)
+          await shared.remember(w.id, w.podUrl, revision);
+      }),
+    );
+    cleanup = Promise.allSettled([cleanup, run]);
+    void cleanup.finally(() => closing.close());
+  }
   const disconnects = new Map<
     string,
     {
@@ -2955,7 +2977,7 @@ export function createBrowserRuntime(
           : openSessionStore(namespace),
       );
       if (disposed) {
-        lease.close();
+        closeStore(lease);
         throw new RuntimeError('disconnected');
       }
       sessions = createSessionTransitions(lease.store, {
@@ -3189,7 +3211,7 @@ export function createBrowserRuntime(
     } catch (error) {
       const problem = runtimeProblem(error);
       if (!initialized) {
-        lease?.close();
+        closeStore(lease);
         lease = undefined;
         sessions = undefined;
       }
@@ -3595,19 +3617,7 @@ export function createBrowserRuntime(
       entries.clear();
       // Addresses of sign-ins that never left for their Pod go back first
       // (#372), each only while its attempt is unchanged.
-      const writes = [...owed];
-      owed.clear();
-      const shared = sessions;
-      const closing = lease;
-      if (writes.length > 0 && shared && closing)
-        void Promise.allSettled(
-          writes.map(async (w) => {
-            const revision = await w.settled;
-            if (revision !== undefined)
-              await shared.remember(w.id, w.podUrl, revision);
-          }),
-        ).finally(() => closing.close());
-      else lease?.close();
+      closeStore(lease);
       publish();
       listeners.clear();
       snapshot = Object.freeze([]);

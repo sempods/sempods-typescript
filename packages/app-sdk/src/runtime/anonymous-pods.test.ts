@@ -847,6 +847,11 @@ describe('several tabs', () => {
       'write',
     ],
     ['it shows leaving, on a saved address it lists', 'shared', 'leaving'],
+    [
+      'its write is in flight, twice, on a saved address it lists',
+      'shared',
+      'twice',
+    ],
   ])(
     'leaves the saved address as it was when the page is disposed before leaving, as %s',
     async (_, on, at) => {
@@ -879,6 +884,11 @@ describe('several tabs', () => {
         { id: added.id, value: { kind: 'address' } },
       ]);
       if (at === 'write') disposeNow = () => t.b.dispose();
+      else if (at === 'twice')
+        disposeNow = () => {
+          t.b.dispose();
+          t.b.dispose();
+        };
       else
         t.b.subscribe(() => {
           if (t.b.getSnapshot().some((c) => c.session.kind === 'leaving'))
@@ -903,6 +913,79 @@ describe('several tabs', () => {
       expect(listed?.session).toEqual({ kind: 'signed-out' });
     },
   );
+
+  it('leaves the saved address as it was when a page is disposed during another Pod’s callback after it began a sign-in on it', async () => {
+    const t = await tabs();
+    const added = await t.a.connect(bob);
+    const before = (await savedRecords(t.factory)).map(({ id, value }) => ({
+      id,
+      value,
+    }));
+    // A sign-in to the default Pod leaves; its callback's token answer waits.
+    await t.a.beginAuthorization(pod);
+    const state = new URL(t.navigate.mock.calls.at(-1)![0]).searchParams.get(
+      'state',
+    );
+    t.a.dispose();
+    await settleLease();
+    const gate = deferred<void>();
+    let asked = false;
+    t.setToken(async (url) => {
+      asked = true;
+      await gate.promise;
+      return Response.json({
+        access_token: jwt({ iss: url.split('/_system')[0] }),
+        token_type: 'Bearer',
+        refresh_token: 'refresh',
+      });
+    });
+    let disposeNow: (() => void) | undefined;
+    const back = keep(
+      createBrowserRuntime({
+        ...t.options,
+        location: () => `${callback}?code=fixture-code&state=${state}`,
+        openStore: storeWith(
+          t.factory,
+          (store) => ({
+            commit: (id, revision, value) => {
+              const committing = store.commit(id, revision, value);
+              // Disposed once the attempt on Bob's address is being written.
+              if (
+                id === added.id &&
+                (value as { kind?: string }).kind === 'authorizing'
+              )
+                disposeNow?.();
+              return committing;
+            },
+          }),
+          t.channels,
+        ),
+      }),
+    );
+    const returned = back.initialize().catch(() => undefined);
+    await vi.waitFor(() => expect(asked).toBe(true));
+    expect(back.getSnapshot().some((c) => c.id === added.id)).toBe(true);
+    const navigations = t.navigate.mock.calls.length;
+    disposeNow = () => back.dispose();
+    await expect(back.beginAuthorization(added.id)).rejects.toMatchObject({
+      problem: 'disconnected',
+    });
+    await returned;
+    gate.resolve();
+    expect(t.navigate.mock.calls.slice(navigations)).toEqual([]);
+    await vi.waitFor(async () =>
+      expect(
+        (await savedRecords(t.factory))
+          .filter(({ id }) => id === added.id)
+          .map(({ id, value }) => ({ id, value })),
+      ).toEqual(before),
+    );
+    await settleLease();
+    const fresh = keep(createBrowserRuntime(t.options));
+    await fresh.initialize();
+    const listed = fresh.getSnapshot().find((c) => c.id === added.id);
+    expect(listed?.session).toEqual({ kind: 'signed-out' });
+  });
 
   it('lets a new sign-in leave while the code exchange of one signed out elsewhere still waits', async () => {
     const t = await tabs();
