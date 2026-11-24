@@ -839,6 +839,128 @@ describe('several tabs', () => {
     },
   );
 
+  it.each([
+    ['its write is in flight, on a saved address it lists', 'shared', 'write'],
+    [
+      'its write is in flight, on a page-local connection',
+      'page-local',
+      'write',
+    ],
+    ['it shows leaving, on a saved address it lists', 'shared', 'leaving'],
+  ])(
+    'leaves the saved address as it was when the page is disposed before leaving, as %s',
+    async (_, on, at) => {
+      const local = on === 'page-local';
+      let disposeNow: (() => void) | undefined;
+      const t = await tabs(undefined, (shared) => ({
+        ...(local ? { rememberPods: false } : {}),
+        openStore: storeWith(
+          shared.factory,
+          (store) => ({
+            commit: (id, revision, value) => {
+              const committing = store.commit(id, revision, value);
+              // Disposed after the attempt's transaction opened.
+              if ((value as { kind?: string }).kind === 'authorizing')
+                disposeNow?.();
+              return committing;
+            },
+          }),
+          shared.channels,
+        ),
+      }));
+      const added = await t.a.connect(bob);
+      const mine = local ? await t.b.connect(bob) : undefined;
+      if (!local) await listedBeside(t.b, added.id);
+      const before = (await savedRecords(t.factory)).map(({ id, value }) => ({
+        id,
+        value,
+      }));
+      expect(before).toMatchObject([
+        { id: added.id, value: { kind: 'address' } },
+      ]);
+      if (at === 'write') disposeNow = () => t.b.dispose();
+      else
+        t.b.subscribe(() => {
+          if (t.b.getSnapshot().some((c) => c.session.kind === 'leaving'))
+            t.b.dispose();
+        });
+      await expect(
+        t.b.beginAuthorization(mine?.id ?? added.id),
+      ).rejects.toMatchObject({ problem: 'disconnected' });
+      expect(t.navigate).not.toHaveBeenCalled();
+      await vi.waitFor(async () =>
+        expect(
+          (await savedRecords(t.factory)).map(({ id, value }) => ({
+            id,
+            value,
+          })),
+        ).toEqual(before),
+      );
+      await settleLease();
+      const fresh = keep(createBrowserRuntime(t.options));
+      await fresh.initialize();
+      const listed = fresh.getSnapshot().find((c) => c.id === added.id);
+      expect(listed?.session).toEqual({ kind: 'signed-out' });
+    },
+  );
+
+  it('lets a new sign-in leave while the code exchange of one signed out elsewhere still waits', async () => {
+    const t = await tabs();
+    const added = await t.a.connect(bob);
+    await listedBeside(t.b, added.id);
+    await t.a.beginAuthorization(added.id);
+    t.a.dispose();
+    await settleLease();
+    // The first callback's token answer waits.
+    const first = deferred<void>();
+    let asked = 0;
+    t.setToken(async (url) => {
+      if (++asked === 1) await first.promise;
+      return Response.json({
+        access_token: jwt({ iss: url.split('/_system')[0] }),
+        token_type: 'Bearer',
+        refresh_token: 'refresh',
+      });
+    });
+    const back = keep(t.returned());
+    const returned = back.initialize();
+    await vi.waitFor(() => expect(asked).toBe(1));
+    // Signed out in the other tab during that exchange.
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({
+        id: added.id,
+        session: { kind: 'ended', problem: 'interrupted' },
+      }),
+    );
+    expect(await t.b.disconnect(added.id)).toEqual({ kind: 'disconnected' });
+    await vi.waitFor(() =>
+      expect(back.getSnapshot().find((c) => c.id === added.id)).toMatchObject({
+        session: { kind: 'signed-out' },
+      }),
+    );
+    // A new sign-in leaves for the Pod while the old answer still waits.
+    await t.b.beginAuthorization(added.id);
+    expect(t.navigate).toHaveBeenCalledTimes(2);
+    first.resolve();
+    await expect(returned).resolves.toBeDefined();
+    // The late answer installs nothing and leaves the new attempt.
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: added.id, value: { kind: 'authorizing' } },
+    ]);
+    expect(back.getSnapshot().find((c) => c.id === added.id)?.reading).not.toBe(
+      'session',
+    );
+    t.b.dispose();
+    await settleLease();
+    const again = keep(t.returned());
+    expect(await again.initialize()).toMatchObject({
+      interaction: 'completed',
+    });
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: added.id, value: { kind: 'ready' } },
+    ]);
+  });
+
   it('keeps a sign-in on the other tab’s address that left for the Pod when this page is disposed', async () => {
     const t = await tabs(undefined, { rememberPods: false });
     const local = await t.b.connect(bob);

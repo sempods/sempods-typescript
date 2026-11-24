@@ -169,6 +169,13 @@ function stopDocument() {
 }
 
 /** Creates no storage, request or navigation until initialize/connect is called. */
+/** A first sign-in's attempt write, as `dispose()` settles it (`owed`). */
+interface OwedWrite {
+  readonly id: string;
+  readonly podUrl: string;
+  /** The revision of an attempt the write saved over an address, once it settled. */
+  readonly settled: Promise<string | undefined>;
+}
 export function createBrowserRuntime(
   options: BrowserRuntimeOptions,
 ): BrowserRuntime {
@@ -375,11 +382,12 @@ export function createBrowserRuntime(
   };
   const listeners = new Set<() => void>();
   /**
-   * Attempts saved on another tab's address (#372) whose page has not left
-   * for the Pod yet: `dispose()` puts those addresses back before it closes
-   * the store.
+   * First sign-ins' attempt writes whose page has not left for the Pod yet,
+   * also while in flight: `dispose()` waits for each and puts back the
+   * address an attempt replaced (#372), only while that attempt is
+   * unchanged, before it closes the store.
    */
-  const owed = new Set<NonNullable<Entry['wroteOn']>>();
+  const owed = new Set<OwedWrite>();
   const disconnects = new Map<
     string,
     {
@@ -2370,10 +2378,13 @@ export function createBrowserRuntime(
       current(e, generation);
       replaceUrl(destination);
       try {
-        // A disposed page lets go of the lock, as a closed tab does.
+        // A disposed page lets go of the lock, as a closed tab does, and so
+        // does a connection that ended meanwhile (another tab signed out):
+        // a late answer then installs nothing.
         const result = await waitFor(
           exchangeAuthorization(claim.attempt, location, protocol),
           runtimeLifetime.signal,
+          e.lifetime.signal,
         );
         await serial(e, async () => {
           current(e, generation);
@@ -2497,10 +2508,9 @@ export function createBrowserRuntime(
    * at once, best effort.
    */
   async function unwrite(e: Entry) {
-    const written = e.wroteOn;
-    if (!written || disconnects.has(e.view.id)) return;
-    // Put back by `dispose()` already.
-    if (!owed.has(written)) {
+    if (!e.wroteOn || disconnects.has(e.view.id)) return;
+    // Put back by `dispose()`.
+    if (disposed) {
       delete e.wroteOn;
       return;
     }
@@ -2512,7 +2522,6 @@ export function createBrowserRuntime(
     if (!written || !sessions) return;
     // A conflict: another tab changed the record since, which stays.
     await sessions.remember(written.id, written.podUrl, written.revision);
-    owed.delete(written);
     if (e.wroteOn === written) delete e.wroteOn;
   }
   async function prepareAuthorization(
@@ -2538,6 +2547,8 @@ export function createBrowserRuntime(
     // registration or persisting the attempt fails, nothing was reset.
     const before = e.generation;
     const self = e;
+    /** This sign-in's attempt over an address, until it leaves (`owed`). */
+    let owing: OwedWrite | undefined;
     const preparation = {};
     self.preparation = preparation;
     /**
@@ -2646,23 +2657,46 @@ export function createBrowserRuntime(
           }
           // Another tab changed the record first: shown here, and a retry
           // prepares on it.
-          const change = await sessions!.prepare(
-            attempt,
-            expected,
-            intent === 'silent',
-          );
+          // Known to `dispose()` before it is sent, so an attempt that
+          // replaces an address is undone also when the page is disposed
+          // while the write is in flight.
+          let settle!: (revision: string | undefined) => void;
+          const write = {
+            id: t.view.id,
+            podUrl: t.view.podUrl,
+            settled: new Promise<string | undefined>((resolve) => {
+              settle = resolve;
+            }),
+          };
+          owed.add(write);
+          let change: SessionChange;
+          try {
+            change = await sessions!.prepare(
+              attempt,
+              expected,
+              intent === 'silent',
+            );
+          } catch (error) {
+            settle(undefined);
+            owed.delete(write);
+            throw error;
+          }
+          const replaced =
+            change.kind === 'committed' && replacesAddress(change.record.value)
+              ? change.record.revision
+              : undefined;
+          settle(replaced);
+          if (replaced === undefined) owed.delete(write);
+          else owing = write;
           accepted(t, change);
           // Saved on another tab's address: until this page leaves for the
           // Pod, a sign-out, forget or dispose puts the address back.
-          if (t !== self && change.kind === 'committed') {
-            const written = {
+          if (t !== self && replaced !== undefined)
+            self.wroteOn = {
               id: t.view.id,
               podUrl: t.view.podUrl,
-              revision: change.record.revision,
+              revision: replaced,
             };
-            self.wroteOn = written;
-            owed.add(written);
-          }
           // The revision is recorded first, so a disconnect that ran during
           // the commit retires the new attempt; this lifetime must not
           // continue.
@@ -2722,8 +2756,6 @@ export function createBrowserRuntime(
       return { generation, url };
     };
     let prepared: Prepared;
-    /** The address the attempt was saved over, on another tab's record. */
-    let leaving: Entry['wroteOn'];
     if (
       (e.revision === null || e.pod === undefined || intent === 'silent') &&
       lease?.store.watch
@@ -2854,7 +2886,6 @@ export function createBrowserRuntime(
         // Saved on the other tab's address: this connection gives way to it.
         // A sign-out or forget of it puts the address back as its record
         // says (`address`); a dispose before it leaves does (`owed`).
-        leaving = e.wroteOn;
         delete e.wroteOn;
         dropEntry(id);
         stop(e, { kind: 'signed-out' });
@@ -2866,7 +2897,7 @@ export function createBrowserRuntime(
     const { generation, url } = prepared;
     current(e, generation);
     // Leaving for the Pod: its callback decides about the address now.
-    if (leaving) owed.delete(leaving);
+    if (owing) owed.delete(owing);
     const navigation: Navigation = {
       controller: new AbortController(),
       owned: false,
@@ -3564,13 +3595,17 @@ export function createBrowserRuntime(
       entries.clear();
       // Addresses of sign-ins that never left for their Pod go back first
       // (#372), each only while its attempt is unchanged.
-      const owing = [...owed];
+      const writes = [...owed];
       owed.clear();
       const shared = sessions;
       const closing = lease;
-      if (owing.length > 0 && shared && closing)
+      if (writes.length > 0 && shared && closing)
         void Promise.allSettled(
-          owing.map((w) => shared.remember(w.id, w.podUrl, w.revision)),
+          writes.map(async (w) => {
+            const revision = await w.settled;
+            if (revision !== undefined)
+              await shared.remember(w.id, w.podUrl, revision);
+          }),
         ).finally(() => closing.close());
       else lease?.close();
       publish();
