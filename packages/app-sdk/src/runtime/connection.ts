@@ -67,9 +67,10 @@ export interface Entry {
   /** The session generation a page that left to re-authorize left from. */
   leftFrom?: string;
   /**
-   * A sign-in attempt this connection saved on another tab's address (#372)
-   * before a sign-out or forget here won: retiring this connection puts that
-   * address back, and reports a failure so a retry can.
+   * A sign-in attempt this connection saved on another tab's address (#372),
+   * until this connection gives way to that tab's: a sign-out or forget here
+   * puts the address back as it retires this connection, and reports a
+   * failure so a retry can.
    */
   wroteOn?: { readonly id: string; readonly podUrl: string; revision: string };
   /**

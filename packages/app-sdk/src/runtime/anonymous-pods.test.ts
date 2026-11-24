@@ -275,8 +275,39 @@ describe('several tabs', () => {
     await a.initialize();
     await b.initialize();
     await restored(b);
-    return { ...f, a, b, factory };
+    return { ...f, a, b, factory, channels };
   }
+  /** Notifications between the tabs, delivered at once or held until `flush()`. */
+  const holdable = () => {
+    let queued: (() => void)[] | null = null;
+    return {
+      deliver: (send: () => void) =>
+        queued ? void queued.push(send) : void setTimeout(send),
+      hold: () => void (queued = []),
+      flush: () => {
+        const sends = queued ?? [];
+        queued = null;
+        sends.forEach((send) => send());
+      },
+    };
+  };
+  /** A token answer that waits for `release()`; `asked()` tells whether it was requested. */
+  const heldToken = (t: {
+    setToken: ReturnType<typeof optional>['setToken'];
+  }) => {
+    const released = deferred<void>();
+    let asked = false;
+    t.setToken(async (url) => {
+      asked = true;
+      await released.promise;
+      return Response.json({
+        access_token: jwt({ iss: url.split('/_system')[0] }),
+        token_type: 'Bearer',
+        refresh_token: 'refresh',
+      });
+    });
+    return { asked: () => asked, release: () => released.resolve() };
+  };
   /** Another tab that holds Bob's Pod lock and never lets it go (suspended). */
   const holdBobsLock = (options: BrowserRuntimeOptions) =>
     void options.locks!.request(
@@ -630,6 +661,197 @@ describe('several tabs', () => {
     ]);
     queued.splice(0).forEach((send) => send());
     queued = null;
+  });
+
+  it.each([
+    ['its own record', 'before the other tab returns'],
+    ['its own record', 'during the other tab’s code exchange'],
+    ['a page-local connection', 'before the other tab returns'],
+    ['a page-local connection', 'during the other tab’s code exchange'],
+  ])(
+    'lets a first sign-in on %s follow one another tab began unheard of, %s',
+    async (on, phase) => {
+      const local = on === 'a page-local connection';
+      const notes = holdable();
+      let held!: ReturnType<typeof heldDiscovery>;
+      const t = await tabs(notes.deliver, ({ options }) => {
+        held = heldDiscovery(options.fetch!, bob);
+        return {
+          fetch: held.fetch,
+          ...(local ? { rememberPods: false } : {}),
+        };
+      });
+      const token = heldToken(t);
+      const added = await t.a.connect(bob);
+      const mine = local ? await t.b.connect(bob) : undefined;
+      if (!local) await listedBeside(t.b, added.id);
+      const pending = t.b.beginAuthorization(mine?.id ?? added.id);
+      await vi.waitFor(() => expect(held.discovering()).toBe(true));
+      // The first tab leaves for Bob's Pod; this tab does not hear of it.
+      notes.hold();
+      await t.a.beginAuthorization(added.id);
+      t.a.dispose();
+      await settleLease();
+      const back = keep(t.returned());
+      let returned: ReturnType<typeof back.initialize> | undefined;
+      if (phase === 'during the other tab’s code exchange') {
+        returned = back.initialize();
+        await vi.waitFor(() => expect(token.asked()).toBe(true));
+        held.release();
+        // This sign-in waits for that exchange.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        let settled = false;
+        void pending.finally(() => (settled = true));
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        token.release();
+        await expect(pending).resolves.toBeUndefined();
+      } else {
+        held.release();
+        await expect(pending).resolves.toBeUndefined();
+        token.release();
+        returned = back.initialize();
+      }
+      expect(await returned).toMatchObject({ interaction: 'completed' });
+      expect(t.navigate).toHaveBeenCalledTimes(1);
+      expect(await savedRecords(t.factory)).toMatchObject([
+        { id: added.id, value: { kind: 'ready' } },
+      ]);
+      notes.flush();
+      await vi.waitFor(() =>
+        expect(t.b.getSnapshot().find((c) => c.podUrl === bob)).toMatchObject({
+          id: added.id,
+          session: { kind: 'active' },
+        }),
+      );
+    },
+  );
+
+  it('resolves a sign-in that waited for the Pod’s lock when it adopts the attempt another tab saved meanwhile', async () => {
+    const notes = holdable();
+    const requested = deferred<void>();
+    const t = await tabs(notes.deliver, ({ options }) => ({
+      // Tells when this tab asks for Bob's Pod's lock.
+      locks: {
+        ...options.locks!,
+        request: ((name: string, ...rest: unknown[]) => {
+          if (name === `sempods:connect:${fixtureNamespace}:${bob}`)
+            requested.resolve();
+          return (options.locks!.request as (...args: unknown[]) => unknown)(
+            name,
+            ...rest,
+          );
+        }) as NonNullable<BrowserRuntimeOptions['locks']>['request'],
+      },
+    }));
+    const added = await t.a.connect(bob);
+    await listedBeside(t.b, added.id);
+    // Another tab holds Bob's Pod's lock once its attempt is written.
+    const written = deferred<void>();
+    const writing = deferred<void>();
+    const holder = keep(
+      createBrowserRuntime({
+        ...t.options,
+        openStore: storeWith(
+          t.factory,
+          (store) => ({
+            commit: async (id, revision, value) => {
+              const change = await store.commit(id, revision, value);
+              if ((value as { kind?: string }).kind === 'authorizing') {
+                writing.resolve();
+                await written.promise;
+              }
+              return change;
+            },
+          }),
+          t.channels,
+        ),
+      }),
+    );
+    await holder.initialize();
+    expect(holder.getSnapshot().some((c) => c.id === added.id)).toBe(true);
+    notes.hold();
+    const leaving = holder.beginAuthorization(added.id);
+    await writing.promise;
+    const pending = t.b.beginAuthorization(added.id);
+    await requested.promise;
+    // This tab hears of that attempt while it waits for the lock.
+    notes.flush();
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({
+        id: added.id,
+        session: { kind: 'ended', problem: 'interrupted' },
+      }),
+    );
+    written.resolve();
+    await leaving;
+    await expect(pending).resolves.toBeUndefined();
+    expect(t.navigate).toHaveBeenCalledTimes(1);
+    holder.dispose();
+    await settleLease();
+    const back = keep(t.returned());
+    expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+    await vi.waitFor(() =>
+      expect(t.b.getSnapshot()[1]).toMatchObject({
+        id: added.id,
+        session: { kind: 'active' },
+      }),
+    );
+  });
+
+  it.each([
+    ['its attempt is saved', 1],
+    ['the other tab’s connection is listed', 2],
+  ])(
+    'puts the other tab’s address back when this page is disposed as %s',
+    async (_, at) => {
+      let written = false;
+      const t = await tabs(undefined, (shared) => ({
+        rememberPods: false,
+        openStore: onAttempt(() => {
+          written = true;
+          return Promise.resolve();
+        })(shared),
+      }));
+      const local = await t.b.connect(bob);
+      const remembered = await t.a.connect(bob);
+      let updates = 0;
+      t.b.subscribe(() => {
+        if (written && ++updates === at) t.b.dispose();
+      });
+      await expect(t.b.beginAuthorization(local.id)).rejects.toMatchObject({
+        problem: 'disconnected',
+      });
+      expect(t.navigate).not.toHaveBeenCalled();
+      await vi.waitFor(async () =>
+        expect(await savedRecords(t.factory)).toMatchObject([
+          { id: remembered.id, value: { kind: 'address', podUrl: bob } },
+        ]),
+      );
+      expect((await savedRecords(t.factory))[0]!.value).not.toHaveProperty(
+        'attempt',
+      );
+      await settleLease();
+      const fresh = keep(createBrowserRuntime(t.options));
+      await fresh.initialize();
+      const listed = fresh.getSnapshot().find((c) => c.id === remembered.id);
+      expect(listed?.session).toEqual({ kind: 'signed-out' });
+    },
+  );
+
+  it('keeps a sign-in on the other tab’s address that left for the Pod when this page is disposed', async () => {
+    const t = await tabs(undefined, { rememberPods: false });
+    const local = await t.b.connect(bob);
+    const remembered = await t.a.connect(bob);
+    await t.b.beginAuthorization(local.id);
+    expect(t.navigate).toHaveBeenCalledTimes(1);
+    t.b.dispose();
+    await settleLease();
+    const back = keep(t.returned());
+    expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: remembered.id, value: { kind: 'ready' } },
+    ]);
   });
 
   it('completes a sign-in pending in discovery with the session another tab stored meanwhile', async () => {
