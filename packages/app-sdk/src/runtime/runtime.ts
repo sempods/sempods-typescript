@@ -2754,6 +2754,17 @@ export function createBrowserRuntime(
       prepared = outcome.prepared;
       const target = outcome.target;
       if (target) {
+        // A sign-out, forget or dispose here after the attempt was saved on
+        // the other tab's address: the address is restored in its place, as
+        // that tab saved it (best effort), and nothing navigates.
+        if (!still()) {
+          target.lifetime.abort(new RuntimeError('disconnected'));
+          if (target.revision)
+            await sessions!
+              .remember(target.view.id, target.view.podUrl, target.revision)
+              .catch(() => {});
+          throw new RuntimeError('disconnected');
+        }
         // Saved on the other tab's address: this connection gives way to it.
         dropEntry(id);
         stop(e, { kind: 'signed-out' });
