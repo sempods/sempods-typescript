@@ -1,0 +1,624 @@
+/**
+ * Markdown as the rich editor's document and back, for the small set it
+ * edits: paragraphs, headings, bold, italic, strikethrough, web links,
+ * bulleted and numbered lists and line breaks. The source is read with the
+ * parser that `MarkdownView` renders with, so the editor shows what the view
+ * shows; a text with anything else, such as code, a quote, an image or HTML,
+ * is not read at all and stays with the source editor, so nothing is lost.
+ *
+ * Written back, the document is standard Markdown: CommonMark with GitHub's
+ * `~~strikethrough~~`. Text that looks like Markdown, such as `*` or a `1.`
+ * at a line's start, is escaped, so it stays text.
+ */
+import { parseMarkdown, type MarkdownNode } from './parse.js';
+
+/** A mark of the editor's document. */
+export interface DocMark {
+  readonly type: string;
+  readonly attrs?: { readonly href?: string };
+}
+
+/** A node of the editor's document, as Tiptap's JSON has it. */
+export interface DocNode {
+  readonly type: string;
+  readonly attrs?: { readonly level?: number; readonly start?: number };
+  readonly content?: readonly DocNode[];
+  readonly text?: string;
+  readonly marks?: readonly DocMark[];
+}
+
+class Unsupported extends Error {}
+
+/** An address the field links: `http:` or `https:`, without spaces. */
+export const WEB = /^https?:\/\/\S+$/i;
+const MARKS: Readonly<Record<string, string>> = {
+  strong: 'bold',
+  emphasis: 'italic',
+  delete: 'strike',
+};
+
+/** `node` with `marks`, if there are any. */
+const mark = (node: DocNode, marks: readonly DocMark[]): DocNode =>
+  marks.length > 0 ? { ...node, marks } : node;
+
+function inline(
+  nodes: readonly MarkdownNode[] = [],
+  marks: readonly DocMark[] = [],
+): DocNode[] {
+  const out: DocNode[] = [];
+  for (const node of nodes) {
+    if (node.type === 'text')
+      (node.value ?? '').split(/\r?\n/).forEach((line, i) => {
+        if (i > 0) out.push(mark({ type: 'hardBreak' }, marks));
+        if (line)
+          out.push({
+            type: 'text',
+            text: line,
+            ...(marks.length > 0 ? { marks } : {}),
+          });
+      });
+    // A break within a link belongs to it, so the link stays one range.
+    else if (node.type === 'break')
+      out.push(mark({ type: 'hardBreak' }, marks));
+    else if (MARKS[node.type])
+      out.push(
+        ...inline(node.children, [...marks, { type: MARKS[node.type]! }]),
+      );
+    else if (
+      node.type === 'link' &&
+      WEB.test(node.url ?? '') &&
+      !node.title &&
+      !marks.some((mark) => mark.type === 'link')
+    )
+      out.push(
+        ...inline(node.children, [
+          ...marks,
+          { type: 'link', attrs: { href: node.url! } },
+        ]),
+      );
+    else throw new Unsupported(node.type);
+  }
+  return out;
+}
+
+function block(node: MarkdownNode): DocNode {
+  switch (node.type) {
+    case 'paragraph':
+      return { type: 'paragraph', content: inline(node.children) };
+    case 'heading':
+      return {
+        type: 'heading',
+        attrs: { level: node.depth ?? 1 },
+        content: inline(node.children),
+      };
+    case 'list':
+      return {
+        type: node.ordered ? 'orderedList' : 'bulletList',
+        ...(node.ordered ? { attrs: { start: node.start ?? 1 } } : {}),
+        content: (node.children ?? []).map((item) => {
+          const content = (item.children ?? []).map(block);
+          // An item in the editor starts with a paragraph, empty for an
+          // empty item or one that starts with a list, as written back.
+          return {
+            type: 'listItem',
+            content:
+              content[0]?.type === 'paragraph'
+                ? content
+                : [{ type: 'paragraph' }, ...content],
+          };
+        }),
+      };
+    default:
+      throw new Unsupported(node.type);
+  }
+}
+
+/**
+ * The editor's document for `source`, or `null` when the text holds
+ * anything beyond the editor's set: code, a quote, an image, HTML, a rule,
+ * a reference link, a link with a title or to anything but a web address.
+ */
+export function fromMarkdown(source: string): DocNode | null {
+  try {
+    const content = (parseMarkdown(source).children ?? []).map(block);
+    return {
+      type: 'doc',
+      content: content.length > 0 ? content : [{ type: 'paragraph' }],
+    };
+  } catch (error) {
+    if (error instanceof Unsupported) return null;
+    throw error;
+  }
+}
+
+/** An `&` that would start a character reference, which Markdown decodes. */
+const REFERENCE = /&(?=#?[0-9A-Za-z]+;)/g;
+
+/** Text with the characters escaped that could begin or end Markdown in a line. */
+const escapeText = (text: string) =>
+  // `&amp;` typed as text stays those five characters.
+  text.replace(/[\\`*_~[\]<]/g, '\\$&').replace(REFERENCE, '\\&');
+
+/**
+ * A line's start without what the parser would read as a block of its own:
+ * a heading, a list, a quote, a rule or a heading's underline, or an
+ * indented code block.
+ */
+const escapeLineStart = (line: string) =>
+  line
+    // Spaces a person typed at a line's start stay, as characters Markdown
+    // keeps: plain ones would be dropped, or start a code block.
+    .replace(/^[ \t]+/, (space) =>
+      space.replace(/ /g, '&#32;').replace(/\t/g, '&#9;'),
+    )
+    .replace(/^(#{1,6})(?=[ \t]|$)/, '\\$1')
+    .replace(/^([-+])(?=[ \t]|$)/, '\\$1')
+    .replace(/^(\d{1,9})([.)])(?=[ \t]|$)/, '$1\\$2')
+    .replace(/^(=+|-+)([ \t]*)$/, '\\$1$2')
+    .replace(/^>/, '\\>');
+
+/** The order in which marks nest: a link outermost. */
+const ORDER = ['link', 'bold', 'italic', 'strike'];
+const DELIMITER: Readonly<Record<string, string>> = {
+  bold: '**',
+  italic: '*',
+  strike: '~~',
+};
+
+const sameMark = (a: DocMark, b: DocMark) =>
+  a.type === b.type && (a.type !== 'link' || a.attrs?.href === b.attrs?.href);
+
+/**
+ * An address as a link destination: in angle brackets where it holds
+ * characters that would end a plain one, and with an `&` escaped where it
+ * would start a character reference, so it reads back as it was.
+ */
+export const destination = (href: string) =>
+  (/[\s()<>\\]/.test(href)
+    ? '<' + href.replace(/[<>\\]/g, '\\$&') + '>'
+    : href
+  ).replace(REFERENCE, '\\&');
+
+/** The length of the spaces and tabs that end `text`. */
+function trailingSpace(text: string) {
+  let at = text.length;
+  while (at > 0 && (text[at - 1] === ' ' || text[at - 1] === '\t')) at--;
+  return text.length - at;
+}
+
+/** Whether `text` ends with a character no backslash escapes. */
+function endsUnescaped(text: string, char: string) {
+  if (!text.endsWith(char)) return false;
+  let at = text.length - 1;
+  while (at > 0 && text[at - 1] === '\\') at--;
+  return (text.length - 1 - at) % 2 === 0;
+}
+
+/** How a character next to a delimiter run counts for CommonMark. */
+const side = (char: string | undefined) =>
+  !char || /\s/.test(char)
+    ? 'space'
+    : /[\p{P}\p{S}]/u.test(char)
+      ? 'punctuation'
+      : 'other';
+
+/** The whole delimiter run around the marker at `[at, at + length)`. */
+function run(out: string, at: number, length: number): [number, number] {
+  const char = out[at]!;
+  let start = at;
+  while (start > 0 && out[start - 1] === char && out[start - 2] !== '\\')
+    start--;
+  let end = at + length;
+  while (out[end] === char) end++;
+  return [start, end];
+}
+
+/**
+ * The letters next to markers that cannot open or close as written, as
+ * character references, which count as punctuation there: `**(a)**b` cannot
+ * close, `**(a)**&#98;` can, and reads back as the same text.
+ */
+function referenced(out: string, spans: readonly Span[]): string {
+  const letters = new Set<number>();
+  for (const span of spans) {
+    const [before] = run(out, span.open, span.length);
+    const [, after] = run(out, span.close, span.length);
+    if (
+      !flanks(out, span.open, span.length, true) &&
+      side(out[before - 1]) === 'other'
+    )
+      letters.add(before - 1);
+    if (
+      !flanks(out, span.close, span.length, false) &&
+      side(out[after]) === 'other'
+    )
+      letters.add(after);
+  }
+  let result = out;
+  for (const at of [...letters].sort((a, b) => b - a)) {
+    // A letter beyond the basic plane is two units, one reference.
+    const low = at > 0 && /[\udc00-\udfff]/.test(out[at]!) ? at - 1 : at;
+    const char = String.fromCodePoint(out.codePointAt(low)!);
+    result =
+      result.slice(0, low) +
+      `&#${char.codePointAt(0)};` +
+      result.slice(low + char.length);
+  }
+  return result;
+}
+
+/**
+ * Whether the delimiter run at `[at, at + length)` of `out` opens or
+ * closes emphasis as meant: CommonMark's flanking rules, which GitHub's
+ * strikethrough follows as well.
+ */
+function flanks(out: string, at: number, length: number, opens: boolean) {
+  const [start, end] = run(out, at, length);
+  // By UTF-16 unit, as the parser reads: half an emoji is no punctuation.
+  const before = side(out[start - 1]);
+  const after = side(out[end]);
+  return opens
+    ? after !== 'space' && (after !== 'punctuation' || before !== 'other')
+    : before !== 'space' && (before !== 'punctuation' || after !== 'other');
+}
+
+/** Emphasis written over nodes `[from, to]`, and where its markers are. */
+interface Span {
+  readonly type: string;
+  readonly from: number;
+  readonly to: number;
+  readonly open: number;
+  readonly close: number;
+  readonly length: number;
+}
+
+/** Each character a reader sees, but whitespace, with its marks. */
+function visible(nodes: readonly DocNode[] = [], breaks = false): string {
+  let out = '';
+  for (const node of nodes) {
+    if (node.type === 'hardBreak') {
+      if (breaks) out += '\n';
+      continue;
+    }
+    if (node.type !== 'text') {
+      const inner = visible(node.content, breaks);
+      // Breaks that end a block show nothing, so they are not written.
+      out += TEXT_BLOCKS.has(node.type) ? inner.replace(/\n+$/, '') : inner;
+      continue;
+    }
+    const marks = (node.marks ?? [])
+      .map((mark) => mark.type + (mark.attrs?.href ?? ''))
+      .sort()
+      .join(' ');
+    for (const char of node.text ?? '')
+      if (/\S/.test(char)) out += `${char}\u0000${marks}\u0001`;
+  }
+  return out;
+}
+
+/** Blocks of inline text, whose breaks at the end show nothing. */
+const TEXT_BLOCKS = new Set(['paragraph', 'heading']);
+
+/** Text next to text with the same marks as one, as the editor keeps it. */
+function merged(content: readonly DocNode[]): DocNode[] {
+  const out: DocNode[] = [];
+  for (const node of content) {
+    const previous = out[out.length - 1];
+    const marks = node.marks ?? [];
+    if (
+      previous?.type === 'text' &&
+      node.type === 'text' &&
+      (previous.marks ?? []).length === marks.length &&
+      marks.every((mark) =>
+        (previous.marks ?? []).some((other) => sameMark(mark, other)),
+      )
+    )
+      out[out.length - 1] = {
+        ...previous,
+        text: (previous.text ?? '') + (node.text ?? ''),
+      };
+    else out.push(node);
+  }
+  return out;
+}
+
+/** The content without bold, italic and strikethrough; links stay. */
+const plain = (content: readonly DocNode[]) =>
+  content.map((node) =>
+    node.marks
+      ? { ...node, marks: node.marks.filter((m) => m.type === 'link') }
+      : node,
+  );
+
+/**
+ * Inline content as Markdown. In a heading, which is one line, a break is a
+ * space. Emphasis whose markers would not flank its text, as around a `.`
+ * between letters, is left out rather than written as stars that show; so
+ * is all emphasis of a block where markers meet and would pair otherwise,
+ * which reading the block back shows.
+ */
+function serializeInline(
+  nodes: readonly DocNode[] = [],
+  heading = false,
+): string {
+  const content = merged(nodes);
+  let out = '';
+  // The open marks, outermost first: where each began, and its marker.
+  const open: { mark: DocMark; from: number; at: number }[] = [];
+  let last = -1;
+  const spans: Span[] = [];
+  // Markers next to whitespace would neither open nor close: the whitespace
+  // moves outside them.
+  const closeTo = (depth: number) => {
+    // Whitespace and the breaks and blank lines after the last text stay
+    // after the markers too: a marker on a line of its own closes nothing.
+    let cut = out.length;
+    const ends = (end: string) =>
+      cut >= end.length && out.startsWith(end, cut - end.length);
+    for (;;) {
+      while (cut > 0 && (out[cut - 1] === ' ' || out[cut - 1] === '\t')) cut--;
+      if (ends('\\\n')) cut -= 2;
+      else if (ends('&#32;') && !ends('\\&#32;')) cut -= 5;
+      else break;
+    }
+    const space = out.slice(cut);
+    out = out.slice(0, cut);
+    while (open.length > depth) {
+      const { mark, from, at } = open.pop()!;
+      if (mark.type === 'link') {
+        out += `](${destination(mark.attrs?.href ?? '')})`;
+        continue;
+      }
+      const delimiter = DELIMITER[mark.type]!;
+      spans.push({
+        type: mark.type,
+        from,
+        to: last,
+        open: at,
+        close: out.length,
+        length: delimiter.length,
+      });
+      out += delimiter;
+    }
+    out += space;
+  };
+  for (const [index, node] of content.entries()) {
+    if (node.type === 'hardBreak') {
+      if (out === '' || out.endsWith('\n')) {
+        // A heading has no lines; on an empty line a break would be a `\`
+        // that shows, so a space keeps the line, as a blank one.
+        if (heading) continue;
+        out += '&#32;';
+      }
+      // Marks go on over the break: a link over two lines stays one.
+      out = out.slice(0, out.length - trailingSpace(out));
+      out += heading ? ' ' : '\\\n';
+      continue;
+    }
+    // How far a mark of this node goes on: the longer one opens outside,
+    // so marks that end first close first, as `a***b**c*`.
+    const reach = (mark: DocMark) => {
+      let at = index;
+      while (content[at + 1]?.marks?.some((other) => sameMark(other, mark)))
+        at++;
+      return at;
+    };
+    const marks = [...(node.marks ?? [])].sort(
+      (a, b) =>
+        Number(b.type === 'link') - Number(a.type === 'link') ||
+        reach(b) - reach(a) ||
+        ORDER.indexOf(a.type) - ORDER.indexOf(b.type),
+    );
+    // A link whose text is its address, alone, as `<address>`.
+    const href = marks.length === 1 && marks[0]!.attrs?.href;
+    if (
+      href &&
+      node.text === href &&
+      // An autolink takes no escapes.
+      !/[<>\\]/.test(href) &&
+      href.search(REFERENCE) === -1 &&
+      !open.some(({ mark }) => sameMark(mark, marks[0]!)) &&
+      !sameMark(marks[0]!, content[index + 1]?.marks?.[0] ?? { type: '' })
+    ) {
+      closeTo(0);
+      out += `<${href}>`;
+      last = index;
+      continue;
+    }
+    // Open marks this node has too stay open, outermost first; a link that
+    // starts here goes outside them, so it stays one link.
+    const link = marks.find((mark) => mark.type === 'link');
+    let keep = 0;
+    while (
+      keep < open.length &&
+      marks.some((mark) => sameMark(mark, open[keep]!.mark)) &&
+      (!link || open.some((other) => sameMark(other.mark, link)))
+    )
+      keep++;
+    closeTo(keep);
+    const opening = marks.filter(
+      (mark) => !open.some((other) => sameMark(other.mark, mark)),
+    );
+    let text = escapeText(node.text ?? '');
+    // Nothing written on the line yet: it would start a block there.
+    if (out === '' || (!heading && out.endsWith('\n')))
+      text = escapeLineStart(text);
+    // Whitespace alone takes no marks of its own: `** **` would be a rule.
+    if (opening.length > 0 && /\S/.test(node.text ?? '')) {
+      const lead = /^[ \t]*/.exec(text)![0];
+      out += lead;
+      text = text.slice(lead.length);
+      for (const mark of opening) {
+        // A `!` before a link would make it an image.
+        if (mark.type === 'link' && endsUnescaped(out, '!'))
+          out = out.slice(0, -1) + '\\!';
+        open.push({ mark, from: index, at: out.length });
+        out += mark.type === 'link' ? '[' : DELIMITER[mark.type];
+      }
+    }
+    out += text;
+    last = index;
+  }
+  closeTo(0);
+  out = out.slice(0, out.length - trailingSpace(out));
+  // A break at the end of a block is not one, nor are the blank lines it
+  // ends, also before whitespace alone.
+  for (;;) {
+    if (out.endsWith('\\\n')) out = out.slice(0, -2);
+    else if (out.endsWith('&#32;') && !out.endsWith('\\&#32;'))
+      out = out.slice(0, -5);
+    else break;
+    out = out.slice(0, out.length - trailingSpace(out));
+  }
+  // Whether the parser reads the text back with these marks.
+  const agrees = (written: string) =>
+    visible(fromMarkdown(written)?.content, !heading) ===
+    visible([{ type: 'paragraph', content }], !heading);
+  const failed = spans.filter(
+    (span) =>
+      !flanks(out, span.open, span.length, true) ||
+      !flanks(out, span.close, span.length, false),
+  );
+  // Markers that meet, as `***` or `*~~`, can pair otherwise than meant.
+  const meet = /[*~]{3,}|\*~|~\*/.test(out);
+  if (spans.length === 0 || (failed.length === 0 && !meet) || agrees(out))
+    return out;
+  if (failed.length > 0) {
+    const fixed = referenced(out, failed);
+    if (agrees(fixed)) return fixed;
+  }
+  // Otherwise only the marks that cannot flank or meet others are left
+  // out; any other stays, as a bold word elsewhere in the paragraph.
+  const meets = spans.filter((span) =>
+    [
+      span.open - 1,
+      span.open + span.length,
+      span.close - 1,
+      span.close + span.length,
+    ].some((at) => out[at] === '*' || out[at] === '~'),
+  );
+  const drop = [...failed, ...meets];
+  return serializeInline(
+    drop.length === 0 ? plain(content) : without(content, drop),
+    heading,
+  );
+}
+
+/** The content without the marks of `spans` over the nodes they span. */
+const without = (content: readonly DocNode[], spans: readonly Span[]) =>
+  content.map((node, i) => {
+    const drop = spans
+      .filter((span) => span.from <= i && i <= span.to)
+      .map((span) => span.type);
+    return drop.length === 0 || !node.marks
+      ? node
+      : { ...node, marks: node.marks.filter((m) => !drop.includes(m.type)) };
+  });
+
+/** Lines after the first indented by `by`, as a list item's content is. */
+const indent = (text: string, by: number) =>
+  text.replace(/\n(?=[^\n])/g, '\n' + ' '.repeat(by));
+
+/** A block as Markdown; `other` marks a list right after one of its kind. */
+export function serializeBlock(node: DocNode, other = false): string {
+  switch (node.type) {
+    case 'paragraph':
+      return serializeInline(node.content);
+    case 'heading': {
+      // Hashes at its end would close the heading, and disappear.
+      const text = serializeInline(node.content, true).replace(
+        /(^|[ \t])(#+)([ \t]*)$/,
+        '$1\\$2$3',
+      );
+      return '#'.repeat(node.attrs?.level ?? 2) + (text ? ' ' + text : '');
+    }
+    case 'bulletList':
+    case 'orderedList': {
+      // A list right after one of its kind takes the other marker, so the
+      // two stay two lists.
+      const start = node.attrs?.start ?? 1;
+      return (node.content ?? [])
+        .map((item, i) => {
+          const marker =
+            node.type === 'bulletList'
+              ? other
+                ? '* '
+                : '- '
+              : `${start + i}${other ? ')' : '.'} `;
+          // A nested list follows its item's text directly, so the list
+          // stays tight; paragraphs are apart. Two lists in a row keep
+          // apart as at the top.
+          let previous: string | undefined;
+          let nested = false;
+          let body = '';
+          for (const child of item.content ?? []) {
+            const list = /List$/.test(child.type);
+            // Only what is written counts for the lists around it.
+            const turn: boolean = previous === child.type && list && !nested;
+            const written = serializeBlock(child, turn);
+            // An empty paragraph adds nothing.
+            if (written === '') continue;
+            nested = turn;
+            // A list interrupts its item's text only if it starts at 1 with
+            // an item that has text; any other needs a blank line.
+            const tight =
+              list &&
+              (previous !== 'paragraph' ||
+                ((child.attrs?.start ?? 1) === 1 &&
+                  /^(?:[-*]|\d+[.)]) \S/.test(written)));
+            // An item that starts with a list has its marker alone above it.
+            body +=
+              (body === '' ? (list ? '\n' : '') : tight ? '\n' : '\n\n') +
+              written;
+            previous = child.type;
+          }
+          // A marker alone on its line ends there.
+          const head = body.startsWith('\n') ? marker.trimEnd() : marker;
+          return (head + indent(body, marker.length)).replace(/[ \t]+$/, '');
+        })
+        .join('\n');
+    }
+    default:
+      throw new Error(`The editor holds an unknown node: ${node.type}.`);
+  }
+}
+
+/**
+ * Whether `block`, written as Markdown, reads back with the same text and
+ * marks: a formatting the field could not save is not made in the editor.
+ */
+export function writesBack(block: DocNode): boolean {
+  return (
+    visible(fromMarkdown(serializeBlock(block))?.content, true) ===
+    visible([block], true)
+  );
+}
+
+/**
+ * Top-level blocks as Markdown, each written by `write`: a list right after
+ * one of its kind takes the other marker, so the two stay two lists, and an
+ * empty paragraph adds nothing.
+ */
+export function joinBlocks<Block extends { readonly type: string }>(
+  blocks: Iterable<Block>,
+  write: (block: Block, other: boolean) => string,
+): string {
+  const out: string[] = [];
+  let previous: string | undefined;
+  let other = false;
+  for (const block of blocks) {
+    // Only what is written counts for the lists around it.
+    const turn: boolean =
+      previous === block.type && /List$/.test(block.type) && !other;
+    const text = write(block, turn);
+    if (text === '') continue;
+    out.push(text);
+    previous = block.type;
+    other = turn;
+  }
+  return out.join('\n\n');
+}
+
+/** The editor's document as standard Markdown. */
+export const toMarkdown = (doc: DocNode) =>
+  joinBlocks(doc.content ?? [], serializeBlock);

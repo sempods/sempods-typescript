@@ -3,6 +3,8 @@
  * is an API decision and must update this list (and the package README).
  * Types are reviewed with the declarations.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { expect, it } from 'vitest';
 
 it('exports the adapters, the router and the shadcn/ui components', async () => {
@@ -92,4 +94,34 @@ it('exports the adapters, the router and the shadcn/ui components', async () => 
     'useComboboxAnchor',
     'useNav',
   ]);
+});
+
+it('exports the Markdown view and field from their own entry', async () => {
+  expect(Object.keys(await import('./markdown/index.js')).sort()).toEqual([
+    'MarkdownField',
+    'MarkdownView',
+  ]);
+});
+
+it('keeps the optional react-markdown out of the root entry', () => {
+  // Every module the root entry reaches through relative imports.
+  const seen = new Set<string>();
+  const packages = new Set<string>();
+  const visit = (file: string) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const code = readFileSync(file, 'utf8');
+    for (const [, target] of code.matchAll(/from '([^']+)'/g)) {
+      if (!target!.startsWith('.')) {
+        packages.add(target!);
+        continue;
+      }
+      const base = join(dirname(file), target!.replace(/\.js$/, ''));
+      visit(existsSync(base + '.tsx') ? base + '.tsx' : base + '.ts');
+    }
+  };
+  visit(join(import.meta.dirname, 'index.ts'));
+  expect(packages.has('react-markdown')).toBe(false);
+  expect([...seen].some((file) => file.includes('/markdown/'))).toBe(false);
+  expect(packages.has('react-aria-components')).toBe(true);
 });

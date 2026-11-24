@@ -396,8 +396,8 @@ it('opens a row with another definition through the current view, not a kept one
 
 /**
  * Signs in again in the same page: a sign-in started and left, then the page
- * restored from the back/forward cache resumes the session under a new
- * authorization.
+ * restored from the back/forward cache restores the session as a new
+ * connection object, so the views of the page's earlier lifetime end.
  */
 async function reauthorize(
   f: Awaited<ReturnType<typeof signedIn>>,

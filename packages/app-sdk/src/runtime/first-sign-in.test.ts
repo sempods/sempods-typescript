@@ -9,7 +9,6 @@ import {
   heldDiscovery,
   jwt,
   memoryChannels,
-  memoryHistory,
   memoryStorage,
   pod,
   restart,
@@ -187,32 +186,42 @@ it('fails as a sign-in on any other answer', async () => {
   });
 });
 
-it('does not try again after coming back without an answer, and forgets the attempt', async () => {
+it('does not try again after coming back without an answer; the attempt stays signed out until it expires', async () => {
   const f = silent();
   await f.runtime.initialize();
+  expect(await savedRecords(f.factory)).toMatchObject([
+    { value: { kind: 'authorizing', silent: true } },
+  ]);
+  // Back navigation from the Pod, or a reload: no callback.
+  const reloaded = await restart(f, f.runtime, keep);
+  expect(silentAttempts(f)).toBe(1);
+  expect(reloaded.getSnapshot()).toMatchObject([
+    { podUrl: pod, session: { kind: 'signed-out' } },
+  ]);
   expect(await savedRecords(f.factory)).toHaveLength(1);
-  // Back navigation from the Pod: no callback.
-  const reloaded = await restart(f, f.runtime, keep);
-  expect(silentAttempts(f)).toBe(1);
-  expect(reloaded.getSnapshot()).toEqual([]);
-  expect(await savedRecords(f.factory)).toEqual([]);
   expect([...f.tab.map.values()]).toEqual(['tried']);
-});
-
-it('forgets the attempt when the page that left comes back to its history entry', async () => {
-  const history = memoryHistory();
-  vi.stubGlobal('history', history);
-  const f = silent();
-  await f.runtime.initialize();
-  // Back navigation, also to a page the back/forward cache restores and the
-  // app starts a runtime on again: the same history entry.
-  const reloaded = await restart(f, f.runtime, keep);
-  expect(reloaded.getSnapshot()).toEqual([]);
+  // Once it expired, the next start deletes it; this tab still never tries
+  // again.
+  const later = Date.now() + 11 * 60_000;
+  vi.spyOn(Date, 'now').mockReturnValue(later);
+  const expired = await restart(f, reloaded, keep);
+  expect(expired.getSnapshot()).toEqual([]);
   expect(await savedRecords(f.factory)).toEqual([]);
   expect(silentAttempts(f)).toBe(1);
+  // A new tab with nothing stored tries again.
+  expired.dispose();
+  await settleLease();
+  const fresh = createBrowserRuntime({
+    ...f.options,
+    tabStorage: memoryStorage(),
+  });
+  keep(fresh);
+  await fresh.initialize();
+  expect(silentAttempts(f)).toBe(2);
+  vi.restoreAllMocks();
 });
 
-it('leaves the attempt to the tab at the Pod in a tab opened from it', async () => {
+it('shows the attempt signed out in a tab opened from the one at the Pod, and lets its answer complete', async () => {
   // A store the app's tabs share (with `watch`).
   const factory = new IDBFactory();
   const channel = () => ({
@@ -220,16 +229,13 @@ it('leaves the attempt to the tab at the Pod in a tab opened from it', async () 
     addEventListener() {},
     close() {},
   });
-  vi.stubGlobal('history', memoryHistory());
   const f = silent({
     openStore: (namespace) => openSessionStore(namespace, factory, channel),
   });
   await f.runtime.initialize();
-  // The opened tab copies the tab storage, note included, but not the
-  // history entry that left.
+  // The opened tab copies the tab storage, note included.
   const copy = memoryStorage();
   f.tab.map.forEach((value, key) => copy.setItem(key, value));
-  vi.stubGlobal('history', memoryHistory());
   const opened = createBrowserRuntime({
     ...f.options,
     tabStorage: copy,
@@ -238,17 +244,33 @@ it('leaves the attempt to the tab at the Pod in a tab opened from it', async () 
   keep(opened);
   await opened.initialize();
   expect(opened.getSnapshot()).toMatchObject([
-    { session: { kind: 'ended', problem: 'interrupted' } },
+    { session: { kind: 'signed-out' } },
   ]);
   expect(silentAttempts(f)).toBe(1);
   expect(await savedRecords(factory)).toMatchObject([
-    { value: { kind: 'authorizing' } },
+    { value: { kind: 'authorizing', silent: true } },
   ]);
+  opened.dispose();
   const back = await answered(f, 'code=fixture-code');
   expect(await back.initialize()).toMatchObject({ interaction: 'completed' });
 });
 
-it('ends signed out, as if never started, when the page stays instead', async () => {
+it('lets a click replace the silent attempt at once', async () => {
+  const f = silent();
+  await f.runtime.initialize();
+  const reloaded = await restart(f, f.runtime, keep);
+  const [connection] = reloaded.getSnapshot();
+  await reloaded.beginAuthorization(connection!.id);
+  const [saved] = await savedRecords(f.factory);
+  const value = saved?.value;
+  expect(value).toMatchObject({ kind: 'authorizing' });
+  expect(value).not.toHaveProperty('silent');
+  expect(
+    new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.has('prompt'),
+  ).toBe(false);
+});
+
+it('ends signed out when the page stays instead, keeping the attempt for its answer', async () => {
   const f = silent();
   await f.runtime.initialize();
   const [connection] = f.runtime.getSnapshot();
@@ -260,13 +282,15 @@ it('ends signed out, as if never started, when the page stays instead', async ()
       session: { kind: 'signed-out' },
     }),
   ]);
-  await vi.waitFor(async () =>
-    expect(await savedRecords(f.factory)).toEqual([]),
-  );
+  await settleLease();
+  expect(f.runtime.getSnapshot()).toMatchObject([
+    { id: connection!.id, session: { kind: 'signed-out' } },
+  ]);
+  expect(await savedRecords(f.factory)).toHaveLength(1);
   expect([...f.tab.map.values()]).toEqual(['tried']);
 });
 
-it('ends signed out, as if never started, when the page returns from the back/forward cache', async () => {
+it('ends signed out when the page returns from the back/forward cache, keeping the attempt', async () => {
   const page = new EventTarget();
   vi.stubGlobal('addEventListener', page.addEventListener.bind(page));
   vi.stubGlobal('removeEventListener', page.removeEventListener.bind(page));
@@ -289,9 +313,9 @@ it('ends signed out, as if never started, when the page returns from the back/fo
         session: { kind: 'signed-out' },
       }),
     ]);
-    await vi.waitFor(async () =>
-      expect(await savedRecords(f.factory)).toEqual([]),
-    );
+    await settleLease();
+    expect(new Set(kinds)).toEqual(new Set(['signed-out']));
+    expect(await savedRecords(f.factory)).toHaveLength(1);
     expect([...f.tab.map.values()]).toEqual(['tried']);
     expect(silentAttempts(f)).toBe(1);
   } finally {
@@ -596,4 +620,57 @@ it('rejects silent without a default Pod or a did:web identity, before any I/O',
       firstSignIn: 'silent',
     }),
   );
+});
+
+it('recognizes the answer to a silent sign-in an SDK 0.9 tab started', async () => {
+  const f = silent();
+  await f.runtime.initialize();
+  const state = new URL(f.navigate.mock.calls.at(-1)![0]).searchParams.get(
+    'state',
+  )!;
+  f.runtime.dispose();
+  await settleLease();
+  // 0.9 stored an ordinary attempt and noted its state in the tab.
+  const store = await openSessionStore(
+    JSON.stringify(['did-web', identity.clientId]),
+    f.factory,
+  );
+  const [saved] = (await store.list()).records;
+  const { silent: _silent, ...older } = saved!.value as Record<string, unknown>;
+  void _silent;
+  await store.commit(saved!.id, saved!.revision, older);
+  store.close();
+  f.tab.setItem([...f.tab.map.keys()][0]!, `attempt:${state}`);
+  const back = await answered(f, 'error=login_required');
+  expect(await back.initialize()).toMatchObject({
+    interaction: 'none',
+    firstSignIn: { problem: 'login-required' },
+  });
+  await vi.waitFor(async () =>
+    expect(await savedRecords(f.factory)).toEqual([]),
+  );
+});
+
+it('leaves an expired silent attempt of a Pod outside allowedPods alone', async () => {
+  const f = silent();
+  await f.runtime.initialize();
+  expect(await savedRecords(f.factory)).toHaveLength(1);
+  f.runtime.dispose();
+  await settleLease();
+  const later = Date.now() + 11 * 60_000;
+  vi.spyOn(Date, 'now').mockReturnValue(later);
+  // The app now allows only another Pod.
+  const other = 'https://pod.example/bob';
+  const next = createBrowserRuntime({
+    ...f.options,
+    preset: { podUrl: other },
+    allowedPods: [other],
+    tabStorage: memoryStorage(),
+  });
+  keep(next);
+  await next.initialize();
+  expect(await savedRecords(f.factory)).toHaveLength(1);
+  // An existing installation: no silent sign-in to the other Pod.
+  expect(silentAttempts(f)).toBe(1);
+  vi.restoreAllMocks();
 });

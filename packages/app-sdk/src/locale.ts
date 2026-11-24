@@ -310,9 +310,11 @@ export interface UiMessages {
    */
   readonly signInCancelled: string;
   /**
-   * A re-authorization answered with `access_denied` that kept the earlier
-   * session (`startup.resumed`). Optional in the type (added in 0.6.0);
-   * `createLocale` fills it from the language defaults.
+   * A re-authorization answered with `access_denied` that kept the session
+   * (`startup.resumed`). Neutral: the answer does not say whether the person
+   * cancelled or removed access, so it claims no unchanged permissions.
+   * Optional in the type (added in 0.6.0); `createLocale` fills it from the
+   * language defaults.
    */
   readonly sharingUnchanged?: string;
   /** An unfinished sign-in or an expired session; implies neither access nor a kept draft. */
@@ -483,7 +485,7 @@ export const englishMessages: SdkMessages = {
     signInCancelled:
       'No access was granted: the sign-in was cancelled or declined at the Pod. Sign in again to choose what to share.',
     sharingUnchanged:
-      'Sharing was not changed: the consent was cancelled or declined at the Pod. This app keeps the access it had.',
+      'The change was not confirmed: the consent was cancelled or declined at the Pod. This app goes on with its current session.',
     signInRequired: 'Sign in to use this pod.',
     dismiss: 'OK',
     reload: 'Reload',
@@ -667,7 +669,7 @@ export const germanMessages: SdkMessages = {
     signInCancelled:
       'Es wurde kein Zugriff erteilt: Die Anmeldung wurde beim Pod abgebrochen oder abgelehnt. Melde dich erneut an, um eine Freigabe zu wählen.',
     sharingUnchanged:
-      'Die Freigabe wurde nicht geändert: Die Zustimmung wurde beim Pod abgebrochen oder abgelehnt. Diese App behält ihren bisherigen Zugriff.',
+      'Die Änderung wurde nicht bestätigt: Die Zustimmung wurde beim Pod abgebrochen oder abgelehnt. Diese App arbeitet mit ihrer bisherigen Sitzung weiter.',
     signInRequired: 'Melde dich an, um diesen Pod zu nutzen.',
     dismiss: 'OK',
     reload: 'Neu laden',
