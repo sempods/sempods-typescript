@@ -939,7 +939,7 @@ describe('several tabs', () => {
         refresh_token: 'refresh',
       });
     });
-    let disposeNow: (() => void) | undefined;
+    const on: { write?: () => void } = {};
     const back = keep(
       createBrowserRuntime({
         ...t.options,
@@ -954,7 +954,7 @@ describe('several tabs', () => {
                 id === added.id &&
                 (value as { kind?: string }).kind === 'authorizing'
               )
-                disposeNow?.();
+                on.write?.();
               return committing;
             },
           }),
@@ -966,7 +966,7 @@ describe('several tabs', () => {
     await vi.waitFor(() => expect(asked).toBe(true));
     expect(back.getSnapshot().some((c) => c.id === added.id)).toBe(true);
     const navigations = t.navigate.mock.calls.length;
-    disposeNow = () => back.dispose();
+    on.write = () => back.dispose();
     await expect(back.beginAuthorization(added.id)).rejects.toMatchObject({
       problem: 'disconnected',
     });
