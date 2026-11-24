@@ -15,10 +15,26 @@ export interface SessionLease {
 
 /** Leases of this page that are closing, until each is released (#419). */
 const closing = new WeakMap<SessionLocks, Map<string, Set<Promise<void>>>>();
-/** Waits until every lease of this page that is closing has been released. */
-async function closed(locks: SessionLocks, namespace: string) {
+/**
+ * Waits until every lease of this page that is closing has been released, or
+ * until `signal` aborts.
+ */
+async function closed(
+  locks: SessionLocks,
+  namespace: string,
+  signal: AbortSignal | undefined,
+) {
   const pending = closing.get(locks)?.get(namespace);
-  while (pending?.size) await Promise.all(pending);
+  if (!pending?.size) return;
+  let stop!: () => void;
+  const aborted = new Promise<void>((resolve) => (stop = resolve));
+  signal?.addEventListener('abort', stop, { once: true });
+  try {
+    while (pending.size && !signal?.aborted)
+      await Promise.race([Promise.all(pending), aborted]);
+  } finally {
+    signal?.removeEventListener('abort', stop);
+  }
 }
 
 /**
@@ -34,14 +50,22 @@ export async function acquireSessionLease(
   namespace: string,
   locks: SessionLocks | null | undefined,
   openStore: () => Promise<SessionStore> = () => openSessionStore(namespace),
+  signal?: AbortSignal,
 ): Promise<SessionLease> {
   if (!locks) throw new RuntimeError('coordination');
-  await closed(locks, namespace);
+  await closed(locks, namespace, signal);
+  // A runtime disposed meanwhile takes no lease, so a replacement that
+  // stopped waiting with it finds the lock free (#419).
+  if (signal?.aborted) throw new RuntimeError('disconnected');
   let store: SessionStore;
   try {
     store = await openStore();
   } catch {
     throw new RuntimeError('storage');
+  }
+  if (signal?.aborted) {
+    store.close();
+    throw new RuntimeError('disconnected');
   }
   const mode = store.watch ? 'shared' : 'exclusive';
   return new Promise((resolve, reject) => {

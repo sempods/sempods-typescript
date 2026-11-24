@@ -282,10 +282,9 @@ describe('a replacement runtime in the same page (#419)', () => {
     // No sleep, no third runtime: the replacement waits for the cleanup.
     const next = keep(createBrowserRuntime(f.options));
     expect(await next.initialize()).toMatchObject({ storage: 'durable' });
-    expect(next.getSnapshot().find((c) => c.id === f.id)).toMatchObject({
-      session: { kind: 'signed-out' },
+    expect(next.getSnapshot().find((c) => c.id === f.id)?.session).toEqual({
+      kind: 'signed-out',
     });
-    expect(next.getSnapshot()[1]).not.toHaveProperty('problem');
     expect(
       (await savedRecords(factory)).map(({ id, value }) => ({ id, value })),
     ).toEqual(before);
@@ -306,8 +305,83 @@ describe('a replacement runtime in the same page (#419)', () => {
     store.hold.resolve();
     expect(await starting).toMatchObject({ storage: 'durable' });
     expect(await signing).toMatchObject({ problem: 'disconnected' });
-    expect(next.getSnapshot().find((c) => c.id === f.id)).toMatchObject({
-      session: { kind: 'signed-out' },
+    expect(next.getSnapshot().find((c) => c.id === f.id)?.session).toEqual({
+      kind: 'signed-out',
+    });
+  });
+
+  it('opens with durable storage after a replacement disposed while it waited', async () => {
+    const factory = new IDBFactory();
+    const store = exclusive({ factory });
+    const f = await withBob({ openStore: store.openStore });
+    const signing = f.runtime
+      .beginAuthorization(f.id)
+      .catch((error: unknown) => error);
+    await store.writing.promise;
+    f.runtime.dispose();
+    // Both replacements' stores finish opening together, as they can in a
+    // browser once they stop waiting at the same time.
+    const opened = deferred<void>();
+    let opening = 0;
+    const together: BrowserRuntimeOptions['openStore'] = async (namespace) => {
+      const store = await openSessionStore(namespace, factory);
+      if (++opening === 2) opened.resolve();
+      await opened.promise;
+      return store;
+    };
+    // B waits for A's cleanup and is disposed meanwhile: it takes no lease.
+    const waiting = keep(
+      createBrowserRuntime({ ...f.options, openStore: together }),
+    );
+    const abandoned = waiting.initialize();
+    waiting.dispose();
+    const next = keep(
+      createBrowserRuntime({ ...f.options, openStore: together }),
+    );
+    const starting = next.initialize();
+    // A B that opens no store does not hold C back.
+    void abandoned.then(() => opened.resolve());
+    store.hold.resolve();
+    expect(await starting).toMatchObject({ storage: 'durable' });
+    expect(await abandoned).toMatchObject({ problem: 'disconnected' });
+    expect(await signing).toMatchObject({ problem: 'disconnected' });
+    expect(next.getSnapshot().find((c) => c.id === f.id)?.session).toEqual({
+      kind: 'signed-out',
+    });
+  });
+
+  it('opens with durable storage when putting the address back fails', async () => {
+    const factory = new IDBFactory();
+    const writing = deferred<void>();
+    const hold = deferred<void>();
+    let attempted = false;
+    const f = await withBob({
+      openStore: storeWith(factory, (store) => ({
+        commit: async (id, revision, value) => {
+          const kind = (value as { kind?: string }).kind;
+          if (kind === 'authorizing') {
+            attempted = true;
+            writing.resolve();
+            await hold.promise;
+          } else if (attempted && kind === 'address')
+            throw new Error('unavailable');
+          return store.commit(id, revision, value);
+        },
+      })),
+    });
+    const signing = f.runtime
+      .beginAuthorization(f.id)
+      .catch((error: unknown) => error);
+    await writing.promise;
+    f.runtime.dispose();
+    hold.resolve();
+    expect(await signing).toMatchObject({ problem: 'disconnected' });
+    // The lease is released after the failed write too.
+    const next = keep(createBrowserRuntime(f.options));
+    expect(await next.initialize()).toMatchObject({ storage: 'durable' });
+    expect(next.getSnapshot().find((c) => c.id === f.id)?.session).toEqual({
+      kind: 'ended',
+      problem: 'interrupted',
     });
   });
 

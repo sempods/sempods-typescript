@@ -242,11 +242,16 @@ Pod URLs (including a trailing slash) and wrong-Pod/noncanonical context IRIs ar
 rejected before any request. Configure it once for that runtime lifetime; changing
 props does not change an existing runtime. A host that replaces a runtime must
 first settle its drafts and unresolved operations, dispose it, and initialize its
-replacement. `dispose()` returns at once; its cleanup (putting back an address
-that a first sign-in still in flight replaced) finishes afterwards. A
+replacement. `dispose()` returns at once; its cleanup finishes afterwards: it
+tries to put back an address that a first sign-in still in flight replaced. A
 replacement in the same page needs no wait: its `initialize()` opens the store
-once that cleanup is done and the disposed runtime's lease is released, so it
-lists the address again and does not report `busy`.
+once that attempt has settled and the disposed runtime's lease is released, so
+it does not report `busy`. It lists the address as `signed-out` again; if
+putting it back failed, it lists the attempt's connection as ended
+(`interrupted`) instead. This handover needs both runtimes to use the same SDK
+module instance and the same `locks` object; the default `navigator.locks`
+satisfies the latter, while a separate adapter for each runtime does not, even
+one that forwards to `navigator.locks`.
 
 `runtime.connect()` uses the preset URL. Both it and `connect(url)` reuse an
 existing connection at that exact URL, preferring a session over an address-only
@@ -882,8 +887,10 @@ newer tab never run beside each other. Lack of durable storage or coordination
 stored records untouched, so a later start with coordination restores them.
 The runtime requests its lease only if available and never steals it: the
 holder keeps working until it is closed or disposed. A runtime disposed in the
-same page holds nothing any more: a replacement waits for its cleanup and lease
-release instead of reporting `busy`. The runtime never retries
+same page holds nothing any more: a replacement with the same SDK instance and
+`locks` object waits for its cleanup and lease release instead of reporting
+`busy` (see [one known Pod](#one-known-pod)); one disposed while it waits stops
+waiting and takes no lease. The runtime never retries
 a busy startup: after closing the holder, reload the busy page to create a
 fresh runtime and acquire the lease. A store closed by a newer database version
 (`versionchange`, e.g. after an upgrade in another tab) stays closed for this

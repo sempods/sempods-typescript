@@ -2972,10 +2972,14 @@ export function createBrowserRuntime(
         options.locks === undefined
           ? (globalThis.navigator?.locks as SessionLocks | undefined)
           : options.locks;
-      lease = await acquireSessionLease(namespace, locks, () =>
-        options.openStore
-          ? options.openStore(namespace)
-          : openSessionStore(namespace),
+      lease = await acquireSessionLease(
+        namespace,
+        locks,
+        () =>
+          options.openStore
+            ? options.openStore(namespace)
+            : openSessionStore(namespace),
+        runtimeLifetime.signal,
       );
       if (disposed) {
         closeStore(lease);
