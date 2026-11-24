@@ -562,5 +562,13 @@ export interface BrowserRuntime {
    * Pod 403 returns refused without catalogue recovery or inferred session changes.
    */
   bindPod(id: string): BoundPod;
+  /**
+   * Ends this runtime at once. Its session lease is released once the
+   * attempt to put back an address that a first sign-in still in flight
+   * replaced has settled, also when that write failed. A replacement runtime
+   * in the same page, with the same SDK module instance and the same `locks`
+   * object (the default `navigator.locks` is one), waits for that in
+   * `initialize()` instead of reporting `busy`.
+   */
   dispose(): void;
 }

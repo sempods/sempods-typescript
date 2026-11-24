@@ -408,7 +408,8 @@ export function createBrowserRuntime(
       }),
     );
     cleanup = Promise.allSettled([cleanup, run]);
-    void cleanup.finally(() => closing.close());
+    // A replacement runtime in this page waits for this close (#419).
+    closing.close(cleanup);
   }
   const disconnects = new Map<
     string,
@@ -2971,10 +2972,14 @@ export function createBrowserRuntime(
         options.locks === undefined
           ? (globalThis.navigator?.locks as SessionLocks | undefined)
           : options.locks;
-      lease = await acquireSessionLease(namespace, locks, () =>
-        options.openStore
-          ? options.openStore(namespace)
-          : openSessionStore(namespace),
+      lease = await acquireSessionLease(
+        namespace,
+        locks,
+        () =>
+          options.openStore
+            ? options.openStore(namespace)
+            : openSessionStore(namespace),
+        runtimeLifetime.signal,
       );
       if (disposed) {
         closeStore(lease);

@@ -158,8 +158,8 @@ it('reports busy storage and releases the lease on dispose', async () => {
     storage: 'busy',
     problem: 'busy',
   });
+  // A replacement in this page needs no wait for the release (#419).
   f.runtime.dispose();
-  await settleLease();
   const next = createBrowserRuntime(f.options);
   runtimes.push(next);
   expect(await next.initialize()).toMatchObject({ storage: 'durable' });
