@@ -287,9 +287,9 @@ describe('several tabs', () => {
   /** Waits until `runtime` lists connection `id` beside the default Pod. */
   const listedBeside = (runtime: BrowserRuntime, id: string) =>
     vi.waitFor(() => expect(runtime.getSnapshot()[1]).toMatchObject({ id }));
-  /** A store wrapper that rejects or holds this tab's sign-in attempts. */
-  const onAttempt =
-    (attempt: () => Promise<void>) =>
+  /** A store wrapper that rejects or holds this tab's writes of some record kinds. */
+  const onWrite =
+    (hooks: Partial<Record<string, () => Promise<void>>>) =>
     ({
       factory,
       channels,
@@ -301,13 +301,15 @@ describe('several tabs', () => {
         factory,
         (store) => ({
           commit: async (id, revision, value) => {
-            if ((value as { kind?: string }).kind === 'authorizing')
-              await attempt();
+            await hooks[(value as { kind?: string }).kind ?? '']?.();
             return store.commit(id, revision, value);
           },
         }),
         channels,
       );
+  /** A store wrapper that rejects or holds this tab's sign-in attempts. */
+  const onAttempt = (attempt: () => Promise<void>) =>
+    onWrite({ authorizing: attempt });
 
   it('lists a Pod another tab added, and forgets it with that tab', async () => {
     const t = await tabs();
@@ -544,6 +546,90 @@ describe('several tabs', () => {
       { id: remembered.id, value: { kind: 'address', podUrl: bob } },
     ]);
     expect(t.b.getSnapshot().some((c) => c.podUrl === bob)).toBe(false);
+  });
+
+  it('reports a forget whose putting back of the other tab’s address fails, and puts it back on a retry', async () => {
+    const saved = deferred<void>();
+    let saving = false;
+    let failing = true;
+    const t = await tabs(undefined, (shared) => ({
+      rememberPods: false,
+      openStore: onWrite({
+        // The sign-in attempt waits before it is written.
+        authorizing: () => {
+          saving = true;
+          return saved.promise;
+        },
+        address: () =>
+          failing ? Promise.reject(new Error('quota')) : Promise.resolve(),
+      })(shared),
+    }));
+    const local = await t.b.connect(bob);
+    const remembered = await t.a.connect(bob);
+    const pending = t.b.beginAuthorization(local.id);
+    await vi.waitFor(() => expect(saving).toBe(true));
+    const forgotten = t.b.forget(local.id);
+    saved.resolve();
+    expect(await forgotten).toEqual({ kind: 'blocked-locally' });
+    await expect(pending).rejects.toMatchObject({ problem: 'disconnected' });
+    expect(t.navigate).not.toHaveBeenCalled();
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: remembered.id, value: { kind: 'authorizing' } },
+    ]);
+    expect(t.b.getSnapshot().find((c) => c.id === local.id)).toMatchObject({
+      session: { kind: 'ended', saved: false, forget: true },
+    });
+    failing = false;
+    expect(await t.b.forget(local.id)).toEqual({ kind: 'disconnected' });
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: remembered.id, value: { kind: 'address', podUrl: bob } },
+    ]);
+    expect(t.b.getSnapshot().some((c) => c.podUrl === bob)).toBe(false);
+  });
+
+  it('forgets the other tab’s address when a forget follows a sign-out of the first sign-in on it', async () => {
+    const t = await tabs(undefined, { rememberPods: false });
+    const local = await t.b.connect(bob);
+    const remembered = await t.a.connect(bob);
+    await t.b.beginAuthorization(local.id);
+    expect(t.b.getSnapshot()[1]).toMatchObject({ id: remembered.id });
+    // The sign-out puts the address back; the forget then deletes it.
+    const signedOut = t.b.disconnect(remembered.id);
+    const forgotten = t.b.forget(remembered.id);
+    expect(await signedOut).toEqual({ kind: 'disconnected' });
+    expect(await forgotten).toEqual({ kind: 'disconnected' });
+    expect(await savedRecords(t.factory)).toEqual([]);
+    expect(t.b.getSnapshot().some((c) => c.podUrl === bob)).toBe(false);
+  });
+
+  it('follows a sign-in another tab began before this tab heard of it', async () => {
+    let queued: (() => void)[] | null = null;
+    let held!: ReturnType<typeof heldDiscovery>;
+    const t = await tabs(
+      (send) => (queued ? void queued.push(send) : void setTimeout(send)),
+      ({ options }) => {
+        held = heldDiscovery(options.fetch!, bob);
+        return { fetch: held.fetch };
+      },
+    );
+    const added = await t.a.connect(bob);
+    await listedBeside(t.b, added.id);
+    const pending = t.b.beginAuthorization(added.id);
+    await vi.waitFor(() => expect(held.discovering()).toBe(true));
+    // The first tab leaves for Bob's Pod; this tab does not hear of it yet.
+    queued = [];
+    await t.a.beginAuthorization(added.id);
+    const state = new URL(t.navigate.mock.calls[0]![0]).searchParams.get(
+      'state',
+    );
+    held.release();
+    await expect(pending).resolves.toBeUndefined();
+    expect(t.navigate).toHaveBeenCalledTimes(1);
+    expect(await savedRecords(t.factory)).toMatchObject([
+      { id: added.id, value: { kind: 'authorizing', attempt: { state } } },
+    ]);
+    queued.splice(0).forEach((send) => send());
+    queued = null;
   });
 
   it('completes a sign-in pending in discovery with the session another tab stored meanwhile', async () => {

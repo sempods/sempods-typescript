@@ -377,7 +377,11 @@ export function createBrowserRuntime(
   const disconnects = new Map<
     string,
     {
-      /** Deletes the record (`forget`), rather than keeping its address. */
+      /**
+       * A forget: it deletes the record. A sign-out under `rememberPods:
+       * false` may put an address back instead (#372), so a forget asked
+       * meanwhile runs after it.
+       */
       readonly erase: boolean;
       readonly operation: Promise<{ kind: 'disconnected' | 'blocked-locally' }>;
     }
@@ -771,7 +775,9 @@ export function createBrowserRuntime(
           x.revision !== null ||
           inSession(x) ||
           disconnects.has(x.view.id) ||
-          preparing.has(x.view.id),
+          preparing.has(x.view.id) ||
+          // It still puts back the address that record replaced (#372).
+          x.wroteOn !== undefined,
       )
     )
       return false;
@@ -1143,6 +1149,9 @@ export function createBrowserRuntime(
     insist = false,
   ): Promise<SessionRecord['kind'] | undefined> {
     return serial(e, async () => {
+      // An attempt a cancelled sign-in here saved on another tab's address
+      // (#372) is put back first; a failure is this retirement's.
+      await restoreWritten(e);
       for (let round = 0; ; round++) {
         if (!sessions || !e.revision) {
           contexts.forget(e.view.id);
@@ -2465,6 +2474,24 @@ export function createBrowserRuntime(
   }
   /** A stored attempt, ready to leave for: its generation and URL. */
   type Prepared = { readonly generation: string; readonly url: string };
+  /**
+   * Puts back the address a cancelled sign-in of `e` saved its attempt over
+   * (`wroteOn`, #372): a sign-out or forget here does as it retires `e`, and
+   * reports a failure so a retry can; otherwise (a dispose, a newer sign-in)
+   * at once, best effort.
+   */
+  async function unwrite(e: Entry) {
+    if (!e.wroteOn || disconnects.has(e.view.id)) return;
+    await restoreWritten(e).catch(() => {});
+  }
+  /** Puts back the address `e`'s sign-in saved an attempt over, if any. */
+  async function restoreWritten(e: Entry) {
+    const written = e.wroteOn;
+    if (!written || !sessions) return;
+    // A conflict: another tab changed the record since, which stays.
+    await sessions.remember(written.id, written.podUrl, written.revision);
+    if (e.wroteOn === written) delete e.wroteOn;
+  }
   async function prepareAuthorization(
     id: string,
     intent: AuthorizationIntent | 'silent',
@@ -2590,17 +2617,19 @@ export function createBrowserRuntime(
             intent === 'silent',
           );
           accepted(t, change);
+          // Saved on another tab's address: until this connection gives way
+          // to it, retiring this connection puts the address back.
+          if (t !== self && change.kind === 'committed')
+            self.wroteOn = {
+              id: t.view.id,
+              podUrl: t.view.podUrl,
+              revision: change.record.revision,
+            };
           // The revision is recorded first, so a disconnect that ran during
           // the commit retires the new attempt; this lifetime must not
           // continue.
           if (!storing()) {
-            // A sign-out or forget here won over the attempt on another
-            // tab's address: the address is restored in its place (and in
-            // place of its verifier), as that tab saved it. Best effort.
-            if (t !== self && change.kind === 'committed')
-              await sessions!
-                .remember(t.view.id, t.view.podUrl, change.record.revision)
-                .catch(() => {});
+            await unwrite(self);
             throw new RuntimeError('disconnected');
           }
           // Committed durably: switch to the new lifetime in the same step,
@@ -2690,13 +2719,18 @@ export function createBrowserRuntime(
         }
         // A silent first sign-in follows a sign-in another tab has under
         // way for this Pod, up to the end of its code exchange, rather than
-        // replacing its attempt.
+        // replacing its attempt. So does a first sign-in that meets an open
+        // attempt on its own record before this tab heard of it (#372); one
+        // already listed here is replaced, as a deliberate retry.
+        const open =
+          saved?.value.kind === 'authorizing' &&
+          saved.value.attempt.expiresAt > Date.now();
         const follows =
-          intent === 'silent' &&
-          ((saved?.value.kind === 'authorizing' &&
-            saved.value.attempt.expiresAt > Date.now()) ||
-            (saved?.value.kind === 'claimed' &&
-              saved.value.operation === 'code'));
+          (intent === 'silent' &&
+            (open ||
+              (saved?.value.kind === 'claimed' &&
+                saved.value.operation === 'code'))) ||
+          (first && open && saved?.id === id && saved.revision !== e.revision);
         // The default Pod's address, which another tab saved after this
         // start listed nothing (#372): the silent first sign-in leaves it, as
         // a start that finds it does, since a declined answer would delete
@@ -2759,13 +2793,11 @@ export function createBrowserRuntime(
         // that tab saved it (best effort), and nothing navigates.
         if (!still()) {
           target.lifetime.abort(new RuntimeError('disconnected'));
-          if (target.revision)
-            await sessions!
-              .remember(target.view.id, target.view.podUrl, target.revision)
-              .catch(() => {});
+          await unwrite(e);
           throw new RuntimeError('disconnected');
         }
         // Saved on the other tab's address: this connection gives way to it.
+        delete e.wroteOn;
         dropEntry(id);
         stop(e, { kind: 'signed-out' });
         entries.set(target.view.id, target);
@@ -3113,7 +3145,7 @@ export function createBrowserRuntime(
     const marked = forget ? { forget: true as const } : {};
     const pending = disconnects.get(id);
     if (pending) {
-      if (!deleting || pending.erase) return pending.operation;
+      if (!forget || pending.erase) return pending.operation;
       // A forget asked during a sign-out deletes the record once that
       // settled. It counts as pending meanwhile, so neither a connect nor a
       // sign-in reuses the connection in between.
@@ -3178,7 +3210,7 @@ export function createBrowserRuntime(
         if (disconnects.get(id)?.operation === operation)
           disconnects.delete(id);
       });
-    disconnects.set(id, { erase: deleting, operation });
+    disconnects.set(id, { erase: forget, operation });
     delete e.credentials;
     delete e.credential;
     delete e.anonymous;
