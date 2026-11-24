@@ -6,7 +6,9 @@ import { IDBFactory } from 'fake-indexeddb';
 import {
   callback,
   fixture,
+  heldDiscovery,
   jwt,
+  memoryChannels,
   memoryStorage,
   pod,
   restart,
@@ -506,6 +508,88 @@ it('keeps reading the default Pod without a token when the Pod needs the person'
       session: { kind: 'signed-out' },
     }),
   ]);
+});
+
+it('still asks silently beside a Pod added without a sign-in (#372)', async () => {
+  const f = silent({ signIn: 'optional', firstSignIn: 'click' });
+  await f.runtime.initialize();
+  await f.runtime.connect('https://pod.example/bob');
+  expect(await savedRecords(f.factory)).toMatchObject([
+    { value: { kind: 'address' } },
+  ]);
+  f.runtime.dispose();
+  await settleLease();
+  const tab = createBrowserRuntime({
+    ...f.options,
+    firstSignIn: 'silent',
+    tabStorage: memoryStorage(),
+  });
+  keep(tab);
+  await tab.initialize();
+  expect(silentAttempts(f)).toBe(1);
+});
+
+it('keeps the saved address of its own default Pod: no silent attempt that could delete it (#372)', async () => {
+  const bob = 'https://pod.example/bob';
+  const f = silent({ signIn: 'optional', firstSignIn: 'click' });
+  await f.runtime.initialize();
+  const added = await f.runtime.connect(bob);
+  f.runtime.dispose();
+  await settleLease();
+  // The same app, now with Bob's Pod as its default one.
+  const tab = createBrowserRuntime({
+    ...f.options,
+    preset: { podUrl: bob },
+    firstSignIn: 'silent',
+    tabStorage: memoryStorage(),
+  });
+  keep(tab);
+  expect(await tab.initialize()).toMatchObject({ interaction: 'none' });
+  expect(silentAttempts(f)).toBe(0);
+  expect(tab.getSnapshot()).toMatchObject([
+    { id: added.id, podUrl: bob, reading: 'anonymous' },
+  ]);
+  expect(await savedRecords(f.factory)).toMatchObject([
+    { id: added.id, value: { kind: 'address', podUrl: bob } },
+  ]);
+});
+
+it('leaves the address another tab saves while the silent sign-in discovers that Pod (#372)', async () => {
+  const bob = 'https://pod.example/bob';
+  const factory = new IDBFactory();
+  const channels = memoryChannels();
+  const f = silent({
+    signIn: 'optional',
+    firstSignIn: 'click',
+    openStore: (namespace) => openSessionStore(namespace, factory, channels),
+  });
+  await f.runtime.initialize();
+  // Another tab with Bob's Pod as its default one finds nothing stored and
+  // asks it silently; its discovery waits.
+  const held = heldDiscovery(f.fetch, bob);
+  const tab = createBrowserRuntime({
+    ...f.options,
+    preset: { podUrl: bob },
+    firstSignIn: 'silent',
+    tabStorage: memoryStorage(),
+    fetch: held.fetch,
+  });
+  keep(tab);
+  const started = tab.initialize();
+  await vi.waitFor(() => expect(held.discovering()).toBe(true));
+  // Meanwhile the first tab adds Bob's Pod and saves its address.
+  const added = await f.runtime.connect(bob);
+  held.release();
+  await started;
+  expect(silentAttempts(f)).toBe(0);
+  expect(await savedRecords(factory)).toMatchObject([
+    { id: added.id, value: { kind: 'address', podUrl: bob } },
+  ]);
+  await vi.waitFor(() =>
+    expect(tab.getSnapshot()).toMatchObject([
+      { id: added.id, podUrl: bob, reading: 'anonymous' },
+    ]),
+  );
 });
 
 it('rejects silent without a default Pod or a did:web identity, before any I/O', () => {

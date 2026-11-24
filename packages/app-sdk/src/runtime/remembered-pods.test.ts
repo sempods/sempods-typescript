@@ -9,7 +9,10 @@ import { IDBFactory } from 'fake-indexeddb';
 import { createBrowserRuntime } from './runtime.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import { openSessionStore } from '../sessions/store.js';
-import { sessionBinding, type SessionRecord } from '../sessions/records.js';
+import {
+  sessionBinding,
+  type BoundSessionRecord,
+} from '../sessions/records.js';
 import {
   deferred,
   fixture,
@@ -424,7 +427,7 @@ async function duplicateRecord(
   disconnected = false,
 ) {
   const original = (await records(f)).find((r) => r.id === f.id)!;
-  const value = original.value as SessionRecord;
+  const value = original.value as BoundSessionRecord;
   const binding = { ...sessionBinding(value), connectionId: id };
   const store = await openSessionStore(fixtureNamespace, f.factory);
   try {

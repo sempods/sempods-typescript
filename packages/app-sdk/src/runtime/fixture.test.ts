@@ -7,7 +7,7 @@ import type {
   BrowserRuntimeOptions,
   PreferenceStorage,
 } from './types.js';
-import { openSessionStore } from '../sessions/store.js';
+import { openSessionStore, type SessionChannel } from '../sessions/store.js';
 import type { SessionLocks, SessionStore } from '../sessions/types.js';
 
 export const pod = 'https://pod.example/alice';
@@ -38,6 +38,29 @@ export function storeWith(
   return async (namespace) => {
     const store = await openSessionStore(namespace, factory, channel);
     return { ...store, ...overrides(store) };
+  };
+}
+/** A request's `authorization` header: `null` when it carried no token. */
+export const authorization = (init?: RequestInit) =>
+  new Headers(init?.headers).get('authorization');
+/**
+ * A `fetch` around `inner` whose discovery of the Pod at `base` waits until
+ * `release()`; `discovering()` tells whether it has started.
+ */
+export function heldDiscovery(inner: PodFetch, base: string) {
+  const released = deferred<void>();
+  let started = false;
+  const fetch: PodFetch = async (url, init) => {
+    if (url.startsWith(base + '/.well-known/')) {
+      started = true;
+      await released.promise;
+    }
+    return inner(url, init);
+  };
+  return {
+    fetch,
+    discovering: () => started,
+    release: () => released.resolve(),
   };
 }
 /** Startup no longer waits for restoration; tests wait for each saved Pod to settle. */
@@ -192,6 +215,42 @@ export function memoryLocks(): SessionLocks {
   };
   return locks;
 }
+/**
+ * `BroadcastChannel`s of one browser profile: a message reaches the others
+ * later, by default after a timer; `deliver` can make it arrive sooner.
+ */
+export function memoryChannels(
+  deliver: (send: () => void) => void = (send) => void setTimeout(send),
+) {
+  const members = new Map<string, Set<Member>>();
+  type Member = SessionChannel & {
+    listeners: Set<(event: { readonly data: unknown }) => void>;
+  };
+  return (name: string): SessionChannel => {
+    const group = members.get(name) ?? new Set<Member>();
+    members.set(name, group);
+    const self: Member = {
+      listeners: new Set(),
+      postMessage(message) {
+        const data = structuredClone(message);
+        for (const other of group)
+          if (other !== self)
+            deliver(() =>
+              other.listeners.forEach((listener) => listener({ data })),
+            );
+      },
+      addEventListener(_type, listener) {
+        self.listeners.add(listener);
+      },
+      close() {
+        group.delete(self);
+      },
+    };
+    group.add(self);
+    return self;
+  };
+}
+
 export function fixture(overrides: Partial<BrowserRuntimeOptions> = {}) {
   const factory = new IDBFactory();
   const locks = memoryLocks();

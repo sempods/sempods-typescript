@@ -1312,3 +1312,98 @@ describe('a re-authorization pending beside its session (#393)', () => {
     });
   });
 });
+
+describe('the address of a Pod never signed in to (#372)', () => {
+  it('is saved once, kept by a sign-out and replaced by a sign-in', async () => {
+    const s = await setup();
+    const saved = committed(await s.transitions.remember('connection', pod));
+    expect(saved.value).toEqual({
+      version: 1,
+      kind: 'address',
+      configKey: 'app',
+      connectionId: 'connection',
+      podUrl: pod,
+    });
+    expect(await s.transitions.remember('connection', pod)).toEqual({
+      kind: 'conflict',
+    });
+    // Nothing to retire: the address stays as it is.
+    expect(
+      committed(await s.transitions.disconnect(saved.id, saved.revision)),
+    ).toEqual(saved);
+    // Neither a code nor a refresh is claimed on it.
+    await expect(
+      s.transitions.claimRefresh(saved.id, saved.revision, s.attempt),
+    ).rejects.toMatchObject({ problem: 'state' });
+    const attempt = committed(
+      await s.transitions.prepare(s.attempt, saved.revision),
+    );
+    expect(attempt.value).toMatchObject({ kind: 'authorizing' });
+    expect(attempt.value).not.toHaveProperty('previous');
+  });
+
+  it('marks a first sign-in over it, which a failure or sign-out puts back', async () => {
+    const s = await setup();
+    const saved = committed(await s.transitions.remember('connection', pod));
+    const attempt = committed(
+      await s.transitions.prepare(s.attempt, saved.revision),
+    );
+    expect(attempt.value).toMatchObject({ kind: 'authorizing', address: true });
+    // Signed out of (or failed): the address is back, nothing else.
+    expect(
+      committed(await s.transitions.disconnect(attempt.id, attempt.revision))
+        .value,
+    ).toEqual(saved.value);
+    // A code claim keeps the mark, so a failed exchange puts it back too.
+    const again = committed(
+      await s.transitions.prepare(
+        s.attempt,
+        (await s.transitions.read(saved.id))!.revision,
+      ),
+    );
+    const claim = claimed(
+      await s.transitions.claimCode(
+        again.id,
+        again.revision,
+        s.attempt,
+        returned(s.attempt),
+      ),
+    );
+    const stored = (await s.transitions.read(saved.id))!;
+    expect(stored.value).toMatchObject({ kind: 'claimed', address: true });
+    expect(
+      committed(
+        await s.transitions.disconnect(saved.id, stored.revision, 'expired'),
+      ).value,
+    ).toEqual(saved.value);
+    expect(claim.kind).toBe('claimed');
+  });
+
+  it('refuses a non-canonical address and lists a malformed one as corrupt', async () => {
+    const s = await setup();
+    await expect(
+      s.transitions.remember('connection', pod + '/'),
+    ).rejects.toMatchObject({ problem: 'configuration' });
+    for (const [id, value] of [
+      ['slash', { podUrl: pod + '/' }],
+      ['foreign', { configKey: 'other' }],
+      ['moved', { connectionId: 'elsewhere' }],
+    ] as const)
+      await s.store.commit(id, null, {
+        version: 1,
+        kind: 'address',
+        configKey: 'app',
+        connectionId: id,
+        podUrl: pod,
+        ...value,
+      });
+    expect(await s.transitions.list()).toEqual({
+      records: [],
+      unreadable: [
+        { id: 'foreign', problem: 'corrupt' },
+        { id: 'moved', problem: 'corrupt' },
+        { id: 'slash', problem: 'corrupt' },
+      ],
+    });
+  });
+});

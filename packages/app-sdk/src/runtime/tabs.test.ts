@@ -18,6 +18,7 @@ import {
   fixtureNamespace,
   jwt,
   memoryHistory,
+  memoryChannels,
   memoryLocks,
   memoryStorage,
   pod,
@@ -30,7 +31,7 @@ import {
   unauthorized,
   work,
 } from './fixture.test.js';
-import { openSessionStore, type SessionChannel } from '../sessions/store.js';
+import { openSessionStore } from '../sessions/store.js';
 
 const runtimes: BrowserRuntime[] = [];
 const realNow = Date.now.bind(Date);
@@ -46,42 +47,6 @@ function advance(ms: number) {
   if (!vi.isMockFunction(Date.now))
     vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
   offset += ms;
-}
-
-/**
- * `BroadcastChannel`s of one browser profile: a message reaches the others
- * later, by default after a timer; `deliver` can make it arrive sooner.
- */
-function memoryChannels(
-  deliver: (send: () => void) => void = (send) => void setTimeout(send),
-) {
-  const members = new Map<string, Set<Member>>();
-  type Member = SessionChannel & {
-    listeners: Set<(event: { readonly data: unknown }) => void>;
-  };
-  return (name: string): SessionChannel => {
-    const group = members.get(name) ?? new Set<Member>();
-    members.set(name, group);
-    const self: Member = {
-      listeners: new Set(),
-      postMessage(message) {
-        const data = structuredClone(message);
-        for (const other of group)
-          if (other !== self)
-            deliver(() =>
-              other.listeners.forEach((listener) => listener({ data })),
-            );
-      },
-      addEventListener(_type, listener) {
-        self.listeners.add(listener);
-      },
-      close() {
-        group.delete(self);
-      },
-    };
-    group.add(self);
-    return self;
-  };
 }
 
 let issued = 0;

@@ -365,7 +365,8 @@ const runtime = createBrowserRuntime({
 
 When nothing is stored for the app on this device (no session, no remembered
 Pod, no unreadable record, also none of a Pod that `allowedPods` now
-excludes), `initialize()` connects the default Pod and
+excludes; the address of a Pod other than the default one, only read without
+a token, does not count), `initialize()` connects the default Pod and
 navigates to its provider once with `prompt=none`, instead of resolving. The
 Pod answers at once, without showing anything:
 
@@ -441,10 +442,11 @@ if (pod) await runtime.loadContexts(pod.id);
   reads only with a session.
 - **`optional`**: a connection without a session reads the Pod's public
   Contexts without a token. Startup connects the default Pod (the `preset`, or
-  the sole allowed Pod), and `connect(url)` adds another Pod without discovery
-  or sign-in. `beginAuthorization(id)` signs in when the person asks for it;
-  only then is the Pod discovered and the client resolved. A session that
-  ends, or signing out, returns to reading without a token.
+  the sole allowed Pod), and `connect(url)` adds further Pods without discovery
+  or sign-in, each read without a token on its own. `beginAuthorization(id)`
+  signs in to one Pod when the person asks for it; only then is that Pod
+  discovered and the client resolved. A session that ends, or signing out,
+  returns to reading without a token.
 - **`none`**: only an anonymous connection to the default Pod, which is
   required. No session store and no Web Lock are used, so several tabs and an
   installed PWA beside a browser tab work. `identity` may be omitted;
@@ -492,6 +494,36 @@ with `rememberPods: false`, which then only keeps the address from the next
 start. `forget(id)` removes the connection; a forgotten default Pod is listed
 again as a new connection that was never signed in. Under `optional` the tabs
 share their sessions as under `required`.
+
+Under `optional` an app can read several Pods without signing in to any, for
+example public Pods a person adds by address:
+
+```ts
+const added = await runtime.connect('https://pods.example/bob');
+await runtime.loadContexts(added.id); // Bob's public Contexts, without a token
+const pods = runtime.bindPod(added.id); // reads across Bob's public Contexts
+```
+
+Each connection has its own catalogue, labels, handles and `reading`, and a
+sign-in to one Pod leaves the others reading without a token.
+
+- **The address is saved.** With the default `rememberPods: true`, the address
+  of a Pod other than the default one is saved when it is added, without
+  discovery, client or token. The next start and the app's other tabs list it
+  as `signed-out` (without a `problem`), reading without a token, until
+  `forget(id)`.
+- **Signing in replaces it** with the session. A first sign-in that fails, or
+  is signed out of before it completes, puts the address back.
+- **Some Pods are listed in this page only.** With `rememberPods: false`, such
+  a Pod is listed in this page only, also when another tab remembers it;
+  signing in to it there continues on the address that tab saved, so the Pod
+  keeps one record. A failed write, or another tab that holds the Pod's lock
+  for more than three seconds (a suspended tab), lists it in this page only
+  too. Such a connection gives way when another tab saves a record for the Pod
+  later: that record's connection is listed instead, and handles taken from
+  the earlier one are no longer current.
+- **Older SDKs leave it untouched.** SDKs that do not know this record kind
+  (such as 0.9.0-dev.3) report such an address in `StartupReport.unreadable`.
 
 The SDK reads public data with plain requests without a token. It does not use
 the anonymous `scope=public-read&prompt=none` token some Pods offer
@@ -1047,8 +1079,10 @@ A Pod address outlives its session, so people do not type it again on their
 own device. Signing out (`disconnect(id)`) and a session that ends (a refused
 renewal, an expired token without a refresh token, a failed sign-in) keep the
 connection's record with only its address (the Pod binding) and why the
-session ended: no token and no verifier. The connection stays in the snapshot,
-and the next start lists it again, as
+session ended: no token and no verifier. Under `signIn: 'optional'`, a Pod
+added and only read without a token is remembered too, by its address alone
+([apps without sign-in](#apps-without-sign-in)). The connection stays in the
+snapshot, and the next start lists it again, as
 
 ```ts
 { kind: 'signed-out', problem?: RuntimeProblem }

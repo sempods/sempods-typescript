@@ -25,6 +25,7 @@ import {
   fixture,
   pod,
   renewal,
+  restart,
   without,
   work,
 } from '../runtime/fixture.test.js';
@@ -335,12 +336,70 @@ it('lists every Pod read without a token as a row and selects one without signin
   expect(await podActionNames('pod.example/bob')).toEqual([
     'Sign in',
     'Use this Pod',
+    'Remove from this device',
   ]);
   const use = await podAction('Use this Pod', 'pod.example/bob');
   await act(async () => use.click());
   // Choosing it does not sign in.
   expect(within(bob).getByText('Selected')).toBeTruthy();
   expect(f.navigate).not.toHaveBeenCalled();
+});
+
+it('removes a Pod added without a sign-in from this device, keeping the default Pod (#372)', async () => {
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  await f.runtime.initialize();
+  await f.runtime.connect('https://pod.example/bob');
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Recipes" open />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('group', { name: 'pod.example/alice' });
+  // The default Pod is listed on every start: nothing saved to remove.
+  expect(await podActionNames('pod.example/alice')).not.toContain(
+    'Remove from this device',
+  );
+  const remove = await podAction('Remove from this device', 'pod.example/bob');
+  await act(async () => remove.click());
+  await waitFor(() =>
+    expect(screen.queryByRole('group', { name: 'pod.example/bob' })).toBeNull(),
+  );
+  expect(f.runtime.getSnapshot()).toMatchObject([{ podUrl: pod }]);
+  const next = await restart(f, f.runtime, (r) => {
+    cleanups.push(() => r.dispose());
+    return r;
+  });
+  expect(next.getSnapshot()).toMatchObject([{ podUrl: pod }]);
+  expect(next.getSnapshot()).toHaveLength(1);
+});
+
+it('removes a saved Pod that became the default Pod later (#372)', async () => {
+  const bob = 'https://pod.example/bob';
+  const f = start({ signIn: 'optional', preset: { podUrl: pod } });
+  await f.runtime.initialize();
+  const added = await f.runtime.connect(bob);
+  const keep = (r: { dispose(): void }) =>
+    void cleanups.push(() => r.dispose());
+  // Reopened with Bob's Pod as the sole allowed one: his saved address.
+  const options = { ...f.options, allowedPods: [bob] };
+  delete options.preset;
+  const next = await restart({ options }, f.runtime, keep);
+  expect(next.getSnapshot()).toMatchObject([{ id: added.id, podUrl: bob }]);
+  render(
+    <SempodsProvider runtime={next}>
+      <AppAccess appName="Recipes" open />
+    </SempodsProvider>,
+  );
+  await screen.findByRole('group', { name: 'pod.example/bob' });
+  const remove = await podAction('Remove from this device', 'pod.example/bob');
+  await act(async () => remove.click());
+  // Its address is gone; the default Pod's own connection remains.
+  await waitFor(() =>
+    expect(next.getSnapshot()).toMatchObject([{ id: bob, podUrl: bob }]),
+  );
+  expect(await podActionNames('pod.example/bob')).not.toContain(
+    'Remove from this device',
+  );
 });
 
 const task = fields(

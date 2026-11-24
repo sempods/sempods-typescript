@@ -10,7 +10,7 @@ import { useApp, useAppState } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { AccessNotice, endedMessage } from './components.js';
 import { contextName, distinctName, podName } from './names.js';
-import { knownContexts, reads } from './access-presentation.js';
+import { defaultPod, knownContexts, reads } from './access-presentation.js';
 import type { Connection } from '../runtime/types.js';
 
 /**
@@ -279,6 +279,8 @@ export function PodManagement({
     if (s.kind === 'signed-out') return m.controls.signedOut;
     return undefined;
   };
+  // The Pod every start connects under `optional`.
+  const defaultPodUrl = defaultPod(state);
   const actionsOf = (entry: Connection): readonly PodAction[] => {
     const s = entry.session;
     const signIn = state.signIn !== 'none';
@@ -344,12 +346,17 @@ export function PodManagement({
           signOut,
         ];
       case 'signed-out':
-        // A Pod read without a token that was never signed in to has no
-        // saved address of its own to remove.
+        // The default Pod's own connection, read without a token and never
+        // signed in to, has no saved address to remove: every start lists
+        // it again, with the Pod's address as its ID (`Connection.id`). Any
+        // other Pod added that way is remembered by its address (#372), also
+        // one that became the default Pod later.
         return [
           ...signInAction,
           ...use,
-          ...(anonymous && s.problem === undefined ? [] : remove),
+          ...(anonymous && s.problem === undefined && entry.id === defaultPodUrl
+            ? []
+            : remove),
         ];
       // A Pod still restoring can already be signed out of.
       case 'restoring':

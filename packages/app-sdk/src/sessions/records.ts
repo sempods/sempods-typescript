@@ -4,6 +4,7 @@ import {
   type SessionBinding,
   type SessionAttempt,
 } from './authorization.js';
+import { anonymous, createPod } from '@sempods/client-sdk';
 import { type ExchangeResult } from '@sempods/client-sdk/oauth';
 import {
   parseStoredCredentials,
@@ -45,6 +46,12 @@ export type SessionRecord = { readonly version: 1 } & (
        * signed out in every tab while it is out, never as interrupted.
        */
       readonly silent?: true;
+      /**
+       * The first sign-in replaced the address of a Pod never signed in to
+       * (#372): a sign-in that fails, or a sign-out of it, puts the address
+       * back. Absent in records of SDKs that do not save addresses.
+       */
+      readonly address?: true;
     }
   | {
       readonly kind: 'ready';
@@ -72,6 +79,8 @@ export type SessionRecord = { readonly version: 1 } & (
        * one that never saw the attempt. Kept by renewals; in `ready` too.
        */
       readonly attemptEnded?: string;
+      /** A code claim of an attempt that replaced an address; see `authorizing`. */
+      readonly address?: true;
     }
   | {
       readonly kind: 'disconnected';
@@ -83,7 +92,21 @@ export type SessionRecord = { readonly version: 1 } & (
        */
       readonly reason?: string;
     }
+  | {
+      /**
+       * A Pod read without a token that was never signed in to (`signIn:
+       * 'optional'`): only its address, neither discovered nor bound to a
+       * client. A sign-in replaces it. SDKs without this kind (such as 0.9.0-dev.3) list it as
+       * unreadable and leave it untouched.
+       */
+      readonly kind: 'address';
+      readonly configKey: string;
+      readonly connectionId: string;
+      readonly podUrl: string;
+    }
 );
+/** A record bound to a discovered Pod and a client: every kind but `address`. */
+export type BoundSessionRecord = Exclude<SessionRecord, { kind: 'address' }>;
 /**
  * What one resend of a claimed refresh needs: the refresh token that was
  * sent, the granted scopes it continues and when it was first sent (this
@@ -108,11 +131,36 @@ export class SessionTransitionError extends Error {
   }
 }
 
-export function sessionBinding(value: SessionRecord): SessionBinding {
+export function sessionBinding(value: BoundSessionRecord): SessionBinding {
   if (value.kind !== 'authorizing') return value.binding;
   const { configKey, connectionId, generation, pod, client, scopes } =
     value.attempt;
   return { configKey, connectionId, generation, pod, client, scopes };
+}
+
+/**
+ * Whether a first sign-in under way replaced the address of a Pod never
+ * signed in to, which its failure or sign-out puts back (#372).
+ */
+export function replacesAddress(value: SessionRecord): boolean {
+  return (
+    (value.kind === 'authorizing' || value.kind === 'claimed') &&
+    value.address === true
+  );
+}
+
+/** The exact Pod URL a record is for. */
+export function recordPodUrl(value: SessionRecord): string {
+  return value.kind === 'address'
+    ? value.podUrl
+    : sessionBinding(value).pod.podUrl;
+}
+
+/** The generation a record belongs to; an address has none. */
+export function recordGeneration(value: SessionRecord): string | undefined {
+  return value.kind === 'address'
+    ? undefined
+    : sessionBinding(value).generation;
 }
 
 /** Parse stored shape and identity, without deciding freshness, eligibility or network dispatch. */
@@ -131,7 +179,31 @@ export function parseSessionRecord(
   }
   try {
     if (!record(value) || value.version !== 1) throw new Error();
-    let parsed: SessionRecord;
+    let parsed: BoundSessionRecord;
+    if (value.kind === 'address') {
+      if (
+        value.configKey !== config.configKey ||
+        value.connectionId !== stored.id ||
+        typeof value.podUrl !== 'string'
+      )
+        throw new Error();
+      // The portable client's canonical address rule; construction sends nothing.
+      createPod(value.podUrl, {
+        auth: anonymous(),
+        ...(config.development ? { development: config.development } : {}),
+      });
+      return {
+        id: stored.id,
+        revision: stored.revision,
+        value: {
+          version: 1,
+          kind: 'address',
+          configKey: value.configKey,
+          connectionId: value.connectionId,
+          podUrl: value.podUrl,
+        },
+      };
+    }
     if (value.kind === 'authorizing') {
       const attempt = parseStoredAttempt(
         value.attempt,
@@ -149,6 +221,7 @@ export function parseSessionRecord(
               kind: 'authorizing',
               attempt,
               ...(value.silent === true ? { silent: true as const } : {}),
+              ...(value.address === true ? { address: true as const } : {}),
             }
           : {
               version: 1,
@@ -207,6 +280,9 @@ export function parseSessionRecord(
                   ...parsePending(value.pending, binding, config),
                   ...parseEnded(value.attemptEnded),
                 }
+              : {}),
+            ...(value.address === true && value.operation === 'code'
+              ? { address: true as const }
               : {}),
           };
           break;

@@ -10,6 +10,7 @@ import { RuntimeError } from './errors.js';
 import { removalsOf } from './removals.js';
 import type { BrowserRuntime, BrowserRuntimeOptions } from './types.js';
 import {
+  authorization,
   catalogue,
   deferred,
   fixture,
@@ -33,8 +34,6 @@ const keep = (runtime: BrowserRuntime) => {
 
 /** Only `work` is public: an anonymous catalogue lists it as readable only. */
 const publicCatalogue = () => catalogue([work], []);
-const authorization = (init?: RequestInit) =>
-  new Headers(init?.headers).get('authorization');
 /** Calls to `suffix`, split by whether they carried a token. */
 function sent(f: ReturnType<typeof fixture>, suffix: string) {
   const calls = f.fetch.mock.calls.filter(([url]) =>

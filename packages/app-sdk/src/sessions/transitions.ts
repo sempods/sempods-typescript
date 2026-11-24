@@ -18,6 +18,8 @@ import {
   openPending,
   parseSessionRecord,
   pendingOf,
+  recordGeneration,
+  replacesAddress,
   sessionBinding,
   SessionTransitionError,
   type PendingAttempt,
@@ -103,6 +105,16 @@ export function createSessionTransitions(
       ? undefined
       : parseSessionRecord(stored, config);
   }
+  /** The record of a Pod never signed in to, by its address alone. */
+  function addressRecord(id: string, podUrl: string): SessionRecord {
+    return {
+      version: 1,
+      kind: 'address',
+      configKey: config.configKey,
+      connectionId: id,
+      podUrl,
+    };
+  }
   async function commit(
     id: string,
     revision: string | null,
@@ -160,6 +172,8 @@ export function createSessionTransitions(
     operation: 'code' | 'refresh',
     expected: SessionBinding,
   ) {
+    if (current.value.kind === 'address')
+      throw new SessionTransitionError('state');
     const binding = sessionBinding(current.value);
     assertSessionBinding(binding, expected);
     if (operation === 'refresh' && !expected.pod.supportsRefreshToken)
@@ -185,6 +199,9 @@ export function createSessionTransitions(
               sentAt: Date.now(),
             },
           }
+        : {}),
+      ...(operation === 'code' && replacesAddress(current.value)
+        ? { address: true as const }
         : {}),
     });
   }
@@ -232,10 +249,7 @@ export function createSessionTransitions(
       );
       const current = await read(snapshot.connectionId);
       if ((current?.revision ?? null) !== expectedRevision) return conflict;
-      if (
-        current &&
-        sessionBinding(current.value).generation === snapshot.generation
-      )
+      if (current && recordGeneration(current.value) === snapshot.generation)
         throw new SessionTransitionError('state');
       const value = current?.value;
       // An earlier attempt it replaces ended without a grant, also an
@@ -250,6 +264,10 @@ export function createSessionTransitions(
         kind: 'authorizing',
         attempt: snapshot,
         ...(silent ? { silent: true as const } : {}),
+        // Over an address (#372), also over an attempt that replaced one.
+        ...(value && (value.kind === 'address' || replacesAddress(value))
+          ? { address: true as const }
+          : {}),
       });
     },
     /**
@@ -510,8 +528,25 @@ export function createSessionTransitions(
       };
     },
     /**
+     * Remembers the address of a Pod read without a token that was never
+     * signed in to, as a new record `id` (`conflict` when one exists), or in
+     * place of the record at `revision`.
+     */
+    async remember(
+      id: string,
+      podUrl: string,
+      revision: string | null = null,
+    ): Promise<SessionChange> {
+      const value = addressRecord(id, podUrl);
+      // Validated as a start would read it, before anything is stored.
+      validate('configuration', () =>
+        parseSessionRecord({ id, revision: '-', value }, config),
+      );
+      return commit(id, revision, value);
+    },
+    /**
      * Retires the record: only its binding (the Pod address) and why it ended
-     * stay, without token or verifier.
+     * stay, without token or verifier. An address stays as it is.
      */
     async disconnect(
       id: string,
@@ -522,6 +557,16 @@ export function createSessionTransitions(
     ): Promise<SessionChange> {
       const current = await observed(id, revision);
       if (!current) return conflict;
+      if (current.value.kind === 'address')
+        return { kind: 'committed', record: current };
+      // A first sign-in over an address that failed or is signed out of:
+      // the Pod was never signed in to, so its address is put back.
+      if (replacesAddress(current.value))
+        return commit(
+          id,
+          revision,
+          addressRecord(id, sessionBinding(current.value).pod.podUrl),
+        );
       return commit(
         id,
         revision,

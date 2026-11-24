@@ -105,6 +105,13 @@ export type CatalogueFact =
       readonly labels?: ContextLabels;
     };
 export interface Connection {
+  /**
+   * Stable for the connection's saved record. The connection that
+   * `signIn: 'optional'` or `'none'` lists for the default Pod without a
+   * saved record (the `preset`, or the sole allowed Pod) has that Pod's
+   * address as its ID; any other connection, also a saved address of the
+   * same Pod, has an ID of its own.
+   */
   readonly id: string;
   readonly podUrl: string;
   /** `null` only under `signIn: 'none'` without an `identity`. */
@@ -228,8 +235,9 @@ export interface BrowserRuntimeOptions {
    * - `optional`: a connection without a session reads the Pod's public
    *   Contexts without a token (`Connection.reading: 'anonymous'`). Startup
    *   connects the default Pod (the `preset`, or the sole allowed Pod), and
-   *   `connect(url)` adds a Pod without discovery or sign-in. Signing in is
-   *   offered, never demanded. A session that ends, or signing out, returns
+   *   `connect(url)` adds further Pods without discovery or sign-in, each
+   *   remembered under `rememberPods`. Signing in to one is offered, never
+   *   demanded. A session that ends, or signing out, returns
    *   to reading without a token. `scopes.required` is a configuration
    *   error; `public-read` is added to the optional scopes, so signing in
    *   does not hide the public Contexts.
@@ -293,12 +301,15 @@ export interface BrowserRuntimeOptions {
    * (`disconnect`) or a session that ends (a refused renewal, an expired
    * token) then keeps the address on this device, without token or
    * verifier, and the next start lists the connection as `signed-out`, so
-   * signing in again is one action. `forget(id)` deletes it.
+   * signing in again is one action. `forget(id)` deletes it. Under
+   * `signIn: 'optional'`, a Pod added with `connect(url)` and read without a
+   * token is remembered the same way, without a sign-in.
    *
    * `false` forgets the address and the remembered Context on sign-out and
    * session end, for shared devices or privacy-sensitive apps: a signed-out
    * connection leaves the snapshot, an ended one stays listed only until the
-   * page unloads, and startup deletes addresses an earlier start remembered.
+   * page unloads, a Pod read without a token is listed in this page only,
+   * and startup deletes addresses an earlier start remembered.
    */
   readonly rememberPods?: boolean;
   /**
@@ -309,7 +320,9 @@ export interface BrowserRuntimeOptions {
    * `preset`, or a single `allowedPods` entry) where people usually have a
    * session at that Pod already (single sign-on). When nothing is stored
    * for this app on the device (no session, no remembered Pod, also none
-   * that `allowedPods` excludes now), `initialize()` connects the
+   * that `allowedPods` excludes now; the address of a Pod other than the
+   * default one, only read without a token, does not count), `initialize()`
+   * connects the
    * default Pod and navigates to its provider once with `prompt=none`
    * instead of resolving: signed in there with a grant for this app, the
    * person returns signed in without a click. Otherwise the Pod answers
@@ -417,6 +430,12 @@ export interface BrowserRuntime {
    * resolves a client: the connection reads without a token at once, and a
    * sign-in discovers the Pod itself. An invalid address rejects with
    * SdkError (invalid-pod-url). Under `'none'` only the default Pod connects.
+   * Under `'optional'` and `rememberPods`, the address of a Pod other than
+   * the default one is saved, so the next start and the app's other tabs
+   * list it too, until `forget(id)`; a write that fails, or another tab
+   * that holds that Pod's lock for more than three seconds, lists it in this
+   * page only, until another tab saves a record for the Pod: that record's
+   * connection replaces it then, and its handles are no longer current.
    */
   connect(url?: string): Promise<Connection>;
   /**
