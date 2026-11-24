@@ -241,6 +241,88 @@ describe('a second Pod without a token', () => {
   });
 });
 
+describe('a replacement runtime in the same page (#419)', () => {
+  /**
+   * A store without `watch`, so the lease is exclusive; `written` resolves
+   * once the first sign-in's attempt over Bob's address is being committed,
+   * and `hold` keeps that commit pending until it is released.
+   */
+  function exclusive(f: { factory: IDBFactory }) {
+    const writing = deferred<void>();
+    const hold = deferred<void>();
+    return {
+      writing,
+      hold,
+      openStore: storeWith(f.factory, (store) => ({
+        commit: async (id, revision, value) => {
+          if ((value as { kind?: string }).kind === 'authorizing') {
+            writing.resolve();
+            await hold.promise;
+          }
+          return store.commit(id, revision, value);
+        },
+      })),
+    };
+  }
+
+  it('opens with durable storage right after dispose, once the replaced address is back', async () => {
+    const factory = new IDBFactory();
+    const store = exclusive({ factory });
+    const f = await withBob({ openStore: store.openStore });
+    expect(f.runtime.getSnapshot()).toHaveLength(2);
+    const before = (await savedRecords(factory)).map(({ id, value }) => ({
+      id,
+      value,
+    }));
+    const signing = f.runtime.beginAuthorization(f.id);
+    await store.writing.promise;
+    f.runtime.dispose();
+    store.hold.resolve();
+    await expect(signing).rejects.toMatchObject({ problem: 'disconnected' });
+    // No sleep, no third runtime: the replacement waits for the cleanup.
+    const next = keep(createBrowserRuntime(f.options));
+    expect(await next.initialize()).toMatchObject({ storage: 'durable' });
+    expect(next.getSnapshot().find((c) => c.id === f.id)).toMatchObject({
+      session: { kind: 'signed-out' },
+    });
+    expect(next.getSnapshot()[1]).not.toHaveProperty('problem');
+    expect(
+      (await savedRecords(factory)).map(({ id, value }) => ({ id, value })),
+    ).toEqual(before);
+    expect(f.navigate).not.toHaveBeenCalled();
+  });
+
+  it('opens with durable storage when initialized before the sign-in has rejected', async () => {
+    const factory = new IDBFactory();
+    const store = exclusive({ factory });
+    const f = await withBob({ openStore: store.openStore });
+    const signing = f.runtime
+      .beginAuthorization(f.id)
+      .catch((error: unknown) => error);
+    await store.writing.promise;
+    f.runtime.dispose();
+    const next = keep(createBrowserRuntime(f.options));
+    const starting = next.initialize();
+    store.hold.resolve();
+    expect(await starting).toMatchObject({ storage: 'durable' });
+    expect(await signing).toMatchObject({ problem: 'disconnected' });
+    expect(next.getSnapshot().find((c) => c.id === f.id)).toMatchObject({
+      session: { kind: 'signed-out' },
+    });
+  });
+
+  it('still reports busy beside the holder after a busy runtime of this page was disposed', async () => {
+    const f = await withBob();
+    const other = keep(createBrowserRuntime(f.options));
+    expect(await other.initialize()).toMatchObject({ storage: 'busy' });
+    // The busy runtime held no lease: disposing it hands nothing over.
+    other.dispose();
+    const third = keep(createBrowserRuntime(f.options));
+    expect(await third.initialize()).toMatchObject({ storage: 'busy' });
+    expect(f.runtime.getSnapshot()).toHaveLength(2);
+  });
+});
+
 describe('several tabs', () => {
   /**
    * Two tabs on one IndexedDB, Web Locks and channel, under `optional`; the

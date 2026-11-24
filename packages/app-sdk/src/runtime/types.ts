@@ -562,5 +562,10 @@ export interface BrowserRuntime {
    * Pod 403 returns refused without catalogue recovery or inferred session changes.
    */
   bindPod(id: string): BoundPod;
+  /**
+   * Ends this runtime at once and releases its session lease once the address
+   * a first sign-in still in flight replaced is back. A replacement runtime in
+   * the same page waits for that in `initialize()` instead of reporting `busy`.
+   */
   dispose(): void;
 }
