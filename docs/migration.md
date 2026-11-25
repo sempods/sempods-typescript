@@ -386,16 +386,24 @@ opened from that one.
 
 A failed re-authorization callback (another provider error, a refused code, a
 lost code answer) keeps the session too: the report is `failed` with
-`resumed: true`, where 0.8 ended the connection. An app that reads
-`startup.resumed` as "access unchanged" stops doing so: it only says that
-the session is in use again. The default `controls.sharingUnchanged` text now
+`resumed: true`, where 0.8 ended the connection. Check `resumed === true`
+before treating the earlier session as usable: a callback that waited too
+long for another tab's refresh lock reports `failed` with `problem:
+'coordination'` and without `resumed`, because it has not consumed its
+attempt. An app that reads `startup.resumed` as "access unchanged" stops
+doing so: it only says that the session is in use again. The default `controls.sharingUnchanged` text now
 says that the change was not confirmed; an app with its own text reviews it.
 
 A silent first sign-in under way is stored as such and shows `signed-out` in
 every tab; a click on **Sign in** replaces it. Records of earlier SDKs are
-read as before. A tab of an earlier SDK beside one of 0.9.0 ignores a pending
-attempt and drops it with its next renewal; that attempt's callback then
-fails with `attempt`, and the session stays. The prerelease after
+read as before. During a rolling upgrade, 0.8.0 and the prereleases up to
+`0.9.0-dev.3` hold the app's session lease alone, so their tabs and tabs of
+0.9.0 do not run side by side: whichever tab opens second reports
+`storage: 'busy'` and can neither renew the session nor drop a pending
+attempt. Close the tab that holds the lease and reload the busy one. An
+earlier SDK that takes over after the 0.9.0 tabs released the lease ignores a
+pending attempt and drops it with its next renewal; that attempt's callback
+then fails with `attempt`, and the session stays. The prerelease after
 `0.9.0-dev.3` carries this.
 
 ### Confirmed modification time on list rows

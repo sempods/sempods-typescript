@@ -137,8 +137,12 @@ cache, and after any catalogue read that was under way then.
 
 Records of SDK 0.6 to 0.8 and of the prereleases up to 0.9.0-dev.3 kept the
 session as `previous` of its attempt; 0.9.0 reads them as the session with the
-attempt pending and stores the new shape with its next write. A tab of an
-earlier SDK beside one of 0.9.0 ignores the pending attempt and drops it with its next renewal: the session stays, and that
+attempt pending and stores the new shape with its next write. Those SDKs hold
+the session lease alone, so their tabs and tabs of 0.9.0 do not run side by
+side: whichever tab opens second reports `storage: 'busy'` until the tab that
+holds the lease is closed and the busy one is reloaded. An earlier SDK that
+takes over after the 0.9.0 tabs released the lease ignores the pending
+attempt and drops it with its next renewal: the session stays, and that
 attempt's callback fails with `attempt`. Records written by SDK 0.5 have no
 earlier session.
 
