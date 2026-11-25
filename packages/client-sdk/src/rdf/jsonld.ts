@@ -144,7 +144,7 @@ export function fromJsonLd(body: unknown, documentUrl: string): Dataset {
         if (!isNode(entry)) throw new JsonLdError('invalid @reverse value');
         checkContext(entry);
         for (const [predicate, items] of Object.entries(entry)) {
-          if (KEYWORDS.has(predicate) && predicate !== '@context')
+          if (isKeyword(predicate) && predicate !== '@context')
             throw new JsonLdError('invalid reverse property map');
           // An unmapped reverse property states nothing, nor does its value.
           if (!isPredicate(predicate)) continue;
@@ -244,6 +244,20 @@ const KEYWORDS = new Set(
   ].map((name) => `@${name}`),
 );
 
+/** The JSON-LD 1.1 Framing keywords, keywords too for expansion's checks. */
+const FRAMING_KEYWORDS = new Set([
+  '@default',
+  '@embed',
+  '@explicit',
+  '@omitDefault',
+  '@preserve',
+  '@requireAll',
+]);
+
+function isKeyword(key: string): boolean {
+  return KEYWORDS.has(key) || FRAMING_KEYWORDS.has(key);
+}
+
 /**
  * A key that expansion without a context drops before it checks an
  * object's shape: neither a keyword nor containing a colon, or of the
@@ -261,9 +275,21 @@ function valueObject(value: JsonLd, documentUrl: string): Term | undefined {
   const type = value['@type'];
   const language = value['@language'];
   const direction = value['@direction'];
-  if (type !== undefined && (language !== undefined || direction !== undefined))
+  if (type !== undefined) {
+    if (Array.isArray(type) && type.every((t) => typeof t === 'string'))
+      throw new JsonLdError('invalid typed value');
+    if (typeof type !== 'string') throw new JsonLdError('invalid type value');
+  }
+  const datatype =
+    type === undefined || type === '@json'
+      ? type
+      : datatypeOf(type, documentUrl);
+  if (
+    datatype !== undefined &&
+    (language !== undefined || direction !== undefined)
+  )
     throw new JsonLdError('invalid value object');
-  if (type === '@json') return literal(literalOf(value, type));
+  if (datatype === '@json') return literal(literalOf(value, datatype));
   // The keywords are checked also for a null value, as JSON-LD expands them.
   if (language !== undefined) {
     if (typeof language !== 'string')
@@ -273,13 +299,6 @@ function valueObject(value: JsonLd, documentUrl: string): Term | undefined {
   }
   if (direction !== undefined && direction !== 'ltr' && direction !== 'rtl')
     throw new JsonLdError('invalid base direction');
-  if (type !== undefined) {
-    if (Array.isArray(type) && type.every((t) => typeof t === 'string'))
-      throw new JsonLdError('invalid typed value');
-    if (typeof type !== 'string') throw new JsonLdError('invalid type value');
-  }
-  const datatype =
-    type === undefined ? undefined : datatypeOf(type, documentUrl);
   if (native === null) return undefined;
   if (typeof native === 'object')
     throw new JsonLdError('invalid value object value');
@@ -300,10 +319,14 @@ function literalOf(value: JsonLd, type: string | undefined): JsonLd {
 /**
  * A literal's datatype IRI: absolute as given, or a relative reference
  * resolved against the document URL, as expansion does for `@type`. A
- * blank node, whitespace or an unresolvable reference is no datatype.
+ * keyword, a blank node, whitespace or an unresolvable reference is no
+ * datatype. A key of the keyword form that is no keyword, such as
+ * `@future`, expands to nothing: the literal has no datatype (JSON-LD 1.1
+ * IRI expansion, steps 1–2).
  */
-function datatypeOf(type: string, documentUrl: string): string {
-  if (type.startsWith('_:') || /\s/.test(type))
+function datatypeOf(type: string, documentUrl: string): string | undefined {
+  if (!isKeyword(type) && /^@[a-zA-Z]+$/.test(type)) return undefined;
+  if (isKeyword(type) || type.startsWith('_:') || /\s/.test(type))
     throw new JsonLdError('invalid typed value');
   if (SCHEME.test(type)) {
     if (!ABSOLUTE_IRI.test(type)) throw new JsonLdError('invalid typed value');

@@ -1230,6 +1230,25 @@ describe('Find groups as named-graph JSON-LD writes them', () => {
 });
 
 describe('Find values read as JSON-LD expansion reads them', () => {
+  it.each([
+    ['the empty list first', 0],
+    ['rdf:nil first', 1],
+  ])('types a node with rdf:nil once, %s', async (_name, first) => {
+    const nil = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil';
+    const values = [{ '@list': [] }, { '@id': nil }];
+    const graph = [
+      {
+        '@id': `${base}/e1`,
+        'http://www.w3.org/1999/02/22-rdf-syntax-ns#type':
+          first === 0 ? values : [...values].reverse(),
+      },
+    ];
+    expect(await ok(answering(graph, base).pod.findFlat('x'))).toEqual({
+      nodes: [{ '@id': `${base}/e1`, '@type': [nil] }],
+      observations: [],
+    });
+  });
+
   it('resolves a relative datatype against the Find URL', async () => {
     const graph = [
       { '@id': `${base}/e1`, 'x:p': [{ '@value': 'red', '@type': '#Color' }] },

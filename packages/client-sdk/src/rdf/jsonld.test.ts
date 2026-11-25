@@ -76,11 +76,35 @@ describe('expanded JSON-LD the reader reads as expansion does', () => {
     g: undefined,
   });
 
-  it('resolves a relative datatype against the document URL', () => {
-    expect(quads({ '@value': 'red', '@type': '#Color' })).toEqual([
-      literal({ '@value': 'red', '@type': `${base}#Color` }),
+  it.each([
+    ['#Color', `${base}#Color`],
+    ['./@id', 'https://pod.example/@id'],
+  ])(
+    'resolves the relative datatype %s against the document URL',
+    (type, iri) => {
+      expect(quads({ '@value': 'red', '@type': type })).toEqual([
+        literal({ '@value': 'red', '@type': iri }),
+      ]);
+    },
+  );
+
+  it('drops a keyword-like datatype that is no keyword, as IRI expansion does', () => {
+    expect(quads({ '@value': 'red', '@type': '@future' })).toEqual([
+      literal({ '@value': 'red' }),
     ]);
   });
+
+  it.each(['@id', '@vocab', '@embed'])(
+    'rejects the keyword %s as a datatype',
+    (type) => {
+      expect(
+        rejection({
+          '@id': `${base}#s`,
+          [p]: { '@value': 'red', '@type': type },
+        }),
+      ).toBe('invalid typed value');
+    },
+  );
 
   it.each<[string, unknown, string]>([
     [
@@ -136,6 +160,17 @@ describe('expanded JSON-LD the reader reads as expansion does', () => {
     'drops unmapped keys of %s before checking its shape',
     (_name, value, o) => {
       expect(quads(value)).toEqual([{ s, p, o, g: undefined }]);
+    },
+  );
+
+  it.each(['@id', '@embed', '@requireAll'])(
+    'rejects the keyword %s in a reverse map, also a framing keyword',
+    (keyword) => {
+      const body = {
+        '@id': `${base}#s`,
+        '@reverse': { [keyword]: '@always', [p]: { '@id': `${base}#o` } },
+      };
+      expect(rejection(body)).toBe('invalid reverse property map');
     },
   );
 

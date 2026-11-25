@@ -1,6 +1,7 @@
 import { RDF_TYPE } from '../iri.js';
 import type { JsonLd } from '../results.js';
 import {
+  RDF_NIL,
   subjectOf,
   termKey,
   type Graph,
@@ -60,7 +61,14 @@ export function nodeMap(label: (id: string) => string): NodeMap {
       return node;
     },
     add(node, predicate, object) {
+      // The empty list is the IRI rdf:nil, so it is a type like any IRI.
       if (
+        predicate === RDF_TYPE &&
+        object.kind === 'list' &&
+        object.items.length === 0
+      )
+        ((node['@type'] ??= []) as string[]).push(RDF_NIL);
+      else if (
         predicate === RDF_TYPE &&
         (object.kind === 'iri' || object.kind === 'blank')
       )
