@@ -211,22 +211,34 @@ function observe(groups: readonly Group[]): readonly (Group & {
       let changed = false;
       const out: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(node)) {
+        if (key === '@reverse' && isNode(value)) {
+          // The same for resources that name the observation from their side.
+          const reverse = settle(value);
+          changed ||= reverse !== value;
+          out[key] = reverse;
+          continue;
+        }
         if (key.startsWith('@') && key !== '@included') {
           out[key] = value;
           continue;
         }
-        const all = Array.isArray(value) ? value : [value];
-        const next = all.map((child: unknown) => {
-          if (!isHitValue(child)) return item(child);
-          if (Object.keys(child).length === 1) return child;
-          extra.push(item(child) as JsonLd);
-          return { '@id': child['@id'] };
-        });
-        const same = next.every((v, i) => v === all[i]);
-        changed ||= !same;
-        out[key] = same ? value : next.filter((v) => v !== MOVED);
+        const next = settled(value);
+        changed ||= next !== value;
+        out[key] = next;
       }
       return changed ? out : node;
+    };
+    const settled = (value: unknown): unknown => {
+      const all = Array.isArray(value) ? value : [value];
+      const next = all.map((child: unknown) => {
+        if (!isHitValue(child)) return item(child);
+        if (Object.keys(child).length === 1) return child;
+        extra.push(item(child) as JsonLd);
+        return { '@id': child['@id'] };
+      });
+      return next.every((v, i) => v === all[i])
+        ? value
+        : next.filter((v) => v !== MOVED);
     };
     const extra: JsonLd[] = [];
     const named = new Set<string>();

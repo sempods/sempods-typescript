@@ -759,4 +759,62 @@ describe('Pod find requests', () => {
     });
     expect(await read(embedded)).toEqual(expected);
   });
+
+  it('extracts an observation of a hit that names an observation with @reverse', async () => {
+    const one = `${base}/e1`;
+    const two = `${base}/e2`;
+    const about = 'https://schema.org/about';
+    const text = (value: string) => ({
+      'https://schema.org/text': [{ '@value': value }],
+    });
+    const graph = [
+      {
+        '@id': one,
+        [FIND_RESULT]: [
+          {
+            '@id': '_:first',
+            ...text('first'),
+            '@reverse': {
+              [about]: [
+                {
+                  '@id': two,
+                  [FIND_RESULT]: [{ '@id': '_:second', ...text('second') }],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+    const at = (body: unknown) =>
+      createPod(base, {
+        auth: bearer('test'),
+        fetch: async () => jsonLd(body),
+      });
+    const expected = {
+      nodes: [{ '@id': one }, { '@id': two }],
+      observations: [
+        {
+          text: ['first'],
+          details: [{ node: { '@reverse': { [about]: [{ '@id': two }] } } }],
+        },
+        { links: [{ hit: two }], text: ['second'] },
+      ],
+    };
+    expect(await at(graph).findFlat('x')).toMatchObject({
+      kind: 'ok',
+      body: expected,
+    });
+    expect(
+      await at([{ '@id': tasks, '@graph': graph }]).find('x'),
+    ).toMatchObject({
+      kind: 'ok',
+      body: [
+        {
+          nodes: expected.nodes,
+          observations: [{ text: ['first'] }, { text: ['second'] }],
+        },
+      ],
+    });
+  });
 });
