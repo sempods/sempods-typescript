@@ -225,7 +225,8 @@ function read(body: unknown): {
   return { quads, names, blankNamed };
 }
 
-const GRAPH_KEYS = new Set(['@id', '@graph', '@context']);
+/** A named graph's keys; `@index` is metadata JSON-LD toRdf ignores. */
+const GRAPH_KEYS = new Set(['@id', '@graph', '@context', '@index']);
 
 function reference(id: string): Subject {
   return id.startsWith('_:')
@@ -398,22 +399,32 @@ const XSD = 'http://www.w3.org/2001/XMLSchema#';
  */
 function lexical(value: JsonLd): JsonLd {
   const native = value['@value'];
-  if (typeof native === 'boolean')
-    return { ...value, '@value': String(native), '@type': `${XSD}boolean` };
-  if (typeof native !== 'number') return value;
   const type = value['@type'];
+  if (typeof native === 'boolean')
+    return {
+      ...value,
+      '@value': String(native),
+      '@type': type ?? `${XSD}boolean`,
+    };
+  if (typeof native !== 'number') return value;
+  // An explicit datatype stays; only the lexical form and a default change.
   if (
-    Number.isInteger(native) &&
-    Math.abs(native) < 1e21 &&
-    (type === undefined || type === `${XSD}integer`)
-  )
-    return { ...value, '@value': native.toFixed(0), '@type': `${XSD}integer` };
-  const [mantissa, exponent] = native.toExponential().split('e');
-  const decimal = mantissa!.includes('.') ? mantissa : `${mantissa}.0`;
+    !Number.isInteger(native) ||
+    Math.abs(native) >= 1e21 ||
+    type === `${XSD}double`
+  ) {
+    const [mantissa, exponent] = native.toExponential().split('e');
+    const decimal = mantissa!.includes('.') ? mantissa : `${mantissa}.0`;
+    return {
+      ...value,
+      '@value': `${decimal}E${Number(exponent)}`,
+      '@type': type ?? `${XSD}double`,
+    };
+  }
   return {
     ...value,
-    '@value': `${decimal}E${Number(exponent)}`,
-    '@type': type ?? `${XSD}double`,
+    '@value': native.toFixed(0),
+    '@type': type ?? `${XSD}integer`,
   };
 }
 

@@ -1024,4 +1024,42 @@ describe('Find answers read by the RDF they encode', () => {
     expect(observation!.position).toEqual([4, 6]);
     expect(observation!.details[0]!.node[position]).toHaveLength(4);
   });
+
+  it('keeps a number typed as a string apart from the integer, as RDF does', async () => {
+    const string = 'http://www.w3.org/2001/XMLSchema#string';
+    const answer = await ok(
+      answering(
+        [
+          {
+            '@id': one,
+            'x:n': [
+              { '@value': 2 },
+              { '@value': 2, '@type': string },
+              { '@value': '2' },
+            ],
+          },
+        ],
+        base,
+      ).pod.findFlat('x'),
+    );
+    // `2` is "2"^^xsd:integer; the typed number and the plain "2" are one string.
+    expect(answer.nodes).toEqual([
+      {
+        '@id': one,
+        'x:n': [{ '@value': 2 }, { '@value': 2, '@type': string }],
+      },
+    ]);
+  });
+
+  it('reads @index on a named graph as metadata', async () => {
+    const group = {
+      '@id': tasks,
+      '@graph': [{ '@id': one, '@type': [event] }],
+    };
+    expect(
+      stable(
+        await answering([{ ...group, '@index': 'A' }], base).pod.find('x'),
+      ),
+    ).toEqual(stable(await answering([group], base).pod.find('x')));
+  });
 });
