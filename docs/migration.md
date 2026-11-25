@@ -35,6 +35,12 @@ Records of SDK 0.6 to 0.9 are read as before. A tab of 0.9 beside one of
 0.10 ignores a pending attempt and drops it with its next renewal; that
 attempt's callback then fails with `attempt`, and the session stays.
 
+## From 0.8.0 to 0.9.0
+
+0.9.0 is not released yet; this section collects its upgrade steps. The
+prerelease `0.9.0-dev.3` carries them, and the [0.9.0 release
+notes](releases/0.9.0.md) list the changes.
+
 ### Find observations, the flat form and a type filter
 
 The Pod's Find may now describe how it found a hit (#418): an `sps:findResult`
@@ -58,12 +64,6 @@ is as before, with `observations: []`.
 - A typed test double of `Pod` or `BoundPod` needs `findFlat`. New client-sdk
   types: `FlatFindGraph`, `FindObservation`, `FindLink` and `FindDetail`. The
   `invalid-argument` failure's `argument` gains `'type'`.
-
-## From 0.8.0 to 0.9.0
-
-0.9.0 is not released yet; this section collects its upgrade steps. The
-prerelease `0.9.0-dev.3` carries them, and the [0.9.0 release
-notes](releases/0.9.0.md) list the changes.
 
 ### Shared palette defaults
 
