@@ -77,19 +77,17 @@ against `sempods/sempods-spec` at `c6308c157d8c78be0ba6e9d91dba39a11a9ce883`:
 SPS-SPARQL-011–015. It sends the same dataset parameters as Context CONSTRUCT
 and shares its open dependency on sempods-spec#129. Fixture tests only, no live Pod.
 
-Find (#233) was checked against `sempods/sempods-spec` at
-`c6308c157d8c78be0ba6e9d91dba39a11a9ce883` (`spec/core/find.md`, 2026-11-02): SPS-FIND-004, -005, -009–015 and
--018–020. The named-graph JSON-LD form was cross-read in `sempods/sempods-kotlin`
-at `d72098f85a50df421e75a02a5cb13a8d7f2f0307` (`FindEndpoint`, `FindPostRequest`,
-`RdfWriterUtil.toJsonLdNamedGraphs`). This is source reading and deterministic
-fixtures, not live wire evidence. Kotlin treats `contexts: []` as an empty scope; the spec
-leaves an empty downscope to SPS-CRUD-014
+Find (#233) was first checked against `sempods/sempods-spec` at
+`c6308c157d8c78be0ba6e9d91dba39a11a9ce883` (2026-11-02). #418 below
+supersedes that check: SPS-FIND-018 and -019 cited then are withdrawn, and the decoder no longer reads the grouped JSON shape. Still
+valid from it: Kotlin treats `contexts: []` as an empty scope, the spec leaves
+an empty downscope to SPS-CRUD-014
 ([sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129)), so
-the SDK rejects any group in the answer to `[]`.
+the SDK rejects any statement in the answer to `[]`.
 
 Find observations, the flat form and the type filter (#418) were checked on
 2026-11-25 against `sempods/sempods-spec` at
-`2e543168f7ac0d6d850ec2f7d66224c927cdf62d` (`spec/core/find.md`): SPS-FIND-006,
+`2e543168f7ac0d6d850ec2f7d66224c927cdf62d` (`spec/core/find.md`): SPS-FIND-004, -005, -006,
 -007, -009, -010, -015, -025–-030 and -032; -011, -016, -018, -019 and -022–-024
 are withdrawn there. The JSON-LD side of `examples/find/responses.yaml`
 (sempods-spec#147 cases 1–8, converted to `src/fixtures/find-responses.json`)

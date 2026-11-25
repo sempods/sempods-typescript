@@ -113,7 +113,8 @@ function read(body: unknown): {
   let lists = 1;
 
   const emit = (s: Subject, p: string, o: Term, g: Graph): void => {
-    const key = `${termKey(s)} ${p} ${termKey(o)} ${g ?? ''}`;
+    // NUL occurs in no term, so the parts cannot run into each other.
+    const key = [termKey(s), p, termKey(o), g ?? ''].join('\u0000');
     if (!seen.has(key)) {
       seen.add(key);
       quads.push({ s, p, o, g });
@@ -352,15 +353,15 @@ function freezeObservation(entry: Building): FindObservation {
       graph === undefined ? { node } : { context: graph, node },
     ),
   );
-  /** The `@value`s of a predicate across the details' canonical arrays. */
-  const values = (predicate: string): unknown[] =>
-    details.flatMap(({ node }) =>
-      ((node[predicate] as readonly JsonLd[] | undefined) ?? []).map(
-        (v) => v['@value'],
-      ),
+  /** The value objects of a predicate across the details' canonical arrays. */
+  const values = (predicate: string): readonly JsonLd[] =>
+    details.flatMap(
+      ({ node }) => (node[predicate] as readonly JsonLd[] | undefined) ?? [],
     );
   const strings = (predicate: string): string[] =>
-    values(predicate).filter((v): v is string => typeof v === 'string');
+    values(predicate)
+      .map((v) => v['@value'])
+      .filter((v): v is string => typeof v === 'string');
   return Object.freeze({
     id: entry.id,
     links: Object.freeze([...entry.links]),
@@ -382,11 +383,38 @@ function termKey(term: Term): string {
       // without the language-tag rules of RDF literals.
       return term.value['@type'] === '@json'
         ? `json:${jsonKey(term.value['@value'])}`
-        : canonical(term.value);
+        : canonical(lexical(term.value));
     case 'list':
       // The empty list is rdf:nil; every other one has its own head node.
       return term.id === 0 ? '()' : `(#${term.id})`;
   }
+}
+
+const XSD = 'http://www.w3.org/2001/XMLSchema#';
+
+/**
+ * A native number or boolean in its RDF form (JSON-LD 1.1 toRdf), so
+ * `{"@value": 2}` and `"2"^^xsd:integer` are one literal.
+ */
+function lexical(value: JsonLd): JsonLd {
+  const native = value['@value'];
+  if (typeof native === 'boolean')
+    return { ...value, '@value': String(native), '@type': `${XSD}boolean` };
+  if (typeof native !== 'number') return value;
+  const type = value['@type'];
+  if (
+    Number.isInteger(native) &&
+    Math.abs(native) < 1e21 &&
+    (type === undefined || type === `${XSD}integer`)
+  )
+    return { ...value, '@value': native.toFixed(0), '@type': `${XSD}integer` };
+  const [mantissa, exponent] = native.toExponential().split('e');
+  const decimal = mantissa!.includes('.') ? mantissa : `${mantissa}.0`;
+  return {
+    ...value,
+    '@value': `${decimal}E${Number(exponent)}`,
+    '@type': type ?? `${XSD}double`,
+  };
 }
 
 /** JSON with object keys sorted, so equal payloads give equal keys. */
@@ -442,12 +470,37 @@ function inert(context: unknown): boolean {
   );
 }
 
-/** A 1-based position; other values stay in `details` only. */
-function positionOf(lexical: unknown): readonly number[] {
+/** XSD datatypes whose values are integers. */
+const INTEGERS = new Set(
+  [
+    'integer',
+    'long',
+    'int',
+    'short',
+    'byte',
+    'nonNegativeInteger',
+    'positiveInteger',
+    'unsignedLong',
+    'unsignedInt',
+    'unsignedShort',
+    'unsignedByte',
+  ].map((name) => `${XSD}${name}`),
+);
+
+/**
+ * A 1-based position: a native integer, or a string typed as an XSD
+ * integer. Other values, also an untyped `"3"`, stay in `details` only.
+ */
+function positionOf(value: JsonLd): readonly number[] {
+  const lexical = value['@value'];
+  const type = value['@type'];
   const number =
-    typeof lexical === 'number'
+    typeof lexical === 'number' &&
+    (type === undefined || INTEGERS.has(type as string))
       ? lexical
-      : typeof lexical === 'string' && /^[+-]?\d+$/.test(lexical.trim())
+      : typeof lexical === 'string' &&
+          INTEGERS.has(type as string) &&
+          /^[+-]?\d+$/.test(lexical)
         ? Number(lexical)
         : Number.NaN;
   return Number.isSafeInteger(number) && number > 0 ? [number] : [];

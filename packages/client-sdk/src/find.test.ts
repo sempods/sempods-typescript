@@ -944,4 +944,84 @@ describe('Find answers read by the RDF they encode', () => {
     });
     expect(grouped).toMatchObject({ kind: 'ok', body: [{ nodes: [node] }] });
   });
+
+  it('keeps two statements whose parts would run into each other', async () => {
+    // Space-joined, both read `<x:a> x:p <x:b> x:p <x:c>`.
+    const graph = [
+      { '@id': 'x:a', 'x:p': [{ '@id': 'x:b> x:p <x:c' }] },
+      { '@id': 'x:a> x:p <x:b', 'x:p': [{ '@id': 'x:c' }] },
+    ];
+    expect(await ok(answering(graph, base).pod.findFlat('x'))).toEqual({
+      nodes: graph,
+      observations: [],
+    });
+  });
+
+  it('reads a native number and its typed form as one literal', async () => {
+    const integer = 'http://www.w3.org/2001/XMLSchema#integer';
+    const position = 'https://schema.org/position';
+    const answer = await ok(
+      answering(
+        [
+          {
+            '@id': one,
+            'x:n': [{ '@value': 2 }, { '@value': '2', '@type': integer }],
+            'x:b': [
+              { '@value': true },
+              {
+                '@value': 'true',
+                '@type': 'http://www.w3.org/2001/XMLSchema#boolean',
+              },
+            ],
+            [FIND_RESULT]: [
+              {
+                [position]: [
+                  { '@value': 2 },
+                  { '@value': '2', '@type': integer },
+                ],
+              },
+            ],
+          },
+        ],
+        base,
+      ).pod.findFlat('x'),
+    );
+    expect(answer.nodes).toEqual([
+      { '@id': one, 'x:n': [{ '@value': 2 }], 'x:b': [{ '@value': true }] },
+    ]);
+    expect(answer.observations[0]!.position).toEqual([2]);
+  });
+
+  it('takes a position only from an integer literal', async () => {
+    const position = 'https://schema.org/position';
+    const answer = await ok(
+      answering(
+        [
+          {
+            '@id': one,
+            [FIND_RESULT]: [
+              {
+                [position]: [
+                  { '@value': '3' },
+                  {
+                    '@value': '4',
+                    '@type': 'http://www.w3.org/2001/XMLSchema#positiveInteger',
+                  },
+                  {
+                    '@value': 5,
+                    '@type': 'http://www.w3.org/2001/XMLSchema#double',
+                  },
+                  { '@value': 6 },
+                ],
+              },
+            ],
+          },
+        ],
+        base,
+      ).pod.findFlat('x'),
+    );
+    const [observation] = answer.observations;
+    expect(observation!.position).toEqual([4, 6]);
+    expect(observation!.details[0]!.node[position]).toHaveLength(4);
+  });
 });
