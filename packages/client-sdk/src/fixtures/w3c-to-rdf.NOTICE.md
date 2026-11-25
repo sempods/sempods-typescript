@@ -22,19 +22,21 @@ others. All Rights Reserved. <https://www.w3.org/copyright/test-suites-licenses/
 The year is that of the copied revision (2026-11-18); the tests carry no
 copyright notice of their own.
 
-## Licenses
+## License
 
-The upstream test suite is "Distributed under the W3C Test Suite License"
-([2008 version](https://www.w3.org/copyright/test-suite-license-2008/), as
-linked from the suite's
-[README](https://github.com/w3c/json-ld-api/blob/fd4f7eb41f679fb73a54923143c473c3a1d06093/tests/README.md#distribution);
-superseded by the
-[2023 version](https://www.w3.org/copyright/test-suite-license-2023/)), and
-the repository's
+This repository redistributes the unchanged tests under the
+[W3C Test Suite License, 2008 version](https://www.w3.org/copyright/test-suite-license-2008/),
+the license the suite's
+[README](https://github.com/w3c/json-ld-api/blob/fd4f7eb41f679fb73a54923143c473c3a1d06093/tests/README.md#distribution)
+names for its distribution; it is the sole basis for this copy. The upstream
+repository's
 [LICENSE.md](https://github.com/w3c/json-ld-api/blob/fd4f7eb41f679fb73a54923143c473c3a1d06093/LICENSE.md)
-licenses its documents under the
-[W3C Software and Document License](https://www.w3.org/copyright/software-license/).
-The licence texts are not reproduced here; follow the links above.
+also licenses its documents under the W3C Software and Document License; this
+copy does not rely on it. W3C has since published a
+[2023 version](https://www.w3.org/copyright/test-suite-license-2023/) of the
+test-suite license. The license asks copies of a portion of a suite for the
+link to the original, the copyright notice and the status above; its full
+text is linked, not reproduced.
 
 The upstream disclaimer applies to the copied tests:
 

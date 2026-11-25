@@ -60,6 +60,11 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
   and package README links staying within the package or matching its release revision. See
   [documentation strategy](agents/documentation-strategy.md#automated-checks-and-their-limits)
   for deliberately separate checks and limits.
+- `test` includes the JSON-LD reader's
+  [W3C toRdf cases](../packages/client-sdk/src/rdf/w3c-to-rdf.test.ts): 62
+  context-free cases of the W3C JSON-LD 1.1 API test suite, vendored unchanged
+  with their [notice](../packages/client-sdk/src/fixtures/w3c-to-rdf.NOTICE.md).
+  `node scripts/vendor-w3c-to-rdf.mjs <json-ld-api checkout>` regenerates them.
 - `build`: strict library compilation, explicit `.js` ESM imports and a one-way
   app-sdk → client-sdk dependency. Test sources are not part of library output.
   It also writes app-sdk's app-author reference (`scripts/package-docs.mjs`): the

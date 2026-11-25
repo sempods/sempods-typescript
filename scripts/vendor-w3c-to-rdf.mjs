@@ -82,7 +82,7 @@ const fixture = {
     repository: 'https://github.com/w3c/json-ld-api',
     commit,
     path: 'tests/toRdf-manifest.jsonld',
-    license: 'W3C Test Suite License and W3C Software and Document License',
+    license: 'W3C Test Suite License (2008 version), see the notice',
     notice: 'w3c-to-rdf.NOTICE.md',
     note: "Selection: every case of the manifest whose input has no @context other than null, {} or a list of them, and that needs no expandContext, rdfDirection or JSON-LD 1.0 option. Each input is the original file's text and each expected output the original N-Quads, both unchanged; base is the manifest's baseIri plus the input path, or the case's base option. Regenerate with scripts/vendor-w3c-to-rdf.mjs rather than edit.",
     total: manifest.sequence.length,
