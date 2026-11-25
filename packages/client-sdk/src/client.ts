@@ -37,7 +37,8 @@ import type {
   WriteResult,
 } from './results.js';
 import { ABSOLUTE_IRI, isIriRef } from './iri.js';
-import { decodeFlatFind, decodeGroupedFind, isNode } from './find.js';
+import { decodeFlatFind, decodeGroupedFind } from './find.js';
+import { isNode } from './rdf/terms.js';
 import { decodeSelect } from './sparql.js';
 
 const cancelled: Cancelled = Object.freeze({ kind: 'cancelled' });

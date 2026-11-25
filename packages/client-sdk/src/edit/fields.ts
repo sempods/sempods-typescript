@@ -13,6 +13,7 @@ import {
   type Term,
 } from './terms.js';
 import { EMBEDDABLE_IRI } from '../iri.js';
+import { LANGUAGE_TAG } from '../rdf/terms.js';
 import { classifyDate } from './dates.js';
 
 /**
@@ -181,9 +182,6 @@ export interface Timestamps {
   readonly created: string | null;
   readonly modified: string | null;
 }
-
-/** A BCP 47 language tag's syntax, as RDF 1.1 accepts it. */
-export const LANGUAGE_TAG = /^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$/;
 
 function predicateOf(predicate: string): string {
   if (!EMBEDDABLE_IRI.test(predicate))

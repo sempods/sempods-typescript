@@ -1,6 +1,6 @@
 import type { JsonLd } from '../results.js';
 import { EMBEDDABLE_IRI } from '../iri.js';
-import { LANGUAGE_TAG } from './fields.js';
+import { LANGUAGE_TAG } from '../rdf/terms.js';
 import { hasLanguage, isText, sameData, termsOf, type Term } from './terms.js';
 
 const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
