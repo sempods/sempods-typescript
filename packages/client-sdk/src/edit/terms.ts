@@ -1,5 +1,5 @@
 import type { JsonLd } from '../results.js';
-import { EMBEDDABLE_IRI } from '../iri.js';
+import { EMBEDDABLE_IRI, RDF_TYPE } from '../iri.js';
 
 /** One value object of the canonical shape (SPS-CRUD-023): `{"@id"}` or `{"@value"}`. */
 export type Term = { readonly [key: string]: unknown };
@@ -7,7 +7,6 @@ export type Term = { readonly [key: string]: unknown };
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
 export const XSD_DATE_TIME = 'http://www.w3.org/2001/XMLSchema#dateTime';
 export const XSD_DATE = 'http://www.w3.org/2001/XMLSchema#date';
-const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
 /** The resource or snapshot cannot be mapped to the definition; nothing is guessed. */
 export class MappingError extends Error {
@@ -70,7 +69,8 @@ export function hasLanguage(term: Term, language: string | null): boolean {
     : typeof tag === 'string' && tag.toLowerCase() === language.toLowerCase();
 }
 
-function canonical(value: unknown): string {
+/** A canonical key for RDF value data; equal keys denote the same terms. */
+export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (typeof value === 'object' && value !== null) {
     const literal = '@value' in value;
@@ -108,7 +108,7 @@ export function sameData(a: unknown, b: unknown): boolean {
 export function frozenCopy<T>(value: T): T {
   return deepFreeze(structuredClone(value));
 }
-function deepFreeze<T>(value: T): T {
+export function deepFreeze<T>(value: T): T {
   if (typeof value === 'object' && value !== null) {
     Object.values(value).forEach(deepFreeze);
     Object.freeze(value);

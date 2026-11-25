@@ -5,7 +5,7 @@ import {
   type CatalogueContext,
   type ContextDescription,
 } from './catalogue.js';
-import { SdkError, type SdkFailure } from './errors.js';
+import { requestFailure as failure } from './errors.js';
 import {
   createExecutor,
   untrustedTarget,
@@ -36,8 +36,8 @@ import type {
   WriteOptions,
   WriteResult,
 } from './results.js';
-import { ABSOLUTE_IRI, EMBEDDABLE_IRI } from './iri.js';
-import { decodeFlatFind, decodeGroupedFind } from './find.js';
+import { ABSOLUTE_IRI, isIriRef } from './iri.js';
+import { decodeFlatFind, decodeGroupedFind, isNode } from './find.js';
 import { decodeSelect } from './sparql.js';
 
 const cancelled: Cancelled = Object.freeze({ kind: 'cancelled' });
@@ -534,7 +534,7 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     if (
       types !== undefined &&
       (!Array.isArray(types) ||
-        !types.every((iri) => typeof iri === 'string' && isTypeIri(iri)))
+        !types.every((iri) => typeof iri === 'string' && isIriRef(iri)))
     )
       throw failure({ code: 'invalid-argument', argument: 'type' });
     if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0))
@@ -618,14 +618,6 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
       }));
     },
   });
-}
-
-function failure(reason: SdkFailure, cause?: unknown): SdkError {
-  return new SdkError(
-    reason,
-    `Pod request failed: ${reason.code}.`,
-    cause === undefined ? undefined : { cause },
-  );
 }
 
 function discard(response: Response): void {
@@ -726,18 +718,6 @@ function constructBody(body: unknown): readonly JsonLd[] {
   if (!Array.isArray(body) || !body.every(isNode))
     throw failure({ code: 'response', problem: 'body' });
   return Object.freeze(body);
-}
-
-/**
- * A type IRI the Pod can read: an absolute IRIREF whose percent signs each
- * start a two-digit escape, so `%GG` is refused before dispatch.
- */
-function isTypeIri(iri: string): boolean {
-  return EMBEDDABLE_IRI.test(iri) && !/%(?![0-9A-Fa-f]{2})/.test(iri);
-}
-
-function isNode(value: unknown): value is JsonLd {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** UTF-8 base64url without padding (SPS-CRUD-005); works in browsers and Node. */

@@ -1,3 +1,4 @@
+import { MALFORMED_ESCAPE } from '../iri.js';
 import { OAuthError, type OAuthProblem } from './errors.js';
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -27,7 +28,7 @@ export function callbackUrl(value: string, development: boolean): URL {
       url.username ||
       url.password ||
       value.includes('#') ||
-      /%(?![0-9a-f]{2})/i.test(value) ||
+      MALFORMED_ESCAPE.test(value) ||
       (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) ||
       (loopback && !development) ||
       reservedCallbackParameters.some((name) => url.searchParams.has(name))

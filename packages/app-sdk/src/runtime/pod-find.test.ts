@@ -1,7 +1,6 @@
 // `BoundPod.find` (#233) and `findFlat` (#418): the client Find primitive
 // through a Pod handle, with the same lifetime and admission as `sparql`.
 // Fixture evidence only.
-import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   bearer,
@@ -9,6 +8,12 @@ import {
   type FindGraph,
   type FindOptions,
 } from '@sempods/client-sdk';
+import {
+  bodyRejected,
+  findCases,
+  optionsOf,
+  stable,
+} from '../../../client-sdk/src/find.helpers.test.js';
 import { createViewLoader } from '../authoring/load.js';
 import type { BrowserRuntime } from './types.js';
 import type { BoundPod } from './view.js';
@@ -238,45 +243,12 @@ it('invalidates a flat find answered after a disconnect', async () => {
   expect(await pending).toEqual({ kind: 'invalidated' });
 });
 
-/** An answer with its per-answer blank-node labels made comparable. */
-const stable = (answer: unknown) =>
-  JSON.parse(JSON.stringify(answer).replace(/_:a\d+-/g, '_:')) as unknown;
-
-/** The shared Find cases (sempods-spec#147), moved under this fixture's Pod. */
-const shared = Object.entries(
-  JSON.parse(
-    readFileSync(
-      new URL(
-        '../../../client-sdk/src/fixtures/find-responses.json',
-        import.meta.url,
-      ),
-      'utf8',
-    ).replaceAll('https://pod.example/', `${pod}/`),
-  ) as Record<string, SharedCase>,
-).filter(([name]) => name !== '$source');
-
-interface SharedCase {
-  readonly request: {
-    readonly text: string;
-    readonly type?: readonly string[];
-    readonly contexts?: readonly string[];
-    readonly limit?: number;
-  };
-  readonly grouped?: { readonly jsonld: unknown };
-  readonly flat: { readonly jsonld: unknown };
-  readonly invalid?: { readonly jsonld: unknown };
-}
-
-it.each(shared)(
+it.each(findCases(pod))(
   'sends and answers shared case %s through BoundPod as the client Pod does',
   async (_name, c) => {
     const f = await signedIn();
-    const { text, type, contexts, limit } = c.request;
-    const options: FindOptions = {
-      ...(type ? { types: type } : {}),
-      ...(contexts ? { contexts } : {}),
-      ...(limit === undefined ? {} : { limit }),
-    };
+    const { text } = c.request;
+    const options = optionsOf(c.request);
     const direct = (answer: unknown) =>
       createPod(pod, {
         auth: bearer('test'),
@@ -304,9 +276,9 @@ it.each(shared)(
     if (c.invalid) {
       f.setFind(async () => Response.json(c.invalid!.jsonld));
       for (const read of ['find', 'findFlat'] as const)
-        await expect(f.reader[read](text, options)).rejects.toMatchObject({
-          reason: { code: 'response', problem: 'body' },
-        });
+        await expect(f.reader[read](text, options)).rejects.toMatchObject(
+          bodyRejected,
+        );
     }
   },
 );

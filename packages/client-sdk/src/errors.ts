@@ -51,3 +51,12 @@ export class SdkError extends Error {
 export function sdkFailure(cause: unknown): SdkFailure {
   return cause instanceof SdkError ? cause.reason : { code: 'unexpected' };
 }
+
+/** A failed Pod request; the diagnostic names the failure code, never data. */
+export function requestFailure(reason: SdkFailure, cause?: unknown): SdkError {
+  return new SdkError(
+    reason,
+    `Pod request failed: ${reason.code}.`,
+    cause === undefined ? undefined : { cause },
+  );
+}

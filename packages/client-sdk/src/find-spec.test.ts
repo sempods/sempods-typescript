@@ -1,73 +1,31 @@
 // The shared Find acceptance cases (sempods-spec#147, examples/find/responses.yaml)
 // through `Pod.find` and `Pod.findFlat`: each case's request is the body sent,
 // and the decoded answer, observations included, is the case's N-Quads dataset.
-import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
-import {
-  bearer,
-  createPod,
-  type FindGraph,
-  type FindObservation,
-  type FindOptions,
-  type FlatFindGraph,
-  type JsonLd,
-  type PodFetch,
+import { describe, expect, it } from 'vitest';
+import type {
+  FindGraph,
+  FindObservation,
+  FlatFindGraph,
+  JsonLd,
 } from './index.js';
+import {
+  answering,
+  bodyRejected,
+  FIND_RESULT,
+  findCases,
+  ok,
+  optionsOf,
+  sent,
+} from './find.helpers.test.js';
+import { RDF_TYPE } from './iri.js';
 
-interface Representation {
-  readonly jsonld: unknown;
-  readonly nquads: string;
-}
-interface Case {
-  readonly case?: number;
-  readonly request: {
-    readonly text: string;
-    readonly type?: readonly string[];
-    readonly contexts?: readonly string[];
-    readonly limit?: number;
-  };
-  readonly grouped?: Representation;
-  readonly flat: Representation;
-  readonly invalid?: { readonly jsonld: unknown };
-}
-
-const fixtures = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/find-responses.json', import.meta.url),
-    'utf8',
-  ),
-) as Record<string, Case> & { $source: unknown };
-const cases = Object.entries(fixtures).filter(
-  (entry): entry is [string, Case] => entry[0] !== '$source',
-);
+const cases = findCases();
+const fixtures = Object.fromEntries(cases);
 const base = 'https://pod.example';
 const A = `${base}/_system/contexts/A`;
 const B = `${base}/_system/contexts/B`;
 const hit = `${base}/articles/42`;
-const FIND_RESULT = 'https://schema.sempods.org/findResult';
-const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const XSD_INTEGER = 'http://www.w3.org/2001/XMLSchema#integer';
-
-function answering(body: unknown) {
-  const fetch = vi.fn<PodFetch>(async () => Response.json(body));
-  return { fetch, pod: createPod(base, { auth: bearer('test'), fetch }) };
-}
-const sent = (fetch: ReturnType<typeof vi.fn<PodFetch>>) =>
-  JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)) as unknown;
-const optionsOf = ({
-  type,
-  contexts,
-  limit,
-}: Case['request']): FindOptions => ({
-  ...(type ? { types: type } : {}),
-  ...(contexts ? { contexts } : {}),
-  ...(limit === undefined ? {} : { limit }),
-});
-async function ok<T>(answer: Promise<{ kind: string; body?: T }>): Promise<T> {
-  const result = await answer;
-  if (result.kind !== 'ok') throw new Error(result.kind);
-  return result.body as T;
-}
 
 /** N-Quads for the fixtures' expanded JSON-LD terms. */
 function term(value: unknown): string {
@@ -175,26 +133,22 @@ describe('shared Find acceptance cases', () => {
     async (_name, c) => {
       await expect(
         answering(c.grouped!.jsonld).pod.findFlat(c.request.text),
-      ).rejects.toMatchObject({
-        reason: { code: 'response', problem: 'body' },
-      });
+      ).rejects.toMatchObject(bodyRejected);
       await expect(
         answering(c.flat.jsonld).pod.find(c.request.text),
-      ).rejects.toMatchObject({
-        reason: { code: 'response', problem: 'body' },
-      });
+      ).rejects.toMatchObject(bodyRejected);
     },
   );
 
-  it('rejects an anonymous group, also one holding only an observation (case 8)', async () => {
-    const c = fixtures['anonymous-group']!;
-    for (const read of ['find', 'findFlat'] as const)
-      await expect(
-        answering(c.invalid!.jsonld).pod[read](c.request.text),
-      ).rejects.toMatchObject({
-        reason: { code: 'response', problem: 'body' },
-      });
-  });
+  it.each(cases.filter(([, c]) => c.invalid))(
+    'rejects the invalid form of %s in both forms (case 8)',
+    async (_name, c) => {
+      for (const read of ['find', 'findFlat'] as const)
+        await expect(
+          answering(c.invalid!.jsonld).pod[read](c.request.text),
+        ).rejects.toMatchObject(bodyRejected);
+    },
+  );
 });
 
 describe('observations in the shared cases', () => {

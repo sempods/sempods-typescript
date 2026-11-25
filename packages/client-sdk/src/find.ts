@@ -1,5 +1,7 @@
 import { isContextIri } from './catalogue.js';
-import { SdkError } from './errors.js';
+import { canonical, deepFreeze } from './edit/terms.js';
+import { requestFailure } from './errors.js';
+import { ABSOLUTE_IRI, RDF_TYPE } from './iri.js';
 import type {
   FindDetail,
   FindGraph,
@@ -11,7 +13,6 @@ import type {
 
 /** `sps:findResult` (SPS-FIND-028): links a hit to one observation. */
 export const FIND_RESULT = 'https://schema.sempods.org/findResult';
-const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const SCHEMA_TEXT = 'https://schema.org/text';
 const SCHEMA_POSITION = 'https://schema.org/position';
 const SPS_ENGINE = 'https://schema.sempods.org/engine';
@@ -20,8 +21,9 @@ const SPS_ENGINE = 'https://schema.sempods.org/engine';
  * A Find answer is read by the RDF it encodes, not by its JSON shape: the
  * document becomes quads first, so every serialization of one dataset
  * (embedded or separate nodes, `@reverse`, `@set`, `@list`, `@included`,
- * scalar or array values) gives the same result. `nodes` and the
- * observations are then built from those quads.
+ * scalar or array values) gives the same result. The decoders then apply
+ * the Find rules to the quads, and `nodes` and the observations are built
+ * from them.
  */
 
 type Subject =
@@ -41,11 +43,11 @@ interface Quad {
 }
 
 /**
- * Named-graph JSON-LD (SPS-FIND-027): one group object or an array of them,
- * each naming a Context of this Pod inside the requested downscope
- * (SPS-FIND-010). A statement in the default graph or a graph with a blank
- * name, also a bare observation, rejects the whole answer, and so does a
- * graph nested below a group. Groups that name the same Context merge.
+ * Named-graph JSON-LD (SPS-FIND-027): every statement in a named graph that
+ * is a Context of this Pod inside the requested downscope (SPS-FIND-010).
+ * A statement in the default graph, a graph with a blank name, also a bare
+ * observation, rejects the whole answer. Groups that name the same Context
+ * merge.
  */
 export function decodeGroupedFind(
   body: unknown,
@@ -53,123 +55,78 @@ export function decodeGroupedFind(
   scope: readonly string[] | undefined,
 ): readonly FindGraph[] {
   const requested = scope && new Set(scope);
-  const reader = new Reader(true);
-  reader.document(body);
-  for (const name of reader.names)
-    if (
-      name === undefined ||
-      !isContextIri(name, base) ||
-      (requested && !requested.has(name))
+  const { quads, names, blankNamed } = read(body);
+  if (
+    blankNamed ||
+    quads.some((quad) => quad.g === undefined) ||
+    names.some(
+      (name) =>
+        !isContextIri(name, base) || (requested && !requested.has(name)),
     )
-      throw invalid();
-  if (reader.quads.some((quad) => quad.g === undefined)) throw invalid();
+  )
+    throw invalid();
   return Object.freeze(
-    build(reader.quads, reader.names).map(({ graph, nodes, observations }) =>
-      Object.freeze({ context: graph as string, nodes, observations }),
+    build(quads, names).map(({ graph, nodes, observations }) =>
+      Object.freeze({ context: graph!, nodes, observations }),
     ),
   );
 }
 
 /**
- * A graph without graph names (SPS-FIND-026): node objects, one node object
- * or a default-graph `{"@graph": …}`. Any named graph rejects the answer,
- * and so does any statement for an explicitly empty downscope.
+ * A graph without graph names (SPS-FIND-026). Any named graph rejects the
+ * answer, and so does any statement for an explicitly empty downscope.
  */
 export function decodeFlatFind(
   body: unknown,
   scope: readonly string[] | undefined,
 ): FlatFindGraph {
-  const reader = new Reader(false);
-  reader.document(body);
-  if (scope?.length === 0 && reader.quads.length > 0) throw invalid();
-  const [built] = build(reader.quads, [undefined]);
-  return Object.freeze({
-    nodes: built!.nodes,
-    observations: built!.observations,
-  });
+  const { quads, names, blankNamed } = read(body);
+  if (blankNamed || names.length > 0) throw invalid();
+  if (scope?.length === 0 && quads.length > 0) throw invalid();
+  const [{ nodes, observations }] = build(quads, [undefined]) as [Built];
+  return Object.freeze({ nodes, observations });
 }
 
 /**
  * Expanded JSON-LD to quads (JSON-LD 1.1 toRdf for documents without an
- * active context). Blank-node labels are scoped to this answer.
+ * active context). Named graphs are read where JSON-LD puts them, at the
+ * top of the document; their names are kept in order, also of an empty
+ * graph, because a group without statements still names a Context the
+ * decoder must check. Blank-node labels are scoped to this answer.
  */
-class Reader {
-  readonly quads: Quad[] = [];
-  /** Named graphs in order of appearance; a blank name is `undefined`. */
-  readonly names: Graph[] = [];
-  private readonly seen = new Set<string>();
-  private readonly subjects = new WeakMap<JsonLd, Subject>();
-  /** Embedded nodes read after the statement that embeds them. */
-  private readonly pending: (() => void)[] = [];
-  private fresh = 0;
+function read(body: unknown): {
+  readonly quads: readonly Quad[];
+  readonly names: readonly string[];
+  readonly blankNamed: boolean;
+} {
+  const quads: Quad[] = [];
+  const names: string[] = [];
+  let blankNamed = false;
+  const seen = new Set<string>();
+  const subjects = new WeakMap<JsonLd, Subject>();
+  let fresh = 0;
 
-  constructor(private readonly grouped: boolean) {}
-
-  document(body: unknown): void {
-    if (
-      isNode(body) &&
-      Object.hasOwn(body, '@graph') &&
-      Object.keys(body).every((key) => key === '@graph' || key === '@context')
-    ) {
-      // The top-level wrapper is the default graph; named graphs inside it
-      // stay named.
-      checkContext(body);
-      for (const node of list(body['@graph'])) this.top(node);
-    } else
-      for (const node of Array.isArray(body) ? body : [body]) this.top(node);
-  }
-
-  private top(value: unknown): void {
-    if (!isNodeObject(value)) throw invalid();
-    if (!Object.hasOwn(value, '@graph')) {
-      this.node(value, undefined);
-      return;
+  const emit = (s: Subject, p: string, o: Term, g: Graph): void => {
+    const key = `${termKey(s)} ${p} ${termKey(o)} ${g ?? ''}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      quads.push({ s, p, o, g });
     }
-    // A named graph: a group states nothing about itself.
-    if (!this.grouped || !Object.keys(value).every(isGroupKey)) throw invalid();
-    checkContext(value);
-    const own = value['@id'];
-    if (own !== undefined && typeof own !== 'string') throw invalid();
-    const name = own === undefined || own.startsWith('_:') ? undefined : own;
-    if (!this.names.includes(name)) this.names.push(name);
-    if (name === undefined) throw invalid();
-    for (const node of list(value['@graph'])) this.node(node, name);
-  }
-
-  /** One node object in `graph`, also every node object it embeds. */
-  private node(value: unknown, graph: Graph): void {
-    if (!isNodeObject(value) || Object.hasOwn(value, '@graph')) throw invalid();
-    checkContext(value);
-    const subject = this.subjectOf(value);
-    for (const [key, entry] of Object.entries(value)) {
-      if (key === '@type') {
-        for (const type of list(entry)) {
-          if (typeof type !== 'string') throw invalid();
-          this.emit(subject, RDF_TYPE, reference(type), graph);
-        }
-      } else if (key === '@reverse') {
-        if (!isNode(entry)) throw invalid();
-        for (const [predicate, values] of Object.entries(entry))
-          for (const item of list(values)) {
-            if (!isNodeObject(item)) throw invalid();
-            if (isPredicate(predicate))
-              this.emit(this.subjectOf(item), predicate, subject, graph);
-            this.node(item, graph);
-          }
-      } else if (key === '@included') {
-        for (const item of list(entry)) this.node(item, graph);
-      } else if (!key.startsWith('@') && isPredicate(key)) {
-        for (const item of list(entry)) {
-          const object = this.object(item, graph);
-          if (object) this.emit(subject, key, object, graph);
-          else this.flush();
-        }
-      }
+  };
+  /** One subject per node object; one without `@id` is a fresh blank node. */
+  const subjectOf = (value: JsonLd): Subject => {
+    let subject = subjects.get(value);
+    if (!subject) {
+      const id = value['@id'];
+      if (id !== undefined && typeof id !== 'string') throw invalid();
+      subject =
+        id === undefined ? { kind: 'blank', id: `f${fresh++}` } : reference(id);
+      subjects.set(value, subject);
     }
-  }
-
-  /** A property value as a term; an embedded node object is read after it. */
-  private object(value: unknown, graph: Graph): Term | undefined {
+    return subject;
+  };
+  /** A property value as a term, collecting the node objects it embeds. */
+  const object = (value: unknown, embedded: JsonLd[]): Term | undefined => {
     if (Array.isArray(value)) throw invalid();
     if (!isNode(value))
       return value === null ? undefined : literal({ '@value': value });
@@ -182,44 +139,78 @@ class Reader {
     if (Object.hasOwn(value, '@list')) {
       const items: Term[] = [];
       for (const item of list(value['@list'])) {
-        const term = this.object(item, graph);
+        const term = object(item, embedded);
         if (term) items.push(term);
       }
       return { kind: 'list', items };
     }
-    const subject = this.subjectOf(value);
-    this.pending.push(() => this.node(value, graph));
-    return subject;
-  }
-
-  private emit(s: Subject, p: string, o: Term, g: Graph): void {
-    const key = JSON.stringify([termKey(s), p, termKey(o), g ?? null]);
-    if (!this.seen.has(key)) {
-      this.seen.add(key);
-      this.quads.push({ s, p, o, g });
+    embedded.push(value);
+    return subjectOf(value);
+  };
+  /** One node object in `graph`; an embedded node follows its statement. */
+  const node = (value: unknown, graph: Graph): void => {
+    // A graph nested in a node is no part of a Find answer.
+    if (!isNodeObject(value) || Object.hasOwn(value, '@graph')) throw invalid();
+    checkContext(value);
+    const subject = subjectOf(value);
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === '@type') {
+        for (const type of list(entry)) {
+          if (typeof type !== 'string') throw invalid();
+          emit(subject, RDF_TYPE, reference(type), graph);
+        }
+      } else if (key === '@reverse') {
+        if (!isNode(entry)) throw invalid();
+        for (const [predicate, values] of Object.entries(entry))
+          for (const item of list(values)) {
+            if (!isNodeObject(item)) throw invalid();
+            if (isPredicate(predicate))
+              emit(subjectOf(item), predicate, subject, graph);
+            node(item, graph);
+          }
+      } else if (key === '@included') {
+        for (const item of list(entry)) node(item, graph);
+      } else if (!key.startsWith('@') && isPredicate(key)) {
+        for (const item of list(entry)) {
+          const embedded: JsonLd[] = [];
+          const term = object(item, embedded);
+          if (term) emit(subject, key, term, graph);
+          for (const child of embedded) node(child, graph);
+        }
+      }
     }
-    this.flush();
-  }
-
-  private flush(): void {
-    for (const run of this.pending.splice(0)) run();
-  }
-
-  /** One subject per node object; one without `@id` is a fresh blank node. */
-  private subjectOf(value: JsonLd): Subject {
-    let subject = this.subjects.get(value);
-    if (!subject) {
-      const id = value['@id'];
-      if (id !== undefined && typeof id !== 'string') throw invalid();
-      subject =
-        id === undefined
-          ? { kind: 'blank', id: `f${this.fresh++}` }
-          : reference(id);
-      this.subjects.set(value, subject);
+  };
+  /** A top-level item: a node of the default graph or a named graph. */
+  const top = (value: unknown): void => {
+    if (!isNodeObject(value)) throw invalid();
+    if (!Object.hasOwn(value, '@graph')) return node(value, undefined);
+    checkContext(value);
+    // A named graph's own statements would sit in the default graph.
+    if (Object.keys(value).some((key) => !GRAPH_KEYS.has(key))) throw invalid();
+    const name = value['@id'];
+    if (name !== undefined && typeof name !== 'string') throw invalid();
+    if (name === undefined || name.startsWith('_:')) {
+      blankNamed = true;
+      return;
     }
-    return subject;
-  }
+    if (!names.includes(name)) names.push(name);
+    for (const item of list(value['@graph'])) node(item, name);
+  };
+
+  if (
+    isNode(body) &&
+    Object.hasOwn(body, '@graph') &&
+    Object.keys(body).every((key) => key === '@graph' || key === '@context')
+  ) {
+    // The top-level wrapper is the default graph; named graphs inside it
+    // stay named.
+    checkContext(body);
+    list(body['@graph']).forEach(top);
+  } else (Array.isArray(body) ? body : [body]).forEach(top);
+  return { quads, names, blankNamed };
 }
+
+const GRAPH_KEYS = new Set(['@id', '@graph', '@context']);
 
 function reference(id: string): Subject {
   return id.startsWith('_:')
@@ -236,11 +227,10 @@ interface Built {
 interface Building {
   readonly id: string;
   readonly links: FindLink[];
-  readonly graphs: Set<Graph>;
   readonly details: Map<Graph, Record<string, unknown>>;
 }
 
-/** Counts answers, so pod blank nodes of two answers never share a label. */
+/** Counts answers, so blank nodes of two answers never share a label. */
 let answers = 0;
 
 /**
@@ -257,29 +247,12 @@ let answers = 0;
 function build(quads: readonly Quad[], graphs: readonly Graph[]): Built[] {
   const answer = answers++;
   const label = (id: string) => `_:a${answer}-${id}`;
-  const observed = new Map<string, Building>();
-  for (const { s, p, o } of quads)
-    if (
-      s.kind === 'iri' &&
-      p === FIND_RESULT &&
-      o.kind === 'blank' &&
-      !observed.has(o.id)
-    )
-      observed.set(o.id, {
-        id: label(o.id),
-        links: [],
-        graphs: new Set(),
-        details: new Map(),
-      });
-  const isObservation = (term: Term): term is Subject & { kind: 'blank' } =>
-    term.kind === 'blank' && observed.has(term.id);
-
+  const idOf = (s: Subject) => (s.kind === 'iri' ? s.value : label(s.id));
   const value = (term: Term): JsonLd => {
     switch (term.kind) {
       case 'iri':
-        return { '@id': term.value };
       case 'blank':
-        return { '@id': label(term.id) };
+        return { '@id': idOf(term) };
       case 'literal':
         return term.value;
       case 'list':
@@ -288,89 +261,99 @@ function build(quads: readonly Quad[], graphs: readonly Graph[]): Built[] {
   };
   const add = (node: Record<string, unknown>, p: string, o: Term): void => {
     if (p === RDF_TYPE && (o.kind === 'iri' || o.kind === 'blank'))
-      ((node['@type'] ??= []) as string[]).push(value(o)['@id'] as string);
+      ((node['@type'] ??= []) as string[]).push(idOf(o));
     else ((node[p] ??= []) as JsonLd[]).push(value(o));
   };
 
-  const groups = new Map<Graph, Map<string, Record<string, unknown>>>();
-  for (const graph of graphs) groups.set(graph, new Map());
-  const nodeIn = (graph: Graph, s: Subject): Record<string, unknown> => {
-    let nodes = groups.get(graph);
-    if (!nodes) groups.set(graph, (nodes = new Map()));
-    const key = termKey(s);
-    let node = nodes.get(key);
-    if (!node) nodes.set(key, (node = { '@id': value(s)['@id'] }));
-    return node;
-  };
+  const observed = new Map<string, Building>();
+  for (const { s, p, o } of quads)
+    if (
+      s.kind === 'iri' &&
+      p === FIND_RESULT &&
+      o.kind === 'blank' &&
+      !observed.has(o.id)
+    )
+      observed.set(o.id, { id: label(o.id), links: [], details: new Map() });
+  const observationOf = (term: Term) =>
+    term.kind === 'blank' ? observed.get(term.id) : undefined;
   const detailIn = (entry: Building, graph: Graph) => {
     let node = entry.details.get(graph);
     if (!node) entry.details.set(graph, (node = {}));
-    entry.graphs.add(graph);
+    return node;
+  };
+
+  const groups = new Map<Graph, Map<string, Record<string, unknown>>>(
+    graphs.map((graph) => [graph, new Map()]),
+  );
+  const nodeIn = (graph: Graph, s: Subject): Record<string, unknown> => {
+    const nodes = groups.get(graph)!;
+    const key = termKey(s);
+    let node = nodes.get(key);
+    if (!node) nodes.set(key, (node = { '@id': idOf(s) }));
     return node;
   };
 
   for (const { s, p, o, g } of quads) {
-    if (s.kind === 'iri' && p === FIND_RESULT && isObservation(o)) {
-      const entry = observed.get(o.id)!;
-      entry.links.push(
+    const target = observationOf(o);
+    const source = observationOf(s);
+    if (target && s.kind === 'iri' && p === FIND_RESULT) {
+      target.links.push(
         Object.freeze(
           g === undefined ? { hit: s.value } : { hit: s.value, context: g },
         ),
       );
-      entry.graphs.add(g);
       nodeIn(g, s);
-    } else if (isObservation(s)) {
+    } else if (source) {
       // Another observation is named by its `id`.
-      add(detailIn(observed.get(s.id)!, g), p, o);
-    } else if (isObservation(o)) {
+      add(detailIn(source, g), p, o);
+    } else if (target) {
       // A statement that names an observation from the other side.
-      const detail = detailIn(observed.get(o.id)!, g);
+      const detail = detailIn(target, g);
       const reverse = (detail['@reverse'] ??= {}) as Record<string, JsonLd[]>;
       (reverse[p] ??= []).push(value(s));
     } else add(nodeIn(g, s), p, o);
   }
 
-  const observations = [...observed.values()].map((entry) => ({
-    entry,
-    observation: freezeObservation(entry),
-  }));
+  const placed = new Map<Graph, FindObservation[]>(
+    graphs.map((graph) => [graph, []]),
+  );
+  for (const entry of observed.values()) {
+    const observation = freezeObservation(entry);
+    const where = new Set<Graph>([
+      ...entry.links.map((link) => link.context),
+      ...entry.details.keys(),
+    ]);
+    for (const graph of where) placed.get(graph)!.push(observation);
+  }
   return [...groups].map(([graph, nodes]) => ({
     graph,
-    nodes: Object.freeze([...nodes.values()].map(freezeNode)),
-    observations: Object.freeze(
-      observations
-        .filter(({ entry }) => entry.graphs.has(graph))
-        .map(({ observation }) => observation),
-    ),
+    nodes: deepFreeze([...nodes.values()]) as readonly JsonLd[],
+    observations: Object.freeze(placed.get(graph)!),
   }));
-}
-
-function freezeNode(node: Record<string, unknown>): JsonLd {
-  for (const value of Object.values(node))
-    if (Array.isArray(value)) Object.freeze(value);
-    else if (isNode(value)) freezeNode(value as Record<string, unknown>);
-  return Object.freeze(node);
 }
 
 function freezeObservation(entry: Building): FindObservation {
-  const details: readonly FindDetail[] = Object.freeze(
+  const details: readonly FindDetail[] = deepFreeze(
     [...entry.details].map(([graph, node]) =>
-      Object.freeze(
-        graph === undefined
-          ? { node: freezeNode(node) }
-          : { context: graph, node: freezeNode(node) },
-      ),
+      graph === undefined ? { node } : { context: graph, node },
     ),
   );
-  const values = (predicate: string) =>
-    details.flatMap(({ node }) => list(node[predicate]));
+  /** The `@value`s of a predicate across the details' canonical arrays. */
+  const values = (predicate: string): unknown[] =>
+    details.flatMap(({ node }) =>
+      ((node[predicate] as readonly JsonLd[] | undefined) ?? []).map(
+        (v) => v['@value'],
+      ),
+    );
+  const strings = (predicate: string): string[] =>
+    values(predicate).filter((v): v is string => typeof v === 'string');
   return Object.freeze({
     id: entry.id,
     links: Object.freeze([...entry.links]),
     details,
-    text: Object.freeze(values(SCHEMA_TEXT).flatMap(stringOf)),
+    text: Object.freeze(strings(SCHEMA_TEXT)),
     position: Object.freeze(values(SCHEMA_POSITION).flatMap(positionOf)),
-    engine: Object.freeze(values(SPS_ENGINE).flatMap(stringOf)),
+    engine: Object.freeze(strings(SPS_ENGINE)),
   });
 }
 
@@ -381,18 +364,14 @@ function termKey(term: Term): string {
     case 'blank':
       return `_:${term.id}`;
     case 'literal':
-      return JSON.stringify(
-        Object.keys(term.value)
-          .sort()
-          .map((key) => [key, term.value[key]]),
-      );
+      return canonical(term.value);
     case 'list':
       return `(${term.items.map(termKey).join(' ')})`;
   }
 }
 
 function literal(value: JsonLd): Term {
-  return { kind: 'literal', value: Object.freeze({ ...value }) };
+  return { kind: 'literal', value: Object.freeze(value) };
 }
 
 /** The values of a property, with `@set` wrappers unwrapped. */
@@ -410,7 +389,7 @@ function isNodeObject(value: unknown): value is JsonLd {
 
 /** An absolute IRI; a relative key or a blank predicate states nothing. */
 function isPredicate(key: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(key) && !key.startsWith('_:');
+  return ABSOLUTE_IRI.test(key) && !key.startsWith('_:');
 }
 
 /**
@@ -431,14 +410,8 @@ function inert(context: unknown): boolean {
   );
 }
 
-function stringOf(value: unknown): readonly string[] {
-  const lexical = isNode(value) ? value['@value'] : value;
-  return typeof lexical === 'string' ? [lexical] : [];
-}
-
 /** A 1-based position; other values stay in `details` only. */
-function positionOf(value: unknown): readonly number[] {
-  const lexical = isNode(value) ? value['@value'] : value;
+function positionOf(lexical: unknown): readonly number[] {
   const number =
     typeof lexical === 'number'
       ? lexical
@@ -448,17 +421,11 @@ function positionOf(value: unknown): readonly number[] {
   return Number.isSafeInteger(number) && number > 0 ? [number] : [];
 }
 
-function isGroupKey(key: string): boolean {
-  return key === '@id' || key === '@graph' || key === '@context';
-}
-
-function isNode(value: unknown): value is JsonLd {
+/** A JSON object, not an array. */
+export function isNode(value: unknown): value is JsonLd {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function invalid(): SdkError {
-  return new SdkError(
-    { code: 'response', problem: 'body' },
-    'Pod request failed: response.',
-  );
+function invalid() {
+  return requestFailure({ code: 'response', problem: 'body' });
 }

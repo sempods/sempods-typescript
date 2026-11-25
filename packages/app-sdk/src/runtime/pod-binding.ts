@@ -138,13 +138,15 @@ export function bindPod(
 }
 
 /**
- * The search members only, each forwarded when given: an omitted `contexts`
- * stays omitted and `[]` stays `[]`. The signal comes from the bound read.
+ * The search, without this binding's own `priority` and `signal`: members
+ * pass as given, so an omitted `contexts` stays omitted and `[]` stays `[]`,
+ * and a new `FindOptions` member needs no change here.
  */
-function findOptions(options: FindOptions | undefined): FindOptions {
-  return {
-    ...(options?.contexts === undefined ? {} : { contexts: options.contexts }),
-    ...(options?.types === undefined ? {} : { types: options.types }),
-    ...(options?.limit === undefined ? {} : { limit: options.limit }),
-  };
+function findOptions(
+  options: (FindOptions & { readonly priority?: 'current' }) | undefined,
+): FindOptions {
+  const search: Record<string, unknown> = { ...options };
+  delete search['priority'];
+  delete search['signal'];
+  return search as FindOptions;
 }

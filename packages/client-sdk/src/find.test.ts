@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+import { bearer, createPod, type FindOptions, type PodFetch } from './index.js';
 import {
-  bearer,
-  createPod,
-  type FindOptions,
-  type PodAuth,
-  type PodFetch,
-} from './index.js';
+  answering,
+  bodyRejected,
+  FIND_RESULT,
+  jsonLd,
+  ok,
+  renewing,
+  sent,
+  stable,
+} from './find.helpers.test.js';
 
 const base = 'https://pod.example/alice';
 const tasks = `${base}/_system/contexts/tasks`;
@@ -13,20 +17,11 @@ const notes = `${base}/_system/contexts/notes`;
 const url = `${base}/_system/find`;
 const event = 'https://schema.org/Event';
 const place = 'https://schema.org/Place';
-const FIND_RESULT = 'https://schema.sempods.org/findResult';
-const jsonLd = (body: unknown, type = 'application/ld+json') =>
-  new Response(JSON.stringify(body), { headers: { 'content-type': type } });
 const challenge = () =>
   new Response(null, {
     status: 401,
     headers: { 'www-authenticate': 'Bearer' },
   });
-const sent = (fetch: ReturnType<typeof vi.fn<PodFetch>>, call = 0) =>
-  JSON.parse(String(fetch.mock.calls[call]?.[1]?.body)) as unknown;
-
-/** An answer with its per-answer blank-node labels made comparable. */
-const stable = (answer: unknown) =>
-  JSON.parse(JSON.stringify(answer).replace(/_:a\d+-/g, '_:')) as unknown;
 
 describe('Pod find requests', () => {
   it.each<[string, FindOptions, unknown]>([
@@ -140,14 +135,7 @@ describe('Pod find requests', () => {
   ])(
     'repeats the exact body with %s on the one resend, never unscoped',
     async (_name, options) => {
-      let credential = { authorization: 'Bearer old' };
-      const auth: PodAuth = {
-        credential: async () => credential,
-        renew: async () => {
-          credential = { authorization: 'Bearer new' };
-          return true;
-        },
-      };
+      const auth = renewing();
       const fetch = vi
         .fn<PodFetch>()
         .mockImplementationOnce(async () => challenge())
@@ -302,6 +290,16 @@ describe('Pod find requests', () => {
       {},
     ],
     [
+      'a default-graph statement beside groups in a wrapper',
+      {
+        '@graph': [
+          { '@id': tasks, '@graph': [] },
+          { '@id': `${base}/e2`, 'x:p': 'v' },
+        ],
+      },
+      {},
+    ],
+    [
       'a graph nested in a group',
       [{ '@id': tasks, '@graph': [{ '@id': notes, '@graph': [] }] }],
       {},
@@ -310,7 +308,7 @@ describe('Pod find requests', () => {
     const fetch = vi.fn<PodFetch>(async () => jsonLd(body));
     await expect(
       createPod(base, { auth: bearer('test'), fetch }).find('x', options),
-    ).rejects.toMatchObject({ reason: { code: 'response', problem: 'body' } });
+    ).rejects.toMatchObject(bodyRejected);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -329,14 +327,7 @@ describe('Pod find requests', () => {
   });
 
   it('sends the flat form without include_contexts, also on the one resend', async () => {
-    let credential = { authorization: 'Bearer old' };
-    const auth: PodAuth = {
-      credential: async () => credential,
-      renew: async () => {
-        credential = { authorization: 'Bearer new' };
-        return true;
-      },
-    };
+    const auth = renewing();
     const fetch = vi
       .fn<PodFetch>()
       .mockImplementationOnce(async () => challenge())
@@ -360,6 +351,11 @@ describe('Pod find requests', () => {
 
   it.each<[string, unknown, FindOptions]>([
     ['a named graph', [{ '@id': tasks, '@graph': [] }], {}],
+    [
+      'a named graph inside a wrapper',
+      { '@graph': [{ '@id': tasks, '@graph': [] }] },
+      {},
+    ],
     ['a graph wrapper with a statement', { '@graph': [], 'x:p': 'v' }, {}],
     ['a node that is not an object', ['x'], {}],
     [
@@ -381,7 +377,7 @@ describe('Pod find requests', () => {
     const fetch = vi.fn<PodFetch>(async () => jsonLd(body));
     await expect(
       createPod(base, { auth: bearer('test'), fetch }).findFlat('x', options),
-    ).rejects.toMatchObject({ reason: { code: 'response', problem: 'body' } });
+    ).rejects.toMatchObject(bodyRejected);
   });
 
   it('keeps a stored sps:findResult as pod data, in the canonical array form', async () => {
@@ -389,24 +385,20 @@ describe('Pod find requests', () => {
       '@id': `${base}/e1`,
       [FIND_RESULT]: { '@id': `${base}/saved` },
     };
-    const fetch = vi.fn<PodFetch>(async () =>
-      jsonLd([{ '@id': tasks, '@graph': [stored] }]),
+    const [group] = await ok(
+      answering([{ '@id': tasks, '@graph': [stored] }], base).pod.find('x'),
     );
-    const answer = await createPod(base, { auth: bearer('test'), fetch }).find(
-      'x',
-    );
-    if (answer.kind !== 'ok') throw new Error(answer.kind);
-    expect(answer.body[0]!.nodes).toEqual([
-      { '@id': stored['@id'], [FIND_RESULT]: [stored[FIND_RESULT]] },
-    ]);
-    expect(answer.body[0]!.observations).toEqual([]);
+    expect(group).toEqual({
+      context: tasks,
+      nodes: [{ '@id': stored['@id'], [FIND_RESULT]: [stored[FIND_RESULT]] }],
+      observations: [],
+    });
   });
 
   it('reads an observation embedded in its link, and labels pod blank nodes per answer', async () => {
     const hit = `${base}/e1`;
-    const blank = { '@id': '_:b', [FIND_RESULT]: [{ '@id': '_:c' }] };
-    const fetch = vi.fn<PodFetch>(async () =>
-      jsonLd([
+    const { pod } = answering(
+      [
         {
           '@id': hit,
           [FIND_RESULT]: [
@@ -425,25 +417,20 @@ describe('Pod find requests', () => {
             {},
           ],
         },
-        blank,
-      ]),
+        { '@id': '_:b', [FIND_RESULT]: [{ '@id': '_:c' }] },
+      ],
+      base,
     );
-    const pod = createPod(base, { auth: bearer('test'), fetch });
-    const answer = await pod.findFlat('konzert');
-    if (answer.kind !== 'ok') throw new Error(answer.kind);
+    const answer = await ok(pod.findFlat('konzert'));
     // A blank subject is no hit: its link stays pod data, relabelled.
-    expect(answer.body.nodes).toEqual([
+    expect(answer.nodes).toEqual([
       { '@id': hit },
       {
         '@id': expect.stringMatching(/^_:a\d+-bb$/),
         [FIND_RESULT]: [{ '@id': expect.stringMatching(/^_:a\d+-bc$/) }],
       },
     ]);
-    const again = await pod.findFlat('konzert');
-    if (again.kind !== 'ok') throw new Error(again.kind);
-    expect(again.body.nodes[1]!['@id']).not.toBe(answer.body.nodes[1]!['@id']);
-    void blank;
-    expect(answer.body.observations).toMatchObject([
+    expect(answer.observations).toMatchObject([
       {
         links: [{ hit }],
         text: ['Konzert'],
@@ -452,7 +439,9 @@ describe('Pod find requests', () => {
       },
       { links: [{ hit }], details: [], text: [] },
     ]);
-    expect(Object.isFrozen(answer.body.observations[0])).toBe(true);
+    expect(Object.isFrozen(answer.observations[0])).toBe(true);
+    const again = await ok(pod.findFlat('konzert'));
+    expect(again.nodes[1]!['@id']).not.toBe(answer.nodes[1]!['@id']);
   });
 
   it.each<[string, unknown, FindOptions]>([
@@ -465,337 +454,207 @@ describe('Pod find requests', () => {
       { contexts: [] },
     ],
   ])('reads %s as no statement in both forms', async (_name, body, options) => {
-    const fetch = vi.fn<PodFetch>(async () => jsonLd(body));
-    const pod = createPod(base, { auth: bearer('test'), fetch });
-    const flat = await pod.findFlat('x', options);
-    expect(flat).toMatchObject({ kind: 'ok', body: { observations: [] } });
-    if (flat.kind !== 'ok') throw new Error(flat.kind);
-    expect(flat.body.nodes.filter((n) => Object.keys(n).length !== 1)).toEqual(
-      [],
-    );
+    const { pod } = answering(body, base);
+    expect(await pod.findFlat('x', options)).toEqual({
+      kind: 'ok',
+      body: { nodes: [], observations: [] },
+    });
     expect(await pod.find('x', options)).toEqual({ kind: 'ok', body: [] });
-  });
-
-  it('reads one node as the value of @graph, and a context without effect', async () => {
-    const hit = { '@id': `${base}/e1`, [FIND_RESULT]: { '@id': '_:m' } };
-    const pod = (body: unknown) =>
-      createPod(base, {
-        auth: bearer('test'),
-        fetch: async () => jsonLd(body),
-      });
-    const grouped = await pod({
-      '@context': {},
-      '@id': tasks,
-      '@graph': { ...hit, '@context': [null, {}] },
-    }).find('x');
-    if (grouped.kind !== 'ok') throw new Error(grouped.kind);
-    expect(grouped.body[0]!.observations[0]!.links).toEqual([
-      { hit: hit['@id'], context: tasks },
-    ]);
-    const flat = await pod({ '@context': null, '@graph': hit }).findFlat('x');
-    if (flat.kind !== 'ok') throw new Error(flat.kind);
-    expect(flat.body.observations[0]!.links).toEqual([{ hit: hit['@id'] }]);
-  });
-
-  it('extracts observations from embedded hits and flattens the embedding', async () => {
-    // The article/topic case with the topic embedded under `schema:about`.
-    const article = `${base}/articles/42`;
-    const topic = `${base}/topics/climate`;
-    const about = 'https://schema.org/about';
-    const fetch = vi.fn<PodFetch>(async () =>
-      jsonLd([
-        {
-          '@id': tasks,
-          '@graph': [
-            {
-              '@id': article,
-              [about]: [
-                {
-                  '@id': topic,
-                  'https://schema.org/name': [{ '@value': 'Climate change' }],
-                  [FIND_RESULT]: [{ '@id': '_:topic' }],
-                },
-              ],
-            },
-            {
-              '@id': '_:topic',
-              'https://schema.org/text': [{ '@value': 'Climate' }],
-            },
-          ],
-        },
-      ]),
-    );
-    const answer = await createPod(base, { auth: bearer('test'), fetch }).find(
-      'x',
-    );
-    if (answer.kind !== 'ok') throw new Error(answer.kind);
-    const [group] = answer.body;
-    expect(group!.nodes).toEqual([
-      { '@id': article, [about]: [{ '@id': topic }] },
-      {
-        '@id': topic,
-        'https://schema.org/name': [{ '@value': 'Climate change' }],
-      },
-    ]);
-    expect(group!.observations).toMatchObject([
-      { links: [{ hit: topic, context: tasks }], text: ['Climate'] },
-    ]);
   });
 
   it('keeps nonpositive positions out of the typed projection', async () => {
     const position = 'https://schema.org/position';
-    const fetch = vi.fn<PodFetch>(async () =>
-      jsonLd([
-        {
-          '@id': `${base}/e1`,
-          [FIND_RESULT]: [
-            {
-              [position]: [{ '@value': 0 }, { '@value': -2 }, { '@value': 1 }],
-            },
-          ],
-        },
-      ]),
+    const answer = await ok(
+      answering(
+        [
+          {
+            '@id': `${base}/e1`,
+            [FIND_RESULT]: [
+              {
+                [position]: [
+                  { '@value': 0 },
+                  { '@value': -2 },
+                  { '@value': 1 },
+                ],
+              },
+            ],
+          },
+        ],
+        base,
+      ).pod.findFlat('x'),
     );
-    const answer = await createPod(base, {
-      auth: bearer('test'),
-      fetch,
-    }).findFlat('x');
-    if (answer.kind !== 'ok') throw new Error(answer.kind);
-    const [observation] = answer.body.observations;
+    const [observation] = answer.observations;
     expect(observation!.position).toEqual([1]);
     expect(observation!.details[0]!.node[position]).toHaveLength(3);
   });
 
-  it('reads a link written with @reverse like its forward form, in both forms', async () => {
-    const hit = `${base}/e1`;
-    const text = { 'https://schema.org/text': [{ '@value': 'Konzert' }] };
-    const name = { 'https://schema.org/name': [{ '@value': 'Konzert' }] };
-    const forward = [
-      { '@id': hit, ...name, [FIND_RESULT]: [{ '@id': '_:m' }] },
-      { '@id': '_:m', ...text },
-    ];
-    const reverse = [
-      {
-        '@id': '_:m',
-        ...text,
-        '@reverse': { [FIND_RESULT]: [{ '@id': hit, ...name }] },
-      },
-    ];
-    const bare = [{ ...text, '@reverse': { [FIND_RESULT]: { '@id': hit } } }];
-    const read = async (graph: unknown) => {
-      const pod = createPod(base, {
-        auth: bearer('test'),
-        fetch: async () => jsonLd([{ '@id': tasks, '@graph': graph }]),
-      });
-      const flatPod = createPod(base, {
-        auth: bearer('test'),
-        fetch: async () => jsonLd(graph),
-      });
-      return [await pod.find('x'), await flatPod.findFlat('x')];
-    };
-    expect(stable(await read(reverse))).toEqual(stable(await read(forward)));
-    const [grouped, flat] = await read(bare);
-    expect(grouped).toMatchObject({
-      kind: 'ok',
-      body: [
-        {
-          nodes: [{ '@id': hit }],
-          observations: [
-            { links: [{ hit, context: tasks }], text: ['Konzert'] },
-          ],
-        },
-      ],
-    });
-    expect(flat).toMatchObject({
-      kind: 'ok',
-      body: { nodes: [{ '@id': hit }], observations: [{ links: [{ hit }] }] },
-    });
-  });
-
-  it('reads reverse links of an observation embedded in a forward link', async () => {
-    const one = `${base}/e1`;
-    const two = `${base}/e2`;
-    const graph = [
-      {
-        '@id': one,
-        [FIND_RESULT]: [
-          {
-            '@id': '_:m',
-            'https://schema.org/text': [{ '@value': 'Konzert' }],
-            '@reverse': { [FIND_RESULT]: [{ '@id': two }] },
-          },
+  it('keeps a statement from one observation to another, by its id', async () => {
+    const part = 'https://schema.org/isPartOf';
+    const answer = await ok(
+      answering(
+        [
+          { '@id': `${base}/e1`, [FIND_RESULT]: [{ '@id': '_:a' }] },
+          { '@id': `${base}/e2`, [FIND_RESULT]: [{ '@id': '_:b' }] },
+          { '@id': '_:a', [part]: [{ '@id': '_:b' }] },
         ],
-      },
-    ];
-    const pod = (body: unknown) =>
-      createPod(base, {
-        auth: bearer('test'),
-        fetch: async () => jsonLd(body),
-      });
-    const grouped = await pod([{ '@id': tasks, '@graph': graph }]).find('x');
-    expect(grouped).toMatchObject({
-      kind: 'ok',
-      body: [
+        base,
+      ).pod.findFlat('x'),
+    );
+    const [a, b] = answer.observations;
+    expect(a!.details).toEqual([{ node: { [part]: [{ '@id': b!.id }] } }]);
+    expect(a!.id).not.toBe(b!.id);
+    expect(b!.details).toEqual([]);
+  });
+});
+
+describe('Find answers read by the RDF they encode', () => {
+  const one = `${base}/e1`;
+  const two = `${base}/e2`;
+  const about = 'https://schema.org/about';
+  const name = 'https://schema.org/name';
+  const text = (value: string) => ({
+    'https://schema.org/text': [{ '@value': value }],
+  });
+  /** The same graph as a grouped and a flat answer. */
+  const both = async (graph: unknown) => [
+    await answering([{ '@id': tasks, '@graph': graph }], base).pod.find('x'),
+    await answering(graph, base).pod.findFlat('x'),
+  ];
+
+  // Each row: one serialization, and the same statements written as separate
+  // flattened nodes with plain arrays.
+  it.each<[string, unknown, unknown]>([
+    [
+      'a link written with @reverse',
+      [
         {
-          nodes: [{ '@id': one }, { '@id': two }],
-          observations: [
-            {
-              links: [
-                { hit: one, context: tasks },
-                { hit: two, context: tasks },
-              ],
-              text: ['Konzert'],
-            },
-          ],
+          '@id': '_:m',
+          ...text('first'),
+          '@reverse': {
+            [FIND_RESULT]: [{ '@id': one, [name]: [{ '@value': 'One' }] }],
+          },
         },
       ],
-    });
-    const flat = await pod(graph).findFlat('x');
-    expect(flat).toMatchObject({
-      kind: 'ok',
-      body: {
-        nodes: [{ '@id': one }, { '@id': two }],
-        observations: [{ links: [{ hit: one }, { hit: two }] }],
-      },
-    });
-    if (flat.kind !== 'ok') throw new Error(flat.kind);
-    expect(flat.body.observations[0]!.details[0]!.node).not.toHaveProperty(
-      '@reverse',
-    );
-  });
-
-  it('unwraps @set values of sps:findResult, forward and reverse', async () => {
-    const hit = `${base}/e1`;
-    const text = { 'https://schema.org/text': [{ '@value': 'Konzert' }] };
-    const forward = [
-      { '@id': hit, [FIND_RESULT]: [{ '@id': '_:m' }] },
-      { '@id': '_:m', ...text },
-    ];
-    const wrapped = [
-      { '@id': hit, [FIND_RESULT]: { '@set': [{ '@id': '_:m' }] } },
-      { '@id': '_:m', ...text },
-    ];
-    const reverse = [
-      {
-        '@id': '_:m',
-        ...text,
-        '@reverse': { [FIND_RESULT]: [{ '@set': [{ '@id': hit }] }] },
-      },
-    ];
-    const read = async (graph: unknown) => {
-      const at = (body: unknown) =>
-        createPod(base, {
-          auth: bearer('test'),
-          fetch: async () => jsonLd(body),
-        });
-      return [
-        await at([{ '@id': tasks, '@graph': graph }]).find('x'),
-        await at(graph).findFlat('x'),
-      ];
-    };
-    const expected = await read(forward);
-    expect(expected[1]).toMatchObject({
-      body: { nodes: [{ '@id': hit }], observations: [{ text: ['Konzert'] }] },
-    });
-    expect(stable(await read(wrapped))).toEqual(stable(expected));
-    expect(stable(await read(reverse))).toEqual(stable(expected));
-  });
-
-  it('projects @set-wrapped details like plain arrays', async () => {
-    const fetch = vi.fn<PodFetch>(async () =>
-      jsonLd([
+      [
         {
-          '@id': `${base}/e1`,
+          '@id': one,
+          [name]: [{ '@value': 'One' }],
+          [FIND_RESULT]: [{ '@id': '_:m' }],
+        },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
+      'a bare reverse link from an anonymous observation',
+      [{ ...text('first'), '@reverse': { [FIND_RESULT]: { '@id': one } } }],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
+      '@set values of a link',
+      [
+        { '@id': one, [FIND_RESULT]: { '@set': [{ '@id': '_:m' }] } },
+        { '@id': '_:m', ...text('first') },
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
+      '@set values of a reverse link',
+      [
+        {
+          '@id': '_:m',
+          ...text('first'),
+          '@reverse': { [FIND_RESULT]: [{ '@set': [{ '@id': one }] }] },
+        },
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
+      '@set-wrapped details and single values',
+      [
+        {
+          '@id': one,
           [FIND_RESULT]: [
             {
-              'https://schema.org/text': { '@set': [{ '@value': 'Konzert' }] },
+              'https://schema.org/text': { '@set': [{ '@value': 'first' }] },
               'https://schema.org/position': [{ '@set': [{ '@value': 2 }] }],
               'https://schema.sempods.org/engine': { '@set': ['sparql-text'] },
             },
           ],
         },
-      ]),
-    );
-    const answer = await createPod(base, {
-      auth: bearer('test'),
-      fetch,
-    }).findFlat('x');
-    expect(answer).toMatchObject({
-      kind: 'ok',
-      body: {
-        observations: [
-          { text: ['Konzert'], position: [2], engine: ['sparql-text'] },
-        ],
-      },
-    });
-  });
-
-  it('extracts an observation of a hit embedded in another observation', async () => {
-    const one = `${base}/e1`;
-    const two = `${base}/e2`;
-    const about = 'https://schema.org/about';
-    const text = (value: string) => ({
-      'https://schema.org/text': [{ '@value': value }],
-    });
-    const embedded = [
-      {
-        '@id': one,
-        [FIND_RESULT]: [
-          {
-            '@id': '_:first',
-            ...text('first'),
-            [about]: [
-              {
-                '@id': two,
-                [FIND_RESULT]: [{ '@id': '_:second', ...text('second') }],
-              },
-            ],
-          },
-        ],
-      },
-    ];
-    const separate = [
-      { '@id': one, [FIND_RESULT]: [{ '@id': '_:first' }] },
-      { '@id': '_:first', ...text('first'), [about]: [{ '@id': two }] },
-      { '@id': two, [FIND_RESULT]: [{ '@id': '_:second' }] },
-      { '@id': '_:second', ...text('second') },
-    ];
-    const read = async (graph: unknown) => {
-      const at = (body: unknown) =>
-        createPod(base, {
-          auth: bearer('test'),
-          fetch: async () => jsonLd(body),
-        });
-      return [
-        await at([{ '@id': tasks, '@graph': graph }]).find('x'),
-        await at(graph).findFlat('x'),
-      ];
-    };
-    const expected = await read(separate);
-    expect(expected[1]).toMatchObject({
-      body: {
-        nodes: [{ '@id': one }, { '@id': two }],
-        observations: [{ text: ['first'] }, { text: ['second'] }],
-      },
-    });
-    expect(stable(await read(embedded))).toEqual(stable(expected));
-  });
-
-  it('extracts an observation of a hit that names an observation with @reverse', async () => {
-    const one = `${base}/e1`;
-    const two = `${base}/e2`;
-    const about = 'https://schema.org/about';
-    const text = (value: string) => ({
-      'https://schema.org/text': [{ '@value': value }],
-    });
-    const graph = [
-      {
-        '@id': one,
-        [FIND_RESULT]: [
-          {
-            '@id': '_:first',
-            ...text('first'),
-            '@reverse': {
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        {
+          '@id': '_:m',
+          ...text('first'),
+          'https://schema.org/position': [{ '@value': 2 }],
+          'https://schema.sempods.org/engine': [{ '@value': 'sparql-text' }],
+        },
+      ],
+    ],
+    [
+      'a hit embedded in another node',
+      [
+        {
+          '@id': one,
+          [about]: [
+            {
+              '@id': two,
+              [name]: [{ '@value': 'Two' }],
+              [FIND_RESULT]: [{ '@id': '_:m' }],
+            },
+          ],
+        },
+        { '@id': '_:m', ...text('first') },
+      ],
+      [
+        { '@id': one, [about]: [{ '@id': two }] },
+        {
+          '@id': two,
+          [name]: [{ '@value': 'Two' }],
+          [FIND_RESULT]: [{ '@id': '_:m' }],
+        },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
+      'an embedded observation that names a second hit with @reverse',
+      [
+        {
+          '@id': one,
+          [FIND_RESULT]: [
+            {
+              '@id': '_:m',
+              ...text('first'),
+              '@reverse': { [FIND_RESULT]: [{ '@id': two }] },
+            },
+          ],
+        },
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': two, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
+      'a hit embedded in an observation, with its own observation',
+      [
+        {
+          '@id': one,
+          [FIND_RESULT]: [
+            {
+              '@id': '_:first',
+              ...text('first'),
               [about]: [
                 {
                   '@id': two,
@@ -803,171 +662,202 @@ describe('Pod find requests', () => {
                 },
               ],
             },
-          },
-        ],
-      },
-    ];
-    const at = (body: unknown) =>
-      createPod(base, {
-        auth: bearer('test'),
-        fetch: async () => jsonLd(body),
-      });
-    const expected = {
-      nodes: [{ '@id': one }, { '@id': two }],
-      observations: [
-        {
-          text: ['first'],
-          details: [{ node: { '@reverse': { [about]: [{ '@id': two }] } } }],
-        },
-        { links: [{ hit: two }], text: ['second'] },
-      ],
-    };
-    expect(await at(graph).findFlat('x')).toMatchObject({
-      kind: 'ok',
-      body: expected,
-    });
-    expect(
-      await at([{ '@id': tasks, '@graph': graph }]).find('x'),
-    ).toMatchObject({
-      kind: 'ok',
-      body: [
-        {
-          nodes: expected.nodes,
-          observations: [{ text: ['first'] }, { text: ['second'] }],
+          ],
         },
       ],
-    });
-  });
-
-  it.each(['@set', '@list'])(
-    'reads a hit embedded in an observation through %s',
-    async (wrapper) => {
-      const one = `${base}/e1`;
-      const two = `${base}/e2`;
-      const about = 'https://schema.org/about';
-      const graph = [
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:first' }] },
+        { '@id': '_:first', ...text('first'), [about]: [{ '@id': two }] },
+        { '@id': two, [FIND_RESULT]: [{ '@id': '_:second' }] },
+        { '@id': '_:second', ...text('second') },
+      ],
+    ],
+    [
+      'a hit that names an observation with @reverse',
+      [
         {
           '@id': one,
           [FIND_RESULT]: [
             {
-              '@id': '_:m',
-              [about]: {
-                [wrapper]: [
+              '@id': '_:first',
+              ...text('first'),
+              '@reverse': {
+                [about]: [
                   {
                     '@id': two,
-                    [FIND_RESULT]: [
-                      { 'https://schema.org/text': [{ '@value': 'second' }] },
-                    ],
+                    [FIND_RESULT]: [{ '@id': '_:second', ...text('second') }],
                   },
                 ],
               },
             },
           ],
         },
-      ];
-      const at = (body: unknown) =>
-        createPod(base, {
-          auth: bearer('test'),
-          fetch: async () => jsonLd(body),
-        });
-      const nodes = [{ '@id': one }, { '@id': two }];
-      expect(await at(graph).findFlat('x')).toMatchObject({
-        kind: 'ok',
-        body: {
-          nodes,
-          observations: [
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:first' }] },
+        { '@id': '_:first', ...text('first') },
+        {
+          '@id': two,
+          [about]: [{ '@id': '_:first' }],
+          [FIND_RESULT]: [{ '@id': '_:second' }],
+        },
+        { '@id': '_:second', ...text('second') },
+      ],
+    ],
+    [
+      'a hit embedded in an observation through @set',
+      [
+        {
+          '@id': one,
+          [FIND_RESULT]: [
             {
-              details: [
-                {
-                  node: {
-                    [about]:
-                      wrapper === '@set'
-                        ? [{ '@id': two }]
-                        : [{ '@list': [{ '@id': two }] }],
-                  },
-                },
-              ],
+              '@id': '_:m',
+              [about]: {
+                '@set': [{ '@id': two, [name]: [{ '@value': 'Two' }] }],
+              },
             },
-            { links: [{ hit: two }], text: ['second'] },
           ],
         },
-      });
-      expect(
-        await at([{ '@id': tasks, '@graph': graph }]).find('x'),
-      ).toMatchObject({ kind: 'ok', body: [{ nodes }] });
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', [about]: [{ '@id': two }] },
+        { '@id': two, [name]: [{ '@value': 'Two' }] },
+      ],
+    ],
+    [
+      'a hit embedded in an observation through @list',
+      [
+        {
+          '@id': one,
+          [FIND_RESULT]: [
+            {
+              '@id': '_:m',
+              [about]: {
+                '@list': [{ '@id': two, [name]: [{ '@value': 'Two' }] }],
+              },
+            },
+          ],
+        },
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', [about]: [{ '@list': [{ '@id': two }] }] },
+        { '@id': two, [name]: [{ '@value': 'Two' }] },
+      ],
+    ],
+    [
+      '@included nodes and single values',
+      {
+        '@id': one,
+        [name]: { '@value': 'One' },
+        [FIND_RESULT]: { '@id': '_:m' },
+        '@included': {
+          '@id': '_:m',
+          'https://schema.org/text': { '@value': 'first' },
+        },
+      },
+      [
+        {
+          '@id': one,
+          [name]: [{ '@value': 'One' }],
+          [FIND_RESULT]: [{ '@id': '_:m' }],
+        },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+  ])('reads %s like separate nodes', async (_name, variant, separate) => {
+    const read = await both(variant);
+    expect(read.every((answer) => answer.kind === 'ok')).toBe(true);
+    expect(stable(read)).toEqual(stable(await both(separate)));
+  });
+
+  it('names every hit as a node and keeps statements about an observation in its details', async () => {
+    // Anchors for the separate forms above: a hit known only by its link is a
+    // node, and a statement naming an observation sits under @reverse.
+    const [grouped, flat] = await both([
+      { '@id': one, [FIND_RESULT]: [{ '@id': '_:first' }] },
+      { '@id': '_:first', ...text('first') },
+      {
+        '@id': two,
+        [about]: [{ '@id': '_:first' }],
+        [FIND_RESULT]: [{ '@id': '_:second' }],
+      },
+    ]);
+    expect(grouped).toMatchObject({
+      kind: 'ok',
+      body: [{ nodes: [{ '@id': one }, { '@id': two }] }],
+    });
+    expect(flat).toMatchObject({
+      kind: 'ok',
+      body: {
+        nodes: [{ '@id': one }, { '@id': two }],
+        observations: [
+          {
+            links: [{ hit: one }],
+            text: ['first'],
+            details: [
+              {
+                node: {
+                  ...text('first'),
+                  '@reverse': { [about]: [{ '@id': two }] },
+                },
+              },
+            ],
+          },
+          { links: [{ hit: two }], details: [] },
+        ],
+      },
+    });
+  });
+
+  it.each<[string, unknown, unknown, 'find' | 'findFlat']>([
+    [
+      'one node as the value of @graph, with contexts without effect',
+      {
+        '@context': {},
+        '@id': tasks,
+        '@graph': {
+          '@id': one,
+          '@context': [null, {}],
+          [FIND_RESULT]: { '@id': '_:m' },
+        },
+      },
+      [
+        {
+          '@id': tasks,
+          '@graph': [{ '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] }],
+        },
+      ],
+      'find',
+    ],
+    [
+      'one node in the default-graph wrapper',
+      {
+        '@context': null,
+        '@graph': { '@id': one, [FIND_RESULT]: { '@id': '_:m' } },
+      },
+      [{ '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] }],
+      'findFlat',
+    ],
+    [
+      'named groups inside a top-level @graph wrapper',
+      {
+        '@graph': [
+          { '@id': tasks, '@graph': [{ '@id': one, '@type': [event] }] },
+        ],
+      },
+      [{ '@id': tasks, '@graph': [{ '@id': one, '@type': [event] }] }],
+      'find',
+    ],
+  ])(
+    'reads %s like the plain document',
+    async (_name, variant, plain, read) => {
+      const answer = await answering(variant, base).pod[read]('x');
+      expect(answer.kind).toBe('ok');
+      expect(stable(answer)).toEqual(
+        stable(await answering(plain, base).pod[read]('x')),
+      );
     },
   );
-
-  it('reads @included nodes and single values like separate nodes and arrays', async () => {
-    const hit = `${base}/e1`;
-    const name = 'https://schema.org/name';
-    const separate = [
-      {
-        '@id': hit,
-        [name]: [{ '@value': 'Konzert' }],
-        [FIND_RESULT]: [{ '@id': '_:m' }],
-      },
-      { '@id': '_:m', 'https://schema.org/text': [{ '@value': 'Konzert' }] },
-    ];
-    const included = {
-      '@id': hit,
-      [name]: { '@value': 'Konzert' },
-      [FIND_RESULT]: { '@id': '_:m' },
-      '@included': {
-        '@id': '_:m',
-        'https://schema.org/text': { '@value': 'Konzert' },
-      },
-    };
-    const read = (graph: unknown) =>
-      createPod(base, {
-        auth: bearer('test'),
-        fetch: async () => jsonLd(graph),
-      }).findFlat('x');
-    expect(stable(await read(included))).toEqual(stable(await read(separate)));
-  });
-
-  it('keeps a statement from one observation to another, by its id', async () => {
-    const part = 'https://schema.org/isPartOf';
-    const answer = await createPod(base, {
-      auth: bearer('test'),
-      fetch: async () =>
-        jsonLd([
-          { '@id': `${base}/e1`, [FIND_RESULT]: [{ '@id': '_:a' }] },
-          { '@id': `${base}/e2`, [FIND_RESULT]: [{ '@id': '_:b' }] },
-          { '@id': '_:a', [part]: [{ '@id': '_:b' }] },
-        ]),
-    }).findFlat('x');
-    if (answer.kind !== 'ok') throw new Error(answer.kind);
-    const [a, b] = answer.body.observations;
-    expect(a!.details).toEqual([{ node: { [part]: [{ '@id': b!.id }] } }]);
-    expect(a!.id).not.toBe(b!.id);
-    expect(b!.details).toEqual([]);
-  });
-
-  it('reads named groups inside a top-level @graph wrapper as named', async () => {
-    const group = {
-      '@id': tasks,
-      '@graph': [
-        { '@id': `${base}/e1`, '@type': ['https://schema.org/Event'] },
-      ],
-    };
-    const at = (body: unknown) =>
-      createPod(base, {
-        auth: bearer('test'),
-        fetch: async () => jsonLd(body),
-      });
-    expect(stable(await at({ '@graph': [group] }).find('x'))).toEqual(
-      stable(await at([group]).find('x')),
-    );
-    // A default-graph statement beside them still rejects, and the flat form
-    // still refuses any named graph.
-    await expect(
-      at({ '@graph': [group, { '@id': `${base}/e2`, 'x:p': 'v' }] }).find('x'),
-    ).rejects.toMatchObject({ reason: { code: 'response', problem: 'body' } });
-    await expect(at({ '@graph': [group] }).findFlat('x')).rejects.toMatchObject(
-      {
-        reason: { code: 'response', problem: 'body' },
-      },
-    );
-  });
 });
