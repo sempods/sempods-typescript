@@ -379,6 +379,21 @@ describe('Pod find requests', () => {
       {},
     ],
     [
+      'a set with a context that changes it',
+      [
+        {
+          '@id': `${base}/e1`,
+          'x:p': [
+            {
+              '@context': { '@language': 'de' },
+              '@set': [{ '@value': 'Auszug' }],
+            },
+          ],
+        },
+      ],
+      {},
+    ],
+    [
       'a list with a context that changes it',
       [
         {

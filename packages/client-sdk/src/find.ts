@@ -172,6 +172,7 @@ function read(body: unknown): {
         }
       } else if (key === '@reverse') {
         if (!isNode(entry)) throw invalid();
+        checkContext(entry);
         for (const [predicate, values] of Object.entries(entry))
           for (const item of list(values)) {
             if (!isNodeObject(item)) throw invalid();
@@ -404,9 +405,11 @@ function literal(value: JsonLd): Term {
 /** The values of a property, with `@set` wrappers unwrapped. */
 function list(value: unknown): readonly unknown[] {
   if (value === undefined) return [];
-  return (Array.isArray(value) ? value : [value]).flatMap((item: unknown) =>
-    isNode(item) && Object.hasOwn(item, '@set') ? list(item['@set']) : [item],
-  );
+  return (Array.isArray(value) ? value : [value]).flatMap((item: unknown) => {
+    if (!isNode(item) || !Object.hasOwn(item, '@set')) return [item];
+    checkContext(item);
+    return list(item['@set']);
+  });
 }
 
 /** A node object: neither a value object nor a list. */
