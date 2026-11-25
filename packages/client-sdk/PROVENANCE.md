@@ -111,8 +111,10 @@ W3C JSON-LD 1.1 API test suite, `w3c/json-ld-api` at
 `tests/toRdf-manifest.jsonld`: the 62 toRdf cases without an active context
 and without a context or toRdf option are copied verbatim into
 `src/fixtures/w3c-to-rdf.json`, under the W3C Test Suite License and the W3C
-Software and Document License. The fixture is test data and is not part of
-the published package. 400 cases with an active context, the
+Software and Document License; the required notice is
+[w3c-to-rdf.NOTICE.md](src/fixtures/w3c-to-rdf.NOTICE.md), and
+`scripts/vendor-w3c-to-rdf.mjs` regenerates the file. The fixture is test
+data and is not part of the published package. 400 cases with an active context, the
 `expandContext`, `rdfDirection` and JSON-LD 1.0 cases and the separate
 remote-document manifest are not run; `src/rdf/w3c-to-rdf.test.ts` lists the
 seven cases where the SDK deliberately differs from the suite.
