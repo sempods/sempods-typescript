@@ -817,4 +817,54 @@ describe('Pod find requests', () => {
       ],
     });
   });
+
+  it.each(['@set', '@list'])(
+    'settles a hit embedded in an observation through %s',
+    async (wrapper) => {
+      const one = `${base}/e1`;
+      const two = `${base}/e2`;
+      const about = 'https://schema.org/about';
+      const graph = [
+        {
+          '@id': one,
+          [FIND_RESULT]: [
+            {
+              '@id': '_:m',
+              [about]: {
+                [wrapper]: [
+                  {
+                    '@id': two,
+                    [FIND_RESULT]: [
+                      { 'https://schema.org/text': [{ '@value': 'second' }] },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ];
+      const at = (body: unknown) =>
+        createPod(base, {
+          auth: bearer('test'),
+          fetch: async () => jsonLd(body),
+        });
+      const nodes = [{ '@id': one }, { '@id': two }];
+      expect(await at(graph).findFlat('x')).toMatchObject({
+        kind: 'ok',
+        body: {
+          nodes,
+          observations: [
+            {
+              details: [{ node: { [about]: { [wrapper]: [{ '@id': two }] } } }],
+            },
+            { links: [{ hit: two }], text: ['second'] },
+          ],
+        },
+      });
+      expect(
+        await at([{ '@id': tasks, '@graph': graph }]).find('x'),
+      ).toMatchObject({ kind: 'ok', body: [{ nodes }] });
+    },
+  );
 });
