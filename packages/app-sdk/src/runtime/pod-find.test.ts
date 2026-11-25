@@ -243,30 +243,61 @@ const shared = Object.entries(
       ),
       'utf8',
     ).replaceAll('https://pod.example/', `${pod}/`),
-  ) as Record<
-    string,
-    { grouped?: { jsonld: unknown }; flat: { jsonld: unknown } }
-  >,
+  ) as Record<string, SharedCase>,
 ).filter(([name]) => name !== '$source');
 
+interface SharedCase {
+  readonly request: {
+    readonly text: string;
+    readonly type?: readonly string[];
+    readonly contexts?: readonly string[];
+    readonly limit?: number;
+  };
+  readonly grouped?: { readonly jsonld: unknown };
+  readonly flat: { readonly jsonld: unknown };
+  readonly invalid?: { readonly jsonld: unknown };
+}
+
 it.each(shared)(
-  'answers shared case %s through BoundPod as the client Pod does',
+  'sends and answers shared case %s through BoundPod as the client Pod does',
   async (_name, c) => {
     const f = await signedIn();
+    const { text, type, contexts, limit } = c.request;
+    const options: FindOptions = {
+      ...(type ? { types: type } : {}),
+      ...(contexts ? { contexts } : {}),
+      ...(limit === undefined ? {} : { limit }),
+    };
     const direct = (answer: unknown) =>
       createPod(pod, {
         auth: bearer('test'),
         fetch: async () => Response.json(answer),
       });
+    const sent: unknown[] = [];
     if (c.grouped) {
-      f.setFind(async () => Response.json(c.grouped!.jsonld));
-      expect(await f.reader.find('x')).toEqual(
-        await direct(c.grouped.jsonld).find('x'),
+      f.setFind(async (_url, init) => {
+        sent.push(body(init));
+        return Response.json(c.grouped!.jsonld);
+      });
+      expect(await f.reader.find(text, options)).toEqual(
+        await direct(c.grouped.jsonld).find(text, options),
       );
+      expect(sent.pop()).toEqual({ ...c.request, include_contexts: true });
     }
-    f.setFind(async () => Response.json(c.flat.jsonld));
-    expect(await f.reader.findFlat('x')).toEqual(
-      await direct(c.flat.jsonld).findFlat('x'),
+    f.setFind(async (_url, init) => {
+      sent.push(body(init));
+      return Response.json(c.flat.jsonld);
+    });
+    expect(await f.reader.findFlat(text, options)).toEqual(
+      await direct(c.flat.jsonld).findFlat(text, options),
     );
+    expect(sent.pop()).toEqual(c.request);
+    if (c.invalid) {
+      f.setFind(async () => Response.json(c.invalid!.jsonld));
+      for (const read of ['find', 'findFlat'] as const)
+        await expect(f.reader[read](text, options)).rejects.toMatchObject({
+          reason: { code: 'response', problem: 'body' },
+        });
+    }
   },
 );

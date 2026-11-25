@@ -195,6 +195,12 @@ describe('Pod find requests', () => {
       ['a blank type', 'x', { types: [' '] }, 'type'],
       ['a relative type', 'x', { types: ['Event'] }, 'type'],
       [
+        'a malformed escape in a type',
+        'x',
+        { types: ['https://example.org/%GG'] },
+        'type',
+      ],
+      [
         'types without a list',
         'x',
         { types: event as unknown as string[] },
@@ -231,10 +237,50 @@ describe('Pod find requests', () => {
       [{ '@id': tasks, '@graph': [] }],
       { contexts: [] },
     ],
-    ['a group without nodes', [{ '@id': tasks }], {}],
+    [
+      'a default-graph statement about a Context',
+      [{ '@id': tasks, 'x:p': 'v' }],
+      {},
+    ],
     ['a node that is not an object', [{ '@id': tasks, '@graph': ['x'] }], {}],
-    ['a flat graph', { '@graph': [] }, {}],
-    ['a default-graph node', [{ '@id': `${base}/e1` }], {}],
+    ['a flat graph', { '@graph': [{ '@id': `${base}/e1`, 'x:p': 'v' }] }, {}],
+    ['a default-graph node', [{ '@id': `${base}/e1`, '@type': ['x:T'] }], {}],
+    [
+      'a named graph inside an embedded node',
+      [
+        {
+          '@id': tasks,
+          '@graph': [
+            {
+              '@id': `${base}/e1`,
+              'x:p': [
+                {
+                  '@id': notes,
+                  '@graph': [{ '@id': `${base}/e2`, 'x:q': 'v' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      {},
+    ],
+    [
+      'a local context that changes a key',
+      [
+        {
+          '@id': tasks,
+          '@graph': [
+            {
+              '@context': { found: FIND_RESULT },
+              '@id': `${base}/e1`,
+              found: [{ '@id': '_:m' }],
+            },
+          ],
+        },
+      ],
+      {},
+    ],
     [
       'a default-graph statement about a group',
       [{ '@id': tasks, '@type': ['x:y'], '@graph': [] }],
@@ -303,8 +349,18 @@ describe('Pod find requests', () => {
     ['a node that is not an object', ['x'], {}],
     [
       'a statement for an empty downscope',
-      [{ '@id': `${base}/e1` }],
+      [{ '@id': `${base}/e1`, [FIND_RESULT]: [{ '@id': '_:m' }] }],
       { contexts: [] },
+    ],
+    [
+      'a named graph inside an embedded node',
+      [{ '@id': `${base}/e1`, 'x:p': { '@id': tasks, '@graph': [] } }],
+      {},
+    ],
+    [
+      'a default graph with a context that changes a key',
+      { '@context': { '@vocab': 'x:' }, '@graph': [{ '@id': `${base}/e1` }] },
+      {},
     ],
   ])('rejects a flat answer with %s', async (_name, body, options) => {
     const fetch = vi.fn<PodFetch>(async () => jsonLd(body));
@@ -372,5 +428,120 @@ describe('Pod find requests', () => {
       { links: [{ hit }], details: [], text: [] },
     ]);
     expect(Object.isFrozen(answer.body.observations[0])).toBe(true);
+  });
+
+  it.each<[string, unknown, FindOptions]>([
+    ['an empty object', {}, {}],
+    ['an empty object for an empty downscope', {}, { contexts: [] }],
+    ['an empty default graph', { '@graph': [] }, {}],
+    [
+      'nodes without statements',
+      [{}, { '@id': `${base}/e1` }],
+      { contexts: [] },
+    ],
+  ])('reads %s as no statement in both forms', async (_name, body, options) => {
+    const fetch = vi.fn<PodFetch>(async () => jsonLd(body));
+    const pod = createPod(base, { auth: bearer('test'), fetch });
+    const flat = await pod.findFlat('x', options);
+    expect(flat).toMatchObject({ kind: 'ok', body: { observations: [] } });
+    if (flat.kind !== 'ok') throw new Error(flat.kind);
+    expect(flat.body.nodes.filter((n) => Object.keys(n).length !== 1)).toEqual(
+      [],
+    );
+    expect(await pod.find('x', options)).toEqual({ kind: 'ok', body: [] });
+  });
+
+  it('reads one node as the value of @graph, and a context without effect', async () => {
+    const hit = { '@id': `${base}/e1`, [FIND_RESULT]: { '@id': '_:m' } };
+    const pod = (body: unknown) =>
+      createPod(base, {
+        auth: bearer('test'),
+        fetch: async () => jsonLd(body),
+      });
+    const grouped = await pod({
+      '@context': {},
+      '@id': tasks,
+      '@graph': { ...hit, '@context': [null, {}] },
+    }).find('x');
+    if (grouped.kind !== 'ok') throw new Error(grouped.kind);
+    expect(grouped.body[0]!.observations[0]!.links).toEqual([
+      { hit: hit['@id'], context: tasks },
+    ]);
+    const flat = await pod({ '@context': null, '@graph': hit }).findFlat('x');
+    if (flat.kind !== 'ok') throw new Error(flat.kind);
+    expect(flat.body.observations[0]!.links).toEqual([{ hit: hit['@id'] }]);
+  });
+
+  it('extracts observations from embedded hits and keeps the embedding', async () => {
+    // The article/topic case with the topic embedded under `schema:about`.
+    const article = `${base}/articles/42`;
+    const topic = `${base}/topics/climate`;
+    const about = 'https://schema.org/about';
+    const fetch = vi.fn<PodFetch>(async () =>
+      jsonLd([
+        {
+          '@id': tasks,
+          '@graph': [
+            {
+              '@id': article,
+              [about]: [
+                {
+                  '@id': topic,
+                  'https://schema.org/name': [{ '@value': 'Climate change' }],
+                  [FIND_RESULT]: [{ '@id': '_:topic' }],
+                },
+              ],
+            },
+            {
+              '@id': '_:topic',
+              'https://schema.org/text': [{ '@value': 'Climate' }],
+            },
+          ],
+        },
+      ]),
+    );
+    const answer = await createPod(base, { auth: bearer('test'), fetch }).find(
+      'x',
+    );
+    if (answer.kind !== 'ok') throw new Error(answer.kind);
+    const [group] = answer.body;
+    expect(group!.nodes).toEqual([
+      {
+        '@id': article,
+        [about]: [
+          {
+            '@id': topic,
+            'https://schema.org/name': [{ '@value': 'Climate change' }],
+          },
+        ],
+      },
+    ]);
+    expect(group!.observations).toMatchObject([
+      { links: [{ hit: topic, context: tasks }], text: ['Climate'] },
+    ]);
+  });
+
+  it('keeps nonpositive positions out of the typed projection', async () => {
+    const position = 'https://schema.org/position';
+    const fetch = vi.fn<PodFetch>(async () =>
+      jsonLd([
+        {
+          '@id': `${base}/e1`,
+          [FIND_RESULT]: [
+            {
+              [position]: [{ '@value': 0 }, { '@value': -2 }, { '@value': 1 }],
+            },
+          ],
+        },
+      ]),
+    );
+    const answer = await createPod(base, {
+      auth: bearer('test'),
+      fetch,
+    }).findFlat('x');
+    if (answer.kind !== 'ok') throw new Error(answer.kind);
+    const [observation] = answer.body.observations;
+    expect(observation!.position).toEqual([1]);
+    expect(observation!.details[0]!.node[position]).toHaveLength(3);
   });
 });

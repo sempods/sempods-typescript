@@ -36,7 +36,7 @@ import type {
   WriteOptions,
   WriteResult,
 } from './results.js';
-import { ABSOLUTE_IRI } from './iri.js';
+import { ABSOLUTE_IRI, EMBEDDABLE_IRI } from './iri.js';
 import { decodeFlatFind, decodeGroupedFind } from './find.js';
 import { decodeSelect } from './sparql.js';
 
@@ -534,9 +534,7 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     if (
       types !== undefined &&
       (!Array.isArray(types) ||
-        !types.every(
-          (iri) => typeof iri === 'string' && ABSOLUTE_IRI.test(iri),
-        ))
+        !types.every((iri) => typeof iri === 'string' && isTypeIri(iri)))
     )
       throw failure({ code: 'invalid-argument', argument: 'type' });
     if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0))
@@ -728,6 +726,14 @@ function constructBody(body: unknown): readonly JsonLd[] {
   if (!Array.isArray(body) || !body.every(isNode))
     throw failure({ code: 'response', problem: 'body' });
   return Object.freeze(body);
+}
+
+/**
+ * A type IRI the Pod can read: an absolute IRIREF whose percent signs each
+ * start a two-digit escape, so `%GG` is refused before dispatch.
+ */
+function isTypeIri(iri: string): boolean {
+  return EMBEDDABLE_IRI.test(iri) && !/%(?![0-9A-Fa-f]{2})/.test(iri);
 }
 
 function isNode(value: unknown): value is JsonLd {

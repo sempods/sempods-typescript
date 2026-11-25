@@ -18,8 +18,10 @@ const SPS_ENGINE = 'https://schema.sempods.org/engine';
 /**
  * Named-graph JSON-LD (SPS-FIND-027): one group object or an array of them,
  * each naming a Context of this Pod inside the requested downscope
- * (SPS-FIND-010). A statement in the default graph or under a blank graph
- * name, also a bare observation, makes the whole answer untrusted.
+ * (SPS-FIND-010). Graph membership follows the RDF the document encodes: a
+ * statement in the default graph, under a blank graph name or in a graph
+ * nested in a node, also a bare observation, makes the whole answer
+ * untrusted. Serializations without statements, such as `{}`, are empty.
  */
 export function decodeGroupedFind(
   body: unknown,
@@ -27,25 +29,34 @@ export function decodeGroupedFind(
   scope: readonly string[] | undefined,
 ): readonly FindGraph[] {
   const requested = scope && new Set(scope);
-  const groups = Array.isArray(body) ? body : [body];
-  const raw = groups.map((group: unknown) => {
-    if (!isNode(group) || !Object.keys(group).every(isGroupKey))
-      throw invalid();
-    const context = group['@id'];
-    const nodes = group['@graph'];
+  const groups: Group[] = [];
+  for (const item of Array.isArray(body) ? body : [body]) {
+    if (!isNode(item)) throw invalid();
+    checkContext(item);
+    if (!Object.hasOwn(item, '@graph')) {
+      // A node of the default graph: allowed only while it states nothing.
+      checkNode(item);
+      if (hasStatements(item)) throw invalid();
+      continue;
+    }
+    const context = item['@id'];
+    const nodes = graphOf(item);
+    if (!Object.keys(item).every(isGroupKey)) throw invalid();
+    if (context === undefined && !Array.isArray(body)) {
+      // The top-level wrapper is the default graph.
+      if (nodes.some(hasStatements)) throw invalid();
+      continue;
+    }
     if (
       typeof context !== 'string' ||
       !isContextIri(context, base) ||
-      (requested && !requested.has(context)) ||
-      !Array.isArray(nodes) ||
-      !nodes.every(isGraphNode)
+      (requested && !requested.has(context))
     )
       throw invalid();
-    return { context, nodes: nodes as readonly JsonLd[] };
-  });
-  const decoded = observe(raw);
+    groups.push({ context, nodes });
+  }
   return Object.freeze(
-    decoded.map(({ context, nodes, observations }) =>
+    observe(groups).map(({ context, nodes, observations }) =>
       Object.freeze({ context: context as string, nodes, observations }),
     ),
   );
@@ -53,27 +64,34 @@ export function decodeGroupedFind(
 
 /**
  * A graph without graph names (SPS-FIND-026): an array of node objects, one
- * node object, or a default-graph `{"@graph": [...]}`. A named graph rejects
- * the answer, and so does any statement for an explicitly empty downscope.
+ * node object, or a default-graph `{"@graph": …}`. A named graph, also one
+ * nested in a node, rejects the answer, and so does any statement for an
+ * explicitly empty downscope. Serializations without statements are empty.
  */
 export function decodeFlatFind(
   body: unknown,
   scope: readonly string[] | undefined,
 ): FlatFindGraph {
-  let nodes: unknown;
-  if (Array.isArray(body)) nodes = body;
-  else if (isNode(body) && Object.hasOwn(body, '@graph')) {
-    if (Object.keys(body).length !== 1) throw invalid();
-    nodes = body['@graph'];
-  } else nodes = [body];
-  if (!Array.isArray(nodes) || !nodes.every(isGraphNode)) throw invalid();
-  if (scope?.length === 0 && nodes.length > 0) throw invalid();
-  const [decoded] = observe([
-    { context: undefined, nodes: nodes as readonly JsonLd[] },
-  ]);
+  let nodes: readonly JsonLd[];
+  if (Array.isArray(body)) {
+    for (const item of body) checkNode(item);
+    nodes = body as readonly JsonLd[];
+  } else if (isNode(body) && Object.hasOwn(body, '@graph')) {
+    checkContext(body);
+    if (
+      !Object.keys(body).every((key) => key === '@graph' || key === '@context')
+    )
+      throw invalid();
+    nodes = graphOf(body);
+  } else {
+    checkNode(body);
+    nodes = [body as JsonLd];
+  }
+  if (scope?.length === 0 && nodes.some(hasStatements)) throw invalid();
+  const [decoded] = observe([{ context: undefined, nodes }]);
   return Object.freeze({
-    nodes: decoded?.nodes ?? Object.freeze([]),
-    observations: decoded?.observations ?? Object.freeze([]),
+    nodes: decoded!.nodes,
+    observations: decoded!.observations,
   });
 }
 
@@ -88,13 +106,17 @@ interface Building {
   readonly groups: Set<string | undefined>;
 }
 
+/** Marks an embedded observation that left its place for `details`. */
+const MOVED = Symbol('moved');
+
 /**
- * Separates generated observations from pod data across the whole answer.
- * A `sps:findResult` value that is a blank node is an observation link; an
- * IRI value is a stored statement and stays (SPS-FIND-027). Blank-node labels
- * identify one node within this answer only: a link in one group and details
- * in another are one observation, and no label leaves this function, so two
- * answers never share an observation.
+ * Separates generated observations from pod data across the whole answer,
+ * also inside embedded node objects. A `sps:findResult` value that is a
+ * blank node is an observation link; an IRI value is a stored statement and
+ * stays (SPS-FIND-027). Blank-node labels identify one node within this
+ * answer only: a link in one group and details in another are one
+ * observation, and no label leaves this function, so two answers never
+ * share an observation. A node without observations stays as answered.
  */
 function observe(groups: readonly Group[]): readonly (Group & {
   readonly observations: readonly FindObservation[];
@@ -106,61 +128,95 @@ function observe(groups: readonly Group[]): readonly (Group & {
     order.push(entry);
     return entry;
   };
-  for (const { nodes } of groups)
-    for (const node of nodes) {
-      if (!isHit(node)) continue;
+  const discover = (node: JsonLd): void => {
+    if (isHit(node))
       for (const value of findResults(node)) {
         const label = blankLabel(value);
-        if (label !== undefined && !labelled.has(label))
-          labelled.set(label, start());
+        if (label && !labelled.has(label)) labelled.set(label, start());
       }
-    }
+    for (const child of embedded(node)) discover(child);
+  };
+  for (const { nodes } of groups) nodes.forEach(discover);
+
   const stripped = groups.map(({ context, nodes }) => {
-    const kept: JsonLd[] = [];
-    for (const node of nodes) {
-      const own = typeof node['@id'] === 'string' ? node['@id'] : undefined;
-      const detailOf = own === undefined ? undefined : labelled.get(own);
-      if (detailOf) {
-        detailOf.details.push(detail(context, node));
-        detailOf.groups.add(context);
-        continue;
+    const item = (value: unknown): unknown => {
+      if (!isNode(value) || '@value' in value) return value;
+      for (const key of ['@list', '@set'])
+        if (Object.hasOwn(value, key)) {
+          const inner = values(value[key]);
+          return inner === value[key] ? value : { ...value, [key]: inner };
+        }
+      const own = value['@id'];
+      const observation = typeof own === 'string' && labelled.get(own);
+      if (observation) {
+        observation.details.push(detail(context, value));
+        observation.groups.add(context);
+        return MOVED;
       }
-      const values = findResults(node);
-      if (values.length === 0 || own === undefined || !isHit(node)) {
-        kept.push(node);
-        continue;
+      return strip(value);
+    };
+    const values = (value: unknown): unknown => {
+      if (!Array.isArray(value)) {
+        const next = item(value);
+        return next === MOVED ? [] : next;
       }
-      // A node without an observation stays exactly as answered.
-      if (values.every((value) => blankLabel(value) === undefined)) {
-        kept.push(node);
-        continue;
-      }
-      const stored: unknown[] = [];
-      for (const value of values) {
-        const label = blankLabel(value);
-        if (label === undefined) {
-          stored.push(value);
+      const next = value.map(item);
+      return next.every((v, i) => v === value[i])
+        ? value
+        : next.filter((v) => v !== MOVED);
+    };
+    const link = (hit: string, value: unknown): void => {
+      const label = blankLabel(value)!;
+      const entry = label === '' ? start() : labelled.get(label)!;
+      entry.links.push(
+        Object.freeze(context === undefined ? { hit } : { hit, context }),
+      );
+      entry.groups.add(context);
+      // An embedded node carries its details in place of a reference.
+      const own = without(value as JsonLd, '@id');
+      if (Object.keys(own).length > 0) entry.details.push(detail(context, own));
+    };
+    const strip = (node: JsonLd): JsonLd => {
+      let changed = false;
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(node)) {
+        if (key === FIND_RESULT && isHit(node)) {
+          const all = Array.isArray(value) ? value : [value];
+          if (all.some((v) => blankLabel(v) !== undefined)) {
+            changed = true;
+            const stored = all.filter((v) => blankLabel(v) === undefined);
+            all
+              .filter((v) => blankLabel(v) !== undefined)
+              .forEach((v) => link(node['@id'] as string, v));
+            const kept = values(stored);
+            if ((kept as unknown[]).length > 0) out[key] = kept;
+            continue;
+          }
+        }
+        if (key === '@reverse' && isNode(value)) {
+          const reverse: Record<string, unknown> = {};
+          let moved = false;
+          for (const [p, v] of Object.entries(value)) {
+            reverse[p] = values(v);
+            moved ||= reverse[p] !== v;
+          }
+          changed ||= moved;
+          out[key] = moved ? reverse : value;
           continue;
         }
-        const entry = label === '' ? start() : labelled.get(label)!;
-        entry.links.push(
-          Object.freeze(
-            context === undefined ? { hit: own } : { hit: own, context },
-          ),
-        );
-        entry.groups.add(context);
-        // An embedded node carries its details in place of a reference.
-        const embedded = withoutId(value as JsonLd);
-        if (Object.keys(embedded).length > 0) {
-          entry.details.push(detail(context, embedded));
-        }
+        const next =
+          key.startsWith('@') && key !== '@included' ? value : values(value);
+        changed ||= next !== value;
+        out[key] = next;
       }
-      const rest = without(node, FIND_RESULT);
-      kept.push(
-        Object.freeze(
-          stored.length > 0 ? { ...rest, [FIND_RESULT]: stored } : rest,
-        ),
-      );
+      return changed ? Object.freeze(out) : node;
+    };
+    const kept: JsonLd[] = [];
+    for (const node of nodes) {
+      const next = item(node);
+      // A top-level `{}` states nothing and is no node of the answer.
+      if (next !== MOVED && (Object.keys(node).length > 0 || next !== node))
+        kept.push(next as JsonLd);
     }
     return { context, nodes: kept };
   });
@@ -190,20 +246,16 @@ function freezeObservation(entry: Building): FindObservation {
     links: Object.freeze([...entry.links]),
     details,
     text: Object.freeze(values(SCHEMA_TEXT).flatMap(stringOf)),
-    position: Object.freeze(values(SCHEMA_POSITION).flatMap(integerOf)),
+    position: Object.freeze(values(SCHEMA_POSITION).flatMap(positionOf)),
     engine: Object.freeze(values(SPS_ENGINE).flatMap(stringOf)),
   });
 }
 
 function detail(context: string | undefined, node: JsonLd): FindDetail {
-  const own = Object.freeze(withoutId(node));
+  const own = Object.freeze(without(node, '@id'));
   return Object.freeze(
     context === undefined ? { node: own } : { context, node: own },
   );
-}
-
-function withoutId(node: JsonLd): JsonLd {
-  return without(node, '@id');
 }
 
 function without(node: JsonLd, key: string): JsonLd {
@@ -241,12 +293,95 @@ function blankLabel(value: unknown): string | undefined {
   return typeof id === 'string' && id.startsWith('_:') ? id : undefined;
 }
 
+/** The node objects a node embeds: property, `@reverse` and `@included` values. */
+function embedded(node: JsonLd): JsonLd[] {
+  const out: JsonLd[] = [];
+  const items = (value: unknown): void => {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      // A literal, also a JSON literal, is opaque.
+      if (!isNode(item) || '@value' in item) continue;
+      if ('@list' in item) items(item['@list']);
+      else if ('@set' in item) items(item['@set']);
+      else out.push(item);
+    }
+  };
+  for (const [key, value] of Object.entries(node)) {
+    if (key === '@reverse') {
+      if (!isNode(value)) throw invalid();
+      Object.values(value).forEach(items);
+    } else if (key === '@included' || !key.startsWith('@')) items(value);
+  }
+  return out;
+}
+
+/**
+ * A node object of a graph, also every node it embeds: a nested `@graph`
+ * would name a graph inside the answer, and only a context without effect
+ * is understood.
+ */
+function checkNode(value: unknown): asserts value is JsonLd {
+  if (
+    !isNode(value) ||
+    '@value' in value ||
+    '@list' in value ||
+    '@set' in value ||
+    Object.hasOwn(value, '@graph')
+  )
+    throw invalid();
+  checkContext(value);
+  embedded(value).forEach(checkNode);
+}
+
+/** The nodes of a `@graph`: one node object or an array of them. */
+function graphOf(group: JsonLd): readonly JsonLd[] {
+  const value = group['@graph'];
+  const nodes = Array.isArray(value) ? value : [value];
+  nodes.forEach(checkNode);
+  return nodes as readonly JsonLd[];
+}
+
+/**
+ * The SDK reads expanded JSON-LD, as the Pod answers: a local `@context`
+ * that could change what a key means rejects the answer rather than being
+ * misread. `null`, `{}` and lists of them change nothing.
+ */
+function checkContext(node: JsonLd): void {
+  if (Object.hasOwn(node, '@context') && !inert(node['@context']))
+    throw invalid();
+}
+
+function inert(context: unknown): boolean {
+  return (
+    context === null ||
+    (isNode(context) && Object.keys(context).length === 0) ||
+    (Array.isArray(context) && context.every(inert))
+  );
+}
+
+/** Whether a node object encodes at least one RDF statement. */
+function hasStatements(node: JsonLd): boolean {
+  return Object.entries(node).some(([key, value]) => {
+    if (key === '@included')
+      return (Array.isArray(value) ? value : [value]).some(
+        (v) => isNode(v) && hasStatements(v),
+      );
+    if (key === '@reverse')
+      return isNode(value) && Object.values(value).some(present);
+    return (key === '@type' || !key.startsWith('@')) && present(value);
+  });
+}
+
+function present(value: unknown): boolean {
+  return !Array.isArray(value) || value.length > 0;
+}
+
 function stringOf(value: unknown): readonly string[] {
   const lexical = isNode(value) ? value['@value'] : value;
   return typeof lexical === 'string' ? [lexical] : [];
 }
 
-function integerOf(value: unknown): readonly number[] {
+/** A 1-based position; other values stay in `details` only. */
+function positionOf(value: unknown): readonly number[] {
   const lexical = isNode(value) ? value['@value'] : value;
   const number =
     typeof lexical === 'number'
@@ -254,16 +389,11 @@ function integerOf(value: unknown): readonly number[] {
       : typeof lexical === 'string' && /^[+-]?\d+$/.test(lexical.trim())
         ? Number(lexical)
         : Number.NaN;
-  return Number.isSafeInteger(number) ? [number] : [];
+  return Number.isSafeInteger(number) && number > 0 ? [number] : [];
 }
 
 function isGroupKey(key: string): boolean {
-  return key === '@id' || key === '@graph';
-}
-
-/** A node object; a nested `@graph` would name a graph inside the answer. */
-function isGraphNode(value: unknown): value is JsonLd {
-  return isNode(value) && !Object.hasOwn(value, '@graph');
+  return key === '@id' || key === '@graph' || key === '@context';
 }
 
 function isNode(value: unknown): value is JsonLd {

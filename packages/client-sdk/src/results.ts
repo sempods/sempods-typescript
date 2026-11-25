@@ -144,7 +144,8 @@ export interface FindGraph {
   /**
    * Pod data as answered (raw, like CONSTRUCT nodes), without generated
    * observations: an `sps:findResult` link to a blank node and that node's
-   * details are moved to `observations`. A hit reported only by such a link
+   * details are moved to `observations`, also from embedded nodes. A node
+   * without observations stays as answered. A hit reported only by such a link
    * stays as a node with only `@id`. A stored `sps:findResult` to an IRI stays.
    */
   readonly nodes: readonly JsonLd[];
@@ -176,7 +177,10 @@ export interface FindObservation {
   readonly details: readonly FindDetail[];
   /** `schema:text` excerpts across `details`. */
   readonly text: readonly string[];
-  /** `schema:position` integers: 1-based places in the list that produced it. */
+  /**
+   * `schema:position` as positive integers: 1-based places in the list that
+   * produced it. Other values stay in `details` only.
+   */
   readonly position: readonly number[];
   /** `sps:engine` tokens across `details`. */
   readonly engine: readonly string[];

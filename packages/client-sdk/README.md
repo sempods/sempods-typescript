@@ -199,18 +199,25 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
 - Nothing found, or nothing readable, is `ok` with an empty body, not
   `refused`. Find has no `not-found`.
 - `find` needs named graphs, `[{ "@id": <context>, "@graph": [<node>…] }]` or
-  one such object. A statement outside a named group, also in a group without
-  a Context name, rejects with `response/body`, and so does a group that names
-  no Context of this Pod or one outside `contexts`. `findFlat` needs one graph
-  without graph names and rejects a named graph.
+  one such object; `@graph` may also hold a single node. Graph membership
+  follows the RDF the document encodes. A statement outside a named group,
+  also in a group without a Context name or in a graph nested in a node,
+  rejects with `response/body`, and so does a group that names no Context of
+  this Pod or one outside `contexts`. `findFlat` needs one graph without
+  graph names and rejects a named graph, also a nested one. A serialization
+  without statements, such as `{}`, is an empty answer in both forms.
+- The SDK reads expanded JSON-LD, as the Pod answers. A local `@context` that
+  could change what a key means rejects with `response/body` rather than
+  being misread; `null`, `{}` and lists of them are accepted.
 - `nodes` are the Pod's data as answered, not guaranteed to have the canonical
   resource shape. A hit's type and label are optional: a hit can be a node with
   only `@id`. There is no marker that separates a hit from its expansion.
 - The Pod may describe how it found a hit: a blank node linked with
   `sps:findResult`, with an excerpt (`schema:text`), a 1-based position
   (`schema:position`) or an engine (`sps:engine`). The SDK moves these
-  observations out of `nodes` into typed `observations`; ignore them if you
-  need no more than the hits. An observation carries each link and detail
+  observations out of `nodes` into typed `observations`, also from hits
+  embedded in another node; ignore them if you need no more than the hits.
+  `position` keeps only positive integers; every value stays in `details`. An observation carries each link and detail
   with its Context. One that is repeated or split across groups is the same
   object in each group. Its blank-node label is not kept, so observations of
   two answers or two Pods never merge. A Context records where the Pod placed
