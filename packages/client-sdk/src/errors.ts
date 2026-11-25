@@ -6,7 +6,7 @@ export type SdkFailure =
   | {
       readonly code: 'invalid-argument';
       readonly argument:
-        'iri' | 'context' | 'query' | 'condition' | 'text' | 'limit';
+        'iri' | 'context' | 'query' | 'condition' | 'text' | 'type' | 'limit';
     }
   | {
       readonly code: 'discovery';
@@ -50,4 +50,13 @@ export class SdkError extends Error {
 /** Stable presentation facts; diagnostics and causes are not translated user text. */
 export function sdkFailure(cause: unknown): SdkFailure {
   return cause instanceof SdkError ? cause.reason : { code: 'unexpected' };
+}
+
+/** A failed Pod request; the diagnostic names the failure code, never data. */
+export function requestFailure(reason: SdkFailure, cause?: unknown): SdkError {
+  return new SdkError(
+    reason,
+    `Pod request failed: ${reason.code}.`,
+    cause === undefined ? undefined : { cause },
+  );
 }

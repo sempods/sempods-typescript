@@ -692,7 +692,7 @@ when required scopes are missing; dispatch rechecks eligibility and returns
 not that readable data exists. The server authorizes its dataset.
 
 The cached `BoundPod.key` identifies connection, subject, Pod and authorization
-generation. It exposes only `select`, `construct` and `find`, and a stable immutable snapshot
+generation. It exposes only `select`, `construct`, `find` and `findFlat`, and a stable immutable snapshot
 with `current`, `read` and `revision`. Subscriptions have no initial callback and
 notify only changes to those reader facts. Context selection (including A → B → A),
 catalogue loading/failure/permission updates and labels neither cancel pending
@@ -733,9 +733,10 @@ The full catalogue remains one response, without per-Context reads or fetches.
 Context handles, retaining cancellation, obsolete-result retirement and at most
 one recovery retry per cycle. See [React Pod overviews](react-authoring.md#pod-overviews-with-contexts-on-demand).
 
-`reader.find(text, options)` is the client's
+`reader.find(text, options)` and `reader.findFlat(text, options)` are the client's
 [Find](../packages/client-sdk/README.md#finding-resources) through the same
-handle. It has the same lifetime, `invalidated` and `cancelled` results as
+handle; `contexts`, `types` and `limit` pass as given, an omitted `contexts`
+stays omitted and `[]` stays `[]`. Both have the same lifetime, `invalidated` and `cancelled` results as
 `select`, waits for a `podReadLimit` slot, and takes `priority: 'current'`. A
 connection that reads without a token searches only the Pod's public Contexts.
 Each Pod answers on its own; to search several, use one loader per Pod as in
@@ -765,7 +766,7 @@ await reader.sparql.select(query, { signal, priority: 'current' });
 ```
 
 Without `podReadLimit`, every read starts at once, as before. With it, an
-explicit Pod read (`BoundPod.sparql.select`/`construct` or `find`, also through
+explicit Pod read (`BoundPod.sparql.select`/`construct`, `find` or `findFlat`, also through
 `usePodLoad` and `createViewLoader`) beyond a limit waits for a slot:
 
 - `perPod` counts the requests in flight to one Pod URL, across its

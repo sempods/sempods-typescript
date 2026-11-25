@@ -368,7 +368,7 @@ export interface BrowserRuntimeOptions {
   readonly refreshGracePeriod?: number;
   /**
    * Opt-in bound for explicit Pod reads (`BoundPod.sparql.select`,
-   * `construct` and `find`, also through `usePodLoad` and `createViewLoader`). Omit it
+   * `construct`, `find` and `findFlat`, also through `usePodLoad` and `createViewLoader`). Omit it
    * and every read starts at once, as before. `perPod` counts the reads in
    * flight to one Pod URL, across its connections and authorization
    * generations; `total` counts them across all Pods. A read beyond a limit

@@ -41,6 +41,42 @@ attempt's callback then fails with `attempt`, and the session stays.
 prerelease `0.9.0-dev.3` carries them, and the [0.9.0 release
 notes](releases/0.9.0.md) list the changes.
 
+### Find observations, the flat form and a type filter
+
+The Pod's Find may now describe how it found a hit (#418): an `sps:findResult`
+link from the hit to a blank node with an excerpt, a position or an engine
+([Find](../packages/client-sdk/README.md#finding-resources)). `pod.find` and
+`BoundPod.find` keep their grouped answer and move these observations out of
+`nodes` into the new `FindGraph.observations`, which is `[]` when the Pod sends
+none; `nodes` come normalized (below). The prerelease after `0.9.0-dev.3`
+carries this; `0.9.0-dev.3` itself has neither `findFlat` nor `types`.
+
+- **Derive hits as before** from `nodes`. A hit reported only by a link is a
+  node with only `@id`; a hit's type and label are optional (SPS-FIND-032).
+- **Read `nodes` in their canonical form.** The SDK now reads a Find answer by
+  the RDF it encodes, so `nodes` are no longer the JSON the Pod sent: one
+  flattened node object per subject and group, embedded nodes as their own
+  entries, `@type` an array, every other value an array of `{"@id"}`,
+  `{"@value"}` or `{"@list"}` objects. A node object that states nothing,
+  such as `{"@id": …}` alone, is gone, and pod blank nodes get labels unique
+  to the answer. Code that read a single value or an embedded node in place
+  reads the array or follows the `@id`.
+- **Read excerpts from `observations`**, not from `nodes`: `text`, `position`
+  and `engine` are typed, `links` and `details` keep each statement's Context.
+  That Context is where the Pod placed the statement, not where the search
+  matched.
+- **Filter by type on the Pod** with `types` instead of after the answer: the
+  Pod filters before `limit`.
+- **Use `findFlat`** for one graph without Contexts.
+- **Strict answers:** `find` now also rejects a group with statements of its
+  own, a graph nested in a node and a local `@context` that could change a
+  key or value. It accepts any serialization of the same statements, such as
+  one group object without an array or one node as the value of `@graph`, and
+  reads `{}` or other serializations without statements as an empty answer.
+- A typed test double of `Pod` or `BoundPod` needs `findFlat`. New client-sdk
+  types: `FlatFindGraph`, `FindObservation`, `FindLink` and `FindDetail`. The
+  `invalid-argument` failure's `argument` gains `'type'`.
+
 ### Shared palette defaults
 
 The UI kit's fallback palette and the TODO example now use sage in both

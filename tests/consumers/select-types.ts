@@ -12,7 +12,9 @@ import type {
 import { createViewLoader } from '@sempods/app-sdk';
 import type {
   FindGraph,
+  FindObservation,
   FindOptions,
+  FlatFindGraph,
   Pod,
   QueryResult,
   SelectResult,
@@ -130,8 +132,16 @@ export function loaders(view: BoundView, pod: BoundPod) {
   if (found.kind === 'ready')
     for (const graph of found.data)
       void [graph.context, graph.nodes[0]?.['@id']];
-  // @ts-expect-error Find takes no type filter in this version.
-  void pod.find('x', { types: ['urn:T'] });
+  // Exact types on the Pod, and observations typed apart from the pod data.
+  const flat: PodRead<FlatFindGraph> = (target, signal) =>
+    target.findFlat('konzert', { types: ['urn:T'], signal });
+  void flat;
+  if (found.kind === 'ready')
+    for (const graph of found.data)
+      for (const o of graph.observations satisfies readonly FindObservation[])
+        void [o.links[0]?.hit, o.links[0]?.context, o.text[0], o.position[0]];
+  // @ts-expect-error The option is `types`, not the wire member `type`.
+  void pod.find('x', { type: ['urn:T'] });
   const state: LoadState<SelectResult> = overview.getSnapshot();
   void state;
   const podRead: PodRead<SelectResult> = (target, signal) =>

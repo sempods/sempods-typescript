@@ -2,6 +2,7 @@ import type {
   ContextView,
   FindGraph,
   FindOptions,
+  FlatFindGraph,
   GetResult,
   JsonLd,
   QueryResult,
@@ -66,6 +67,11 @@ export interface BoundPod {
     text: string,
     options?: FindOptions & { readonly priority?: 'current' },
   ): Promise<BoundRead<QueryResult<readonly FindGraph[]>>>;
+  /** The client `Pod.findFlat` through this handle, like `find`. */
+  findFlat(
+    text: string,
+    options?: FindOptions & { readonly priority?: 'current' },
+  ): Promise<BoundRead<QueryResult<FlatFindGraph>>>;
 }
 
 /**

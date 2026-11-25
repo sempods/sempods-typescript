@@ -5,7 +5,7 @@ import {
   type CatalogueContext,
   type ContextDescription,
 } from './catalogue.js';
-import { SdkError, type SdkFailure } from './errors.js';
+import { requestFailure as failure } from './errors.js';
 import {
   createExecutor,
   untrustedTarget,
@@ -23,7 +23,6 @@ import { canonicalPodUrl } from './pod-url.js';
 import type {
   Cancelled,
   CreateCondition,
-  FindGraph,
   FindOptions,
   GetResult,
   JsonLd,
@@ -37,7 +36,8 @@ import type {
   WriteOptions,
   WriteResult,
 } from './results.js';
-import { ABSOLUTE_IRI } from './iri.js';
+import { ABSOLUTE_IRI, isIriRef } from './iri.js';
+import { decodeFlatFind, decodeGroupedFind, isNode } from './find.js';
 import { decodeSelect } from './sparql.js';
 
 const cancelled: Cancelled = Object.freeze({ kind: 'cancelled' });
@@ -514,6 +514,65 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     }));
   }
 
+  async function find<T>(
+    text: string,
+    options: FindOptions,
+    grouped: boolean,
+    decode: (body: unknown, scope: readonly string[] | undefined) => T,
+  ): Promise<QueryResult<T>> {
+    if (typeof text !== 'string' || !text.trim())
+      throw failure({ code: 'invalid-argument', argument: 'text' });
+    const { contexts, types, limit } = options;
+    // The members as they will be sent: a hole in a sparse array is checked
+    // as the `undefined` it would become, not skipped.
+    const scope = contexts === undefined ? undefined : members(contexts);
+    if (
+      scope !== undefined &&
+      (!scope ||
+        !scope.every(
+          (iri) => typeof iri === 'string' && isContextIri(iri, base),
+        ))
+    )
+      throw failure({ code: 'invalid-argument', argument: 'context' });
+    const given = types === undefined ? undefined : members(types);
+    if (
+      given !== undefined &&
+      (!given ||
+        !given.every((iri) => typeof iri === 'string' && isIriRef(iri)))
+    )
+      throw failure({ code: 'invalid-argument', argument: 'type' });
+    if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0))
+      throw failure({ code: 'invalid-argument', argument: 'limit' });
+    const type = given && [...new Set(given as string[])];
+    // One body for every dispatch: an authentication resend repeats it, so
+    // the downscope (also an empty one) is never dropped.
+    const body = JSON.stringify({
+      text,
+      ...(type?.length ? { type } : {}),
+      ...(scope ? { contexts: scope } : {}),
+      ...(grouped ? { include_contexts: true } : {}),
+      ...(limit === undefined ? {} : { limit }),
+    });
+    const url = `${base}/_system/find`;
+    const exchange = await execute(
+      request(
+        'POST',
+        url,
+        { accept: JSON_LD, 'content-type': 'application/json' },
+        podGuards,
+        options.signal,
+        body,
+      ),
+    );
+    return read(exchange, url, options.signal, async (response) => ({
+      kind: 'ok' as const,
+      body: decode(
+        await json(response),
+        scope as readonly string[] | undefined,
+      ),
+    }));
+  }
+
   return Object.freeze({
     podUrl: base,
     context,
@@ -529,48 +588,14 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
       construct: (query: string, options: ReadOptions = {}) =>
         sparql(query, JSON_LD, constructBody, podGuards, options),
     }),
-    async find(
-      text: string,
-      options: FindOptions = {},
-    ): Promise<QueryResult<readonly FindGraph[]>> {
-      if (typeof text !== 'string' || !text.trim())
-        throw failure({ code: 'invalid-argument', argument: 'text' });
-      const { contexts, limit } = options;
-      if (
-        contexts !== undefined &&
-        (!Array.isArray(contexts) ||
-          !contexts.every(
-            (iri) => typeof iri === 'string' && isContextIri(iri, base),
-          ))
-      )
-        throw failure({ code: 'invalid-argument', argument: 'context' });
-      if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0))
-        throw failure({ code: 'invalid-argument', argument: 'limit' });
-      const scope = contexts && [...contexts];
-      // One body for every dispatch: an authentication resend repeats it, so
-      // the downscope (also an empty one) is never dropped.
-      const body = JSON.stringify({
-        text,
-        include_contexts: true,
-        ...(scope ? { contexts: scope } : {}),
-        ...(limit === undefined ? {} : { limit }),
-      });
-      const url = `${base}/_system/find`;
-      const exchange = await execute(
-        request(
-          'POST',
-          url,
-          { accept: JSON_LD, 'content-type': 'application/json' },
-          podGuards,
-          options.signal,
-          body,
-        ),
-      );
-      return read(exchange, url, options.signal, async (response) => ({
-        kind: 'ok' as const,
-        body: findBody(await json(response), base, scope),
-      }));
-    },
+    find: (text: string, options: FindOptions = {}) =>
+      find(text, options, true, (body, scope) =>
+        decodeGroupedFind(body, base, scope),
+      ),
+    findFlat: (text: string, options: FindOptions = {}) =>
+      find(text, options, false, (body, scope) =>
+        decodeFlatFind(body, base, scope),
+      ),
     async catalogue(
       options: ReadOptions = {},
     ): Promise<QueryResult<readonly CatalogueContext[]>> {
@@ -601,14 +626,6 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
       }));
     },
   });
-}
-
-function failure(reason: SdkFailure, cause?: unknown): SdkError {
-  return new SdkError(
-    reason,
-    `Pod request failed: ${reason.code}.`,
-    cause === undefined ? undefined : { cause },
-  );
 }
 
 function discard(response: Response): void {
@@ -711,38 +728,9 @@ function constructBody(body: unknown): readonly JsonLd[] {
   return Object.freeze(body);
 }
 
-/**
- * Named-graph JSON-LD (SPS-FIND-019): every group names its source Context.
- * A group without one, of another Pod, or outside the requested downscope
- * (SPS-FIND-010) makes the whole answer untrusted; nodes stay as answered.
- */
-function findBody(
-  body: unknown,
-  base: string,
-  scope: readonly string[] | undefined,
-): readonly FindGraph[] {
-  const requested = scope && new Set(scope);
-  if (!Array.isArray(body))
-    throw failure({ code: 'response', problem: 'body' });
-  return Object.freeze(
-    body.map((group: unknown) => {
-      const context = isNode(group) ? group['@id'] : undefined;
-      const nodes = isNode(group) ? group['@graph'] : undefined;
-      if (
-        typeof context !== 'string' ||
-        !isContextIri(context, base) ||
-        (requested && !requested.has(context)) ||
-        !Array.isArray(nodes) ||
-        !nodes.every(isNode)
-      )
-        throw failure({ code: 'response', problem: 'body' });
-      return Object.freeze({ context, nodes: Object.freeze(nodes) });
-    }),
-  );
-}
-
-function isNode(value: unknown): value is JsonLd {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+/** An array's members with holes as `undefined`; `false` for no array. */
+function members(value: unknown): readonly unknown[] | false {
+  return Array.isArray(value) && Array.from(value as unknown[]);
 }
 
 /** UTF-8 base64url without padding (SPS-CRUD-005); works in browsers and Node. */

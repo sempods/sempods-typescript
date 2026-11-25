@@ -110,27 +110,104 @@ export interface ReadOptions {
   readonly signal?: AbortSignal;
 }
 
-/** Options of `Pod.find`. */
+/** Options of `Pod.find` and `Pod.findFlat`. */
 export interface FindOptions extends ReadOptions {
   /**
    * The read downscope. Omitted: every Context the caller may read. A list:
    * exactly those Contexts of this Pod, unreadable ones dropped by the Pod.
-   * `[]` asks for none: any group in the answer rejects it. Never widened,
-   * also not on an authentication resend.
+   * `[]` asks for none: any statement in the answer rejects it. Never
+   * widened, also not on an authentication resend.
    */
   readonly contexts?: readonly string[];
-  /** A positive integer; the Pod applies its own default and maximum. */
+  /**
+   * Hits must have one of these `rdf:type` IRIs, matched exactly by the Pod
+   * before it applies `limit` (SPS-FIND-006, -007). Omitted or `[]`: any
+   * type. A repeated IRI is sent once.
+   */
+  readonly types?: readonly string[];
+  /**
+   * A positive integer bounding the distinct hit IRIs (SPS-FIND-025); the Pod
+   * applies its own default and maximum. Linked resources and observations
+   * do not count, so one hit can carry several observations.
+   */
   readonly limit?: number;
 }
 
 /**
- * What one source Context contributed to a Find answer: its Context IRI and
- * the JSON-LD node objects as answered (raw, like CONSTRUCT nodes). The
- * answer has no rank and no marker separating a hit from its expansion.
+ * What one source Context contributed to a grouped Find answer: its Context
+ * IRI, its pod statements as JSON-LD node objects, and the observations
+ * placed in it. The answer has no rank and no marker separating a hit from
+ * its expansion.
  */
 export interface FindGraph {
   readonly context: string;
+  /**
+   * Pod data, read by the RDF the answer encodes and without generated
+   * observations: one flattened node object per subject, `@type` an array of
+   * IRIs, every other property an array of `{"@id"}`, `{"@value"}` or
+   * `{"@list"}` objects. An `sps:findResult` link to a blank node and the
+   * statements about that node are in `observations`; a hit whose link is
+   * here appears as a node, with only `@id` when it has no other statement
+   * here. A stored `sps:findResult` to an IRI stays. Blank nodes of pod data
+   * get labels unique to this answer.
+   */
   readonly nodes: readonly JsonLd[];
+  /**
+   * Observations whose link or details this group carries. One observation
+   * split or repeated across groups is the same object in each of them.
+   */
+  readonly observations: readonly FindObservation[];
+}
+
+/** A flat Find answer (SPS-FIND-026): one graph without graph names. */
+export interface FlatFindGraph {
+  /** Pod data, without generated observations, as in `FindGraph.nodes`. */
+  readonly nodes: readonly JsonLd[];
+  readonly observations: readonly FindObservation[];
+}
+
+/**
+ * One response-local observation (SPS-FIND-028): how the Pod says it found a
+ * hit. Optional and implementation-specific; a hit can have none, one or
+ * several. Placement records where the Pod put a statement, not where the
+ * search matched.
+ */
+export interface FindObservation {
+  /**
+   * A blank-node label unique to this answer: the `@id` by which `details`
+   * name another observation. The Pod's own label is not kept, so
+   * observations of two answers or two Pods never merge.
+   */
+  readonly id: string;
+  /** The hits linking to this observation, with each link's group. */
+  readonly links: readonly FindLink[];
+  /**
+   * The observation's statements, per group, without `@id`; statements that
+   * name it from the other side are under `@reverse`.
+   */
+  readonly details: readonly FindDetail[];
+  /** `schema:text` excerpts across `details`. */
+  readonly text: readonly string[];
+  /**
+   * `schema:position` as positive integers: 1-based places in the list that
+   * produced it. Other values stay in `details` only.
+   */
+  readonly position: readonly number[];
+  /** `sps:engine` tokens across `details`. */
+  readonly engine: readonly string[];
+}
+
+export interface FindLink {
+  /** The hit IRI. */
+  readonly hit: string;
+  /** The group of the link; absent in a flat answer. */
+  readonly context?: string;
+}
+
+export interface FindDetail {
+  /** The group of these statements; absent in a flat answer. */
+  readonly context?: string;
+  readonly node: JsonLd;
 }
 
 export interface WriteOptions {

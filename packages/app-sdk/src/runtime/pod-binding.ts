@@ -1,5 +1,6 @@
 import type {
   DispatchGuard,
+  FindOptions,
   Pod,
   QueryResult,
   ReadOptions,
@@ -125,18 +126,27 @@ export function bindPod(
         read((o) => pod.sparql.construct(query, o), options),
     }),
     find: (text, options) =>
+      read((o) => pod.find(text, { ...findOptions(options), ...o }), options),
+    findFlat: (text, options) =>
       read(
-        (o) =>
-          pod.find(text, {
-            ...(options?.contexts === undefined
-              ? {}
-              : { contexts: options.contexts }),
-            ...(options?.limit === undefined ? {} : { limit: options.limit }),
-            ...o,
-          }),
+        (o) => pod.findFlat(text, { ...findOptions(options), ...o }),
         options,
       ),
   } satisfies BoundPod);
   observePod(reader, e);
   return reader;
+}
+
+/**
+ * The search, without this binding's own `priority` and `signal`: members
+ * pass as given, so an omitted `contexts` stays omitted and `[]` stays `[]`,
+ * and a new `FindOptions` member needs no change here.
+ */
+function findOptions(
+  options: (FindOptions & { readonly priority?: 'current' }) | undefined,
+): FindOptions {
+  const search: Record<string, unknown> = { ...options };
+  delete search['priority'];
+  delete search['signal'];
+  return search as FindOptions;
 }

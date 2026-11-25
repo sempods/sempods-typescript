@@ -161,17 +161,29 @@ default is `'required'`. See
 ### Finding resources
 
 `pod.find(text, options)` uses the Pod's Find primitive: text in, the matching
-resources out, grouped by the Context each statement came from. The Pod decides
-how it matches; there is no mode, rank or cursor.
+resources out, grouped by the Context each statement came from.
+`pod.findFlat(text, options)` asks for the same search as one graph without
+Contexts, the Pod's default form. The Pod decides how it matches; there is no
+mode, rank or cursor.
 
 ```ts
 import type { Pod } from '@sempods/client-sdk';
 
 export async function search(pod: Pod, text: string, signal: AbortSignal) {
-  const result = await pod.find(text, { limit: 20, signal });
+  const result = await pod.find(text, {
+    types: ['https://schema.org/Article'],
+    limit: 20,
+    signal,
+  });
   if (result.kind !== 'ok') return result;
-  for (const { context, nodes } of result.body) {
+  for (const { context, nodes, observations } of result.body) {
     for (const node of nodes) console.log(node['@id'], 'in', context);
+    for (const { links, text } of observations)
+      console.log(
+        links.map((link) => link.hit),
+        'matched',
+        text,
+      );
   }
   return result;
 }
@@ -180,20 +192,48 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
 - Without `contexts`, the Pod searches every Context the caller may read. With
   `contexts`, it searches only those Contexts of this Pod and silently drops
   the unreadable ones. `[]` asks for no Context: the SDK sends it as given,
-  and any group in the answer rejects with `response/body`.
+  and any statement in the answer rejects with `response/body`.
+- `types` keeps hits with one of these `rdf:type` IRIs, matched exactly; the
+  Pod filters before it applies `limit`. Omitted or `[]` accepts any type.
+  `limit` bounds the distinct hit IRIs, not the statements or observations.
 - Nothing found, or nothing readable, is `ok` with an empty body, not
   `refused`. Find has no `not-found`.
-- The answer must be a top-level array of named graphs,
-  `[{ "@id": <context>, "@graph": [<node>…] }]`; a flat `{"@graph": [...]}`
-  rejects with `response/body`. Each `FindGraph` names its source Context. Its
-  `nodes` are JSON-LD node objects as answered, not guaranteed to have the
-  canonical resource shape. The Pod usually
-  includes each hit's type and label, with no marker that separates a hit from
-  that expansion.
-- The request is always `POST` with `include_contexts`. An authentication
-  resend repeats it unchanged, and the SDK never retries it without the
-  downscope. A group without a source Context of this Pod, or one outside
-  `contexts`, rejects the whole read with `response/body`.
+- `find` needs named graphs, `[{ "@id": <context>, "@graph": [<node>…] }]` or
+  one such object; `@graph` may also hold a single node. Graph membership
+  follows the RDF the document encodes. A statement outside a named group,
+  also in a group without a Context name or in a graph nested in a node,
+  rejects with `response/body`, and so does a group that names no Context of
+  this Pod or one outside `contexts`. `findFlat` needs one graph without
+  graph names and rejects a named graph, also a nested one. A serialization
+  without statements, such as `{}`, is an empty answer in both forms.
+- The SDK reads the answer, expanded JSON-LD as the Pod sends it, by the RDF
+  it encodes, so every serialization of the same statements gives the same
+  result: embedded or separate nodes, `@reverse`, `@set`, `@list`,
+  `@included`, `@nest`, single values or arrays. A relative reference
+  resolves against the Find URL, as in JSON-LD expansion. A local `@context` that could change
+  a key or value rejects with `response/body` rather than being misread;
+  `null`, `{}` and lists of them are accepted. `nodes` are the Pod's data in one canonical form: one flattened node
+  object per subject and group, `@type` an array of IRIs, every other
+  property an array of `{"@id"}`, `{"@value"}` or `{"@list"}` objects. Blank
+  nodes of pod data get labels unique to the answer. A hit's type and label
+  are optional: a hit can be a node with only `@id`. There is no marker that
+  separates a hit from its expansion.
+- The Pod may describe how it found a hit: a blank node linked with
+  `sps:findResult`, with an excerpt (`schema:text`), a 1-based position
+  (`schema:position`) or an engine (`sps:engine`). The SDK moves these
+  observations out of `nodes` into typed `observations`; ignore them if you
+  need no more than the hits. `position` keeps positive integers given as
+  numbers or XSD integer literals; every value stays in `details`. An observation carries each link and its
+  statements per Context, with statements that name it from the other side
+  under `@reverse`. One that is repeated or split across groups is the same
+  object in each group. Its `id` is a blank-node label unique to the answer,
+  by which `details` name another observation; the Pod's own label is not
+  kept, so observations of two answers or two Pods never merge. A Context
+  records where the Pod placed the statement, not where the search matched. A stored `sps:findResult` to an
+  IRI stays in `nodes` and its source Context.
+- The request is always `POST`; `find` adds `include_contexts`. An
+  authentication resend repeats the body unchanged, and the SDK never retries
+  it without the downscope.
 
 ## Reading and writing one context
 
@@ -254,6 +294,7 @@ Supported operations:
 | `view.sparql.construct(query)`                | `POST {pod}/_system/sparql/query` with `default-graph-uri` and `named-graph-uri` = the view context | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `view.sparql.select(query)`                   | Same route and dataset parameters, accepts SPARQL Results JSON                                      | `ok` (`SelectResult`) · `refused` · `cancelled` · `stopped`                                                                      |
 | `pod.find(text, options)`                     | `POST {pod}/_system/find` (JSON body, `include_contexts: true`); accepts JSON-LD                    | `ok` (`FindGraph` per source Context) · `refused` · `cancelled` · `stopped`                                                      |
+| `pod.findFlat(text, options)`                 | Same route and body without `include_contexts`; accepts JSON-LD                                     | `ok` (`FlatFindGraph`) · `refused` · `cancelled` · `stopped`                                                                     |
 
 ### Querying one Context
 
@@ -363,6 +404,8 @@ export async function removeNickname(
 
 The SDK returns JSON-LD bodies as the Pod answered them. It does not compact,
 frame, reorder or otherwise normalize them; it only checks the outer structure.
+Find is the exception: it reads its answer as RDF and returns normalized
+nodes ([finding resources](#finding-resources)).
 Values are typed `unknown`, so check each one before using it.
 
 `subjects.get` accepts only a JSON object; an array or other JSON rejects with
@@ -448,12 +491,12 @@ not silently emulated:
 | Union or multi-context CRUD reads (no or repeated `?context=`)     | SPS-CRUD-014–017                     | Use Pod SPARQL for cross-Context queries; CRUD stays Context-bound                    |
 | `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -057, -058 | JSON-LD only; no provenance per value, also not on a slot read                        |
 | SPARQL ASK                                                         | `sparql.md`                          | Pod or Context SELECT/CONSTRUCT                                                       |
-| The Find `type` filter, the flat Find form and N-Quads             | SPS-FIND-006–008, -018, -020         | `pod.find` always asks for the Context-grouped JSON-LD form                           |
+| Find answers as N-Quads                                            | SPS-FIND-020                         | `find` and `findFlat` ask for JSON-LD                                                 |
 | Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`             | Out of scope for the client                                                           |
 | Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                          | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |
 
 Protocol facts the client preserves: JSON-LD read bodies are returned as
-answered; SELECT decodes wire terms without changing their lexical values, language
+answered, except Find's normalized nodes; SELECT decodes wire terms without changing their lexical values, language
 tags or datatype IRIs; writes return the answered
 status and a pod-local `Location` for a creation; resource writes return no
 entity tag (SPS-CRUD-030), value writes the slot's (SPS-CRUD-052); conflicts

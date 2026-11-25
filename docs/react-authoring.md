@@ -1359,7 +1359,8 @@ const load = usePodLoad(
 ```
 
 Each [Find](../packages/client-sdk/README.md#finding-resources) answer groups
-the hits by source Context (`FindGraph`). The SDK neither merges Pods nor
+the hits by source Context (`FindGraph`), with any excerpts in its
+`observations`. The SDK neither merges Pods nor
 ranks hits. To show one merged list, combine the **current** state of every
 source on each render, never results kept from a settled promise. Then a
 source whose grants changed, or that was cancelled or signed out, drops out

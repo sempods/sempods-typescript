@@ -1,7 +1,19 @@
-// `BoundPod.find` (#233): the client Find primitive through a Pod handle, with
-// the same lifetime and admission as `sparql`. Fixture evidence only.
+// `BoundPod.find` (#233) and `findFlat` (#418): the client Find primitive
+// through a Pod handle, with the same lifetime and admission as `sparql`.
+// Fixture evidence only.
 import { afterEach, expect, it, vi } from 'vitest';
-import type { FindGraph } from '@sempods/client-sdk';
+import {
+  bearer,
+  createPod,
+  type FindGraph,
+  type FindOptions,
+} from '@sempods/client-sdk';
+import {
+  bodyRejected,
+  findCases,
+  optionsOf,
+  stable,
+} from '../../../client-sdk/src/find.helpers.test.js';
 import { createViewLoader } from '../authoring/load.js';
 import type { BrowserRuntime } from './types.js';
 import type { BoundPod } from './view.js';
@@ -24,12 +36,13 @@ afterEach(() => {
 });
 const keep = (runtime: BrowserRuntime) => void runtimes.push(runtime);
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
+const EVENT = 'https://schema.org/Event';
 /** A Find answer naming one hit in `context` of the Pod at `base`. */
 const hit = (base: string, name: string, context = 'work') =>
   Response.json([
     {
       '@id': `${base}/_system/contexts/${context}`,
-      '@graph': [{ '@id': `${base}/${name}` }],
+      '@graph': [{ '@id': `${base}/${name}`, '@type': [EVENT] }],
     },
   ]);
 const body = (init?: RequestInit) => JSON.parse(String(init?.body)) as unknown;
@@ -60,7 +73,13 @@ it('sends the text, downscope and limit unchanged, never the read priority', asy
     }),
   ).toEqual({
     kind: 'ok',
-    body: [{ context: work, nodes: [{ '@id': `${pod}/e1` }] }],
+    body: [
+      {
+        context: work,
+        nodes: [{ '@id': `${pod}/e1`, '@type': [EVENT] }],
+        observations: [],
+      },
+    ],
   });
   const [url, init] = findCall(f);
   expect(url).toBe(`${pod}/_system/find`);
@@ -192,3 +211,74 @@ it('one loader per Pod: changed grants refresh a ready source while another stil
   expect(hits(alice)).toBe('unavailable');
   expect(hits(bob)).toEqual([`${otherUrl}/bob-1`]);
 });
+
+it.each<[string, FindOptions, Record<string, unknown>]>([
+  ['an omitted downscope', {}, {}],
+  ['an empty downscope', { contexts: [] }, { contexts: [] }],
+  [
+    'types and a limit',
+    { types: ['https://schema.org/Event'], limit: 2 },
+    { type: ['https://schema.org/Event'], limit: 2 },
+  ],
+])(
+  'sends the flat form with %s as given, never the read priority',
+  async (_name, options, members) => {
+    const f = await signedIn();
+    f.setFind(async () => Response.json([]));
+    expect(
+      await f.reader.findFlat('konzert', { ...options, priority: 'current' }),
+    ).toEqual({ kind: 'ok', body: { nodes: [], observations: [] } });
+    expect(body(findCall(f)[1])).toEqual({ text: 'konzert', ...members });
+  },
+);
+
+it('invalidates a flat find answered after a disconnect', async () => {
+  const f = await signedIn();
+  const gate = deferred<Response>();
+  f.setFind(async () => gate.promise);
+  const pending = f.reader.findFlat('x');
+  await vi.waitFor(() => expect(f.count('/_system/find')).toBe(1));
+  await f.runtime.disconnect(f.id);
+  gate.resolve(Response.json([{ '@id': `${pod}/late` }]));
+  expect(await pending).toEqual({ kind: 'invalidated' });
+});
+
+it.each(findCases(pod))(
+  'sends and answers shared case %s through BoundPod as the client Pod does',
+  async (_name, c) => {
+    const f = await signedIn();
+    const { text } = c.request;
+    const options = optionsOf(c.request);
+    const direct = (answer: unknown) =>
+      createPod(pod, {
+        auth: bearer('test'),
+        fetch: async () => Response.json(answer),
+      });
+    const sent: unknown[] = [];
+    if (c.grouped) {
+      f.setFind(async (_url, init) => {
+        sent.push(body(init));
+        return Response.json(c.grouped!.jsonld);
+      });
+      expect(stable(await f.reader.find(text, options))).toEqual(
+        stable(await direct(c.grouped.jsonld).find(text, options)),
+      );
+      expect(sent.pop()).toEqual({ ...c.request, include_contexts: true });
+    }
+    f.setFind(async (_url, init) => {
+      sent.push(body(init));
+      return Response.json(c.flat.jsonld);
+    });
+    expect(stable(await f.reader.findFlat(text, options))).toEqual(
+      stable(await direct(c.flat.jsonld).findFlat(text, options)),
+    );
+    expect(sent.pop()).toEqual(c.request);
+    if (c.invalid) {
+      f.setFind(async () => Response.json(c.invalid!.jsonld));
+      for (const read of ['find', 'findFlat'] as const)
+        await expect(f.reader[read](text, options)).rejects.toMatchObject(
+          bodyRejected,
+        );
+    }
+  },
+);
