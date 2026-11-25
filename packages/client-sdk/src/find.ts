@@ -1,9 +1,15 @@
 import { isContextIri } from './catalogue.js';
 import { deepFreeze } from './edit/terms.js';
 import { requestFailure } from './errors.js';
-import { fromJsonLd, JsonLdError, type Dataset } from './rdf/jsonld.js';
+import {
+  fromJsonLd,
+  JsonLdError,
+  topLevel,
+  type Dataset,
+} from './rdf/jsonld.js';
 import { nodeMap } from './rdf/nodes.js';
 import {
+  isNode,
   lexical,
   listChain,
   XSD,
@@ -100,7 +106,19 @@ function read(
     throw error;
   }
   const { graphs, nested } = dataset;
-  if (nested || graphs.some((name) => name.startsWith('_:'))) throw invalid();
+  if (
+    nested ||
+    graphs.some((name) => name.startsWith('_:')) ||
+    // A group is only its name and graph, also where JSON-LD would read
+    // further keys as statements without effect.
+    topLevel(body).some(
+      (item) =>
+        isNode(item) &&
+        Object.hasOwn(item, '@graph') &&
+        Object.keys(item).some((key) => !GROUP_KEYS.has(key)),
+    )
+  )
+    throw invalid();
   let fresh = 0;
   const blank = (): Subject => ({ kind: 'blank', id: `l${fresh++}` });
   const quads = dataset.quads.flatMap((quad): readonly Quad[] => {
@@ -114,6 +132,9 @@ function read(
   });
   return { quads, names: graphs };
 }
+
+/** A group's keys; `@index` is metadata JSON-LD toRdf ignores. */
+const GROUP_KEYS = new Set(['@id', '@graph', '@context', '@index']);
 
 interface Built {
   readonly graph: Graph;

@@ -49,7 +49,7 @@ const REJECTED: Readonly<Record<string, string>> = {
   '#twf05': 'ill-formed language tag',
 };
 /**
- * IRIs are taken as given, as Find always did (find.test.ts keeps
+ * Absolute IRIs are taken as given, as Find always did (find.test.ts keeps
  * `x:a> x:p <x:b`): the statements JSON-LD drops for an IRI with a space
  * stay, and every other statement matches.
  */

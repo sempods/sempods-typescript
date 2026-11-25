@@ -18,8 +18,8 @@ import {
  * what a key means rejects the document rather than being misread.
  *
  * Where JSON-LD only drops or warns, this reader rejects: a free-floating
- * value, an ill-formed language tag and an array nested in an array. IRIs
- * are taken as given. The differences from the W3C toRdf suite are listed
+ * value, an ill-formed language tag and an array nested in an array.
+ * Absolute IRIs are taken as given. The differences from the W3C toRdf suite are listed
  * in src/rdf/w3c-to-rdf.test.ts.
  */
 
@@ -95,7 +95,14 @@ export function fromJsonLd(body: unknown, documentUrl: string): Dataset {
     if (Object.hasOwn(value, '@list')) {
       onlyKeys(value, LIST_KEYS, 'invalid set or list object');
       const items: Term[] = [];
-      for (const item of values(value['@list'])) {
+      const raw = value['@list'];
+      // JSON-LD reads a set in a list as a nested list; so would an array.
+      if (
+        Array.isArray(raw) &&
+        raw.some((item) => isNode(item) && Object.hasOwn(item, '@set'))
+      )
+        throw new JsonLdError('nested array');
+      for (const item of values(raw)) {
         const term = object(item, embedded);
         if (term) items.push(term);
       }
@@ -156,7 +163,12 @@ export function fromJsonLd(body: unknown, documentUrl: string): Dataset {
       } else if (key === '@nest') {
         // Nested properties belong to the containing node.
         for (const inner of values(entry)) {
-          if (!isNodeObject(inner) || Object.hasOwn(inner, '@id'))
+          // `@id` and `@graph` would describe the containing node itself.
+          if (
+            !isNodeObject(inner) ||
+            Object.hasOwn(inner, '@id') ||
+            Object.hasOwn(inner, '@graph')
+          )
             throw new JsonLdError('invalid @nest value');
           checkContext(inner);
           properties(inner, subject, graph);
@@ -172,16 +184,21 @@ export function fromJsonLd(body: unknown, documentUrl: string): Dataset {
     }
   };
 
-  // A top-level object with only `@graph` wraps the default graph; the
-  // graphs inside it are top-level graphs.
+  for (const item of topLevel(body)) node(item, undefined, true);
+  return { quads, graphs, nested };
+}
+
+/**
+ * The top-level items of a document. A top-level object with only `@graph`
+ * wraps the default graph; the graphs inside it are top-level graphs.
+ */
+export function topLevel(body: unknown): readonly unknown[] {
   const wrapped =
     isNode(body) &&
     Object.hasOwn(body, '@graph') &&
     Object.keys(body).every((key) => key === '@graph' || key === '@context');
   if (wrapped) checkContext(body);
-  for (const item of values(wrapped ? body['@graph'] : body))
-    node(item, undefined, true);
-  return { quads, graphs, nested };
+  return values(wrapped ? body['@graph'] : body);
 }
 
 /** The keys of a list object; `@index` is metadata toRdf ignores. */
@@ -206,14 +223,10 @@ function valueObject(value: JsonLd): Term | undefined {
   if (type !== undefined && (language !== undefined || direction !== undefined))
     throw new JsonLdError('invalid value object');
   if (type === '@json') return literal(withoutMetadata(value));
-  if (native === null) return undefined;
-  if (typeof native === 'object')
-    throw new JsonLdError('invalid value object value');
+  // The keywords are checked also for a null value, as JSON-LD expands them.
   if (language !== undefined) {
     if (typeof language !== 'string')
       throw new JsonLdError('invalid language-tagged string');
-    if (typeof native !== 'string')
-      throw new JsonLdError('invalid language-tagged value');
     if (!LANGUAGE_TAG.test(language))
       throw new JsonLdError('ill-formed language tag');
   }
@@ -226,6 +239,11 @@ function valueObject(value: JsonLd): Term | undefined {
     if (!ABSOLUTE_IRI.test(type) || type.startsWith('_:'))
       throw new JsonLdError('invalid typed value');
   }
+  if (native === null) return undefined;
+  if (typeof native === 'object')
+    throw new JsonLdError('invalid value object value');
+  if (language !== undefined && typeof native !== 'string')
+    throw new JsonLdError('invalid language-tagged value');
   return literal(withoutMetadata(value));
 }
 

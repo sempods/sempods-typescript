@@ -115,7 +115,7 @@ Software and Document License. The fixture is test data and is not part of
 the published package. 400 cases with an active context, the
 `expandContext`, `rdfDirection` and JSON-LD 1.0 cases and the separate
 remote-document manifest are not run; `src/rdf/w3c-to-rdf.test.ts` lists the
-five cases where the SDK deliberately differs from the suite.
+seven cases where the SDK deliberately differs from the suite.
 
 The consent prompt of `prepareAuthorization` (#362) was checked against
 `sempods/sempods-spec` at `c6308c157d8c78be0ba6e9d91dba39a11a9ce883`

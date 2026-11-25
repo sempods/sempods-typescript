@@ -1206,3 +1206,25 @@ describe('Find answers read by the RDF they encode', () => {
     expect(second).not.toBe(first);
   });
 });
+
+describe('Find groups as named-graph JSON-LD writes them', () => {
+  it.each<[string, Record<string, unknown>]>([
+    ['an empty property', { 'x:p': [] }],
+    ['a relative key', { name: 'x' }],
+    ['an empty type', { '@type': [] }],
+    ['an empty reverse map', { '@reverse': {} }],
+    [
+      'an included node without statements',
+      { '@included': [{ '@id': 'x:y' }] },
+    ],
+    ['an empty nest', { '@nest': {} }],
+  ])(
+    'rejects a group with %s, although it states nothing',
+    async (_name, extra) => {
+      const body = [{ '@id': tasks, '@graph': [], ...extra }];
+      await expect(answering(body, base).pod.find('x')).rejects.toMatchObject(
+        bodyRejected,
+      );
+    },
+  );
+});

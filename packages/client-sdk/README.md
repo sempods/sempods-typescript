@@ -210,12 +210,15 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
   it encodes, so every serialization of the same statements gives the same
   result: embedded or separate nodes, `@reverse`, `@set`, `@list`,
   `@included`, `@nest`, single values or arrays. A relative reference
-  resolves against the Find URL, as in JSON-LD expansion. A local `@context` that could change
+  resolves against the Find URL with the URL parser, which also
+  percent-encodes characters an IRI may keep. A local `@context` that could change
   a key or value rejects with `response/body` rather than being misread;
   `null`, `{}` and lists of them are accepted. Invalid JSON-LD, such as a
   value object with an `@id` or a non-string `@language`, rejects the same
   way, and so does what JSON-LD would only drop: a free-floating value or an
-  ill-formed language tag. IRIs are taken as given. `nodes` are the Pod's data in one canonical form: one flattened node
+  ill-formed language tag. A form the SDK cannot represent, such as a set or
+  an array inside a list or a graph inside `@nest`, rejects too. Absolute IRIs
+  are taken as given. `nodes` are the Pod's data in one canonical form: one flattened node
   object per subject and group, `@type` an array of IRIs, every other
   property an array of `{"@id"}`, `{"@value"}` or `{"@list"}` objects. Blank
   nodes of pod data get labels unique to the answer. A hit's type and label
