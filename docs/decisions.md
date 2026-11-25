@@ -254,7 +254,7 @@ The store announces each change to the other tabs (`BroadcastChannel`), so a
 renewal, a new sign-in, a sign-out or a forget reaches every tab. A first
 sign-in under way in one tab shows as interrupted in the others until its
 result is stored. A re-authorization stores its attempt beside the session
-instead (0.10.0): the session keeps working in every tab, under the refresh
+instead (0.9.0): the session keeps working in every tab, under the refresh
 lock that also serializes the callback's code exchange, and only a
 validated, stored result replaces it. A tab uses another tab's renewal of
 the same session as it is; any other change makes it list that connection

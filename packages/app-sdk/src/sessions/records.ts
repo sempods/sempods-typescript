@@ -25,7 +25,7 @@ export interface SessionConfiguration {
 
 /**
  * A re-authorization of a session, kept beside that session until it settles
- * (0.10.0): `open` with its verifier until its callback claims the code, then
+ * (0.9.0): `open` with its verifier until its callback claims the code, then
  * `claimed` without it while that exchange runs. Its binding's generation
  * becomes the new grant's. Only a validated callback replaces the session;
  * any other outcome drops the attempt and leaves the session as it is.
@@ -42,7 +42,7 @@ export type SessionRecord = { readonly version: 1 } & (
       readonly kind: 'authorizing';
       readonly attempt: SessionAttempt;
       /**
-       * The silent first sign-in (`firstSignIn: 'silent'`, 0.10.0): shown
+       * The silent first sign-in (`firstSignIn: 'silent'`, 0.9.0): shown
        * signed out in every tab while it is out, never as interrupted.
        */
       readonly silent?: true;
@@ -75,7 +75,7 @@ export type SessionRecord = { readonly version: 1 } & (
       readonly pending?: PendingAttempt;
       /**
        * Changes each time a re-authorization of this session ends without a
-       * new grant (0.10.0), so every tab reads Context access again, also
+       * new grant (0.9.0), so every tab reads Context access again, also
        * one that never saw the attempt. Kept by renewals; in `ready` too.
        */
       readonly attemptEnded?: string;

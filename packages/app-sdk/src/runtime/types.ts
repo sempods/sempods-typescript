@@ -163,7 +163,7 @@ export interface StartupReport {
    * narrowed them meanwhile, which the next renewal or Context check shows.
    * Absent when no session was kept, also for a callback that did not
    * consume its attempt (forged, unmatched or waited for too long).
-   * Since 0.10.0 also for `failed`; before, only a denial kept the session.
+   * Since 0.9.0 also for `failed`; before, only a denial kept the session.
    */
   readonly resumed?: true;
   /** The returning sign-in's outcome; `none` without a callback, even when startup fails. */
