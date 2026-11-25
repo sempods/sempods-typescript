@@ -169,14 +169,22 @@ export interface FlatFindGraph {
 /**
  * One response-local observation (SPS-FIND-028): how the Pod says it found a
  * hit. Optional and implementation-specific; a hit can have none, one or
- * several. Identity is the object: the answer's blank-node label is not
- * kept, so observations of two answers or two Pods never merge. Placement
- * records where the Pod put a statement, not where the search matched.
+ * several. Placement records where the Pod put a statement, not where the
+ * search matched.
  */
 export interface FindObservation {
+  /**
+   * A blank-node label unique to this answer: the `@id` by which `details`
+   * name another observation. The Pod's own label is not kept, so
+   * observations of two answers or two Pods never merge.
+   */
+  readonly id: string;
   /** The hits linking to this observation, with each link's group. */
   readonly links: readonly FindLink[];
-  /** The observation's statements, per group, as answered and without `@id`. */
+  /**
+   * The observation's statements, per group, without `@id`; statements that
+   * name it from the other side are under `@reverse`.
+   */
   readonly details: readonly FindDetail[];
   /** `schema:text` excerpts across `details`. */
   readonly text: readonly string[];

@@ -24,6 +24,10 @@ const challenge = () =>
 const sent = (fetch: ReturnType<typeof vi.fn<PodFetch>>, call = 0) =>
   JSON.parse(String(fetch.mock.calls[call]?.[1]?.body)) as unknown;
 
+/** An answer with its per-answer blank-node labels made comparable. */
+const stable = (answer: unknown) =>
+  JSON.parse(JSON.stringify(answer).replace(/_:a\d+-/g, '_:')) as unknown;
+
 describe('Pod find requests', () => {
   it.each<[string, FindOptions, unknown]>([
     ['the whole readable Pod', {}, { text: 'konzert', include_contexts: true }],
@@ -589,7 +593,7 @@ describe('Pod find requests', () => {
       });
       return [await pod.find('x'), await flatPod.findFlat('x')];
     };
-    expect(await read(reverse)).toEqual(await read(forward));
+    expect(stable(await read(reverse))).toEqual(stable(await read(forward)));
     const [grouped, flat] = await read(bare);
     expect(grouped).toMatchObject({
       kind: 'ok',
@@ -693,8 +697,8 @@ describe('Pod find requests', () => {
     expect(expected[1]).toMatchObject({
       body: { nodes: [{ '@id': hit }], observations: [{ text: ['Konzert'] }] },
     });
-    expect(await read(wrapped)).toEqual(expected);
-    expect(await read(reverse)).toEqual(expected);
+    expect(stable(await read(wrapped))).toEqual(stable(expected));
+    expect(stable(await read(reverse))).toEqual(stable(expected));
   });
 
   it('projects @set-wrapped details like plain arrays', async () => {
@@ -774,7 +778,7 @@ describe('Pod find requests', () => {
         observations: [{ text: ['first'] }, { text: ['second'] }],
       },
     });
-    expect(await read(embedded)).toEqual(expected);
+    expect(stable(await read(embedded))).toEqual(stable(expected));
   });
 
   it('extracts an observation of a hit that names an observation with @reverse', async () => {
@@ -919,6 +923,24 @@ describe('Pod find requests', () => {
         auth: bearer('test'),
         fetch: async () => jsonLd(graph),
       }).findFlat('x');
-    expect(await read(included)).toEqual(await read(separate));
+    expect(stable(await read(included))).toEqual(stable(await read(separate)));
+  });
+
+  it('keeps a statement from one observation to another, by its id', async () => {
+    const part = 'https://schema.org/isPartOf';
+    const answer = await createPod(base, {
+      auth: bearer('test'),
+      fetch: async () =>
+        jsonLd([
+          { '@id': `${base}/e1`, [FIND_RESULT]: [{ '@id': '_:a' }] },
+          { '@id': `${base}/e2`, [FIND_RESULT]: [{ '@id': '_:b' }] },
+          { '@id': '_:a', [part]: [{ '@id': '_:b' }] },
+        ]),
+    }).findFlat('x');
+    if (answer.kind !== 'ok') throw new Error(answer.kind);
+    const [a, b] = answer.body.observations;
+    expect(a!.details).toEqual([{ node: { [part]: [{ '@id': b!.id }] } }]);
+    expect(a!.id).not.toBe(b!.id);
+    expect(b!.details).toEqual([]);
   });
 });

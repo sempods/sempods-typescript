@@ -157,8 +157,8 @@ describe('shared Find acceptance cases', () => {
       const body = await ok(pod.find(c.request.text, optionsOf(c.request)));
       expect(sent(fetch)).toEqual({ ...c.request, include_contexts: true });
       expect(isomorphic(dataset(body), c.grouped!.nquads)).toBe(true);
-      // No response-local label reaches the app as a resource or an id.
-      expect(JSON.stringify(body)).not.toMatch(/"_:/);
+      // No observation label reaches the pod data.
+      expect(JSON.stringify(body.map((g) => g.nodes))).not.toMatch(/"_:/);
     },
   );
 
@@ -167,7 +167,7 @@ describe('shared Find acceptance cases', () => {
     const body = await ok(pod.findFlat(c.request.text, optionsOf(c.request)));
     expect(sent(fetch)).toEqual(c.request);
     expect(isomorphic(dataset([body]), c.flat.nquads)).toBe(true);
-    expect(JSON.stringify(body)).not.toMatch(/"_:/);
+    expect(JSON.stringify(body.nodes)).not.toMatch(/"_:/);
   });
 
   it.each(cases.filter(([, c]) => c.grouped && c.grouped.nquads.trim()))(
@@ -214,6 +214,7 @@ describe('observations in the shared cases', () => {
       observations: [observation],
     });
     expect(observation).toEqual({
+      id: expect.stringMatching(/^_:a\d+-/),
       links: [{ hit, context: A }],
       details: [],
       text: [],
@@ -238,6 +239,7 @@ describe('observations in the shared cases', () => {
     ]);
     expect(inB!.observations).toEqual([
       {
+        id: expect.stringMatching(/^_:a\d+-/),
         links: [{ hit, context: B }],
         details: [
           {
@@ -300,7 +302,11 @@ describe('observations in the shared cases', () => {
     const { pod } = answering(fixtures['bare']!.grouped!.jsonld);
     const [first] = await ok(pod.find('x'));
     const [second] = await ok(pod.find('x'));
-    expect(second!.observations[0]).toEqual(first!.observations[0]);
-    expect(second!.observations[0]).not.toBe(first!.observations[0]);
+    const { id: firstId, ...firstRest } = first!.observations[0]!;
+    const { id: secondId, ...secondRest } = second!.observations[0]!;
+    expect(secondRest).toEqual(firstRest);
+    // The Pod's label `_:m` is not kept: each answer has its own.
+    expect(secondId).not.toBe(firstId);
+    expect(firstId).not.toBe('_:m');
   });
 });

@@ -238,6 +238,10 @@ it('invalidates a flat find answered after a disconnect', async () => {
   expect(await pending).toEqual({ kind: 'invalidated' });
 });
 
+/** An answer with its per-answer blank-node labels made comparable. */
+const stable = (answer: unknown) =>
+  JSON.parse(JSON.stringify(answer).replace(/_:a\d+-/g, '_:')) as unknown;
+
 /** The shared Find cases (sempods-spec#147), moved under this fixture's Pod. */
 const shared = Object.entries(
   JSON.parse(
@@ -284,8 +288,8 @@ it.each(shared)(
         sent.push(body(init));
         return Response.json(c.grouped!.jsonld);
       });
-      expect(await f.reader.find(text, options)).toEqual(
-        await direct(c.grouped.jsonld).find(text, options),
+      expect(stable(await f.reader.find(text, options))).toEqual(
+        stable(await direct(c.grouped.jsonld).find(text, options)),
       );
       expect(sent.pop()).toEqual({ ...c.request, include_contexts: true });
     }
@@ -293,8 +297,8 @@ it.each(shared)(
       sent.push(body(init));
       return Response.json(c.flat.jsonld);
     });
-    expect(await f.reader.findFlat(text, options)).toEqual(
-      await direct(c.flat.jsonld).findFlat(text, options),
+    expect(stable(await f.reader.findFlat(text, options))).toEqual(
+      stable(await direct(c.flat.jsonld).findFlat(text, options)),
     );
     expect(sent.pop()).toEqual(c.request);
     if (c.invalid) {

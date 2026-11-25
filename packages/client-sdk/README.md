@@ -226,8 +226,9 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
   value stays in `details`. An observation carries each link and its
   statements per Context, with statements that name it from the other side
   under `@reverse`. One that is repeated or split across groups is the same
-  object in each group. Its blank-node label is not kept, so observations of
-  two answers or two Pods never merge. A Context records where the Pod placed
+  object in each group. Its `id` is a blank-node label unique to the answer,
+  by which `details` name another observation; the Pod's own label is not
+  kept, so observations of two answers or two Pods never merge. A Context records where the Pod placed
   the statement, not where the search matched. A stored `sps:findResult` to an
   IRI stays in `nodes` and its source Context.
 - The request is always `POST`; `find` adds `include_contexts`. An

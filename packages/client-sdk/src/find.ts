@@ -233,6 +233,7 @@ interface Built {
 }
 
 interface Building {
+  readonly id: string;
   readonly links: FindLink[];
   readonly graphs: Set<Graph>;
   readonly details: Map<Graph, Record<string, unknown>>;
@@ -253,6 +254,8 @@ let answers = 0;
  * its link, so a bare link still names it.
  */
 function build(quads: readonly Quad[], graphs: readonly Graph[]): Built[] {
+  const answer = answers++;
+  const label = (id: string) => `_:a${answer}-${id}`;
   const observed = new Map<string, Building>();
   for (const { s, p, o } of quads)
     if (
@@ -261,17 +264,21 @@ function build(quads: readonly Quad[], graphs: readonly Graph[]): Built[] {
       o.kind === 'blank' &&
       !observed.has(o.id)
     )
-      observed.set(o.id, { links: [], graphs: new Set(), details: new Map() });
+      observed.set(o.id, {
+        id: label(o.id),
+        links: [],
+        graphs: new Set(),
+        details: new Map(),
+      });
   const isObservation = (term: Term): term is Subject & { kind: 'blank' } =>
     term.kind === 'blank' && observed.has(term.id);
 
-  const answer = answers++;
   const value = (term: Term): JsonLd => {
     switch (term.kind) {
       case 'iri':
         return { '@id': term.value };
       case 'blank':
-        return { '@id': `_:a${answer}-${term.id}` };
+        return { '@id': label(term.id) };
       case 'literal':
         return term.value;
       case 'list':
@@ -312,8 +319,8 @@ function build(quads: readonly Quad[], graphs: readonly Graph[]): Built[] {
       entry.graphs.add(g);
       nodeIn(g, s);
     } else if (isObservation(s)) {
-      // A statement between two observations has no place in either.
-      if (!isObservation(o)) add(detailIn(observed.get(s.id)!, g), p, o);
+      // Another observation is named by its `id`.
+      add(detailIn(observed.get(s.id)!, g), p, o);
     } else if (isObservation(o)) {
       // A statement that names an observation from the other side.
       const detail = detailIn(observed.get(o.id)!, g);
@@ -357,6 +364,7 @@ function freezeObservation(entry: Building): FindObservation {
   const values = (predicate: string) =>
     details.flatMap(({ node }) => list(node[predicate]));
   return Object.freeze({
+    id: entry.id,
     links: Object.freeze([...entry.links]),
     details,
     text: Object.freeze(values(SCHEMA_TEXT).flatMap(stringOf)),
