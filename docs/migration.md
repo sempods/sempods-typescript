@@ -4,41 +4,10 @@ Use this guide when moving an older frontend onto app-sdk, changing a deployment
 identity or updating a preview SDK. It describes a deliberate migration, not an
 automatic conversion of legacy app data or stored credentials.
 
-## From 0.9.0 to 0.10.0
-
-0.10.0 is not released yet; this section collects its upgrade steps.
-
-### Re-authorization keeps the session
-
-**Change sharing** and any other sign-in of a signed-in connection store
-their attempt beside the session, which keeps working in every tab until a
-validated callback replaces it
-([re-authorization](browser-runtime.md#configure-initialize-connect)). Other tabs no
-longer show that connection `ended { problem: 'interrupted' }` while one tab
-is at the Pod, and coming back without a callback restores the session at
-once, also in a tab opened from that one. A test that expected `interrupted`
-there expects the session instead.
-
-A failed re-authorization callback (another provider error, a refused code, a
-lost code answer) keeps the session too: the report is `failed` with
-`resumed: true`, where 0.9 ended the connection. An app that reads
-`startup.resumed` as "access unchanged" stops doing so: it only says that
-the session is in use again. The default `controls.sharingUnchanged` text now
-says that the change was not confirmed; an app with its own text reviews it.
-
-The SDK no longer writes a note to `history.state` or `tabStorage` for a
-sign-in it leaves for; a router's state stays as the app left it. A silent
-first sign-in under way is stored as such and shows `signed-out` in every tab
-instead of `interrupted`; a click on **Sign in** replaces it.
-
-Records of SDK 0.6 to 0.9 are read as before. A tab of 0.9 beside one of
-0.10 ignores a pending attempt and drops it with its next renewal; that
-attempt's callback then fails with `attempt`, and the session stays.
-
 ## From 0.8.0 to 0.9.0
 
 0.9.0 is not released yet; this section collects its upgrade steps. The
-prerelease `0.9.0-dev.3` carries them, and the [0.9.0 release
+prerelease `0.9.0-dev.4` carries them, and the [0.9.0 release
 notes](releases/0.9.0.md) list the changes.
 
 ### Find observations, the flat form and a type filter
@@ -405,6 +374,29 @@ wait while the lock is held, until its `signal` aborts; the session lease is
 requested with `mode: 'shared'` for a store with `watch`. An injected
 `openStore` keeps one active tab unless its store implements `watch`. See
 [several tabs](browser-runtime.md#several-tabs).
+
+### Re-authorization keeps the session
+
+**Change sharing** and any other sign-in of a signed-in connection store
+their attempt beside the session, which keeps working in every tab until a
+validated callback replaces it
+([re-authorization](browser-runtime.md#configure-initialize-connect)).
+Coming back without a callback restores the session at once, also in a tab
+opened from that one.
+
+A failed re-authorization callback (another provider error, a refused code, a
+lost code answer) keeps the session too: the report is `failed` with
+`resumed: true`, where 0.8 ended the connection. An app that reads
+`startup.resumed` as "access unchanged" stops doing so: it only says that
+the session is in use again. The default `controls.sharingUnchanged` text now
+says that the change was not confirmed; an app with its own text reviews it.
+
+A silent first sign-in under way is stored as such and shows `signed-out` in
+every tab; a click on **Sign in** replaces it. Records of earlier SDKs are
+read as before. A tab of an earlier SDK beside one of 0.9.0 ignores a pending
+attempt and drops it with its next renewal; that attempt's callback then
+fails with `attempt`, and the session stays. The prerelease after
+`0.9.0-dev.3` carries this.
 
 ### Confirmed modification time on list rows
 

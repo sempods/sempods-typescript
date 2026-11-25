@@ -96,7 +96,7 @@ cancelled callback that matched a stored attempt, `attemptConnectionId` names
 that connection, also when discovery failed before the attempt was claimed.
 
 A re-authorization of a signed-in connection stores its attempt beside the
-session (0.10.0). The session keeps working meanwhile, in every tab: it reads,
+session (0.9.0). The session keeps working meanwhile, in every tab: it reads,
 writes and renews within its granted permissions. Only a validated callback,
 once stored, replaces it; any other outcome drops the attempt and leaves the
 session as it is:
@@ -135,10 +135,10 @@ once an attempt ends without a new grant (also one a newer attempt
 replaces, expired or not), also a tab that missed it in the back/forward
 cache, and after any catalogue read that was under way then.
 
-Records of SDK 0.6 to 0.9 kept the session as `previous` of its attempt; 0.10
-reads them as the session with the attempt pending and stores the new shape
-with its next write. A tab of SDK 0.9 beside one of 0.10 ignores the pending
-attempt and drops it with its next renewal: the session stays, and that
+Records of SDK 0.6 to 0.8 and of the prereleases up to 0.9.0-dev.3 kept the
+session as `previous` of its attempt; 0.9.0 reads them as the session with the
+attempt pending and stores the new shape with its next write. A tab of an
+earlier SDK beside one of 0.9.0 ignores the pending attempt and drops it with its next renewal: the session stays, and that
 attempt's callback fails with `attempt`. Records written by SDK 0.5 have no
 earlier session.
 

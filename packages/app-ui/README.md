@@ -57,7 +57,7 @@ layer statement puts the SDK's own styles (layer `sempods`) above Tailwind's
 reset and below the utilities: package components keep their look inside SDK
 surfaces such as the `ResourceEditor`, and the SDK's confirmations stay
 centred. The SDK's
-[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#cascade-layer-order)
+[cascade layer guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.4/docs/react-authoring.md#cascade-layer-order)
 (installed as `node_modules/@sempods/app-sdk/docs/react-authoring.md`)
 explains the order and which app rules still override SDK rules.
 
@@ -703,7 +703,7 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
   no icon legend. That describes the component, not a rule for apps: an app
   may still offer its own sharing entry, for example in a `HeaderMenu`, with
   `useContexts().share()` beside `ContextSwitch`
-  ([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#changing-what-the-app-may-access),
+  ([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.4/docs/react-authoring.md#changing-what-the-app-may-access),
   installed as `node_modules/@sempods/app-sdk/docs/react-authoring.md`).
 
   The trigger keeps the app icon the same size and places the chevron beside
@@ -1175,7 +1175,7 @@ font size, always decorative (`aria-hidden`). Both draw the same outline at
 the same size, without an icon import or size of the app's own. Each button's
 name says what it deletes, and the app decides which rows the bulk action
 includes; its confirmation follows the
-[clear-done recipes](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#several-rows-from-one-decision).
+[clear-done recipes](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.4/docs/react-authoring.md#several-rows-from-one-decision).
 `RemoveButton`'s children replace its icon, for example a text.
 
 ```tsx
@@ -1244,7 +1244,7 @@ stays inside it, so an enclosing dialog stays open.
 The app owns the trigger and any deep link, the field mapping and
 validation, which name Save may write over, what a dismissal keeps and its own
 list actions. Write with the row's `useFieldUpdate` command; the
-[authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#renaming-one-value-in-a-row)
+[authoring guide](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.4/docs/react-authoring.md#renaming-one-value-in-a-row)
 explains the recipe. Here a dismissal parks a changed name, marked in its
 row and guarded, and the next rename resumes it; `useRename` is the write
 rule that the app's other renames share:
@@ -1668,7 +1668,7 @@ export function ListMenu({ shareMore }: { readonly shareMore: () => void }) {
 `useApp().authorize(id, { intent: 'change-sharing' })` for a given Pod, so the
 Pod shows its consent page even when it could reuse the grant. A plain
 `authorize(id)` is a sign-in and may return without asking
-([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/docs/react-authoring.md#changing-what-the-app-may-access),
+([changing sharing](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.4/docs/react-authoring.md#changing-what-the-app-may-access),
 installed as `node_modules/@sempods/app-sdk/docs/react-authoring.md`).
 `share()` never rejects; show `useContexts().shareProblem` beside the menu.
 
@@ -1995,7 +1995,7 @@ export function TaskNotes({
 ```
 
 A text read in a preferred language variant
-([recipe](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant))
+([recipe](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.4/packages/client-sdk/README.md#show-and-edit-a-preferred-language-variant))
 passes that variant's text and replaces only it:
 `value={draft.notes.value ?? ''}` and
 `onChange={(notes) => change({ ...draft, notes: editTextVariant(draft.notes, notes === '' ? null : notes) })}`.
