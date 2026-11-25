@@ -212,7 +212,10 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
   `@included`, `@nest`, single values or arrays. A relative reference
   resolves against the Find URL, as in JSON-LD expansion. A local `@context` that could change
   a key or value rejects with `response/body` rather than being misread;
-  `null`, `{}` and lists of them are accepted. `nodes` are the Pod's data in one canonical form: one flattened node
+  `null`, `{}` and lists of them are accepted. Invalid JSON-LD, such as a
+  value object with an `@id` or a non-string `@language`, rejects the same
+  way, and so does what JSON-LD would only drop: a free-floating value or an
+  ill-formed language tag. IRIs are taken as given. `nodes` are the Pod's data in one canonical form: one flattened node
   object per subject and group, `@type` an array of IRIs, every other
   property an array of `{"@id"}`, `{"@value"}` or `{"@list"}` objects. Blank
   nodes of pod data get labels unique to the answer. A hit's type and label
