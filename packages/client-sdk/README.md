@@ -209,16 +209,23 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
 - The SDK reads expanded JSON-LD, as the Pod answers. A local `@context` that
   could change what a key means rejects with `response/body` rather than
   being misread; `null`, `{}` and lists of them are accepted.
-- `nodes` are the Pod's data as answered, not guaranteed to have the canonical
-  resource shape. A hit's type and label are optional: a hit can be a node with
-  only `@id`. There is no marker that separates a hit from its expansion.
+- The SDK reads the answer by the RDF it encodes, so every JSON-LD
+  serialization of the same statements gives the same result: embedded or
+  separate nodes, `@reverse`, `@set`, `@list`, `@included`, single values or
+  arrays. `nodes` are the Pod's data in one canonical form: one flattened node
+  object per subject and group, `@type` an array of IRIs, every other
+  property an array of `{"@id"}`, `{"@value"}` or `{"@list"}` objects. Blank
+  nodes of pod data get labels unique to the answer. A hit's type and label
+  are optional: a hit can be a node with only `@id`. There is no marker that
+  separates a hit from its expansion.
 - The Pod may describe how it found a hit: a blank node linked with
   `sps:findResult`, with an excerpt (`schema:text`), a 1-based position
   (`schema:position`) or an engine (`sps:engine`). The SDK moves these
-  observations out of `nodes` into typed `observations`, also from hits
-  embedded in another node or links written with `@reverse`; ignore them if you need no more than the hits.
-  `position` keeps only positive integers; every value stays in `details`. An observation carries each link and detail
-  with its Context. One that is repeated or split across groups is the same
+  observations out of `nodes` into typed `observations`; ignore them if you
+  need no more than the hits. `position` keeps only positive integers; every
+  value stays in `details`. An observation carries each link and its
+  statements per Context, with statements that name it from the other side
+  under `@reverse`. One that is repeated or split across groups is the same
   object in each group. Its blank-node label is not kept, so observations of
   two answers or two Pods never merge. A Context records where the Pod placed
   the statement, not where the search matched. A stored `sps:findResult` to an

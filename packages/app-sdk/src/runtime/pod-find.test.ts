@@ -31,12 +31,13 @@ afterEach(() => {
 });
 const keep = (runtime: BrowserRuntime) => void runtimes.push(runtime);
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
+const EVENT = 'https://schema.org/Event';
 /** A Find answer naming one hit in `context` of the Pod at `base`. */
 const hit = (base: string, name: string, context = 'work') =>
   Response.json([
     {
       '@id': `${base}/_system/contexts/${context}`,
-      '@graph': [{ '@id': `${base}/${name}` }],
+      '@graph': [{ '@id': `${base}/${name}`, '@type': [EVENT] }],
     },
   ]);
 const body = (init?: RequestInit) => JSON.parse(String(init?.body)) as unknown;
@@ -68,7 +69,11 @@ it('sends the text, downscope and limit unchanged, never the read priority', asy
   ).toEqual({
     kind: 'ok',
     body: [
-      { context: work, nodes: [{ '@id': `${pod}/e1` }], observations: [] },
+      {
+        context: work,
+        nodes: [{ '@id': `${pod}/e1`, '@type': [EVENT] }],
+        observations: [],
+      },
     ],
   });
   const [url, init] = findCall(f);

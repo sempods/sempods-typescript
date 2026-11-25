@@ -11,17 +11,41 @@ import type {
 
 /** `sps:findResult` (SPS-FIND-028): links a hit to one observation. */
 export const FIND_RESULT = 'https://schema.sempods.org/findResult';
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const SCHEMA_TEXT = 'https://schema.org/text';
 const SCHEMA_POSITION = 'https://schema.org/position';
 const SPS_ENGINE = 'https://schema.sempods.org/engine';
 
+/*
+ * A Find answer is read by the RDF it encodes, not by its JSON shape: the
+ * document becomes quads first, so every serialization of one dataset
+ * (embedded or separate nodes, `@reverse`, `@set`, `@list`, `@included`,
+ * scalar or array values) gives the same result. `nodes` and the
+ * observations are then built from those quads.
+ */
+
+type Subject =
+  | { readonly kind: 'iri'; readonly value: string }
+  | { readonly kind: 'blank'; readonly id: string };
+type Term =
+  | Subject
+  | { readonly kind: 'literal'; readonly value: JsonLd }
+  | { readonly kind: 'list'; readonly items: readonly Term[] };
+/** `undefined` is the default graph. */
+type Graph = string | undefined;
+interface Quad {
+  readonly s: Subject;
+  readonly p: string;
+  readonly o: Term;
+  readonly g: Graph;
+}
+
 /**
  * Named-graph JSON-LD (SPS-FIND-027): one group object or an array of them,
  * each naming a Context of this Pod inside the requested downscope
- * (SPS-FIND-010). Graph membership follows the RDF the document encodes: a
- * statement in the default graph, under a blank graph name or in a graph
- * nested in a node, also a bare observation, makes the whole answer
- * untrusted. Serializations without statements, such as `{}`, are empty.
+ * (SPS-FIND-010). A statement in the default graph or a graph with a blank
+ * name, also a bare observation, rejects the whole answer, and so does a
+ * graph nested below a group. Groups that name the same Context merge.
  */
 export function decodeGroupedFind(
   body: unknown,
@@ -29,314 +53,307 @@ export function decodeGroupedFind(
   scope: readonly string[] | undefined,
 ): readonly FindGraph[] {
   const requested = scope && new Set(scope);
-  const groups: Group[] = [];
-  for (const item of Array.isArray(body) ? body : [body]) {
-    if (!isNode(item)) throw invalid();
-    checkContext(item);
-    if (!Object.hasOwn(item, '@graph')) {
-      // A node of the default graph: allowed only while it states nothing.
-      checkNode(item);
-      if (hasStatements(item)) throw invalid();
-      continue;
-    }
-    const context = item['@id'];
-    const nodes = graphOf(item);
-    if (!Object.keys(item).every(isGroupKey)) throw invalid();
-    if (context === undefined && !Array.isArray(body)) {
-      // The top-level wrapper is the default graph.
-      if (nodes.some(hasStatements)) throw invalid();
-      continue;
-    }
+  const reader = new Reader(true);
+  reader.document(body);
+  for (const name of reader.names)
     if (
-      typeof context !== 'string' ||
-      !isContextIri(context, base) ||
-      (requested && !requested.has(context))
+      name === undefined ||
+      !isContextIri(name, base) ||
+      (requested && !requested.has(name))
     )
       throw invalid();
-    groups.push({ context, nodes });
-  }
+  if (reader.quads.some((quad) => quad.g === undefined)) throw invalid();
   return Object.freeze(
-    observe(groups).map(({ context, nodes, observations }) =>
-      Object.freeze({ context: context as string, nodes, observations }),
+    build(reader.quads, reader.names).map(({ graph, nodes, observations }) =>
+      Object.freeze({ context: graph as string, nodes, observations }),
     ),
   );
 }
 
 /**
- * A graph without graph names (SPS-FIND-026): an array of node objects, one
- * node object, or a default-graph `{"@graph": …}`. A named graph, also one
- * nested in a node, rejects the answer, and so does any statement for an
- * explicitly empty downscope. Serializations without statements are empty.
+ * A graph without graph names (SPS-FIND-026): node objects, one node object
+ * or a default-graph `{"@graph": …}`. Any named graph rejects the answer,
+ * and so does any statement for an explicitly empty downscope.
  */
 export function decodeFlatFind(
   body: unknown,
   scope: readonly string[] | undefined,
 ): FlatFindGraph {
-  let nodes: readonly JsonLd[];
-  if (Array.isArray(body)) {
-    for (const item of body) checkNode(item);
-    nodes = body as readonly JsonLd[];
-  } else if (isNode(body) && Object.hasOwn(body, '@graph')) {
-    checkContext(body);
-    if (
-      !Object.keys(body).every((key) => key === '@graph' || key === '@context')
-    )
-      throw invalid();
-    nodes = graphOf(body);
-  } else {
-    checkNode(body);
-    nodes = [body as JsonLd];
-  }
-  if (scope?.length === 0 && nodes.some(hasStatements)) throw invalid();
-  const [decoded] = observe([{ context: undefined, nodes }]);
+  const reader = new Reader(false);
+  reader.document(body);
+  if (scope?.length === 0 && reader.quads.length > 0) throw invalid();
+  const [built] = build(reader.quads, [undefined]);
   return Object.freeze({
-    nodes: decoded!.nodes,
-    observations: decoded!.observations,
+    nodes: built!.nodes,
+    observations: built!.observations,
   });
 }
 
-interface Group {
-  readonly context: string | undefined;
+/**
+ * Expanded JSON-LD to quads (JSON-LD 1.1 toRdf for documents without an
+ * active context). Blank-node labels are scoped to this answer.
+ */
+class Reader {
+  readonly quads: Quad[] = [];
+  /** Named graphs in order of appearance; a blank name is `undefined`. */
+  readonly names: Graph[] = [];
+  private readonly seen = new Set<string>();
+  private readonly subjects = new WeakMap<JsonLd, Subject>();
+  /** Embedded nodes read after the statement that embeds them. */
+  private readonly pending: (() => void)[] = [];
+  private fresh = 0;
+
+  constructor(private readonly grouped: boolean) {}
+
+  document(body: unknown): void {
+    if (
+      isNode(body) &&
+      Object.hasOwn(body, '@graph') &&
+      Object.keys(body).every((key) => key === '@graph' || key === '@context')
+    ) {
+      // The top-level wrapper is the default graph.
+      checkContext(body);
+      for (const node of list(body['@graph'])) this.node(node, undefined);
+    } else
+      for (const node of Array.isArray(body) ? body : [body]) this.top(node);
+  }
+
+  private top(value: unknown): void {
+    if (!isNodeObject(value)) throw invalid();
+    if (!Object.hasOwn(value, '@graph')) {
+      this.node(value, undefined);
+      return;
+    }
+    // A named graph: a group states nothing about itself.
+    if (!this.grouped || !Object.keys(value).every(isGroupKey)) throw invalid();
+    checkContext(value);
+    const own = value['@id'];
+    if (own !== undefined && typeof own !== 'string') throw invalid();
+    const name = own === undefined || own.startsWith('_:') ? undefined : own;
+    if (!this.names.includes(name)) this.names.push(name);
+    if (name === undefined) throw invalid();
+    for (const node of list(value['@graph'])) this.node(node, name);
+  }
+
+  /** One node object in `graph`, also every node object it embeds. */
+  private node(value: unknown, graph: Graph): void {
+    if (!isNodeObject(value) || Object.hasOwn(value, '@graph')) throw invalid();
+    checkContext(value);
+    const subject = this.subjectOf(value);
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === '@type') {
+        for (const type of list(entry)) {
+          if (typeof type !== 'string') throw invalid();
+          this.emit(subject, RDF_TYPE, reference(type), graph);
+        }
+      } else if (key === '@reverse') {
+        if (!isNode(entry)) throw invalid();
+        for (const [predicate, values] of Object.entries(entry))
+          for (const item of list(values)) {
+            if (!isNodeObject(item)) throw invalid();
+            if (isPredicate(predicate))
+              this.emit(this.subjectOf(item), predicate, subject, graph);
+            this.node(item, graph);
+          }
+      } else if (key === '@included') {
+        for (const item of list(entry)) this.node(item, graph);
+      } else if (!key.startsWith('@') && isPredicate(key)) {
+        for (const item of list(entry)) {
+          const object = this.object(item, graph);
+          if (object) this.emit(subject, key, object, graph);
+          else this.flush();
+        }
+      }
+    }
+  }
+
+  /** A property value as a term; an embedded node object is read after it. */
+  private object(value: unknown, graph: Graph): Term | undefined {
+    if (Array.isArray(value)) throw invalid();
+    if (!isNode(value))
+      return value === null ? undefined : literal({ '@value': value });
+    if (Object.hasOwn(value, '@value')) {
+      if (value['@value'] === null) return undefined;
+      const rest = { ...value };
+      delete rest['@index'];
+      return literal(rest);
+    }
+    if (Object.hasOwn(value, '@list')) {
+      const items: Term[] = [];
+      for (const item of list(value['@list'])) {
+        const term = this.object(item, graph);
+        if (term) items.push(term);
+      }
+      return { kind: 'list', items };
+    }
+    const subject = this.subjectOf(value);
+    this.pending.push(() => this.node(value, graph));
+    return subject;
+  }
+
+  private emit(s: Subject, p: string, o: Term, g: Graph): void {
+    const key = JSON.stringify([termKey(s), p, termKey(o), g ?? null]);
+    if (!this.seen.has(key)) {
+      this.seen.add(key);
+      this.quads.push({ s, p, o, g });
+    }
+    this.flush();
+  }
+
+  private flush(): void {
+    for (const run of this.pending.splice(0)) run();
+  }
+
+  /** One subject per node object; one without `@id` is a fresh blank node. */
+  private subjectOf(value: JsonLd): Subject {
+    let subject = this.subjects.get(value);
+    if (!subject) {
+      const id = value['@id'];
+      if (id !== undefined && typeof id !== 'string') throw invalid();
+      subject =
+        id === undefined
+          ? { kind: 'blank', id: `f${this.fresh++}` }
+          : reference(id);
+      this.subjects.set(value, subject);
+    }
+    return subject;
+  }
+}
+
+function reference(id: string): Subject {
+  return id.startsWith('_:')
+    ? { kind: 'blank', id: `b${id.slice(2)}` }
+    : { kind: 'iri', value: id };
+}
+
+interface Built {
+  readonly graph: Graph;
   readonly nodes: readonly JsonLd[];
+  readonly observations: readonly FindObservation[];
 }
 
 interface Building {
   readonly links: FindLink[];
-  readonly details: FindDetail[];
-  readonly groups: Set<string | undefined>;
+  readonly graphs: Set<Graph>;
+  readonly details: Map<Graph, Record<string, unknown>>;
 }
 
-/** Marks an embedded observation that left its place for `details`. */
-const MOVED = Symbol('moved');
+/** Counts answers, so pod blank nodes of two answers never share a label. */
+let answers = 0;
 
 /**
- * Separates generated observations from pod data across the whole answer,
- * also inside embedded node objects. A `sps:findResult` value that is a
- * blank node is an observation link; an IRI value is a stored statement and
- * stays (SPS-FIND-027). Blank-node labels identify one node within this
- * answer only: a link in one group and details in another are one
- * observation, and no label leaves this function, so two answers never
- * share an observation. A node without observations stays as answered.
+ * Splits the quads into pod data and generated observations (SPS-FIND-028).
+ * A blank node that an IRI links to with `sps:findResult` is an
+ * observation; that link, the observation's own statements and statements
+ * naming it as their object are find statements. An IRI value of
+ * `sps:findResult` is a stored statement (SPS-FIND-027). Everything else is
+ * pod data: one flattened node object per subject and graph, with `@type`
+ * an array and every value an array of `{"@id"}`, `{"@value"}` or
+ * `{"@list"}` objects. A hit appears as a node in each group that carries
+ * its link, so a bare link still names it.
  */
-function observe(groups: readonly Group[]): readonly (Group & {
-  readonly observations: readonly FindObservation[];
-})[] {
-  const labelled = new Map<string, Building>();
-  const order: Building[] = [];
-  const start = (): Building => {
-    const entry: Building = { links: [], details: [], groups: new Set() };
-    order.push(entry);
-    return entry;
-  };
-  const discover = (node: JsonLd): void => {
-    if (isHit(node))
-      for (const value of findResults(node)) {
-        const label = blankLabel(value);
-        if (label && !labelled.has(label)) labelled.set(label, start());
-      }
-    // The same link, written from the observation with `@reverse`.
-    const own = blankLabel(node);
-    if (own && reverseHits(node).length > 0 && !labelled.has(own))
-      labelled.set(own, start());
-    for (const child of embedded(node)) discover(child);
-  };
-  for (const { nodes } of groups) nodes.forEach(discover);
+function build(quads: readonly Quad[], graphs: readonly Graph[]): Built[] {
+  const observed = new Map<string, Building>();
+  for (const { s, p, o } of quads)
+    if (
+      s.kind === 'iri' &&
+      p === FIND_RESULT &&
+      o.kind === 'blank' &&
+      !observed.has(o.id)
+    )
+      observed.set(o.id, { links: [], graphs: new Set(), details: new Map() });
+  const isObservation = (term: Term): term is Subject & { kind: 'blank' } =>
+    term.kind === 'blank' && observed.has(term.id);
 
-  const stripped = groups.map(({ context, nodes }) => {
-    const item = (value: unknown): unknown => {
-      if (!isNode(value) || '@value' in value) return value;
-      for (const key of ['@list', '@set'])
-        if (Object.hasOwn(value, key)) {
-          const inner = values(value[key]);
-          return inner === value[key] ? value : { ...value, [key]: inner };
-        }
-      const own = blankLabel(value);
-      const observation =
-        own === undefined
-          ? undefined
-          : own
-            ? labelled.get(own)
-            : reverseHits(value).length > 0
-              ? start()
-              : undefined;
-      if (observation) {
-        absorb(value, observation);
-        return MOVED;
-      }
-      return strip(value);
-    };
-    /**
-     * An observation node: its reverse `sps:findResult` links are links like
-     * forward ones, and a hit they name is a node of this group.
-     */
-    const absorb = (value: JsonLd, entry: Building): void => {
-      let node = value;
-      const reverse = value['@reverse'];
-      if (isNode(reverse) && Object.hasOwn(reverse, FIND_RESULT)) {
-        const all = list(reverse[FIND_RESULT]);
-        for (const hit of all.filter(isHitValue)) {
-          entry.links.push(
-            Object.freeze(
-              context === undefined
-                ? { hit: hit['@id'] }
-                : { hit: hit['@id'], context },
-            ),
-          );
-          entry.groups.add(context);
-          const facts = without(hit, '@id');
-          if (Object.keys(facts).length > 0) extra.push(strip(hit));
-          else named.add(hit['@id']);
-        }
-        const rest = without(reverse, FIND_RESULT);
-        const others = all.filter((v) => !isHitValue(v));
-        const next =
-          others.length > 0 ? { ...rest, [FIND_RESULT]: others } : rest;
-        node =
-          Object.keys(next).length > 0
-            ? { ...value, '@reverse': next }
-            : without(value, '@reverse');
-      }
-      node = settle(node);
-      if (Object.keys(without(node, '@id')).length > 0) {
-        entry.details.push(detail(context, node));
-        entry.groups.add(context);
-      }
-    };
-    /**
-     * An observation's own statements. A resource it embeds is pod data: its
-     * description moves to the group's nodes, as if written separately, and
-     * a reference stays; embedded observations are extracted.
-     */
-    const settle = (node: JsonLd): JsonLd => {
-      let changed = false;
-      const out: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(node)) {
-        if (key === '@reverse' && isNode(value)) {
-          // The same for resources that name the observation from their side.
-          const reverse = settle(value);
-          changed ||= reverse !== value;
-          out[key] = reverse;
-          continue;
-        }
-        if (key.startsWith('@') && key !== '@included') {
-          out[key] = value;
-          continue;
-        }
-        const next = settled(value);
-        changed ||= next !== value;
-        out[key] = next;
-      }
-      return changed ? out : node;
-    };
-    const settled = (value: unknown): unknown => {
-      const all = Array.isArray(value) ? value : [value];
-      const next = all.map((child: unknown) => {
-        if (isNode(child))
-          for (const key of ['@list', '@set'])
-            if (Object.hasOwn(child, key)) {
-              // Wrapper members settle the same way; the wrapper stays.
-              const inner = settled(child[key]);
-              return inner === child[key] ? child : { ...child, [key]: inner };
-            }
-        if (!isHitValue(child)) return item(child);
-        if (Object.keys(child).length === 1) return child;
-        extra.push(item(child) as JsonLd);
-        return { '@id': child['@id'] };
-      });
-      if (next.every((v, i) => v === all[i])) return value;
-      // A single value keeps its shape unless it moved away.
-      if (!Array.isArray(value) && next[0] !== MOVED) return next[0];
-      return next.filter((v) => v !== MOVED);
-    };
-    const extra: JsonLd[] = [];
-    const named = new Set<string>();
-    const values = (value: unknown): unknown => {
-      if (!Array.isArray(value)) {
-        const next = item(value);
-        return next === MOVED ? [] : next;
-      }
-      const next = value.map(item);
-      return next.every((v, i) => v === value[i])
-        ? value
-        : next.filter((v) => v !== MOVED);
-    };
-    const link = (hit: string, value: unknown): void => {
-      const label = blankLabel(value)!;
-      const entry = label === '' ? start() : labelled.get(label)!;
-      entry.links.push(
-        Object.freeze(context === undefined ? { hit } : { hit, context }),
-      );
-      entry.groups.add(context);
-      // An embedded node carries its details, and maybe reverse links to
-      // more hits, in place of a reference.
-      absorb(value as JsonLd, entry);
-    };
-    const strip = (node: JsonLd): JsonLd => {
-      let changed = false;
-      const out: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(node)) {
-        if (key === FIND_RESULT && isHit(node)) {
-          const all = findResults(node);
-          if (all.some((v) => blankLabel(v) !== undefined)) {
-            changed = true;
-            const stored = all.filter((v) => blankLabel(v) === undefined);
-            all
-              .filter((v) => blankLabel(v) !== undefined)
-              .forEach((v) => link(node['@id'] as string, v));
-            const kept = values(stored);
-            if ((kept as unknown[]).length > 0) out[key] = kept;
-            continue;
-          }
-        }
-        if (key === '@reverse' && isNode(value)) {
-          const reverse: Record<string, unknown> = {};
-          let moved = false;
-          for (const [p, v] of Object.entries(value)) {
-            reverse[p] = values(v);
-            moved ||= reverse[p] !== v;
-          }
-          changed ||= moved;
-          out[key] = moved ? reverse : value;
-          continue;
-        }
-        const next =
-          key.startsWith('@') && key !== '@included' ? value : values(value);
-        changed ||= next !== value;
-        out[key] = next;
-      }
-      return changed ? Object.freeze(out) : node;
-    };
-    const kept: JsonLd[] = [];
-    for (const node of nodes) {
-      const next = item(node);
-      // A top-level `{}` states nothing and is no node of the answer.
-      if (next !== MOVED && (Object.keys(node).length > 0 || next !== node))
-        kept.push(next as JsonLd);
+  const answer = answers++;
+  const value = (term: Term): JsonLd => {
+    switch (term.kind) {
+      case 'iri':
+        return { '@id': term.value };
+      case 'blank':
+        return { '@id': `_:a${answer}-${term.id}` };
+      case 'literal':
+        return term.value;
+      case 'list':
+        return { '@list': term.items.map(value) };
     }
-    kept.push(...extra);
-    // A hit named only by a reverse link still appears as a node.
-    const present = new Set(kept.map((node) => node['@id']));
-    for (const hit of named)
-      if (!present.has(hit)) kept.push(Object.freeze({ '@id': hit }));
-    return { context, nodes: kept };
-  });
-  const observations = order.map((entry) => ({
+  };
+  const add = (node: Record<string, unknown>, p: string, o: Term): void => {
+    if (p === RDF_TYPE && (o.kind === 'iri' || o.kind === 'blank'))
+      ((node['@type'] ??= []) as string[]).push(value(o)['@id'] as string);
+    else ((node[p] ??= []) as JsonLd[]).push(value(o));
+  };
+
+  const groups = new Map<Graph, Map<string, Record<string, unknown>>>();
+  for (const graph of graphs) groups.set(graph, new Map());
+  const nodeIn = (graph: Graph, s: Subject): Record<string, unknown> => {
+    let nodes = groups.get(graph);
+    if (!nodes) groups.set(graph, (nodes = new Map()));
+    const key = termKey(s);
+    let node = nodes.get(key);
+    if (!node) nodes.set(key, (node = { '@id': value(s)['@id'] }));
+    return node;
+  };
+  const detailIn = (entry: Building, graph: Graph) => {
+    let node = entry.details.get(graph);
+    if (!node) entry.details.set(graph, (node = {}));
+    entry.graphs.add(graph);
+    return node;
+  };
+
+  for (const { s, p, o, g } of quads) {
+    if (s.kind === 'iri' && p === FIND_RESULT && isObservation(o)) {
+      const entry = observed.get(o.id)!;
+      entry.links.push(
+        Object.freeze(
+          g === undefined ? { hit: s.value } : { hit: s.value, context: g },
+        ),
+      );
+      entry.graphs.add(g);
+      nodeIn(g, s);
+    } else if (isObservation(s)) {
+      // A statement between two observations has no place in either.
+      if (!isObservation(o)) add(detailIn(observed.get(s.id)!, g), p, o);
+    } else if (isObservation(o)) {
+      // A statement that names an observation from the other side.
+      const detail = detailIn(observed.get(o.id)!, g);
+      const reverse = (detail['@reverse'] ??= {}) as Record<string, JsonLd[]>;
+      (reverse[p] ??= []).push(value(s));
+    } else add(nodeIn(g, s), p, o);
+  }
+
+  const observations = [...observed.values()].map((entry) => ({
     entry,
     observation: freezeObservation(entry),
   }));
-  return stripped.map(({ context, nodes }) => ({
-    context,
-    nodes: Object.freeze(nodes),
+  return [...groups].map(([graph, nodes]) => ({
+    graph,
+    nodes: Object.freeze([...nodes.values()].map(freezeNode)),
     observations: Object.freeze(
       observations
-        .filter(({ entry }) => entry.groups.has(context))
+        .filter(({ entry }) => entry.graphs.has(graph))
         .map(({ observation }) => observation),
     ),
   }));
 }
 
+function freezeNode(node: Record<string, unknown>): JsonLd {
+  for (const value of Object.values(node))
+    if (Array.isArray(value)) Object.freeze(value);
+    else if (isNode(value)) freezeNode(value as Record<string, unknown>);
+  return Object.freeze(node);
+}
+
 function freezeObservation(entry: Building): FindObservation {
-  const details = Object.freeze([...entry.details]);
+  const details: readonly FindDetail[] = Object.freeze(
+    [...entry.details].map(([graph, node]) =>
+      Object.freeze(
+        graph === undefined
+          ? { node: freezeNode(node) }
+          : { context: graph, node: freezeNode(node) },
+      ),
+    ),
+  );
   const values = (predicate: string) =>
     details.flatMap(({ node }) => list(node[predicate]));
   return Object.freeze({
@@ -348,27 +365,25 @@ function freezeObservation(entry: Building): FindObservation {
   });
 }
 
-function detail(context: string | undefined, node: JsonLd): FindDetail {
-  const own = Object.freeze(without(node, '@id'));
-  return Object.freeze(
-    context === undefined ? { node: own } : { context, node: own },
-  );
+function termKey(term: Term): string {
+  switch (term.kind) {
+    case 'iri':
+      return `<${term.value}>`;
+    case 'blank':
+      return `_:${term.id}`;
+    case 'literal':
+      return JSON.stringify(
+        Object.keys(term.value)
+          .sort()
+          .map((key) => [key, term.value[key]]),
+      );
+    case 'list':
+      return `(${term.items.map(termKey).join(' ')})`;
+  }
 }
 
-function without(node: JsonLd, key: string): JsonLd {
-  const copy = { ...node };
-  delete copy[key];
-  return copy;
-}
-
-/** A hit is an IRI (SPS-FIND-029); a blank subject's links stay as answered. */
-function isHit(node: JsonLd): boolean {
-  const own = node['@id'];
-  return typeof own === 'string' && !own.startsWith('_:');
-}
-
-function findResults(node: JsonLd): readonly unknown[] {
-  return list(node[FIND_RESULT]);
+function literal(value: JsonLd): Term {
+  return { kind: 'literal', value: Object.freeze({ ...value }) };
 }
 
 /** The values of a property, with `@set` wrappers unwrapped. */
@@ -379,81 +394,14 @@ function list(value: unknown): readonly unknown[] {
   );
 }
 
-/** The hits a node names as reverse `sps:findResult` subjects. */
-function reverseHits(node: JsonLd): readonly JsonLd[] {
-  const reverse = node['@reverse'];
-  return isNode(reverse) ? list(reverse[FIND_RESULT]).filter(isHitValue) : [];
+/** A node object: neither a value object nor a list. */
+function isNodeObject(value: unknown): value is JsonLd {
+  return isNode(value) && !('@value' in value) && !('@list' in value);
 }
 
-function isHitValue(value: unknown): value is JsonLd & { '@id': string } {
-  return (
-    isNode(value) && !('@value' in value) && !('@list' in value) && isHit(value)
-  );
-}
-
-/**
- * The blank-node label of an observation reference: `_:m` for a reference,
- * `''` for an embedded node without `@id` (a fresh blank node), and
- * `undefined` for an IRI or a literal, which are stored data.
- */
-function blankLabel(value: unknown): string | undefined {
-  if (
-    !isNode(value) ||
-    '@value' in value ||
-    '@list' in value ||
-    '@set' in value
-  )
-    return undefined;
-  const id = value['@id'];
-  if (id === undefined) return '';
-  return typeof id === 'string' && id.startsWith('_:') ? id : undefined;
-}
-
-/** The node objects a node embeds: property, `@reverse` and `@included` values. */
-function embedded(node: JsonLd): JsonLd[] {
-  const out: JsonLd[] = [];
-  const items = (value: unknown): void => {
-    for (const item of Array.isArray(value) ? value : [value]) {
-      // A literal, also a JSON literal, is opaque.
-      if (!isNode(item) || '@value' in item) continue;
-      if ('@list' in item) items(item['@list']);
-      else if ('@set' in item) items(item['@set']);
-      else out.push(item);
-    }
-  };
-  for (const [key, value] of Object.entries(node)) {
-    if (key === '@reverse') {
-      if (!isNode(value)) throw invalid();
-      Object.values(value).forEach(items);
-    } else if (key === '@included' || !key.startsWith('@')) items(value);
-  }
-  return out;
-}
-
-/**
- * A node object of a graph, also every node it embeds: a nested `@graph`
- * would name a graph inside the answer, and only a context without effect
- * is understood.
- */
-function checkNode(value: unknown): asserts value is JsonLd {
-  if (
-    !isNode(value) ||
-    '@value' in value ||
-    '@list' in value ||
-    '@set' in value ||
-    Object.hasOwn(value, '@graph')
-  )
-    throw invalid();
-  checkContext(value);
-  embedded(value).forEach(checkNode);
-}
-
-/** The nodes of a `@graph`: one node object or an array of them. */
-function graphOf(group: JsonLd): readonly JsonLd[] {
-  const value = group['@graph'];
-  const nodes = Array.isArray(value) ? value : [value];
-  nodes.forEach(checkNode);
-  return nodes as readonly JsonLd[];
+/** An absolute IRI; a relative key or a blank predicate states nothing. */
+function isPredicate(key: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(key) && !key.startsWith('_:');
 }
 
 /**
@@ -472,23 +420,6 @@ function inert(context: unknown): boolean {
     (isNode(context) && Object.keys(context).length === 0) ||
     (Array.isArray(context) && context.every(inert))
   );
-}
-
-/** Whether a node object encodes at least one RDF statement. */
-function hasStatements(node: JsonLd): boolean {
-  return Object.entries(node).some(([key, value]) => {
-    if (key === '@included')
-      return (Array.isArray(value) ? value : [value]).some(
-        (v) => isNode(v) && hasStatements(v),
-      );
-    if (key === '@reverse')
-      return isNode(value) && Object.values(value).some(present);
-    return (key === '@type' || !key.startsWith('@')) && present(value);
-  });
-}
-
-function present(value: unknown): boolean {
-  return !Array.isArray(value) || value.length > 0;
 }
 
 function stringOf(value: unknown): readonly string[] {

@@ -76,9 +76,9 @@ describe('Pod find requests', () => {
     expect(headers.get('authorization')).toBe('Bearer test');
   });
 
-  it('keeps each named graph with its source Context and the nodes as answered', async () => {
-    // Raw JSON-LD, not the canonical resource shape: `@type` shorthand and a
-    // plain string value pass through unchanged.
+  it('keeps each named graph with its source Context and normalizes its nodes', async () => {
+    // Read by the RDF it encodes: `@type` shorthand and a plain string become
+    // the canonical arrays; a node with only `@id` states nothing.
     const node = {
       '@id': 'https://pod.example/alice/e1',
       '@type': 'https://schema.org/MusicEvent',
@@ -100,13 +100,24 @@ describe('Pod find requests', () => {
     expect(answer).toEqual({
       kind: 'ok',
       body: [
-        { context: tasks, nodes: [node], observations: [] },
-        { context: notes, nodes: [{ '@id': node['@id'] }], observations: [] },
+        {
+          context: tasks,
+          nodes: [
+            {
+              '@id': node['@id'],
+              '@type': ['https://schema.org/MusicEvent'],
+              'https://schema.org/name': [{ '@value': 'Konzert' }],
+            },
+          ],
+          observations: [],
+        },
+        { context: notes, nodes: [], observations: [] },
       ],
     });
     if (answer.kind !== 'ok') throw new Error(answer.kind);
     expect(Object.isFrozen(answer.body)).toBe(true);
     expect(Object.isFrozen(answer.body[0])).toBe(true);
+    expect(Object.isFrozen(answer.body[0]!.nodes[0])).toBe(true);
   });
 
   it.each([401, 403] as const)(
@@ -369,8 +380,7 @@ describe('Pod find requests', () => {
     ).rejects.toMatchObject({ reason: { code: 'response', problem: 'body' } });
   });
 
-  it('keeps a node with only stored sps:findResult values as answered', async () => {
-    // Scalar JSON-LD values are not rewritten into arrays.
+  it('keeps a stored sps:findResult as pod data, in the canonical array form', async () => {
     const stored = {
       '@id': `${base}/e1`,
       [FIND_RESULT]: { '@id': `${base}/saved` },
@@ -382,11 +392,13 @@ describe('Pod find requests', () => {
       'x',
     );
     if (answer.kind !== 'ok') throw new Error(answer.kind);
-    expect(answer.body[0]!.nodes).toEqual([stored]);
+    expect(answer.body[0]!.nodes).toEqual([
+      { '@id': stored['@id'], [FIND_RESULT]: [stored[FIND_RESULT]] },
+    ]);
     expect(answer.body[0]!.observations).toEqual([]);
   });
 
-  it('reads an observation embedded in its link, and leaves a blank subject as answered', async () => {
+  it('reads an observation embedded in its link, and labels pod blank nodes per answer', async () => {
     const hit = `${base}/e1`;
     const blank = { '@id': '_:b', [FIND_RESULT]: [{ '@id': '_:c' }] };
     const fetch = vi.fn<PodFetch>(async () =>
@@ -412,12 +424,21 @@ describe('Pod find requests', () => {
         blank,
       ]),
     );
-    const answer = await createPod(base, {
-      auth: bearer('test'),
-      fetch,
-    }).findFlat('konzert');
+    const pod = createPod(base, { auth: bearer('test'), fetch });
+    const answer = await pod.findFlat('konzert');
     if (answer.kind !== 'ok') throw new Error(answer.kind);
-    expect(answer.body.nodes).toEqual([{ '@id': hit }, blank]);
+    // A blank subject is no hit: its link stays pod data, relabelled.
+    expect(answer.body.nodes).toEqual([
+      { '@id': hit },
+      {
+        '@id': expect.stringMatching(/^_:a\d+-bb$/),
+        [FIND_RESULT]: [{ '@id': expect.stringMatching(/^_:a\d+-bc$/) }],
+      },
+    ]);
+    const again = await pod.findFlat('konzert');
+    if (again.kind !== 'ok') throw new Error(again.kind);
+    expect(again.body.nodes[1]!['@id']).not.toBe(answer.body.nodes[1]!['@id']);
+    void blank;
     expect(answer.body.observations).toMatchObject([
       {
         links: [{ hit }],
@@ -472,7 +493,7 @@ describe('Pod find requests', () => {
     expect(flat.body.observations[0]!.links).toEqual([{ hit: hit['@id'] }]);
   });
 
-  it('extracts observations from embedded hits and keeps the embedding', async () => {
+  it('extracts observations from embedded hits and flattens the embedding', async () => {
     // The article/topic case with the topic embedded under `schema:about`.
     const article = `${base}/articles/42`;
     const topic = `${base}/topics/climate`;
@@ -506,14 +527,10 @@ describe('Pod find requests', () => {
     if (answer.kind !== 'ok') throw new Error(answer.kind);
     const [group] = answer.body;
     expect(group!.nodes).toEqual([
+      { '@id': article, [about]: [{ '@id': topic }] },
       {
-        '@id': article,
-        [about]: [
-          {
-            '@id': topic,
-            'https://schema.org/name': [{ '@value': 'Climate change' }],
-          },
-        ],
+        '@id': topic,
+        'https://schema.org/name': [{ '@value': 'Climate change' }],
       },
     ]);
     expect(group!.observations).toMatchObject([
@@ -819,7 +836,7 @@ describe('Pod find requests', () => {
   });
 
   it.each(['@set', '@list'])(
-    'settles a hit embedded in an observation through %s',
+    'reads a hit embedded in an observation through %s',
     async (wrapper) => {
       const one = `${base}/e1`;
       const two = `${base}/e2`;
@@ -856,7 +873,16 @@ describe('Pod find requests', () => {
           nodes,
           observations: [
             {
-              details: [{ node: { [about]: { [wrapper]: [{ '@id': two }] } } }],
+              details: [
+                {
+                  node: {
+                    [about]:
+                      wrapper === '@set'
+                        ? [{ '@id': two }]
+                        : [{ '@list': [{ '@id': two }] }],
+                  },
+                },
+              ],
             },
             { links: [{ hit: two }], text: ['second'] },
           ],
@@ -867,4 +893,32 @@ describe('Pod find requests', () => {
       ).toMatchObject({ kind: 'ok', body: [{ nodes }] });
     },
   );
+
+  it('reads @included nodes and single values like separate nodes and arrays', async () => {
+    const hit = `${base}/e1`;
+    const name = 'https://schema.org/name';
+    const separate = [
+      {
+        '@id': hit,
+        [name]: [{ '@value': 'Konzert' }],
+        [FIND_RESULT]: [{ '@id': '_:m' }],
+      },
+      { '@id': '_:m', 'https://schema.org/text': [{ '@value': 'Konzert' }] },
+    ];
+    const included = {
+      '@id': hit,
+      [name]: { '@value': 'Konzert' },
+      [FIND_RESULT]: { '@id': '_:m' },
+      '@included': {
+        '@id': '_:m',
+        'https://schema.org/text': { '@value': 'Konzert' },
+      },
+    };
+    const read = (graph: unknown) =>
+      createPod(base, {
+        auth: bearer('test'),
+        fetch: async () => jsonLd(graph),
+      }).findFlat('x');
+    expect(await read(included)).toEqual(await read(separate));
+  });
 });

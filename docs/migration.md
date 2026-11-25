@@ -53,6 +53,14 @@ carries this; `0.9.0-dev.3` itself has neither `findFlat` nor `types`.
 
 - **Derive hits as before** from `nodes`. A hit reported only by a link is a
   node with only `@id`; a hit's type and label are optional (SPS-FIND-032).
+- **Read `nodes` in their canonical form.** The SDK now reads a Find answer by
+  the RDF it encodes, so `nodes` are no longer the JSON the Pod sent: one
+  flattened node object per subject and group, embedded nodes as their own
+  entries, `@type` an array, every other value an array of `{"@id"}`,
+  `{"@value"}` or `{"@list"}` objects. A node object that states nothing,
+  such as `{"@id": …}` alone, is gone, and pod blank nodes get labels unique
+  to the answer. Code that read a single value or an embedded node in place
+  reads the array or follows the `@id`.
 - **Read excerpts from `observations`**, not from `nodes`: `text`, `position`
   and `engine` are typed, `links` and `details` keep each statement's Context.
   That Context is where the Pod placed the statement, not where the search

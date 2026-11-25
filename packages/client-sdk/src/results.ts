@@ -142,11 +142,14 @@ export interface FindOptions extends ReadOptions {
 export interface FindGraph {
   readonly context: string;
   /**
-   * Pod data as answered (raw, like CONSTRUCT nodes), without generated
-   * observations: an `sps:findResult` link to a blank node and that node's
-   * details are moved to `observations`, also from embedded nodes. A node
-   * without observations stays as answered. A hit reported only by such a link
-   * stays as a node with only `@id`. A stored `sps:findResult` to an IRI stays.
+   * Pod data, read by the RDF the answer encodes and without generated
+   * observations: one flattened node object per subject, `@type` an array of
+   * IRIs, every other property an array of `{"@id"}`, `{"@value"}` or
+   * `{"@list"}` objects. An `sps:findResult` link to a blank node and the
+   * statements about that node are in `observations`; a hit whose link is
+   * here appears as a node, with only `@id` when it has no other statement
+   * here. A stored `sps:findResult` to an IRI stays. Blank nodes of pod data
+   * get labels unique to this answer.
    */
   readonly nodes: readonly JsonLd[];
   /**

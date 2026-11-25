@@ -101,7 +101,11 @@ grouped JSON-LD writes observation blank nodes as `_:` labels. Case 6's
 server-side isolation is sempods/sempods-kotlin#409 and #461. This is source
 reading and deterministic fixtures, not live wire evidence. A `sps:findResult`
 to a blank node is read as an observation; whether stored data may contain
-blank nodes is open in [sempods-spec#68](https://github.com/sempods/sempods-spec/issues/68).
+blank nodes is open in [sempods-spec#68](https://github.com/sempods/sempods-spec/issues/68). The
+decoder reads expanded JSON-LD by its RDF (JSON-LD 1.1 toRdf without an
+active context; a context that is not inert rejects), following the
+OpenAPI note that graph membership is determined by the RDF a Find answer
+encodes. It is a local subset, not a full JSON-LD processor.
 
 The consent prompt of `prepareAuthorization` (#362) was checked against
 `sempods/sempods-spec` at `c6308c157d8c78be0ba6e9d91dba39a11a9ce883`
