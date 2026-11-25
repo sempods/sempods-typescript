@@ -34,7 +34,7 @@ away, so you can install the SDK first.
 In the app directory:
 
 ```sh
-npm install --save-exact @sempods/app-sdk@0.8.0 @sempods/client-sdk@0.8.0
+npm install --save-exact @sempods/app-sdk@0.9.0 @sempods/client-sdk@0.9.0
 ```
 
 Both packages are released together with one version, and app-sdk depends on
@@ -300,11 +300,10 @@ After a reload the session stays signed in and the app returns to the context
 you chose last, as long as the Pod still lets you read it; otherwise you choose
 again. To grant the app another context later, use **Change sharing**: the Pod
 shows its consent page, and you choose the new context after returning
-([changing sharing](react-authoring.md#changing-what-the-app-may-access)). From 0.9.0 a second ordinary tab of the same
+([changing sharing](react-authoring.md#changing-what-the-app-may-access)). A second ordinary tab of the same
 app shares the session: both stay signed in, each with its own context and
-drafts, and signing out in one signs out both. With the 0.8.0 packages installed
-above, the second tab shows that the app is open in another tab instead. Use a private window or another browser profile to
-act as a second person.
+drafts, and signing out in one signs out both. Use a private window or another
+browser profile to act as a second person.
 
 The development server also serves the callback path (`/callback`), so no extra
 route is needed.

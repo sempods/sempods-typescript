@@ -66,12 +66,12 @@ Automated checks cover installed packages and browser fixtures. Live-Pod,
 installed-device and independent app-author validation are separate evidence;
 see [development checks](docs/development.md).
 
-For 0.8.0, see the [release notes](docs/releases/0.8.0.md) and
-[upgrade instructions](docs/migration.md#from-070-to-080).
+For 0.9.0, see the [release notes](docs/releases/0.9.0.md) and
+[upgrade instructions](docs/migration.md#from-080-to-090).
 
 ## Supported environments
 
-| Environment                  | Status in 0.8                                                                                                                                                                      |
+| Environment                  | Status in 0.9                                                                                                                                                                      |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Node                         | 24.15 or newer (Node 24 LTS), ESM only (`engines` in every package).                                                                                                               |
 | Browser tab                  | Current browsers with IndexedDB and Web Locks. Automated browser checks run in Chromium.                                                                                           |

@@ -6,9 +6,10 @@ automatic conversion of legacy app data or stored credentials.
 
 ## From 0.8.0 to 0.9.0
 
-0.9.0 is not released yet; this section collects its upgrade steps. The
-prerelease `0.9.0-dev.4` carries them, and the [0.9.0 release
-notes](releases/0.9.0.md) list the changes.
+Upgrade client-sdk and app-sdk together, and the UI kit `@sempods/app-ui` to
+the same version where the app uses it. The
+[0.9.0 release notes](releases/0.9.0.md) list the changes; the steps below
+say what each one needs.
 
 ### Find observations, the flat form and a type filter
 
@@ -17,8 +18,8 @@ link from the hit to a blank node with an excerpt, a position or an engine
 ([Find](../packages/client-sdk/README.md#finding-resources)). `pod.find` and
 `BoundPod.find` keep their grouped answer and move these observations out of
 `nodes` into the new `FindGraph.observations`, which is `[]` when the Pod sends
-none; `nodes` come normalized (below). The prerelease after `0.9.0-dev.3`
-carries this; `0.9.0-dev.3` itself has neither `findFlat` nor `types`.
+none; `nodes` come normalized (below). The prerelease `0.9.0-dev.4` brought
+this; `0.9.0-dev.3` itself has neither `findFlat` nor `types`.
 
 - **Derive hits as before** from `nodes`. A hit reported only by a link is a
   node with only `@id`; a hit's type and label are optional (SPS-FIND-032).
