@@ -943,4 +943,31 @@ describe('Pod find requests', () => {
     expect(a!.id).not.toBe(b!.id);
     expect(b!.details).toEqual([]);
   });
+
+  it('reads named groups inside a top-level @graph wrapper as named', async () => {
+    const group = {
+      '@id': tasks,
+      '@graph': [
+        { '@id': `${base}/e1`, '@type': ['https://schema.org/Event'] },
+      ],
+    };
+    const at = (body: unknown) =>
+      createPod(base, {
+        auth: bearer('test'),
+        fetch: async () => jsonLd(body),
+      });
+    expect(stable(await at({ '@graph': [group] }).find('x'))).toEqual(
+      stable(await at([group]).find('x')),
+    );
+    // A default-graph statement beside them still rejects, and the flat form
+    // still refuses any named graph.
+    await expect(
+      at({ '@graph': [group, { '@id': `${base}/e2`, 'x:p': 'v' }] }).find('x'),
+    ).rejects.toMatchObject({ reason: { code: 'response', problem: 'body' } });
+    await expect(at({ '@graph': [group] }).findFlat('x')).rejects.toMatchObject(
+      {
+        reason: { code: 'response', problem: 'body' },
+      },
+    );
+  });
 });

@@ -111,9 +111,10 @@ class Reader {
       Object.hasOwn(body, '@graph') &&
       Object.keys(body).every((key) => key === '@graph' || key === '@context')
     ) {
-      // The top-level wrapper is the default graph.
+      // The top-level wrapper is the default graph; named graphs inside it
+      // stay named.
       checkContext(body);
-      for (const node of list(body['@graph'])) this.node(node, undefined);
+      for (const node of list(body['@graph'])) this.top(node);
     } else
       for (const node of Array.isArray(body) ? body : [body]) this.top(node);
   }
