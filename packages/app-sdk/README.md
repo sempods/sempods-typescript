@@ -116,7 +116,7 @@ off.
 
 ## Pod reads without a context choice
 
-`runtime.bindPod(connectionId)` supplies read-only `select`/`construct` and `find` methods
+`runtime.bindPod(connectionId)` supplies read-only `select`/`construct`, `find` and `findFlat` methods
 for a signed-in connection's authorized dataset, or a Pod's public data without
 a token. It needs no catalogue or
 selected context. Required feature scopes gate dispatch; Context/label changes

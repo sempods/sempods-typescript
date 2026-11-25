@@ -6,7 +6,7 @@ export type SdkFailure =
   | {
       readonly code: 'invalid-argument';
       readonly argument:
-        'iri' | 'context' | 'query' | 'condition' | 'text' | 'limit';
+        'iri' | 'context' | 'query' | 'condition' | 'text' | 'type' | 'limit';
     }
   | {
       readonly code: 'discovery';

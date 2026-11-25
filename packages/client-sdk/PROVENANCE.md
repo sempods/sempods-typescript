@@ -87,6 +87,22 @@ leaves an empty downscope to SPS-CRUD-014
 ([sempods-spec#129](https://github.com/sempods/sempods-spec/issues/129)), so
 the SDK rejects any group in the answer to `[]`.
 
+Find observations, the flat form and the type filter (#418) were checked on
+2026-11-25 against `sempods/sempods-spec` at
+`2e543168f7ac0d6d850ec2f7d66224c927cdf62d` (`spec/core/find.md`): SPS-FIND-006,
+-007, -009, -010, -015, -025–-030 and -032; -011, -016, -018, -019 and -022–-024
+are withdrawn there. The JSON-LD side of `examples/find/responses.yaml`
+(sempods-spec#147 cases 1–8, converted to `src/fixtures/find-responses.json`)
+runs through `find`, `findFlat` and `BoundPod`, each compared with the case's
+N-Quads up to blank-node renaming. The server side was cross-read in
+`sempods/sempods-kotlin` PRs #465 and #466 (`FindPostRequest`, `FindService`,
+`RdfWriterUtil`): `type` is a string array, an unknown member is a `400`, and
+grouped JSON-LD writes observation blank nodes as `_:` labels. Case 6's
+server-side isolation is sempods/sempods-kotlin#409 and #461. This is source
+reading and deterministic fixtures, not live wire evidence. A `sps:findResult`
+to a blank node is read as an observation; whether stored data may contain
+blank nodes is open in [sempods-spec#68](https://github.com/sempods/sempods-spec/issues/68).
+
 The consent prompt of `prepareAuthorization` (#362) was checked against
 `sempods/sempods-spec` at `c6308c157d8c78be0ba6e9d91dba39a11a9ce883`
 (`spec/core/auth.md` §7): SPS-AUTH-039 lets a Pod reuse standing grants without

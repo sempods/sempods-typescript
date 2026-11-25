@@ -161,17 +161,29 @@ default is `'required'`. See
 ### Finding resources
 
 `pod.find(text, options)` uses the Pod's Find primitive: text in, the matching
-resources out, grouped by the Context each statement came from. The Pod decides
-how it matches; there is no mode, rank or cursor.
+resources out, grouped by the Context each statement came from.
+`pod.findFlat(text, options)` asks for the same search as one graph without
+Contexts, the Pod's default form. The Pod decides how it matches; there is no
+mode, rank or cursor.
 
 ```ts
 import type { Pod } from '@sempods/client-sdk';
 
 export async function search(pod: Pod, text: string, signal: AbortSignal) {
-  const result = await pod.find(text, { limit: 20, signal });
+  const result = await pod.find(text, {
+    types: ['https://schema.org/Article'],
+    limit: 20,
+    signal,
+  });
   if (result.kind !== 'ok') return result;
-  for (const { context, nodes } of result.body) {
+  for (const { context, nodes, observations } of result.body) {
     for (const node of nodes) console.log(node['@id'], 'in', context);
+    for (const { links, text } of observations)
+      console.log(
+        links.map((link) => link.hit),
+        'matched',
+        text,
+      );
   }
   return result;
 }
@@ -180,20 +192,33 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
 - Without `contexts`, the Pod searches every Context the caller may read. With
   `contexts`, it searches only those Contexts of this Pod and silently drops
   the unreadable ones. `[]` asks for no Context: the SDK sends it as given,
-  and any group in the answer rejects with `response/body`.
+  and any statement in the answer rejects with `response/body`.
+- `types` keeps hits with one of these `rdf:type` IRIs, matched exactly; the
+  Pod filters before it applies `limit`. Omitted or `[]` accepts any type.
+  `limit` bounds the distinct hit IRIs, not the statements or observations.
 - Nothing found, or nothing readable, is `ok` with an empty body, not
   `refused`. Find has no `not-found`.
-- The answer must be a top-level array of named graphs,
-  `[{ "@id": <context>, "@graph": [<node>…] }]`; a flat `{"@graph": [...]}`
-  rejects with `response/body`. Each `FindGraph` names its source Context. Its
-  `nodes` are JSON-LD node objects as answered, not guaranteed to have the
-  canonical resource shape. The Pod usually
-  includes each hit's type and label, with no marker that separates a hit from
-  that expansion.
-- The request is always `POST` with `include_contexts`. An authentication
-  resend repeats it unchanged, and the SDK never retries it without the
-  downscope. A group without a source Context of this Pod, or one outside
-  `contexts`, rejects the whole read with `response/body`.
+- `find` needs named graphs, `[{ "@id": <context>, "@graph": [<node>…] }]` or
+  one such object. A statement outside a named group, also in a group without
+  a Context name, rejects with `response/body`, and so does a group that names
+  no Context of this Pod or one outside `contexts`. `findFlat` needs one graph
+  without graph names and rejects a named graph.
+- `nodes` are the Pod's data as answered, not guaranteed to have the canonical
+  resource shape. A hit's type and label are optional: a hit can be a node with
+  only `@id`. There is no marker that separates a hit from its expansion.
+- The Pod may describe how it found a hit: a blank node linked with
+  `sps:findResult`, with an excerpt (`schema:text`), a 1-based position
+  (`schema:position`) or an engine (`sps:engine`). The SDK moves these
+  observations out of `nodes` into typed `observations`; ignore them if you
+  need no more than the hits. An observation carries each link and detail
+  with its Context. One that is repeated or split across groups is the same
+  object in each group. Its blank-node label is not kept, so observations of
+  two answers or two Pods never merge. A Context records where the Pod placed
+  the statement, not where the search matched. A stored `sps:findResult` to an
+  IRI stays in `nodes` and its source Context.
+- The request is always `POST`; `find` adds `include_contexts`. An
+  authentication resend repeats the body unchanged, and the SDK never retries
+  it without the downscope.
 
 ## Reading and writing one context
 
@@ -254,6 +279,7 @@ Supported operations:
 | `view.sparql.construct(query)`                | `POST {pod}/_system/sparql/query` with `default-graph-uri` and `named-graph-uri` = the view context | `ok` (expanded JSON-LD nodes) · `refused` · `cancelled` · `stopped`                                                              |
 | `view.sparql.select(query)`                   | Same route and dataset parameters, accepts SPARQL Results JSON                                      | `ok` (`SelectResult`) · `refused` · `cancelled` · `stopped`                                                                      |
 | `pod.find(text, options)`                     | `POST {pod}/_system/find` (JSON body, `include_contexts: true`); accepts JSON-LD                    | `ok` (`FindGraph` per source Context) · `refused` · `cancelled` · `stopped`                                                      |
+| `pod.findFlat(text, options)`                 | Same route and body without `include_contexts`; accepts JSON-LD                                     | `ok` (`FlatFindGraph`) · `refused` · `cancelled` · `stopped`                                                                     |
 
 ### Querying one Context
 

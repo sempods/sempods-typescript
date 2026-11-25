@@ -1,5 +1,6 @@
 import type {
   DispatchGuard,
+  FindOptions,
   Pod,
   QueryResult,
   ReadOptions,
@@ -125,18 +126,25 @@ export function bindPod(
         read((o) => pod.sparql.construct(query, o), options),
     }),
     find: (text, options) =>
+      read((o) => pod.find(text, { ...findOptions(options), ...o }), options),
+    findFlat: (text, options) =>
       read(
-        (o) =>
-          pod.find(text, {
-            ...(options?.contexts === undefined
-              ? {}
-              : { contexts: options.contexts }),
-            ...(options?.limit === undefined ? {} : { limit: options.limit }),
-            ...o,
-          }),
+        (o) => pod.findFlat(text, { ...findOptions(options), ...o }),
         options,
       ),
   } satisfies BoundPod);
   observePod(reader, e);
   return reader;
+}
+
+/**
+ * The search members only, each forwarded when given: an omitted `contexts`
+ * stays omitted and `[]` stays `[]`. The signal comes from the bound read.
+ */
+function findOptions(options: FindOptions | undefined): FindOptions {
+  return {
+    ...(options?.contexts === undefined ? {} : { contexts: options.contexts }),
+    ...(options?.types === undefined ? {} : { types: options.types }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+  };
 }

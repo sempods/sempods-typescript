@@ -5,6 +5,7 @@ import type {
   CreateCondition,
   FindGraph,
   FindOptions,
+  FlatFindGraph,
   GetResult,
   JsonLd,
   MatchCondition,
@@ -65,16 +66,26 @@ export interface Pod {
     ): Promise<QueryResult<readonly JsonLd[]>>;
   };
   /**
-   * The Pod's Find primitive (sempods-spec `find.md`): text in, the matching
-   * resources (usually with their type and label), grouped by source Context.
-   * Always sent as `POST` with `include_contexts`. Nothing readable or nothing
-   * found is `ok` with an empty body, not `refused`. A group that names no
-   * Context of this Pod, or one outside `contexts`, rejects the whole answer.
+   * The Pod's Find primitive (sempods-spec `find.md`) grouped by Context:
+   * text in, the matching resources and their expansion, each statement in
+   * its source Context. Sent as `POST` with `include_contexts`. Nothing
+   * readable or nothing found is `ok` with an empty body, not `refused`. A
+   * group that names no Context of this Pod, one outside `contexts`, or a
+   * statement outside a named group rejects the whole answer. Optional
+   * observations are typed in `observations`, apart from the pod data.
    */
   find(
     text: string,
     options?: FindOptions,
   ): Promise<QueryResult<readonly FindGraph[]>>;
+  /**
+   * The same search as one graph without graph names (SPS-FIND-026): the
+   * Pod's default representation. A named graph in the answer rejects it.
+   */
+  findFlat(
+    text: string,
+    options?: FindOptions,
+  ): Promise<QueryResult<FlatFindGraph>>;
   /** Operations bound to one explicitly selected context. Never "all contexts". */
   context(contextIri: string, options?: ContextOptions): ContextView;
   /** The caller-relative context catalogue: known access facts, not server authority. */

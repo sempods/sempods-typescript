@@ -1,7 +1,14 @@
-// `BoundPod.find` (#233): the client Find primitive through a Pod handle, with
-// the same lifetime and admission as `sparql`. Fixture evidence only.
+// `BoundPod.find` (#233) and `findFlat` (#418): the client Find primitive
+// through a Pod handle, with the same lifetime and admission as `sparql`.
+// Fixture evidence only.
+import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { FindGraph } from '@sempods/client-sdk';
+import {
+  bearer,
+  createPod,
+  type FindGraph,
+  type FindOptions,
+} from '@sempods/client-sdk';
 import { createViewLoader } from '../authoring/load.js';
 import type { BrowserRuntime } from './types.js';
 import type { BoundPod } from './view.js';
@@ -60,7 +67,9 @@ it('sends the text, downscope and limit unchanged, never the read priority', asy
     }),
   ).toEqual({
     kind: 'ok',
-    body: [{ context: work, nodes: [{ '@id': `${pod}/e1` }] }],
+    body: [
+      { context: work, nodes: [{ '@id': `${pod}/e1` }], observations: [] },
+    ],
   });
   const [url, init] = findCall(f);
   expect(url).toBe(`${pod}/_system/find`);
@@ -192,3 +201,72 @@ it('one loader per Pod: changed grants refresh a ready source while another stil
   expect(hits(alice)).toBe('unavailable');
   expect(hits(bob)).toEqual([`${otherUrl}/bob-1`]);
 });
+
+it.each<[string, FindOptions, Record<string, unknown>]>([
+  ['an omitted downscope', {}, {}],
+  ['an empty downscope', { contexts: [] }, { contexts: [] }],
+  [
+    'types and a limit',
+    { types: ['https://schema.org/Event'], limit: 2 },
+    { type: ['https://schema.org/Event'], limit: 2 },
+  ],
+])(
+  'sends the flat form with %s as given, never the read priority',
+  async (_name, options, members) => {
+    const f = await signedIn();
+    f.setFind(async () => Response.json([]));
+    expect(
+      await f.reader.findFlat('konzert', { ...options, priority: 'current' }),
+    ).toEqual({ kind: 'ok', body: { nodes: [], observations: [] } });
+    expect(body(findCall(f)[1])).toEqual({ text: 'konzert', ...members });
+  },
+);
+
+it('invalidates a flat find answered after a disconnect', async () => {
+  const f = await signedIn();
+  const gate = deferred<Response>();
+  f.setFind(async () => gate.promise);
+  const pending = f.reader.findFlat('x');
+  await vi.waitFor(() => expect(f.count('/_system/find')).toBe(1));
+  await f.runtime.disconnect(f.id);
+  gate.resolve(Response.json([{ '@id': `${pod}/late` }]));
+  expect(await pending).toEqual({ kind: 'invalidated' });
+});
+
+/** The shared Find cases (sempods-spec#147), moved under this fixture's Pod. */
+const shared = Object.entries(
+  JSON.parse(
+    readFileSync(
+      new URL(
+        '../../../client-sdk/src/fixtures/find-responses.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ).replaceAll('https://pod.example/', `${pod}/`),
+  ) as Record<
+    string,
+    { grouped?: { jsonld: unknown }; flat: { jsonld: unknown } }
+  >,
+).filter(([name]) => name !== '$source');
+
+it.each(shared)(
+  'answers shared case %s through BoundPod as the client Pod does',
+  async (_name, c) => {
+    const f = await signedIn();
+    const direct = (answer: unknown) =>
+      createPod(pod, {
+        auth: bearer('test'),
+        fetch: async () => Response.json(answer),
+      });
+    if (c.grouped) {
+      f.setFind(async () => Response.json(c.grouped!.jsonld));
+      expect(await f.reader.find('x')).toEqual(
+        await direct(c.grouped.jsonld).find('x'),
+      );
+    }
+    f.setFind(async () => Response.json(c.flat.jsonld));
+    expect(await f.reader.findFlat('x')).toEqual(
+      await direct(c.flat.jsonld).findFlat('x'),
+    );
+  },
+);
