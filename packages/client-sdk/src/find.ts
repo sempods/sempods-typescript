@@ -291,10 +291,7 @@ function observe(groups: readonly Group[]): readonly (Group & {
 function freezeObservation(entry: Building): FindObservation {
   const details = Object.freeze([...entry.details]);
   const values = (predicate: string) =>
-    details.flatMap(({ node }) => {
-      const value = node[predicate];
-      return Array.isArray(value) ? value : value === undefined ? [] : [value];
-    });
+    details.flatMap(({ node }) => list(node[predicate]));
   return Object.freeze({
     links: Object.freeze([...entry.links]),
     details,

@@ -679,4 +679,33 @@ describe('Pod find requests', () => {
     expect(await read(wrapped)).toEqual(expected);
     expect(await read(reverse)).toEqual(expected);
   });
+
+  it('projects @set-wrapped details like plain arrays', async () => {
+    const fetch = vi.fn<PodFetch>(async () =>
+      jsonLd([
+        {
+          '@id': `${base}/e1`,
+          [FIND_RESULT]: [
+            {
+              'https://schema.org/text': { '@set': [{ '@value': 'Konzert' }] },
+              'https://schema.org/position': [{ '@set': [{ '@value': 2 }] }],
+              'https://schema.sempods.org/engine': { '@set': ['sparql-text'] },
+            },
+          ],
+        },
+      ]),
+    );
+    const answer = await createPod(base, {
+      auth: bearer('test'),
+      fetch,
+    }).findFlat('x');
+    expect(answer).toMatchObject({
+      kind: 'ok',
+      body: {
+        observations: [
+          { text: ['Konzert'], position: [2], engine: ['sparql-text'] },
+        ],
+      },
+    });
+  });
 });
