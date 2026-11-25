@@ -6585,7 +6585,9 @@ async function dateChoice({ browser, origin, engine }) {
       await attemptOn(errors, 'date-choice-escape-keyboard', async () => {
         await open();
         let day = '';
-        for (let i = 0; i < 10 && !/November 2026/.test(day); i++) {
+        // The stored day by its date: on the real 25 November the calendar
+        // names it "Today, …", and the shortened name loses the year.
+        for (let i = 0; i < 10 && !/\b25 November\b/.test(day); i++) {
           await page.keyboard.press(tab);
           day = await focused(page);
         }
@@ -6611,7 +6613,7 @@ async function dateChoice({ browser, origin, engine }) {
         const until = await stored();
         return {
           pass:
-            /25 November 2026/.test(day) &&
+            /\b25 November\b/.test(day) &&
             picked === '2026-11-26' &&
             beforeEscape === '2026-11-25' &&
             inside &&
